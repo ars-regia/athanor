@@ -159,7 +159,9 @@ class EvidenceCopies(unittest.TestCase):
     def test_a_listed_copy_that_cannot_be_pulled_fails(self):
         self.promoted(10, 20)
         del self.fx["bundles"][f"{EVID}:10-20"]
-        self.assertFails(self.check(), "promotion run 20: unreadable, so not checked")
+        self.assertFails(
+            self.check(), f"promotion run 20: {EVID}:10-20: unreadable, so not checked"
+        )
 
     def test_one_unreadable_promotion_does_not_hide_the_others(self):
         self.promoted(5, 6)
@@ -168,7 +170,9 @@ class EvidenceCopies(unittest.TestCase):
         del self.fx["bundles"][f"{EVID}:10-20"]
         r = self.check()
         self.assertFails(r, "promotion run 6: no copy")
-        self.assertIn("promotion run 20: unreadable, so not checked", r.stderr)
+        self.assertIn(
+            f"promotion run 20: {EVID}:10-20: unreadable, so not checked", r.stderr
+        )
 
     def test_a_copy_whose_signature_fails_does_not_verify(self):
         self.promoted(10, 20)
@@ -227,11 +231,38 @@ class EvidenceCopies(unittest.TestCase):
         self.assertFails(self.check(), "no promotion found in the environment release")
 
     def test_a_promotion_on_the_second_page_of_deployments_is_checked(self):
-        self.deploy(30, 1030, name=ISO_JOB)
+        self.promoted(5, 6)
         self.promoted(10, 20)
         self.assertEqual(self.fx["api"][DEPLOYMENTS][1], {"id": 1020})
         self.fx["list"][EVID].remove("10-20")
         self.assertFails(self.check(), "promotion run 20: no copy")
+
+    def test_a_run_with_only_an_iso_deployment_fails(self):
+        self.promoted(10, 20)
+        self.deploy(30, 2030, name=ISO_JOB)
+        self.assertFails(self.check(), "run 30: a successful")
+
+    def test_one_unreadable_deployment_does_not_hide_the_others(self):
+        self.promoted(10, 20)
+        self.deploy(30, 1030)
+        self.fx["errors"] = ["deployments/1030/statuses"]
+        r = self.check()
+        self.assertFails(r, "deployment 1030: unreadable, so not checked")
+        self.assertIn(f"promotion run 20: {EVID}:10-20 verifies", r.stdout)
+
+    def test_one_unreadable_build_tag_does_not_hide_the_others(self):
+        self.deploy(20, 1020)
+        self.copy(10, 20)
+        self.copy(11, 20)
+        self.release("v0.9.0", 11, 20)
+        del self.fx["bundles"][f"{EVID}:11-20"]
+        r = self.check()
+        self.assertFails(
+            r, "promotion run 20: no GitHub Release carries evidence-10-20.tar"
+        )
+        self.assertIn(
+            f"promotion run 20: {EVID}:11-20: unreadable, so not checked", r.stderr
+        )
 
     def test_an_unreadable_api_or_registry_fails(self):
         self.promoted(10, 20, release="v0.9.0")

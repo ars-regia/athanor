@@ -6,7 +6,8 @@ signed evidence bundle can vanish; it cannot be forged, because the bundle diges
 keylessly and recorded in Rekor. This lists every promotion in the release history, a promotion
 run of promote-stable.yml whose `promote` job succeeded with a successful GitHub deployment in
 the environment `release` (a successful deployment there of any other job, of a job that did
-not succeed, or whose log_url names no job of this repository fails; no promotion found fails),
+not succeed, or whose log_url names no job of this repository fails, and so do a run with an
+ISO deployment and no promote one, and finding no promotion),
 and for each one:
   1. resolves its copy, `$EVIDENCE_REGISTRY/athanor-evidence:<build run>-<promotion run>`; a
      promotion with no such tag fails: the copy was deleted;
@@ -18,7 +19,8 @@ and for each one:
   3. fails when the copy does not verify, or when its signed plan names another build run or
      another promotion run than its tag.
 A registry, a bundle or the GitHub API that cannot be read fails the check: nothing passes unread.
-A promotion that cannot be read is a finding of its own, and the others are still checked.
+A deployment, a promotion or a build tag that cannot be read is a finding of its own, and the
+others are still checked.
 
 Usage: check_evidence_copies.py
 Environment: EVIDENCE_REGISTRY; GITHUB_REPOSITORY; GITHUB_SERVER_URL (default https://github.com);
@@ -69,8 +71,9 @@ def promotions(repo, server):
     """(the promotion runs whose promote job succeeded in `release`, oldest first, findings).
 
     Every successful deployment status in `release` must name a successful promote or ISO job
-    of a run of this repository; one that does not is a finding, never skipped."""
-    found, bad = set(), []
+    of a run of this repository; one that does not is a finding, never skipped. A run with an
+    ISO deployment and no promote deployment is a finding too: its promotion would go unchecked."""
+    found, iso, bad = set(), set(), []
     for dep in gh_lines(
         f"repos/{repo}/deployments?environment={ENVIRONMENT}", ".[].id"
     ):
@@ -94,13 +97,19 @@ def promotions(repo, server):
                 )
                 if job == [f"{PROMOTE_JOB}\tsuccess"]:
                     found.add(int(m[1]))
-                elif job != [f"{ISO_JOB}\tsuccess"]:
+                elif job == [f"{ISO_JOB}\tsuccess"]:
+                    iso.add(int(m[1]))
+                else:
                     bad.append(
                         f"deployment {dep}: a successful deployment in {ENVIRONMENT} of job {m[2]} of run {m[1]}, "
                         f"which is {job!r}, not a successful {PROMOTE_JOB!r} or {ISO_JOB!r}"
                     )
         except Unreadable as e:
             bad.append(f"deployment {dep}: unreadable, so not checked: {e}")
+    bad += [
+        f"run {run}: a successful {ISO_JOB!r} deployment in {ENVIRONMENT} and no successful {PROMOTE_JOB!r} one, so its promotion is not checked"
+        for run in sorted(iso - found)
+    ]
     return sorted(found), bad
 
 
@@ -157,60 +166,71 @@ def check(promotion, tags, assets, evidence_repo, repo, server):
     # Without the job token, as the promotion verifies its own bundle (github-release.sh).
     env = {k: v for k, v in os.environ.items() if k not in ("GH_TOKEN", "GITHUB_TOKEN")}
     for build in builds:
-        tag = f"{build}-{promotion}"
-        asset = f"evidence-{tag}.tar"
-        if asset not in assets and promotion not in PRE_RELEASE_PROMOTIONS:
+        # One build tag that cannot be read does not hide the findings of the others.
+        try:
+            bad += check_tag(promotion, build, assets, evidence_repo, repo, server, env)
+        except (Unreadable, KeyError, ValueError) as e:
             bad.append(
-                f"promotion run {promotion}: no GitHub Release carries {asset}, the approved plan to verify {evidence_repo}:{tag} against"
+                f"promotion run {promotion}: {evidence_repo}:{build}-{promotion}: unreadable, so not checked: {e}"
             )
-            continue
-        with tempfile.TemporaryDirectory() as tmp:
-            copy = fetch_copy(f"{evidence_repo}:{tag}", pathlib.Path(tmp))
-            if asset in assets:
-                approved, against = (
-                    fetch_release(repo, assets[asset], asset, pathlib.Path(tmp)),
-                    f"the Release {assets[asset]}",
-                )
-            else:
-                approved, against = (
-                    copy,
-                    "its own signed plan, a promotion made before the Releases",
-                )
-            v = subprocess.run(
-                [
-                    "bash",
-                    str(ROOT / "system/evidence-bundle.sh"),
-                    "verify-dir",
-                    str(copy),
-                    str(approved),
-                ],
-                capture_output=True,
-                text=True,
-                check=False,
-                env=env,
+    return bad
+
+
+def check_tag(promotion, build, assets, evidence_repo, repo, server, env):
+    """The failures of the copy <build>-<promotion>, as lines; empty when it is intact."""
+    tag = f"{build}-{promotion}"
+    asset = f"evidence-{tag}.tar"
+    if asset not in assets and promotion not in PRE_RELEASE_PROMOTIONS:
+        return [
+            f"promotion run {promotion}: no GitHub Release carries {asset}, the approved plan to verify {evidence_repo}:{tag} against"
+        ]
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = fetch_copy(f"{evidence_repo}:{tag}", pathlib.Path(tmp))
+        if asset in assets:
+            approved, against = (
+                fetch_release(repo, assets[asset], asset, pathlib.Path(tmp)),
+                f"the Release {assets[asset]}",
             )
-            if v.returncode != 0:
-                bad.append(
-                    f"{evidence_repo}:{tag}: does not verify against {against}: {v.stderr.strip()}"
-                )
-                continue
-            try:
-                plan = json.loads((copy / "promotion.json").read_text())
-            except (OSError, ValueError) as e:
-                raise Unreadable(
-                    f"{tag}: promotion.json of a verified copy is unreadable: {e}"
-                ) from e
-        trigger = f"{server}/{repo}/actions/runs/{promotion}"
-        if str(plan.get("run_id")) != build or plan.get("trigger") != trigger:
-            bad.append(
+        else:
+            approved, against = (
+                copy,
+                "its own signed plan, a promotion made before the Releases",
+            )
+        v = subprocess.run(
+            [
+                "bash",
+                str(ROOT / "system/evidence-bundle.sh"),
+                "verify-dir",
+                str(copy),
+                str(approved),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        if v.returncode != 0:
+            return [
+                f"{evidence_repo}:{tag}: does not verify against {against}: {v.stderr.strip()}"
+            ]
+        try:
+            plan = json.loads((copy / "promotion.json").read_text())
+        except (OSError, ValueError) as e:
+            raise Unreadable(
+                f"{tag}: promotion.json of a verified copy is unreadable: {e}"
+            ) from e
+    trigger = f"{server}/{repo}/actions/runs/{promotion}"
+    if str(plan.get("run_id")) != build or plan.get("trigger") != trigger:
+        return [
+            (
                 f"{evidence_repo}:{tag}: its signed plan is build run {plan.get('run_id')!r} planned by "
                 f"{plan.get('trigger')!r}, not build run {build} planned by {trigger}"
             )
-        else:
-            print(
-                f"promotion run {promotion}: {evidence_repo}:{tag} verifies against {against}"
-            )
-    return bad
+        ]
+    print(
+        f"promotion run {promotion}: {evidence_repo}:{tag} verifies against {against}"
+    )
+    return []
 
 
 def main():
@@ -239,11 +259,7 @@ def main():
             f"no promotion found in the environment {ENVIRONMENT}: the release history was not read"
         )
     for promotion in runs:
-        # One promotion that cannot be read does not hide the findings of the others.
-        try:
-            bad += check(promotion, tags, assets, evidence_repo, repo, server)
-        except (Unreadable, KeyError, ValueError) as e:
-            bad.append(f"promotion run {promotion}: unreadable, so not checked: {e}")
+        bad += check(promotion, tags, assets, evidence_repo, repo, server)
     for line in bad:
         print(line, file=sys.stderr)
     return 1 if bad else 0
