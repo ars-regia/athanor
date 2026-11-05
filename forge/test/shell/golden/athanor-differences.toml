@@ -7,7 +7,7 @@
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: at scale 1.5 both compositors place a window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)
 #   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
-#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)
+#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)
 #
 # Decision 28 of doc_own_stack.md hides controls under the own compositor until their replacement
 # comes: one entry per case and hidden control, covering its absence and the move it causes, for
@@ -318,32 +318,32 @@ issue = 743
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures; the rig's grim -o asks for no cursor, and athanor-sulphur follows ext-image-copy-capture and draws none (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
