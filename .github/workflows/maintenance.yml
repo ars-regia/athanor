@@ -1,5 +1,6 @@
 # Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
-# drift check of PL52; the other maintenance jobs move here with PB12.
+# drift check of PL52 and the daily check of the evidence copies off GitHub (#401); the other
+# maintenance jobs move here with PB12.
 name: Maintenance
 
 on:
@@ -10,6 +11,35 @@ on:
 permissions: {}
 
 jobs:
+  # A deleted or altered evidence copy off GitHub (#401, ADR-0106 item 4, secrets.md SEC16): every
+  # promotion that ran in the environment release must keep its copy in EVIDENCE_REGISTRY, and the
+  # copy must verify against the plan on its GitHub Release. The job holds no environment, no
+  # write permission and no secret: the registry is read anonymously and the token only reads.
+  evidence-copies:
+    name: Evidence copies are intact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Verify the copy of every promotion off GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_REGISTRY: ${{ vars.EVIDENCE_REGISTRY }}
+        run: python3 system/check_evidence_copies.py
+
   settings-drift:
     name: Settings drift
     runs-on: ubuntu-24.04
