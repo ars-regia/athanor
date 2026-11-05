@@ -56,7 +56,8 @@ if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ ${SECURE_BOOT:-0} == 1 ]] || { echo "the upgrade case runs on Secure Boot firmware: set SECURE_BOOT=1" >&2; exit 2; }
 fi
 
-iso_digest= iso_layers=
+iso_digest=''
+iso_layers=''
 if [[ -n ${UPDATE_TO:-} ]]; then
     [[ -z ${ISO_DIGEST:-} ]] || { echo "ISO_DIGEST and UPDATE_TO exclude each other: the upgrade case installs the previous :stable ISO, whose image is not ISO_DIGEST" >&2; exit 2; }
 else
