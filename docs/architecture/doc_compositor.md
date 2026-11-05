@@ -1,6 +1,6 @@
 # Athanor compositor
 
-Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor's client crate to `athanor-sulphur-client`. Only identifiers are renamed; the specified behaviour does not change.
+Status: **revision 2, approved by the maintainer on 2026-10-08.** This revision settles the trusted-path patch on cosmic-comp PR #1441 (ADR-0041), adds the upstream policy to CO3, completes the list of patches to match the register, records the upstream plan for patches 1 and 2, and accepts the rebase cost as measured by the first rebase. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor's client crate to `athanor-sulphur-client`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by [ADR-0135](../decisions/0135-faster-road-to-1-0.md), the amendment approved by the maintainer with the pull request that records it, in CO4's note: the own compositor replaces cosmic-comp in release 1.1, and release 1.0 ships it as the default session.
 
 This document answers one question the maintainer raised on 2026-10-04: should Athanor have a
 compositor of its own, one that takes in what niri, Hyprland, MangoWC and the others offer? The
@@ -87,7 +87,7 @@ maintainers) this document adds: **a window-management model the maintainer appr
 register, which cosmic-comp cannot host and upstream declines.** A fork starts from cosmic-comp
 (or from niri, both on Smithay), never from zero.
 
-*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor passes its acceptance and replaces cosmic-comp, in release 1.0, as `doc_own_stack.md` sets out.*
+*Note (ADR-0121, 2026-10-17): the maintainer decided that Athanor writes its own compositor on Smithay, from Smithay and not from a fork. This item holds until that compositor passes its acceptance and replaces cosmic-comp, in release 1.1, as `doc_own_stack.md` sets out; release 1.0 ships it as the default session, with cosmic-comp's as the second choice (amended on 2026-11-05, [ADR-0135](../decisions/0135-faster-road-to-1-0.md)).*
 
 ## 3. Open questions
 

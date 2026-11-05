@@ -27,7 +27,12 @@ pub mod shelld;
 pub mod update;
 
 // athanor-update is a binary crate, so the modules under test are included by path, at the
-// crate root because tools.rs names `crate::sigobj`: the fuzzed code is the shipped source.
+// crate root because tools.rs names `crate::sigobj` and `crate::attestation`: the fuzzed code is
+// the shipped source.
+#[cfg(feature = "update")]
+#[path = "../../../forge/specs/athanor-update/athanor-update-1.0.0/src/attestation.rs"]
+#[allow(dead_code)]
+mod attestation;
 #[cfg(feature = "update")]
 #[path = "../../../forge/specs/athanor-update/athanor-update-1.0.0/src/sigobj.rs"]
 #[allow(dead_code)]

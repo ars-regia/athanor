@@ -3,8 +3,10 @@
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import atspi_compare as compare
@@ -83,6 +85,12 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("toggle button", "Bar")])
         self.assertEqual((len(lines), failures), (1, []))
 
+    def test_a_label_that_repeats_its_check_boxs_name_is_the_check_box(self):
+        # The maintainer extended the rule to check boxes on 2026-11-05 (#648).
+        reference = [node("check box", "Option one"), dict(node("label", "Option one"), depth=1)]
+        lines, failures = compare.compare(reference, [node("check box", "Option one")])
+        self.assertEqual((len(lines), failures), (1, []))
+
     def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
         reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
         lines, failures = compare.compare(reference, [node("button", "Close")])
@@ -107,6 +115,72 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare([node("label", "Sample text")], [node("entry", "Sample text")])
         self.assertEqual(failures, ["label 'Sample text': role 'entry'"])
 
+    def test_a_gallery_switch_and_the_label_beside_it_are_a_toggle_button(self):
+        for name in ("A switch", "Abilita il pulsante"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable", "checked"]), depth=1),
+            ]
+            transcript = [node("toggle button", name, ["checkable", "pressed"])]
+            lines, failures = compare.compare(reference, transcript)
+            self.assertEqual(failures, [])
+            self.assertEqual(len(lines), 1)
+            self.assertIn("note: role 'toggle button'", lines[0])
+
+    def test_a_gallery_switch_may_lack_checkable_and_a_check_box_may_not(self):
+        # AccessKit gives a toggle button no checkable state (node.rs:336; maintainer, 2026-11-05).
+        lines, failures = compare.compare(
+            [node("check box", "A switch", ["checkable", "checked"])],
+            [node("toggle button", "A switch", ["pressed"])],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("'checkable' absent", lines[0])
+        _, failures = compare.compare(
+            [node("check box", "Option one", ["checkable"])], [node("check box", "Option one")]
+        )
+        self.assertEqual(failures, ["check box 'Option one': state 'checkable' missing"])
+
+    def test_a_disabled_control_may_lack_focusable(self):
+        # doc_own_stack.md, lines 506-508: a disabled control takes no focus (maintainer, 2026-11-05).
+        lines, failures = compare.compare(
+            [node("button", "Waits", ["focusable", "showing"])], [node("button", "Waits", ["showing"])]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("'focusable' absent", lines[0])
+        # Enabled on either side, the control must take the focus.
+        for reference, transcript in [
+            (["focusable", "sensitive"], []),
+            (["focusable"], ["enabled", "sensitive"]),
+        ]:
+            _, failures = compare.compare(
+                [node("button", "Waits", reference)], [node("button", "Waits", transcript)]
+            )
+            self.assertIn("button 'Waits': state 'focusable' missing", failures)
+
+    def test_a_check_box_that_is_not_a_gallery_switch_stays_a_check_box(self):
+        _, failures = compare.compare(
+            [node("check box", "Option one")], [node("toggle button", "Option one")]
+        )
+        self.assertEqual(failures, ["check box 'Option one': role 'toggle button'"])
+        # A label beside another parent's switch is its own element.
+        reference = [
+            node("panel", ""),
+            dict(node("check box", "A switch"), depth=1),
+            node("panel", ""),
+            dict(node("label", "A switch"), depth=1),
+        ]
+        _, failures = compare.compare(reference, [node("toggle button", "A switch")])
+        self.assertEqual(failures, ["label 'A switch': missing"])
+        # A label beside a check box that is no gallery switch is its own element too.
+        reference = [
+            node("panel", ""),
+            dict(node("check box", "Option one"), depth=1),
+            dict(node("label", "Option one"), depth=1),
+        ]
+        _, failures = compare.compare(reference, [node("check box", "Option one")])
+        self.assertEqual(failures, ["label 'Option one': missing"])
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
@@ -115,6 +189,63 @@ class CompareTest(unittest.TestCase):
 
 
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/atspi"
+
+
+class GalleryTest(unittest.TestCase):
+    """rig.sh atspi gallery: one tree per page of cases.py gallery-pages, each compared with its
+    reference; a page with no reference or no transcript fails (#648)."""
+
+    def test_every_page_has_a_reference_in_both_languages(self):
+        # Each reference stands in for its transcript: only a missing file can fail, and the
+        # expected difference of the lists page, which a reference holds against itself.
+        rot = "lists: no difference left; remove its expected difference (#982)"
+        for lang in ("en", "it"):
+            _, failures = compare.gallery_problems(GOLDEN, GOLDEN, lang)
+            self.assertEqual(failures, [rot], lang)
+
+    def test_an_expected_difference_is_reported_and_does_not_fail(self):
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                for folder, role in ((references, "list"), (transcripts, "list box")):
+                    tree = [node(role if page == "lists" else "button", page)]
+                    (Path(folder) / f"atspi-gallery-{page}.json").write_text(json.dumps(tree))
+            lines, failures = compare.gallery_problems(references, transcripts, "en")
+            self.assertEqual(failures, [])
+            self.assertIn("lists: expected difference (#982): list 'lists': role 'list box'", lines)
+            # Any other page with a difference fails.
+            (Path(transcripts) / "atspi-gallery-values.json").write_text(
+                json.dumps([node("list box", "values")])
+            )
+            _, failures = compare.gallery_problems(references, transcripts, "en")
+            self.assertEqual(failures, ["values: button 'values': role 'list box'"])
+
+    def test_an_expected_difference_of_no_page_fails(self):
+        stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}
+        with mock.patch.object(compare, "EXPECTED_DIFFERENCES", stale):
+            _, failures = compare.gallery_problems(GOLDEN, GOLDEN, "en")
+        self.assertEqual(failures[0], "tables: expected difference (#1) names no page of cases.py")
+        self.assertEqual(len(failures), 2)
+
+    def test_a_page_without_its_reference_or_its_transcript_fails(self):
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                for folder in (references, transcripts):
+                    tree = [node("toggle button", page)]
+                    (Path(folder) / f"atspi-gallery-{page}-it.json").write_text(json.dumps(tree))
+            lines, failures = compare.gallery_problems(references, transcripts, "it")
+            # Every page passes, so the expected difference of the lists page has rotted.
+            self.assertEqual(len(lines), len(compare.GALLERY_PAGES))
+            self.assertEqual(
+                failures, ["lists: no difference left; remove its expected difference (#982)"]
+            )
+            (Path(references) / "atspi-gallery-choices-it.json").unlink()
+            (Path(transcripts) / "atspi-gallery-states-it.json").unlink()
+            _, failures = compare.gallery_problems(references, transcripts, "it")
+            self.assertEqual(len(failures), 3)
+            self.assertTrue(failures[0].startswith("choices: no reference "))
+            self.assertTrue(failures[2].startswith("states: no transcript "))
+            # The English trees are other files.
+            self.assertEqual(len(compare.gallery_problems(references, transcripts, "en")[1]), 12)
 
 
 class HiddenTest(unittest.TestCase):

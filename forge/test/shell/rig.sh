@@ -9,6 +9,7 @@
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
+#   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -51,7 +52,7 @@
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
-#   rig.sh atspi gallery [it]   the gallery's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
+#   rig.sh atspi gallery [it]   each page's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
 #   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
@@ -128,10 +129,11 @@ build_image() {
     fi
 }
 
-# The base of the fixtures' layer: the published rig when there is one (see the Containerfile).
-rig_base=()
+# The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
+# and the registry of the forge's tier 2 repository, where the rig's cosmic-comp comes from.
+rig_base=(--build-arg "FORGE_REGISTRY=$registry")
 if [ -s "$rig/rig-image.digest" ]; then
-    rig_base=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
+    rig_base+=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
 fi
 
 # label=disable: under SELinux's container_t bubblewrap cannot mount devpts, glycin's
@@ -488,6 +490,11 @@ capture_launcher() {
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         seed_bar "$out/seed-$tag" float top visible "$variant"
+        # cosmic-comp 1.11 focuses the launcher at map, so its search field's caret blinks and a
+        # capture shows it at whatever opacity the blink had reached (#955). A blink that stops
+        # after a second leaves the caret fully drawn by the capture. The greeter's cursor-blink
+        # false left it here at a partial opacity GTK keeps once the blink is turned off.
+        echo "org.gnome.desktop.interface cursor-blink-timeout 1" >> "$out/seed-$tag.gsettings"
         override=()
         if [ "$catalog" != - ]; then
             override+=(ATHANOR_I18N_CATALOG="/out/locale/launcher/$catalog")
@@ -603,6 +610,21 @@ publish-build-image)
     echo "published $(cat "$out/build-image.ref")"
     echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
     echo "the pin trusts this run: the digest is unsigned, and rig.sh checks only the inputs label against the checkout"
+    ;;
+cosmic-comp-version)
+    # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
+    # carries the session's build (#965). Publishing the rig again does not move it: the
+    # Containerfile pins the tier 2 repository it installs from by TIER2_DIGEST.
+    # The spec's Release is a macro and rpmbuild is not on the host: spec_nevr.awk expands it and
+    # prints nothing for anything it cannot expand, which fails the check.
+    want=$(awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
+    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
+    if [ -n "$want" ] && [ "$have" = "$want" ]; then
+        echo "the rig runs cosmic-comp $have, the build forge/specs/cosmic-comp ships"
+    else
+        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); if TIER2_DIGEST in forge/test/shell/Containerfile already holds that build, republish the rig (rig.sh publish-image) and commit rig-image.digest; otherwise move TIER2_DIGEST to a tier 2 repository that holds it first" >&2
+        exit 1
+    fi
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
@@ -1154,21 +1176,34 @@ atspi)
             "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         ;;
     gallery)
-        # The gallery's first page: the page toggles (six pages), a button, three toggles and a
-        # field, and the title bar's two buttons in the toolkit's. ATHANOR_GALLERY_BIN runs the GTK twin
-        # (forge/test/shell/gallery_gtk.py), or the toolkit's gallery by default; its transcript must
-        # hold all the reference holds, the GTK twin's, recorded (OS8).
-        # To record it again, copy <out>/atspi-gallery[-it].json of a GTK run into golden/atspi/.
+        # One tree per page of cases.py gallery-pages, read with the gallery started on that page
+        # (--page): a hidden page exposes no node. Each holds the page toggles, at least one per
+        # page, the page's controls and, in the toolkit's, the title bar's two buttons.
+        # ATHANOR_GALLERY_BIN runs the GTK twin (forge/test/shell/gallery_gtk.py), or the toolkit's
+        # gallery by default; each page's transcript must hold all its reference holds, the GTK
+        # twin's, recorded (OS8), and a page with no transcript or no reference fails.
+        # To record them again, copy <out>/atspi-gallery-<page>[-it].json of a GTK run into golden/atspi/.
         bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-sal-gallery}
         if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-sal-gallery build-toolkit; fi
-        transcript=atspi-gallery${3:+-$3}.json
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
-            ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} 10" \
-            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-gallery -- \
-            bash -c "$enable && exec $bin --lang ${3:-en}"
+        # An assignment, so that set -e stops on a failure of cases.py; no page would compare the
+        # transcripts of an earlier run.
+        listing=$(python3 -B "$rig/cases.py" gallery-pages)
+        if [ -z "$listing" ]; then
+            echo "rig.sh atspi gallery: cases.py gallery-pages lists no page" >&2
+            exit 1
+        fi
+        mapfile -t pages < <(cut -f1 <<<"$listing")
+        for page in "${pages[@]}"; do
+            transcript=atspi-gallery-$page${3:+-$3}.json
+            rm -f "$out/$transcript"
+            in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=6 \
+                ATSPI_REQUIRED_NAME="$required" ATSPI_TRANSCRIPT="/out/$transcript" \
+                RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py ${bin##*/} ${#pages[@]}" \
+                dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-gallery-$page" -- \
+                bash -c "$enable && exec $bin --page $page --lang ${3:-en}"
+        done
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
+            --gallery /repo/forge/test/shell/golden/atspi /out "${3:-en}"
         ;;
     toolkit-chooser)
         # The same 8 choices in athanor-sal's chooser, under athanor-sulphur, through

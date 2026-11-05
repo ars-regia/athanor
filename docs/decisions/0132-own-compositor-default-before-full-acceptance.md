@@ -2,7 +2,7 @@
 id: ADR-0132
 title: "The own compositor becomes the default session before its full acceptance"
 date: 2026-10-28
-status: accepted
+status: amended by ADR-0135
 issues: []
 areas: [shell, security, process]
 ---

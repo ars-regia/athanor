@@ -17,6 +17,7 @@ so does an exemption that names no utterance of the reference.
 """
 
 import sys
+from functools import cache
 from itertools import pairwise
 from pathlib import Path
 
@@ -46,21 +47,28 @@ from golden_report import exemptions
 # whatever its label, spoken as a toggle button still fails.
 
 
-def gallery_labels(key):
-    """The texts of `key` in the gallery's strings.tsv, one per language."""
-    return [
-        line.split("\t")[1:]
-        for line in (
-            Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
-        )
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.startswith(f"{key}\t")
-    ][0]
+STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
 
 
-SWITCH_LABELS = gallery_labels("switch") + gallery_labels("enable")
-AREA_LABELS = gallery_labels("notes")
+@cache
+def gallery_labels(*keys):
+    """The texts of `keys` in the gallery's strings.tsv, every language. Read on first use, by
+    a reference that holds a gallery's switch or text area, so that the walk of another surface
+    does not need the file; a missing key is an error that names it."""
+    rows = {
+        row[0]: row[1:]
+        for row in (line.split("\t") for line in STRINGS.read_text(encoding="utf-8").splitlines())
+    }
+    missing = [key for key in keys if key not in rows]
+    if missing:
+        raise LookupError(f"{STRINGS} has no key {', '.join(missing)}")
+    return [text for key in keys for text in rows[key]]
+
+
+def switch_labels():
+    return gallery_labels("switch", "enable")
+
+
 SWITCH_SPEECH = {
     "check box checked.": "toggle button pressed.",
     "check box not checked.": "toggle button not pressed.",
@@ -81,10 +89,10 @@ def heard_as(utterance):
     for role, said in SAME_FIELD_ROLE.items():
         if utterance.endswith(f" {role}."):
             yield f"{utterance[: -len(role) - 1]}{said}."
-    for label in SWITCH_LABELS:
-        for gtk, said in SWITCH_SPEECH.items():
-            if utterance == f"{label} {gtk}":
-                yield f"{label} {said}"
+    for gtk, said in SWITCH_SPEECH.items():
+        label = utterance.removesuffix(f" {gtk}")
+        if label != utterance and label in switch_labels():
+            yield f"{label} {said}"
 
 
 def compare(reference, transcript, exempt=None):
@@ -102,14 +110,14 @@ def compare(reference, transcript, exempt=None):
     ]
     together = {}
     for field, after in pairwise(reference):
-        for label in AREA_LABELS:
-            for role, said in SAME_FIELD_ROLE.items():
-                if field != f"{label} {role}.":
-                    continue
-                joined = f"{label} {said} {after}"
-                if joined in spoken:
-                    together.setdefault(field, joined)
-                    together.setdefault(after, joined)
+        for role, said in SAME_FIELD_ROLE.items():
+            label = field.removesuffix(f" {role}.")
+            if label == field or label not in gallery_labels("notes"):
+                continue
+            joined = f"{label} {said} {after}"
+            if joined in spoken:
+                together.setdefault(field, joined)
+                together.setdefault(after, joined)
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
         said = said or together.get(utterance)
