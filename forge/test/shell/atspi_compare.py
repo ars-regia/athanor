@@ -42,12 +42,16 @@ REWORDED = {
 # Role::Group reaches AT-SPI as a panel. The maintainer decided on 2026-10-17 that AccessKit's
 # "panel" equals GTK's "grouping". The same goes for a single-line field: AccessKit's
 # Role::TextInput reaches AT-SPI as an entry and has no way to say "text", the role of GTK's
-# GtkText, and Orca speaks both as a text field.
+# GtkText, and Orca speaks both as a text field. And a list: the toolkit's list, of which the user
+# chooses one row, is ARIA's listbox, which W3C Core-AAM 1.2 maps to AT-SPI's list box, where GTK's
+# ListBox says list; Orca says "list" for both. The maintainer decided on 2026-11-05 (#982) that the
+# toolkit keeps the role Core-AAM prescribes (doc_own_stack.md, OS8, decision 25).
 SAME_ROLE = [
     {"button", "push button"},
     {"frame", "window"},
     {"grouping", "panel"},
     {"text", "entry"},
+    {"list", "list box"},
 ]
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button, and extended the rule to check boxes on
@@ -72,7 +76,25 @@ ENABLED = {"enabled", "sensitive"}
 # The gallery's pages whose tree is known to differ from GTK's, each with its issue: still compared
 # and reported, its differences are notes, and the page fails once it holds no difference, so that
 # the entry is removed with the fix (maintainer, 2026-11-05, #648).
-EXPECTED_DIFFERENCES = {"lists": 982}  # the list's role, focus, rows and scroll bar
+EXPECTED_DIFFERENCES = {}
+# GTK's ScrolledWindow holds a scroll bar, a node with a value and a child panel with one. The
+# toolkit's scroll draws only an indicator, which takes no input, and publishes no node for it; its
+# scroll view says how far it is scrolled. The maintainer decided on 2026-11-05 (#982) that a scroll
+# bar of the reference, with its subtree, has no counterpart in a transcript that holds no scroll bar.
+INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer, 2026-11-05, #982)"
+
+
+def in_scroll_bar(nodes):
+    """The ids of the nodes of `nodes` that are a scroll bar or lie inside one."""
+    out, bar = set(), None
+    for node in nodes:
+        if bar is not None and node["depth"] <= bar:
+            bar = None
+        if bar is None and node["role"] == "scroll bar":
+            bar = node["depth"]
+        if bar is not None:
+            out.add(id(node))
+    return out
 
 
 def significant(node):
@@ -146,7 +168,13 @@ def compare(reference, transcript, exempt=None):
         f"exemption {name!r} names no element of the reference"
         for name in sorted(set(exempt) - {ref["name"] for ref in spoken(reference)})
     ]
+    bars = set()
+    if not any(node["role"] == "scroll bar" for node in transcript):
+        bars = in_scroll_bar(reference)
     for ref in spoken(reference):
+        if id(ref) in bars:
+            lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
+            continue
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = next(
             (node for node in named if node["role"] == ref["role"]), None

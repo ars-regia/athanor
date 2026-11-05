@@ -181,6 +181,41 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual(failures, ["label 'Option one': missing"])
 
+    def test_a_list_box_is_a_list(self):
+        reference = [node("list", "A list", ["focusable", "showing"])]
+        lines, failures = compare.compare(reference, [node("list box", "A list", ["focusable", "showing"])])
+        self.assertEqual(failures, [])
+        self.assertIn("note: role 'list box'", lines[0])
+        # A list is not another role.
+        _, failures = compare.compare(reference, [node("menu", "A list", ["focusable", "showing"])])
+        self.assertEqual(failures, ["list 'A list': role 'menu'"])
+
+    def test_a_scroll_bar_and_its_subtree_have_no_counterpart_in_a_tree_without_one(self):
+        def at(depth, role, name, value=""):
+            return {**node(role, name, ["showing"], value), "depth": depth}
+
+        reference = [
+            at(0, "scroll pane", ""),
+            at(1, "label", "Row 1"),
+            at(1, "scroll bar", "", "0.0"),
+            at(2, "panel", "", "0.0"),
+            at(1, "label", "Row 2"),
+        ]
+        transcript = [at(0, "scroll pane", ""), at(1, "label", "Row 1"), at(1, "label", "Row 2")]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            [line for line in lines if "no counterpart" in line],
+            [
+                f"scroll bar '': no counterpart; note: {compare.INDICATOR}",
+                f"panel '': no counterpart; note: {compare.INDICATOR}",
+            ],
+        )
+        # A scroll bar the transcript holds is compared, its value with it.
+        published = transcript + [at(1, "scroll bar", "", "5.0"), at(2, "panel", "", "0.0")]
+        _, failures = compare.compare(reference, published)
+        self.assertEqual(failures, ["scroll bar '': value '5.0', expected '0.0'"])
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
@@ -196,35 +231,42 @@ class GalleryTest(unittest.TestCase):
     reference; a page with no reference or no transcript fails (#648)."""
 
     def test_every_page_has_a_reference_in_both_languages(self):
-        # Each reference stands in for its transcript: only a missing file can fail, and the
-        # expected difference of the lists page, which a reference holds against itself.
-        rot = "lists: no difference left; remove its expected difference (#982)"
+        # Each reference stands in for its transcript: only a missing file can fail.
         for lang in ("en", "it"):
             _, failures = compare.gallery_problems(GOLDEN, GOLDEN, lang)
-            self.assertEqual(failures, [rot], lang)
+            self.assertEqual(failures, [], lang)
 
+    @mock.patch.object(compare, "EXPECTED_DIFFERENCES", {"lists": 1})
     def test_an_expected_difference_is_reported_and_does_not_fail(self):
         with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
             for page in compare.GALLERY_PAGES:
-                for folder, role in ((references, "list"), (transcripts, "list box")):
+                for folder, role in ((references, "button"), (transcripts, "slider")):
                     tree = [node(role if page == "lists" else "button", page)]
                     (Path(folder) / f"atspi-gallery-{page}.json").write_text(json.dumps(tree))
             lines, failures = compare.gallery_problems(references, transcripts, "en")
             self.assertEqual(failures, [])
-            self.assertIn("lists: expected difference (#982): list 'lists': role 'list box'", lines)
+            self.assertIn("lists: expected difference (#1): button 'lists': role 'slider'", lines)
             # Any other page with a difference fails.
             (Path(transcripts) / "atspi-gallery-values.json").write_text(
-                json.dumps([node("list box", "values")])
+                json.dumps([node("slider", "values")])
             )
             _, failures = compare.gallery_problems(references, transcripts, "en")
-            self.assertEqual(failures, ["values: button 'values': role 'list box'"])
+            self.assertEqual(failures, ["values: button 'values': role 'slider'"])
+            # A page of EXPECTED_DIFFERENCES with no difference left fails.
+            (Path(transcripts) / "atspi-gallery-lists.json").write_text(
+                json.dumps([node("button", "lists")])
+            )
+            (Path(transcripts) / "atspi-gallery-values.json").write_text(
+                json.dumps([node("button", "values")])
+            )
+            _, failures = compare.gallery_problems(references, transcripts, "en")
+            self.assertEqual(failures, ["lists: no difference left; remove its expected difference (#1)"])
 
     def test_an_expected_difference_of_no_page_fails(self):
         stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}
         with mock.patch.object(compare, "EXPECTED_DIFFERENCES", stale):
             _, failures = compare.gallery_problems(GOLDEN, GOLDEN, "en")
-        self.assertEqual(failures[0], "tables: expected difference (#1) names no page of cases.py")
-        self.assertEqual(len(failures), 2)
+        self.assertEqual(failures, ["tables: expected difference (#1) names no page of cases.py"])
 
     def test_a_page_without_its_reference_or_its_transcript_fails(self):
         with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
@@ -233,17 +275,14 @@ class GalleryTest(unittest.TestCase):
                     tree = [node("toggle button", page)]
                     (Path(folder) / f"atspi-gallery-{page}-it.json").write_text(json.dumps(tree))
             lines, failures = compare.gallery_problems(references, transcripts, "it")
-            # Every page passes, so the expected difference of the lists page has rotted.
             self.assertEqual(len(lines), len(compare.GALLERY_PAGES))
-            self.assertEqual(
-                failures, ["lists: no difference left; remove its expected difference (#982)"]
-            )
+            self.assertEqual(failures, [])
             (Path(references) / "atspi-gallery-choices-it.json").unlink()
             (Path(transcripts) / "atspi-gallery-states-it.json").unlink()
             _, failures = compare.gallery_problems(references, transcripts, "it")
-            self.assertEqual(len(failures), 3)
+            self.assertEqual(len(failures), 2)
             self.assertTrue(failures[0].startswith("choices: no reference "))
-            self.assertTrue(failures[2].startswith("states: no transcript "))
+            self.assertTrue(failures[1].startswith("states: no transcript "))
             # The English trees are other files.
             self.assertEqual(len(compare.gallery_problems(references, transcripts, "en")[1]), 12)
 
