@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rust security audit: clippy (warnings denied) over the root workspace and the toolkit's gallery,
-# and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s. Licences, bans and sources of the same
-# policy run in the pull request gate (`just check-deny`), so they are not repeated here.
+# and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s, and
+# `cargo audit --deny yanked` over the vendored lockfiles of scripts/ci/audited-lockfiles.txt.
+# Licences, bans and sources of the same policy run in the pull request gate (`just check-deny`), so they are not repeated here.
 # Logs land in $AUDIT_OUT (default: audit-out) so a workflow can upload the directory.
 set -euo pipefail
 

@@ -82,7 +82,7 @@ Two rulesets (`.github/settings/rulesets.json`, active) apply on top of the bran
 | `gate` | CI27 | every PR and merge group (no path filter) | yes | `just check` (actionlint, Justfile syntax, every `verify.py` check with `scripts/ci/known-red.txt`, every Python test directory, `cargo test` over the root workspace in the rig's build stage through `just check-rust`); the kernel check (CI28), CI14 and CI15 when `scripts/ci/changes.py` selects them |
 | `Kernel gate` | CI8 | every PR to `main` (no path filter); none to `iso-v0`, where CI27 runs the kernel check | on `main` only | lint (CI2), kernel prep/build, boot matrix, NVIDIA module build |
 | System Image Check | CI13 | the image inputs change | no | the three images build as in the pipeline, without a key; package delta |
-| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny advisories (`deny.toml`) over the root lockfile; licences, bans and sources run in CI27 (`just check-deny`) |
+| Rust Security & FFI Audit | CI22 | every PR to `iso-v0` | no | clippy, cargo-deny advisories (`deny.toml`) over the root lockfile, `cargo audit --deny yanked` over the vendored lockfiles of `scripts/ci/audited-lockfiles.txt`; licences, bans and sources run in CI27 (`just check-deny`) |
 | Nix Vanguard | CI24 | only PRs based on `main` | no | see section 3 |
 | Shell surfaces | CI15 | through CI27 when `changes.json` selects `shell`: a crate the rig draws, `forge/test/shell/**`, `Cargo.toml`, `Cargo.lock` or `.cargo/` changes | through `gate` | rig tests of the greeter, layout, compositor client, shelld, bar, dock, launcher; also CI2 |
 
@@ -273,10 +273,10 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI22 Rust Security & FFI Audit
 
-- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace and the advisory check of cargo-deny over its lockfile. Licences, bans and sources of the same `deny.toml` policy run in the pull request gate (CI27, `just check-deny`), so there is one policy and no check runs twice; the frozen shell workspace left the tree with ADR-0073 wave 1. There is no cargo-vet, Kani or eBPF job (ADR-0075).
+- **File:** `rust-security-audit.yml`. **Purpose:** clippy over the root workspace and the advisory check of cargo-deny over its lockfile, and `cargo audit --deny yanked` over the vendored lockfiles of `scripts/ci/audited-lockfiles.txt`, which cargo-deny cannot read (no workspace). Licences, bans and sources of the same `deny.toml` policy run in the pull request gate (CI27, `just check-deny`), so there is one policy and no check runs twice; the frozen shell workspace left the tree with ADR-0073 wave 1. There is no cargo-vet, Kani or eBPF job (ADR-0075).
 - **Triggers:** push and `pull_request` on `iso-v0`, and weekly (Monday 04:17 UTC) on the default branch, because the advisory database changes without a commit. **Outputs:** artifact `security-audit-logs`.
 - **Secrets, variables:** `REGISTRY_HOST`, `BUILDER_STABLE_TAG`. **Environment:** none. **Runner:** hosted; the audit runs in the `athanor-builder` image under podman, not as a job container. **Concurrency:** `<workflow>-<ref>`, cancels in progress.
-- **Scripts:** `scripts/ci/security-audit.sh`.
+- **Scripts:** `scripts/ci/security-audit.sh`, `scripts/ci/audited-lockfiles.txt`.
 - **Health:** `gh run list --workflow rust-security-audit.yml --branch iso-v0 --limit 5`.
 
 ### CI23 Rust Security & Buffer Overflow Fuzzing (retired)
