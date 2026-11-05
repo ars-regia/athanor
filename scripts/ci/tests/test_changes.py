@@ -59,6 +59,7 @@ class ClassifyTest(unittest.TestCase):
     def test_shell_inputs_select_the_visual_tests(self):
         for path in (
             "system/athanor-sulphur-client/src/lib.rs",
+            "system/athanor-sal/src/lib.rs",
             "system/athanor-style/calmo/generate.py",
             "forge/test/shell/rig.sh",
             "Cargo.lock",
@@ -71,6 +72,12 @@ class ClassifyTest(unittest.TestCase):
                     changes.classify([path]),
                     {**NONE, "shell": True},
                 )
+
+    def test_the_own_compositor_selects_the_visual_tests_and_its_package(self):
+        self.assertEqual(
+            changes.classify(["forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/main.rs"]),
+            {**NONE, "specs": True, "shell": True},
+        )
 
     def test_a_crate_the_rig_does_not_draw_selects_no_visual_test(self):
         # Its unit tests run in `just check` on every change; no area is needed for them.
