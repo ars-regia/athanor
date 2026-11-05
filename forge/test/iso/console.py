@@ -326,15 +326,27 @@ KARG_PROBE_WAIT = 5.0
 # origin; a file read without a container reference follows no image and answers WRONG
 # with `none`. As with the other probes printf assembles the marker, so the echo of the
 # typed line cannot pass for the answer.
-ORIGIN_PROBE = (
-    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
-    b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
-    b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
-    b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
-    b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
-    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
-    b" esac; fi"
-)
+# The repository is the one the ISO was built from (ATHANOR_ISO_REPOSITORY, passed by
+# run_iso_test.sh): the signed :stable of any other repository answers WRONG (issue 462).
+REPOSITORY = re.compile(r"[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+")
+
+
+def origin_probe(repository: str) -> bytes:
+    """ORIGIN_PROBE for one repository. The name goes into a shell `case` pattern, so
+    only the characters of a repository name are accepted."""
+    if not REPOSITORY.fullmatch(repository):
+        raise ValueError(f"not a repository name: {repository!r}")
+    return (
+        b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+        b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
+        b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
+        b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
+        b" ostree-image-signed:docker://" + repository.encode() + b":stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+        b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
+        b" esac; fi"
+    )
+
+
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
 
@@ -531,6 +543,10 @@ def main() -> int:
         print("usage: console.py SOCKET LOG PHASES MONITOR", file=sys.stderr)
         return 2
     sock_path, log_path, phase_path, monitor_path = sys.argv[1:5]
+    iso_repository = os.environ.get("ATHANOR_ISO_REPOSITORY", "")
+    if not REPOSITORY.fullmatch(iso_repository):
+        print(f"ATHANOR_ISO_REPOSITORY is not a repository name: {iso_repository!r}", file=sys.stderr)
+        return 2
     decided = DECIDED - {"settings-alive"} if HOLD else DECIDED
 
     for _ in range(180):
@@ -605,7 +621,7 @@ def main() -> int:
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
         note("karg-asked")
-        ask(ORIGIN_PROBE, ORIGIN_PROBE_WAIT)
+        ask(origin_probe(iso_repository), ORIGIN_PROBE_WAIT)
         note("origin-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")

@@ -31,6 +31,8 @@ import time
 import zlib
 
 HERE = pathlib.Path(__file__).resolve().parent
+# The repository the fake ISO of these tests was built from.
+ISO_REPOSITORY = "ghcr.io/acme/athanor-system"
 
 
 def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None):
@@ -392,7 +394,7 @@ def test_console_boots_our_kickstart(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn, _ = server.accept()
@@ -468,7 +470,7 @@ def test_installed_systems_own_grub_is_not_a_loop(tmp: pathlib.Path) -> None:
             str(run / "monitor.sock"),
         ],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn, _ = server.accept()
@@ -628,7 +630,7 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
         ],
         stdout=subprocess.DEVNULL,
         # The login path waits on the guest in real time; the fake guest answers at once.
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
     try:
         conn = play_first_boot(server, run)
@@ -693,7 +695,7 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         [sys.executable, str(HERE / "console.py"), sock, str(run / "serial.log"),
          str(run / "phases.txt"), str(run / "monitor.sock")],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_CONSOLE_HOLD": "1"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY, "ATHANOR_CONSOLE_HOLD": "1"},
     )
     try:
         conn = play_first_boot(server, run)
@@ -858,12 +860,19 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     """ORIGIN_PROBE run verbatim against a fake sysroot: /proc/cmdline and /sysroot are
     pointed at a scratch directory and `sudo` is a pass-through. `ostree=` names the
     deployment through the boot.N symlinks, as on a booted system. A signed :stable origin
-    answers OK; :latest, an unverified :stable and a remote-verified :stable answer
-    WRONG with what they carry, and an origin with no container reference WRONG with
+    answers OK; :latest, an unverified :stable, a remote-verified :stable and the signed
+    :stable of another repository answer WRONG with what they carry, and an origin with no container reference WRONG with
     `none`; an empty or missing origin, or no `ostree=`, answers UNREADABLE. Under sh and
     under bash, the guest's shell."""
     sys.path.insert(0, str(HERE))
     import console
+
+    for bad in ("", "ghcr.io/*", "a b/c", "x;y/z", "athanor-system"):
+        try:
+            console.origin_probe(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"origin_probe accepted {bad!r}")
 
     work = tmp / "origin"
     shutil.rmtree(work, ignore_errors=True)
@@ -878,11 +887,12 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
     (boot / "0").symlink_to("../../../deploy/athanor/deploy/abc.0")
     (work / "sysroot" / "ostree" / "boot.1").symlink_to("boot.1.1")
     booted = "root=UUID=x ostree=/ostree/boot.1/athanor/bc/0 rw\n"
-    probe = console.ORIGIN_PROBE.replace(b"/proc/cmdline", str(work / "cmdline").encode())
+    probe = console.origin_probe("ghcr.io/acme/athanor-system").replace(b"/proc/cmdline", str(work / "cmdline").encode())
     probe = probe.replace(b"/sysroot", str(work / "sysroot").encode())
     (work / "probe.sh").write_bytes(probe + b"\n")
 
     repository = "ghcr.io/acme/athanor-system"
+    other = "ghcr.io/mallory/athanor-system"
     unread = "ORIGIN_UNREADABLE /ostree/boot.1/athanor/bc/0"
     cases = tuple(
         (booted, f"[origin]\ncontainer-image-reference={ref}\n", f"ORIGIN_{answer} {ref}")
@@ -892,6 +902,9 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             (f"ostree-unverified-image:docker://{repository}:stable", "WRONG"),
             (f"ostree-remote-image:fedora:docker://{repository}:stable", "WRONG"),
             (f"ostree-image-signed:docker://{repository}:38546669761", "WRONG"),
+            (f"ostree-image-signed:docker://{other}:stable", "WRONG"),
+            (f"ostree-image-signed:docker://{repository}-nvidia:stable", "WRONG"),
+            (f"ostree-image-signed:docker://x/{repository}:stable", "WRONG"),
         )
     ) + (
         (booted, "[origin]\nrefspec=x\n", "ORIGIN_WRONG none"),
@@ -1052,7 +1065,7 @@ def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
     iso = tmp / "fake.iso"
     iso.write_bytes(b"")
     env = {k: v for k, v in os.environ.items() if k != "SECURE_BOOT"}
-    env.update(UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
+    env.update(ISO_REPOSITORY=ISO_REPOSITORY, UPDATE_TO="sha256:" + "a" * 64, UPDATE_REPOSITORY="ghcr.io/owner/athanor-system")
     proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
                           capture_output=True, text=True, env=env)
     assert proc.returncode == 2 and "Secure Boot" in proc.stderr, proc
@@ -1076,7 +1089,7 @@ def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
     (stubs / "ssh-keygen").chmod(0o755)
     iso = tmp / "fake.iso"
     iso.write_bytes(b"")
-    env = dict(os.environ, SECURE_BOOT="1", UPDATE_TO="sha256:" + "a" * 64,
+    env = dict(os.environ, SECURE_BOOT="1", ISO_REPOSITORY=ISO_REPOSITORY, UPDATE_TO="sha256:" + "a" * 64,
                UPDATE_REPOSITORY="ghcr.io/owner/athanor-system", PATH=f"{stubs}:{os.environ['PATH']}")
     proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(out)],
                           capture_output=True, text=True, env=env)
@@ -1135,7 +1148,7 @@ def test_console_answers_the_mok_request(tmp: pathlib.Path) -> None:
         [sys.executable, str(HERE / "console.py"), str(run / "serial.sock"), str(run / "serial.log"),
          str(run / "phases.txt"), str(run / "monitor.sock")],
         stdout=subprocess.DEVNULL,
-        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01"},
+        env={**os.environ, "ATHANOR_CONSOLE_PACE": "0.01", "ATHANOR_ISO_REPOSITORY": ISO_REPOSITORY},
     )
 
     def keys() -> list[str]:

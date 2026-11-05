@@ -19,6 +19,10 @@
 # greeter.txt with the verdict. The screenshots are there to be looked at by a person,
 # not only asserted on.
 #
+# ISO_REPOSITORY=<registry/owner/athanor-system> is required: the repository the ISO was built
+# from. The console's origin probe answers WRONG for a system that follows the signed :stable
+# of any other repository (issue 462).
+#
 # UPDATE_TO=<digest> UPDATE_REPOSITORY=<repository> runs the upgrade case of
 # doc_update_delivery.md UD18 on top, on Secure Boot firmware only: the candidate is served
 # as :stable from a registry on the runner (serve_candidate.sh), and once the first boot is
@@ -29,6 +33,8 @@ set -euo pipefail
 [[ $# -eq 2 ]] || { echo "usage: run_iso_test.sh ISO OUTPUT_DIR" >&2; exit 2; }
 iso=$1 output=$2
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+[[ -n ${ISO_REPOSITORY:-} ]] || { echo "ISO_REPOSITORY is not set: the repository the ISO was built from" >&2; exit 2; }
 
 if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ -n ${UPDATE_TO:-} && -n ${UPDATE_REPOSITORY:-} ]] || { echo "UPDATE_TO and UPDATE_REPOSITORY go together" >&2; exit 2; }
@@ -198,7 +204,7 @@ rm -f "$serial" "$monitor"
 unset ATHANOR_CONSOLE_PACE
 hold=0
 if [[ -n ${UPDATE_TO:-} ]]; then hold=1; fi
-ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
+ATHANOR_ISO_REPOSITORY=$ISO_REPOSITORY ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
 console_pid=$!
 
 # Screenshots on a timer: the installer and the greeter are graphical and say nothing on
