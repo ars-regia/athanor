@@ -90,13 +90,13 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
-/// colour the desktop's hearth wallpaper starts from (system/athanor-style/calmo/tokens.toml).
-// ponytail: dark always; the session's light or dark theme when the compositor reads appearance.
 /// A surface on no output, or shown on another one, still gets a frame callback this often.
 pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
 
-pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
+/// What the outputs show where no surface is: cosmic-comp's clear colour, srgb(39,41,42), so
+/// that the shell's surfaces match the cosmic-comp goldens (OS19, item 1; #736). cosmic-bg
+/// covers it with the wallpaper in both sessions.
+pub const BACKGROUND: [f32; 4] = [39.0 / 255.0, 41.0 / 255.0, 42.0 / 255.0, 1.0];
 
 /// The keyboard's repeat: the delay before a held key repeats, in milliseconds, and the
 /// repeats per second.
