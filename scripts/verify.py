@@ -2938,6 +2938,32 @@ def check_sysctl():
     return r
 
 
+# A vendored lockfile under forge/specs has no workspace cargo-deny can read, so no advisory
+# check reads it unless `just check-deny` audits it with `cargo audit --file`. That recipe reads
+# its list from scripts/ci/audited-lockfiles.txt; a lockfile missing from it is never checked (#465).
+AUDITED_LOCKFILES = "scripts/ci/audited-lockfiles.txt"
+
+
+def advisory_lock_problems(root=None):
+    """Every Cargo.lock under forge/specs is listed in AUDITED_LOCKFILES, and every entry exists."""
+    root = root or ROOT
+    listed = [l.strip() for l in read(root / AUDITED_LOCKFILES).splitlines()
+              if l.strip() and not l.lstrip().startswith("#")]
+    found = {p.relative_to(root).as_posix() for p in (root / "forge" / "specs").rglob("Cargo.lock")}
+    problems = [f"{p}: a lockfile under forge/specs that no advisory check reads; add it to {AUDITED_LOCKFILES}"
+                for p in sorted(found - set(listed))]
+    problems += [f"{AUDITED_LOCKFILES}: {p} does not exist" for p in listed if p not in found]
+    return problems
+
+
+@check("advisory-locks", "Every Cargo.lock under forge/specs is read by an advisory check (just check-deny)")
+def check_advisory_locks():
+    r = Result()
+    for problem in advisory_lock_problems():
+        r.fail(problem)
+    return r
+
+
 # A udev rule that sets GROUP= to a group no sysusers.d file declares makes udev log
 # "Unknown group" at every boot and fall back to root (doc_kernel_profile.md section 14,
 # boot ordering). A group the Fedora base declares goes into athanor-base-config's

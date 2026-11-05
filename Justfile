@@ -190,6 +190,9 @@ check-rust:
 # [workspace.dependencies], so cargo cannot resolve it on its own and cargo-deny cannot
 # read it; it joins this list when it gets a workspace of its own. The calmo theme tool
 # is a build-time derive tool that no spec installs and pins libcosmic to a git revision.
+# The vendored lockfiles of scripts/ci/audited-lockfiles.txt have no workspace for cargo-deny, so
+# `cargo audit --file` reads each one, advisories included, against the RustSec database it
+# fetches: a vulnerability fails, an unmaintained or unsound warning is printed (verify.py advisory-locks fails on a lockfile under forge/specs that is not listed).
 [group('QA & Security')]
 check-deny:
     #!/usr/bin/env bash
@@ -199,6 +202,11 @@ check-deny:
         echo "check-deny: $manifest"
         cargo deny --locked --manifest-path "$manifest" --config deny.toml check licenses bans sources
     done
+    command -v cargo-audit >/dev/null || { echo "check-deny: cargo-audit is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    while read -r lock; do
+        echo "check-deny: cargo audit $lock"
+        cargo audit --file "$lock"
+    done < <(grep -v '^[[:space:]]*\(#\|$\)' scripts/ci/audited-lockfiles.txt)
 
 # Formats all shell scripts and Justfiles across workspace
 [group('QA & Security')]

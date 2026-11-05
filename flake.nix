@@ -25,7 +25,7 @@
         security-tools = with pkgs; [ syft cosign ];
         # libclang: bindgen (libspa-sys di niri, aya) carica libclang.so da LIBCLANG_PATH.
         c-toolchain = with pkgs; [ gcc gnumake cmake mold llvmPackages_latest.llvm llvmPackages_latest.clang llvmPackages_latest.lld llvmPackages_latest.libclang ccache bpf-linker pahole elfutils ];
-        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-fuzz ];
+        rust-tools = with pkgs; [ rust-toolchain sccache clippy rustfmt cargo-deny cargo-audit cargo-fuzz ];
         # Toolset POSIX di base incluso: rpmbuild, %autosetup e i Makefile upstream
         # danno per scontati grep, diff, patch, gzip, file, which, m4, gettext.
         # dbus: the %check of athanor-update runs its bus tests on a private dbus-daemon.

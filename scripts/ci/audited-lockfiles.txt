@@ -1,0 +1,7 @@
+# Vendored Cargo lockfiles that `just check-deny` audits with `cargo audit --file` because
+# cargo-deny cannot read them: each ships a lockfile with no workspace to resolve (#465).
+# One path per line; `#` starts a comment. scripts/verify.py (advisory-locks) fails on a
+# Cargo.lock under forge/specs that is not listed here, so a new one cannot go unread.
+forge/specs/athanor-backup/athanor-backup-1.0.0/Cargo.lock
+forge/specs/athanor-recovery/athanor-recovery-1.0.0/Cargo.lock
+forge/specs/greenboot-rs/SOURCES/Cargo.lock
