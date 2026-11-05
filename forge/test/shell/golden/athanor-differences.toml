@@ -7,7 +7,7 @@
 #   #736: athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: at scale 1.5 cosmic-comp places a window at a fractional logical offset and athanor-sulphur at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides
-#   #743: the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)
+#   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
 #   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none
 #   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
 #
@@ -1290,7 +1290,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-light-1.5-en"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
@@ -1305,7 +1305,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-light-1.5-de"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
@@ -1320,7 +1320,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-light-1.5-rtl"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
@@ -1365,7 +1365,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-en"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
@@ -1380,7 +1380,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-de"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
@@ -1395,7 +1395,7 @@ issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-rtl"
-cause = "the launcher card's top and bottom rows differ by one pixel at scale 1.5 (fractional-scale rounding)"
+cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
