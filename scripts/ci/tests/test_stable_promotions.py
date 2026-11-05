@@ -132,6 +132,12 @@ class StablePromotions(unittest.TestCase):
         if listed:
             self.fx["list"][IMAGE].append(name)
 
+    def drop(self, name):
+        """Delete a tag from the registry, the listing included."""
+        self.fx["tags"].pop(f"{IMAGE}:{name}", None)
+        if name in self.fx["list"][IMAGE]:
+            self.fx["list"][IMAGE].remove(name)
+
     def fails(self, *texts):
         r = self.check()
         self.assertEqual(r.returncode, 1, r.stdout)
@@ -143,7 +149,7 @@ class StablePromotions(unittest.TestCase):
         self.chain()
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("follow promotion run 20", r.stdout)
+        self.assertIn("newest run 20", r.stdout)
 
     def test_a_stable_with_no_record_fails_and_names_the_digest(self):
         self.promotion(5, 6, D2, day="20261017")
@@ -169,6 +175,7 @@ class StablePromotions(unittest.TestCase):
         self.promotion(5, 6, D2, day="20261024")
         self.tag("stable", D2, listed=False)
         self.tag("stable-20261024", D2, listed=False)
+        self.drop("stable-20261017")
         del self.fx["tags"][f"{IMAGE}:stable-previous"]
         r = self.check()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -182,6 +189,43 @@ class StablePromotions(unittest.TestCase):
         for name in ("stable", "stable-previous", "stable-20261017"):
             del self.fx["tags"][f"{IMAGE}:{name}"]
         self.fails(f"athanor-system:stable-20261024: {D1} has no promotion record")
+
+    def test_a_deleted_newest_dated_tag_fails(self):
+        self.chain()
+        self.drop("stable-20261024")
+        self.fails("athanor-system:stable-20261024: missing")
+
+    def test_deleted_dated_tags_fail(self):
+        self.chain()
+        for day in ("20261017", "20261024"):
+            self.drop(f"stable-{day}")
+        self.fails("athanor-system:stable-20261024: missing")
+
+    def test_an_older_dated_tag_moved_fails(self):
+        self.chain()
+        self.tag("stable-20261017", D1, listed=False)
+        self.fails(f"athanor-system:stable-20261017: {D1}, but the last promotion of that day (run 6) set {D2}")
+
+    def test_a_dated_tag_before_the_first_record_fails(self):
+        self.chain()
+        self.tag("stable-20261001", D2)
+        self.fails(f"athanor-system:stable-20261001: {D2}, but no promotion record has that day")
+
+    def test_a_previous_stable_no_earlier_record_set_fails(self):
+        d3 = "sha256:" + "3" * 64
+        self.promotion(5, 6, D2, day="20261017")
+        self.promotion(10, 20, D1, previous=d3)
+        self.tag("stable-previous", d3, listed=False)
+        self.fails(f"recorded previous stable {d3}, which no earlier promotion record set")
+
+    def test_a_first_record_with_a_previous_stable_fails(self):
+        self.promotion(10, 20, D1, previous=D2, day="20261024")
+        self.fails(f"recorded previous stable {D2}, which no earlier promotion record set")
+
+    def test_a_leftover_stable_previous_names_the_deleted_stable_case(self):
+        self.promotion(5, 6, D2, day="20261024")
+        self.tag("stable", D2, listed=False)
+        self.fails(":stable was deleted before the promotion, or :stable-previous was moved")
 
     def test_a_rollback_to_an_older_recorded_digest_fails(self):
         self.chain()

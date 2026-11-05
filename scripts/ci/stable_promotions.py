@@ -3,13 +3,16 @@
 
 The GITHUB_TOKEN of any run with `packages: write` can push a GHCR tag, so `skopeo copy` can
 put an already signed digest on `:stable` and skip the evidence, the dwell and the `release`
-approval. This reads, for each system image repository, `:stable`, `:stable-previous` and the
-newest `:stable-<YYYYMMDD>`, and fails, naming the digest, unless the chain of the newest
-promotion record holds: `:stable` is its digest (an older recorded digest copied back is a
-rollback no promotion made), `:stable-previous` its `previous_stable`, and the newest dated
-tag the digest of the last record of that day. A dated tag that is no date, or lies in the
-future, fails (promote.sh never writes one). Once an image has a record, a missing tag fails;
-an image with no record and no `:stable` is skipped.
+approval. This reads, for each system image repository, `:stable`, `:stable-previous` and every
+`:stable-<YYYYMMDD>`, and fails, naming the digest, unless the chain of the promotion records
+holds. For the newest record of the image (by promotion run): `:stable` is its digest (an older
+recorded digest copied back is a rollback no promotion made); `:stable-previous` is its
+`previous_stable`, which must be the digest of an earlier record; `:stable-<its day>` exists.
+Every dated tag equals the last record of its day, and one whose day has no record fails, as
+does one that is no date or lies in the future (promote.sh never writes those). A first record
+has no `previous_stable`, and then `:stable-previous` must not exist: one that does means
+:stable was deleted before a promotion, or :stable-previous was moved. An image with no record
+fails on any of these tags and is skipped only when none exists.
 
 A promotion record is the `promotion.json` of an evidence bundle in the registry off GitHub
 (`$EVIDENCE_REGISTRY/athanor-evidence:<build run>-<promotion run>`, system/evidence-bundle.sh)
@@ -205,29 +208,40 @@ def check_image(name, repo, found):
         )
     previous = want.get("previous_stable")
     have = tag_digest(repo, "stable-previous")
+    earlier = [r["images"][name]["digest"] for r in mine[:-1]]
+    if previous and previous not in earlier:
+        # Taken on trust otherwise: a previous that no earlier approved record set is a legacy
+        # :stable that predates the records, or a plan that named an unrecorded digest.
+        bad.append(f"{name}: the newest promotion (run {newest['run']}) recorded previous stable {previous}, which no earlier promotion record set")
     if not previous:
         # The first promotion of an image has no :stable to keep, and promote.sh writes
         # :stable-previous only from one.
         if have:
-            bad.append(f"{name}:stable-previous: {have}, but the newest promotion (run {newest['run']}) recorded no previous stable{stopped}")
-    else:
-        if have != previous:
-            bad.append(f"{name}:stable-previous: {have or 'missing'}, but the newest promotion (run {newest['run']}) recorded {previous}{stopped}")
+            bad.append(
+                f"{name}:stable-previous: {have}, but the newest promotion (run {newest['run']}) recorded no previous stable: "
+                f":stable was deleted before the promotion, or :stable-previous was moved{stopped}"
+            )
+    elif have != previous:
+        bad.append(f"{name}:stable-previous: {have or 'missing'}, but the newest promotion (run {newest['run']}) recorded {previous}{stopped}")
+    days = {}  # the last record of each day
+    for r in mine:
+        days[r["day"]] = r
     dated = {t: valid_day(t) for t in tags(repo) if re.fullmatch(r"stable-\d{8}", t)}
-    for t, day in sorted(dated.items()):
+    newest_tag = f"stable-{newest['day']}"
+    if newest_tag not in dated:
+        bad.append(f"{name}:{newest_tag}: missing, but the newest promotion (run {newest['run']}) wrote it{stopped}")
+    for tag, day in sorted(dated.items()):
         if day is None:
-            bad.append(f"{name}:{t}: not a date, or a date in the future; promote.sh never writes one")
-    valid = {t: d for t, d in dated.items() if d}
-    if valid:
-        top = max(valid, key=valid.get)
-        last = [r for r in mine if r["day"] == top.removeprefix("stable-")]
-        have = tag_digest(repo, top)
-        if not last:
-            bad.append(f"{name}:{top}: {have}, but no promotion record has that day{stopped}")
-        elif have != last[-1]["images"][name]["digest"]:
-            bad.append(f"{name}:{top}: {have}, but the last promotion of that day (run {last[-1]['run']}) set {last[-1]['images'][name]['digest']}{stopped}")
+            bad.append(f"{name}:{tag}: not a date, or a date in the future; promote.sh never writes one")
+            continue
+        have = tag_digest(repo, tag)
+        last = days.get(tag.removeprefix("stable-"))
+        if last is None:
+            bad.append(f"{name}:{tag}: {have}, but no promotion record has that day{stopped}")
+        elif have != last["images"][name]["digest"]:
+            bad.append(f"{name}:{tag}: {have}, but the last promotion of that day (run {last['run']}) set {last['images'][name]['digest']}{stopped}")
     if not bad:
-        print(f"{name}: :stable, :stable-previous and {max(valid, key=valid.get) if valid else 'no dated tag'} follow promotion run {newest['run']}")
+        print(f"{name}: :stable, :stable-previous and every dated tag follow the promotion records, newest run {newest['run']}")
     return bad
 
 
