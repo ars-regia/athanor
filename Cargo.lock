@@ -616,6 +616,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wgpu",
+ "yeslogic-fontconfig-sys",
 ]
 
 [[package]]
