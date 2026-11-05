@@ -9,6 +9,7 @@
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
+#   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -128,10 +129,11 @@ build_image() {
     fi
 }
 
-# The base of the fixtures' layer: the published rig when there is one (see the Containerfile).
-rig_base=()
+# The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
+# and the registry of the forge's tier 2 repository, where the rig's cosmic-comp comes from.
+rig_base=(--build-arg "FORGE_REGISTRY=$registry")
 if [ -s "$rig/rig-image.digest" ]; then
-    rig_base=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
+    rig_base+=(--build-arg "RIG_BASE=$registry/athanor-shell-rig@$(cat "$rig/rig-image.digest")")
 fi
 
 # label=disable: under SELinux's container_t bubblewrap cannot mount devpts, glycin's
@@ -488,6 +490,11 @@ capture_launcher() {
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         seed_bar "$out/seed-$tag" float top visible "$variant"
+        # cosmic-comp 1.11 focuses the launcher at map, so its search field's caret blinks and a
+        # capture shows it at whatever opacity the blink had reached (#955). A blink that stops
+        # after a second leaves the caret fully drawn by the capture. The greeter's cursor-blink
+        # false left it here at a partial opacity GTK keeps once the blink is turned off.
+        echo "org.gnome.desktop.interface cursor-blink-timeout 1" >> "$out/seed-$tag.gsettings"
         override=()
         if [ "$catalog" != - ]; then
             override+=(ATHANOR_I18N_CATALOG="/out/locale/launcher/$catalog")
@@ -603,6 +610,21 @@ publish-build-image)
     echo "published $(cat "$out/build-image.ref")"
     echo "commit that reference as forge/test/shell/build-image.digest together with the Containerfile change it builds"
     echo "the pin trusts this run: the digest is unsigned, and rig.sh checks only the inputs label against the checkout"
+    ;;
+cosmic-comp-version)
+    # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
+    # carries the session's build (#965). Publishing the rig again does not move it: the
+    # Containerfile pins the tier 2 repository it installs from by TIER2_DIGEST.
+    # The spec's Release is a macro and rpmbuild is not on the host: spec_nevr.awk expands it and
+    # prints nothing for anything it cannot expand, which fails the check.
+    want=$(awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
+    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
+    if [ -n "$want" ] && [ "$have" = "$want" ]; then
+        echo "the rig runs cosmic-comp $have, the build forge/specs/cosmic-comp ships"
+    else
+        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); if TIER2_DIGEST in forge/test/shell/Containerfile already holds that build, republish the rig (rig.sh publish-image) and commit rig-image.digest; otherwise move TIER2_DIGEST to a tier 2 repository that holds it first" >&2
+        exit 1
+    fi
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true

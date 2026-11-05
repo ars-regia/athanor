@@ -5,6 +5,12 @@
 # RIG_BASE: the image the fixtures' layer goes on. rig.sh passes the published rig, pinned by
 # digest, so the pixels of every golden stay; with no published rig it is the base below.
 ARG RIG_BASE=rig-fresh
+# FORGE_REGISTRY and TIER2_DIGEST: the forge's tier 2 repository, by digest, which carries the
+# cosmic-comp the session ships (see the rig stage). rig.sh passes the registry.
+ARG FORGE_REGISTRY
+ARG TIER2_DIGEST=sha256:088b236a97c4122e9e1096a2a9423d176ba93fea93b653a59c92eb13382f7b6a
+FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo@${TIER2_DIGEST} AS tier2-repo
+
 FROM registry.fedoraproject.org/fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809 AS rig-fresh
 
 RUN dnf5 -y install --setopt=install_weak_deps=False \
@@ -47,7 +53,7 @@ RUN dnf5 -y install --setopt=install_weak_deps=False \
 RUN dnf5 -y install --setopt=install_weak_deps=False dconf gsettings-desktop-schemas \
       adwaita-sans-fonts adwaita-mono-fonts \
   && dnf5 clean all
-# athanor-compositor's headless soak (doc_own_stack.md, C1 task 2) draws eglgears_wayland on
+# athanor-sulphur's headless soak (doc_own_stack.md, C1 task 2) draws eglgears_wayland on
 # llvmpipe beside a GTK4 client.
 RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
   && dnf5 clean all
@@ -56,11 +62,17 @@ RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
 # device. The base image installs English messages only (%_install_langs); the Italian
 # transcript says roles and states in Orca's and AT-SPI's Italian, so this step keeps both.
 # AT-SPI's come with an update of at-spi2-core: the base's release is no longer in the
-# repositories to install again.
+# repositories to install again. wl-clipboard is for rig.sh toolkit-clipboard (wl-copy, wl-paste).
 RUN echo '%_install_langs en_US:it' > /etc/rpm/macros.zz-orca-langs \
-  && dnf5 -y install --setopt=install_weak_deps=False orca wtype \
+  && dnf5 -y install --setopt=install_weak_deps=False orca wtype wl-clipboard \
   && dnf5 -y upgrade --setopt=install_weak_deps=False at-spi2-core \
   && rm /etc/rpm/macros.zz-orca-langs \
+  && dnf5 clean all
+# The cosmic-comp the session ships, Athanor's build of forge/specs/cosmic-comp in place of
+# Fedora's, from the tier 2 repository as system/Containerfile installs it (#965). The last step
+# of the stage, so no later transaction replaces it; `rig.sh cosmic-comp-version` checks it.
+RUN --mount=type=bind,from=tier2-repo,source=/,target=/tmp/tier2-repo \
+    dnf5 -y install --setopt=install_weak_deps=False /tmp/tier2-repo/athanor-forge-cosmic-comp/cosmic-comp-*.x86_64.rpm \
   && dnf5 clean all
 
 # The build stage compiles our GTK crates against the same GTK the rig runs. rig.sh runs the
@@ -71,7 +83,7 @@ FROM rig AS build
 # writes the GNOME interface and accessibility schemas (gsettings-desktop-schemas).
 # athanor-greeter-ui reads lastlog2 through the system libsqlite3 (sqlite-devel).
 # athanor-toolkit's keyboard (smithay-client-toolkit) links libxkbcommon (libxkbcommon-devel).
-# athanor-compositor's headless backend links libgbm (mesa-libgbm-devel) and Pixman (pixman-devel);
+# athanor-sulphur's headless backend links libgbm (mesa-libgbm-devel) and Pixman (pixman-devel);
 # its DRM backend links libseat (libseat-devel) and libinput (libinput-devel).
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       rust cargo clippy gcc gcc-c++ clang-devel pkgconf-pkg-config \

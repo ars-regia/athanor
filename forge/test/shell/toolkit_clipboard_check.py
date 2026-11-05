@@ -57,6 +57,13 @@ def wait_shown(expected):
 
 
 def keys(*args):
+    # cosmic-comp 1.11 applies a virtual keyboard's modifiers to the seat's keymap at once, but
+    # makes the device's keymap active only at its first key, which resets them
+    # (src/wayland/handlers/virtual_keyboard.rs:91-110 against src/input/mod.rs:287): wtype's -M
+    # is lost unless a key comes first. Shift_L does nothing in the field. Drop this once the
+    # job no longer runs on cosmic-comp.
+    if "-M" in args:
+        args = ("-k", "Shift_L", *args)
     subprocess.run(["wtype", *args], check=True, timeout=TIMEOUT)
     time.sleep(SETTLE_S)
 
