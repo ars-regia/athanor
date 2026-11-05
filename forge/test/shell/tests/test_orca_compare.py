@@ -137,6 +137,23 @@ class CompareTest(unittest.TestCase):
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
             )
 
+    def test_the_gallery_strings_are_read_only_for_a_switch_or_a_text_area(self):
+        # Another surface's walk passes without the file; a gallery's fails with its name.
+        compare.gallery_labels.cache_clear()
+        moved = compare.STRINGS
+        compare.STRINGS = moved.with_name("moved.tsv")
+        try:
+            self.assertEqual(compare.compare(REFERENCE, REFERENCE)[1], [])
+            with self.assertRaises(FileNotFoundError):
+                compare.compare(["A switch check box checked."], ["A switch toggle button pressed."])
+        finally:
+            compare.STRINGS = moved
+            compare.gallery_labels.cache_clear()
+
+    def test_a_missing_key_of_the_gallery_strings_is_named(self):
+        with self.assertRaisesRegex(LookupError, "no key nowhere"):
+            compare.gallery_labels("switch", "nowhere")
+
     def test_a_label_that_ends_in_text_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Sample text"], ["Sample text"])[1], [])
         self.assertEqual(compare.compare(["Sample text"], ["Sample entry"])[1], ["'Sample text': missing"])
