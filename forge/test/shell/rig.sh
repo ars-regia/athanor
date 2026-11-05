@@ -490,6 +490,11 @@ capture_launcher() {
     while IFS=$'\t' read -r tag variant scale locale catalog; do
         tags+=("$tag")
         seed_bar "$out/seed-$tag" float top visible "$variant"
+        # cosmic-comp 1.11 focuses the launcher at map, so its search field's caret blinks and a
+        # capture shows it at whatever opacity the blink had reached (#955). A blink that stops
+        # after a second leaves the caret fully drawn by the capture. The greeter's cursor-blink
+        # false left it here at a partial opacity GTK keeps once the blink is turned off.
+        echo "org.gnome.desktop.interface cursor-blink-timeout 1" >> "$out/seed-$tag.gsettings"
         override=()
         if [ "$catalog" != - ]; then
             override+=(ATHANOR_I18N_CATALOG="/out/locale/launcher/$catalog")
