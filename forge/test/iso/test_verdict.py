@@ -1072,6 +1072,25 @@ def test_upgrade_requires_secure_boot(tmp: pathlib.Path) -> None:
     assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
 
 
+def test_iso_repository_is_checked_before_the_boot(tmp: pathlib.Path) -> None:
+    """run_iso_test.sh refuses a missing or malformed ISO_REPOSITORY before it writes anything,
+    by the rule console.py applies (issue 462)."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    for bad in (None, "", "athanor-system", "ghcr.io/Acme/athanor-system", "ghcr.io/a b/x", "ghcr.io/*/x"):
+        env = {k: v for k, v in os.environ.items() if k != "ISO_REPOSITORY"}
+        if bad is not None:
+            env["ISO_REPOSITORY"] = bad
+        proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                              capture_output=True, text=True, env=env)
+        assert proc.returncode == 2 and "ISO_REPOSITORY" in proc.stderr, (bad, proc)
+        assert not (tmp / "never").exists()
+        assert bad is None or not console.REPOSITORY.fullmatch(bad), bad
+
+
 def test_upgrade_clears_the_last_runs_files(tmp: pathlib.Path) -> None:
     """A second upgrade case in the same OUTPUT_DIR starts from none of the files the stages
     leave: a stale `ready` would start the stages on the installer, a stale status would judge
@@ -1284,6 +1303,7 @@ def main() -> int:
             test_origin_missing_or_wrong_fails,
             test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
+            test_iso_repository_is_checked_before_the_boot,
             test_greetd_starting_is_not_a_greeter,
             test_installed_but_no_greeter,
             test_text_login_is_not_a_greeter,
