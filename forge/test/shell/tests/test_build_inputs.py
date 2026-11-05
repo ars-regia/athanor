@@ -83,9 +83,36 @@ class BuildInputs(unittest.TestCase):
 
     def test_rig_sh_never_overrides_the_tier2_digest(self):
         # a --build-arg would change the stage without changing the hash of its inputs
-        args = re.findall(r"--build-arg\s+\S+", (SHELL / "rig.sh").read_text(encoding="utf-8"))
+        args = re.findall(r"--build-arg(?:\s+|=)\S+", (SHELL / "rig.sh").read_text(encoding="utf-8"))
         self.assertTrue(args)
         self.assertFalse([a for a in args if "TIER2_DIGEST" in a], args)
+
+
+class SpecNevr(unittest.TestCase):
+    def nevr(self, text):
+        with tempfile.TemporaryDirectory() as d:
+            spec = Path(d) / "x.spec"
+            spec.write_text(text, encoding="utf-8")
+            return subprocess.run(
+                ["awk", "-f", str(SHELL / "spec_nevr.awk"), str(spec)],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+    def test_the_real_spec(self):
+        spec = SHELL.parent.parent / "specs" / "cosmic-comp" / "cosmic-comp.spec"
+        self.assertRegex(self.nevr(spec.read_text(encoding="utf-8")), r"^\d+\.\d+\.\d+-\S+\.athanor\d+$")
+
+    def test_nested_macros_expand(self):
+        self.assertEqual(self.nevr("%global a 2\n%global b %{a}.fc43\nVersion: 1\nRelease: %{b}.x\n"), "1-2.fc43.x")
+
+    def test_an_undefined_macro_fails_closed(self):
+        self.assertEqual(self.nevr("Version: 1\nRelease: %{nope}.x\n"), "")
+
+    def test_a_self_reference_fails_closed(self):
+        self.assertEqual(self.nevr("%global a %{a}\nVersion: 1\nRelease: %{a}\n"), "")
+
+    def test_a_conditional_fails_closed(self):
+        self.assertEqual(self.nevr("Version: 1\nRelease: %{?dist}\n"), "")
 
 
 if __name__ == "__main__":

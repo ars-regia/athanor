@@ -606,21 +606,14 @@ cosmic-comp-version)
     # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
     # carries the session's build (#965). Publishing the rig again does not move it: the
     # Containerfile pins the tier 2 repository it installs from by TIER2_DIGEST.
-    # The spec's Release is a macro (%global fedora_release ...) and rpmbuild is not on the host, so
-    # the awk below expands the one-level %{name} references of its %global lines; a spec that
-    # nests them or uses a conditional makes the expansion differ and the check fail, which is
-    # the safe side.
-    spec="$root/forge/specs/cosmic-comp/cosmic-comp.spec"
-    want=$(awk '
-        $1 == "%global" { m[$2] = substr($0, index($0, $3)) }
-        $1 == "Version:" { v = $2 }
-        $1 == "Release:" { r = $2; while (match(r, /%\{[A-Za-z_]+\}/)) r = substr(r, 1, RSTART - 1) m[substr(r, RSTART + 2, RLENGTH - 3)] substr(r, RSTART + RLENGTH) }
-        END { if (v != "" && r != "" && r !~ /%/) print v "-" r }' "$spec")
+    # The spec's Release is a macro and rpmbuild is not on the host: spec_nevr.awk expands it and
+    # prints nothing for anything it cannot expand, which fails the check.
+    want=$(awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
     have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
     if [ -n "$want" ] && [ "$have" = "$want" ]; then
         echo "the rig runs cosmic-comp $have, the build forge/specs/cosmic-comp ships"
     else
-        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); move TIER2_DIGEST in forge/test/shell/Containerfile to a tier 2 repository that holds that build, then publish the rig again (rig.sh publish-image) and commit rig-image.digest" >&2
+        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); if TIER2_DIGEST in forge/test/shell/Containerfile already holds that build, republish the rig (rig.sh publish-image) and commit rig-image.digest; otherwise move TIER2_DIGEST to a tier 2 repository that holds it first" >&2
         exit 1
     fi
     ;;
