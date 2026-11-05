@@ -1163,7 +1163,14 @@ atspi)
         # To record them again, copy <out>/atspi-gallery-<page>[-it].json of a GTK run into golden/atspi/.
         bin=${ATHANOR_GALLERY_BIN:-/out/bin/athanor-sal-gallery}
         if [ -z "${ATHANOR_GALLERY_BIN:-}" ]; then require athanor-sal-gallery build-toolkit; fi
-        mapfile -t pages < <(python3 -B "$rig/cases.py" gallery-pages | cut -f1)
+        # An assignment, so that set -e stops on a failure of cases.py; no page would compare the
+        # transcripts of an earlier run.
+        listing=$(python3 -B "$rig/cases.py" gallery-pages)
+        if [ -z "$listing" ]; then
+            echo "rig.sh atspi gallery: cases.py gallery-pages lists no page" >&2
+            exit 1
+        fi
+        mapfile -t pages < <(cut -f1 <<<"$listing")
         for page in "${pages[@]}"; do
             transcript=atspi-gallery-$page${3:+-$3}.json
             rm -f "$out/$transcript"
