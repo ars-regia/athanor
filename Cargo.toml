@@ -39,6 +39,9 @@ exclude = [
   "fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
+  # A published crate carried with a patch, not code of ours: no workspace lint, format or test
+  # runs over it (system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md).
+  "system/athanor-sal/vendor/accesskit_atspi_common",
 ]
 
 resolver = "2"
@@ -121,3 +124,9 @@ panic = "abort"
 strip = true
 rpath = false
 overflow-checks = true
+
+# AccessKit's AT-SPI bridge with the expandable, expanded, collapsed and has-popup states (#638),
+# until an AccessKit release maps them; the gallery's manifest carries the same entry.
+# system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md says what it changes and when it goes.
+[patch.crates-io]
+accesskit_atspi_common = { path = "system/athanor-sal/vendor/accesskit_atspi_common" }

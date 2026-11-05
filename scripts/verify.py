@@ -39,6 +39,12 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent.parent
 RS_DIRS = ["system", "forge/specs"]
+# Published crates the repository carries with a patch of its own, by directory: somebody else's
+# code, whose manifest declares upstream's licence exactly and whose panics the budget does not
+# count. Each directory's PATCHES.md says what it changes and when it goes.
+VENDORED_CRATES = {
+    "system/athanor-sal/vendor/accesskit_atspi_common": "MIT OR Apache-2.0",
+}
 
 # --------------------------------------------------------------------------- #
 # infrastruttura minima
@@ -94,6 +100,11 @@ def walk(base, suffix):
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
+
+
+def vendored(path):
+    """Whether `path`, relative to the repository, lies in a crate of VENDORED_CRATES."""
+    return any(path.startswith(d + "/") for d in VENDORED_CRATES)
 
 
 def rust_files():
@@ -1054,6 +1065,10 @@ TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
 # The gallery is a client of the toolkit outside the workspace: its one dependency.
 GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
 GALLERY_DEPENDENCY = {"athanor-sal": {"path": ".."}}
+# The one patch the gallery may carry: the toolkit's own patch of AccessKit's AT-SPI bridge, the
+# same as the repository root's, which a workspace root of its own does not inherit (#638;
+# system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md). It goes when the patch does.
+GALLERY_PATCH = {"crates-io": {"accesskit_atspi_common": {"path": "../vendor/accesskit_atspi_common"}}}
 
 
 def dependency_tables(data, kinds):
@@ -1068,7 +1083,7 @@ def dependency_tables(data, kinds):
 
 def gallery_problems(root):
     """The gallery depends on the toolkit by its path and on nothing else, as an application
-    outside Athanor would (ADR-0126)."""
+    outside Athanor would (ADR-0126), and patches nothing but the toolkit's AccessKit patch."""
     if not (root / GALLERY_MANIFEST).is_file():
         return []
     try:
@@ -1077,7 +1092,7 @@ def gallery_problems(root):
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
     tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
     out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
-           for kind in ("patch", "replace") if kind in data]
+           for kind in ("patch", "replace") if kind in data and data[kind] != GALLERY_PATCH]
     out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
             for key in data.get("workspace", {})]
     for table, deps in tables:
@@ -2094,7 +2109,7 @@ def check_panics():
     files = list(rust_files())
     test_modules = test_module_files(files)
     for p in files:
-        if is_test_file(p) or p in test_modules:
+        if is_test_file(p) or p in test_modules or vendored(rel(p)):
             continue
         txt = without_literals(without_test_items(read(p)))
         for i, code in enumerate(txt.split("\n"), 1):
@@ -3694,7 +3709,7 @@ def licence_problems(root=None):
             if pkg is None:
                 continue
             lic = pkg.get("license")
-            want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
+            want = VENDORED_CRATES.get(f.rsplit("/", 1)[0]) or OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
                 out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):

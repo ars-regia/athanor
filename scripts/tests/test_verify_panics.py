@@ -165,5 +165,13 @@ MACROS = (
 )
 
 
+class VendoredTest(unittest.TestCase):
+    def test_only_files_inside_a_vendored_crate_are_vendored(self):
+        crate = sorted(verify.VENDORED_CRATES)[0]
+        self.assertTrue(verify.vendored(crate + "/src/node.rs"))
+        self.assertFalse(verify.vendored(crate + "-other/src/node.rs"))
+        self.assertFalse(verify.vendored("system/athanor-sal/src/a11y.rs"))
+
+
 if __name__ == "__main__":
     unittest.main()

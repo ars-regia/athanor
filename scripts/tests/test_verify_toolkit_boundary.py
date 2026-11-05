@@ -103,6 +103,16 @@ class ToolkitBoundary(unittest.TestCase):
                       '[replace]\n"serde:1.0.0" = { path = "x" }\n'):
             self.assertTrue(self.gallery(base + extra), extra)
 
+    def test_the_gallery_may_carry_the_toolkits_accesskit_patch_and_no_other(self):
+        base = '[dependencies]\nathanor-sal = { path = ".." }\n[patch.crates-io]\n'
+        ours = 'accesskit_atspi_common = { path = "../vendor/accesskit_atspi_common" }\n'
+        self.assertEqual(self.gallery(base + ours), [])
+        self.assertTrue(self.gallery(base + ours + 'serde = { path = "x" }\n'))
+        self.assertTrue(self.gallery(base + 'accesskit_atspi_common = { path = "x" }\n'))
+        self.assertTrue(self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'
+                                     '[replace]\n"accesskit_atspi_common:0.21.0" = '
+                                     '{ path = "../vendor/accesskit_atspi_common" }\n'))
+
     def test_a_gallery_that_points_the_toolkit_elsewhere_fails(self):
         self.assertTrue(self.gallery('[dependencies]\nathanor-sal = { path = "../other" }\n'))
 

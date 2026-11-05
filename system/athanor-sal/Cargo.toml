@@ -31,3 +31,5 @@ gpu = ["dep:vello_gpu", "dep:wgpu", "dep:wayland-backend"]
 [dev-dependencies]
 # The chooser example reads the GTK chooser's catalogue, as the GTK chooser does.
 athanor-i18n = { path = "../athanor-i18n" }
+# The AT-SPI bridge accesskit_unix runs, read in-process: a node's states as Orca gets them.
+accesskit_atspi_common = "0.21"
