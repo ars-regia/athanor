@@ -1,8 +1,11 @@
 """Runtime audit probes of the VM acceptance (issue #312).
 
     probes.py collect                           on the guest, as the login user: print the facts as JSON
-    probes.py check FACTS EXPECT CONTACTS PORT  on the host: compare them with the committed expectations;
-                                                PORT is the registry tunnel's ($ACC_PORT of lib.sh)
+    probes.py check FACTS EXPECT CONTACTS PORT IMAGE DIGEST
+                                                on the host: compare them with the committed expectations;
+                                                PORT is the registry tunnel's ($ACC_PORT of lib.sh), IMAGE
+                                                the reference the guest follows and DIGEST the signed
+                                                digest the registry serves for it
 
 `collect` only observes (plus one Nix build and one `nix store gc`, as the login user). `check`
 is pure, so every comparison is unit-tested (scripts/tests/test_runtime_probes.py). A change of
@@ -248,6 +251,8 @@ def collect():
         doc = json.loads(state or "{}")
         # Schema 2 (UT7, UT13): the opt-out and the postpone lineage are published, null or not.
         facts["trust"] = doc.get("verified", {}) | {
+            "booted_digest": doc.get("booted", {}).get("digest"),
+            "policy_shipped": doc.get("policy", {}).get("shipped"),
             "schema": doc.get("schema"),
             "automatic_security_updates": doc.get("automatic_security_updates"),
             "postpone_published": "postpone" in doc
@@ -257,6 +262,18 @@ def collect():
         facts["trust"] = {}
         facts["rc"]["trust"]["err"] = "state.json is not JSON"
         facts["rc"]["trust"]["rc"] = 65
+    # What bootc booted, apart from what athanor-update says of it (#508, item 3).
+    status = probe("trust:bootc", ["bootc", "status", "--format", "json"], sudo=True)
+    try:
+        booted = (json.loads(status or "{}").get("status") or {}).get("booted") or {}
+        image = booted.get("image") or {}
+        facts["trust"] |= {
+            "bootc_digest": image.get("imageDigest"),
+            "bootc_image": (image.get("image") or {}).get("image"),
+            "bootc_signature": (image.get("image") or {}).get("signature"),
+        }
+    except json.JSONDecodeError:
+        facts["rc"]["trust:bootc"] = {"rc": 65, "err": "bootc status is not JSON"}
     nix = ["nix", "--extra-experimental-features", "nix-command"]
     probe(
         "nix:build",
@@ -282,8 +299,10 @@ def declares(entry, socket, tunnel_port):
     )
 
 
-def evaluate(facts, expect, contacts, tunnel_port):
-    """Every violated expectation as (check, detail); empty when the guest conforms."""
+def evaluate(facts, expect, contacts, tunnel_port, signed):
+    """Every violated expectation as (check, detail); empty when the guest conforms. `signed` is
+    (reference, digest): the reference the guest must follow and the signed digest the registry
+    serves for it."""
     bad = []
 
     def fail(check, detail):
@@ -400,6 +419,34 @@ def evaluate(facts, expect, contacts, tunnel_port):
             fail("trust", f"{key} is {facts['trust'].get(key)!r}, expected {want!r}")
     if not facts["trust"].get("postpone_published"):
         fail("trust", "postpone is absent or neither null nor an object (schema 2)")
+    # The booted image is the signed one, bootc pulled it under the container policy, and that
+    # policy is the image's own, so its keys are the shipped ones.
+    t, (reference, digest) = facts["trust"], signed
+    if t.get("value") is not (reason == "signature"):
+        fail("trust", f"verified.value is {t.get('value')!r} beside reason {reason}")
+    if t.get("bootc_image") != reference:
+        fail("trust", f"the guest follows {t.get('bootc_image')}, expected {reference}")
+    if t.get("bootc_digest") != digest:
+        fail(
+            "trust",
+            f"bootc booted {t.get('bootc_digest')}, the registry signs {digest} for {reference}",
+        )
+    if t.get("booted_digest") != t.get("bootc_digest"):
+        fail(
+            "trust",
+            f"state.json names {t.get('booted_digest')} booted, bootc {t.get('bootc_digest')}",
+        )
+    want = expect.get("trust", {}).get("signature")
+    if t.get("bootc_signature") != want:
+        fail(
+            "trust",
+            f"bootc pulled the booted image with signature {t.get('bootc_signature')!r}, expected {want!r}",
+        )
+    if t.get("policy_shipped") is not True:
+        fail(
+            "trust",
+            f"policy.shipped is {t.get('policy_shipped')!r}: the policy in force is not the image's",
+        )
 
     if not facts["backup"]:
         fail("backup", "athanor-backup list shows no snapshot after the hourly unit ran")
@@ -415,10 +462,12 @@ def main(argv):
     if argv[:1] == ["collect"]:
         print(json.dumps(collect()))
         return 0
-    if len(argv) == 5 and argv[0] == "check" and argv[4].isdigit():
+    if len(argv) == 7 and argv[0] == "check" and argv[4].isdigit():
         with open(argv[1]) as f:
             facts = json.load(f)
-        bad = evaluate(facts, load(argv[2]), load(argv[3]), int(argv[4]))
+        bad = evaluate(
+            facts, load(argv[2]), load(argv[3]), int(argv[4]), (argv[5], argv[6])
+        )
         for check, detail in bad:
             print(f"FAIL  probe {check}: {detail}")
         for check in sorted(
