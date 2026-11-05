@@ -107,23 +107,30 @@ Decided by the maintainer on 2026-11-05.
      - every way of opening the overview hidden or unbound, and the Launcher buttons opening
        `athanor-launcher` under Sulphur.
 
-     A gap of SN16 that the maintainer accepted by number in the pull request that made Sulphur
-     the default, as SN16 provides, stays accepted for 1.0 and closes with the full acceptance in
-     1.1. This record adds no criterion of its own.
+     This record adds no criterion of its own.
    - cosmic-comp keeps patches 1 and 2 for as long as its session ships
      ([ADR-0115](0115-zero-nine-in-one-week.md), ADR-0103 D14).
 
-### Proposals that the approval of this record decides
+The maintainer decided items 4 to 6 on 2026-11-05, on the draft of this record.
 
-The maintainer did not decide these; they are the agent's placements, and approving this
-record approves them.
+4. **The gaps of SN16 accepted at the switch stay accepted for 1.0.** A gap of
+   `doc_session.md` SN16 that the maintainer accepted by number in the pull request that made
+   Sulphur the default, as SN16 provides, stays accepted for 1.0 and closes with the full
+   acceptance in 1.1.
+5. **The work moved by decision 3 waits in milestone "After 1.0"**, the repository having no
+   1.1 milestone. Of the open issues of milestone 1.0, only #835 (the workspaces module and
+   button with `athanor-overview`) and #877 (Super+Alt+S reaching Orca under Sulphur, gap 3) move
+   there. The golden differences of OS19 item 1 that decision 28 lets record and fix after the
+   switch (#736, #740, #744, #918) stay in 1.0.
+6. **The approved specifications follow in the pull request of this record**, whose approval
+   approves their text: `doc_own_stack.md` becomes revision 3, and the notes of `doc_shell.md`
+   SH2 and `doc_compositor.md` CO4 are amended.
 
-- **The work moved by decision 3 waits in milestone "After 1.0"**, the repository having no
-  1.1 milestone; creating one is a maintainer step. Of the open issues of milestone 1.0 on
-  2026-11-05, #835 (the workspaces module and button with `athanor-overview`) and #877
-  (Super+Alt+S reaching Orca under Sulphur, gap 3) belong to the moved work. The triage of
-  decision 2 decides the golden differences of OS19 item 1 that decision 28 lets record and fix
-  after the switch (#736, #740, #744, #918).
+### Proposal that the approval of this record decides
+
+The maintainer did not decide this; it is the agent's placement, and approving this record
+approves it.
+
 - **An issue placed in a release before or at 1.0 after 2026-11-05 names, in its body, which of
   (a), (b) or (c) of decision 2 holds**, so that a triage can check the placement.
 
@@ -163,15 +170,20 @@ record approves them.
 - While cosmic-comp's session ships, the patch register of `doc_compositor.md` CO3 applies to it
   unchanged, and `doc_shell.md` SH2 and `doc_compositor.md` CO4 hold, as ADR-0121 and
   [ADR-0122](0122-own-compositor-optional-session-and-desktop-first.md) say.
-- Approved text that says release 1.0 waits for OS19 in full, for the overview or for the window
-  switcher, or retires cosmic-workspaces in 1.0, keeps its words until its next revision:
-  `doc_own_stack.md` (OS5's list, the lead-in of OS19, section 6 step 4, decision 28 and the
-  risks of section 8), and the notes of `doc_shell.md` SH2 and `doc_compositor.md` CO4. This
-  record is the reference until those revisions are approved.
+- `doc_own_stack.md` becomes revision 3 (decision 6): its status line and list of changes, OS5's
+  list, the lead-in of OS19, section 6 step 4, decision 28 (its opening and its paragraph on the
+  overview) and the risks of section 8 say that the own compositor replaces cosmic-comp in 1.1
+  and that 1.0 ships it as the default session. The notes of `doc_shell.md` SH2 and
+  `doc_compositor.md` CO4, which ADR-0121 placed, say the same, and their status lines record the
+  amendment. Every other sentence of those documents keeps its words.
+- After this record merges, #835 and #877 move from milestone 1.0 to "After 1.0"; #736, #740,
+  #744 and #918 stay in 1.0 (decision 5). Moving them is a maintainer step.
 - Amended: ADR-0112 item 2 (the limit); ADR-0121 decision 5 (the acceptance 1.0 waits for) and
   its point on cosmic-workspaces; ADR-0122's consequence that release 1.0 takes cosmic-comp's
   session off the greeter; ADR-0123 item 5 (the trusted path and the keyboard monitor in 1.0);
   ADR-0132 decision 5 and its consequences (1.0 waits for the full acceptance, the overview and
   the window switcher, and retires cosmic-workspaces). ADR-0103 D13 reads as written again for
   cosmic-workspaces. Their texts keep their words; their status lines and the index name this
-  record.
+  record. Amended documents: `AGENTS.md`, `docs/operations/release-1.0.md` (revision 8),
+  `doc_own_stack.md` (revision 3), `doc_shell.md` (SH2's note) and `doc_compositor.md` (CO4's
+  note).
