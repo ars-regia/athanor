@@ -327,10 +327,10 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 
 ### CI29 Maintenance
 
-- **File:** `maintenance.yml`. **Purpose:** the scheduled maintenance of doc_pipeline.md section 3.1; today only the daily settings drift check (PL52): `ghsettings.py diff` compares `.github/settings/*.json` with the live repository and fails on a drift (`docs/operations/github-settings.md` section 9).
-- **Triggers:** cron `23 5 * * *`; dispatch. **Outputs:** one line per drift in the log.
-- **Secrets, variables:** `SETTINGS_APP_PRIVATE_KEY`, `SETTINGS_APP_CLIENT_ID`: a token of the settings GitHub App for this repository. It is not narrowed: it inherits the App's read-only permissions, because the token action cannot request the Variables permission by name (#330); the merge settings are read through GraphQL (`docs/operations/github-settings.md` section 9). **Environment:** none. **Runner:** hosted. **Concurrency:** none.
-- **Scripts:** `scripts/github-settings/ghsettings.py`.
+- **File:** `maintenance.yml`. **Purpose:** the scheduled maintenance of doc_pipeline.md section 3.1; today the daily settings drift check (PL52): `ghsettings.py diff` compares `.github/settings/*.json` with the live repository and fails on a drift (`docs/operations/github-settings.md` section 9); and the check that `:stable` was promoted (#405, PL54): `stable_promotions.py` reads `:stable`, `:stable-previous` and the newest `:stable-<day>` of each system image and fails, naming the digest, when it is in no promotion record, that is the `promotion.json` of a signed bundle in `athanor-evidence` whose promote job succeeded in the environment `release`.
+- **Triggers:** cron `23 5 * * *`; dispatch. **Outputs:** one line per drift in the log; one line per tag checked, and per digest without a record, in the `stable-promotions` job.
+- **Secrets, variables:** `SETTINGS_APP_PRIVATE_KEY`, `SETTINGS_APP_CLIENT_ID`: a token of the settings GitHub App for this repository. It is not narrowed: it inherits the App's read-only permissions, because the token action cannot request the Variables permission by name (#330); the merge settings are read through GraphQL (`docs/operations/github-settings.md` section 9). `stable-promotions` holds no secret: `GITHUB_TOKEN` with `contents`, `actions` and `deployments` read, and the variables `REGISTRY_HOST` and `EVIDENCE_REGISTRY`. **Environment:** none. **Runner:** hosted. **Concurrency:** none.
+- **Scripts:** `scripts/github-settings/ghsettings.py`, `scripts/ci/stable_promotions.py`.
 - **Health:** `gh run list --workflow maintenance.yml --branch iso-v0 --limit 5`.
 
 ### CI30 Publish the shell rig build image
