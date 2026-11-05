@@ -47,6 +47,38 @@ class PinningTest(unittest.TestCase):
         found = self.problems({"scripts/x.sh": "nix run nixpkgs#jq --inputs-from . -- .\n"})
         self.assertEqual(len(found), 1)
 
+    def test_inputs_from_pins_only_its_own_nix_command(self):
+        for line in (
+            "nix shell --inputs-from . nixpkgs#a -c nix run nixpkgs#b\n",
+            "nix shell --inputs-from . nixpkgs#a --command nix run nixpkgs#b\n",
+            "nix run --inputs-from . nixpkgs#a; nix run nixpkgs#b\n",
+            "nix run --inputs-from . nixpkgs#a && nix run nixpkgs#b\n",
+            "nix run --inputs-from . nixpkgs#a | nix run nixpkgs#b\n",
+        ):
+            with self.subTest(line=line):
+                found = self.problems({"scripts/x.sh": line})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("nixpkgs#b", found[0])
+
+    def test_two_tools_of_one_pinned_command_pass(self):
+        found = self.problems({"scripts/x.sh": "nix shell --inputs-from . nixpkgs#a nixpkgs#b -c true\n"})
+        self.assertEqual(found, [])
+
+    def test_remote_and_alias_references_are_reported_even_with_inputs_from(self):
+        for ref in ("github:NixOS/nixpkgs#cosign", "github:nixos/nixpkgs/nixos-unstable#cosign",
+                    "git+https://github.com/NixOS/nixpkgs#cosign", "nixpkgs-unstable#cosign"):
+            with self.subTest(ref=ref):
+                found = self.problems({"scripts/x.sh": f"nix run --inputs-from . {ref} -- version\n"})
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(ref, found[0])
+
+    def test_inputs_from_on_a_continued_line_pins_the_reference(self):
+        found = self.problems(
+            {"scripts/x.sh": "nix shell --inputs-from . \\\n  nixpkgs#cosign -c true\nnix run \\\n  nixpkgs#jq\n"}
+        )
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("scripts/x.sh:3: nixpkgs#jq", found[0])
+
     def test_scripts_actions_justfiles_and_system_are_covered(self):
         found = self.problems(
             {

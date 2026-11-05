@@ -3468,14 +3468,36 @@ def check_registry():
 
 # PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
 # nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
-# `nixpkgs/<ref>#` names a ref of its own, which --inputs-from does not pin.
+# --inputs-from pins only the bare `nixpkgs#` of its own nix command: `nixpkgs/<ref>#`,
+# `nixpkgs-<alias>#` and `github:NixOS/nixpkgs[/<ref>]#` name a source of their own.
 PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
-NIXPKGS_REF = re.compile(r"(?<![\w./:-])nixpkgs(/[\w.-]+)?#[\w.+-]+")
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./-]*#[\w.+-]+", re.I)
+# Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
+NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
+
+
+def logical_lines(text):
+    """(first line number, text) of each command, its backslash continuations joined; comment
+    lines are dropped."""
+    start, parts = None, []
+    for i, line in enumerate(text.split("\n"), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if start is None:
+            start = i
+        parts.append(line[:-1] if line.endswith("\\") else line)
+        if not line.endswith("\\"):
+            yield start, " ".join(parts)
+            start, parts = None, []
+    if parts:
+        yield start, " ".join(parts)
 
 
 def pinning_problems(root):
-    """Every nixpkgs#<tool> a workflow, action, recipe or script runs comes with --inputs-from
-    earlier on the same line, so nixpkgs is the locked input of the repository flake."""
+    """Every nixpkgs#<tool> a workflow, action, recipe or script runs is a bare nixpkgs#
+    reference after --inputs-from in the same nix command, so nixpkgs is the locked input of
+    the repository flake."""
     root = Path(root)
     paths = [root / f for f in REGISTRY_FILES]
     for base in PINNING_DIRS:
@@ -3487,13 +3509,13 @@ def pinning_problems(root):
         if (not path.is_file() or relative.parts[1:2] == ("tests",)
                 or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
             continue
-        for i, line in enumerate(read(path).split("\n"), 1):
-            if line.lstrip().startswith("#"):
-                continue
+        for i, line in logical_lines(read(path)):
             for ref in NIXPKGS_REF.finditer(line):
-                if ref.group(1) or "--inputs-from " not in line[:ref.start()]:
+                command = NIX_COMMAND_BREAK.split(line[:ref.start()])[-1]
+                if not ref.group().startswith("nixpkgs#") or "--inputs-from " not in command:
                     problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
-                                    f"it with --inputs-from <checkout> so nixpkgs is flake.lock's")
+                                    f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
+                                    f"nix command, so nixpkgs is flake.lock's")
     return problems
 
 
