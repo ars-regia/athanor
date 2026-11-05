@@ -3,9 +3,9 @@
 # One policy for the root workspace lockfile. `just check-deny` applies its licences,
 # bans and sources in the pull request gate; scripts/ci/security-audit.sh applies its
 # advisories, on pull requests, pushes and a weekly schedule. The
-# packages built from their own vendored lockfile (athanor-backup's release tarball,
-# greenboot-rs) have no manifest cargo-deny can read: `just check-deny` audits their advisories
-# with `cargo audit --file` (scripts/ci/audited-lockfiles.txt), not licences, bans or sources. The licence
+# vendored lockfiles of athanor-recovery and greenboot-rs have no workspace cargo-deny can read:
+# scripts/ci/security-audit.sh audits their advisories with `cargo audit --file`
+# (scripts/ci/audited-lockfiles.txt), not licences, bans or sources. The licence
 # allow-list is the set of identifiers the current dependency graph contains, derived
 # from `cargo metadata`; an entry nothing uses is a warning, so it cannot go stale
 # unnoticed.

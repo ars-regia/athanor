@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the pinned tools `just check` needs on a machine that lacks them (the GitHub
-# runner of pr.yml): just, actionlint, cargo-deny and cargo-audit from their release archives, each verified against
+# runner of pr.yml): just, actionlint and cargo-deny from their release archives, each verified against
 # its SHA-256 before it is unpacked, cosign and the registry (distribution) that the real-cosign
 # attest check runs against (scripts/ci/cosign-attest-check.sh), and pykickstart (ksvalidator) and PyYAML in a virtual
 # environment, every Python package verified by the hashes of requirements-build.txt and
@@ -29,8 +29,6 @@ COSIGN_INSTALLER=6f9f17788090df1f26f669e9d70d6ae9567deba6
 COSIGN_VERSION=v3.0.6
 COSIGN_URL=https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64
 COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
-CARGO_AUDIT_URL=https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-musl-v0.22.2.tgz
-CARGO_AUDIT_SHA256=7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428
 REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0.0/registry_3.0.0_linux_amd64.tar.gz
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
 
@@ -53,9 +51,6 @@ tar -xzf "$dir/download/actionlint.tar.gz" -C "$dir/bin" actionlint
 fetch "$CARGO_DENY_URL" "$CARGO_DENY_SHA256" "$dir/download/cargo-deny.tar.gz"
 tar -xzf "$dir/download/cargo-deny.tar.gz" -C "$dir/bin" --strip-components=1 \
     cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
-fetch "$CARGO_AUDIT_URL" "$CARGO_AUDIT_SHA256" "$dir/download/cargo-audit.tgz"
-tar -xzf "$dir/download/cargo-audit.tgz" -C "$dir/bin" --strip-components=1 \
-    cargo-audit-x86_64-unknown-linux-musl-v0.22.2/cargo-audit
 fetch "$COSIGN_URL" "$COSIGN_SHA256" "$dir/download/cosign"
 install -m 0755 "$dir/download/cosign" "$dir/bin/cosign"
 fetch "$REGISTRY_URL" "$REGISTRY_SHA256" "$dir/download/registry.tar.gz"

@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -18,6 +19,7 @@ class AdvisoryLocks(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
+        subprocess.run(["git", "-C", str(self.root), "init", "-q"], check=True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -26,6 +28,7 @@ class AdvisoryLocks(unittest.TestCase):
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+        subprocess.run(["git", "-C", str(self.root), "add", "-f", relative], check=True)
 
     def test_the_repository_has_no_problem(self):
         self.assertEqual(verify.advisory_lock_problems(), [])
@@ -41,6 +44,13 @@ class AdvisoryLocks(unittest.TestCase):
         problems = verify.advisory_lock_problems(self.root)
         self.assertEqual(len(problems), 1)
         self.assertIn(LOCK, problems[0])
+
+    def test_an_untracked_lockfile_does_not_count(self):
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        path = self.root / LOCK
+        path.parent.mkdir(parents=True)
+        path.write_text("")
+        self.assertEqual(verify.advisory_lock_problems(self.root), [])
 
     def test_a_listed_lockfile_that_is_gone_is_named(self):
         self.write(verify.AUDITED_LOCKFILES, f"{LOCK}\n")

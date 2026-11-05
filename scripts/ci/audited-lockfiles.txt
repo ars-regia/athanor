@@ -1,4 +1,4 @@
-# Vendored Cargo lockfiles that `just check-deny` audits with `cargo audit --file` because
+# Vendored Cargo lockfiles that scripts/ci/security-audit.sh audits with `cargo audit --file` because
 # cargo-deny cannot read them: each ships a lockfile with no workspace to resolve (#465).
 # One path per line; `#` starts a comment. scripts/verify.py (advisory-locks) fails on a
 # Cargo.lock under forge/specs that is not listed here, so a new one cannot go unread.

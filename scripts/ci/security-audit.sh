@@ -25,3 +25,19 @@ cargo clippy --manifest-path system/athanor-toolkit/gallery/Cargo.toml --locked 
 for manifest in Cargo.toml system/athanor-toolkit/gallery/Cargo.toml fuzz/Cargo.toml; do
     cargo deny --manifest-path "$manifest" --config deny.toml check advisories 2>&1 | tee -a "$out/deny.log"
 done
+
+# The vendored lockfiles cargo-deny cannot read (no workspace) are audited by cargo-audit, which
+# reads a bare lockfile. Yanked crates are denied, as deny.toml does. An empty or missing list fails.
+list=scripts/ci/audited-lockfiles.txt
+[ -f "$list" ] || { echo "security-audit: $list is missing" >&2; exit 1; }
+mapfile -t entries < "$list"
+locks=()
+for entry in "${entries[@]}"; do
+    case "$entry" in '' | '#'*) ;; *) locks+=("$entry") ;; esac
+done
+[ "${#locks[@]}" -gt 0 ] || { echo "security-audit: $list names no lockfile" >&2; exit 1; }
+: > "$out/audit.log"
+for lock in "${locks[@]}"; do
+    echo "security-audit: cargo audit $lock" | tee -a "$out/audit.log"
+    cargo audit --deny yanked --file "$lock" < /dev/null 2>&1 | tee -a "$out/audit.log"
+done

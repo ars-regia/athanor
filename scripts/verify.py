@@ -2939,24 +2939,26 @@ def check_sysctl():
 
 
 # A vendored lockfile under forge/specs has no workspace cargo-deny can read, so no advisory
-# check reads it unless `just check-deny` audits it with `cargo audit --file`. That recipe reads
+# check reads it unless scripts/ci/security-audit.sh audits it with `cargo audit --file`. That script reads
 # its list from scripts/ci/audited-lockfiles.txt; a lockfile missing from it is never checked (#465).
 AUDITED_LOCKFILES = "scripts/ci/audited-lockfiles.txt"
 
 
 def advisory_lock_problems(root=None):
-    """Every Cargo.lock under forge/specs is listed in AUDITED_LOCKFILES, and every entry exists."""
+    """Every tracked Cargo.lock under forge/specs is listed in AUDITED_LOCKFILES, and every entry is tracked."""
     root = root or ROOT
     listed = [l.strip() for l in read(root / AUDITED_LOCKFILES).splitlines()
               if l.strip() and not l.lstrip().startswith("#")]
-    found = {p.relative_to(root).as_posix() for p in (root / "forge" / "specs").rglob("Cargo.lock")}
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "forge/specs"],
+                             capture_output=True, text=True, check=True).stdout.split("\0")
+    found = {f for f in tracked if f.endswith("Cargo.lock")}
     problems = [f"{p}: a lockfile under forge/specs that no advisory check reads; add it to {AUDITED_LOCKFILES}"
                 for p in sorted(found - set(listed))]
     problems += [f"{AUDITED_LOCKFILES}: {p} does not exist" for p in listed if p not in found]
     return problems
 
 
-@check("advisory-locks", "Every Cargo.lock under forge/specs is read by an advisory check (just check-deny)")
+@check("advisory-locks", "Every Cargo.lock under forge/specs is read by an advisory check (security-audit.sh)")
 def check_advisory_locks():
     r = Result()
     for problem in advisory_lock_problems():
