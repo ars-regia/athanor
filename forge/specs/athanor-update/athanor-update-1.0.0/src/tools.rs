@@ -319,8 +319,8 @@ struct Blob {
 /// bounds (#658). The manifest is read first, within `bounds.manifest`, and not copied when it has
 /// a member cosign does not write, more than `bounds.layers` layers, or a descriptor that declares
 /// more than `bounds.blob`. A registry can serve a blob larger than its descriptor declares, so the
-/// copy runs with `RLIMIT_FSIZE` at `bounds.manifest`, the largest file `dir:` has to write. The
-/// copy names the digest of the manifest read, so the registry cannot serve it another one. Each
+/// copy runs with `RLIMIT_FSIZE` at the larger of `bounds.blob` and the manifest read, the largest
+/// file `dir:` has to write, `manifest.json` included. The copy names the digest of the manifest read, so the registry cannot serve it another one. Each
 /// call is killed past `bounds.time`.
 fn fetch_attachment(skopeo: &str, repository: &str, digest: &str, suffix: &str, dest: &Path, bounds: Bounds) -> Result<(), Failure> {
     let hex = digest.strip_prefix("sha256:").filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).ok_or(Failure { code: ErrorCode::Internal, host: None })?;
@@ -341,7 +341,7 @@ fn fetch_attachment(skopeo: &str, repository: &str, digest: &str, suffix: &str, 
     }
     let pinned = format!("docker://{repository}@sha256:{}", hex::encode(Sha256::digest(&raw)));
     let dest = format!("dir:{}", dest.display());
-    let fsize = format!("--fsize={}", bounds.manifest);
+    let fsize = format!("--fsize={}", (raw.len() as u64).max(bounds.blob));
     run_bounded(PRLIMIT, &[fsize.as_str(), "--", skopeo, "copy", "--policy", ATTACHMENTS_POLICY, &pinned, &dest], host, None, bounds.time).map(drop).map_err(|(failure, stderr)| {
         // EFBIG, as Go and coreutils word it: a blob larger than the limit, whatever it declared.
         if stderr.to_ascii_lowercase().contains("file too large") {
@@ -700,7 +700,9 @@ mod tests {
         // At both caps exactly: the manifest padded to its cap, its layer at the verifier's.
         let mut served = manifest(233, crate::sigobj::MAX_PAYLOAD).into_bytes();
         served.resize(usize::try_from(crate::sigobj::MAX_MANIFEST).expect("cap"), b' ');
-        let stub = Stub::new("within", &served, "true");
+        // The copy writes the manifest as dir: does, with plain writes as Go does (cat would use
+        // copy_file_range, which meets the limit even at its end): the limit leaves room for it.
+        let stub = Stub::new("within", &served, r#"dd if="${5#dir:}/../served" of="${5#dir:}/manifest.json" bs=65536 status=none"#);
         assert_eq!(stub.fetch(Duration::from_secs(10)), Ok(()));
         let copied = std::fs::read_to_string(stub.dir.join("copied")).expect("copied");
         let pinned = format!("docker://{REPO}@sha256:{}", hex::encode(Sha256::digest(&served)));
@@ -766,11 +768,12 @@ mod tests {
     fn a_blob_larger_than_it_declared_is_cut_at_the_file_size_limit() {
         // The copy writes past the limit, as skopeo does for a blob whose descriptor declares less
         // than it serves; SIGXFSZ is ignored, as Go ignores it, so the write fails with EFBIG.
-        let over = crate::sigobj::MAX_MANIFEST + 1;
+        // The limit is the declared-blob cap here, the manifest read being smaller.
+        let over = crate::sigobj::MAX_PAYLOAD + 1;
         let stub = Stub::new("fsize", manifest(233, 300).as_bytes(), &format!(r#"trap '' XFSZ; exec head -c {over} /dev/zero > "${{5#dir:}}/blob""#));
         assert_eq!(stub.fetch(Duration::from_secs(10)), Err(refused()));
         let written = std::fs::metadata(stub.dir.join("store/blob")).expect("blob").len();
-        assert_eq!(written, crate::sigobj::MAX_MANIFEST, "nothing written past the limit");
+        assert_eq!(written, crate::sigobj::MAX_PAYLOAD, "nothing written past the limit");
     }
 
     #[test]

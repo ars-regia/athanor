@@ -79,8 +79,10 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
   manifest first, up to 1 MiB, and does not copy an object whose manifest has a member cosign
   does not write, more than 64 layers, or a descriptor that declares more than 64 KiB. The copy
   names the digest of the manifest read and runs under prlimit(1) with a file size limit of
-  1 MiB, so a blob larger than it declared is cut there and the fetch fails. Each skopeo call
-  is killed after 30 seconds. Requires util-linux for prlimit.
+  64 KiB, or of the manifest's size when it is larger, so a blob larger than it declared is cut
+  there and the fetch fails. The copy therefore writes at most 65 such files and the manifest:
+  about 4 MiB for a manifest of 64 KiB or less, 66 MiB at most. Each skopeo call is killed
+  after 30 seconds. Requires util-linux for prlimit.
 
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.0-14
 - Each check removes the stored signature objects as it does the release attestations,
