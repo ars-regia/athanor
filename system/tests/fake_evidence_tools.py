@@ -5,7 +5,10 @@ tool's name on PATH. It answers from the JSON file named by FAKE_EVIDENCE:
   bundles   {"registry/repo:tag": path of the layer tar `skopeo copy` writes}
   assets    {"asset name": path of the file `gh release download` writes}
   errors    ["text", ...]  any call whose arguments contain the text fails
-  api       {"gh api path": JSON}, printed through `jq -r` with the call's --jq filter
+  api       {"gh api path": JSON}, printed through `jq -r` with the call's --jq filter. A list
+            of two or more is served as two pages, as GitHub serves a long list: with
+            --paginate the filter runs on each page, as gh does; without it only the first
+            page is answered
   cosign_ok false: `cosign verify-blob` rejects the signature"""
 
 import hashlib
@@ -39,9 +42,19 @@ def main(name, args):
         if body is None:
             print(f"fake gh: HTTP 404 {path}", file=sys.stderr)
             return 1
-        return subprocess.run(
-            ["jq", "-r", jq], input=json.dumps(body), text=True, check=False
-        ).returncode
+        pages = [body]
+        if isinstance(body, list) and len(body) > 1:
+            half = len(body) // 2
+            pages = (
+                [body[:half], body[half:]] if "--paginate" in args else [body[:half]]
+            )
+        for page in pages:
+            r = subprocess.run(
+                ["jq", "-r", jq], input=json.dumps(page), text=True, check=False
+            )
+            if r.returncode != 0:
+                return r.returncode
+        return 0
     ref = args[-1].removeprefix("docker://")
     if args[0] == "list-tags":
         print(json.dumps({"Repository": ref, "Tags": fx["list"][ref]}))

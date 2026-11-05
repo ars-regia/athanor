@@ -5,16 +5,20 @@ The CI robot token of `EVIDENCE_REGISTRY` can delete tags on quay.io, so the cop
 signed evidence bundle can vanish; it cannot be forged, because the bundle digest is signed
 keylessly and recorded in Rekor. This lists every promotion in the release history, a promotion
 run of promote-stable.yml whose `promote` job succeeded with a successful GitHub deployment in
-the environment `release`, and for each one:
+the environment `release` (a successful deployment there of any other job, of a job that did
+not succeed, or whose log_url names no job of this repository fails; no promotion found fails),
+and for each one:
   1. resolves its copy, `$EVIDENCE_REGISTRY/athanor-evidence:<build run>-<promotion run>`; a
      promotion with no such tag fails: the copy was deleted;
   2. pulls it and runs `system/evidence-bundle.sh verify-dir` on it, the check `verify` makes
      after its pull, against the plan the promotion approved: the `promotion.json` of the
-     bundle `evidence-<build run>-<promotion run>.tar` on its GitHub Release (ADR-0131); a
-     promotion older than the Releases has none, and then the copy's own signed plan is used;
+     bundle `evidence-<build run>-<promotion run>.tar` on its GitHub Release (ADR-0131). Only
+     the promotions of PRE_RELEASE_PROMOTIONS, made before the Releases, use the copy's own
+     signed plan; any other promotion with no bundle on a Release fails;
   3. fails when the copy does not verify, or when its signed plan names another build run or
      another promotion run than its tag.
 A registry, a bundle or the GitHub API that cannot be read fails the check: nothing passes unread.
+A promotion that cannot be read is a finding of its own, and the others are still checked.
 
 Usage: check_evidence_copies.py
 Environment: EVIDENCE_REGISTRY; GITHUB_REPOSITORY; GITHUB_SERVER_URL (default https://github.com);
@@ -32,11 +36,18 @@ import tarfile
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-# The `name:` of the promote job of promote-stable.yml, the job in the environment `release`
-# that moves :stable (the ISO job runs in it too).
+# The `name:` of the two jobs of promote-stable.yml in the environment `release`: the promote
+# job, which moves :stable, and the ISO job after it. A successful deployment of any other job
+# there, or of one of these that did not succeed, is a release history this check cannot read.
 PROMOTE_JOB = "Point stable at the run"
+ISO_JOB = "Point the installer ISO's stable at the run"
 ENVIRONMENT = "release"
 EVIDENCE_IMAGE = "athanor-evidence"
+# The promotions made before each promotion attached its bundle to a GitHub Release (ADR-0131;
+# the first Release, promoted-40078211020, is of 2026-10-24). No Release carries their bundle, so
+# their copy is verified against its own signed plan. Every later promotion must have its bundle
+# on a Release: one without it fails, rather than silently falling back to the copy alone.
+PRE_RELEASE_PROMOTIONS = (38546669761, 39018812032)
 
 
 class Unreadable(Exception):
@@ -54,22 +65,43 @@ def gh_lines(path, jq):
     return run("gh", "api", "--paginate", path, "--jq", jq).splitlines()
 
 
-def promotions(repo):
-    """The promotion runs whose promote job succeeded in the environment `release`, oldest first."""
-    found = set()
+def promotions(repo, server):
+    """(the promotion runs whose promote job succeeded in `release`, oldest first, findings).
+
+    Every successful deployment status in `release` must name a successful promote or ISO job
+    of a run of this repository; one that does not is a finding, never skipped."""
+    found, bad = set(), []
     for dep in gh_lines(
         f"repos/{repo}/deployments?environment={ENVIRONMENT}", ".[].id"
     ):
-        for url in gh_lines(
-            f"repos/{repo}/deployments/{dep}/statuses",
-            '.[] | select(.state == "success") | .log_url',
-        ):
-            m = re.search(r"/actions/runs/(\d+)/job/(\d+)$", url)
-            if m and gh_lines(
-                f"repos/{repo}/actions/jobs/{m[2]}", '.name + "\\t" + .conclusion'
-            ) == [f"{PROMOTE_JOB}\tsuccess"]:
-                found.add(int(m[1]))
-    return sorted(found)
+        try:
+            urls = gh_lines(
+                f"repos/{repo}/deployments/{dep}/statuses",
+                '.[] | select(.state == "success") | .log_url',
+            )
+            for url in urls:
+                m = re.fullmatch(
+                    rf"{re.escape(server)}/{re.escape(repo)}/actions/runs/(\d+)/job/(\d+)",
+                    url,
+                )
+                if not m:
+                    bad.append(
+                        f"deployment {dep}: a successful status in {ENVIRONMENT} whose log_url {url!r} names no job of a run of {repo}"
+                    )
+                    continue
+                job = gh_lines(
+                    f"repos/{repo}/actions/jobs/{m[2]}", '.name + "\\t" + .conclusion'
+                )
+                if job == [f"{PROMOTE_JOB}\tsuccess"]:
+                    found.add(int(m[1]))
+                elif job != [f"{ISO_JOB}\tsuccess"]:
+                    bad.append(
+                        f"deployment {dep}: a successful deployment in {ENVIRONMENT} of job {m[2]} of run {m[1]}, "
+                        f"which is {job!r}, not a successful {PROMOTE_JOB!r} or {ISO_JOB!r}"
+                    )
+        except Unreadable as e:
+            bad.append(f"deployment {dep}: unreadable, so not checked: {e}")
+    return sorted(found), bad
 
 
 def release_assets(repo):
@@ -127,6 +159,11 @@ def check(promotion, tags, assets, evidence_repo, repo, server):
     for build in builds:
         tag = f"{build}-{promotion}"
         asset = f"evidence-{tag}.tar"
+        if asset not in assets and promotion not in PRE_RELEASE_PROMOTIONS:
+            bad.append(
+                f"promotion run {promotion}: no GitHub Release carries {asset}, the approved plan to verify {evidence_repo}:{tag} against"
+            )
+            continue
         with tempfile.TemporaryDirectory() as tmp:
             copy = fetch_copy(f"{evidence_repo}:{tag}", pathlib.Path(tmp))
             if asset in assets:
@@ -135,7 +172,10 @@ def check(promotion, tags, assets, evidence_repo, repo, server):
                     f"the Release {assets[asset]}",
                 )
             else:
-                approved, against = copy, "its own signed plan, no Release carries it"
+                approved, against = (
+                    copy,
+                    "its own signed plan, a promotion made before the Releases",
+                )
             v = subprocess.run(
                 [
                     "bash",
@@ -182,19 +222,28 @@ def main():
         return 2
     evidence_repo = f"{evidence}/{EVIDENCE_IMAGE}"
     try:
-        runs = promotions(repo)
+        runs, bad = promotions(repo, server)
+        # skopeo follows the registry's Link header, so this is every tag, not the first page
+        # (quay.io serves 100 a page; skopeo 1.22.3 listed all 412 of quay.io/prometheus/prometheus).
         tags = json.loads(run("skopeo", "list-tags", f"docker://{evidence_repo}"))[
             "Tags"
         ]
         assets = release_assets(repo)
-        bad = []
-        for promotion in runs:
-            bad += check(promotion, tags, assets, evidence_repo, repo, server)
     except (Unreadable, KeyError, ValueError) as e:
         print(f"unreadable, so not checked: {e}", file=sys.stderr)
         return 1
     if not runs:
-        print(f"no promotion in the environment {ENVIRONMENT}: no copy to check")
+        # The release history holds promotions since the first :stable of 2026-10-14: none
+        # found means the history was not read, not that there is nothing to check.
+        bad.append(
+            f"no promotion found in the environment {ENVIRONMENT}: the release history was not read"
+        )
+    for promotion in runs:
+        # One promotion that cannot be read does not hide the findings of the others.
+        try:
+            bad += check(promotion, tags, assets, evidence_repo, repo, server)
+        except (Unreadable, KeyError, ValueError) as e:
+            bad.append(f"promotion run {promotion}: unreadable, so not checked: {e}")
     for line in bad:
         print(line, file=sys.stderr)
     return 1 if bad else 0
