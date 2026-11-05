@@ -36,9 +36,10 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python3 scripts/github-settings/ghsettings.py --repo "${GITHUB_REPOSITORY}" diff
 
-  # A :stable that no promotion moved (#405, PL54, ADR-0111 item 5): every digest of :stable,
-  # :stable-previous and the newest :stable-<day> must be in a promotion record that ran in the
-  # environment release. The job holds no environment, no package write and no secret: it reads.
+  # A :stable that no promotion moved (#405, PL54, ADR-0111 item 5): :stable must be the digest of
+  # the newest promotion record that ran in the environment release, :stable-previous that record's
+  # previous_stable, and every :stable-<day> the last record of its day (doc_ci.md CI29).
+  # The job holds no environment, no package write and no secret: it reads.
   stable-promotions:
     name: Stable was promoted
     runs-on: ubuntu-24.04

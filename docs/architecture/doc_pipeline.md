@@ -611,8 +611,9 @@ branch, can push GHCR tags, so a contributor with write access can copy an alrea
 digest onto `:stable` and skip the evidence, the dwell and the approval. Machines still
 refuse an unsigned or older image (UT5). The maintainer accepted this risk on 2026-10-11
 ([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md) item 5) until #405, which added the daily job `stable-promotions` of
-`maintenance.yml` (`scripts/ci/stable_promotions.py`): it compares `:stable`, `:stable-previous` and the newest
-`:stable-<day>` with the newest promotion record and fails on a copy no promotion made. A dispatch made with
+`maintenance.yml` (`scripts/ci/stable_promotions.py`): it fails unless `:stable` is the digest of the newest
+promotion record, `:stable-previous` that record's `previous_stable` and every `:stable-<day>` the last record of
+its day (doc_ci.md CI29), so a copy no promotion made is detected. A dispatch made with
 `GITHUB_TOKEN` starts a run, unlike the other events that token creates
 (https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication).
 The maintainer may dispatch `release.yml` by hand with a build run id, on `iso-v0`,
