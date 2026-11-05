@@ -64,6 +64,8 @@ AREAS = {
         "system/athanor-layout/",
         "forge/specs/athanor-layout-chooser/",
         "system/athanor-sulphur-client/",
+        "system/athanor-sal/",
+        "forge/specs/athanor-sulphur/",
         "system/athanor-i18n/",
         "forge/specs/athanor-shelld/",
         "forge/specs/athanor-bar/",

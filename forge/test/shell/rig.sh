@@ -54,7 +54,7 @@
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   each page's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; needs ATHANOR_RIG_IMAGE with Orca; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
+#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
 #                           and `surface dock`, whose captures and goldens it tags toolkit-
@@ -143,7 +143,10 @@ fi
 # RIG_COMPOSITOR=athanor reaches scene.sh, which runs athanor-sulphur headless in place of
 # cosmic-comp (session.sh) on RIG_HEADLESS_OUTPUTS outputs, and runs the container in systemd
 # mode, whose cgroup tree is writable: bar_session.py --unit and in-unit.sh put a client in its
-# unit's cgroup there, for the compositor's allow-list (OS4).
+# unit's cgroup there, for the compositor's allow-list (OS4). A recipe that always runs under
+# athanor-sulphur sets RIG_COMPOSITOR for in_rig itself (RIG_COMPOSITOR=athanor in_rig ...),
+# never in the container's command alone: there scene.sh would start athanor-sulphur in a
+# container without systemd mode, and in-unit.sh could not make grim's cgroup (#971).
 # ATHANOR_SAL_RENDERER reaches athanor-sal's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
@@ -354,7 +357,7 @@ capture_toolkit_chooser() {
         if [ "$catalog" != - ]; then
             override=(ATHANOR_I18N_CATALOG="/out/locale/chooser/$catalog")
         fi
-        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE="$locale" "${override[@]}" \
+        RIG_COMPOSITOR=athanor in_rig "$(rig_image)" env RIG_LOCALE="$locale" "${override[@]}" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             /out/bin/athanor-sal-chooser
     done < <(python3 -B "$rig/cases.py" toolkit-chooser)
@@ -365,11 +368,11 @@ capture_toolkit_chooser() {
 # whose captures are the references to match. Each case passes its page and direction to the
 # binary as arguments.
 capture_gallery() { # capture_gallery <toolkit-gallery|gtk-gallery>
-    local surface=$1 compositor=() bin=/repo/forge/test/shell/gallery_gtk.py
+    local surface=$1 bin=/repo/forge/test/shell/gallery_gtk.py
     if [ "$surface" = toolkit-gallery ]; then
         require athanor-sulphur build-compositor
         require athanor-sal-gallery build-toolkit
-        compositor=(RIG_COMPOSITOR=athanor)
+        local -x RIG_COMPOSITOR=athanor
         bin=/out/bin/athanor-sal-gallery
     fi
     while IFS=$'\t' read -r tag variant scale locale _ page direction; do
@@ -377,7 +380,7 @@ capture_gallery() { # capture_gallery <toolkit-gallery|gtk-gallery>
         seed_scheme "$out/seed-$tag" "$variant"
         args=(--page "$page")
         if [ "$direction" = rtl ]; then args+=(--rtl); fi
-        in_rig "$(rig_image)" env "${compositor[@]}" RIG_LOCALE="$locale" RIG_CONFIG_SEED="/out/seed-$tag" \
+        in_rig "$(rig_image)" env RIG_LOCALE="$locale" RIG_CONFIG_SEED="/out/seed-$tag" \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 "$scale" "$tag" -- \
             "$bin" "${args[@]}"
@@ -748,7 +751,7 @@ compositor-globals)
     # (headless.rs); its log says which.
     require athanor-sulphur build-compositor
     rm -f "$out/compositor-globals.txt" "$out/compositor-globals-compositor.log"
-    in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_SETTLE=2 \
+    RIG_COMPOSITOR=athanor in_rig "$(rig_image)" env RIG_SETTLE=2 \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 compositor-globals -- \
         bash -c 'wayland-info > /out/compositor-globals.txt && exec sleep 60'
     missing=()
@@ -1210,7 +1213,7 @@ atspi)
         # AccessKit (doc_own_stack.md, C1 task 1).
         require athanor-sulphur build-compositor
         require athanor-sal-chooser build-toolkit
-        in_rig "$(rig_image)" env RIG_COMPOSITOR=athanor RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
+        RIG_COMPOSITOR=athanor in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=6 \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-sal-chooser 8" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-sal-chooser"
@@ -1315,8 +1318,8 @@ orca)
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
     # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
-    # athanor-sal's. The published rig has no Orca yet: ATHANOR_RIG_IMAGE names a local build
-    # of the Containerfile's rig stage.
+    # athanor-sal's. The rig stage installs Orca and wtype; the published rig carries them since
+    # the image pinned by #974, and shell-surfaces.yml compares every transcript (#954).
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.
     # The reference is the cosmic-comp transcript, but for the launcher's (see its walk): under
     # RIG_COMPOSITOR=athanor the same command runs the walk under athanor-sulphur, the clients
