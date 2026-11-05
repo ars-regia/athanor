@@ -66,7 +66,9 @@ class PinningTest(unittest.TestCase):
 
     def test_remote_and_alias_references_are_reported_even_with_inputs_from(self):
         for ref in ("github:NixOS/nixpkgs#cosign", "github:nixos/nixpkgs/nixos-unstable#cosign",
-                    "git+https://github.com/NixOS/nixpkgs#cosign", "nixpkgs-unstable#cosign"):
+                    "git+https://github.com/NixOS/nixpkgs#cosign", "nixpkgs-unstable#cosign",
+                    "flake:nixpkgs#cosign", "registry:nixpkgs#cosign",
+                    "github:NixOS/nixpkgs?ref=nixos-unstable#cosign", "nixpkgs?ref=master#cosign"):
             with self.subTest(ref=ref):
                 found = self.problems({"scripts/x.sh": f"nix run --inputs-from . {ref} -- version\n"})
                 self.assertEqual(len(found), 1, found)

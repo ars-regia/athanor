@@ -3469,10 +3469,12 @@ def check_registry():
 # PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
 # nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
 # --inputs-from pins only the bare `nixpkgs#` of its own nix command: `nixpkgs/<ref>#`,
-# `nixpkgs-<alias>#` and `github:NixOS/nixpkgs[/<ref>]#` name a source of their own.
+# `nixpkgs-<alias>#`, `nixpkgs?<query>#`, `flake:nixpkgs#` and `github:NixOS/nixpkgs[/<ref>]#`
+# name a source of their own.
 PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
-NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./-]*#[\w.+-]+"
-                         r"|(?<![\w./:+-])nixpkgs[\w./-]*#[\w.+-]+", re.I)
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+", re.I)
 # Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
 NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
 
