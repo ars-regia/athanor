@@ -79,7 +79,30 @@ pub type Handler = Box<dyn FnMut(&mut Ui, Event)>;
 
 /// The variable that picks the renderer: `cpu` (the default) or `gpu`, which only a build with
 /// the `gpu` feature takes. Popups draw on the CPU either way.
-pub const RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
+pub const RENDERER: &str = "ATHANOR_SAL_RENDERER";
+
+/// The name [`RENDERER`] had before the toolkit became Sal (ADR-0134), still read, with a
+/// warning, until the 1.0 cut.
+const OLD_RENDERER: &str = "ATHANOR_TOOLKIT_RENDERER";
+
+/// What [`RENDERER`] holds, falling back to [`OLD_RENDERER`]; the second value is a warning to
+/// print. The new name wins when both are set.
+fn renderer_value(
+    new: Option<std::ffi::OsString>,
+    old: Option<std::ffi::OsString>,
+) -> (Option<std::ffi::OsString>, Option<String>) {
+    match (new, old) {
+        (None, Some(old)) => (
+            Some(old),
+            Some(format!("{OLD_RENDERER} is deprecated; set {RENDERER}")),
+        ),
+        (new, Some(_)) => (
+            new,
+            Some(format!("{OLD_RENDERER} is ignored because {RENDERER} is set")),
+        ),
+        (new, None) => (new, None),
+    }
+}
 
 /// Whether [`RENDERER`]'s value asks for the GPU. Anything but `cpu`, `gpu` or unset is refused.
 fn wants_gpu(value: Option<std::ffi::OsString>) -> Result<bool, Error> {
@@ -253,7 +276,12 @@ fn run_on(
     application: impl Application + 'static,
     insert: impl FnOnce(&LoopHandle<'static, App>) -> Result<(), Error>,
 ) -> Result<(), Error> {
-    let gpu = wants_gpu(std::env::var_os(RENDERER))?;
+    let (value, warning) =
+        renderer_value(std::env::var_os(RENDERER), std::env::var_os(OLD_RENDERER));
+    if let Some(warning) = warning {
+        eprintln!("athanor-sal: {warning}");
+    }
+    let gpu = wants_gpu(value)?;
     let conn = Connection::connect_to_env()?;
     let (globals, queue) = registry_queue_init(&conn)?;
     let qh = queue.handle();
@@ -2177,6 +2205,20 @@ mod tests {
         // A held Menu key or Shift+F10 opens the field's menu once, and does not repeat into it.
         assert!(once(Keysym::Menu, false));
         assert!(once(Keysym::F10, false));
+    }
+
+    #[test]
+    fn the_renderer_variable_falls_back_to_its_old_name() {
+        let gpu = || Some(std::ffi::OsString::from("gpu"));
+        let cpu = || Some(std::ffi::OsString::from("cpu"));
+        assert_eq!(renderer_value(None, None), (None, None));
+        let (value, warning) = renderer_value(None, gpu());
+        assert_eq!(value, gpu());
+        assert!(warning.is_some_and(|w| w.contains("set ATHANOR_SAL_RENDERER")));
+        let (value, warning) = renderer_value(cpu(), gpu());
+        assert_eq!(value, cpu());
+        assert!(warning.is_some_and(|w| w.contains("ignored")));
+        assert_eq!(renderer_value(gpu(), None), (gpu(), None));
     }
 
     #[test]

@@ -145,7 +145,7 @@ class ProcessTest(unittest.TestCase):
             client.chmod(0o755)
             with (
                 unittest.mock.patch.dict(
-                    os.environ, {"ATHANOR_TOOLKIT_RENDERER": "gpu"}
+                    os.environ, {"ATHANOR_SAL_RENDERER": "gpu"}
                 ),
                 self.assertRaisesRegex(SystemExit, "named no GPU adapter"),
             ):

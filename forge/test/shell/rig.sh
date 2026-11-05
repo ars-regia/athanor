@@ -19,7 +19,7 @@
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-sulphur into <out>/bin
 #   rig.sh build-toolkit    clippy, tests and release build of athanor-sal's chooser, text field, test input method, layer surfaces, popups, test pointer and gallery into <out>/bin,
-#                           with and without the gpu feature; the binaries carry it, so ATHANOR_TOOLKIT_RENDERER=gpu works
+#                           with and without the gpu feature; the binaries carry it, so ATHANOR_SAL_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-sulphur offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
 #   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
@@ -142,7 +142,7 @@ fi
 # cosmic-comp (session.sh) on RIG_HEADLESS_OUTPUTS outputs, and runs the container in systemd
 # mode, whose cgroup tree is writable: bar_session.py --unit and in-unit.sh put a client in its
 # unit's cgroup there, for the compositor's allow-list (OS4).
-# ATHANOR_TOOLKIT_RENDERER reaches athanor-sal's clients: cpu (the default) or gpu, which
+# ATHANOR_SAL_RENDERER reaches athanor-sal's clients: cpu (the default) or gpu, which
 # draws through wgpu on the rig's llvmpipe, as the rig has no render node.
 in_rig() { # in_rig <image> <command...>
     local image=$1 opts=()
@@ -159,8 +159,8 @@ in_rig() { # in_rig <image> <command...>
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
         opts+=(--systemd=always)
     fi
-    if [ -n "${ATHANOR_TOOLKIT_RENDERER:-}" ]; then
-        opts+=(-e ATHANOR_TOOLKIT_RENDERER)
+    if [ -n "${ATHANOR_SAL_RENDERER:-}" ]; then
+        opts+=(-e ATHANOR_SAL_RENDERER)
     fi
     mkdir -p "$out"
     podman run --rm --memory 6g --security-opt label=disable "${opts[@]}" \
@@ -1449,7 +1449,7 @@ measure-chooser)
     for run in "${runs[@]}"; do
         bin=${run%%:*} renderer=${run#*:}
         name=$bin${renderer:+-$renderer}
-        ATHANOR_TOOLKIT_RENDERER=$renderer in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
+        ATHANOR_SAL_RENDERER=$renderer in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=2 \
             RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
             RIG_HOLD="python3 -B /repo/forge/test/shell/measure_chooser.py run /out/bin/$bin /out/measure/$name.json" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "measure-$name" -- sleep 600

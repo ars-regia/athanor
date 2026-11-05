@@ -5,7 +5,7 @@
       Inside a scene (rig.sh measure-chooser runs it as RIG_HOLD): the stripped size of
       <binary>, its start-up time to the first frame and its window's buffer over [runs] traced
       launches (5), and its memory one minute after one more launch, untraced. For
-      athanor-sal's chooser, ATHANOR_TOOLKIT_RENDERER (cpu or gpu) picks the renderer, and
+      athanor-sal's chooser, ATHANOR_SAL_RENDERER (cpu or gpu) picks the renderer, and
       the record names it and the adapter wgpu picked.
   measure_chooser.py lines <toolkit-dir>
       The toolkit's lines, split by area, counted as tokei counts code, comments and blanks.
@@ -34,7 +34,7 @@ from pathlib import Path
 RUNS = 5
 MEMORY_AFTER_S = 60
 FIRST_FRAME_TIMEOUT_S = 30
-RENDERER = "ATHANOR_TOOLKIT_RENDERER"
+RENDERER = "ATHANOR_SAL_RENDERER"
 # The line athanor-sal prints on stderr once wgpu has picked an adapter.
 ADAPTER = "athanor-sal: vello_gpu on "
 

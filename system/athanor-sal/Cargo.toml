@@ -19,7 +19,7 @@ smithay-client-toolkit = { version = "0.21", default-features = false, features 
 wayland-client = "0.31"
 
 [features]
-# ATHANOR_TOOLKIT_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
+# ATHANOR_SAL_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
 # wgpu reaches through libwayland-client's pointers (wayland-backend's system backend). Off by
 # default: vello_cpu drew the chooser faster and in less memory on every machine T1 measured,
 # and the path adds 4.3 MiB to the binary (docs/spikes/t1-own-toolkit.md).
