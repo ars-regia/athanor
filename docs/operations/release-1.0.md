@@ -135,10 +135,9 @@ rows narrowed below.
 
 **Placement of newly found issues** ([ADR-0135](../decisions/0135-faster-road-to-1-0.md) decision 2). From 2026-11-05 an issue found
 in the work goes to the milestone "After 1.0" unless it blocks a row of section 2 or the exit
-evidence of a release in the table above, it is a security defect of any class of
-`doc_threat_model.md` or a regression of something already shipped, or the maintainer places it
-explicitly; such an issue is placed in a release before or at 1.0 as before. Issues already in
-0.10 and 1.0 on that date stay there until a triage moves them. The rule moves no row: rows move
+evidence of a release in the table above, it is a security defect or a regression, or the
+maintainer places it explicitly; such an issue is placed in a release before or at 1.0 as
+before. Issues already in 0.10 and 1.0 on that date stay where they are. The rule moves no row: rows move
 only by a decision record (section 5).
 
 ### 4.2 Rows split or narrowed

@@ -21,7 +21,7 @@ repository on that date:
 | 7 days | 108 | 58 | 52 |
 | 14 days | 221 | 70 | 93 |
 
-80 issues were open: 14 in milestone 0.10, 25 in 1.0, 3 in 0.9, 23 in "After 1.0" and 15 in no
+On 2026-11-05, 80 issues were open: 14 in milestone 0.10, 25 in 1.0, 3 in 0.9, 23 in "After 1.0" and 15 in no
 milestone. Merges keep pace with the work, but over fourteen days the issues opened outnumber
 those closed by 23, so the milestones before 1.0 grow while they are worked.
 
@@ -61,12 +61,11 @@ Decided by the maintainer on 2026-11-05.
 2. **The scope of 0.10 and 1.0 is frozen.** From 2026-11-05, a newly found issue goes to the
    milestone "After 1.0" unless one of these holds:
    - (a) it blocks a row of `release-1.0.md` section 2, or the exit evidence of a release;
-   - (b) it is a security defect, of any class of `doc_threat_model.md`, or a regression of
-     something already shipped;
+   - (b) it is a security defect or a regression;
    - (c) the maintainer places it explicitly.
 
    An issue that meets (a), (b) or (c) is placed in a release before or at 1.0 as before. Issues
-   already in milestones 0.10 and 1.0 stay where they are; a later triage may move them.
+   already in milestones 0.10 and 1.0 stay where they are.
 3. **Parts of the own compositor move to 1.1.** Release 1.0 ships with Sulphur as the default
    session and cosmic-comp's session at the greeter as the second choice, as ADR-0132 already
    allows before 1.0. Sulphur is not the only session of 1.0.
@@ -125,14 +124,6 @@ The maintainer decided items 4 to 6 on 2026-11-05, on the draft of this record.
 6. **The approved specifications follow in the pull request of this record**, whose approval
    approves their text: `doc_own_stack.md` becomes revision 3, and the notes of `doc_shell.md`
    SH2 and `doc_compositor.md` CO4 are amended.
-
-### Proposal that the approval of this record decides
-
-The maintainer did not decide this; it is the agent's placement, and approving this record
-approves it.
-
-- **An issue placed in a release before or at 1.0 after 2026-11-05 names, in its body, which of
-  (a), (b) or (c) of decision 2 holds**, so that a triage can check the placement.
 
 ## Alternatives rejected
 
