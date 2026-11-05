@@ -32,6 +32,11 @@
   Amended 2026-11-01 (#655), by the maintainer's decision: PL55 takes the Azoth
   kernel out of the Fedora half, requires a `release-class.toml` file for a security fix of
   a package Athanor builds, and has `candidate` check that file for the kernel.
+  Amended 2026-11-05, approved by the maintainer with the pull request that makes the change:
+  PL51 runs the `alert` action in a last job of each scheduled workflow, on a GitHub-hosted
+  runner, rather than as the last step of each job, since a job whose self-hosted runner is
+  lost never runs its last step (Kernel Weekly, 2026-11-01). Only `kernel-weekly.yml` carries
+  that job today; the other scheduled workflows gain it with PB2.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -197,7 +202,8 @@ Composite actions carry the repeated steps, never logic:
 - `.github/actions/attest`: provenance and SBOM attestations for a digest file;
 - `.github/actions/verify-input`: verifies a consumed digest against its expected signer
   identity and writes the verified digest file;
-- `.github/actions/alert`: opens or updates the alert issue when a scheduled run fails (PL51);
+- `.github/actions/alert`: opens or updates the alert issue when a scheduled run fails (PL51;
+  exists, used by `kernel-weekly.yml`);
 - `.github/actions/kvm`: KVM access for the runner user on hosted runners, for the boot and
   acceptance jobs (exists).
 
@@ -862,7 +868,7 @@ section 5 unless a later release or promotion names them. A build is released ag
 dispatching `release.yml` with its run id, which PL58 refuses once a newer build is on
 `:latest`. Its security class and advisory ids are not lost: its content is in the next
 release's difference from `:latest` (PL55). A failed release run alerts through `.github/actions/alert` (PL51)
-once PB2 adds that action; until then the alert is the failed run's notification.
+once PB2 gives `release.yml` the alert job; until then the alert is the failed run's notification.
 
 **PL60. The promotion to `:stable` waits for the `release` approval** (ADR-0104 item 3,
 UD5). The job that moves `:stable`, in `promote-stable.yml` today and in `promote.yml` from
@@ -1110,9 +1116,13 @@ no job restores is removed, and the
 
 ## 8. Observability
 
-**PL51. A scheduled run that fails is seen.** Every scheduled job ends with the `alert`
-composite action, which opens or updates one issue per workflow and job labelled
-`ci-alert`, and closes it on the next success. No scheduled failure stays silent.
+**PL51. A scheduled run that fails is seen.** Every scheduled workflow ends with a job that
+runs the `alert` composite action on a GitHub-hosted runner once every other job has ended,
+whatever its result, so that a job whose runner was lost or that timed out is seen as well.
+The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
+it on the next success. No scheduled failure stays silent. Today only `kernel-weekly.yml`
+ends with that job; the other scheduled workflows gain it with PB2 (section 12), and until
+then their failures raise no issue.
 
 **PL52. Settings drift is detected daily.** `scripts/github-settings/ghsettings.py diff`,
 which exists, is tested (`scripts/tests/test_ghsettings.py`) and exits 1 on drift, compares
