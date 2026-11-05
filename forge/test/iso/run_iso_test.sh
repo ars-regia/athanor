@@ -23,6 +23,10 @@
 # from. The console's origin probe answers WRONG for a system that follows the signed :stable
 # of any other repository (issue 462).
 #
+# ISO_DIGEST=<digest> is the athanor-system digest the ISO was built from, required except in
+# the upgrade case, whose ISO is the previous :stable's. The verdict fails unless the installed
+# system booted that digest (issue 402).
+#
 # UPDATE_TO=<digest> UPDATE_REPOSITORY=<repository> runs the upgrade case of
 # doc_update_delivery.md UD18 on top, on Secure Boot firmware only: the candidate is served
 # as :stable from a registry on the runner (serve_candidate.sh), and once the first boot is
@@ -40,6 +44,12 @@ if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ -n ${UPDATE_TO:-} && -n ${UPDATE_REPOSITORY:-} ]] || { echo "UPDATE_TO and UPDATE_REPOSITORY go together" >&2; exit 2; }
     [[ $UPDATE_TO =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "UPDATE_TO is not a digest: ${UPDATE_TO}" >&2; exit 2; }
     [[ ${SECURE_BOOT:-0} == 1 ]] || { echo "the upgrade case runs on Secure Boot firmware: set SECURE_BOOT=1" >&2; exit 2; }
+fi
+
+iso_digest=
+if [[ -z ${UPDATE_TO:-} ]]; then
+    [[ ${ISO_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ISO_DIGEST is not a digest: ${ISO_DIGEST:-unset}" >&2; exit 2; }
+    iso_digest=$ISO_DIGEST
 fi
 
 [[ -f $iso ]] || { echo "ISO not found: $iso" >&2; exit 2; }
@@ -316,7 +326,7 @@ kill "$shots_pid" 2> /dev/null || true
 # Both run whatever the first answers, so a failed install still gets its memory report and
 # a session over budget still gets its verdict; the script exits with the worse of the two.
 status=0
-python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
+ATHANOR_ISO_DIGEST=$iso_digest python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
 python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
 # REMOVE_DISK=1 frees the disk image once the verdict is written; logs and screenshots stay.
 if [[ ${REMOVE_DISK:-0} == 1 ]]; then rm -f "$disk"; fi

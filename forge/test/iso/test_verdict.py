@@ -35,18 +35,22 @@ HERE = pathlib.Path(__file__).resolve().parent
 ISO_REPOSITORY = "ghcr.io/acme/athanor-system"
 
 
-def verdict(tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None):
+def verdict(
+    tmp: pathlib.Path, phases, qemu_status=0, *extra: str, files: dict[str, str] | None = None,
+    serial: bytes = b"console output\n", digest: str = "",
+):
     out = tmp / "run"
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     (out / "phases.txt").write_text("".join(f"{n} {t}\n" for n, t in phases))
-    (out / "serial.log").write_bytes(b"console output\n")
+    (out / "serial.log").write_bytes(serial)
     for name, text in (files or {}).items():
         (out / name).write_text(text)
     proc = subprocess.run(
         [sys.executable, str(HERE / "verdict.py"), str(out), "900", str(qemu_status), *extra],
         capture_output=True,
         text=True,
+        env={**os.environ, "ATHANOR_ISO_DIGEST": digest},
     )
     return proc.returncode, (out / "verdict.md").read_text()
 
@@ -929,6 +933,90 @@ def test_origin_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert proc.stdout.strip() == expected, f"{shell} {cmdline!r} {content!r}: {proc.stdout!r} != {expected!r}"
 
 
+def test_booted_digest_is_compared(tmp: pathlib.Path) -> None:
+    """The digest the installed system booted, read from `bootc status --json` in the guest,
+    must be the one the ISO was built from (issue 402). A mismatch, no answer, and a status
+    that is not JSON, names no booted image or carries no digest fail the verdict, with the
+    reason; the digest is recorded either way. A run given no digest (the upgrade case) is
+    not judged on it."""
+    want = "sha256:" + "a" * 64
+    other = "sha256:" + "b" * 64
+
+    def status(digest):
+        image = {"imageDigest": digest} if digest is not None else {}
+        return json.dumps({"status": {"booted": {"image": image}, "staged": None}}).encode()
+
+    def answer(raw: bytes) -> bytes:
+        return b"echo of the typed line: BOOTED_%s %s\r\nBOOTED_STATUS " + raw + b"\r\n"
+
+    code, report = verdict(tmp, COMPLETE, serial=answer(status(want)), digest=want)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and data["checks"]["booted-digest"] is True, report
+    assert data["digest"] == {"expected": want, "booted": want}, data
+
+    code, report = verdict(tmp, COMPLETE, serial=answer(status(other)), digest=want)
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code != 0 and data["checks"]["booted-digest"] is False, report
+    assert f"MISMATCH, booted {other}, expected {want}" in report, report
+    assert data["digest"] == {"expected": want, "booted": other}, data
+
+    unreadable = {
+        "no answer": b"console output\nBOOTED_%s %s\n",
+        "waiting for the lock": answer(b""),
+        "not json": answer(b"Waiting for sysroot lock..."),
+        "no booted image": answer(b'{"status": {"booted": null}}'),
+        "no digest": answer(status(None)),
+        "not a digest": answer(status("latest")),
+        "digest not a string": answer(status(7)),
+    }
+    for name, serial in unreadable.items():
+        code, report = verdict(tmp, COMPLETE, serial=serial, digest=want)
+        data = json.loads((tmp / "run" / "verdict.json").read_text())
+        assert code != 0 and data["checks"]["booted-digest"] is False, (name, report)
+        assert data["digest"]["booted"] is None, (name, data)
+        assert "NO ANSWER" in report or "UNREADABLE" in report, (name, report)
+
+    code, report = verdict(tmp, COMPLETE, serial=b"console output\n")
+    data = json.loads((tmp / "run" / "verdict.json").read_text())
+    assert code == 0 and "booted-digest" not in data["checks"] and "digest" not in data, data
+
+
+def test_booted_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
+    """BOOTED_PROBE run verbatim with `sudo` as a pass-through and a `bootc` that prints a
+    pretty-printed status: the answer is one line the verdict reads the digest from. And
+    run_iso_test.sh refuses a case that is not the upgrade one without ISO_DIGEST."""
+    sys.path.insert(0, str(HERE))
+    import console
+    import verdict as verdict_module
+
+    work = tmp / "booted"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    (work / "bin" / "sudo").write_text('#!/bin/sh\n[ "$1" = -S ] && shift\ncat >/dev/null\nexec "$@"\n')
+    (work / "bin" / "bootc").write_text(
+        '#!/bin/sh\nprintf \'{\\n  "status": {\\n    "booted": {"image": {"imageDigest": "sha256:%s"}}\\n  }\\n}\\n\' "$(printf a%.0s $(seq 64))"\n'
+    )
+    for name in ("sudo", "bootc"):
+        (work / "bin" / name).chmod(0o755)
+    (work / "probe.sh").write_bytes(console.BOOTED_PROBE + b"\n")
+    for shell in ("sh", "bash"):
+        proc = subprocess.run(
+            [shell, str(work / "probe.sh")], capture_output=True, check=False,
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}"},
+        )
+        ok, text, booted = verdict_module.check_booted_digest(proc.stdout, "sha256:" + "a" * 64)
+        assert ok and booted == "sha256:" + "a" * 64, (shell, proc.stdout, text)
+
+    iso = tmp / "fake.iso"
+    iso.write_bytes(b"")
+    env = {k: v for k, v in os.environ.items() if k != "ISO_DIGEST"}
+    env.update(ISO_REPOSITORY=ISO_REPOSITORY)
+    proc = subprocess.run(["bash", str(HERE / "run_iso_test.sh"), str(iso), str(tmp / "never")],
+                          capture_output=True, text=True, env=env)
+    assert proc.returncode == 2 and "ISO_DIGEST" in proc.stderr, proc
+    assert not (tmp / "never").exists(), "run_iso_test.sh wrote its output before refusing"
+
+
 def test_mok_missing_fails(tmp: pathlib.Path) -> None:
     """A desktop on a machine whose certificate never reached MokList is a fail: the
     installer's request, its password or MokManager broke, and Secure Boot cannot hold."""
@@ -1309,6 +1397,8 @@ def main() -> int:
             test_upgrade_clears_the_last_runs_files,
             test_upgrade_deadline_ends_inside_the_job,
             test_plain_case_unchanged,
+            test_booted_digest_is_compared,
+            test_booted_probe_answers_from_the_guest,
             test_mok_missing_fails,
             test_secure_boot_case_requires_enforcement,
             test_console_answers_the_mok_request,

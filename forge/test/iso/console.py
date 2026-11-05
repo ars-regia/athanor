@@ -350,6 +350,17 @@ def origin_probe(repository: str) -> bytes:
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
 
+# Ask the guest which image it booted (issue 402). The whole `bootc status --json` goes back
+# on one line and verdict.py reads the booted digest from it on the host, so a status that
+# cannot be read is a line the verdict cannot parse and not a guess made here. Under
+# `timeout`, because bootc waits for the sysroot lock while greenboot holds it and prints
+# no JSON until it has it. As with the other probes printf assembles the marker.
+BOOTED_PROBE = (
+    b"s=$(printf 'collaudo\\n' | sudo -S timeout 60 bootc status --json | tr -d '\\r\\n');"
+    b" printf 'BOOTED_%s %s\\n' STATUS \"$s\""
+)
+BOOTED_PROBE_WAIT = 20.0
+
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
 GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
@@ -623,6 +634,8 @@ def main() -> int:
         note("karg-asked")
         ask(origin_probe(iso_repository), ORIGIN_PROBE_WAIT)
         note("origin-asked")
+        ask(BOOTED_PROBE, BOOTED_PROBE_WAIT)
+        note("booted-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 

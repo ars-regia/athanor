@@ -93,7 +93,7 @@ jobs:
           TIMEOUT: "1500"
           VCPUS: "4"
           MEMORY_MIB: "6144"
-        run: ISO_REPOSITORY="${REGISTRY}/athanor-system" bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test
+        run: ISO_DIGEST="$(<target/default-digest)" ISO_REPOSITORY="${REGISTRY}/athanor-system" bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test
 
       # The same ISO again on firmware with Secure Boot enforced (#252, #145): the Athanor
       # certificate reaches MokList through the installer's request and MokManager, and the
@@ -107,7 +107,7 @@ jobs:
           TIMEOUT: "1500"
           VCPUS: "4"
           MEMORY_MIB: "6144"
-        run: ISO_REPOSITORY="${REGISTRY}/athanor-system" bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test-sb
+        run: ISO_DIGEST="$(<target/default-digest)" ISO_REPOSITORY="${REGISTRY}/athanor-system" bash forge/test/iso/run_iso_test.sh "${ISO_PATH}" ./iso-test-sb
 
       # These run after a failure as well, because a run that broke halfway is
       # exactly when its screenshots and console are worth having. They are conditioned
