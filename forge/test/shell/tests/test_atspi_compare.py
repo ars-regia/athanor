@@ -171,6 +171,14 @@ class CompareTest(unittest.TestCase):
         ]
         _, failures = compare.compare(reference, [node("toggle button", "A switch")])
         self.assertEqual(failures, ["label 'A switch': missing"])
+        # A label beside a check box that is no gallery switch is its own element too.
+        reference = [
+            node("panel", ""),
+            dict(node("check box", "Option one"), depth=1),
+            dict(node("label", "Option one"), depth=1),
+        ]
+        _, failures = compare.compare(reference, [node("check box", "Option one")])
+        self.assertEqual(failures, ["label 'Option one': missing"])
 
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
