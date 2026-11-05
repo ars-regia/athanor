@@ -231,7 +231,7 @@ class Promote(Tool):
         self.assertEqual(copies, [])
 
     def promote_iso(self, run="412"):
-        """The iso job: promote-iso.sh on the plan directory, after the promote job."""
+        """The ISO step: promote-iso.sh on the plan, after promote.sh in the promote job."""
         (self.dir / "calls.log").unlink(missing_ok=True)
         r = subprocess.run(
             ["bash", str(PROMOTE_ISO), run, str(self.artifacts / "promotion.json")],
@@ -253,7 +253,7 @@ class Promote(Tool):
         self.assertIn(f"{REG}/athanor-iso:stable -> {ISO}", r.stdout)
 
     def test_the_iso_job_refuses_once_a_later_promotion_moved_the_system(self):
-        """A late re-run of an older promotion's iso job would put the ISO behind the system."""
+        """A late re-run of an older promotion's job would put the ISO behind the system."""
         self.published()
         r, _ = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)

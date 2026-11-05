@@ -3,11 +3,13 @@ name: Promote a system image run to stable
 # Moves :stable of the system images of one build run on the evidence of that run, by digest
 # (doc_update_delivery.md UD3-UD5; doc_pipeline.md PL60; ADR-0103 D23; ADR-0106). The plan job
 # checks the evidence and the dwell, signs the evidence bundle keylessly, copies it off GitHub
-# and verifies the copy; the promote job runs only after the release approval and checks
-# everything again before it moves a tag; the github-release job then publishes the GitHub
+# and verifies the copy; the promote job runs only after the release approval, the one a
+# promotion asks for, checks everything again before it moves a tag, and moves the installer
+# ISO's :stable last (ADR-0114, ADR-0136); the github-release job then publishes the GitHub
 # Release of the promotion (doc_pipeline.md PL42, ADR-0131). No signing key is involved. The
 # logic is in system/fetch-evidence.sh, scripts/ci/promotion-plan.sh, system/promote.sh (both on
-# scripts/ci/promotion-record.sh), system/evidence-bundle.sh and system/github-release.sh.
+# scripts/ci/promotion-record.sh), system/promote-iso.sh, system/evidence-bundle.sh and
+# system/github-release.sh.
 
 on:
   workflow_dispatch:
@@ -158,62 +160,21 @@ jobs:
           nix shell --inputs-from . nixpkgs#cosign -c bash system/evidence-bundle.sh verify "${EVIDENCE_REF}" artifacts
       - name: ⭐ Check again and promote (system/promote.sh)
         run: bash system/promote.sh ${OVERRIDE:+--hardware-override "$OVERRIDE"} "${RUN_ID}" | tee -a "${GITHUB_STEP_SUMMARY}"
-
-  # A job of its own, so "re-run failed jobs" retries the ISO alone once the system images moved.
-  iso:
-    name: Point the installer ISO's stable at the run
-    needs: [promote]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: release
-    permissions:
-      contents: read
-      packages: write
-      actions: read
-    steps:
-      - name: Release only from iso-v0 (PL54, PL60)
-        run: '[[ $GITHUB_REF == refs/heads/iso-v0 ]] || { echo "::error::promote-stable.yml runs only on refs/heads/iso-v0, not $GITHUB_REF"; exit 1; }'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Install Nix
-        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
-        with:
-          extra_nix_config: "experimental-features = nix-command flakes"
-      - name: Log in to the registries
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_ACTOR: ${{ github.actor }}
-          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
-          EVIDENCE_REGISTRY: ${{ vars.EVIDENCE_REGISTRY }}
-          EVIDENCE_REGISTRY_USER: ${{ vars.EVIDENCE_REGISTRY_USER }}
-          EVIDENCE_REGISTRY_TOKEN: ${{ secrets.EVIDENCE_REGISTRY_TOKEN }}
-        run: bash system/promote-login.sh
-      - name: 📥 Fetch the run's evidence again (system/fetch-evidence.sh)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash system/fetch-evidence.sh "${RUN_ID}" artifacts
-      - name: 📎 The approved plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
-        with:
-          name: promotion-${{ inputs.run_id }}
-          path: approved
-      - name: 🔎 Verify the copy off GitHub against the approved plan
-        run: |
-          cp approved/promotion.json artifacts/promotion.json
-          nix shell --inputs-from . nixpkgs#cosign -c bash system/evidence-bundle.sh verify "${EVIDENCE_REF}" artifacts
       - name: 💿 Point the installer ISO's stable at the ISO the acceptance tested (system/promote-iso.sh)
-        # After the system images, so the ISO users download never installs a build :stable
-        # has not reached (doc_pipeline.md PL35, ADR-0114). The digest is the verified plan's,
-        # which promote.sh found unchanged before it moved anything; promote-iso.sh refuses once
-        # athanor-system:stable names another build, so a late re-run never moves the ISO back.
+        # The last step, after the system images, so the ISO users download never installs a
+        # build :stable has not reached (doc_pipeline.md PL35, ADR-0114). The digest is the
+        # verified plan's, which promote.sh found unchanged before it moved anything. A re-run
+        # of this job after a failed ISO step asks for the approval again, finds the plan
+        # applied in promote.sh, which then moves nothing, and retries the ISO (ADR-0136);
+        # promote-iso.sh refuses once athanor-system:stable names another build, so a late
+        # re-run never moves the ISO back.
         run: bash system/promote-iso.sh "${RUN_ID}" artifacts/promotion.json | tee -a "${GITHUB_STEP_SUMMARY}"
 
   # After the promotion, with no environment: the release approval already covered the Release
   # (ADR-0131 decision 1). contents: write is the only write, and only github-release.sh sees it.
   github-release:
     name: Publish the GitHub Release
-    needs: [iso]
+    needs: [promote]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
