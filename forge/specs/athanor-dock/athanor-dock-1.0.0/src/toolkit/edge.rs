@@ -4,7 +4,7 @@
 
 use athanor_dock::placement::{Anchor, Placement};
 use athanor_style::dock;
-use athanor_toolkit::driver::{Anchor as Edges, KeyboardInteractivity, Layer, LayerOptions, Side};
+use athanor_sal::driver::{Anchor as Edges, KeyboardInteractivity, Layer, LayerOptions, Side};
 
 /// The layer shell namespace cosmic-comp and the rig know the dock by.
 pub const NAMESPACE: &str = "athanor-dock";

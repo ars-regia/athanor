@@ -52,7 +52,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
 - **Our applications use libadwaita** (`libadwaita-rs` on GTK4) and its stylesheet unchanged. The shell stays GTK4 with the CSS generated from the tokens (SH4, SH5): its surfaces are not windows, and libadwaita does not cover them.
 - **The tokens file stays the single source** of the shell's look. This document revises its values (VL10); it does not replace it.
 - **Revision 3 binds only the new toolkit** (maintainer decision, 2026-10-19). The GTK shell stays on today's tokens until it is removed, and #574 narrows to the toolkit's tokens.
-- **What the new toolkit takes** (proposed, revision 3). The new toolkit is `athanor-toolkit` (`doc_own_stack.md` OS7): the surfaces it draws and the theme generated for it from the tokens take the passages of revision 3, and with them the values of VL10 that revision 2 set and that were never applied (VL12 step 1, #574).
+- **What the new toolkit takes** (proposed, revision 3). The new toolkit is `athanor-sal` (`doc_own_stack.md` OS7): the surfaces it draws and the theme generated for it from the tokens take the passages of revision 3, and with them the values of VL10 that revision 2 set and that were never applied (VL12 step 1, #574).
 - **What the GTK shell keeps** (proposed, revision 3). It receives no rule of revision 3 and no value of VL10 it does not already have, and keeps revision 2's other rules.
 
 **VL2. Two families of materials.**
@@ -198,7 +198,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
   - **`acc_fg`**, for lines, rings, indicators and thin fills (the focus ring, a field's border and caret, the dock's running indicator, a slider's highlight): the accent with its OKLab lightness raised in the dark variants and lowered in the light ones, in steps of 0.005, until it reaches 3:1 against `surf`, `surf2`, `bar` and `chip`. A preset that already reaches 3:1 is unchanged.
   - **`acc`**, for filled controls, with `acc_ink` on top: the preset itself, unless neither white nor `acc_ink` reaches 4.5:1 on it; then its OKLab lightness is lowered in the same steps until white does. Of the nine presets only red is moved, from `#e62d42` to `#e2283f`.
   - The generator and `appearance.rs` apply the same rules; a generated table of each preset's colours makes a test fail when they disagree. `[accent.presets]` names the nine presets in `tokens.toml`.
-- **Revision 3, for the toolkit's theme only** (proposed, revision 3). The values above that the GTK shell never received (VL12 step 1, #574) are applied to the theme generated for `athanor-toolkit`, together with the following. Where a revised table would change a value that the GTK templates read today, the GTK sheet keeps today's value until its surface is removed; how the file carries both is for the plan of step 6 to choose.
+- **Revision 3, for the toolkit's theme only** (proposed, revision 3). The values above that the GTK shell never received (VL12 step 1, #574) are applied to the theme generated for `athanor-sal`, together with the following. Where a revised table would change a value that the GTK templates read today, the GTK sheet keeps today's value until its surface is removed; how the file carries both is for the plan of step 6 to choose.
   - **`[radius]`:** adds `shape = "continuous"`; `dock = 22` and `panel = 30`. The dock's highlights (16) and a 2×1 tile (18) follow by the concentric rule of VL7; a 1×1 tile takes `round`.
   - **New `[size.icon]`:** `bar = 16`, `dock = 48`, `dock_compact = 40` (outputs up to 800 px tall), `launcher_row = 32`, `library = 96`, `notification = 40`, `cc_disc = 36`, `cc_glyph = 20`.
   - **New `[material]`:** `alpha_light = 0.90`, `alpha_dark = 0.88`, `blur = 20` (px, a dual Kawase blur at half resolution), `saturate = 1.2`, `highlight = 0.10` (VL9). VL11 bounds the alphas from below and the saturation from above.
@@ -244,7 +244,7 @@ The GTK shell stays until 1.0 and gets nothing new (decision of 2026-10-18), so 
 
 Revision 3 adds three steps for the toolkit (proposed, revision 3). For the GTK shell, revision 2 stays the approved text and the GTK shell keeps what its steps have already given it (VL1); the values of VL10 that it does not already have, the remainder of step 1 (#574), go only to the toolkit's theme, under step 6.
 
-6. **The toolkit's theme:** the theme of `athanor-toolkit` generated from the tokens, with the values of VL10 and its revision 3 tables, `ink3` retuned, the composited contrast check and the extended motion test.
+6. **The toolkit's theme:** the theme of `athanor-sal` generated from the tokens, with the values of VL10 and its revision 3 tables, `ink3` retuned, the composited contrast check and the extended motion test.
 7. **Materials:** the frame-time measurement and the tier choice (where and when the frame time is measured is spike VL-S5), M1's wallpaper snapshot, M2's live blur, and `reduce-transparency` in the schema of VL4 (spike VL-S5 opens this step).
 8. **The surfaces,** one at a time, starting with the dock (#616). Each is judged on the board beside the reference that beats it in #616, not only beside the GTK surface it replaces (`doc_shell_standard.md` ST8).
 

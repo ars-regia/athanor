@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use athanor_style::appearance::Appearance;
 use athanor_style::dock;
-use athanor_toolkit::{Rgba, Theme};
+use athanor_sal::{Rgba, Theme};
 
 /// The themes of the dock's surfaces and of its menus.
 pub struct Look {

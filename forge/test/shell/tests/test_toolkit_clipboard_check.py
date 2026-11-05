@@ -37,7 +37,7 @@ class ShownTest(unittest.TestCase):
         self.assertEqual(check.shown("abc\n\n"), "")
 
     def test_the_toolkits_messages_are_not_the_fields_text(self):
-        log = "abc\nathanor-toolkit: nothing pasted: the text is not UTF-8\n"
+        log = "abc\nathanor-sal: nothing pasted: the text is not UTF-8\n"
         self.assertEqual(check.shown(log), "abc")
 
     def test_before_the_first_edit_there_is_no_text(self):

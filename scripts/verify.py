@@ -1048,12 +1048,12 @@ def check_os_release():
 # toolkit-boundary: the toolkit stays ready to leave the repository (ADR-0126)
 # --------------------------------------------------------------------------- #
 
-TOOLKIT = "system/athanor-toolkit"
+TOOLKIT = "system/athanor-sal"
 # SPDX identifier -> the licence file that carries its text.
 TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
 # The gallery is a client of the toolkit outside the workspace: its one dependency.
 GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
-GALLERY_DEPENDENCY = {"athanor-toolkit": {"path": ".."}}
+GALLERY_DEPENDENCY = {"athanor-sal": {"path": ".."}}
 
 
 def dependency_tables(data, kinds):
@@ -1084,7 +1084,7 @@ def gallery_problems(root):
         for name, dep in deps.items():
             if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
                 out.append(f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
-                           'the gallery depends only on athanor-toolkit = { path = ".." }')
+                           'the gallery depends only on athanor-sal = { path = ".." }')
     return out
 
 
@@ -3496,9 +3496,9 @@ OWN_LICENCE_EXCEPTIONS = {
         ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
     # The toolkit is permissive so that applications outside Athanor can use it (ADR-0121,
     # doc_own_stack.md OS7).
-    "system/athanor-toolkit/Cargo.toml":
+    "system/athanor-sal/Cargo.toml":
         ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
-    "system/athanor-toolkit/gallery/Cargo.toml":
+    "system/athanor-sal/gallery/Cargo.toml":
         ("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None),
 }
 # The crate whose dependency forces the greeter's exception above; a crate that depends on it

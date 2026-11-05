@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """atspi_compare.py <reference.json> <transcript.json> [--own-compositor <preset|-> <dock|-> <lang>]
 
-doc_own_stack.md, OS8: a surface moves from GTK4 to athanor-toolkit only when what a screen
+doc_own_stack.md, OS8: a surface moves from GTK4 to athanor-sal only when what a screen
 reader is told about it holds every name, role, state and value of the GTK version. Both files
 are atspi_check.py's ATSPI_TRANSCRIPT; the reference is the GTK chooser's, recorded. Prints one
 line per element of the reference with its verdict, and fails when the transcript lacks an

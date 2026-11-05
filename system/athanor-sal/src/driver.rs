@@ -750,7 +750,7 @@ impl Shell {
             #[allow(unsafe_code)]
             let gpu = unsafe { Gpu::new(&self.conn, shown.wl_surface()) }
                 .map_err(|e| format!("{RENDERER}=gpu: {e}"))?;
-            eprintln!("athanor-toolkit: vello_gpu on {}", gpu.adapter);
+            eprintln!("athanor-sal: vello_gpu on {}", gpu.adapter);
             Some(gpu)
         } else {
             None
@@ -1351,7 +1351,7 @@ impl App {
             .show_popup(id, widget, self.pressed_at, menu, Side::Bottom, true)
         {
             Ok(surface) => self.field_menu = Some((surface, items)),
-            Err(error) => eprintln!("athanor-toolkit: no context menu for the field: {error}"),
+            Err(error) => eprintln!("athanor-sal: no context menu for the field: {error}"),
         }
     }
 
@@ -1540,7 +1540,7 @@ impl App {
             .shell
             .show_popup(id, widget, None, tip, Side::Bottom, false)
         {
-            eprintln!("athanor-toolkit: no tooltip: {error}");
+            eprintln!("athanor-sal: no tooltip: {error}");
         }
     }
 

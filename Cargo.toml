@@ -25,7 +25,7 @@ members = [
   "system/athanor-services",
   "system/athanor-unit",
   "system/athanor-trust-state",
-  "system/athanor-toolkit",
+  "system/athanor-sal",
   "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0",
 ]
 

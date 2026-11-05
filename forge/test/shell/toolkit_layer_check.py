@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""toolkit_layer_check.py - the dock plan, task 3: athanor-toolkit's layer surfaces as outputs
+"""toolkit_layer_check.py - the dock plan, task 3: athanor-sal's layer surfaces as outputs
 are added, removed, added again and scaled from 1 to 1.5, against sway on its headless backend,
 which can add and remove outputs (athanor-sulphur's fixture cannot yet: C1 task 8).
 
-Runs inside the rig. Starts sway, then `athanor-toolkit-layer` with WAYLAND_DEBUG, which opens one
+Runs inside the rig. Starts sway, then `athanor-sal-layer` with WAYLAND_DEBUG, which opens one
 layer surface per output; after each step, the client's own trace must hold exactly one live
 `zwlr_layer_surface_v1` per output sway lists, and after the scale change a buffer drawn at 1.5
 times the size its viewport maps it to.
@@ -17,7 +17,7 @@ import sys
 import time
 from pathlib import Path
 
-CLIENT = "/out/bin/athanor-toolkit-layer"
+CLIENT = "/out/bin/athanor-sal-layer"
 TRACE = Path("/out/toolkit-layer.trace")
 TIMEOUT = 10
 

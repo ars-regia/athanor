@@ -6,7 +6,7 @@
 mod tree;
 
 use athanor_i18n::Catalog;
-use athanor_toolkit::{driver, Event};
+use athanor_sal::{driver, Event};
 use std::process::ExitCode;
 
 /// The GTK chooser's gettext domain, whose catalogue this chooser reads.
@@ -24,7 +24,7 @@ fn main() -> ExitCode {
     });
     let chooser = tree::build(&catalog, catalog.is_rtl());
     let choices = chooser.choices;
-    let on_event = move |_: &mut athanor_toolkit::Ui, event: Event| {
+    let on_event = move |_: &mut athanor_sal::Ui, event: Event| {
         if let Event::Selected(id) = event {
             if let Some((_, group, name)) = choices.iter().find(|c| c.0 == id) {
                 println!("{group}: {name}");

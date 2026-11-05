@@ -5,7 +5,7 @@
       Inside a scene (rig.sh measure-chooser runs it as RIG_HOLD): the stripped size of
       <binary>, its start-up time to the first frame and its window's buffer over [runs] traced
       launches (5), and its memory one minute after one more launch, untraced. For
-      athanor-toolkit's chooser, ATHANOR_TOOLKIT_RENDERER (cpu or gpu) picks the renderer, and
+      athanor-sal's chooser, ATHANOR_TOOLKIT_RENDERER (cpu or gpu) picks the renderer, and
       the record names it and the adapter wgpu picked.
   measure_chooser.py lines <toolkit-dir>
       The toolkit's lines, split by area, counted as tokei counts code, comments and blanks.
@@ -35,8 +35,8 @@ RUNS = 5
 MEMORY_AFTER_S = 60
 FIRST_FRAME_TIMEOUT_S = 30
 RENDERER = "ATHANOR_TOOLKIT_RENDERER"
-# The line athanor-toolkit prints on stderr once wgpu has picked an adapter.
-ADAPTER = "athanor-toolkit: vello_gpu on "
+# The line athanor-sal prints on stderr once wgpu has picked an adapter.
+ADAPTER = "athanor-sal: vello_gpu on "
 
 # A request in either trace: libwayland's "[ts] {queue} -> iface#id.req(args)" (iface@id before
 # 1.24) or wayland-backend's "[ts] -> iface@id.req(args)".

@@ -11,7 +11,7 @@ spec = importlib.util.spec_from_file_location("verify", ROOT / "scripts" / "veri
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
-MANIFEST = '[package]\nname = "athanor-toolkit"\nlicense = "MIT OR Apache-2.0"\n{body}'
+MANIFEST = '[package]\nname = "athanor-sal"\nlicense = "MIT OR Apache-2.0"\n{body}'
 
 
 class ToolkitBoundary(unittest.TestCase):
@@ -68,7 +68,7 @@ class ToolkitBoundary(unittest.TestCase):
         self.assertTrue(verify.toolkit_boundary_problems(self.root))
 
     def test_a_licence_file_the_license_does_not_name_fails(self):
-        (self.dir / "Cargo.toml").write_text('[package]\nname = "athanor-toolkit"\nlicense = "MIT"\n')
+        (self.dir / "Cargo.toml").write_text('[package]\nname = "athanor-sal"\nlicense = "MIT"\n')
         out = verify.toolkit_boundary_problems(self.root)
         self.assertEqual(out, [f"{verify.TOOLKIT}/LICENSE-APACHE: present, but license = 'MIT' does not name it"])
 
@@ -79,20 +79,20 @@ class ToolkitBoundary(unittest.TestCase):
     def gallery(self, body):
         (self.dir / "gallery").mkdir(exist_ok=True)
         (self.dir / "gallery" / "Cargo.toml").write_text(
-            '[package]\nname = "athanor-toolkit-gallery"\n' + body)
+            '[package]\nname = "athanor-sal-gallery"\n' + body)
         return self.problems()
 
     def test_the_gallery_may_depend_on_the_toolkit_by_its_path(self):
-        self.assertEqual(self.gallery('[dependencies]\nathanor-toolkit = { path = ".." }\n'), [])
+        self.assertEqual(self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'), [])
 
     def test_a_gallery_that_adds_the_i18n_crate_fails(self):
-        out = self.gallery('[dependencies]\nathanor-toolkit = { path = ".." }\n'
+        out = self.gallery('[dependencies]\nathanor-sal = { path = ".." }\n'
                            'athanor-i18n = { path = "../../athanor-i18n" }\n')
         self.assertEqual(len(out), 1)
         self.assertIn("athanor-i18n", out[0])
 
     def test_a_gallery_with_dev_dependencies_patch_or_replace_fails(self):
-        base = '[dependencies]\nathanor-toolkit = { path = ".." }\n'
+        base = '[dependencies]\nathanor-sal = { path = ".." }\n'
         for extra in ('[dev-dependencies]\nserde = "1"\n',
                       '[target.\'cfg(unix)\'.dev-dependencies]\nserde = "1"\n',
                       '[dev_dependencies]\nserde = "1"\n',
@@ -104,7 +104,7 @@ class ToolkitBoundary(unittest.TestCase):
             self.assertTrue(self.gallery(base + extra), extra)
 
     def test_a_gallery_that_points_the_toolkit_elsewhere_fails(self):
-        self.assertTrue(self.gallery('[dependencies]\nathanor-toolkit = { path = "../other" }\n'))
+        self.assertTrue(self.gallery('[dependencies]\nathanor-sal = { path = "../other" }\n'))
 
 
 if __name__ == "__main__":

@@ -386,7 +386,7 @@ impl IconTheme {
                 Ok(image) => return Ok(image),
                 // The error names the path, escaped.
                 Err(error) => {
-                    eprintln!("athanor-toolkit: icon {icon:?}: {error}; drawing {FALLBACK_ICON}")
+                    eprintln!("athanor-sal: icon {icon:?}: {error}; drawing {FALLBACK_ICON}")
                 }
             }
         }
@@ -556,7 +556,7 @@ mod tests {
     /// A fresh directory holding `files`, each a path relative to it and its bytes.
     pub(super) fn scratch(test: &str, files: &[(&str, &[u8])]) -> Result<PathBuf, Error> {
         let dir = std::env::temp_dir().join(format!(
-            "athanor-toolkit-icon-{}-{test}",
+            "athanor-sal-icon-{}-{test}",
             std::process::id()
         ));
         if dir.exists() {

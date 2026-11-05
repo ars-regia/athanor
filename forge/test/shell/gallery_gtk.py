@@ -1,8 +1,8 @@
 #!/usr/bin/python3
 """gallery_gtk.py [--lang en|it] [--rtl] [--page <name>]
 
-doc_own_stack.md, OS10: the GTK 4 twin of athanor-toolkit's gallery
-(system/athanor-toolkit/gallery). It shows the same pages with GTK widgets, from the same
+doc_own_stack.md, OS10: the GTK 4 twin of athanor-sal's gallery
+(system/athanor-sal/gallery). It shows the same pages with GTK widgets, from the same
 strings.tsv, and takes the same command line. What a screen reader is told about it, and how it
 draws, are the references the toolkit's gallery is checked against (rig.sh orca gallery, atspi
 gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start.
@@ -21,7 +21,7 @@ from cases import GALLERY_PAGES  # noqa: E402
 
 STRINGS = (
     Path(__file__).resolve().parents[3]
-    / "system/athanor-toolkit/gallery/strings.tsv"
+    / "system/athanor-sal/gallery/strings.tsv"
 )
 LANGUAGES = ("en", "it")
 
@@ -61,7 +61,7 @@ def group(title):
 
 
 def fill_page(page, container, text):
-    """The widgets of `page`, as system/athanor-toolkit/gallery/src/main.rs adds them."""
+    """The widgets of `page`, as system/athanor-sal/gallery/src/main.rs adds them."""
     if page == "buttons":
         container.append(Gtk.Label(label=text["label"], xalign=0))
         container.append(Gtk.Button(label=text["button"]))
