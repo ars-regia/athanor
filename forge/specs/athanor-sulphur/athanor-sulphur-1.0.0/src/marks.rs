@@ -17,10 +17,12 @@ use smithay::backend::renderer::element::memory::{
 };
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+    render_elements_from_surface_tree, KindEvaluation, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{AsRenderElements, Element, Id, Kind, RenderElement};
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
+use smithay::backend::renderer::utils::{
+    CommitCounter, DamageSet, OpaqueRegions, RendererSurfaceStateUserData,
+};
 use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::utils::bbox_from_surface_tree;
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, Space, Window};
@@ -30,7 +32,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
 use smithay::wayland::shell::wlr_layer::Layer;
 use std::cell::RefCell;
 
@@ -57,7 +59,7 @@ const DIVIDER: usize = 1;
 
 smithay::backend::renderer::element::render_elements! {
     pub Stacked<R> where R: ImportAll + ImportMem;
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceElement<R>,
     Line=SolidColorRenderElement,
     Corner=MemoryRenderBufferRenderElement<R>,
     Pixels=Pixels<R>,
@@ -113,6 +115,152 @@ where
         self.inner
             .draw(frame, src, dst, damage, opaque_regions, cache)
     }
+}
+
+/// A client's surface whose opaque region holds only the output's pixels it covers whole.
+/// Smithay rounds each edge of the logical region to the nearest pixel, so that at a fractional
+/// scale a pixel the region covers by half, which the client antialiases, counts as opaque and
+/// nothing is drawn beneath it (#978). wl_surface.set_opaque_region makes the region a hint
+/// that must not grow past what the client paints opaque; a pixel lost costs only overdraw.
+pub struct SurfaceElement<R: Renderer> {
+    inner: WaylandSurfaceRenderElement<R>,
+    /// The surface's opaque region, in its own logical pixels.
+    opaque: Vec<Rectangle<i32, Logical>>,
+}
+
+impl<R: Renderer + ImportAll> Element for SurfaceElement<R> {
+    fn id(&self) -> &Id {
+        self.inner.id()
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.inner.current_commit()
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
+        self.inner.location(scale)
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        self.inner.src()
+    }
+
+    fn transform(&self) -> Transform {
+        self.inner.transform()
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.inner.geometry(scale)
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        self.inner.damage_since(scale, commit)
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        if self.inner.alpha() < 1.0 {
+            return OpaqueRegions::default();
+        }
+        // The buffer is stretched over the element's whole pixels, as its damage is.
+        let size = self.inner.geometry(scale).size.to_f64();
+        let view = self.inner.view().dst.to_f64();
+        let ratio = Scale::from((size.w / view.w, size.h / view.h));
+        self.opaque
+            .iter()
+            .filter_map(|region| covered(*region, ratio))
+            .collect()
+    }
+
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+
+    fn kind(&self) -> Kind {
+        self.inner.kind()
+    }
+}
+
+impl<R> RenderElement<R> for SurfaceElement<R>
+where
+    R: Renderer + ImportAll,
+    R::TextureId: Texture + 'static,
+{
+    fn draw(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
+    ) -> Result<(), R::Error> {
+        self.inner
+            .draw(frame, src, dst, damage, opaque_regions, cache)
+    }
+
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
+        self.inner.underlying_storage(renderer)
+    }
+}
+
+/// The pixels `region` covers whole, at `ratio` pixels to a logical pixel: its start rounded up,
+/// its end down, and nothing when no pixel is left.
+fn covered(region: Rectangle<i32, Logical>, ratio: Scale<f64>) -> Option<Rectangle<i32, Physical>> {
+    let exact = region.to_f64().to_physical(ratio);
+    let start = exact.loc.to_i32_ceil();
+    let end = (exact.loc + exact.size).to_i32_floor();
+    (end.x > start.x && end.y > start.y).then(|| Rectangle::from_extremities(start, end))
+}
+
+/// The elements of `surface`'s tree, as `render_elements_from_surface_tree` makes them, each
+/// with its opaque region kept to the pixels it covers whole. Every client surface the
+/// compositor draws goes through it.
+pub fn surface_elements<R, E>(
+    renderer: &mut R,
+    surface: &WlSurface,
+    location: impl Into<Point<i32, Physical>>,
+    scale: impl Into<Scale<f64>>,
+    alpha: f32,
+    kind: impl Into<KindEvaluation>,
+) -> Vec<E>
+where
+    R: Renderer + ImportAll,
+    R::TextureId: Clone + 'static,
+    E: From<SurfaceElement<R>>,
+{
+    let mut regions: Vec<(Id, Vec<Rectangle<i32, Logical>>)> = Vec::new();
+    with_surface_tree_downward(
+        surface,
+        (),
+        |_, _, _| TraversalAction::DoChildren(()),
+        |surface, states, _| {
+            let opaque = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .and_then(|data| data.lock().ok()?.opaque_regions().map(<[_]>::to_vec));
+            if let Some(opaque) = opaque {
+                regions.push((Id::from_wayland_resource(surface), opaque));
+            }
+        },
+        |_, _, _| true,
+    );
+    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+        renderer, surface, location, scale, alpha, kind,
+    )
+    .into_iter()
+    .map(|inner| {
+        let opaque = regions
+            .iter()
+            .position(|(id, _)| id == inner.id())
+            .map(|at| regions.swap_remove(at).1)
+            .unwrap_or_default();
+        E::from(SurfaceElement { inner, opaque })
+    })
+    .collect()
 }
 
 /// The black behind a full-screen window, whose element is `surface`'s for its whole life.
@@ -734,7 +882,7 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + Texture + 'static,
 {
-    render_elements_from_surface_tree::<_, Stacked<R>>(
+    surface_elements::<_, Stacked<R>>(
         renderer,
         surface,
         (at - place.origin).to_physical_precise_round(place.scale),
@@ -912,13 +1060,24 @@ where
     let layers = |renderer: &mut R, layers: Vec<&LayerSurface>, elements: &mut Vec<Stacked<R>>| {
         for layer in layers {
             if let Some(geometry) = map.layer_geometry(layer) {
-                elements.extend(AsRenderElements::<R>::render_elements::<Stacked<R>>(
-                    layer,
-                    renderer,
-                    geometry.loc.to_physical_precise_round(scale),
-                    Scale::from(scale),
-                    1.0,
-                ));
+                // A layer surface's popups stand above it.
+                let at = geometry.loc.to_physical_precise_round(scale);
+                let surface = layer.wl_surface();
+                let tree = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
+                    surface_elements::<_, Stacked<R>>(
+                        renderer,
+                        surface,
+                        at,
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                };
+                for (popup, offset) in PopupManager::popups_for_surface(surface) {
+                    let offset = (offset - popup.geometry().loc).to_physical_precise_round(scale);
+                    elements.extend(tree(renderer, popup.wl_surface(), at + offset));
+                }
+                elements.extend(tree(renderer, surface, at));
             }
         }
     };
