@@ -137,6 +137,12 @@ class SpecNevr(unittest.TestCase):
     def test_a_conditional_fails_closed(self):
         self.assertEqual(self.nevr("Version: 1\nRelease: %{?dist}\n"), "")
 
+    def test_an_if_block_fails_closed(self):
+        self.assertEqual(self.nevr("%if 0\nVersion: 5\n%endif\nVersion: 1\nRelease: 2\n"), "")
+
+    def test_trailing_blanks_of_a_global_are_dropped(self):
+        self.assertEqual(self.nevr("%global a 2 \t\nVersion: 1\nRelease: %{a}.x\n"), "1-2.x")
+
 
 if __name__ == "__main__":
     unittest.main()
