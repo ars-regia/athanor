@@ -4,12 +4,10 @@
 # report fails on a difference without an entry and on an entry without a difference. The
 # greeter is left out of the report (doc_session.md SN12). Causes seen on the images:
 #
-#   #736: athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
-#   #918: at scale 1.5 cosmic-comp places a window at a fractional logical offset and athanor-sulphur at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides
+#   #918: at scale 1.5 both compositors place a window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)
 #   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
-#   #744: the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none
-#   #740: the launcher draws a text caret in its search entry that the cosmic-comp capture lacks
+#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)
 #
 # Decision 28 of doc_own_stack.md hides controls under the own compositor until their replacement
 # comes: one entry per case and hidden control, covering its absence and the move it causes, for
@@ -20,18 +18,8 @@
 
 [[difference]]
 case = "chooser-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "chooser-light-1.0-en"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "chooser-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-light-1.0-de"
@@ -40,18 +28,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "chooser-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "chooser-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-light-1.5-en"
@@ -60,13 +38,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "chooser-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-light-1.5-de"
@@ -75,13 +48,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "chooser-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-light-1.5-rtl"
@@ -90,13 +58,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-light-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "chooser-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-dark-1.0-en"
@@ -105,28 +68,13 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "chooser-dark-1.0-de"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
 
 [[difference]]
 case = "chooser-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "chooser-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "chooser-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-dark-1.5-en"
@@ -135,13 +83,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "chooser-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-dark-1.5-de"
@@ -150,13 +93,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "chooser-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "chooser-dark-1.5-rtl"
@@ -165,13 +103,8 @@ issue = 737
 
 [[difference]]
 case = "chooser-dark-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-light-1.0-en"
@@ -180,28 +113,13 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-light-1.0-de"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
 
 [[difference]]
 case = "bar-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "bar-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-light-1.5-en"
@@ -210,13 +128,8 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-light-1.5-de"
@@ -225,13 +138,8 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-light-1.5-rtl"
@@ -240,13 +148,8 @@ issue = 737
 
 [[difference]]
 case = "bar-light-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-dark-1.0-en"
@@ -255,28 +158,13 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-dark-1.0-de"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
 
 [[difference]]
 case = "bar-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "bar-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-dark-1.5-en"
@@ -285,13 +173,8 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-dark-1.5-de"
@@ -300,13 +183,8 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-dark-1.5-rtl"
@@ -315,793 +193,8 @@ issue = 737
 
 [[difference]]
 case = "bar-dark-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "bar-power-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-power-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-input-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-calendar-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-accessibility-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tiling-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-popups-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-notifications-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-tray-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-network-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-bluetooth-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-audio-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-battery-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "bar-shield-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "dock-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-light-1.0-en"
@@ -1110,28 +203,13 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "dock-light-1.0-de"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
 
 [[difference]]
 case = "dock-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "dock-light-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "dock-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-light-1.5-en"
@@ -1140,13 +218,8 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "dock-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-light-1.5-de"
@@ -1155,13 +228,8 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "dock-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-light-1.5-rtl"
@@ -1170,13 +238,8 @@ issue = 737
 
 [[difference]]
 case = "dock-light-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "dock-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-dark-1.0-en"
@@ -1185,28 +248,13 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "dock-dark-1.0-de"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
 
 [[difference]]
 case = "dock-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "dock-dark-1.0-rtl"
 cause = "cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)"
 issue = 737
-
-[[difference]]
-case = "dock-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-dark-1.5-en"
@@ -1215,13 +263,8 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-en"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "dock-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-dark-1.5-de"
@@ -1230,13 +273,8 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-de"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
-
-[[difference]]
-case = "dock-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "dock-dark-1.5-rtl"
@@ -1245,63 +283,13 @@ issue = 737
 
 [[difference]]
 case = "dock-dark-1.5-rtl"
-cause = "at scale 1.5 cosmic-comp places the window at a fractional logical offset, where athanor-sulphur places it at whole logical coordinates, so the divider and the outline's inner edge land one physical pixel apart on one or more sides"
+cause = "at scale 1.5 both compositors place the window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)"
 issue = 918
 
 [[difference]]
-case = "launcher-light-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.0-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.0-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.0-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
 case = "launcher-light-1.5-en"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
 
 [[difference]]
 case = "launcher-light-1.5-de"
@@ -1310,58 +298,8 @@ issue = 743
 
 [[difference]]
 case = "launcher-light-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "launcher-dark-1.0-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.0-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.0-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.0-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.0-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.0-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
 
 [[difference]]
 case = "launcher-dark-1.5-en"
@@ -1370,198 +308,43 @@ issue = 743
 
 [[difference]]
 case = "launcher-dark-1.5-de"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-de"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-de"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
 
 [[difference]]
 case = "launcher-dark-1.5-rtl"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "the launcher draws a text caret in its search entry that the cosmic-comp capture lacks"
-issue = 740
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
 cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
 issue = 743
-
-[[difference]]
-case = "layout-float-top-visible-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-1o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.0-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-2o-1.5-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-1o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.0-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-2o-1.5-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
-case = "layout-minimal-top-none-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-1o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.0-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-2o-1.5-land"
-cause = "the golden draws a pointer cursor at the top left of the two-output captures; athanor-sulphur draws none"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
 issue = 744
-
-[[difference]]
-case = "layout-float-top-auto-hide-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-none-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-bottom-visible-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-bottom-auto-hide-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-bottom-none-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-top-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-visible-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-auto-hide-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-bottom-visible-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-bottom-auto-hide-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-bottom-none-1o-1.0-land"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-top-visible-1o-1.0-port"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-bar-bottom-1o-1.0-port"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-minimal-top-none-1o-1.0-port"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
-
-[[difference]]
-case = "layout-float-bottom-visible-1o-1.0-port"
-cause = "athanor-sulphur clears to navy srgb(16,19,35) where cosmic-comp clears to grey srgb(39,41,42)"
-issue = 736
 
 [[difference]]
 case = "bar-light-1.0-en"
@@ -3324,11 +2107,6 @@ cause = "decision 28 hides the dock's application library button"
 issue = 836
 
 [[difference]]
-case = "layout-bar-bottom-1o-1.0-land"
-cause = "decision 28 hides the bar's application library button"
-issue = 836
-
-[[difference]]
 case = "layout-bar-bottom-1o-1.5-land"
 cause = "decision 28 hides the bar's application library button"
 issue = 836
@@ -3444,11 +2222,6 @@ cause = "decision 28 hides the bar's application library button"
 issue = 836
 
 [[difference]]
-case = "layout-bar-top-1o-1.0-land"
-cause = "decision 28 hides the bar's application library button"
-issue = 836
-
-[[difference]]
 case = "layout-minimal-top-visible-1o-1.0-land"
 cause = "decision 28 hides the bar's workspaces module"
 issue = 835
@@ -3536,11 +2309,6 @@ issue = 835
 [[difference]]
 case = "layout-float-top-visible-1o-1.0-port"
 cause = "decision 28 hides the dock's application library button"
-issue = 836
-
-[[difference]]
-case = "layout-bar-bottom-1o-1.0-port"
-cause = "decision 28 hides the bar's application library button"
 issue = 836
 
 [[difference]]
