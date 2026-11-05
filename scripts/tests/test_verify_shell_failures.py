@@ -53,6 +53,17 @@ class HiddenFailuresTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [1])
 
+    def test_the_constructs_listed_in_801_are_found(self):
+        for line in ("run 2>|/dev/null", "run >| /dev/null 2>&1", "run || { true; }",
+                     "run || { : }", "run || (exit 0)", "run || (true)", "run || echo x; true",
+                     "run || echo x; :"):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [1])
+        for line in ("run || (exit 1)", "run || { echo x; }", "run || echo x; true_value",
+                     "run || echo x; echo y", "run 2>|\"$log\""):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [])
+
     def test_a_bogus_here_document_does_not_hide_the_rest(self):
         for first in ("x=$((1<<2))", "read a <<<foo", 'echo "<<EOF"', "(( x = 1<<2 ))",
                       "echo '<<EOF'", "echo \\<<EOF"):

@@ -2145,11 +2145,14 @@ GUEST_SHELL_BUDGET = 8
 DEV_NULL = r"""["']?/dev/null["']?"""
 # Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
 # a quote that spans lines; text run through `eval` or `$(...)`; a construct split across byte
-# strings that the guest's shell joins with `+`.
+# strings that the guest's shell joins with `+`; a here-document opened inside a double-quoted
+# `$(...)` that spans lines (`out="$(cat <<EOF`), whose body is read as code (a false positive);
+# a `#` after an escaped space (`\ #`), read as a comment (a false negative).
+NOOP = r"(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)"
 HIDDEN_FAILURE = re.compile(
-    rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
-    r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
-    r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
+    rf"2>[>|]?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\|?\s*{DEV_NULL}\s+2>&1|2>&-"
+    rf"|\|\|\s*(?:{NOOP}(?![\w-])|\{{\s*{NOOP}\s*;?\s*\}}|\(\s*{NOOP}\s*\))"
+    r"|\|\|[^;|&]*;\s*(?:true|:)(?![\w-])"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
 # and the one error sent away is "No such process". Only a plain operand (no substitution) and
