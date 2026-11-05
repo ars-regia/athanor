@@ -108,6 +108,31 @@ def parse_security(text):
     }
 
 
+def parse_sysctl_config(text):
+    """`systemd-sysctl --cat-config` -> {key: [value, optional]}. The files come in the order
+    systemd-sysctl applies them, so the last assignment of a key is the one in force; a leading
+    `-` marks a key whose absence systemd-sysctl ignores."""
+    out = {}
+    for line in text.splitlines():
+        key, sep, value = line.strip().partition("=")
+        key = key.strip()
+        # ponytail: a glob key (Fedora's net.ipv4.conf.*.rp_filter) is not compared, sysctl
+        # cannot name it; expand it against /proc/sys if one ever matters.
+        if not sep or key[:1] in "#;" or any(c in key for c in "*?["):
+            continue
+        out[key.lstrip("-")] = [value.strip(), key.startswith("-")]
+    return out
+
+
+def parse_sysctl_values(text):
+    """`sysctl KEY...` -> {key: value}."""
+    return {
+        k: v.strip()
+        for k, sep, v in (line.partition(" = ") for line in text.splitlines())
+        if sep
+    }
+
+
 # --- collector --------------------------------------------------------------------------------
 
 NIX_EXPR = 'derivation { name = "probe-%d"; system = builtins.currentSystem; builder = "/bin/sh"; args = [ "-c" "echo ok > $out" ]; }'
@@ -199,6 +224,25 @@ def collect():
         ],
         sudo=True,
     ).strip()
+    # Each key the sysctl.d files set, and its value in the kernel now: a value written at boot
+    # and changed afterwards differs here, while the boot's warnings above say nothing of it.
+    facts["sysctl_set"] = parse_sysctl_config(
+        probe(
+            "sysctl:config",
+            ["/usr/lib/systemd/systemd-sysctl", "--cat-config"],
+            sudo=True,
+        )
+    )
+    # -e: a key the kernel lacks is left out of the answer instead of failing the whole read.
+    facts["sysctl_live"] = (
+        parse_sysctl_values(
+            probe(
+                "sysctl:live", ["sysctl", "-e", *sorted(facts["sysctl_set"])], sudo=True
+            )
+        )
+        if facts["sysctl_set"]
+        else {}
+    )
     state = probe("trust", ["cat", "/run/athanor-update/state.json"])
     try:
         doc = json.loads(state or "{}")
@@ -321,6 +365,14 @@ def evaluate(facts, expect, contacts, tunnel_port):
 
     if facts["sysctl"]:
         fail("sysctl", f"systemd-sysctl logged at boot: {facts['sysctl'][:200]}")
+    if not facts["sysctl_set"]:
+        fail("sysctl", "systemd-sysctl --cat-config sets no key")
+    for key, (want, optional) in sorted(facts["sysctl_set"].items()):
+        got = facts["sysctl_live"].get(key)
+        if got is None and not optional:
+            fail("sysctl", f"{key} is set to {want!r} but the kernel has no such key")
+        elif got is not None and got.split() != want.split():
+            fail("sysctl", f"{key} is {got!r} in the kernel, sysctl.d sets {want!r}")
 
     for state in ("masked", "disabled"):
         for unit in expect.get("units", {}).get(state, []):

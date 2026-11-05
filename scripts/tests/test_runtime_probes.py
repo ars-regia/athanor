@@ -15,6 +15,13 @@ spec.loader.exec_module(probes)
 
 EXPECT = probes.load(ACC / "expectations.toml")
 CONTACTS = probes.load(ROOT / "forge" / "config" / "contacts.toml")
+# The image's own sysctl.d files, as the guest's `systemd-sysctl --cat-config` prints them.
+SYSCTL = probes.parse_sysctl_config(
+    "".join(
+        p.read_text()
+        for p in sorted(ROOT.glob("forge/specs/*/SOURCES/usr/lib/sysctl.d/*.conf"))
+    )
+)
 
 
 def good():
@@ -26,6 +33,8 @@ def good():
         "trust",
         "pam:check",
         "sysctl",
+        "sysctl:config",
+        "sysctl:live",
         "nix:build",
         "nix:gc",
         "backup",
@@ -49,6 +58,8 @@ def good():
             "faillock": {k: str(v) for k, v in EXPECT["pam"]["faillock"].items()},
         },
         "sysctl": "",
+        "sysctl_set": SYSCTL,
+        "sysctl_live": {k: v for k, (v, _) in SYSCTL.items()},
         "trust": {
             "reason": "signature",
             "schema": 2,
@@ -152,6 +163,53 @@ class Expectations(unittest.TestCase):
         f["sysctl"] = "Couldn't write '1' to 'kernel/x'"
         self.assertEqual(failed(f), {"sysctl"})
 
+    def test_a_sysctl_value_changed_after_boot_fails(self):
+        f = good()
+        f["sysctl_live"] = {**f["sysctl_live"], "kernel.kptr_restrict": "0"}
+        self.assertEqual(failed(f), {"sysctl"})
+
+    def test_a_sysctl_key_the_kernel_lacks_fails_unless_optional(self):
+        f = good()
+        f["sysctl_live"] = dict(f["sysctl_live"])
+        del f["sysctl_live"]["kernel.kptr_restrict"]
+        self.assertEqual(failed(f), {"sysctl"})
+        f["sysctl_set"] = {**f["sysctl_set"], "kernel.kptr_restrict": ["2", True]}
+        self.assertEqual(failed(f), set())
+
+    def test_no_sysctl_key_read_fails(self):
+        f = good()
+        f["sysctl_set"], f["sysctl_live"] = {}, {}
+        self.assertEqual(failed(f), {"sysctl"})
+
+    def test_sysctl_config_last_assignment_wins(self):
+        text = (
+            "# /usr/lib/sysctl.d/50-default.conf\nnet.core.default_qdisc = fq_codel\n"
+            "-net.ipv4.ping_group_range = 0 2147483647\nnet.ipv4.conf.*.rp_filter = 2\n"
+            "; a = 1\n# /usr/lib/sysctl.d/99-x.conf\nnet.core.default_qdisc=fq\n"
+        )
+        self.assertEqual(
+            probes.parse_sysctl_config(text),
+            {
+                "net.core.default_qdisc": ["fq", False],
+                "net.ipv4.ping_group_range": ["0 2147483647", True],
+            },
+        )
+        self.assertEqual(SYSCTL["kernel.kptr_restrict"], ["2", False])
+
+    def test_collect_reads_the_live_value_of_each_configured_key(self):
+        calls = {
+            "/usr/lib/systemd/systemd-sysctl --cat-config": (
+                0,
+                "a.b = 1\n-c.d = 0 1\n",
+                "",
+            ),
+            "sysctl -e a.b c.d": (0, "a.b = 1\nc.d = 0\t1\n", ""),
+        }
+        facts = self.collect_with(calls)
+        self.assertEqual(facts["sysctl_live"], {"a.b": "1", "c.d": "0\t1"})
+        f = good() | {k: facts[k] for k in ("sysctl_set", "sysctl_live")}
+        self.assertEqual(failed(f), set())
+
     def test_a_unit_in_the_wrong_state_fails(self):
         f = good()
         f["units"]["rpm-ostree-countme.timer"] = "disabled"
@@ -216,6 +274,8 @@ class Expectations(unittest.TestCase):
             "trust": "trust",
             "pam:check": "pam",
             "sysctl": "sysctl",
+            "sysctl:config": "sysctl",
+            "sysctl:live": "sysctl",
             "nix:build": "nix",
             "nix:gc": "nix",
             "backup": "backup",
