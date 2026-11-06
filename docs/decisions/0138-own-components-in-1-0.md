@@ -37,7 +37,10 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    [ADR-0085](0085-keyring-prompter-secret-exchange-source.md), A2-31 / [ADR-0068](0068-session-budget-and-prompter-timing.md)).
 2. **Athanor's own window switcher on Alt+Tab is in 1.0** (`doc_overview.md`). Then one change makes
    `athanor-launcher` the default and removes cosmic-launcher and pop-launcher, as LA12, A2-24 and
-   ADR-0061 require. Whether the application library goes with it is an open question for the switcher's plan.
+   ADR-0061 require. The switcher is a Sal client, `athanor-switcher`, that serves Sulphur's session and
+   cosmic-comp's; in 1.0 it shows every window of every workspace, by icon and title, on Alt+Tab and
+   Alt+Shift+Tab. Athanor's own application library, `athanor-library` (`doc_launcher.md` LA1, LA7), is
+   in 1.0 too, and cosmic-app-library leaves in the same change as cosmic-launcher and pop-launcher.
    The overview, `athanor-overview`, and cosmic-workspaces' retirement stay in 1.1 (ADR-0135).
 3. **`athanor-idle` and `athanor-wallpaper` (`doc_session_daemons.md`) are in 1.0, and so is the
    replacement of every role of cosmic-settings-daemon.** This brings forward their owners per SD2:
@@ -50,8 +53,8 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
 5. **LP18 step 4 and step 10 are in 1.0 with the lock:** the greeter moves onto `athanor-auth`, and the
    lock-aware `athanor-usbguard-policy` replaces `athanor-usbguard-hook`. They were in 1.1 only because the
    lock was. Decided by the maintainer on 2026-11-06 by the option "Both in 1.0".
-6. **New surfaces are written in Sal, not GTK4:** the lock, the agent's dialog, the switcher, the OSD
-   and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly.
+6. **New surfaces are written in Sal, not GTK4:** the lock, the agent's dialog, the switcher, the
+   application library, the OSD and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly.
 
 ## Alternatives rejected
 
@@ -76,6 +79,8 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
     and the decision to write it in Sal changes that (SD1 names no GTK and is not in the list);
   - `doc_overview.md`, which names GTK4 and gtk4-layer-shell for the switcher (about lines 92, 94,
     119, 270 and 386).
+  - `doc_launcher.md`, which binds the launcher and the application library to GTK4 (SH4, about
+    lines 7 and 24); `athanor-library` is written in Sal.
 - The specifications whose placements this record changes, and which their next revisions must amend:
   - `doc_own_stack.md`: the status line (line 3) and the 1.1 placement of the window switcher (about
     lines 423, 666, 778, 917 to 920, 940 and 1205); decision 28 and gaps 1 and 2, which name
