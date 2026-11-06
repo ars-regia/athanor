@@ -6,7 +6,7 @@
 
 mod clipboard;
 
-use crate::a11y::{leave, tree_update, tree_updates};
+use crate::a11y::{leave, rejoining, tree_update, tree_updates};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
@@ -627,7 +627,7 @@ impl Shell {
         match (surface.a11y.is_some(), accessible) {
             (true, false) => surface.withdraw(),
             (false, true) => {
-                let tree = tree_update(&surface.ui, f64::from(surface.scale));
+                let tree = rejoining(&mut surface.ui, f64::from(surface.scale));
                 if let Ok(mut initial) = surface.initial.lock() {
                     *initial = Some(tree);
                 }
@@ -1210,7 +1210,7 @@ impl Surface {
         // The dropped adapter's alone: a later adapter of the surface starts from a new one.
         let initial = std::mem::take(&mut self.initial);
         let scale = f64::from(self.scale);
-        leave(&mut a11y, &initial, &self.ui, scale, self.window_focused);
+        leave(&mut a11y, &initial, &mut self.ui, scale, self.window_focused);
     }
 
     fn draw(&mut self, pool: &mut SlotPool, qh: &QueueHandle<App>) -> Result<(), Error> {
