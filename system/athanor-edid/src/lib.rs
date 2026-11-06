@@ -98,7 +98,12 @@ fn descriptor(block: &[u8; BASE_BLOCK_LEN], tag: u8) -> Option<String> {
         .find(|d| d[..3] == [0, 0, 0] && d[3] == tag && d[4] == 0)?
         .get(5..)?;
     let end = text.iter().position(|b| *b == 0x0A).unwrap_or(text.len());
-    let text = text.get(..end)?.trim_ascii_end();
+    // Padding is spaces, and 0x00 on monitors that use it in place of 0x0A and spaces.
+    let used = text
+        .get(..end)?
+        .iter()
+        .rposition(|b| !matches!(b, 0 | b' '));
+    let text = text.get(..used.map_or(0, |i| i + 1))?;
     if text.is_empty() || !text.iter().all(|b| (0x20..=0x7E).contains(b)) {
         return None;
     }
@@ -198,6 +203,16 @@ mod tests {
     fn bytes_after_the_newline_are_ignored() {
         let e = edid("DEL", 1, 0, &[(TAG_NAME, b"OK\n\xFF\xFF")]);
         assert_eq!(parse(&e).unwrap().model, "OK");
+    }
+
+    #[test]
+    fn zero_padding_is_trimmed_but_a_zero_inside_is_not_printable() {
+        let e = edid("DEL", 1, 0, &[(TAG_NAME, b"U2412M\0\0\0\0\0\0\0")]);
+        assert_eq!(parse(&e).unwrap().model, "U2412M");
+        let e = edid("DEL", 1, 0, &[(TAG_NAME, b"U24\0\0M\0\0\0")]);
+        assert_eq!(parse(&e).unwrap().model, "0001");
+        let e = edid("DEL", 1, 0, &[(TAG_NAME, b"U24 \0 \0")]);
+        assert_eq!(parse(&e).unwrap().model, "U24");
     }
 
     #[test]
