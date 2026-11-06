@@ -1,0 +1,44 @@
+[Unit]
+Description=Athanor lock screen unlock helper
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_lock_and_prompts.md
+
+# The sandbox of polkit 128's polkit-agent-helper@.service, line for line, then LP8's
+# additions (doc_lock_and_prompts.md, D26).
+[Service]
+Type=oneshot
+DevicePolicy=closed
+ExecStart=/usr/libexec/athanor-unlockd
+SuccessExitStatus=2
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+LimitMEMLOCK=0
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectHostname=yes
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+# pam_faillock's tally.
+ReadWritePaths=/run/faillock
+MemoryMax=32M
+# RuntimeMaxSec= has no effect on a oneshot unit: a client that never answers is stopped here.
+TimeoutStartSec=300
+# No core of a root process that holds a password.
+LimitCORE=0

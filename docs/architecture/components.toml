@@ -345,6 +345,15 @@ item = "TG1"
 purpose = "Cilium Tetragon with Athanor's tracing policies; shipped"
 
 [[component]]
+path = "forge/specs/athanor-unlockd"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP8"
+purpose = "The session lock's PAM helper, one root process per connection, its socket and sandbox, and the lock's two PAM stacks"
+
+[[component]]
 path = "forge/specs/athanor-update"
 kind = "rpm spec"
 area = "signing-update"
@@ -694,6 +703,15 @@ status = "specified"
 spec = "doc_kernel_profile.md"
 item = "section 10"
 purpose = "Start-up of a shell unit: crash-loop record, readiness, journal, Landlock"
+
+[[component]]
+path = "system/athanor-auth"
+kind = "crate"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP2"
+purpose = "The authentication conversation of the lock and the polkit agent: polkit's line protocol, its parser and zeroising buffers"
 
 [[component]]
 path = "system/build-image.sh"

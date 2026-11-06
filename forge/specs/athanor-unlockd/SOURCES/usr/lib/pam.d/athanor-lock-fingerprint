@@ -1,0 +1,9 @@
+#%PAM-1.0
+# The session lock's fingerprint (doc_lock_and_prompts.md, LP8, LP9, D28), run by
+# athanor-unlockd: no reader and no enrolled finger end the stack uncounted (die); a finger
+# that does not match counts toward the lockout, one finger per transaction (max-tries=1).
+auth     requisite  pam_faillock.so preauth silent
+auth     [success=done authinfo_unavail=die user_unknown=die default=bad]  pam_fprintd.so max-tries=1
+auth     required   pam_faillock.so authfail
+auth     required   pam_deny.so
+account  include    system-auth

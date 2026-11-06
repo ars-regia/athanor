@@ -1,0 +1,17 @@
+[package]
+name = "athanor-unlockd"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The root helper that runs PAM for the session lock, one transaction per connection (doc_lock_and_prompts.md, LP8)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-auth = { path = "../../../../system/athanor-auth" }
+athanor-unit = { path = "../../../../system/athanor-unit" }
+libc = { workspace = true }
+# SO_PEERCRED and the peer's user name; no core dump of a process that holds a password.
+nix = { workspace = true, features = ["socket", "user", "process", "resource"] }
+tracing = { workspace = true }
+zbus = { workspace = true }
+zeroize = { workspace = true }
