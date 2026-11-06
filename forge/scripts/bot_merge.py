@@ -9,7 +9,9 @@ so a run that did not select the specs merges nothing. The script reads the
 changed files from the GitHub API (status, path and patch of each), checks every changed line
 against the bot's shape, waits for the required checks of the branch protection and merges
 at HEAD_SHA, so a push after the check makes the merge fail instead of landing unchecked.
-Nothing stays armed: a pull request the script does not merge waits for a person.
+On a base with a merge queue (`iso-v0`, ADR-0137) the merge is a queue entry at HEAD_SHA, and
+the queue merges it only if its merge group passes. Nothing else stays armed: a pull request
+the script does not merge, or one the queue removes, waits for a person.
 
 spec   — branch chore/update-specs-zero-trust (forge-util-update-specs.yml); only modified
          *.spec and SOURCES/sources.sha256 of the packages forge/upstream-watch.json lists
@@ -315,7 +317,7 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
         return 0
     wait_for_required_checks(sha, required_checks(base), gh)
     merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
-    report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
+    report(pr, f"merge requested at {sha}, queued if the base has a merge queue ({kind} bot, the change has the bot's shape)")
     return 0
 
 

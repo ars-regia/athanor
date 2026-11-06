@@ -27,7 +27,8 @@ adds, deletes or renames one, PB12's included, edits that table in the same pull
   `$GITHUB_STEP_SUMMARY`.
 - **Keep the required checks running on every pull request**: `gate` on
   `iso-v0`, `Kernel gate` on `main` (`kernel-build.yml` runs on pull requests to `main` only) (`.github/settings/branch-protection.json`), and
-  `gate` through the `product-branches` ruleset (`rulesets.json`).
+  `gate` through the `product-branches` ruleset (`rulesets.json`), and on every merge group:
+  the merge queue of `iso-v0` (`product-queue`, ADR-0137) waits for `gate` of `merge_group`.
 - **A workflow on a non-default branch is not registered** until a push matches its
   trigger; `gh workflow run` answers 404 before that.
 

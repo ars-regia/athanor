@@ -225,7 +225,7 @@ turns a failed scheduled job into a `ci-alert` issue is not part of this change.
 
 | File | Desired | Live until the maintainer applies it |
 | --- | --- | --- |
-| `rulesets.json` | rulesets `product-branches` and `product-review`, both on `refs/heads/iso-v0` and `refs/heads/main`. `product-branches` holds the integrity rules: no deletion, no force push, linear history and the required check `gate` of GitHub Actions (integration 15368, not strict); it has no bypass actor (no merge queue yet: see below). `product-review` holds the pull request rule: code-owner review and no other approval (squash only, stale approvals dismissed; the paths with no owner merge without a review, ADR-0107); its bypass actors are the repository admin role and the bots GitHub App (`Integration`), both in pull-request mode, so the maintainer and the bots merge their own pull requests without a second reviewer but nobody pushes past the integrity rules. `bot-branches` covers `refs/heads/chore/update-specs-zero-trust` and `refs/heads/bump/system-*`, the branches `bot_merge.py` merges: creation, update and force push are refused to everyone but the bots App (`Integration`, bypass mode `always`), and deletion stays allowed because a merged branch is deleted (PL1, PL2, PL4, PQ5). `rebase-branches` and `rebase-review` cover `refs/heads/rebase/*` (ADR-0125) as the product pair covers the product branches: `rebase-branches` holds no force push and the required check `gate`, not enforced on the push that creates the branch, with no bypass actor; `rebase-review` holds the pull request rule of `product-review` with one difference, a merge commit allowed beside the squash, so a sync of the product branch into a rebase branch keeps the product branch in its ancestry (`.claude/rules/workflow.md`, 2026-10-22), and has only the admin role as bypass actor in pull-request mode; neither has a deletion rule. Three tag rulesets protect the tags a GitHub Release names (ADR-0131 decision 8): `version-tags-create` on `refs/tags/v*` holds the rule `creation`, with the repository admin role (`RepositoryRole` 5) as its only bypass actor in mode `always`, so only the maintainer creates a `v*` tag; `version-tags-immutable` on `refs/tags/v*` holds `update` and `deletion`, with no bypass actor; `promotion-tags` on `refs/tags/promoted-*` holds `update` and `deletion`, with no bypass actor. A bypass actor bypasses every rule of its ruleset, so the one rule the admin may pass sits alone in its own ruleset, and the App is a bypass actor of none of them | no ruleset |
+| `rulesets.json` | rulesets `product-branches` and `product-review`, both on `refs/heads/iso-v0` and `refs/heads/main`. `product-branches` holds the integrity rules: no deletion, no force push, linear history and the required check `gate` of GitHub Actions (integration 15368, not strict); it has no bypass actor. `product-review` holds the pull request rule: code-owner review and no other approval (squash only, stale approvals dismissed; the paths with no owner merge without a review, ADR-0107); its bypass actors are the repository admin role and the bots GitHub App (`Integration`), both in pull-request mode, so the maintainer and the bots merge their own pull requests without a second reviewer but nobody pushes past the integrity rules. `bot-branches` covers `refs/heads/chore/update-specs-zero-trust` and `refs/heads/bump/system-*`, the branches `bot_merge.py` merges: creation, update and force push are refused to everyone but the bots App (`Integration`, bypass mode `always`), and deletion stays allowed because a merged branch is deleted (PL1, PL2, PL4, PQ5). `rebase-branches` and `rebase-review` cover `refs/heads/rebase/*` (ADR-0125) as the product pair covers the product branches: `rebase-branches` holds no force push and the required check `gate`, not enforced on the push that creates the branch, with no bypass actor; `rebase-review` holds the pull request rule of `product-review` with one difference, a merge commit allowed beside the squash, so a sync of the product branch into a rebase branch keeps the product branch in its ancestry (`.claude/rules/workflow.md`, 2026-10-22), and has only the admin role as bypass actor in pull-request mode; neither has a deletion rule. Three tag rulesets protect the tags a GitHub Release names (ADR-0131 decision 8): `version-tags-create` on `refs/tags/v*` holds the rule `creation`, with the repository admin role (`RepositoryRole` 5) as its only bypass actor in mode `always`, so only the maintainer creates a `v*` tag; `version-tags-immutable` on `refs/tags/v*` holds `update` and `deletion`, with no bypass actor; `promotion-tags` on `refs/tags/promoted-*` holds `update` and `deletion`, with no bypass actor. A bypass actor bypasses every rule of its ruleset, so the one rule the admin may pass sits alone in its own ruleset, and the App is a bypass actor of none of them. `product-queue` covers `refs/heads/iso-v0` alone and holds the merge queue, with no bypass actor (see below) | no ruleset |
 | `actions.json` | secret `SETTINGS_APP_PRIVATE_KEY` and variable `SETTINGS_APP_CLIENT_ID`; `personal_tokens` declared, not yet retired; `sha_pinning_required` stays `false` until PB3 (below); variable `MAINTAINER_TAG_EMAIL`, the tagger email a `v0.x` tag must carry (secrets.md VAR11, ADR-0131 decision 3) | both names set (`gh secret list`, `gh variable list`, 2026-10-11); `MAINTAINER_TAG_EMAIL` set by the maintainer on 2026-10-24 |
 
 `gate` is the aggregate job of `pr.yml` (PB1, ADR-0075). It runs `just check`, which tolerates
@@ -236,14 +236,21 @@ both branches. Classic branch protection and the ruleset both apply until the ma
 decides to retire the former; section 8 steps 4a to 5b drop the legacy contexts of `iso-v0`, and
 they must be done before a merge queue on `iso-v0` returns (see below).
 
-The ruleset declares no merge queue for now (maintainer decision of 2026-10-08, PIPE-N06): the
-required checks do not run on `merge_group`, so a queue could not be satisfied, and `apply`
-writes every area at once. The queue returns, in the same change that adds it to
-`rulesets.json`, when every required workflow answers `merge_group`; `verify.py workflows`
-refuses a ruleset that enables a queue while a required context is reported by no workflow with
-that trigger. The queue then is: squash, all green, at most two entries built and merged
-together, 360 minutes for checks. The queue needs `merge_group` among the triggers of every
-required workflow (PB1's `pr.yml`). SHA pinning enforcement makes GitHub refuse every workflow that uses an action
+The merge queue is the ruleset `product-queue`, on `refs/heads/iso-v0` alone, with no bypass
+actor (maintainer decision of 2026-11-06, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)); it lifts
+the deferral of 2026-10-08 (PIPE-N06) for `iso-v0`. A ruleset applies all its rules to every
+branch it covers, so the queue cannot sit in `product-branches`: `main` requires `Kernel gate`,
+which no `merge_group` run reports. The queue squashes; merges a group only when every entry
+is green (`ALLGREEN`); builds at most five entries at once and merges up to five together;
+merges a single entry without waiting for others (`min_entries_to_merge` 1, so the 5-minute
+wait never applies); and
+fails an entry whose required checks have not reported within 360 minutes, the most the API
+accepts and the `timeout-minutes` of the kernel `build` job of `call-kernel.yml`, the longest
+job `pr.yml` runs. `verify.py workflows` refuses a ruleset with a merge queue while a context
+required on a branch it covers is reported by no workflow that runs on `merge_group`; `gate`
+of `pr.yml` is the one context `iso-v0` requires. Applying it is one
+`POST repos/{r}/rulesets` (ruleset `product-queue`) in the plan, with no `DESTRUCTIVE` line.
+With the queue, `gh pr merge` on `iso-v0` enqueues the pull request, and the queue merges it. SHA pinning enforcement makes GitHub refuse every workflow that uses an action
 by tag, so it is enabled only after every `uses:` is pinned by commit SHA (PB3,
 `verify.py pinning`); on 2026-10-07 two references are still tags
 (`actions/upload-artifact@v4`, `cachix/install-nix-action@v25`). The files declare only what
@@ -275,7 +282,7 @@ The order of the maintainer's steps, each followed by `ghsettings.py diff`:
    contexts of `kernel-build.yml` or the former direct run of `spec-build-check.yml`, and a
    queue enabled while they are still required cannot be satisfied. Check with
    `ghsettings.py diff` and by reading the required contexts of both branches, then apply
-   the ruleset (`ghsettings.py apply`, then `--yes`), which declares no merge queue, and
+   the ruleset (`ghsettings.py apply`, then `--yes`), merge queue included, and
    re-export to record what GitHub stored.
 5. Create the bot App of PL5, move the bots to it, delete the three personal tokens, then
    set `personal_tokens.retired` to `true` and drop them from `secrets`.
