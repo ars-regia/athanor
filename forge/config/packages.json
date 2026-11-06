@@ -29,7 +29,8 @@
     "kernel-forge",
     "cosmic-comp",
     "greenboot-rs",
-    "polkit"
+    "polkit",
+    "unlockd"
   ],
   "custom_tier0": [
     "base-config",
@@ -67,7 +68,8 @@
     "backup",
     "update",
     "recovery",
-    "xdg-desktop-portal-athanor"
+    "xdg-desktop-portal-athanor",
+    "unlockd"
   ],
   "cachyos_addons": [],
   "upstream_core": [

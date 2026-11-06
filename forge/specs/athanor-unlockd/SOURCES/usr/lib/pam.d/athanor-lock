@@ -1,0 +1,5 @@
+#%PAM-1.0
+# The session lock's password (doc_lock_and_prompts.md, LP8), run by athanor-unlockd.
+auth     requisite  pam_faillock.so preauth
+auth     include    system-auth
+account  include    system-auth

@@ -101,5 +101,59 @@ class Faillock(Tree):
         self.assertEqual(len(self.problems(lambda t: t.replace(">> /etc/security/faillock.conf", ">> /etc/security/other.conf"))), 1)
 
 
+
+class LockStacks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        (self.root / verify.LOCK_PAM_DIR).mkdir(parents=True)
+        for name in verify.LOCK_PAM:
+            (self.root / verify.LOCK_PAM_DIR / name).write_text((ROOT / verify.LOCK_PAM_DIR / name).read_text())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def edit(self, name, old, new):
+        path = self.root / verify.LOCK_PAM_DIR / name
+        text = path.read_text()
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new))
+        return verify.lock_pam_problems(self.root)
+
+    def test_the_tree_ships_lp8s_lines(self):
+        self.assertEqual(verify.lock_pam_problems(self.root), [])
+
+    def test_a_missing_file_fails(self):
+        (self.root / verify.LOCK_PAM_DIR / "athanor-lock").unlink()
+        self.assertEqual(len(verify.lock_pam_problems(self.root)), 1)
+
+    def test_nullok_and_a_keyring_fail(self):
+        for name, old, new in (
+            ("athanor-lock", "pam_faillock.so preauth", "pam_faillock.so preauth nullok"),
+            ("athanor-lock-fingerprint", "auth     required   pam_deny.so", "auth optional pam_gnome_keyring.so"),
+            ("athanor-lock", "account  include    system-auth", "account include system-auth\nauth optional pam_oo7.so"),
+        ):
+            with self.subTest(new=new):
+                self.assertEqual(len(self.edit(name, old, new)), 2)
+                self.tearDown()
+                self.setUp()
+
+    def test_an_include_other_than_system_auth_fails(self):
+        self.assertEqual(len(self.edit("athanor-lock", "auth     include    system-auth", "auth include password-auth")), 2)
+
+    def test_more_than_one_finger_per_transaction_fails(self):
+        for new in ("pam_fprintd.so", "pam_fprintd.so max-tries=3"):
+            with self.subTest(new=new):
+                self.assertEqual(len(self.edit("athanor-lock-fingerprint", "pam_fprintd.so max-tries=1", new)), 1)
+                self.tearDown()
+                self.setUp()
+
+    def test_counting_a_missing_reader_fails(self):
+        self.assertEqual(len(self.edit("athanor-lock-fingerprint", "authinfo_unavail=die user_unknown=die ", "")), 1)
+
+    def test_spacing_and_comments_are_not_rules(self):
+        self.assertEqual(self.edit("athanor-lock", "auth     include    system-auth", "# a note\nauth include\tsystem-auth"), [])
+
+
 if __name__ == "__main__":
     unittest.main()
