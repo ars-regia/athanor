@@ -345,6 +345,15 @@ item = "TG1"
 purpose = "Cilium Tetragon with Athanor's tracing policies; shipped"
 
 [[component]]
+path = "forge/specs/athanor-unlockd"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP8"
+purpose = "The session lock's PAM helper, one root process per connection, its socket and sandbox, and the lock's two PAM stacks"
+
+[[component]]
 path = "forge/specs/athanor-update"
 kind = "rpm spec"
 area = "signing-update"

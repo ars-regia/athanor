@@ -3242,10 +3242,53 @@ def faillock_problems(root=None):
     return problems
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090)")
+LOCK_PAM_DIR = "forge/specs/athanor-unlockd/SOURCES/usr/lib/pam.d"
+LOCK_PAM = {
+    "athanor-lock": [
+        "auth requisite pam_faillock.so preauth",
+        "auth include system-auth",
+        "account include system-auth",
+    ],
+    "athanor-lock-fingerprint": [
+        "auth requisite pam_faillock.so preauth silent",
+        "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_fprintd.so",
+        "auth required pam_faillock.so authfail",
+        "auth required pam_deny.so",
+        "account include system-auth",
+    ],
+}
+LOCK_PAM_BANNED = ("pam_gnome_keyring", "pam_oo7", "nullok")
+
+
+def lock_pam_problems(root=None):
+    """The session lock's stacks are LP8's lines: no keyring, no nullok, only system-auth included."""
+    root = root or ROOT
+    problems = []
+    for name, expected in LOCK_PAM.items():
+        where = f"{LOCK_PAM_DIR}/{name}"
+        try:
+            text = read(root / where)
+        except OSError as err:
+            problems.append(f"{where}: cannot read ({err})")
+            continue
+        lines = [" ".join(line.split()) for line in text.splitlines()
+                 if line.strip() and not line.lstrip().startswith("#")]
+        for number, line in enumerate(lines, 1):
+            for word in LOCK_PAM_BANNED:
+                if word in line:
+                    problems.append(f"{where}: rule {number} names {word} (LP8)")
+            words = line.split()
+            if len(words) > 2 and words[1] in ("include", "substack") and words[2] != "system-auth":
+                problems.append(f"{where}: rule {number} includes {words[2]}, not system-auth (LP8)")
+        if lines != expected:
+            problems.append(f"{where}: the rules are not LP8's {len(expected)} lines: {lines}")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090), the lock's stacks (LP8)")
 def check_pam():
     r = Result()
-    for problem in nullok_problems() + pwquality_problems() + faillock_problems():
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems() + lock_pam_problems():
         r.fail(problem)
     return r
 
