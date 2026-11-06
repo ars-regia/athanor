@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        20%{?dist}
+Release:        21%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,6 +55,11 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
+- Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
+  with athanor-edid, through wl_output and wlr-output-management; a monitor with no valid
+  EDID keeps make Athanor, model DRM and an empty serial (doc_osd.md OD4).
+
 * Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-20
 - At a fractional scale a client's opaque region keeps only the output's pixels it covers
   whole, for windows, popups, layer surfaces, the lock surface and the cursor: a pixel the

@@ -11229,7 +11229,7 @@ fn a_window_of_an_unplugged_output_comes_back_on_the_first() {
     let (first, second) = (output_at(&run, 0), output_at(&run, 1));
     let third = crate::state::build_output(
         "HEADLESS-3",
-        "fixture",
+        &crate::state::placeholder_identity("fixture"),
         (800, 600).into(),
         60_000,
         smithay::utils::Transform::Normal,

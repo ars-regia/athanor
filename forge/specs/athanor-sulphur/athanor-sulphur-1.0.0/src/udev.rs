@@ -45,7 +45,9 @@ use smithay::desktop::Window;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
-use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
+use smithay::reexports::drm::control::{
+    connector, crtc, property, Device as ControlDevice, ModeTypeFlags,
+};
 use smithay::reexports::drm::Device as _;
 use smithay::reexports::input::event::gesture::{
     GestureHoldEvent, GesturePinchEvent, GestureSwipeEvent,
@@ -125,6 +127,57 @@ enum Wake {
     /// The frame callbacks of a surface shown on no output, at `FRAME_THROTTLE`: a request to
     /// draw does not wait for it.
     Throttle,
+}
+
+/// The EDID of a connector: the bytes of its "EDID" blob property, `None` when it has none
+/// (a monitor that does not answer, or a virtual connector).
+fn read_edid(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let set = device.get_properties(connector)?;
+    let (handles, values) = set.as_props_and_values();
+    for (handle, raw) in handles.iter().zip(values) {
+        let info = device.get_property(*handle)?;
+        if info.name() != c"EDID" {
+            continue;
+        }
+        return match info.value_type().convert_value(*raw) {
+            // A zero blob id is "no blob".
+            property::Value::Blob(id) if id != 0 => device.get_property_blob(id).map(Some),
+            _ => Ok(None),
+        };
+    }
+    Ok(None)
+}
+
+/// What the output of `connector` reports as make, model and serial: the identity in its EDID
+/// (`athanor-edid`, so the strings equal athanor-osd's), or today's placeholder when the
+/// connector has no EDID blob, it cannot be read, or it does not parse.
+fn connector_identity(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+    name: &str,
+) -> athanor_edid::Identity {
+    let edid = match read_edid(device, connector) {
+        Ok(edid) => edid,
+        Err(error) => {
+            tracing::warn!(%error, output = name, "the EDID of a monitor could not be read");
+            None
+        }
+    };
+    identity_of(edid.as_deref(), name)
+}
+
+/// `edid` as an identity, or the placeholder.
+fn identity_of(edid: Option<&[u8]>, name: &str) -> athanor_edid::Identity {
+    let Some(edid) = edid else {
+        return crate::state::placeholder_identity("DRM");
+    };
+    athanor_edid::parse(edid).unwrap_or_else(|error| {
+        tracing::warn!(%error, output = name, "the EDID of a monitor is not valid");
+        crate::state::placeholder_identity("DRM")
+    })
 }
 
 /// A monitor: the output and what draws it.
@@ -804,9 +857,10 @@ impl State {
         };
         let mode = preferred_mode(connector).ok_or("the monitor has no mode")?;
         let wl_mode = Mode::from(mode);
+        let identity = connector_identity(drm.heads.device(), connector.handle(), name);
         let output = crate::state::build_output(
             name,
-            "DRM",
+            &identity,
             wl_mode.size,
             wl_mode.refresh,
             Transform::Normal,
@@ -1519,8 +1573,45 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 
 #[cfg(test)]
 mod tests {
-    use super::{lock_shown, pacing, FailureLog, Frames, LockFrames, Wake};
+    use super::{identity_of, lock_shown, pacing, FailureLog, Frames, LockFrames, Wake};
     use std::time::{Duration, Instant};
+
+    /// A base block for "DEL", product 0xA0B3, serial 1, with a name descriptor and a correct
+    /// checksum.
+    fn dell() -> Vec<u8> {
+        let mut b = vec![0u8; 128];
+        b[..8].copy_from_slice(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
+        b[8..10].copy_from_slice(&((4u16 << 10) | (5 << 5) | 12).to_be_bytes());
+        b[10..12].copy_from_slice(&0xA0B3u16.to_le_bytes());
+        b[12] = 1;
+        b[54 + 3] = 0xFC;
+        b[54 + 5..54 + 5 + 10].copy_from_slice(b"U2412M\n   ");
+        let sum = b.iter().fold(0u8, |s, x| s.wrapping_add(*x));
+        b[127] = 0u8.wrapping_sub(sum);
+        b
+    }
+
+    #[test]
+    fn an_output_reports_the_identity_in_its_edid() {
+        let id = identity_of(Some(&dell()), "DP-1");
+        assert_eq!(
+            (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+    }
+
+    #[test]
+    fn an_output_with_no_edid_or_a_bad_one_keeps_the_placeholder() {
+        let mut bad = dell();
+        bad[127] = bad[127].wrapping_add(1);
+        for edid in [None, Some(bad.as_slice()), Some(&[0u8; 7][..])] {
+            let id = identity_of(edid, "DP-1");
+            assert_eq!(
+                (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+                ("Athanor", "DRM", "")
+            );
+        }
+    }
 
     #[test]
     fn an_output_draws_only_when_asked_and_at_most_once_a_refresh() {
