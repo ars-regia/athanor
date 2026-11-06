@@ -317,7 +317,7 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
         return 0
     wait_for_required_checks(sha, required_checks(base), gh)
     merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
-    report(pr, f"merge requested at {sha}, a queue entry on a base with a merge queue ({kind} bot, the change has the bot's shape)")
+    report(pr, f"merge requested at {sha}, queued if the base has a merge queue ({kind} bot, the change has the bot's shape)")
     return 0
 
 

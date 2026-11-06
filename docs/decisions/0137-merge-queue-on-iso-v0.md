@@ -74,4 +74,4 @@ reports it, runs on `merge_group`. On `main` it does not: `main` requires `Kerne
   for the agents and for `forge/scripts/bot_merge.py` alike.
 - Each queue entry runs `pr.yml` of its own; up to five run at once. A kernel change is built
   again in its entry's run on the self-hosted runner, which serves one build at a time; the wait counts toward the
-  360-minute check timeout, so several kernel entries at once can time out and are queued again.
+  360-minute check timeout, so several kernel entries at once can time out; the queue removes such an entry, and it must be enqueued again.
