@@ -78,6 +78,7 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
 /usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/glib-2.0/schemas/org.athanor.desktop.appearance.gschema.xml
+/usr/share/glib-2.0/schemas/org.athanor.desktop.background.gschema.xml
 /usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
 /usr/share/glib-2.0/schemas/90_athanor-network.gschema.override
 /usr/share/athanor-system-config/greetd.toml

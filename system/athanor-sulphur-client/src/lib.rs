@@ -5,6 +5,7 @@
 
 mod a11y;
 mod actions;
+pub mod background;
 #[cfg(feature = "gtk")]
 mod capture;
 mod connection;
