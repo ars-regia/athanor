@@ -43,6 +43,9 @@
   approved by the maintainer with the pull request that makes the change: PL32 and PL35 name
   the last step of the `promote` job of `promote-stable.yml`, not an `iso` job, as the writer
   of the ISO's `:stable`, so a promotion asks for one `release` approval.
+  Also amended 2026-11-06 ([ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)), approved by the maintainer
+  with the pull request that makes the change: PL2's merge queue is on `iso-v0`, in the
+  ruleset `product-queue`; only the deferral sentence of PL2 changes.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -325,7 +328,7 @@ also covers the merge queue and `gate`; PB2 splits it in two.
 **PL2. Changes land through the merge queue.** The `gate` runs on the `merge_group` commit,
 so what lands passed `just check` in its merged state, and its builds are proven on the pull
 request and again by the release build (PL44; for the kernel, ADR-0110), and the required check stays `strict: false` without
-losing that guarantee. (Scorecard Branch-Protection.) Deferred on 2026-10-08 (PIPE-N06): the queue is not in `.github/settings/rulesets.json` until every required context is reported on `merge_group` (`Kernel gate` on `main` is not; `iso-v0` requires only `gate` since #379), and `verify.py workflows` refuses it before then; until it returns, a pull request lands by squash-merge once `gate` is green on its head.
+losing that guarantee. (Scorecard Branch-Protection.) Deferred on 2026-10-08 (PIPE-N06) until every required context is reported on `merge_group`; returned on 2026-11-06 for `iso-v0` alone ([ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)), which requires only `gate` since #379, in a ruleset of its own, `product-queue`, with no bypass actor, because a ruleset applies its rules to every branch it covers and `main` requires `Kernel gate`, which no `merge_group` run reports. `main` has no queue: a pull request lands there by squash-merge once its checks are green on its head. `verify.py workflows` refuses a queue while a context required on a branch it covers is reported by no workflow that runs on `merge_group`.
 
 **PL3. One required check, always reported.** `gate` depends on every job of `pr.yml`, runs
 with `if: always()`, and fails when any job it needs failed or was cancelled; a skipped job
