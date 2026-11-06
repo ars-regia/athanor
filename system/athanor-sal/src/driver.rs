@@ -581,22 +581,15 @@ impl Shell {
         };
         let new = layer_change(placed, options, version)?;
         let stretch = stretched(options.anchor);
-        let min = (surface.ui.min_width, surface.ui.min_height);
+        let was = (surface.ui.min_width, surface.ui.min_height);
         // An axis no longer stretched takes its widgets' size again.
-        if surface.stretch.0 && !stretch.0 {
-            surface.ui.min_width = 0.0;
-        }
-        if surface.stretch.1 && !stretch.1 {
-            surface.ui.min_height = 0.0;
-        }
-        if let Err(error) = layout(&mut surface.ui, surface.scale) {
-            (surface.ui.min_width, surface.ui.min_height) = min;
-            return Err(error);
-        }
+        let shrink = (surface.stretch.0 && !stretch.0, surface.stretch.1 && !stretch.1);
+        let min = (if shrink.0 { 0.0 } else { was.0 }, if shrink.1 { 0.0 } else { was.1 });
+        layout_at_min(&mut surface.ui, surface.scale, min)?;
         let region = match Self::region(compositor, options.input_region.as_deref()) {
             Ok(region) => region,
             Err(error) => {
-                (surface.ui.min_width, surface.ui.min_height) = min;
+                put_back(&mut surface.ui, was);
                 return Err(error);
             }
         };
@@ -1046,6 +1039,27 @@ fn layer_change(
         .into());
     }
     Ok(Some(options.layer))
+}
+
+/// Lays `ui` out at `scale` with the minimum size `min`. Refused when it cannot be laid out,
+/// with the minimum size `ui` had and the geometry it lays out to.
+fn layout_at_min(ui: &mut Ui, scale: f32, min: (f32, f32)) -> Result<(), Error> {
+    let was = (ui.min_width, ui.min_height);
+    (ui.min_width, ui.min_height) = min;
+    match layout(ui, scale) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            put_back(ui, was);
+            Err(error)
+        }
+    }
+}
+
+/// Gives `ui` the minimum size `min` again, and the geometry it lays out to: none of a refused
+/// layout's stays.
+fn put_back(ui: &mut Ui, min: (f32, f32)) {
+    (ui.min_width, ui.min_height) = min;
+    ui.layout();
 }
 
 /// Whether a layer surface anchored at `anchor` spans its output's width, and its height.
@@ -2664,6 +2678,20 @@ mod tests {
             },
         );
         assert_eq!(state.1, [1], "a closed surface was reported drawn");
+    }
+
+    #[test]
+    fn a_refused_layout_keeps_the_minimum_size_and_the_geometry_it_had() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        assert!(layout_at_min(&mut ui, 1.0, (300.0, 0.0)).is_ok());
+        assert!(layout_at_min(&mut ui, 1.0, (0.0, 0.0)).is_ok());
+        let size = ui.size();
+        assert!(size.0 < 300.0, "{size:?}");
+        // A width no buffer holds: wl_shm sizes are 16-bit.
+        assert!(layout_at_min(&mut ui, 1.0, (100_000.0, 0.0)).is_err());
+        assert_eq!((ui.min_width, ui.min_height), (0.0, 0.0));
+        assert_eq!(ui.size(), size, "the refused layout's geometry stayed");
     }
 
     #[test]
