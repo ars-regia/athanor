@@ -231,7 +231,7 @@ class Promote(Tool):
         self.assertEqual(copies, [])
 
     def promote_iso(self, run="412"):
-        """The iso job: promote-iso.sh on the plan directory, after the promote job."""
+        """The ISO step: promote-iso.sh on the plan, after promote.sh in the promote job."""
         (self.dir / "calls.log").unlink(missing_ok=True)
         r = subprocess.run(
             ["bash", str(PROMOTE_ISO), run, str(self.artifacts / "promotion.json")],
@@ -253,7 +253,7 @@ class Promote(Tool):
         self.assertIn(f"{REG}/athanor-iso:stable -> {ISO}", r.stdout)
 
     def test_the_iso_job_refuses_once_a_later_promotion_moved_the_system(self):
-        """A late re-run of an older promotion's iso job would put the ISO behind the system."""
+        """A late re-run of an older promotion's job would put the ISO behind the system."""
         self.published()
         r, _ = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -606,6 +606,143 @@ class Promote(Tool):
                 self.assertEqual(self.record()["packages"], {})
                 reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
                 self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
+
+    def test_a_rerun_after_a_complete_apply_moves_nothing_and_succeeds(self):
+        # "Re-run failed jobs" after the ISO step failed: promote.sh runs again on the same plan.
+        override = ("--hardware-override", "athanor-system-nvidia")
+        for flags, stable_created in (
+            ((), "2026-09-10T10:00:00Z"),
+            (override, "2026-09-10T10:00:00Z"),
+            ((), None),
+        ):
+            with self.subTest(flags=flags, first=stable_created is None):
+                self.published(stable_created=stable_created)
+                r, _ = self.promote(*flags)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                plan = (self.artifacts / "promotion.json").read_bytes()
+                r, copies = self.promote(*flags, plan=False)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(copies, [])
+                self.assertIn("stable already at the plan", r.stdout)
+                self.assertIn(
+                    f"{REG}/athanor-system@{digest(1)} (applied by an earlier attempt",
+                    r.stdout,
+                )
+                self.assertEqual((self.artifacts / "promotion.json").read_bytes(), plan)
+
+    def test_a_rerun_after_a_partial_apply_goes_on_or_stops_as_before(self):
+        base, nvidia = f"{REG}/athanor-system", f"{REG}/athanor-system-nvidia"
+        override = ("--hardware-override", "athanor-system-nvidia")
+
+        def first_image_moved():
+            # athanor-system's four tags moved, then nvidia's copies failed.
+            day = self.record()["day"]
+            for tag, value in (
+                ("promoted-412", digest(1)),
+                ("stable-previous", digest(4)),
+                (f"stable-{day}", digest(1)),
+                ("stable", digest(1)),
+            ):
+                self.set_tag(f"{base}:{tag}", value)
+
+        # Only promoted-412 written: :stable still names the plan's previous, the record equals
+        # the plan, and the apply goes on with the rest.
+        self.published()
+        r, copies = self.promote(
+            between=lambda: self.set_tag(f"{base}:promoted-412", digest(1))
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            [dest for _, dest in copies],
+            [
+                f"{base}:stable-previous",
+                f"{base}:stable-{self.record()['day']}",
+                f"{base}:stable",
+            ],
+        )
+        # One image of two moved: the record differs from the plan and from the plan applied.
+        self.published()
+        r, copies = self.promote(*override, between=first_image_moved)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("differs from the plan", r.stderr)
+        self.assertEqual(copies, [])
+        self.assertNotIn(nvidia, r.stdout)
+
+    def test_a_rerun_on_a_plan_that_no_longer_matches_is_refused(self):
+        base = f"{REG}/athanor-system"
+        for name, after in (
+            (
+                # Rolled back to an older build since: a newer one stops on UT5 instead.
+                "stable moved since",
+                lambda: self.set_tag(
+                    f"{base}:stable", digest(9), "2026-09-12T10:00:00Z"
+                ),
+            ),
+            (
+                "evidence replaced",
+                lambda: self.evidence(
+                    "signature",
+                    "athanor-system",
+                    digest(1),
+                    finished="2026-09-15T11:30:00Z",
+                ),
+            ),
+            ("override added", None),
+        ):
+            with self.subTest(name=name):
+                self.published()
+                r, _ = self.promote()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                flags = (
+                    ("--hardware-override", "athanor-system-nvidia")
+                    if after is None
+                    else ()
+                )
+                if after:
+                    after()
+                r, copies = self.promote(*flags, plan=False)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("differs from the plan", r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_a_stable_copied_outside_the_promotion_is_not_taken_as_applied(self):
+        # ADR-0111 item 5: a packages: write token can copy the signed digest onto :stable.
+        base = f"{REG}/athanor-system"
+        for name, tags in (
+            ("stable alone", {"stable": digest(1)}),
+            (
+                "no stable-previous",
+                {
+                    "promoted-412": digest(1),
+                    "stable-DAY": digest(1),
+                    "stable": digest(1),
+                },
+            ),
+        ):
+            with self.subTest(name=name):
+                self.published()
+
+                def copy_outside():
+                    for tag, value in tags.items():
+                        self.set_tag(
+                            f"{base}:{tag.replace('DAY', self.record()['day'])}", value
+                        )
+
+                r, copies = self.promote(between=copy_outside)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("was not moved by this promotion", r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_the_iso_step_after_a_rerun_of_a_complete_apply_moves_only_the_iso(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r, copies = self.promote(plan=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(copies, [])
+        r, copies = self.promote_iso()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(copies, [f"{REG}/athanor-iso:stable"])
 
     def test_the_stable_build_promoted_again_still_needs_its_evidence(self):
         self.published()
