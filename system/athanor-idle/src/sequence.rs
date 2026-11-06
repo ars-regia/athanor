@@ -4,6 +4,10 @@
 //!
 //! The lock request outlives the blank: input during the fade cancels it, input after the
 //! outputs went off does not (the `LockDelay` timer keeps running).
+//!
+//! Caller contract:
+//! - one `Sequence` lives as long as the daemon, so the `attempt` counter never restarts;
+//! - a timer for which the sequence emitted `Cancel` must never deliver its event late.
 
 use std::time::Duration;
 
@@ -262,7 +266,7 @@ impl Sequence {
             Lock::Requested { retried: true } => {
                 self.lock = Lock::Settled;
                 let mut out = vec![Action::LogLockFailure];
-                if self.phase == Phase::Off {
+                if self.phase != Phase::Awake {
                     self.notice_due = true;
                 } else {
                     out.push(Action::Notify(LOCK_FAILED_NOTICE));
@@ -604,6 +608,36 @@ mod tests {
             s.handle(Event::Resumed),
             vec![
                 Action::OutputsOn,
+                Action::RemoveOverlay,
+                Action::Notify(LOCK_FAILED_NOTICE)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_second_failure_during_a_fade_defers_the_notice_to_the_wake() {
+        let mut s = Sequence::new();
+        run(
+            &mut s,
+            &[
+                BLANK,
+                Event::FadeDone,
+                DUE,
+                Event::Resumed,
+                fail(1),
+                RETRY_DUE,
+            ],
+        );
+        s.handle(BLANK);
+        assert_eq!(s.phase(), Phase::Fading);
+        assert_eq!(
+            s.handle(fail(2)),
+            vec![CANCEL_TIMEOUT, Action::LogLockFailure]
+        );
+        assert_eq!(
+            s.handle(Event::Resumed),
+            vec![
+                Action::Cancel(Timer::Fade),
                 Action::RemoveOverlay,
                 Action::Notify(LOCK_FAILED_NOTICE)
             ]
