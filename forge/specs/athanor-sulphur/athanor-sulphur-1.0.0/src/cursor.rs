@@ -1,13 +1,11 @@
 //! The pointer's image: the themed cursor the session names (`doc_own_stack.md` OS15).
 
+use crate::marks::{surface_elements, SurfaceElement};
 use std::collections::HashMap;
 
 use smithay::backend::allocator::Fourcc;
 use smithay::backend::renderer::element::memory::{
     MemoryRenderBuffer, MemoryRenderBufferRenderElement,
-};
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
 };
 use smithay::backend::renderer::element::{render_elements, Kind};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
@@ -35,7 +33,7 @@ const MAX_CLIENT_CURSOR: i32 = 256;
 render_elements! {
     pub PointerElement<R> where R: ImportAll + ImportMem;
     Memory=MemoryRenderBufferRenderElement<R>,
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceElement<R>,
 }
 
 /// One cursor image, ready to draw.
@@ -231,17 +229,10 @@ where
                 CursorIcon::Default
             } else {
                 let location = (at - hotspot.to_f64()).to_physical(scale).to_i32_round();
-                return render_elements_from_surface_tree(
-                    renderer,
-                    surface,
-                    location,
-                    scale,
-                    1.0,
-                    Kind::Cursor,
-                )
-                .into_iter()
-                .map(PointerElement::Surface)
-                .collect();
+                return surface_elements(renderer, surface, location, scale, 1.0, Kind::Cursor)
+                    .into_iter()
+                    .map(PointerElement::Surface)
+                    .collect();
             }
         }
         CursorImageStatus::Named(icon) => *icon,

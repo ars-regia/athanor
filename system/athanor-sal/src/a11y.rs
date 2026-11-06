@@ -1,6 +1,7 @@
 //! Accessibility on AccessKit: every widget is one node, and assistive technologies act through
 //! the same paths as the keyboard and the pointer.
 
+use crate::focus::list_stop;
 use crate::widget::{Event, Kind, Ui, WidgetId};
 use accesskit::{
     Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role,
@@ -17,6 +18,12 @@ pub fn node_id(id: WidgetId) -> NodeId {
 /// one line, a text area one per line as it is seen.
 pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
     NodeId(u64::from(id.0) | (line as u64 + 1) << 32)
+}
+
+/// The node of a list row's label, beside the widgets' ids: a row has no text runs, so it takes
+/// the id of a first one.
+pub fn row_label_id(id: WidgetId) -> NodeId {
+    text_run_id(id, 0)
 }
 
 /// The node of widget `id`, with its bounds in physical pixels at `scale`. The match is
@@ -166,7 +173,8 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
     };
     let sensitive = ui.is_sensitive(id);
-    if widget.is_focusable() && sensitive {
+    // A list is focusable as GTK's ListBox is, while it has a row to take the focus.
+    if (widget.is_focusable() || list_stop(ui, id).is_some()) && sensitive {
         node.add_action(Action::Focus);
     }
     if !sensitive {
@@ -182,6 +190,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
+    if let Kind::ListRow(_) = widget.kind {
+        children.push(row_label_id(id));
+    }
     if let Kind::Field(field) | Kind::TextArea(field) = &widget.kind {
         let lines = field.line_ranges();
         children.extend((0..lines.len()).map(|n| text_run_id(id, n)));
@@ -223,6 +234,18 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
         .collect()
 }
 
+/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
+/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
+fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
+    let Kind::ListRow(text) = &ui.widget(id).kind else {
+        return None;
+    };
+    let mut label = Node::new(Role::Label);
+    label.set_value(text.as_str());
+    label.set_bounds(bounds(ui, id, scale));
+    Some((row_label_id(id), label))
+}
+
 /// Byte `index` of field `id`'s `text`, split in `lines` as its runs, as a run and a character
 /// in it: the line that holds the index, or the last line for the end of the text.
 fn text_position(id: WidgetId, text: &str, lines: &[Range<usize>], index: usize) -> TextPosition {
@@ -256,6 +279,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
+            .chain(shown().filter_map(|id| row_label(ui, id, scale)))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -292,8 +316,9 @@ impl Ui {
             })?;
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
+            // A list's focus goes to its stop, as the Tab key's does.
             (Action::Focus, _) => {
-                self.set_focus(Some(id));
+                self.set_focus(Some(list_stop(self, id).unwrap_or(id)));
                 None
             }
             (Action::Increment, _) => self.step_value(id, 1),
@@ -661,10 +686,19 @@ mod tests {
             (n(list).role(), n(list).label()),
             (Role::ListBox, Some("Fruit"))
         );
+        assert!(n(list).supports_action(Action::Focus), "as GTK's");
         assert_eq!(
             n(list).children(),
             rows.iter().map(|&r| node_id(r)).collect::<Vec<_>>()
         );
+        // Each row holds its text as a label, as GTK's rows hold a GtkLabel.
+        assert_eq!(n(rows[0]).children(), [row_label_id(rows[0])]);
+        let label = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == row_label_id(rows[0]))
+            .map(|(_, node)| (node.role(), node.value()));
+        assert_eq!(label, Some((Role::Label, Some("Apple"))));
         let read = |id: WidgetId| (n(id).role(), n(id).label(), n(id).is_selected());
         assert_eq!(
             read(rows[0]),
@@ -714,6 +748,25 @@ mod tests {
             (ui.focus(), ui.selected(list)),
             (Some(rows[3]), Some(rows[0]))
         );
+        // The list's focus goes to its stop, the selected row once the focus has left it.
+        ui.set_focus(None);
+        assert_eq!(ui.do_action(&request(list, Action::Focus)), None);
+        assert_eq!(ui.focus(), Some(rows[0]));
+    }
+
+    #[test]
+    fn a_list_without_a_row_to_focus_is_not_focusable() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let empty = ui.list(Ui::ROOT, "Empty");
+        let list = ui.list(Ui::ROOT, "Off");
+        let row = ui.list_row(list, "Row");
+        ui.set_sensitive(row, false);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        for id in [empty, list] {
+            let node = &update.nodes[id.index()].1;
+            assert!(!node.supports_action(Action::Focus), "{id:?}");
+        }
     }
 
     fn descendants(ui: &Ui, id: WidgetId) -> Vec<WidgetId> {

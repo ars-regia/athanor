@@ -39,6 +39,13 @@ class WalksTest(unittest.TestCase):
         self.assertEqual(len(compare.walk_problems([])), 1)
         self.assertEqual(len(compare.walk_problems([self.ON, self.OFF])), 1)
 
+    def test_a_key_echo_before_or_after_a_walks_last_line_is_not_part_of_the_walk(self):
+        for echo in ("tab", "tabulazione"):
+            before = [self.ON, "Galleria", echo, "Minimize button.", self.OFF]
+            after = [self.ON, "Galleria", "Minimize button.", echo, self.OFF]
+            with self.subTest(echo=echo):
+                self.assertEqual(compare.walk_problems(before + after), [])
+
     def test_walks_that_speak_nothing_fail(self):
         silent = [self.ON, self.OFF, self.ON, self.OFF]
         self.assertEqual(len(compare.walk_problems(silent)), 1)
