@@ -393,6 +393,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-auth"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-backup"
 version = "1.0.0"
 dependencies = [

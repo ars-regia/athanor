@@ -696,6 +696,15 @@ item = "section 10"
 purpose = "Start-up of a shell unit: crash-loop record, readiness, journal, Landlock"
 
 [[component]]
+path = "system/athanor-auth"
+kind = "crate"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP2"
+purpose = "The authentication conversation of the lock and the polkit agent: polkit's line protocol, its parser and zeroising buffers"
+
+[[component]]
 path = "system/build-image.sh"
 kind = "script tool"
 area = "build-ci"
