@@ -77,6 +77,10 @@ SWITCH_SPEECH = {
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
+# Orca's echo of the keys a gallery walk presses (rig.sh: space, then Tab), in English and in
+# Italian. An echo is not speech about the focused object, and it may land before or after the
+# focus's last utterance (#999), so walk_problems drops it.
+KEY_ECHOES = {"space", "tab", "spazio", "tabulazione"}
 
 
 def heard_as(utterance):
@@ -144,12 +148,14 @@ def walk_problems(transcript):
     first utterance and closed by its last ("Screen reader on." and "Screen reader off." in
     English). Each walk ends with one Tab past the page's controls, which leaves the page for
     the stop after it, the same for every page (cases.gallery_walks); a walk that ends anywhere
-    else tabbed a number of times its page does not have."""
+    else tabbed a number of times its page does not have. Orca's key echoes are dropped first."""
     if len(transcript) < 2:
         return ["the transcript holds no walk"]
     on, off = transcript[0], transcript[-1]
     walks, walk = [], None
     for line in transcript:
+        if line in KEY_ECHOES:
+            continue
         if line == on:
             walk = []
         elif line == off and walk is not None:
