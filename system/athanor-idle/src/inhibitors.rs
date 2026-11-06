@@ -130,6 +130,17 @@ mod tests {
     }
 
     #[test]
+    fn the_wrap_skips_a_live_cookie() {
+        let mut t = Inhibitors::new();
+        let first = t.add(inh(Kind::Screen, ":1.1")).unwrap();
+        assert_eq!(first, 1);
+        t.last = u32::MAX;
+        // The next candidate after the wrap is 1, which is live: 2 is taken.
+        assert_eq!(t.add(inh(Kind::Screen, ":1.1")), Some(2));
+        assert_eq!(t.len(), 2);
+    }
+
+    #[test]
     fn cookie_wraps_past_zero_and_live_cookies() {
         let mut t = Inhibitors::new();
         t.last = u32::MAX - 1;
