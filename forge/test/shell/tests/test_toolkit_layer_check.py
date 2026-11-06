@@ -20,6 +20,8 @@ TRACE = """\
 class TestToolkitLayerCheck(unittest.TestCase):
     def test_a_destroyed_surface_is_not_live_and_its_id_may_return(self):
         self.assertEqual(live_surfaces(TRACE), {"30": "12", "31": "23"})
+        self.assertEqual(live_surfaces(TRACE, "x"), {"30": "12", "31": "23"})
+        self.assertEqual(live_surfaces(TRACE, "y"), {})
 
     def test_a_buffer_counts_at_the_scale_its_viewport_maps_it_from(self):
         self.assertTrue(drawn_at(TRACE, 1.0))

@@ -59,7 +59,7 @@ and to the hardware, every duration at zero under reduced motion, islands as the
 auto-hide by default on short outputs, revision 2's tokens applied to the GTK shell first, and a
 library of categories in a scrolling view; none was taken.
 
-## Derived rules and recommended values (proposed with this revision, binding once the maintainer approves it)
+## Derived rules and recommended values (proposed with this revision, approved with it in #619)
 
 These rules follow from the decisions above, or adopt the analysis' proposal (#616) where no
 decision contradicts it. The maintainer did not choose them one by one; `doc_visual_language.md`
@@ -110,7 +110,8 @@ marks each "(proposed, revision 3)".
 
 - `doc_visual_language.md` revision 3 records these decisions, marked "(maintainer decision,
   2026-10-19)", and the derived rules above, marked "(proposed, revision 3)": VL1, VL2, VL4, VL6
-  to VL12, and the new VL13. It binds nothing until the maintainer approves it (ADR-0074 item 5).
+  to VL12, and the new VL13. The maintainer approved it, the derived rules included, with the pull
+  request that records it, #619 (ADR-0074 item 5).
 - This record amends ADR-0099 decision 1 in one point: the appearance settings gain the decided
   "Reduce transparency" switch (decision 2), which this revision proposes to store as
   `reduce-transparency` in `org.athanor.desktop.appearance`. The GNOME keys stay the store of everything GNOME has a key for.

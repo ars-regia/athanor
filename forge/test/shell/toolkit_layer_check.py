@@ -62,11 +62,13 @@ def surfaces(lines):
     return seen
 
 
-def live_surfaces(lines, namespace=BAR):
-    """The layer surfaces of `namespace` the client has created and not destroyed: {surface id:
-    output id}."""
+def live_surfaces(lines, namespace=None):
+    """The layer surfaces the client has created and not destroyed, of `namespace` when one is
+    given: {surface id: output id}."""
     return {
-        s: o for s, (o, n, _, live) in surfaces(lines).items() if live and n == namespace
+        s: o
+        for s, (o, n, _, live) in surfaces(lines).items()
+        if live and namespace in (None, n)
     }
 
 
@@ -225,13 +227,13 @@ def main():
 
             def one_each():
                 return client.poll() is None and len(
-                    live_surfaces(TRACE.read_text().splitlines())
+                    live_surfaces(TRACE.read_text().splitlines(), BAR)
                 ) == len(expected)
 
             until(f"{step}: not one layer surface on each of {expected}", one_each)
             # Late events would show as a second surface: let them come, then count again.
             time.sleep(1)
-            live = live_surfaces(TRACE.read_text().splitlines())
+            live = live_surfaces(TRACE.read_text().splitlines(), BAR)
             if (
                 client.poll() is not None
                 or len(live) != len(expected)

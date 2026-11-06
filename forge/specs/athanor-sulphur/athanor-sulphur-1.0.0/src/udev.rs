@@ -10,7 +10,7 @@ use crate::capture::Target;
 use crate::a11y::Look;
 use crate::cursor::{pointer_elements, Cursor, PointerElement};
 use crate::look::FilterElement;
-use crate::marks::{Marks, Stacked};
+use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
 use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
@@ -29,9 +29,6 @@ use smithay::backend::libinput::{
     LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis,
 };
 use smithay::backend::renderer::damage::Error as DamageError;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Kind, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
@@ -84,7 +81,7 @@ type HeadOutput = DrmOutput<Allocator, Exporter, OutputPresentationFeedback, Drm
 smithay::backend::renderer::element::render_elements! {
     Element<=GlesRenderer>;
     Space=Stacked<GlesRenderer>,
-    Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    Surface=SurfaceElement<GlesRenderer>,
     Pointer=PointerElement<GlesRenderer>,
 }
 
@@ -1439,7 +1436,7 @@ fn render(
         Some(lock) => {
             if let Some(surface) = lock.surface_on(output) {
                 elements.extend(
-                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                    surface_elements::<_, SurfaceElement<_>>(
                         renderer,
                         surface,
                         (0, 0),
@@ -1455,7 +1452,7 @@ fn render(
         None => {
             for (surface, at) in popups {
                 elements.extend(
-                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                    surface_elements::<_, SurfaceElement<_>>(
                         renderer,
                         surface,
                         at.to_physical_precise_round(scale),

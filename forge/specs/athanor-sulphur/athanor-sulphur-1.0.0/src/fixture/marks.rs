@@ -3,7 +3,10 @@
 
 use super::*;
 use crate::focus_theme;
+use smithay::backend::renderer::element::{Element, Id};
+use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::desktop::PopupManager;
+use smithay::utils::{Rectangle, Scale};
 use wayland_client::protocol::wl_subcompositor;
 
 /// The factory accent, which the outline takes before a theme is read, as wide as
@@ -751,6 +754,57 @@ fn the_outline_follows_a_theme_change() {
     });
     run.stop();
     std::fs::remove_dir_all(dir).expect("the directory");
+}
+
+/// At scale 1.5 a pixel an opaque region covers by half is not opaque: 51 logical rows end
+/// 76.5 pixels down, and the 77th row, which a client antialiases, is blended with what lies
+/// beneath it (#978).
+#[test]
+fn a_half_covered_pixel_is_not_opaque() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    // A buffer with alpha: Smithay takes one without it for opaque whole.
+    let file = unlinked().expect("buffer file");
+    let bytes = WIDTH * HEIGHT * 4;
+    file.set_len(u64::try_from(bytes).expect("size"))
+        .expect("pixels");
+    let pool = shm.create_pool(file.as_fd(), bytes, &qh, ());
+    let format = wl_shm::Format::Argb8888;
+    let buffer = pool.create_buffer(0, WIDTH, HEIGHT, WIDTH * 4, format, &qh, ());
+    pool.destroy();
+    let region = compositor.create_region(&qh, ());
+    region.add(0, 0, WIDTH, 51);
+    let (surface, _) = local.window.clone().expect("a window");
+    surface.set_opaque_region(Some(&region));
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let second = run.state.space.outputs().nth(1).expect("an output").clone();
+    let origin = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("mapped")
+        .loc;
+    focused_at(&mut run, &local, (origin.x + 100, origin.y + 100));
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    let id = Id::from_wayland_resource(window.toplevel().expect("a toplevel").wl_surface());
+    let mut renderer = PixmanRenderer::new().expect("a renderer");
+    let marks = run.state.marks();
+    let elements = crate::marks::stack(&mut renderer, &run.state.space, &second, &marks);
+    let element = elements
+        .iter()
+        .find(|element| element.id() == &id)
+        .expect("the window's surface");
+    assert_eq!(
+        element.opaque_regions(Scale::from(1.5)).to_vec(),
+        [Rectangle::new((0, 0).into(), (300, 76).into())]
+    );
+    run.stop();
 }
 
 /// Runs the compositor until the frame shows `done`.

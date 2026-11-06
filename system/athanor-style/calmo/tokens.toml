@@ -62,6 +62,82 @@ center = [0.80, 1.22]
 radii = [0.22, 0.37, 0.54, 0.74]
 gradient_angle = 165
 
+# The tokens of Athanor's toolkit, athanor-sal (doc_visual_language.md VL10, revision 3): the
+# toolkit reads these tables through generated/sal.rs, and the GTK shell keeps the tables above
+# until it is removed (VL1, ADR-0124 decision 7). Lengths are logical pixels, durations ms.
+[sal.accent]
+# The factory accent, one of [accent.presets]. The neutrals of the toolkit's four variants are
+# tinted on its HSL hue and saturation, which the generator derives from it.
+factory = "purple"
+
+[sal.font]
+# No family: the system font (VL6). Only tabular figures, where digits must line up.
+features = "tnum"
+
+[sal.radius]
+shape = "continuous"
+control = 9
+card = 12
+window = 15
+bar = 12
+dock = 22
+panel = 30
+round = 9999
+
+# libadwaita's type scale, relative to the system font (VL6).
+[sal.size]
+caption = { scale = 0.82, weight = 400 }
+body = { scale = 1.00, weight = 400 }
+heading = { scale = 1.00, weight = 700 }
+title-4 = { scale = 1.18, weight = 700 }
+title-3 = { scale = 1.36, weight = 700 }
+title-1 = { scale = 1.81, weight = 800 }
+display = { scale = 5.00, weight = 300 }
+
+[sal.size.icon]
+bar = 16
+dock = 48
+# The dock on outputs up to 800 px tall.
+dock_compact = 40
+launcher_row = 32
+library = 96
+notification = 40
+cc_disc = 36
+cc_glyph = 20
+
+# GNOME's grid, multiples of 6 with a half step; `edge` is the offset of floating surfaces.
+[sal.space]
+xs = 3
+s = 6
+m = 12
+l = 18
+xl = 24
+xxl = 36
+edge = 6
+
+[sal.motion]
+fast = 100
+normal = 200
+slow = 300
+# libadwaita's curve, which applications and the GTK shell keep.
+curve = [0.25, 0.46, 0.45, 0.94]
+# The toolkit shell's entry curve; a surface leaves in exit_ratio of its entry time.
+enter_curve = [0.2, 0, 0, 1]
+exit_ratio = 0.667
+# Moves and resizes: a critically damped spring of unit mass.
+spring_damping = 1.0
+spring_stiffness = 800
+# Under reduced motion, opacity fades of this duration replace every other motion.
+reduced_fade = 100
+
+# The materials of the overlay surfaces in tiers M1 and M2 (VL13); `blur` in pixels.
+[sal.material]
+alpha_light = 0.90
+alpha_dark = 0.88
+blur = 20
+saturate = 1.2
+highlight = 0.10
+
 [variant.light.color]
 bg1 = { s = 42, l = 95 }
 bg2 = { s = 44, l = 88 }
