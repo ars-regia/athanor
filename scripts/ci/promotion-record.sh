@@ -31,8 +31,8 @@
 #   - and, once for the run, the installer ISO users will take (ADR-0114): the digest of the
 #     run's iso-digest.txt, the file accept.yml's accept-target.sh read to find the ISO it
 #     tested, built from the athanor-system digest recorded above and still named by
-#     athanor-iso:RUN_ID. The record names it; the iso job of promote-stable.yml moves
-#     athanor-iso:stable to exactly that digest.
+#     athanor-iso:RUN_ID. The record names it; the last step of the promote job of
+#     promote-stable.yml moves athanor-iso:stable to exactly that digest.
 # Defines promotion_args "$@" (sets run and override), promotion_record DAY OUT (runs every
 # check, writes the record to OUT, sets promote, recorded and previous), stable_of REPOSITORY and
 # tag_of REPOSITORY TAG, check_promoted REPOSITORY DIGEST (promoted-RUN_ID is immutable).
