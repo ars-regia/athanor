@@ -1,5 +1,6 @@
 # Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
-# drift check of PL52 and the daily check of the evidence copies off GitHub (#401); the other
+# drift check of PL52, the daily check of the evidence copies off GitHub (#401) and the
+# daily check that :stable was promoted (#405); the other
 # maintenance jobs move here with PB12.
 name: Maintenance
 
@@ -64,3 +65,33 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python3 scripts/github-settings/ghsettings.py --repo "${GITHUB_REPOSITORY}" diff
+
+  # A :stable that no promotion moved (#405, PL54, ADR-0111 item 5): :stable must be the digest of
+  # the newest promotion record that ran in the environment release, :stable-previous that record's
+  # previous_stable, and every :stable-<day> the last record of its day (doc_ci.md CI29).
+  # The job holds no environment, no package write and no secret: it reads.
+  stable-promotions:
+    name: Stable was promoted
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Compare :stable with the promotion records
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+          EVIDENCE_REGISTRY: ${{ vars.EVIDENCE_REGISTRY }}
+        run: python3 scripts/ci/stable_promotions.py

@@ -64,7 +64,8 @@ stated nor accepted:
    promotion.** The `GITHUB_TOKEN` of any workflow with `packages: write`, on any branch,
    can push GHCR tags, so a contributor with write access can skip the evidence, the dwell
    and the `release` approval. Machines still refuse an unsigned or older image (UT5). #405
-   adds the check that compares `:stable` with the promotion records.
+   added the check that compares `:stable` with the promotion records: the daily job
+   `stable-promotions` of `maintenance.yml`.
 6. **Accepted: `:latest` is signed with no human approval from step 3 of the image key
    rotation.** What reaches it then includes the pull requests that `bot_merge.py` merges
    without review ([ADR-0108](0108-bots-github-app.md) item 3) and the nightly build of the
