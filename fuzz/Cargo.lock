@@ -290,6 +290,7 @@ dependencies = [
  "gio-unix",
  "glib",
  "gtk4",
+ "libc",
  "serde_json",
  "thiserror",
  "tracing",
