@@ -8,6 +8,7 @@ use accesskit::{
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 use std::ops::Range;
+use std::sync::Mutex;
 
 /// The AccessKit node id of a widget.
 pub fn node_id(id: WidgetId) -> NodeId {
@@ -323,6 +324,59 @@ pub fn withdrawn(ui: &Ui, scale: f64) -> TreeUpdate {
         node.set_hidden();
     }
     update
+}
+
+/// What a surface leaving the accessibility tree asks of its adapter: `accesskit_unix`'s, and
+/// in the tests the AT-SPI bridge's under it.
+pub trait Bridge {
+    /// Tells the adapter whether its window is the focused one.
+    fn set_focused(&mut self, focused: bool);
+    /// Applies `update`, if the adapter is active.
+    fn apply(&mut self, update: TreeUpdate);
+}
+
+impl Bridge for accesskit_unix::Adapter {
+    fn set_focused(&mut self, focused: bool) {
+        self.update_window_focus_state(focused);
+    }
+
+    fn apply(&mut self, update: TreeUpdate) {
+        self.update_if_active(|| update);
+    }
+}
+
+/// Takes a surface out of the accessibility tree before its adapter is dropped, which alone
+/// unregisters none of its nodes: its window is deactivated if it is the `focused` one, then
+/// its nodes are withdrawn. An adapter not active yet, its activation still queued on the bus
+/// thread, would register the whole of `initial` there and leave it: it gets no tree instead,
+/// and stays pending until it is dropped (`accesskit_unix` 0.24, `activate_adapter`). An
+/// announcement not yet published is dropped: out of the tree, a surface announces nothing.
+pub fn leave(
+    adapter: &mut impl Bridge,
+    initial: &Mutex<Option<TreeUpdate>>,
+    ui: &mut Ui,
+    scale: f64,
+    focused: bool,
+) {
+    ui.announcement = None;
+    // Before the update, so that an activation from here on finds no tree.
+    // ponytail: an activation between this and `apply` goes pending, and `apply` activates it
+    // with the withdrawn tree, whose hidden root alone the bridge registers and keeps; that
+    // window closes only if accesskit_unix unregisters a dropped adapter's nodes.
+    if let Ok(mut tree) = initial.lock() {
+        *tree = None;
+    }
+    if focused {
+        adapter.set_focused(false);
+    }
+    adapter.apply(withdrawn(ui, scale));
+}
+
+/// The first tree of a surface coming back into the accessibility tree. An announcement asked
+/// for while it was out is dropped, not heard as it comes back.
+pub fn rejoining(ui: &mut Ui, scale: f64) -> TreeUpdate {
+    ui.announcement = None;
+    tree_update(ui, scale)
 }
 
 /// The whole tree of the visible widgets, as the adapter's first update and after every change.
@@ -1240,12 +1294,44 @@ mod tests {
         assert_eq!(heard.announcements, [polite.clone(), polite]);
     }
 
-    /// A surface leaving the accessibility tree first deactivates its window when it was the
-    /// active one, then unregisters every node of it, the root included, from the bus: what
-    /// `Shell::set_accessible` does before it drops the adapter, which unregisters none
-    /// (requirement S2).
+    impl Bridge for accesskit_atspi_common::Adapter {
+        fn set_focused(&mut self, focused: bool) {
+            self.update_window_focus_state(focused);
+        }
+
+        fn apply(&mut self, update: TreeUpdate) {
+            self.update(update);
+        }
+    }
+
+    /// An announcement asked for before a surface leaves the accessibility tree and not yet
+    /// published, or while it is out, is never heard (`Ui::announce`).
     #[test]
-    fn a_withdrawn_tree_deactivates_its_window_and_leaves_nothing_on_the_bus() {
+    fn a_surface_out_of_the_tree_announces_nothing() {
+        let mut ui = Ui::new("Volume", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Mute".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi(&ui);
+        ui.announce("Volume 45 percent");
+        leave(&mut adapter, &Mutex::new(None), &mut ui, 1.0, false);
+        assert!(ui.announcement.is_none(), "the next adapter would announce it");
+        ui.announce("Volume 50 percent");
+        let tree = rejoining(&mut ui, 1.0);
+        assert!(tree.nodes.iter().all(|(id, _)| *id != ANNOUNCEMENT));
+        let (mut adapter, again) = at_spi(&ui);
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert!(heard.lock().expect("not poisoned").announcements.is_empty());
+        assert!(again.lock().expect("not poisoned").announcements.is_empty());
+    }
+
+    /// A surface leaving the accessibility tree first deactivates its window when it was the
+    /// active one, then unregisters every node of it, the root included, from the bus, and
+    /// leaves an adapter not active yet no tree to register: what `Surface::withdraw` does
+    /// before it drops the adapter, which unregisters none (requirement S2).
+    #[test]
+    fn a_surface_leaving_deactivates_its_window_and_leaves_nothing_on_the_bus() {
         let mut ui = Ui::new("What did you plug in?", Theme::default(), false);
         ui.root_role = RootRole::AlertDialog;
         let choices = ui.add(Ui::ROOT, Kind::Column);
@@ -1255,10 +1341,12 @@ mod tests {
         ui.layout();
         let (mut adapter, heard) = at_spi_focused(&ui, true);
         assert!(heard.lock().expect("not poisoned").registered.len() > 1);
-        adapter.update_window_focus_state(false);
-        adapter.update(withdrawn(&ui, 1.0));
+        let initial = Mutex::new(Some(tree_update(&ui, 1.0)));
+        leave(&mut adapter, &initial, &mut ui, 1.0, true);
         let heard = heard.lock().expect("not poisoned");
         assert_eq!(heard.deactivated, ["What did you plug in?"]);
         assert!(heard.registered.is_empty(), "{:?}", heard.registered);
+        let initial = initial.lock().expect("not poisoned");
+        assert!(initial.is_none(), "an adapter not active yet would register the whole tree");
     }
 }
