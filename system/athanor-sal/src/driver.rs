@@ -232,7 +232,7 @@ pub trait Application {
     /// The first frame of `surface` was committed: called in the turn of the event loop that
     /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
     /// compositor may withhold from a surface it does not show. Where a `Type=notify`
-    /// service tells systemd it is ready.
+    /// service tells systemd it is ready. Not called for a surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
     /// The layer surface `surface` closed without the application asking: the compositor closed
@@ -386,9 +386,15 @@ fn run_on(
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
         }
-        for surface in std::mem::take(&mut app.shell.first_frames) {
-            app.application.drawn(&mut app.shell, surface);
-        }
+        // A surface closed since its first frame, by the compositor, with its output or by an
+        // earlier `drawn`, is not reported drawn.
+        let first_frames = std::mem::take(&mut app.shell.first_frames);
+        each_open(
+            &mut app,
+            first_frames,
+            |app, surface| app.shell.ui(surface).is_some(),
+            |app, surface| app.application.drawn(&mut app.shell, surface),
+        );
         app.closed_by_application();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
@@ -519,19 +525,7 @@ impl Shell {
     /// Sets the part of a layer surface that takes the pointer, in logical pixels; `None` is all
     /// of it. Takes effect with the next frame.
     pub fn set_input_region(&mut self, id: SurfaceId, rects: Option<&[Rect]>) -> Result<(), Error> {
-        let region = match rects {
-            Some(rects) => {
-                let region = Region::new(&self.compositor)?;
-                for r in rects {
-                    // Whole pixels that cover the widget: the origin down, the far edge up.
-                    let (x, y) = (r.x.floor(), r.y.floor());
-                    let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
-                    region.add(x as i32, y as i32, w as i32, h as i32);
-                }
-                Some(region)
-            }
-            None => None,
-        };
+        let region = self.region(rects)?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -542,15 +536,34 @@ impl Shell {
         Ok(())
     }
 
+    /// A `wl_region` of `rects`, in logical pixels; `None` for all of the surface.
+    fn region(&self, rects: Option<&[Rect]>) -> Result<Option<Region>, Error> {
+        let Some(rects) = rects else {
+            return Ok(None);
+        };
+        let region = Region::new(&self.compositor)?;
+        for r in rects {
+            // Whole pixels that cover the widget: the origin down, the far edge up.
+            let (x, y) = (r.x.floor(), r.y.floor());
+            let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
+            region.add(x as i32, y as i32, w as i32, h as i32);
+        }
+        Ok(Some(region))
+    }
+
     /// Changes a layer surface's layer, anchor, margin, exclusive zone, keyboard and input
     /// region to `options`'. The layer changes in place, through
     /// `zwlr_layer_surface_v1.set_layer`: the surface is not created again. Refused, with nothing
-    /// changed, for another namespace, which the protocol fixes when the surface is created, and
-    /// for another layer on a layer shell older than version 2, which has no `set_layer`: close
-    /// the surface and open another. Takes effect at once: the driver commits the new state, with
+    /// changed and no request sent, for another namespace, which the protocol fixes when the
+    /// surface is created, for another layer on a layer shell older than version 2, which has no
+    /// `set_layer`: close the surface and open another; and for widgets that cannot be laid out
+    /// at the surface's scale. Takes effect at once: the driver commits the new state, with
     /// the size of the widgets, without waiting for a frame, which the compositor may hold back
     /// from a covered surface. The widgets are drawn again at the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
+        // What can refuse comes before any request: a request sent stays pending, and the next
+        // commit, of this call or not, would apply it.
+        let region = self.region(options.input_region.as_deref())?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -561,7 +574,21 @@ impl Shell {
             SurfaceKind::Wlr(wlr) => wlr.version(),
             _ => 0,
         };
-        if let Some(new) = layer_change(placed, options, version)? {
+        let new = layer_change(placed, options, version)?;
+        let stretch = stretched(options.anchor);
+        let min = (surface.ui.min_width, surface.ui.min_height);
+        // An axis no longer stretched takes its widgets' size again.
+        if surface.stretch.0 && !stretch.0 {
+            surface.ui.min_width = 0.0;
+        }
+        if surface.stretch.1 && !stretch.1 {
+            surface.ui.min_height = 0.0;
+        }
+        if let Err(error) = layout(&mut surface.ui, surface.scale) {
+            (surface.ui.min_width, surface.ui.min_height) = min;
+            return Err(error);
+        }
+        if let Some(new) = new {
             layer.set_layer(new);
             placed.0 = new;
         }
@@ -570,22 +597,15 @@ impl Shell {
         layer.set_margin(top, right, bottom, left);
         layer.set_exclusive_zone(options.exclusive_zone);
         layer.set_keyboard_interactivity(options.keyboard);
-        let stretch = stretched(options.anchor);
-        // An axis no longer stretched takes its widgets' size again.
-        if surface.stretch.0 && !stretch.0 {
-            surface.ui.min_width = 0.0;
-        }
-        if surface.stretch.1 && !stretch.1 {
-            surface.ui.min_height = 0.0;
-        }
         surface.stretch = stretch;
-        surface.ask_size()?;
-        self.set_input_region(id, options.input_region.as_deref())?;
+        surface.request_size();
+        surface
+            .wl_surface()
+            .set_input_region(region.as_ref().map(Region::wl_region));
+        surface.dirty = true;
         // A commit with no new buffer applies the layer surface's state and keeps the buffer
         // attached; the frame callback of a draw under way is untouched.
-        if let Some(surface) = self.get_mut(id) {
-            surface.wl_surface().commit();
-        }
+        surface.wl_surface().commit();
         Ok(())
     }
 
@@ -991,6 +1011,21 @@ fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl
     }
 }
 
+/// Calls `call` on each of `surfaces` that `open` finds open in `state` when its turn comes, so
+/// that one closed before, or by an earlier `call`, is skipped.
+fn each_open<T, S: Copy>(
+    state: &mut T,
+    surfaces: Vec<S>,
+    open: impl Fn(&T, S) -> bool,
+    mut call: impl FnMut(&mut T, S),
+) {
+    for surface in surfaces {
+        if open(state, surface) {
+            call(state, surface);
+        }
+    }
+}
+
 /// The output named `name` among `outputs` and their names.
 fn named<'a, O: 'a>(
     outputs: impl IntoIterator<Item = (&'a O, Option<&'a str>)>,
@@ -1220,16 +1255,14 @@ impl Surface {
         }
     }
 
-    /// Asks the compositor for a layer surface's size now: its widgets' size at its scale, and 0
-    /// along a stretched axis. Sent with the next commit.
-    fn ask_size(&mut self) -> Result<(), Error> {
-        layout(&mut self.ui, self.scale)?;
+    /// Asks the compositor for a layer surface's size now: its widgets' size as last laid out, and
+    /// 0 along a stretched axis. Sent with the next commit.
+    fn request_size(&mut self) {
         if let Shown::Layer(surface) = &self.shown {
             let asked = requested(logical_size(&self.ui), self.stretch);
             surface.set_size(asked.0, asked.1);
             self.size = asked;
         }
-        Ok(())
     }
 
     /// Hands the tree of the surface just drawn to the accessibility adapter.
@@ -2664,6 +2697,24 @@ mod tests {
         );
         assert_eq!(state.1, [1], "a surface closed at the application's asking was lost");
         assert_eq!(state.0, [(3, 8)]);
+    }
+
+    #[test]
+    fn a_surface_closed_before_its_turn_is_not_reported_drawn() {
+        // Surfaces 1, 2 and 3 drew their first frame; 2 closed since, and drawing 1 closes 3.
+        let mut state = (vec![1, 3], Vec::new());
+        each_open(
+            &mut state,
+            vec![1, 2, 3],
+            |(open, _), surface| open.contains(&surface),
+            |(open, told), surface| {
+                told.push(surface);
+                if surface == 1 {
+                    open.retain(|s| *s != 3);
+                }
+            },
+        );
+        assert_eq!(state.1, [1], "a closed surface was reported drawn");
     }
 
     #[test]

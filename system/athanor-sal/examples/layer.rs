@@ -4,8 +4,10 @@
 //!
 //! With `--extra <output>`, once that output is announced, two more layer surfaces open on it by
 //! its name, `athanor-sal-overlay` on the background layer and `athanor-sal-closed` on the top
-//! one: after its first frame the first moves to the overlay layer and the second closes. Prints
-//! `closed <namespace>` for each surface closed without the application asking.
+//! one: after its first frame the first moves to the overlay layer and the second closes. Before
+//! the move, a `set_layer` with widgets too wide to lay out and a margin of 40 at the bottom is
+//! refused, printing `refused <namespace>`. Prints `closed <namespace>` for each surface closed
+//! without the application asking.
 
 use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
@@ -20,6 +22,8 @@ const BAR: &str = "athanor-sal-layer";
 const OVERLAY: &str = "athanor-sal-overlay";
 /// The namespace of the surface the application closes.
 const CLOSED: &str = "athanor-sal-closed";
+/// A width no buffer holds: `wl_shm` sizes are 16-bit.
+const TOO_WIDE: f32 = 100_000.0;
 
 struct Bars {
     /// The output of `--extra`, until its surfaces open.
@@ -73,7 +77,23 @@ impl Application for Bars {
         };
         if namespace == CLOSED {
             shell.close(surface);
-        } else if let Err(error) = shell.set_layer(surface, &options(Layer::Overlay, namespace)) {
+            return;
+        }
+        // Refused: the margin it asks for is never sent, and so never applied.
+        let mut refused = options(Layer::Overlay, namespace);
+        refused.margin = [0, 0, 40, 0];
+        let width = shell
+            .ui_mut(surface)
+            .map(|ui| std::mem::replace(&mut ui.min_width, TOO_WIDE));
+        let outcome = shell.set_layer(surface, &refused);
+        if let (Some(ui), Some(width)) = (shell.ui_mut(surface), width) {
+            ui.min_width = width;
+        }
+        if outcome.is_ok() {
+            return shell.fail("set_layer took widgets too wide to lay out".into());
+        }
+        println!("refused {namespace}");
+        if let Err(error) = shell.set_layer(surface, &options(Layer::Overlay, namespace)) {
             shell.fail(error);
         }
     }
