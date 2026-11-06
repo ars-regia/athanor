@@ -311,22 +311,46 @@ impl Appearance {
     /// contrast, whose accent the contrast gate has checked. The fill of a control, its ink,
     /// and the foreground accent of lines, rings, indicators and thin fills (#571).
     pub fn accent_css(&self) -> Option<String> {
-        if self.high_contrast {
-            return None;
-        }
-        let accent = fill(self.accent_rgb());
         let surfaces = if self.dark {
             &SURFACES_DARK
         } else {
             &SURFACES_LIGHT
         };
+        let colours = self.accent_colours(surfaces, DARK_INK)?;
         Some(format!(
             "@define-color ath_acc {};\n@define-color ath_acc_ink {};\n@define-color ath_acc_fg {};\n",
-            accent.hex(),
-            on_accent(accent).hex(),
-            foreground(accent, surfaces, self.dark).hex()
+            colours.acc.hex(),
+            colours.acc_ink.hex(),
+            colours.acc_fg.hex()
         ))
     }
+
+    /// The colours that replace a palette's accent, or `None` to keep it, as `accent_css`
+    /// derives them for the GTK shell: against `surfaces`, a variant's `surf`, `surf2`, `bar`
+    /// and `chip`, with `dark_ink`, the dark variant's `acc_ink`. The toolkit's theme passes
+    /// its own (`sal::palette`).
+    pub fn accent_colours(&self, surfaces: &[Rgb], dark_ink: Rgb) -> Option<AccentColours> {
+        if self.high_contrast {
+            return None;
+        }
+        let acc = fill_on(self.accent_rgb(), dark_ink);
+        Some(AccentColours {
+            acc,
+            acc_ink: on_accent_with(acc, dark_ink),
+            acc_fg: foreground(acc, surfaces, self.dark),
+        })
+    }
+}
+
+/// A user's accent in its three roles (#571).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AccentColours {
+    /// The fill of a control.
+    pub acc: Rgb,
+    /// The text on `acc`.
+    pub acc_ink: Rgb,
+    /// Lines, rings, indicators and thin fills.
+    pub acc_fg: Rgb,
 }
 
 /// `SURFACES_LIGHT`, `SURFACES_DARK` and `DARK_INK`, generated from the tokens.
@@ -440,7 +464,12 @@ pub fn foreground(accent: Rgb, surfaces: &[Rgb], dark: bool) -> Rgb {
 /// presets only red is darkened (maintainer decision, 2026-10-17, #571). `calmo/tokens.py`
 /// `fill` is the same rule.
 pub fn fill(accent: Rgb) -> Rgb {
-    if contrast(accent, WHITE).max(contrast(accent, DARK_INK)) >= MIN_CONTRAST {
+    fill_on(accent, DARK_INK)
+}
+
+/// `fill`, with `dark_ink` as the dark ink.
+fn fill_on(accent: Rgb, dark_ink: Rgb) -> Rgb {
+    if contrast(accent, WHITE).max(contrast(accent, dark_ink)) >= MIN_CONTRAST {
         return accent;
     }
     let mut last = accent;
@@ -462,10 +491,15 @@ fn contrast(a: Rgb, b: Rgb) -> f64 {
 /// The text colour on `accent`: white when it reaches WCAG AA, otherwise Calmo's dark ink
 /// (VL2). The contrast check of VL11, not this function, holds the presets to AA.
 pub fn on_accent(accent: Rgb) -> Rgb {
+    on_accent_with(accent, DARK_INK)
+}
+
+/// `on_accent`, with `dark_ink` as the dark ink.
+fn on_accent_with(accent: Rgb, dark_ink: Rgb) -> Rgb {
     if contrast(accent, WHITE) >= MIN_CONTRAST {
         WHITE
     } else {
-        DARK_INK
+        dark_ink
     }
 }
 
