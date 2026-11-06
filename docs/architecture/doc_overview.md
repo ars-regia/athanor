@@ -1,6 +1,6 @@
 # Athanor workspace overview
 
-Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** **Amended on 2026-10-31 by `doc_own_stack.md` decision 32, in the note below (#903).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05 and one of 2026-10-08. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur` and its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths). Only identifiers are renamed; the specified behaviour does not change.
+Status: **revision 3 (2026-11-06) proposed, awaiting approval; until then revision 2 is the approved text.** Revision 3 designs the window switcher on Alt+Tab, `athanor-switcher`, which ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places in release 1.0, in section 8, and points sections 1 to 7 at it; it changes nothing of the overview's behaviour, which stays in release 1.1 (ADR-0135). Its rules carry either "(maintainer decision, 2026-11-06)" or "(proposed, revision 3)". **Revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was the draft of 2026-10-05; revision 2 applies the review of 2026-10-08 and the maintainer's decisions of that day (ADR-0099), and follows the specification template of ADR-0076 point 7: scope, non-goals and rationale (section 1), interfaces and failure behaviour (section 2), acceptance criteria (section 5). **Amended on 2026-10-06 by maintainer decision A2-24 (#159): this document owns the window switcher on Alt+Tab (section 7).** **Amended on 2026-10-31 by `doc_own_stack.md` decision 32, in the note below (#903).** This document specifies stage 7 of `doc_shell.md` (SH1, SH3): Athanor's own window and workspace overview, which replaces cosmic-workspaces. It covers the program and its use of the compositor client, the surfaces, contents and thumbnails, pointer and keyboard use, opening and closing (Super+W, the bar, the dock, a three-finger gesture and a hot corner that is off by default), feedback when the workspace changes, the confinement, the tests and the order of construction. The maintainer's decisions are in section 6: seven of 2026-10-05, one of 2026-10-08 and, in revision 3, four of 2026-11-06. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur` and its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths). Only identifiers are renamed; the specified behaviour does not change.
 
 **Amendment of 2026-10-31** (`doc_own_stack.md` decision 32, the amendment approved by the maintainer with #903), in the first pull request of the implementation, as that document's decision 28 asks:
 
@@ -15,11 +15,11 @@ Status: **revision 2, approved by the maintainer on 2026-10-09.** Revision 1 was
 
 ### Scope
 
-Stage 7 of `doc_shell.md`, as the status line lists it: the overview program `athanor-overview`, its surfaces, contents, thumbnails, pointer and keyboard use, the ways of opening and closing it, the workspace-change indicator, the hot corner, the confinement, the tests and the order of construction; and, since 2026-10-06, the ownership of the window switcher on Alt+Tab (section 7).
+Stage 7 of `doc_shell.md`, as the status line lists it: the overview program `athanor-overview`, its surfaces, contents, thumbnails, pointer and keyboard use, the ways of opening and closing it, the workspace-change indicator, the hot corner, the confinement, the tests and the order of construction; and, since 2026-10-06, the ownership of the window switcher on Alt+Tab (section 7), whose design revision 3 brings in section 8.
 
 ### Non-goals
 
-Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, and the shells drawn over other compositors' overviews (OV15); a compositor of our own (`doc_compositor.md` CO1); the bar's workspace indicator (F-bar-20); the design of the window switcher, which a later revision brings (section 7).
+Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, and the shells drawn over other compositors' overviews (OV15); a compositor of our own (`doc_compositor.md` CO1); the bar's workspace indicator (F-bar-20); the window switcher's thumbnails, which come after its first release, and an overview in release 1.0 (section 8; maintainer decision, 2026-11-06).
 
 ### Rationale: context and verified facts
 
@@ -78,7 +78,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV1. One overview, replacing cosmic-workspaces.** On every output it shows that output's workspaces as a strip, and the windows of the selected workspace as a grid of thumbnails. This is the model of macOS Mission Control and GNOME's overview.
 
 - **Super stays with the launcher** (LA8). The overview opens with Super+W, the `XF86LaunchA` key, the bar's Workspaces module, the dock's workspaces button, a three-finger swipe (OV13, decision 4, under the own compositor by the amendment of 2026-10-31) and the hot corner when the user turns it on (OV10, OV14).
-- **The window switcher on Alt+Tab is owned by this document** (amended 2026-10-06, maintainer decision A2-24, #159; section 7). It is a surface of its own, not the overview's grid; F-overview-10. Its design comes in a later revision of this document.
+- **The window switcher on Alt+Tab is owned by this document** (amended 2026-10-06, maintainer decision A2-24, #159; section 7). It is a surface of its own, not the overview's grid; F-overview-10. Revision 3 designs it in section 8: a Sal client of its own, `athanor-switcher`, not part of `athanor-overview` (maintainer decision, 2026-11-06).
 
 **OV2. Programs and crates.**
 
@@ -89,9 +89,9 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 - **One crate, two targets,** as `athanor-bar`.
   - A library holds the logic: the model of windows and workspaces per output, the placement of window cards, keyboard navigation, the indicator's timing and the hot corner's rules. It has no GTK type and is tested without a display (SH4).
-  - A binary holds the GTK4 surfaces.
+  - A binary holds the GTK4 surfaces of the overview. The window switcher is not in this crate and uses neither GTK4 nor gtk4-layer-shell: it is a Sal client (OV20; maintainer decision, 2026-11-06).
   - No new shared crate is created.
-- **Resident and hidden,** as LA1 and CC2: a cold GTK4 start cannot meet ST5's 100 ms.
+- **Resident and hidden,** as LA1 and CC2: a cold GTK4 start cannot meet ST5's 100 ms. The switcher is resident too, as a Sal client (OV20; proposed, revision 3).
   - It owns `os.athanor.Overview1` at `/os/athanor/Overview1`, with three methods: `Show()` (shows, and leaves it shown when it already is), `Toggle()` and `ShowApplication(s app_id)` (OV11).
   - A D-Bus activation file with `SystemdService=athanor-overview.service` starts the unit when it is down, so the program never runs outside its unit (LA8).
 - **Renderer: Cairo,** pinned in code, as the other resident surfaces (SH4, LA1).
@@ -116,7 +116,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV4. The surfaces.**
 
 - **One overview surface per output.**
-  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs:5-12`).
+  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs:5-12`). The rule is the overview's: the switcher opens and closes its Sal surface on demand, and OV27 item 1 checks that both compositors keep its connection (proposed, revision 3).
   - When the output leaves, the window is let go, as the bar's popups are.
   - The surface has three configurations, switched in place:
 
@@ -257,7 +257,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV15. Register entries this document does not build.** Section 3 records each in the register.
 
 - F-overview-07, renaming workspaces: excluded in release 1. cosmic-comp 1.8.0 neither advertises nor handles Rename (decision 7). The overview offers the action only on a workspace whose capabilities include Rename (OV3), so it appears when upstream adds it.
-- F-overview-10, Alt+Tab: owned by this document since 2026-10-06 (A2-24, #159; section 7), designed in a later revision. Not built in release 1 of the overview.
+- F-overview-10, Alt+Tab: owned by this document since 2026-10-06 (A2-24, #159; section 7) and designed by revision 3 in section 8. It is not built by the overview: it is `athanor-switcher`, in release 1.0, while the overview stays in release 1.1 (ADR-0138, `docs/decisions/0138-own-components-in-1-0.md`, pull request #1017; maintainer decision, 2026-11-06).
 - F-overview-14, Stage Manager: excluded. It is a window-management model of its own, which CO2 would bring in as a register entry of the Window management surface. Nothing in cosmic-comp supports it.
 - F-overview-15, snap layouts and tiling zones: moved to the Window management surface that `doc_compositor.md` CO2 proposes. It is a compositor feature, not an overview feature.
 - F-overview-16, Activities: excluded. It would add a second axis of separation over workspaces with no compositor support. Separate workspaces per output already cover the common use.
@@ -267,7 +267,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 - **Landlock at start,** as BR1 and LA9.
   - Read access covers the icon and theme directories, the application directories for desktop entries, and dconf.
-  - Write access covers only what GTK needs (the same list as the bar's: its runtime directory, dconf, its cache, `/tmp` and `/dev/dri`).
+  - Write access covers only what GTK needs (the same list as the bar's: its runtime directory, dconf, its cache, `/tmp` and `/dev/dri`). The switcher is not a GTK program and has a list of its own (OV26; proposed, revision 3).
   - It has no read access to `$HOME` beyond its configuration.
   - It has no TCP: Landlock ABI 4 denies bind and connect, and the unit allows only `AF_UNIX`.
 - **The unit** is confined as `athanor-shelld.service` is (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `RestrictAddressFamilies=AF_UNIX`, which alone keeps it off the network, `SystemCallFilter=@system-service`; `athanor-shelld.service` sets no `IPAddressDeny`). Its `MemoryHigh` is set at 1.5 times the budget of section 4, item 4, the convention of `doc_accessibility.md` AX3.
@@ -360,6 +360,10 @@ Applied with the approval of this document.
 - **The dock** (owner: `doc_bar.md`): a "Show all windows" entry in an application's menu, calling `ShowApplication` (OV11).
 - **The Settings app** (owner: `doc_settings.md`, SE14): a "Hot corner" switch on the Desktop page writing `org.gnome.desktop.interface enable-hot-corners` (decisions 6 and 8).
 - **The lock** (owner: `doc_lock_and_prompts.md`): `LockedHint` set by our lock, which the maintainer's decision on USBGuard of 2026-10-05 already requires; the overview only reads it.
+- **athanor-sulphur's key bindings** (owner: `doc_own_stack.md` OS13): Alt+Tab and Alt+Shift+Tab bound to `Action::Call` of `os.athanor.Switcher1.Next` and `Previous` (maintainer decision, 2026-11-06), through two calls that are not coalesced and do not act while locked, with the fixture test OS13 asks for (OV21; proposed, revision 3).
+- **athanor-sulphur's allow-list** (owner: `doc_own_stack.md` OS4): the switcher's line of OV26 (proposed, revision 3).
+- **cosmic-comp's system actions** (the user's copy, written once per user as LA8 writes the launcher's): `WindowSwitcher` and `WindowSwitcherPrevious` calling `os.athanor.Switcher1` (maintainer decision, 2026-11-06), written by the switcher (OV21; proposed, revision 3).
+- **Sal** (owner: `doc_own_stack.md` OS7): the prerequisites of OV27, in one pull request shared with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display (proposed, revision 3).
 
 **Amendments to approved or pending documents.**
 
@@ -379,11 +383,20 @@ Applied with the approval of this document.
 - **`doc_portal.md` section 3** (ruling of 2026-10-05): its `Screenshot` entry goes to the same file.
 - **Amendments of 2026-10-08 (ADR-0099):** `doc_settings.md` SE14 writes the GNOME key of OV14 instead of a schema of this program; `doc_shell_standard.md` ST5 cites this document's memory budget as section 4, item 4.
 - **`doc_compositor.md` CO3:** two patches, the three-finger swipe (decision 4) and the reduced-motion switch (decision 5), neither written (amendment of 2026-10-31); a third, the overview namespace on the overlay or top layer, only if spike S3 fails (decision 1).
+- **Owed to revision 3** (the window switcher, section 8), each proposed in revision 3, in the pull request of OV28 step 1 unless it says otherwise:
+  - `docs/operations/release-1.0.md`: amended by ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) itself (row 12, section 3); nothing more is owed here.
+  - `doc_own_stack.md`: the 1.1 placement of the window switcher at the lines ADR-0138 lists (about 423, 666, 778, 917 to 920, 940 and 1205), and OS13's list of default bindings, which gains Alt+Tab and Alt+Shift+Tab.
+  - `doc_session.md` SN16, gap 8 (`:227`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
+  - `doc_launcher.md` LA12 (`:141`) and "Left for plan 3c" (`:187`): the switcher of this document exists in release 1.0, and the switch removes the packages ADR-0138 decision 2 names once OV28 steps 4 and 5 have merged and section 8's acceptance holds.
+  - `doc_shell.md` SH3, the row of cosmic-launcher (`:70`): its condition is met by OV28 step 6.
+  - `shell-features.md` F-overview-10 (`:399`): owned by this document, not by "the launcher's plan 3c"; its source becomes `athanor-switcher` at OV28 step 6.
+  - `docs/architecture/components.toml`: an entry for `forge/specs/athanor-switcher`, status "specified", spec `doc_overview.md`, item OV20.
+  - The README of athanor-sulphur, its paragraph on bindings: with OV28 step 4, not in the documentation pull request.
 
 ## 4. Open doubts
 
 1. **The spikes,** each a short probe on the image as shipped, run in OV19 step 1 (S1, S5) or step 2 (S2 to S4). A spike that fails sends its rule back to the maintainer.
-   - **S1. Surface states.** Whether one gtk4-layer-shell surface switches between the three states of OV4, and whether the hot-corner surface empties and refills its input region, on cosmic-comp 1.8.0-1.fc43.athanor1 without the connection being dropped. Also: whether the overlay layer draws above a fullscreen window, which shown surface receives the keyboard, and that a drag reaching the corner does not enter the hot-corner surface.
+   - **S1. Surface states** (the overview's; the switcher's Sal surfaces are checked by OV27 item 1). Whether one gtk4-layer-shell surface switches between the three states of OV4, and whether the hot-corner surface empties and refills its input region, on cosmic-comp 1.8.0-1.fc43.athanor1 without the connection being dropped. Also: whether the overlay layer draws above a fullscreen window, which shown surface receives the keyboard, and that a drag reaching the corner does not enter the hot-corner surface.
    - **S2. Capture.**
      - Whether `ext-image-copy-capture-v1` returns content for a window on an inactive workspace and for a minimised window, and how old that content is.
      - How long one 1920×1080 `wl_shm` capture takes on the UHD 620.
@@ -429,7 +442,7 @@ On the reference laptop athanor-ref, judged by the maintainer (and, for item 9, 
 
 ## 6. Decisions taken
 
-Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2026-10-08. Each followed the recommendation put to the maintainer.
+Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2026-10-08. Each followed the recommendation put to the maintainer. Decisions 9 to 12 were taken by the maintainer on 2026-11-06 for revision 3 (ADR-0138, pull request #1017).
 
 1. **Which layer namespace?** (OV4) Choice: the neutral namespace `athanor-overview` now, with pinned surfaces; a cosmic-comp patch counting the special namespace only on the overlay or top layer only if spike S3 fails. Reason: it needs no patch on cosmic-comp 1.8.0, and the cost it leaves (windows drawn under the overview) is measured before anything depends on it; the special namespace with pinned surfaces would hide every window all session (`quirks.rs:13-25`).
 2. **What do the workspace miniatures show?** (OV5, OV6) Choice: still window captures composed at each window's geometry, with the schematic (rectangle and icon) as fallback per window. Reason: it meets F-overview-02 as written on the shm path, and the fallback keeps every window visible when a capture fails; cosmic-comp's workspace capture would contain the overview itself under a neutral namespace.
@@ -439,6 +452,12 @@ Decisions 1 to 7 were taken by the maintainer on 2026-10-05, and decision 8 on 2
 6. **Is there a hot corner?** (OV14) Choice: drawn by the shell, one 1×1 overlay surface per output, off by default, switched on Settings' Desktop page. Reason: it meets F-overview-11 without a patch; off by default avoids accidental openings for new users.
 7. **Can workspaces be renamed?** (OV15) Choice: excluded in release 1; the action shows only when the compositor advertises Rename. Reason: cosmic-comp 1.8.0 neither advertises nor handles it, the capability check brings the feature with upstream at no cost, and CO3 keeps window-management patches for entries that matter more.
 8. **First frame and hot-corner key** (OV6, OV14; 2026-10-08, ADR-0099). Choice: the first complete frame is every card in place with cached thumbnails or icons, drawn with `wl_shm` and Cairo, without GL or GBM; the hot corner is `org.gnome.desktop.interface enable-hot-corners`, with Athanor's vendor default `false`, and the overview ships no schema. Reason: the first needs no fresh thumbnail to be a complete frame and keeps the renderer that cannot race on Vulkan; the second is the key GNOME users and tools already know, and A2-20 prefers an existing GNOME key to a new one.
+9. **Is the window switcher in 1.0, and what is it?** (OV20, OV21) (maintainer decision, 2026-11-06) Choice: in release 1.0, a Sal client, `athanor-switcher`, owning `os.athanor.Switcher1` with `Next` and `Previous`, serving both sessions: athanor-sulphur binds Alt+Tab through `Action::Call`, and cosmic-comp through its `system_actions`. Reason: ADR-0138 decisions 2 and 6; a client keeps `doc_own_stack.md` decision 30 (the compositor draws no text), reaches Orca through AT-SPI as OS8 asks, and keeps Alt+Tab working in cosmic-comp's session once cosmic-launcher leaves.
+10. **What does it show?** (OV22) (maintainer decision, 2026-11-06) Choice: every window of every workspace, by icon and title, in order of most recent use, on the focused output. Thumbnails come later.
+11. **Which keys?** (OV21) (maintainer decision, 2026-11-06) Choice: Alt+Tab and Alt+Shift+Tab.
+12. **What stays in 1.1?** (maintainer decision, 2026-11-06) Choice: the overview, `athanor-overview`, and the retirement of cosmic-workspaces (ADR-0135).
+
+Everything else in section 8 is marked "(proposed, revision 3)", and its approval decides it: the focused-output rule and the layout (OV22), the order of use kept in the client (OV23), the release of Alt to activate and Escape to cancel (OV24), the AT-SPI focus at map and the Orca transcript (OV25), the confinement (OV26), the Sal prerequisites (OV27), the order of the pull requests (OV28), the failure behaviour and the acceptance criteria.
 
 ## 7. Amendment of 2026-10-06: the window switcher on Alt+Tab
 
@@ -447,5 +466,140 @@ Maintainer decision A2-24 (#159), from specification audit 2 of 2026-10-05. It o
 - **The gap it closes.** Section 2 handed Alt+Tab to the launcher's plan 3c, and `doc_launcher.md` LA12 handed it back to plan 3c as well, so no document designed it. cosmic-launcher serves Alt+Tab today: cosmic-comp's `WindowSwitcher` action runs `cosmic-launcher alt-tab` (LA12).
 - **Ownership.** This document owns the window switcher on Alt+Tab (F-overview-10). It switches between windows, which is the overview's domain, and it reads the same toplevel and workspace state the overview reads through the compositor client (OV2, OV3), so it adds no new source of truth.
 - **Until it exists, cosmic-launcher stays.** LA12's switch may remove cosmic-app-library and pop-launcher with the launcher's own programs, but `cosmic-launcher` leaves the image only in the same change that binds Alt+Tab to the switcher of this document. Removing it earlier leaves Alt+Tab doing nothing. `doc_shell.md` SH3 carries the same condition in its table.
-- **What is not decided here.** The switcher's layout, its keys (Alt+Tab, Alt+Shift+Tab and any others), whether it spans workspaces and outputs, its accessible names and its reduced-motion behaviour come in a later revision of this document, which states its "why not upstream" under the scope budget of `doc_shell.md` SH3 (cosmic-launcher's own switcher is the upstream candidate) and is reviewed like any revision. Release 1 of the overview (OV1 to OV19) does not build it.
+- **What is not decided here.** The switcher's layout, its keys (Alt+Tab, Alt+Shift+Tab and any others), whether it spans workspaces and outputs, its accessible names and its reduced-motion behaviour come in a later revision of this document, which states its "why not upstream" under the scope budget of `doc_shell.md` SH3 (cosmic-launcher's own switcher is the upstream candidate) and is reviewed like any revision. Release 1 of the overview (OV1 to OV19) does not build it. Revision 3 decides these in section 8, which overrides this section where they disagree.
 - **Changes owed to other documents:** `doc_launcher.md` LA12 and its "Left for plan 3c" line name this document as the owner of the window switcher, and plan 3c keeps only the switch of the launcher's own programs; `shell-features.md` names this document as the owner of F-overview-10 (the bullet of section 3 above).
+
+## 8. Revision 3: the window switcher on Alt+Tab
+
+Proposed on 2026-11-06 and awaiting the maintainer's approval; until then nothing in this section may be implemented (ADR-0074). It designs what section 7 left undecided and overrides section 7 where they disagree. ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places the switcher in release 1.0 (decision 2) and writes it in Sal (decision 6). Each rule names its source: "(maintainer decision, 2026-11-06)", or "(proposed, revision 3)" for what the approval of this revision decides.
+
+### Scope
+
+The program `athanor-switcher`: its bus interface, the bindings of both sessions, what it shows and in which order, its keys, its accessibility, its confinement, the Sal prerequisites it needs, the order of the pull requests that build it, its failure behaviour and its acceptance. The switch of LA12 that it makes possible stays `doc_launcher.md`'s.
+
+### Non-goals
+
+- Window thumbnails: they come later (maintainer decision, 2026-11-06).
+- The overview, `athanor-overview`, and the retirement of cosmic-workspaces: they stay in release 1.1 (ADR-0135; maintainer decision, 2026-11-06).
+- Switching between the windows of one application (Alt+grave), and Super+Tab under athanor-sulphur: not bound (proposed, revision 3). Under cosmic-comp, COSMIC's defaults bind Super+Tab and Super+Shift+Tab to the same system actions as Alt+Tab, so they reach the switcher there (OV21).
+- A switcher drawn by the compositor (section 6, decision 9).
+
+### Rationale: context and verified facts
+
+Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the maintainer's desktop.
+
+- **What binds it.** ADR-0138 decisions 2 and 6; section 7 (A2-24) and `doc_launcher.md` LA12, which remove cosmic-launcher only with this switcher bound to Alt+Tab; SH1's rule for replacing a surface (`doc_shell.md`); `doc_own_stack.md` OS8 (Orca's transcript), OS13 (every default binding has a fixture test) and decision 30 (the compositor draws no title bars, with their text, theme and accessibility work).
+- **cosmic-comp's session today.** COSMIC's `defaults` bind Alt+Tab and Super+Tab to `System(WindowSwitcher)`, and Alt+Shift+Tab and Super+Shift+Tab to `System(WindowSwitcherPrevious)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:109-112`, cosmic-comp-1.11.0-2.fc43.athanor1). `system_actions:53,55` run `cosmic-launcher alt-tab` and `cosmic-launcher shift-alt-tab` (cosmic-settings-daemon-1.11.0-2.fc43). The compositor client writes a user's system action once with `shortcuts::set_system_action_once` (`system/athanor-sulphur-client/src/shortcuts.rs:69`), as the launcher does for `Launcher` (`forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/main.rs:95`).
+- **athanor-sulphur today** (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0`, below `S`).
+  - Alt+Tab is unbound: the fixture test `the_unnamed_cosmic_keys_reach_the_client` lists it among COSMIC's keys that reach the client (`S/src/fixture.rs:9716`, row at `:9722`).
+  - Bindings are rows of `DEFAULTS` (`S/src/bindings.rs:127`). `Action::Call` makes a call of `S/src/session_calls.rs`: a session-bus method without arguments, with `while_locked` and `coalesce` flags (`Call`, `:15-28`); the launcher's is coalesced.
+  - A bound key's press is intercepted whatever surface holds the keyboard; only an inhibitor changes that, for the actions that are not `never_inhibited` (`S/src/input.rs:113-153`, `S/src/bindings.rs:113`). So, while Alt is held, each further Tab reaches the bus as another call, not the switcher as a key.
+  - Activating a window through `athanor_toplevel_actions_v1` activates its workspace first, or unminimises it, which activates its workspace too, and then focuses it (`S/src/toplevel_state.rs:181-196`, `S/src/state.rs:1011`).
+  - A layer surface created with no output goes to the first output (`S/src/layer.rs:39-42`).
+  - Its globals include no COSMIC protocol (`S/data/globals`), so cosmic-launcher's switcher, a client of COSMIC's toplevel protocols, does not serve this session.
+- **The compositor client.** `Window { id, app_id, title, state, outputs }`, with `activated` and `minimized` in `state` and the window's output connectors in `outputs` (`system/athanor-sulphur-client/src/model.rs:51-61`). Neither compositor reports an order of use.
+- **Sal today** (`system/athanor-sal`).
+  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:130-176`).
+  - Surfaces open at start or one per output (`Application::start` and `output`, `:195-205`); `Shell::open` (`:717`) and `close` (`:837`) are private, so no layer surface opens on a chosen output at run time.
+  - The keyboard handler (`:2009-2082`) ignores the keys held at `enter`, leaves `release_key` empty and keeps the modifiers to itself.
+  - `sync_window_focus` (`:1493`) gives AccessKit window focus to the surface that holds the keys.
+  - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
+- **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
+
+### Why not upstream, and owner (SH3, scope budget A2-14)
+
+The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, with no AT-SPI (section 1), it is a client of COSMIC's toplevel protocols, which athanor-sulphur does not offer, and it is the package LA12 removes; ADR-0138 decision 6 writes new surfaces in Sal. Drawing the switcher in athanor-sulphur is rejected in section 6, decision 9. The maintenance owner is the maintainer ([ADR-0097](../decisions/0097-owners-execution-firefox-processes.md)).
+
+### Interfaces
+
+**OV20. The program** (maintainer decision, 2026-11-06). `athanor-switcher` is a Sal client of its own, in `forge/specs/athanor-switcher`. It owns `os.athanor.Switcher1` at `/os/athanor/Switcher1`, with two methods without arguments, `Next()` and `Previous()`, and serves athanor-sulphur's session and cosmic-comp's.
+
+- **Resident** (proposed, revision 3): a user unit, `athanor-switcher.service`, started by a D-Bus activation file with `SystemdService=athanor-switcher.service`, so the program never runs outside its unit; enabled by preset in OV28 step 4.
+- **Crashes** follow SH8's policy (proposed, revision 3).
+
+**OV21. The keys and the bindings.** Alt+Tab calls `Next()` and Alt+Shift+Tab calls `Previous()` (maintainer decision, 2026-11-06).
+
+- **athanor-sulphur** binds them through `Action::Call` (maintainer decision, 2026-11-06), with two calls, `SWITCHER_NEXT` and `SWITCHER_PREVIOUS`, that are not coalesced, so that every press arrives, do not act while locked, and are not `never_inhibited`; the fixture row of Alt+Tab moves to a fixture test of the binding (OS13) (proposed, revision 3).
+- **cosmic-comp** binds them through its `system_actions` (maintainer decision, 2026-11-06): at start the switcher sets `WindowSwitcher` and `WindowSwitcherPrevious` once per user with `set_system_action_once`, to a `gdbus call` of `Next` and `Previous`, and leaves alone a command the user chose (proposed, revision 3). The stock file stays as it is.
+
+**OV22. What it shows** (maintainer decision, 2026-11-06): every window of every workspace, by its application's icon and its title, in order of most recent use (OV23), on the focused output.
+
+- **The focused output** (proposed, revision 3): the first output in `Window.outputs` of the window activated last; with none, the first output Sal reports. The surface is opened on that output by name, never left to the compositor's choice (`S/src/layer.rs:39-42`).
+- **The layout** (proposed, revision 3): one card centred on that output, on the overlay layer with exclusive keyboard, opaque, with `radius.panel` and the `float` shadow as OV12's card. It holds a list, one row per window: the icon, from the window's desktop entry with Sal's fallback icon, then the title, cleaned as OV5 cleans titles. A minimised window keeps its place with the label "Minimised". The list is at most 80% of the output's height and scrolls to keep the selection in view. Under right-to-left text the rows mirror.
+- **Motion** (proposed, revision 3): none. The card appears and leaves at once, whatever `enable-animations` says.
+
+**OV23. The order of use** (proposed, revision 3). The client keeps it. A window moves to the front when its state gains `activated`; a new window enters at the front when it is activated and second otherwise; a closed window leaves. At start the activated window comes first and the others follow in the order the compositor reported them. The order is not saved.
+
+**OV24. Opening, choosing and closing** (proposed, revision 3).
+
+- **Opening.** With no window, `Next()` and `Previous()` do nothing. Otherwise the first call selects the second window of the order (`Next`), or the last (`Previous`), or the only one, and opens the surface.
+- **A quick press.** When the keyboard enters the surface and Alt is no longer held, the selected window is activated at once and the surface closes.
+- **While shown,** each `Next()` or `Previous()` moves the selection by one and wraps. Tab, Shift+Tab, Up and Down do the same when they reach the surface; with Alt held they arrive as calls in both sessions (rationale).
+- **Choosing.** Releasing Alt activates the selected window through the compositor client, which also activates its workspace or unminimises it, and closes the surface. A click on a row does the same.
+- **Cancelling.** Escape closes the surface and activates nothing; the window that had the keyboard keeps it.
+- **While locked,** a call is refused and logged at info, as OV10 refuses `Show()`.
+
+**OV25. Accessibility** (ST7, AX; proposed, revision 3).
+
+- **AT-SPI.** The surface has the role `window`, named "Window switcher". The list is a list named "Windows"; each row is a list item named "<title>, <application>", with "selected" and, when minimised, "minimised" as its states.
+- **Focus at map.** The selected row is focused and reported when the surface first takes the keyboard, so Orca reads it with no key pressed, and each move of the selection is a focus change.
+- **Orca's transcript** (OS8). There is no GTK version to compare with, so this revision defines the reference: with three windows, Alt+Tab held, Tab, Shift+Tab, Escape; then Alt+Tab held, Tab, Alt released; in English and in Italian. The transcript holds, at each step, the selected row's name, role, position ("n of m") and states. It is recorded at OV28 step 3 and kept.
+
+**OV26. Confinement and privacy** (proposed, revision 3).
+
+- **The unit** is confined as OV16's (`NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=read-only`, `RestrictAddressFamilies=AF_UNIX`, `SystemCallFilter=@system-service`), with `MemoryHigh` at 1.5 times the budget below.
+- **Landlock at start:** read access to the icon and theme directories, the application directories for desktop entries and the style's configuration; write access to its runtime directory only; no TCP.
+- **Wayland.** Under athanor-sulphur, its line in the allow-list grants `zwlr_layer_shell_v1`, `ext_foreign_toplevel_list_v1`, `athanor_toplevel_manager_v1` and `athanor_toplevel_actions_v1`, and neither capture nor the workspace manager. Under cosmic-comp it keeps the main socket, as OV2 says of the overview.
+- **No privilege.** It starts no application and has no polkit action, setuid program or system unit. Any session peer can call `Next()`, which can only show the switcher on the user's own screen; nothing is returned. Squatting the name blocks the switcher.
+- **Memory budget,** a proposal and not a measurement: at most 48 MB PSS at rest, hidden, and 64 MB shown with twenty windows.
+
+**OV27. Sal prerequisites** (proposed, revision 3), in one Sal pull request agreed with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display, which need items 1 to 3 too:
+
+1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:717`, and `close`, `:837`). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
+2. **Modifiers and releases.** The modifier state at `enter` and at each change, and the releases of the keys the application asks for, reach the application (`src/driver.rs:2009-2082`).
+3. **Focus at map.** The focused widget is reported to AT-SPI when the surface first takes the keyboard, proven by an AT-SPI golden.
+4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:156-171`).
+
+**OV28. Construction** (proposed, revision 3). Each step merges on its own, in this order, and each is judged on the reference laptop:
+
+1. **docs:** this revision and the amendments of section 3 owed to it.
+2. **Sal:** the prerequisites of OV27.
+3. **The crate:** `athanor-switcher` with its unit, activation file, Landlock, its allow-list line, its entries in `forge/config/packages.json`, the rig's surface cases and the AT-SPI golden; disabled, opened by hand with `gdbus`.
+4. **athanor-sulphur's binding** (OV21), with its fixture test, the README's paragraph on bindings and the preset that enables the unit.
+5. **cosmic-comp's binding:** the system actions of OV21.
+6. **The launcher switch** of LA12 (`doc_launcher.md`), as ADR-0138 decision 2 places it: `athanor-launcher` becomes the default, and cosmic-launcher and pop-launcher leave, only once the acceptance below holds.
+
+### Failure behaviour
+
+All proposed, revision 3.
+
+- **No grant.** When a global the switcher needs is missing, as under athanor-sulphur without its allow-list line, it logs a warning at start naming the global, keeps its name, and answers every call with a D-Bus error, which the caller logs. It opens nothing and does not crash.
+- **The compositor closes the surface,** for example because its output leaves: the switcher cancels as Escape does, and the next call opens it again.
+- **The keyboard never arrives** within 500 ms of the opening: the surface closes, nothing is activated, and a line at info records it.
+- **A selected window closes:** it leaves the list and the next one is selected; when none is left, the surface closes. Activating a window that has just closed is harmless (OV18, spike S5).
+- **A crash** follows SH8's policy. A switcher that was open does not reopen, and the order of use starts again as OV23 says.
+- **A squatted name** blocks the switcher and nothing else (OV26).
+
+### Acceptance criteria
+
+All proposed, revision 3.
+
+In CI (the hosted rig of SH13):
+
+1. The crate's tests pass: the order of use (OV23), the selection, its wrapping, the quick press and the cancel (OV24), and the cleaning of titles.
+2. Sal's tests of OV27 pass, including the AT-SPI golden of focus at map.
+3. Three scenes (one window; five windows over three workspaces, one minimised; twenty windows) run SH13's 12 cases, 36 cases, and the AT-SPI walk finds the names, roles and states of OV25 in each.
+4. athanor-sulphur's fixture shows that Alt+Tab and Alt+Shift+Tab send `Next` and `Previous`, every press, and nothing while locked (OS13).
+5. Orca's transcript of OV25, in English and in Italian, matches the recorded reference.
+
+On the reference laptop athanor-ref and on the maintainer's desktop, judged by the maintainer, in athanor-sulphur's session and in cosmic-comp's:
+
+6. A quick Alt+Tab activates the previously used window, read from the compositor client. Alt held with Tab pressed n times activates the window n+1 places back in the order of use at the release of Alt; Alt+Shift+Tab moves back; Escape leaves the keyboard on the window that had it.
+7. A window on another workspace, and a minimised window, are activated with their workspace.
+8. With two outputs, the switcher shows on the output of the window used last.
+9. The first complete frame arrives within 100 ms of the key at the 95th percentile, over 50 openings (ST5).
+10. 100 openings and closings leave the switcher's connection in place under both compositors (OV27, item 1).
+11. Killed with SIGKILL, it is back within 1 s, and a switcher that was open does not reopen.
+12. Memory stays within OV26's budget.
+13. SH1's rule holds in both sessions: the switcher passes `doc_shell_standard.md` (the gate of ST2, with scenarios, accessibility and languages and the maintainer's aesthetic signature) under athanor-sulphur and under cosmic-comp, before OV28 step 6.
+14. After OV28 step 6, `rpm -q cosmic-launcher pop-launcher` reports both absent, and Alt+Tab still switches windows in both sessions.
