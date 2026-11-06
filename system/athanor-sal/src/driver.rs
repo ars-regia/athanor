@@ -525,7 +525,7 @@ impl Shell {
     /// Sets the part of a layer surface that takes the pointer, in logical pixels; `None` is all
     /// of it. Takes effect with the next frame.
     pub fn set_input_region(&mut self, id: SurfaceId, rects: Option<&[Rect]>) -> Result<(), Error> {
-        let region = self.region(rects)?;
+        let region = Self::region(&self.compositor, rects)?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -537,11 +537,14 @@ impl Shell {
     }
 
     /// A `wl_region` of `rects`, in logical pixels; `None` for all of the surface.
-    fn region(&self, rects: Option<&[Rect]>) -> Result<Option<Region>, Error> {
+    fn region(
+        compositor: &CompositorState,
+        rects: Option<&[Rect]>,
+    ) -> Result<Option<Region>, Error> {
         let Some(rects) = rects else {
             return Ok(None);
         };
-        let region = Region::new(&self.compositor)?;
+        let region = Region::new(compositor)?;
         for r in rects {
             // Whole pixels that cover the widget: the origin down, the far edge up.
             let (x, y) = (r.x.floor(), r.y.floor());
@@ -561,11 +564,13 @@ impl Shell {
     /// the size of the widgets, without waiting for a frame, which the compositor may hold back
     /// from a covered surface. The widgets are drawn again at the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
-        // What can refuse comes before any request: a request sent stays pending, and the next
-        // commit, of this call or not, would apply it.
-        let region = self.region(options.input_region.as_deref())?;
+        // What can refuse comes before any request, the region's included: a request sent stays
+        // pending, and the next commit, of this call or not, would apply it.
+        let compositor = &self.compositor;
         let surface = self
-            .get_mut(id)
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
         let (Shown::Layer(layer), Some(placed)) = (&surface.shown, &mut surface.layer) else {
             return Err(format!("{id:?} is not a layer surface").into());
@@ -576,18 +581,18 @@ impl Shell {
         };
         let new = layer_change(placed, options, version)?;
         let stretch = stretched(options.anchor);
-        let min = (surface.ui.min_width, surface.ui.min_height);
+        let was = (surface.ui.min_width, surface.ui.min_height);
         // An axis no longer stretched takes its widgets' size again.
-        if surface.stretch.0 && !stretch.0 {
-            surface.ui.min_width = 0.0;
-        }
-        if surface.stretch.1 && !stretch.1 {
-            surface.ui.min_height = 0.0;
-        }
-        if let Err(error) = layout(&mut surface.ui, surface.scale) {
-            (surface.ui.min_width, surface.ui.min_height) = min;
-            return Err(error);
-        }
+        let shrink = (surface.stretch.0 && !stretch.0, surface.stretch.1 && !stretch.1);
+        let min = (if shrink.0 { 0.0 } else { was.0 }, if shrink.1 { 0.0 } else { was.1 });
+        layout_at_min(&mut surface.ui, surface.scale, min)?;
+        let region = match Self::region(compositor, options.input_region.as_deref()) {
+            Ok(region) => region,
+            Err(error) => {
+                put_back(&mut surface.ui, was);
+                return Err(error);
+            }
+        };
         if let Some(new) = new {
             layer.set_layer(new);
             placed.0 = new;
@@ -1058,6 +1063,27 @@ fn layer_change(
         .into());
     }
     Ok(Some(options.layer))
+}
+
+/// Lays `ui` out at `scale` with the minimum size `min`. Refused when it cannot be laid out,
+/// with the minimum size `ui` had and the geometry it lays out to.
+fn layout_at_min(ui: &mut Ui, scale: f32, min: (f32, f32)) -> Result<(), Error> {
+    let was = (ui.min_width, ui.min_height);
+    (ui.min_width, ui.min_height) = min;
+    match layout(ui, scale) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            put_back(ui, was);
+            Err(error)
+        }
+    }
+}
+
+/// Gives `ui` the minimum size `min` again, and the geometry it lays out to: none of a refused
+/// layout's stays.
+fn put_back(ui: &mut Ui, min: (f32, f32)) {
+    (ui.min_width, ui.min_height) = min;
+    ui.layout();
 }
 
 /// Whether a layer surface anchored at `anchor` spans its output's width, and its height.
@@ -2723,6 +2749,20 @@ mod tests {
             },
         );
         assert_eq!(state.1, [1], "a closed surface was reported drawn");
+    }
+
+    #[test]
+    fn a_refused_layout_keeps_the_minimum_size_and_the_geometry_it_had() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        assert!(layout_at_min(&mut ui, 1.0, (300.0, 0.0)).is_ok());
+        assert!(layout_at_min(&mut ui, 1.0, (0.0, 0.0)).is_ok());
+        let size = ui.size();
+        assert!(size.0 < 300.0, "{size:?}");
+        // A width no buffer holds: wl_shm sizes are 16-bit.
+        assert!(layout_at_min(&mut ui, 1.0, (100_000.0, 0.0)).is_err());
+        assert_eq!((ui.min_width, ui.min_height), (0.0, 0.0));
+        assert_eq!(ui.size(), size, "the refused layout's geometry stayed");
     }
 
     #[test]
