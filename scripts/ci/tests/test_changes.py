@@ -181,6 +181,10 @@ class MainTest(unittest.TestCase):
         self.assertFalse(written["docs_only"])
         self.assertRegex(written["base"], r"^[0-9a-f]{40}$")
 
+    def test_every_area_is_a_build_or_the_audit(self):
+        # A new area must be placed: a build, which merge_group never selects, or not.
+        self.assertEqual(set(changes.AREAS), {*changes.BUILDS, "rust_audit"})
+
     def test_a_merge_group_selects_no_build_but_still_the_audit(self):
         (self.root / "forge/specs/azoth/notes.txt").write_text("kernel 2\n")
         (self.root / "system/athanor-sal").mkdir(parents=True)
