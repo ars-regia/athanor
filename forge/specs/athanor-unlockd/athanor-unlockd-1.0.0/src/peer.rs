@@ -86,7 +86,7 @@ pub fn check(
     };
     let read = match cgroup(first) {
         Ok(read) => read,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Err(Refused::Gone)),
+        Err(error) if reaped(&error) => return Ok(Err(Refused::Gone)),
         Err(error) => return Err(error.into()),
     };
     if pid()? != Some(first) {
@@ -99,6 +99,17 @@ pub fn check(
     Ok(admit(uid, &read, &sessions(uid)?))
 }
 
+/// Whether `error`, from `SO_PEERPIDFD` or from `/proc/<pid>`, says the peer's process is
+/// already reaped: ESRCH, EINVAL or ENODATA from the socket option, ENOENT or ESRCH from
+/// `/proc`.
+fn reaped(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound
+        || matches!(
+            error.raw_os_error(),
+            Some(libc::ESRCH | libc::EINVAL | libc::ENODATA)
+        )
+}
+
 /// The uid of the peer of `socket`, from `SO_PEERCRED`.
 pub fn peer_uid(socket: BorrowedFd<'_>) -> nix::Result<u32> {
     Ok(getsockopt(&socket, PeerCredentials)?.uid())
@@ -106,7 +117,11 @@ pub fn peer_uid(socket: BorrowedFd<'_>) -> nix::Result<u32> {
 
 /// The check on the peer of `socket`, whose uid is `uid`, against `/proc` and logind.
 pub fn check_socket(socket: BorrowedFd<'_>, uid: u32) -> Result<Result<(), Refused>, Internal> {
-    let pidfd = ffi::so_peerpidfd(socket)?;
+    let pidfd = match ffi::so_peerpidfd(socket) {
+        Ok(pidfd) => pidfd,
+        Err(error) if reaped(&error) => return Ok(Err(Refused::Gone)),
+        Err(error) => return Err(error.into()),
+    };
     check(
         uid,
         || pidfd_pid(pidfd.as_fd()),
@@ -272,6 +287,53 @@ mod tests {
             run(&[Some(42)], Err(io::ErrorKind::NotFound.into())),
             Err(Refused::Gone)
         );
+        assert_eq!(
+            run(&[Some(42)], Err(io::Error::from_raw_os_error(libc::ESRCH))),
+            Err(Refused::Gone)
+        );
+    }
+
+    #[test]
+    fn only_a_reaped_process_reads_as_gone() {
+        for errno in [libc::ESRCH, libc::EINVAL, libc::ENODATA, libc::ENOENT] {
+            assert!(reaped(&io::Error::from_raw_os_error(errno)), "{errno}");
+        }
+        for errno in [libc::EACCES, libc::EPERM, libc::EBADF, libc::ENOTSOCK] {
+            assert!(!reaped(&io::Error::from_raw_os_error(errno)), "{errno}");
+        }
+    }
+
+    /// Set in the child that `a_peer_reaped_before_the_accept_is_gone` runs: the socket's path.
+    const PEER_CHILD: &str = "ATHANOR_UNLOCKD_TEST_PEER";
+
+    /// A child process connects to a listening socket and exits; the test reaps it, then
+    /// accepts the connection and checks its peer, which must read as gone.
+    #[test]
+    fn a_peer_reaped_before_the_accept_is_gone() {
+        if let Some(path) = std::env::var_os(PEER_CHILD) {
+            std::os::unix::net::UnixStream::connect(path).expect("the parent's socket");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("athanor-unlockd-peer-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temporary directory");
+        let path = dir.join("socket");
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("a listening socket");
+        // `status` waits for the child, which reaps it.
+        let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "peer::tests::a_peer_reaped_before_the_accept_is_gone",
+            ])
+            .env(PEER_CHILD, &path)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("the child ran");
+        assert!(status.success(), "{status}");
+        let (stream, _) = listener.accept().expect("the child's connection");
+        let uid = peer_uid(stream.as_fd()).expect("SO_PEERCRED outlives the peer");
+        let checked = check_socket(stream.as_fd(), uid).expect("no internal error");
+        std::fs::remove_dir_all(&dir).expect("the temporary directory removed");
+        assert_eq!(checked, Err(Refused::Gone));
     }
 
     #[test]
