@@ -2490,7 +2490,8 @@ smithay_client_toolkit::delegate_dispatch2!(App);
 
 /// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
 /// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut
-/// and paste once per press, and the Menu key and F10, which open a context menu.
+/// and paste once per press, the Menu key and F10, which open a context menu, and Escape, which
+/// closes it.
 fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> bool {
     match keysym {
         Keysym::Return | Keysym::KP_Enter => !in_area,
