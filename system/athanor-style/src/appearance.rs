@@ -142,6 +142,9 @@ pub struct Appearance {
     /// The corrected colour of the wallpaper mode; `None` when the key is empty or not
     /// `#rrggbb`, which leaves the fixed accent in force (VL3).
     pub accent_computed: Option<Rgb>,
+    /// GNOME's `enable-animations`: false is reduced motion (VL9). A store without the key
+    /// keeps the animations on.
+    pub animations: bool,
 }
 
 impl Default for Appearance {
@@ -153,6 +156,7 @@ impl Default for Appearance {
             accent: Accent::Purple,
             accent_mode: AccentMode::Fixed,
             accent_computed: None,
+            animations: true,
         }
     }
 }
@@ -258,6 +262,11 @@ impl Stores {
                 _ => AccentMode::Fixed,
             },
             accent_computed: athanor("accent-computed").and_then(|text| Rgb::from_hex(&text)),
+            animations: self
+                .interface
+                .as_ref()
+                .and_then(|store| store.boolean("enable-animations"))
+                .unwrap_or(default.animations),
         }
     }
 
