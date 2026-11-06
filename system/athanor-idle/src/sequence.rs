@@ -13,6 +13,11 @@ pub const FADE: Duration = Duration::from_secs(5);
 pub const LOCK_DELAY: Duration = Duration::from_millis(500);
 /// From a failed `LockSession` to its single retry.
 pub const LOCK_RETRY: Duration = Duration::from_secs(1);
+/// How long `LockSession` may take before it counts as failed. Shorter than D-Bus's 25 s
+/// default: the lock is the point of the blank and the retry needs room, and logind answers
+/// `LockSession` at once (it only emits a signal). The caller also sets a bounded method
+/// timeout on the call.
+pub const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 /// The notification shown on wake after the lock failed twice. The caller shows it.
 pub const LOCK_FAILED_NOTICE: &str = "Automatic lock failed";
 
@@ -21,6 +26,7 @@ pub enum Timer {
     Fade,
     LockDelay,
     LockRetry,
+    LockTimeout,
 }
 
 /// The session's `LockedHint` as the caller read it. A failed read is `Unknown`, which counts
@@ -57,10 +63,13 @@ pub enum Event {
     LockDue { hint: Hint },
     /// `Timer::LockRetry` has elapsed; `hint` is read just now.
     LockRetryDue { hint: Hint },
-    /// `LockSession` returned.
-    LockDone,
+    /// `LockSession` returned; `attempt` is the number the action carried. An answer for an
+    /// attempt that already timed out or was replaced is ignored.
+    LockDone { attempt: u32 },
     /// `LockSession` failed.
-    LockFailed,
+    LockFailed { attempt: u32 },
+    /// `Timer::LockTimeout` has elapsed: the call never returned, which counts as a failure.
+    LockTimeout,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,8 +88,11 @@ pub enum Action {
         after: Duration,
     },
     Cancel(Timer),
-    /// logind `LockSession(<id>)`; the caller answers `LockDone` or `LockFailed`.
-    LockSession,
+    /// logind `LockSession(<id>)`, with a `LockTimeout` armed beside it; the caller answers
+    /// `LockDone` or `LockFailed` with the same `attempt`.
+    LockSession {
+        attempt: u32,
+    },
     /// logind `Suspend(false)`.
     Suspend,
     /// The lock failed twice: log a warning.
@@ -115,6 +127,8 @@ pub struct Sequence {
     overlay: bool,
     /// The lock failed twice while the outputs were off: the notice waits for the wake.
     notice_due: bool,
+    /// The number of the latest `LockSession` attempt.
+    attempt: u32,
 }
 
 impl Default for Sequence {
@@ -130,6 +144,7 @@ impl Sequence {
             lock: Lock::Settled,
             overlay: false,
             notice_due: false,
+            attempt: 0,
         }
     }
 
@@ -154,11 +169,16 @@ impl Sequence {
             Event::Withdrawn { hint } => self.withdrawn(hint),
             Event::LockDue { hint } if self.lock == Lock::Pending => self.request(hint, false),
             Event::LockRetryDue { hint } if self.lock == Lock::Retrying => self.request(hint, true),
-            Event::LockDone if matches!(self.lock, Lock::Requested { .. }) => {
+            Event::LockDone { attempt } if self.answers(attempt) => {
                 self.lock = Lock::Settled;
-                Vec::new()
+                vec![Action::Cancel(Timer::LockTimeout)]
             }
-            Event::LockFailed => self.failed(),
+            Event::LockFailed { attempt } if self.answers(attempt) => {
+                let mut out = vec![Action::Cancel(Timer::LockTimeout)];
+                out.extend(self.failed());
+                out
+            }
+            Event::LockTimeout => self.failed(),
             // A duplicate `idled`, or a timer that was cancelled in flight.
             _ => Vec::new(),
         }
@@ -213,7 +233,21 @@ impl Sequence {
             return Vec::new();
         }
         self.lock = Lock::Requested { retried };
-        vec![Action::LockSession]
+        self.attempt = self.attempt.wrapping_add(1);
+        vec![
+            Action::LockSession {
+                attempt: self.attempt,
+            },
+            Action::Arm {
+                timer: Timer::LockTimeout,
+                after: LOCK_TIMEOUT,
+            },
+        ]
+    }
+
+    /// Whether an answer belongs to the request in flight.
+    fn answers(&self, attempt: u32) -> bool {
+        matches!(self.lock, Lock::Requested { .. }) && attempt == self.attempt
     }
 
     fn failed(&mut self) -> Vec<Action> {
@@ -305,6 +339,24 @@ mod tests {
         after: LOCK_DELAY,
     };
 
+    fn req(attempt: u32) -> Vec<Action> {
+        vec![
+            Action::LockSession { attempt },
+            Action::Arm {
+                timer: Timer::LockTimeout,
+                after: LOCK_TIMEOUT,
+            },
+        ]
+    }
+
+    fn fail(attempt: u32) -> Event {
+        Event::LockFailed { attempt }
+    }
+
+    fn done(attempt: u32) -> Event {
+        Event::LockDone { attempt }
+    }
+
     fn run(s: &mut Sequence, evs: &[Event]) -> Vec<Action> {
         evs.iter().flat_map(|e| s.handle(*e)).collect()
     }
@@ -327,7 +379,7 @@ mod tests {
             s.handle(Event::FadeDone),
             vec![Action::OutputsOff, ARM_LOCK]
         );
-        assert_eq!(s.handle(DUE), vec![Action::LockSession]);
+        assert_eq!(s.handle(DUE), req(1));
         assert!(s.handle(DUE).is_empty());
     }
 
@@ -352,7 +404,7 @@ mod tests {
             vec![Action::OutputsOn, Action::RemoveOverlay]
         );
         assert_eq!(s.phase(), Phase::Awake);
-        assert_eq!(s.handle(DUE), vec![Action::LockSession]);
+        assert_eq!(s.handle(DUE), req(1));
     }
 
     #[test]
@@ -363,7 +415,7 @@ mod tests {
             s.handle(Event::Resumed),
             vec![Action::OutputsOn, Action::RemoveOverlay]
         );
-        assert_eq!(s.handle(DUE), vec![Action::LockSession]);
+        assert_eq!(s.handle(DUE), req(1));
     }
 
     #[test]
@@ -422,7 +474,7 @@ mod tests {
             s.handle(Event::LockDue {
                 hint: Hint::Unknown
             }),
-            vec![Action::LockSession]
+            req(1)
         );
     }
 
@@ -439,7 +491,7 @@ mod tests {
                 ARM_LOCK
             ]
         );
-        assert_eq!(s.handle(DUE), vec![Action::LockSession]);
+        assert_eq!(s.handle(DUE), req(1));
     }
 
     #[test]
@@ -465,35 +517,33 @@ mod tests {
         run(&mut s, &[BLANK, Event::FadeDone]);
         assert_eq!(s.handle(Event::SuspendIdled), vec![Action::Suspend]);
         assert_eq!(s.phase(), Phase::Off);
-        assert_eq!(s.handle(DUE), vec![Action::LockSession]);
+        assert_eq!(s.handle(DUE), req(1));
     }
+
+    const RETRY_ARM: Action = Action::Arm {
+        timer: Timer::LockRetry,
+        after: LOCK_RETRY,
+    };
+    const CANCEL_TIMEOUT: Action = Action::Cancel(Timer::LockTimeout);
+    const RETRY_DUE: Event = Event::LockRetryDue {
+        hint: Hint::Unlocked,
+    };
 
     #[test]
     fn a_failed_lock_is_retried_once_after_1_s() {
         let mut s = Sequence::new();
         run(&mut s, &[BLANK, Event::FadeDone, DUE]);
-        assert_eq!(
-            s.handle(Event::LockFailed),
-            vec![Action::Arm {
-                timer: Timer::LockRetry,
-                after: LOCK_RETRY
-            }]
-        );
-        assert_eq!(
-            s.handle(Event::LockRetryDue {
-                hint: Hint::Unlocked
-            }),
-            vec![Action::LockSession]
-        );
-        assert!(s.handle(Event::LockDone).is_empty());
+        assert_eq!(s.handle(fail(1)), vec![CANCEL_TIMEOUT, RETRY_ARM]);
+        assert_eq!(s.handle(RETRY_DUE), req(2));
+        assert_eq!(s.handle(done(2)), vec![CANCEL_TIMEOUT]);
         // Settled: nothing more happens.
-        assert!(s.handle(Event::LockFailed).is_empty());
+        assert!(s.handle(fail(2)).is_empty());
     }
 
     #[test]
     fn the_retry_is_skipped_for_a_session_that_locked_meanwhile() {
         let mut s = Sequence::new();
-        run(&mut s, &[BLANK, Event::FadeDone, DUE, Event::LockFailed]);
+        run(&mut s, &[BLANK, Event::FadeDone, DUE, fail(1)]);
         assert!(s
             .handle(Event::LockRetryDue { hint: Hint::Locked })
             .is_empty());
@@ -502,11 +552,11 @@ mod tests {
     #[test]
     fn two_failures_log_and_notify_on_wake() {
         let mut s = Sequence::new();
-        run(&mut s, &[BLANK, Event::FadeDone, DUE, Event::LockFailed]);
-        s.handle(Event::LockRetryDue {
-            hint: Hint::Unlocked,
-        });
-        assert_eq!(s.handle(Event::LockFailed), vec![Action::LogLockFailure]);
+        run(&mut s, &[BLANK, Event::FadeDone, DUE, fail(1), RETRY_DUE]);
+        assert_eq!(
+            s.handle(fail(2)),
+            vec![CANCEL_TIMEOUT, Action::LogLockFailure]
+        );
         assert_eq!(
             s.handle(Event::Resumed),
             vec![
@@ -528,16 +578,74 @@ mod tests {
                 Event::FadeDone,
                 Event::Resumed,
                 DUE,
-                Event::LockFailed,
+                fail(1),
+                RETRY_DUE,
             ],
         );
-        s.handle(Event::LockRetryDue {
-            hint: Hint::Unlocked,
-        });
         assert_eq!(
-            s.handle(Event::LockFailed),
-            vec![Action::LogLockFailure, Action::Notify(LOCK_FAILED_NOTICE)]
+            s.handle(fail(2)),
+            vec![
+                CANCEL_TIMEOUT,
+                Action::LogLockFailure,
+                Action::Notify(LOCK_FAILED_NOTICE)
+            ]
         );
+    }
+
+    #[test]
+    fn a_timeout_is_a_failure_and_is_retried() {
+        let mut s = Sequence::new();
+        run(&mut s, &[BLANK, Event::FadeDone, DUE]);
+        assert_eq!(s.handle(Event::LockTimeout), vec![RETRY_ARM]);
+        assert_eq!(s.handle(RETRY_DUE), req(2));
+        // The retry times out too: warning, and the notice waits for the wake.
+        assert_eq!(s.handle(Event::LockTimeout), vec![Action::LogLockFailure]);
+        assert_eq!(
+            s.handle(Event::Resumed),
+            vec![
+                Action::OutputsOn,
+                Action::RemoveOverlay,
+                Action::Notify(LOCK_FAILED_NOTICE)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_late_answer_after_the_timeout_is_ignored() {
+        let mut s = Sequence::new();
+        run(&mut s, &[BLANK, Event::FadeDone, DUE, Event::LockTimeout]);
+        // While the retry is armed.
+        assert!(s.handle(done(1)).is_empty());
+        assert!(s.handle(fail(1)).is_empty());
+        // While the retry is in flight: attempt 1 does not answer attempt 2.
+        assert_eq!(s.handle(RETRY_DUE), req(2));
+        assert!(s.handle(done(1)).is_empty());
+        assert!(s.handle(fail(1)).is_empty());
+        assert_eq!(
+            s.handle(fail(2)),
+            vec![CANCEL_TIMEOUT, Action::LogLockFailure]
+        );
+        // After the final failure.
+        assert!(s.handle(done(2)).is_empty());
+    }
+
+    #[test]
+    fn a_new_blank_after_a_timeout_still_locks() {
+        let mut s = Sequence::new();
+        run(
+            &mut s,
+            &[
+                BLANK,
+                Event::FadeDone,
+                DUE,
+                Event::LockTimeout,
+                RETRY_DUE,
+                Event::LockTimeout,
+            ],
+        );
+        s.handle(Event::Resumed);
+        assert_eq!(s.handle(REDUCED).len(), 3);
+        assert_eq!(s.handle(DUE), req(3));
     }
 
     #[test]
@@ -555,7 +663,7 @@ mod tests {
                 Action::OutputsOff
             ]
         );
-        s.handle(Event::LockDone);
+        s.handle(done(1));
         s.handle(Event::Resumed);
         assert_eq!(s.handle(REDUCED).len(), 3);
     }
@@ -583,7 +691,11 @@ mod tests {
             }),
             vec![
                 Action::Cancel(Timer::LockDelay),
-                Action::LockSession,
+                Action::LockSession { attempt: 1 },
+                Action::Arm {
+                    timer: Timer::LockTimeout,
+                    after: LOCK_TIMEOUT
+                },
                 Action::OutputsOn,
                 Action::RemoveOverlay
             ]
@@ -591,7 +703,7 @@ mod tests {
         assert_eq!(s.phase(), Phase::Awake);
         assert!(s.handle(DUE).is_empty());
         // The immediate request still has the retry.
-        assert_eq!(s.handle(Event::LockFailed).len(), 1);
+        assert_eq!(s.handle(fail(1)), vec![CANCEL_TIMEOUT, RETRY_ARM]);
     }
 
     #[test]
