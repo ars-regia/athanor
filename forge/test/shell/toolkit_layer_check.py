@@ -7,6 +7,11 @@ Runs inside the rig. Starts sway, then `athanor-sal-layer` with WAYLAND_DEBUG, w
 layer surface per output; after each step, the client's own trace must hold exactly one live
 `zwlr_layer_surface_v1` per output sway lists, and after the scale change a buffer drawn at 1.5
 times the size its viewport maps it to.
+
+With `--extra HEADLESS-2` the client also opens two surfaces on that output by its name when it
+is added (Sal's requirement S1, doc_osd.md): one on the background layer that `set_layer` moves
+to the overlay layer in place, and one the client closes; when the output is removed, the client
+must be told that the first closed.
 """
 
 import json
@@ -23,8 +28,16 @@ TIMEOUT = 10
 
 GET = re.compile(
     r"-> zwlr_layer_shell_v1#\d+\.get_layer_surface\(new id zwlr_layer_surface_v1#(\d+), "
-    r"wl_surface#\d+, wl_output#(\d+)"
+    r"wl_surface#\d+, wl_output#(\d+), (\d+), \"([^\"]*)\"\)"
 )
+SET_LAYER = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.set_layer\((\d+)\)")
+BAR = "athanor-sal-layer"
+OVERLAY = "athanor-sal-overlay"
+CLOSED = "athanor-sal-closed"
+EXTRA = "HEADLESS-2"
+STDOUT = Path("/out/toolkit-layer.stdout")
+# zwlr_layer_shell_v1.layer: background and overlay
+BACKGROUND, OVERLAY_LAYER = 0, 3
 DESTROY = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.destroy\(\)")
 BUFFER = re.compile(
     r"-> wl_shm_pool#\d+\.create_buffer\(new id wl_buffer#\d+, \d+, (\d+), (\d+),"
@@ -32,15 +45,52 @@ BUFFER = re.compile(
 DESTINATION = re.compile(r"-> wp_viewport#\d+\.set_destination\((\d+), (\d+)\)")
 
 
-def live_surfaces(lines):
-    """The layer surfaces the client has created and not destroyed: {surface id: output id}."""
-    live = {}
+def surfaces(lines):
+    """Every layer surface the client created: {surface id: [output id, namespace, layer, live]},
+    the layer as it last asked for it."""
+    seen = {}
     for line in lines:
         if m := GET.search(line):
-            live[m[1]] = m[2]
-        elif m := DESTROY.search(line):
-            live.pop(m[1], None)
-    return live
+            seen[m[1]] = [m[2], m[4], int(m[3]), True]
+        elif (m := SET_LAYER.search(line)) and m[1] in seen:
+            seen[m[1]][2] = int(m[2])
+        elif (m := DESTROY.search(line)) and m[1] in seen:
+            seen[m[1]][3] = False
+    return seen
+
+
+def live_surfaces(lines, namespace=BAR):
+    """The layer surfaces of `namespace` the client has created and not destroyed: {surface id:
+    output id}."""
+    return {
+        s: o for s, (o, n, _, live) in surfaces(lines).items() if live and n == namespace
+    }
+
+
+def extras_placed(lines):
+    """Whether the surfaces of --extra stand as S1 wants them once EXTRA is added: the overlay
+    one live on the output of a bar other than the first, created on the background layer and
+    moved to the overlay layer, the closed one created on the same output and destroyed."""
+    seen = surfaces(lines)
+    bars = [o for o, n, _, _ in seen.values() if n == BAR]
+    overlay = [v for v in seen.values() if v[1] == OVERLAY]
+    closed = [v for v in seen.values() if v[1] == CLOSED]
+    created_on_background = any(
+        (m := GET.search(line)) and m[4] == OVERLAY and int(m[3]) == BACKGROUND
+        for line in lines
+    )
+    return (
+        len(bars) >= 2
+        and len(overlay) == 1
+        and len(closed) == 1
+        and overlay[0][0] in bars[1:]
+        and overlay[0][0] != bars[0]
+        and created_on_background
+        and overlay[0][2] == OVERLAY_LAYER
+        and overlay[0][3]
+        and closed[0][0] == overlay[0][0]
+        and not closed[0][3]
+    )
 
 
 def physical(logical, scale):
@@ -103,11 +153,13 @@ def main():
     until("sway offers no Wayland socket", lambda: list(runtime.glob("wayland-[0-9]")))
     display = next(runtime.glob("wayland-[0-9]")).name
     with open(TRACE, "w") as trace:
-        client = subprocess.Popen(
-            [CLIENT],
-            env=dict(os.environ, WAYLAND_DISPLAY=display, WAYLAND_DEBUG="1"),
-            stderr=trace,
-        )
+        with open(STDOUT, "w") as stdout:
+            client = subprocess.Popen(
+                [CLIENT, "--extra", EXTRA],
+                env=dict(os.environ, WAYLAND_DISPLAY=display, WAYLAND_DEBUG="1"),
+                stdout=stdout,
+                stderr=trace,
+            )
     try:
         steps = [
             ("start", []),
@@ -142,6 +194,26 @@ def main():
                     f"toolkit_layer_check: {step}: {live} for outputs {expected}"
                 )
             print(f"{step}: outputs {expected}, one layer surface on each")
+            if step == "an output added":
+                until(
+                    f"{EXTRA}: the surfaces opened by its name are not as S1 wants them",
+                    lambda: extras_placed(TRACE.read_text().splitlines()),
+                )
+                print(
+                    f"{EXTRA}: a surface opened by its name moved from the background to the "
+                    "overlay layer in place, another opened and closed"
+                )
+            elif step == "an output removed":
+                until(
+                    f"{EXTRA} removed: the client was not told its surface closed",
+                    lambda: f"closed {OVERLAY}" in STDOUT.read_text().splitlines(),
+                )
+                lines = TRACE.read_text().splitlines()
+                if live_surfaces(lines, OVERLAY) or live_surfaces(lines, CLOSED):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: a surface of {EXTRA} is still live"
+                    )
+                print(f"{EXTRA} removed: the client was told its surface closed")
         until(
             "no buffer drawn at 1.5",
             lambda: drawn_at(TRACE.read_text().splitlines(), 1.5),

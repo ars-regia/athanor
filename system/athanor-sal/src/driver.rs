@@ -56,7 +56,9 @@ use smithay_client_toolkit::{
         Capability, SeatHandler, SeatState,
     },
     shell::{
-        wlr_layer::{LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure},
+        wlr_layer::{
+            LayerShell, LayerShellHandler, LayerSurface, LayerSurfaceConfigure, SurfaceKind,
+        },
         xdg::{
             popup::{Popup, PopupConfigure, PopupHandler},
             window::{DecorationMode, Window, WindowConfigure, WindowDecorations, WindowHandler},
@@ -71,7 +73,7 @@ use std::time::Instant;
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
-    Connection, QueueHandle,
+    Connection, Proxy, QueueHandle,
 };
 
 /// What a single window does with each event; it may change the widgets. See [`run_window`].
@@ -134,7 +136,8 @@ pub enum Role {
         /// `.desktop` file.
         app_id: String,
     },
-    /// A wlr-layer-shell surface on the output the compositor picks.
+    /// A wlr-layer-shell surface on the output the compositor picks; [`Shell::open_layer`]
+    /// opens one on a chosen output.
     Layer(LayerOptions),
 }
 
@@ -200,8 +203,10 @@ pub trait Application {
 
     /// The layer surface for `output`, asked when the output is announced, and when it changes
     /// while it has none; `None` leaves it without one. The driver keeps at most one on each
-    /// output, closes it when the output leaves or the compositor closes it, and asks again for
-    /// an output that comes back.
+    /// output and closes it when the output leaves, and asks again for an output that comes
+    /// back. One the compositor or [`Shell::close`] closed is not asked for again on that output
+    /// until the output leaves and comes back: a compositor that refused it would refuse it again.
+    /// More surfaces on an output open through [`Shell::open_layer`].
     fn output(&mut self, _output: &OutputInfo) -> Option<(Ui, LayerOptions)> {
         None
     }
@@ -229,6 +234,11 @@ pub trait Application {
     /// compositor may withhold from a surface it does not show. Where a `Type=notify`
     /// service tells systemd it is ready.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
+
+    /// The layer surface `surface` closed without the application asking: the compositor closed
+    /// it (`zwlr_layer_surface_v1.closed`), or the output it was opened on left. It is no longer
+    /// open, and the driver opens nothing in its place.
+    fn closed(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -335,6 +345,8 @@ fn run_on(
         exit: false,
         failure: None,
         first_frames: Vec::new(),
+        outputs: Vec::new(),
+        closing: Vec::new(),
     };
     let mut app = App {
         application: Box::new(application),
@@ -377,6 +389,7 @@ fn run_on(
         for surface in std::mem::take(&mut app.shell.first_frames) {
             app.application.drawn(&mut app.shell, surface);
         }
+        app.closed_by_application();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
             return Err(error);
@@ -398,8 +411,9 @@ fn require_layer_shell(layer_shell: Option<&LayerShell>) -> Result<&LayerShell, 
 }
 
 /// Which surface the application has on which output: at most one on each (the class of defect
-/// of #600). Generic, so that its tests feed it without a compositor.
-struct PerOutput<O, S>(Vec<(O, S)>);
+/// of #600), or none since its surface closed. Generic, so that its tests feed it without a
+/// compositor.
+struct PerOutput<O, S>(Vec<(O, Option<S>)>);
 
 impl<O, S> Default for PerOutput<O, S> {
     fn default() -> Self {
@@ -409,31 +423,37 @@ impl<O, S> Default for PerOutput<O, S> {
 
 impl<O: PartialEq, S: Copy + PartialEq> PerOutput<O, S> {
     /// An output announced or changed: its surface, the one it had or the one `open` gave it,
-    /// if any. `open` is asked only when it has none.
+    /// if any. `open` is asked only when it never had one, or `open` gave it none.
     fn seen(
         &mut self,
         output: O,
         open: impl FnOnce(&O) -> Result<Option<S>, Error>,
     ) -> Result<Option<S>, Error> {
         if let Some((_, surface)) = self.0.iter().find(|(o, _)| *o == output) {
-            return Ok(Some(*surface));
+            return Ok(*surface);
         }
         let opened = open(&output)?;
         if let Some(surface) = opened {
-            self.0.push((output, surface));
+            self.0.push((output, Some(surface)));
         }
         Ok(opened)
     }
 
-    /// An output left: its surface, for the driver to close.
+    /// An output left: its surface, if it still has one, for the driver to close. An output that
+    /// comes back is asked again.
     fn left(&mut self, output: &O) -> Option<S> {
         let at = self.0.iter().position(|(o, _)| o == output)?;
-        Some(self.0.remove(at).1)
+        self.0.remove(at).1
     }
 
-    /// The compositor closed `surface`: its output has none until it changes or comes back.
+    /// `surface` closed, by the compositor or the application: its output has none, and is not
+    /// asked again, until it leaves.
     fn closed(&mut self, surface: S) {
-        self.0.retain(|(_, s)| *s != surface);
+        for (_, s) in &mut self.0 {
+            if *s == Some(surface) {
+                *s = None;
+            }
+        }
     }
 }
 
@@ -466,6 +486,10 @@ pub struct Shell {
     failure: Option<Error>,
     /// The surfaces whose first frame was committed since [`Application::drawn`] last ran.
     first_frames: Vec<SurfaceId>,
+    /// The outputs announced, as they last changed.
+    outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
+    /// The surfaces [`Shell::close`] closed since the driver last ended what they held.
+    closing: Vec<SurfaceId>,
 }
 
 impl Shell {
@@ -518,16 +542,27 @@ impl Shell {
         Ok(())
     }
 
-    /// Changes a layer surface's anchor, margin, exclusive zone, keyboard and input region to
-    /// `options`'; its layer and namespace stay those it was opened with. Takes effect with the
-    /// next frame.
+    /// Changes a layer surface's layer, anchor, margin, exclusive zone, keyboard and input
+    /// region to `options`'. The layer changes in place, through
+    /// `zwlr_layer_surface_v1.set_layer`: the surface is not created again. Refused, with nothing
+    /// changed, for another namespace, which the protocol fixes when the surface is created, and
+    /// for another layer on a layer shell older than version 2, which has no `set_layer`: close
+    /// the surface and open another. Takes effect with the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
-        let Shown::Layer(layer) = &surface.shown else {
+        let (Shown::Layer(layer), Some(placed)) = (&surface.shown, &mut surface.layer) else {
             return Err(format!("{id:?} is not a layer surface").into());
         };
+        let version = match layer.kind() {
+            SurfaceKind::Wlr(wlr) => wlr.version(),
+            _ => 0,
+        };
+        if let Some(new) = layer_change(placed, options, version)? {
+            layer.set_layer(new);
+            placed.0 = new;
+        }
         layer.set_anchor(options.anchor);
         let [top, right, bottom, left] = options.margin;
         layer.set_margin(top, right, bottom, left);
@@ -550,6 +585,44 @@ impl Shell {
     /// The surface the open menu was opened from, if a menu is open.
     pub fn popup_parent(&self) -> Option<SurfaceId> {
         self.popup.filter(|p| p.menu).map(|p| p.parent)
+    }
+
+    /// The outputs the compositor announced, in that order, as they last changed.
+    pub fn outputs(&self) -> impl Iterator<Item = &OutputInfo> + '_ {
+        self.outputs.iter().map(|(_, info)| info)
+    }
+
+    /// Opens `ui` as a layer surface on the output named `output`, as [`OutputInfo::name`]
+    /// gives it (`DP-1`), or, for `None`, on the output the compositor picks: cosmic-comp's
+    /// active one, athanor-sulphur's first. The application may keep several on one output; it is
+    /// not told of their output's changes, which their scale follows by itself. It is drawn at
+    /// its first configure. An output not announced, or announced without a name, is refused.
+    pub fn open_layer(
+        &mut self,
+        ui: Ui,
+        options: LayerOptions,
+        output: Option<&str>,
+    ) -> Result<SurfaceId, Error> {
+        let output = match output {
+            Some(name) => Some(
+                named(self.outputs.iter().map(|(o, i)| (o, i.name.as_deref())), name)
+                    .ok_or_else(|| format!("no output named {name:?}"))?
+                    .clone(),
+            ),
+            None => None,
+        };
+        self.open(ui, Role::Layer(options), output.as_ref())
+    }
+
+    /// Closes the surface `id`, and the popup open from it first; the application is not told
+    /// through [`Application::closed`]. A surface of [`Application::output`] closed so is not
+    /// asked for again on that output until the output leaves and comes back. Closing a window
+    /// does not end the run.
+    pub fn close(&mut self, id: SurfaceId) {
+        if self.surfaces.iter().any(|s| s.id == id) {
+            self.remove(id);
+            self.closing.push(id);
+        }
     }
 
     fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
@@ -586,7 +659,7 @@ impl Shell {
     /// Closes the popup open, a menu or a tooltip, if any.
     pub fn close_popup(&mut self) {
         if let Some(open) = self.popup {
-            self.close(open.surface);
+            self.remove(open.surface);
         }
     }
 
@@ -724,6 +797,7 @@ impl Shell {
         let qh = &self.qh;
         let mut input_region = None;
         let mut stretch = (false, false);
+        let mut placed = None;
         let shown = match role {
             Role::Window { app_id } => {
                 let xdg_shell = self
@@ -744,9 +818,10 @@ impl Shell {
                     qh,
                     wl,
                     options.layer,
-                    Some(options.namespace),
+                    Some(options.namespace.clone()),
                     output,
                 );
+                placed = Some((options.layer, options.namespace));
                 surface.set_anchor(options.anchor);
                 let [top, right, bottom, left] = options.margin;
                 surface.set_margin(top, right, bottom, left);
@@ -757,7 +832,12 @@ impl Shell {
                 Shown::Layer(surface)
             }
         };
-        self.adopt(ui, shown, fractional, input_region, stretch)
+        let id = self.adopt(ui, shown, fractional, input_region, stretch)?;
+        if let Some(surface) = self.get_mut(id) {
+            surface.layer = placed;
+            surface.output = output.cloned();
+        }
+        Ok(id)
     }
 
     /// Takes a surface just given its role: its renderer, its accessibility adapter, its size and
@@ -817,6 +897,8 @@ impl Shell {
             scale: 1.0,
             size,
             stretch,
+            layer: None,
+            output: None,
             configured: false,
             drawn: false,
             frame_pending: false,
@@ -834,7 +916,7 @@ impl Shell {
 
     /// Closes the surface `id`, and the popup open from it first. Closing a menu returns the focus
     /// to its widget.
-    fn close(&mut self, id: SurfaceId) {
+    fn remove(&mut self, id: SurfaceId) {
         if let Some(open) = self.popup.filter(|p| p.surface == id || p.parent == id) {
             self.popup = None;
             self.surfaces.retain(|s| s.id != open.surface);
@@ -859,6 +941,49 @@ impl Shell {
         }
         Ok(())
     }
+}
+
+/// The output named `name` among `outputs` and their names.
+fn named<'a, O: 'a>(
+    outputs: impl IntoIterator<Item = (&'a O, Option<&'a str>)>,
+    name: &str,
+) -> Option<&'a O> {
+    outputs
+        .into_iter()
+        .find(|(_, n)| *n == Some(name))
+        .map(|(output, _)| output)
+}
+
+/// The layer `set_layer` sends to move a layer surface `placed` on a layer, with a namespace, to
+/// `options`'s, if the layer changes, on a layer shell of `version`. Refused for another
+/// namespace, which `get_layer_surface` fixes, and for another layer before version 2, which
+/// added `set_layer`.
+fn layer_change(
+    placed: &(Layer, String),
+    options: &LayerOptions,
+    version: u32,
+) -> Result<Option<Layer>, Error> {
+    let (layer, namespace) = placed;
+    if options.namespace != *namespace {
+        return Err(format!(
+            "a layer surface keeps the namespace it opened with, {namespace:?}, not {:?}: \
+             close it and open another",
+            options.namespace
+        )
+        .into());
+    }
+    if options.layer == *layer {
+        return Ok(None);
+    }
+    if version < 2 {
+        return Err(format!(
+            "zwlr_layer_shell_v1 version {version} cannot move a layer surface to {:?}: close it \
+             and open another",
+            options.layer
+        )
+        .into());
+    }
+    Ok(Some(options.layer))
 }
 
 /// Whether a layer surface anchored at `anchor` spans its output's width, and its height.
@@ -935,6 +1060,11 @@ struct Surface {
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
     stretch: (bool, bool),
+    /// A layer surface's layer and namespace.
+    layer: Option<(Layer, String)>,
+    /// The output a layer surface was opened on, when one was named: always for the surfaces of
+    /// [`Application::output`]. The driver closes the surface when the output leaves.
+    output: Option<wl_output::WlOutput>,
     configured: bool,
     /// A frame was committed since the first configure.
     drawn: bool,
@@ -1413,6 +1543,12 @@ impl App {
         let Some(info) = self.output.info(&output) else {
             return;
         };
+        match self.shell.outputs.iter_mut().find(|(o, _)| *o == output) {
+            Some((_, known)) => *known = info.clone(),
+            None => self.shell.outputs.push((output.clone(), info.clone())),
+        }
+        // A surface the application closed since is not asked again, nor told of the change.
+        self.closed_by_application();
         let App {
             application,
             shell,
@@ -1479,11 +1615,32 @@ impl App {
     /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
     /// selection its fields offered ends with it.
     fn close(&mut self, id: SurfaceId) {
-        self.shell.close(id);
+        self.shell.remove(id);
+        self.forget(id);
+    }
+
+    /// Ends the text input and the primary selection of the closed surface `id`.
+    fn forget(&mut self, id: SurfaceId) {
         self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
         }
+    }
+
+    /// Ends what the surfaces [`Shell::close`] closed held: their place on their output, their
+    /// text input and their primary selection.
+    fn closed_by_application(&mut self) {
+        for id in std::mem::take(&mut self.shell.closing) {
+            self.outputs.closed(id);
+            self.forget(id);
+        }
+    }
+
+    /// Closes `id`, which the application did not ask to close, and tells it.
+    fn lost(&mut self, id: SurfaceId) {
+        self.outputs.closed(id);
+        self.close(id);
+        self.application.closed(&mut self.shell, id);
     }
 
     /// Moves the accessibility adapters' window focus to the surface that takes the keys, after
@@ -1824,8 +1981,17 @@ impl OutputHandler for App {
         _: &QueueHandle<Self>,
         output: wl_output::WlOutput,
     ) {
-        if let Some(id) = self.outputs.left(&output) {
-            self.close(id);
+        self.shell.outputs.retain(|(o, _)| *o != output);
+        self.outputs.left(&output);
+        let on: Vec<_> = self
+            .shell
+            .surfaces
+            .iter()
+            .filter(|s| s.output.as_ref() == Some(&output))
+            .map(|s| s.id)
+            .collect();
+        for id in on {
+            self.lost(id);
         }
     }
 }
@@ -1836,8 +2002,7 @@ impl LayerShellHandler for App {
             return;
         };
         let id = surface.id;
-        self.outputs.closed(id);
-        self.close(id);
+        self.lost(id);
     }
 
     fn configure(
@@ -2361,12 +2526,67 @@ mod tests {
         fake.left(2);
         fake.left(9);
         fake.one_each(&[a, b]);
-        // The compositor closes a surface: its output gets one again at its next change.
+        // The compositor closes a surface: its output gets none at its next change, which would
+        // be refused again, until it leaves and comes back.
         let closed = fake.open[0].0;
         fake.closed(closed);
         fake.one_each(&[b]);
         fake.seen(a);
+        fake.one_each(&[b]);
+        fake.left(a.name);
+        fake.seen(a);
         fake.one_each(&[a, b]);
+    }
+
+    #[test]
+    fn an_output_whose_surface_closed_is_not_asked_again_until_it_leaves() {
+        let mut outputs = PerOutput::<u32, u32>::default();
+        assert_eq!(outputs.seen(1, |_| Ok(Some(7))).ok(), Some(Some(7)));
+        outputs.closed(7);
+        let asked = std::cell::Cell::new(false);
+        let again = outputs.seen(1, |_| {
+            asked.set(true);
+            Ok(Some(8))
+        });
+        assert_eq!(again.ok(), Some(None));
+        assert!(!asked.get(), "the application was asked again for a closed surface");
+        // Leaving, the output has no surface to close; back, it is asked again.
+        assert_eq!(outputs.left(&1), None);
+        assert_eq!(outputs.seen(1, |_| Ok(Some(9))).ok(), Some(Some(9)));
+        assert_eq!(outputs.left(&1), Some(9));
+    }
+
+    #[test]
+    fn a_layer_surface_is_opened_on_the_output_of_its_name() {
+        let outputs = [(1, Some("DP-1")), (2, None), (3, Some("HDMI-A-1"))];
+        let named = |name| named(outputs.iter().map(|(o, n)| (o, *n)), name).copied();
+        assert_eq!(named("HDMI-A-1"), Some(3));
+        assert_eq!(named("DP-1"), Some(1));
+        assert_eq!(named("DP-2"), None);
+        assert_eq!(named(""), None, "an output without a name was chosen");
+    }
+
+    #[test]
+    fn set_layer_moves_a_layer_surface_to_another_layer_and_keeps_its_namespace() {
+        let placed = (Layer::Background, "athanor-osd".to_owned());
+        let mut options = LayerOptions {
+            layer: Layer::Background,
+            namespace: "athanor-osd".into(),
+            ..LayerOptions::default()
+        };
+        assert_eq!(layer_change(&placed, &options, 4).ok(), Some(None));
+        options.layer = Layer::Overlay;
+        assert_eq!(layer_change(&placed, &options, 2).ok(), Some(Some(Layer::Overlay)));
+        assert_eq!(layer_change(&placed, &options, 4).ok(), Some(Some(Layer::Overlay)));
+        // Version 1 has no set_layer: refused, not dropped.
+        let error = layer_change(&placed, &options, 1).err().map(|e| e.to_string());
+        assert!(error.is_some_and(|e| e.contains("version 1")));
+        // Version 1 keeps a surface that stays on its layer.
+        options.layer = Layer::Background;
+        assert_eq!(layer_change(&placed, &options, 1).ok(), Some(None));
+        options.namespace = "athanor-other".into();
+        let error = layer_change(&placed, &options, 4).err().map(|e| e.to_string());
+        assert!(error.is_some_and(|e| e.contains("\"athanor-osd\"")));
     }
 
     #[test]
