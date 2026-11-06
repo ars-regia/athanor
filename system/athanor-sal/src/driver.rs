@@ -525,7 +525,7 @@ impl Shell {
     /// Sets the part of a layer surface that takes the pointer, in logical pixels; `None` is all
     /// of it. Takes effect with the next frame.
     pub fn set_input_region(&mut self, id: SurfaceId, rects: Option<&[Rect]>) -> Result<(), Error> {
-        let region = self.region(rects)?;
+        let region = Self::region(&self.compositor, rects)?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -537,11 +537,14 @@ impl Shell {
     }
 
     /// A `wl_region` of `rects`, in logical pixels; `None` for all of the surface.
-    fn region(&self, rects: Option<&[Rect]>) -> Result<Option<Region>, Error> {
+    fn region(
+        compositor: &CompositorState,
+        rects: Option<&[Rect]>,
+    ) -> Result<Option<Region>, Error> {
         let Some(rects) = rects else {
             return Ok(None);
         };
-        let region = Region::new(&self.compositor)?;
+        let region = Region::new(compositor)?;
         for r in rects {
             // Whole pixels that cover the widget: the origin down, the far edge up.
             let (x, y) = (r.x.floor(), r.y.floor());
@@ -561,11 +564,13 @@ impl Shell {
     /// the size of the widgets, without waiting for a frame, which the compositor may hold back
     /// from a covered surface. The widgets are drawn again at the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
-        // What can refuse comes before any request: a request sent stays pending, and the next
-        // commit, of this call or not, would apply it.
-        let region = self.region(options.input_region.as_deref())?;
+        // What can refuse comes before any request, the region's included: a request sent stays
+        // pending, and the next commit, of this call or not, would apply it.
+        let compositor = &self.compositor;
         let surface = self
-            .get_mut(id)
+            .surfaces
+            .iter_mut()
+            .find(|s| s.id == id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
         let (Shown::Layer(layer), Some(placed)) = (&surface.shown, &mut surface.layer) else {
             return Err(format!("{id:?} is not a layer surface").into());
@@ -588,6 +593,13 @@ impl Shell {
             (surface.ui.min_width, surface.ui.min_height) = min;
             return Err(error);
         }
+        let region = match Self::region(compositor, options.input_region.as_deref()) {
+            Ok(region) => region,
+            Err(error) => {
+                (surface.ui.min_width, surface.ui.min_height) = min;
+                return Err(error);
+            }
+        };
         if let Some(new) = new {
             layer.set_layer(new);
             placed.0 = new;

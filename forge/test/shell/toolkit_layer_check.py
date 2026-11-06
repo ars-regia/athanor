@@ -37,8 +37,8 @@ WL_SURFACE = re.compile(
 SET_LAYER = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.set_layer\((\d+)\)")
 # The wl_output.name event, which names an output (version 4).
 OUTPUT_NAME = re.compile(r"\] wl_output#(\d+)\.name\(\"([^\"]*)\"\)")
-# The margin of the set_layer the client has refused.
-REFUSED_MARGIN = ".set_margin(0, 0, 40, 0)"
+# The margin and the input region of the set_layer the client has refused.
+REFUSED = (".set_margin(0, 0, 40, 0)", ".add(1, 2, 3, 4)")
 BAR = "athanor-sal-layer"
 OVERLAY = "athanor-sal-overlay"
 CLOSED = "athanor-sal-closed"
@@ -267,9 +267,15 @@ def main():
                     f"{EXTRA}: the client did not report the refused set_layer",
                     lambda: f"refused {OVERLAY}" in STDOUT.read_text().splitlines(),
                 )
-                if any(REFUSED_MARGIN in line for line in TRACE.read_text().splitlines()):
+                sent = [
+                    request
+                    for request in REFUSED
+                    for line in TRACE.read_text().splitlines()
+                    if request in line
+                ]
+                if sent:
                     raise SystemExit(
-                        f"toolkit_layer_check: {step}: a refused set_layer sent its margin"
+                        f"toolkit_layer_check: {step}: a refused set_layer sent {sent}"
                     )
                 if not committed_at_once(TRACE.read_text().splitlines(), OVERLAY):
                     raise SystemExit(
