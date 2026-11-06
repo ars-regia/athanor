@@ -6,7 +6,7 @@
 
 mod clipboard;
 
-use crate::a11y::{tree_update, tree_updates, withdrawn};
+use crate::a11y::{leave, tree_update, tree_updates};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
@@ -629,7 +629,7 @@ impl Shell {
             (false, true) => {
                 let tree = tree_update(&surface.ui, f64::from(surface.scale));
                 if let Ok(mut initial) = surface.initial.lock() {
-                    *initial = tree;
+                    *initial = Some(tree);
                 }
                 let mut a11y = adapter(id, &surface.initial, &actions);
                 a11y.update_window_focus_state(surface.window_focused);
@@ -926,7 +926,7 @@ impl Shell {
             None
         };
         // The first tree comes from the last update drawn.
-        let initial = Arc::new(Mutex::new(tree_update(&ui, 1.0)));
+        let initial = Arc::new(Mutex::new(Some(tree_update(&ui, 1.0))));
         let a11y = Some(adapter(id, &initial, &self.actions));
         // A layer surface asks for its widgets' size before the first configure.
         let size = match &shown {
@@ -1153,7 +1153,8 @@ struct Surface {
     /// The surface's window on the accessibility bus; `None` while [`Shell::set_accessible`]
     /// keeps it out of the tree.
     a11y: Option<accesskit_unix::Adapter>,
-    initial: Arc<Mutex<TreeUpdate>>,
+    /// The tree the adapter activates with; `None` once the surface left the tree.
+    initial: Arc<Mutex<Option<TreeUpdate>>>,
     /// The adapter's window is the focused one, which a new adapter takes over.
     window_focused: bool,
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
@@ -1201,16 +1202,15 @@ impl Surface {
 
     /// Takes the surface out of the accessibility tree, if it is in it. Dropping the adapter
     /// takes its window off the application's children, and leaves its nodes on the bus: the
-    /// window is deactivated and its nodes withdrawn first.
+    /// window is deactivated and its nodes withdrawn first ([`leave`]).
     fn withdraw(&mut self) {
         let Some(mut a11y) = self.a11y.take() else {
             return;
         };
-        if self.window_focused {
-            a11y.update_window_focus_state(false);
-        }
-        let update = withdrawn(&self.ui, f64::from(self.scale));
-        a11y.update_if_active(|| update);
+        // The dropped adapter's alone: a later adapter of the surface starts from a new one.
+        let initial = std::mem::take(&mut self.initial);
+        let scale = f64::from(self.scale);
+        leave(&mut a11y, &initial, &self.ui, scale, self.window_focused);
     }
 
     fn draw(&mut self, pool: &mut SlotPool, qh: &QueueHandle<App>) -> Result<(), Error> {
@@ -1303,7 +1303,7 @@ impl Surface {
     fn publish_tree(&mut self) {
         for update in tree_updates(&mut self.ui, f64::from(self.scale)) {
             if let Ok(mut initial) = self.initial.lock() {
-                initial.clone_from(&update);
+                *initial = Some(update.clone());
             }
             if let Some(a11y) = &mut self.a11y {
                 a11y.update_if_active(|| update);
@@ -1316,7 +1316,7 @@ impl Surface {
 /// travel on `actions` to the event loop.
 fn adapter(
     id: SurfaceId,
-    initial: &Arc<Mutex<TreeUpdate>>,
+    initial: &Arc<Mutex<Option<TreeUpdate>>>,
     actions: &Sender<(SurfaceId, ActionRequest)>,
 ) -> accesskit_unix::Adapter {
     accesskit_unix::Adapter::new(
@@ -1326,11 +1326,13 @@ fn adapter(
     )
 }
 
-struct Activation(Arc<Mutex<TreeUpdate>>);
+struct Activation(Arc<Mutex<Option<TreeUpdate>>>);
 
 impl ActivationHandler for Activation {
+    /// `None` once the surface left the tree: the adapter then stays pending, registering
+    /// nothing, until it is dropped.
     fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
-        self.0.lock().ok().map(|tree| tree.clone())
+        self.0.lock().ok().and_then(|tree| tree.clone())
     }
 }
 
