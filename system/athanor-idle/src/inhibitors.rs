@@ -123,6 +123,11 @@ impl Inhibitors {
         true
     }
 
+    /// Drops every inhibitor (the bus is gone: nothing can be followed any more).
+    pub fn clear(&mut self) {
+        self.table.clear();
+    }
+
     /// How many inhibitors this owner holds.
     pub fn count_owner(&self, owner: &str) -> usize {
         self.table.values().filter(|i| i.owner == owner).count()

@@ -12,7 +12,8 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{watch, Notify};
+use tokio::task::JoinHandle;
 use zbus::fdo::{self, DBusProxy, RequestNameFlags};
 use zbus::message::Header;
 use zbus::names::BusName;
@@ -59,6 +60,7 @@ impl ScreenSaver {
             .sender()
             .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
         let owner = sender.to_string();
+        let application_name = truncate(application_name, MAX_TEXT);
         let app_id = truncate(&app_id_of(conn, sender.clone().into()).await, MAX_TEXT);
         let reason = truncate(reason, MAX_TEXT);
         let cookie = {
@@ -79,8 +81,8 @@ impl ScreenSaver {
             cookie
         };
         // The caller may have left while the application id was read: its signal came
-        // before the entry existed, so look again now that it does.
-        reconcile(conn, &self.0).await;
+        // before the entry existed, so look again, at this owner only, now that it does.
+        reconcile(conn, &self.0, BTreeSet::from([sender.to_string()])).await;
         Ok(cookie)
     }
 
@@ -105,29 +107,41 @@ impl ScreenSaver {
     }
 }
 
-/// Drops the inhibitors whose owner is no longer on the bus. A failed question changes
-/// nothing; the next reconciliation asks again.
-async fn reconcile(conn: &Connection, state: &State) {
-    let Ok(bus) = DBusProxy::new(conn).await else {
-        return;
+/// Drops the inhibitors of these owners when they are no longer on the bus. A failed question
+/// is logged and keeps the inhibitor; the periodic reconciliation asks again. This calls the
+/// bus, so it never runs in the task that drains `NameOwnerChanged` (see `serve`).
+async fn reconcile(conn: &Connection, state: &State, owners: BTreeSet<String>) {
+    let bus = match DBusProxy::new(conn).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("cannot ask the bus who is there: {e}");
+            return;
+        }
     };
-    let owners: BTreeSet<String> = state.lock().iter().map(|(_, i)| i.owner.clone()).collect();
     for owner in owners {
         let Ok(name) = BusName::try_from(owner.as_str()) else {
             continue;
         };
-        if bus.name_has_owner(name).await == Ok(false) {
-            let mut table = state.lock();
-            for i in table.remove_owner(&owner) {
-                tracing::info!(
-                    app_id = i.app_id,
-                    reason = i.reason,
-                    "owner gone, uninhibit"
-                );
+        match bus.name_has_owner(name).await {
+            Ok(false) => {
+                let mut table = state.lock();
+                for i in table.remove_owner(&owner) {
+                    tracing::info!(
+                        app_id = i.app_id,
+                        reason = i.reason,
+                        "owner gone, uninhibit"
+                    );
+                }
+                state.changed(&table);
             }
-            state.changed(&table);
+            Ok(true) => {}
+            Err(e) => tracing::warn!(owner, "NameHasOwner failed, inhibitor kept: {e}"),
         }
     }
+}
+
+fn all_owners(state: &State) -> BTreeSet<String> {
+    state.lock().iter().map(|(_, i)| i.owner.clone()).collect()
 }
 
 /// A unique name as the bus hands them out, `:N.M`; a well-known name is never an owner.
@@ -193,14 +207,77 @@ fn unescape(s: &str) -> String {
 
 /// Restores the saved inhibitors whose owner is still on the bus, serves the interface on
 /// both paths and owns the name (no `AllowReplacement`, no queue). Returns the channel that
-/// carries what the table holds.
-pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<Hold>> {
+/// carries what the table holds, and a handle that completes when the daemon can no longer
+/// follow the bus (the `NameOwnerChanged` stream ended): the table is then cleared, so the
+/// timers are free, and the caller is expected to exit and let the manager restart it (ST5).
+///
+/// zbus queues 64 signals per stream and, when the queue is full, makes its socket reader
+/// wait for the consumer: nothing is dropped, but a consumer that waits for a method reply
+/// would wait for the reader that waits for it. The task that drains the stream therefore
+/// never calls the bus, and the stream is drained before anything else does.
+pub async fn serve(
+    conn: &Connection,
+    file: PathBuf,
+) -> Result<(watch::Receiver<Hold>, JoinHandle<()>)> {
     let bus = DBusProxy::new(conn).await?;
-    // Subscribed before the restore, so an owner that leaves in between is not missed.
     let mut left = bus.receive_name_owner_changed().await?;
+    let (hold, rx) = watch::channel(Hold::None);
+    let state = Arc::new(State {
+        table: Mutex::new(Inhibitors::new()),
+        file,
+        hold,
+    });
 
-    let mut table = Inhibitors::new();
-    match store::load(&file) {
+    // The reconciler: the only task that asks the bus, every 60 s and when the drain asks.
+    let again = Arc::new(Notify::new());
+    let reconciler = {
+        let (conn, state, again) = (conn.clone(), state.clone(), again.clone());
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => {}
+                    _ = again.notified() => {}
+                }
+                reconcile(&conn, &state, all_owners(&state)).await;
+            }
+        })
+    };
+    // The drain: removes owners that left, and nothing else.
+    let ended = {
+        let state = state.clone();
+        tokio::spawn(async move {
+            while let Some(signal) = left.next().await {
+                match signal.args() {
+                    Ok(args) => {
+                        if args.new_owner().is_none() && matches!(args.name(), BusName::Unique(_)) {
+                            let mut table = state.lock();
+                            for i in table.remove_owner(args.name().as_str()) {
+                                tracing::info!(
+                                    app_id = i.app_id,
+                                    reason = i.reason,
+                                    "owner left, uninhibit"
+                                );
+                            }
+                            state.changed(&table);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("bad NameOwnerChanged: {e}");
+                        again.notify_one();
+                    }
+                }
+            }
+            reconciler.abort();
+            tracing::error!("the bus connection ended: inhibitors cleared, the daemon must exit");
+            // In memory only: the file keeps the table for the restart (SN7).
+            let mut table = state.lock();
+            table.clear();
+            state.hold.send_replace(table.hold());
+        })
+    };
+
+    match store::load(&state.file) {
         Ok(entries) => {
             for (cookie, i) in entries {
                 if !is_unique_form(&i.owner) {
@@ -215,21 +292,15 @@ pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<H
                     Ok(n) => bus.name_has_owner(n).await.unwrap_or(false),
                     Err(_) => false,
                 };
-                if present && table.restore(cookie, i.clone()) {
+                if present && state.lock().restore(cookie, i.clone()) {
                     tracing::info!(cookie, app_id = i.app_id, "inhibitor restored");
                 } else {
                     tracing::info!(cookie, owner = i.owner, "inhibitor dropped at start");
                 }
             }
         }
-        Err(e) => tracing::warn!("{} unusable, starting empty: {e}", file.display()),
+        Err(e) => tracing::warn!("{} unusable, starting empty: {e}", state.file.display()),
     }
-    let (hold, rx) = watch::channel(table.hold());
-    let state = Arc::new(State {
-        table: Mutex::new(table),
-        file,
-        hold,
-    });
 
     for path in PATHS {
         conn.object_server()
@@ -238,40 +309,11 @@ pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<H
     }
     conn.request_name_with_flags(NAME, RequestNameFlags::DoNotQueue.into())
         .await?;
-    // Only the instance that owns the name writes the file.
+    // Only the instance that owns the name writes the file. An owner that left while the
+    // restore ran was not yet in the table when its signal came: look at all of them now.
+    reconcile(conn, &state, all_owners(&state)).await;
     state.changed(&state.lock());
-
-    // zbus queues 64 signals per stream and, when the queue is full, makes its socket reader
-    // wait for the consumer: nothing is dropped. A stream error, and every 60 s, look at the
-    // owners again all the same.
-    let conn = conn.clone();
-    tokio::spawn(async move {
-        let mut tick = tokio::time::interval(Duration::from_secs(60));
-        loop {
-            tokio::select! {
-                signal = left.next() => match signal {
-                    None => break,
-                    Some(signal) => match signal.args() {
-                        Ok(args) => {
-                            if args.new_owner().is_none() && matches!(args.name(), BusName::Unique(_)) {
-                                let mut table = state.lock();
-                                for i in table.remove_owner(args.name().as_str()) {
-                                    tracing::info!(app_id = i.app_id, reason = i.reason, "owner left, uninhibit");
-                                }
-                                state.changed(&table);
-                            }
-                        }
-                        Err(e) => {
-                            tracing::warn!("bad NameOwnerChanged: {e}");
-                            reconcile(&conn, &state).await;
-                        }
-                    },
-                },
-                _ = tick.tick() => reconcile(&conn, &state).await,
-            }
-        }
-    });
-    Ok(rx)
+    Ok((rx, ended))
 }
 
 #[cfg(test)]
@@ -360,7 +402,7 @@ mod tests {
         let bus = Bus::start("ss");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let mut rx = serve(&server, file.clone()).await.unwrap();
+        let (mut rx, _end) = serve(&server, file.clone()).await.unwrap();
         assert_eq!(*rx.borrow(), Hold::None);
 
         // A second instance cannot take the name.
@@ -398,7 +440,7 @@ mod tests {
         // A restart restores the live owner's inhibitor and continues above its cookie.
         server.close().await.unwrap();
         let server2 = bus.connect().await;
-        let mut rx2 = serve(&server2, file.clone()).await.unwrap();
+        let (mut rx2, _end2) = serve(&server2, file.clone()).await.unwrap();
         assert_eq!(*rx2.borrow(), Hold::All);
         let c3: u32 = call(&b, PATHS[0], "Inhibit", &("app", "third"))
             .await
@@ -419,7 +461,7 @@ mod tests {
         let bus = Bus::start("orphan");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let rx = serve(&server, file.clone()).await.unwrap();
+        let (rx, _end) = serve(&server, file.clone()).await.unwrap();
         for _ in 0..5 {
             let c = bus.connect().await;
             let msg = zbus::Message::method_call(PATHS[0], "Inhibit")
@@ -444,6 +486,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_flood_of_owner_changes_does_not_stall_the_daemon() {
+        let bus = Bus::start("flood");
+        let server = bus.connect().await;
+        let (rx, _end) = serve(&server, bus.dir.join("inhibitors.json"))
+            .await
+            .unwrap();
+        let a = bus.connect().await;
+        call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        // Well over the 64 signals a stream queues; the table is reconciled meanwhile.
+        for _ in 0..150 {
+            bus.connect().await.close().await.unwrap();
+        }
+        let reply = tokio::time::timeout(
+            Duration::from_secs(10),
+            call(&a, PATHS[1], "Inhibit", &("app", "after")),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(reply.body().deserialize::<u32>().unwrap(), 2);
+        assert_eq!(*rx.borrow(), Hold::All);
+    }
+
+    #[tokio::test]
+    async fn the_end_of_the_bus_clears_the_table_and_is_reported() {
+        let bus = Bus::start("end");
+        let file = bus.dir.join("inhibitors.json");
+        let server = bus.connect().await;
+        let (mut rx, end) = serve(&server, file.clone()).await.unwrap();
+        let a = bus.connect().await;
+        call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        settle(&mut rx, Hold::All).await;
+        server.close().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), end)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*rx.borrow(), Hold::None);
+        // The file still holds the table for the restart.
+        assert!(fs::read_to_string(&file).unwrap().contains("\"r\""));
+    }
+
+    #[tokio::test]
     async fn bounds_and_a_forged_well_known_owner() {
         let bus = Bus::start("bounds");
         let file = bus.dir.join("inhibitors.json");
@@ -453,7 +538,7 @@ mod tests {
         )
         .unwrap();
         let server = bus.connect().await;
-        let rx = serve(&server, file.clone()).await.unwrap();
+        let (rx, _end) = serve(&server, file.clone()).await.unwrap();
         assert_eq!(*rx.borrow(), Hold::None);
         assert!(!fs::read_to_string(&file).unwrap().contains("forged"));
 
