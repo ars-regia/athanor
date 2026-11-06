@@ -943,6 +943,14 @@ impl Shell {
     }
 }
 
+/// Calls `lost` on the surface `next` finds in `state` until it finds none, so that one `lost`
+/// closed along the way is not lost after: `lost` closes the surface it is given.
+fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl FnMut(&mut T, S)) {
+    while let Some(surface) = next(state) {
+        lost(state, surface);
+    }
+}
+
 /// The output named `name` among `outputs` and their names.
 fn named<'a, O: 'a>(
     outputs: impl IntoIterator<Item = (&'a O, Option<&'a str>)>,
@@ -1983,16 +1991,16 @@ impl OutputHandler for App {
     ) {
         self.shell.outputs.retain(|(o, _)| *o != output);
         self.outputs.left(&output);
-        let on: Vec<_> = self
-            .shell
-            .surfaces
-            .iter()
-            .filter(|s| s.output.as_ref() == Some(&output))
-            .map(|s| s.id)
-            .collect();
-        for id in on {
-            self.lost(id);
-        }
+        // One at a time: a surface of the output the application closes from
+        // Application::closed is closed at its asking, and it is not told of it.
+        lose_each(
+            self,
+            |app| {
+                let mut on = app.shell.surfaces.iter();
+                on.find(|s| s.output.as_ref() == Some(&output)).map(|s| s.id)
+            },
+            App::lost,
+        );
     }
 }
 
@@ -2554,6 +2562,26 @@ mod tests {
         assert_eq!(outputs.left(&1), None);
         assert_eq!(outputs.seen(1, |_| Ok(Some(9))).ok(), Some(Some(9)));
         assert_eq!(outputs.left(&1), Some(9));
+    }
+
+    #[test]
+    fn a_surface_the_application_closes_while_its_output_leaves_is_not_reported_lost() {
+        // Surfaces 1 and 2 on the leaving output 9, 3 on another; told of 1, the application
+        // closes 2 itself.
+        let mut state = (vec![(1, 9), (2, 9), (3, 8)], Vec::new());
+        lose_each(
+            &mut state,
+            |(open, _)| open.iter().find(|(_, o)| *o == 9).map(|(s, _)| *s),
+            |(open, told), surface| {
+                open.retain(|(s, _)| *s != surface);
+                told.push(surface);
+                if surface == 1 {
+                    open.retain(|(s, _)| *s != 2);
+                }
+            },
+        );
+        assert_eq!(state.1, [1], "a surface closed at the application's asking was lost");
+        assert_eq!(state.0, [(3, 8)]);
     }
 
     #[test]
