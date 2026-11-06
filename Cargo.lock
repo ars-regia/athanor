@@ -393,6 +393,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-auth"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-backup"
 version = "1.0.0"
 dependencies = [
@@ -736,6 +744,19 @@ dependencies = [
  "nix 0.29.0",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "athanor-unlockd"
+version = "1.0.0"
+dependencies = [
+ "athanor-auth",
+ "athanor-unit",
+ "libc",
+ "nix 0.29.0",
+ "tracing",
+ "zbus",
+ "zeroize",
 ]
 
 [[package]]
@@ -3674,6 +3695,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]
