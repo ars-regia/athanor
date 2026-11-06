@@ -25,6 +25,8 @@ const PAM_PERM_DENIED: c_int = 6;
 const PAM_CONV_ERR: c_int = 19;
 const PAM_USER: c_int = 2;
 const PAM_DISALLOW_NULL_AUTHTOK: c_int = 0x0001;
+/// The flags of `pam_authenticate` and `pam_acct_mgmt`: an empty password never passes (D27).
+const FLAGS: c_int = PAM_DISALLOW_NULL_AUTHTOK;
 const PAM_PROMPT_ECHO_OFF: c_int = 1;
 const PAM_PROMPT_ECHO_ON: c_int = 2;
 const PAM_ERROR_MSG: c_int = 3;
@@ -161,14 +163,14 @@ fn transact<R: Read, W: Write>(
     let mut status = start;
     if start == PAM_SUCCESS {
         // SAFETY: `handle` is the live handle pam_start returned.
-        status = unsafe { pam_authenticate(handle, PAM_DISALLOW_NULL_AUTHTOK) };
+        status = unsafe { pam_authenticate(handle, FLAGS) };
         transaction.authenticate = Some(status);
     }
     if status == PAM_SUCCESS {
         transaction.user_kept = same_user(handle, user);
         if transaction.user_kept {
             // SAFETY: `handle` is the live handle pam_start returned.
-            status = unsafe { pam_acct_mgmt(handle, PAM_DISALLOW_NULL_AUTHTOK) };
+            status = unsafe { pam_acct_mgmt(handle, FLAGS) };
             transaction.account = Some(status);
         }
     }
@@ -494,6 +496,45 @@ mod tests {
         assert!(sent.starts_with(b"PAM_PROMPT_ECHO_OFF "), "{sent:?}");
         let (wrong, _) = run(&dir, Service::Password, b"hunter3\n");
         assert!(!wrong.succeeded(), "{wrong:?}");
+    }
+
+    /// No module of the system's stacks honours the flag without an account with an empty
+    /// password, which a test cannot create without root, so the calls are read from the source.
+    #[test]
+    fn both_phases_refuse_an_empty_password() {
+        assert_eq!(FLAGS & PAM_DISALLOW_NULL_AUTHTOK, PAM_DISALLOW_NULL_AUTHTOK);
+        let source = include_str!("ffi.rs");
+        for call in ["pam_authenticate(", "pam_acct_mgmt("] {
+            let site = format!("{{ {call}");
+            assert_eq!(source.matches(&site).count(), 1, "one call of {call}");
+            assert!(source.contains(&format!("{site}handle, FLAGS)")), "{call}");
+        }
+    }
+
+    /// Set in the child that `a_client_gone_before_its_answer_ends_the_helper_with_2` runs.
+    const CANCEL_CHILD: &str = "ATHANOR_UNLOCKD_TEST_CANCEL";
+
+    /// On the password service, a client that closes before answering ends the process with
+    /// `_exit(2)` from the conversation callback, inside pam_authenticate: no verdict, no count.
+    #[test]
+    fn a_client_gone_before_its_answer_ends_the_helper_with_2() {
+        if std::env::var_os(CANCEL_CHILD).is_some() {
+            let dir = Confdir::new("cancel", EXEC, EXEC);
+            let (transaction, _) = run(&dir, Service::Password, b"");
+            // Reached only if the callback did not end the process: the parent sees 0.
+            println!("{transaction:?}");
+            return;
+        }
+        let status = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+            .args([
+                "--exact",
+                "ffi::tests::a_client_gone_before_its_answer_ends_the_helper_with_2",
+            ])
+            .env(CANCEL_CHILD, "1")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .expect("the child ran");
+        assert_eq!(status.code(), Some(2), "{status}");
     }
 
     #[test]

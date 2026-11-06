@@ -19,17 +19,18 @@ mod ffi;
 mod peer;
 
 use std::error::Error;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{self, Write};
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::process::ExitCode;
 
 use athanor_auth::{read_line_within, ReadError, Secret, Service, FAILURE, MAX_SELECTOR, SUCCESS};
 use nix::unistd::{Uid, User};
 
 use crate::conversation::Conversation;
-use crate::peer::Refused;
+use crate::ffi::Transaction;
+use crate::peer::{Internal, Refused};
 
 /// How the helper ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,11 +76,25 @@ fn run() -> Result<End, Box<dyn Error>> {
     if let Err(error) = ffi::set_locale() {
         tracing::warn!(%error, "PAM's texts stay in the C locale");
     }
+    serve(
+        io::stdin().as_fd(),
+        io::stdout().as_fd(),
+        peer::check_socket,
+        ffi::authenticate,
+    )
+}
 
-    let stdin = io::stdin();
-    let socket = stdin.as_fd();
+/// The connection's work, from the peer check to the verdict, over the connection's read and
+/// write ends, the peer check and the PAM transaction. The account is the one of the peer's
+/// uid from `SO_PEERCRED`; the check runs before any byte of the client is read.
+fn serve(
+    socket: BorrowedFd<'_>,
+    out: BorrowedFd<'_>,
+    check_socket: impl FnOnce(BorrowedFd<'_>, u32) -> Result<Result<(), Refused>, Internal>,
+    authenticate: impl FnOnce(&CStr, &mut Conversation<File, File>) -> Transaction,
+) -> Result<End, Box<dyn Error>> {
     let uid = peer::peer_uid(socket)?;
-    if let Err(refused) = peer::check_socket(socket, uid)? {
+    if let Err(refused) = check_socket(socket, uid)? {
         match &refused {
             Refused::Cgroup { cgroup } => {
                 tracing::warn!(uid, cgroup = ?cgroup, "refused: {refused}");
@@ -91,7 +106,7 @@ fn run() -> Result<End, Box<dyn Error>> {
 
     // Raw descriptors, not Stdin and Stdout: their buffers would keep copies of the answers.
     let mut reader = File::from(socket.try_clone_to_owned()?);
-    let writer = File::from(io::stdout().as_fd().try_clone_to_owned()?);
+    let writer = File::from(out.try_clone_to_owned()?);
 
     let mut selector = Secret::new();
     let service = match read_line_within(&mut reader, &mut selector, MAX_SELECTOR) {
@@ -108,7 +123,7 @@ fn run() -> Result<End, Box<dyn Error>> {
     let account = User::from_uid(Uid::from_raw(uid))?.ok_or("the peer's uid has no account")?;
     let user = CString::new(account.name)?;
     let mut conversation = Conversation::new(reader, writer, service, uid);
-    let transaction = ffi::authenticate(&user, &mut conversation);
+    let transaction = authenticate(&user, &mut conversation);
     let success = transaction.succeeded();
     tracing::info!(
         uid,
@@ -126,6 +141,75 @@ fn run() -> Result<End, Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::os::unix::net::UnixStream;
+
+    /// Runs `serve` on a socket pair whose client wrote `input` and closed its write end, with
+    /// `checked` as the peer check's answer; returns the end, the uid the check got, and the
+    /// user PAM was started for, if it was.
+    fn serve_with(
+        input: &[u8],
+        checked: Result<(), Refused>,
+    ) -> (End, Option<u32>, Option<CString>) {
+        let (helper, mut client) = UnixStream::pair().expect("a socket pair");
+        client.write_all(input).expect("the client's lines");
+        client
+            .shutdown(std::net::Shutdown::Write)
+            .expect("the client's end of stream");
+        let asked = RefCell::new(None);
+        let started = RefCell::new(None);
+        let end = serve(
+            helper.as_fd(),
+            helper.as_fd(),
+            |_, uid| {
+                *asked.borrow_mut() = Some(uid);
+                Ok(checked)
+            },
+            |user, _| {
+                *started.borrow_mut() = Some(user.to_owned());
+                Transaction {
+                    start: 4,
+                    authenticate: None,
+                    user_kept: false,
+                    account: None,
+                }
+            },
+        )
+        .expect("no internal error");
+        (end, asked.into_inner(), started.into_inner())
+    }
+
+    #[test]
+    fn a_refused_peer_starts_no_pam_transaction() {
+        for refused in [
+            Refused::Gone,
+            Refused::NoSession,
+            Refused::Cgroup {
+                cgroup: "0::/user.slice\n".into(),
+            },
+        ] {
+            let (end, asked, started) = serve_with(b"athanor-lock\n", Err(refused));
+            assert_eq!(end, End::Refused);
+            assert_eq!(asked, Some(nix::unistd::getuid().as_raw()));
+            assert_eq!(started, None, "PAM started for a refused peer");
+        }
+    }
+
+    #[test]
+    fn the_account_is_the_peers_uid_whatever_the_client_names() {
+        let own = User::from_uid(nix::unistd::getuid())
+            .expect("the passwd database")
+            .expect("an account for the test's uid");
+        let (end, asked, started) = serve_with(b"athanor-lock\nnobody\n", Ok(()));
+        assert_eq!(end, End::Verdict(false));
+        assert_eq!(asked, Some(own.uid.as_raw()));
+        assert_eq!(
+            started,
+            Some(CString::new(own.name).expect("a name without NUL"))
+        );
+        let (end, _, started) = serve_with(b"nobody\n", Ok(()));
+        assert_eq!((end, started), (End::Refused, None));
+    }
 
     #[test]
     fn each_end_writes_its_line_and_exits_with_its_status() {
