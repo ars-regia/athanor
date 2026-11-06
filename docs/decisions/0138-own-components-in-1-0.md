@@ -81,11 +81,11 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
     (about lines 92, 94, 119, 270 and 386) concern the overview, which stays in 1.1, and the switcher
     is specified there in Sal.
   - `doc_launcher.md`, which binds the launcher and the application library to GTK4 (SH4, about
-    lines 7 and 24); `athanor-library` is written in Sal.
+    lines 7, 24 and 26); `athanor-library` is written in Sal.
 - The specifications whose placements this record changes, and which their next revisions must amend:
   - `doc_own_stack.md`: the status line (line 3) and the 1.1 placement of the window switcher (about
-    lines 423, 666, 778, 917 to 920, 940 and 1205) and of the application library (about lines 931 to
-    935); decision 28 and gaps 1 and 2, which name
+    lines 423, 666, 778, 917 to 920, 940 and 1205) and of the application library after the switch
+    (about lines 931 to 935); decision 28 and gaps 1 and 2, which name
     cosmic-greeter as the locker, cosmic-idle as the idle daemon and cosmic-osd as the polkit agent
     as conditions of the 1.0 switch (about lines 310 to 316, 780 to 798, 905 and 960). Lines 63, 656
     and 686, and the sentences that open at 420 and 656 up to their switcher clauses at 423 and 666,
