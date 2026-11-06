@@ -124,6 +124,22 @@ def committed_at_once(lines, namespace):
     return False
 
 
+def destroyed_in_order(lines, namespace):
+    """Whether the surface of `namespace` had its zwlr_layer_surface_v1 destroyed before its
+    wl_surface: the protocol requires the role to go first."""
+    made = creation(lines, namespace)
+    if made is None:
+        return False
+    start, layer, wl = made
+    role = surface = None
+    for i, line in enumerate(lines[start:]):
+        if role is None and f"-> zwlr_layer_surface_v1#{layer}.destroy()" in line:
+            role = i
+        elif surface is None and f"-> wl_surface#{wl}.destroy()" in line:
+            surface = i
+    return role is not None and surface is not None and role < surface
+
+
 def physical(logical, scale):
     """`logical` pixels at `scale`, as wp_fractional_scale_v1 rounds them: in integers from the
     scale's 120ths, half away from zero."""
@@ -234,9 +250,13 @@ def main():
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: set_layer waited for a frame to commit"
                     )
+                if not destroyed_in_order(TRACE.read_text().splitlines(), CLOSED):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: {CLOSED} lost its wl_surface before its role"
+                    )
                 print(
                     f"{EXTRA}: a surface opened by its name moved from the background to the "
-                    "overlay layer in place, committed at once, another opened and closed"
+                    "overlay layer in place, committed at once, another opened and closed role first"
                 )
             elif step == "an output removed":
                 until(
@@ -248,7 +268,11 @@ def main():
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: a surface of {EXTRA} is still live"
                     )
-                print(f"{EXTRA} removed: the client was told its surface closed")
+                if not destroyed_in_order(lines, OVERLAY):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: {OVERLAY} lost its wl_surface before its role"
+                    )
+                print(f"{EXTRA} removed: the client was told its surface closed, role destroyed first")
         until(
             "no buffer drawn at 1.5",
             lambda: drawn_at(TRACE.read_text().splitlines(), 1.5),
