@@ -687,6 +687,15 @@ item = "OS7"
 purpose = "Athanor's own widget toolkit: Wayland driver, widgets, Parley text, AccessKit accessibility"
 
 [[component]]
+path = "system/athanor-idle"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD4"
+purpose = "The idle daemon's logic with no display: the timer choice, the inhibitor table and the blank, off, lock request sequence"
+
+[[component]]
 path = "system/athanor-trust-state"
 kind = "crate"
 area = "signing-update"
