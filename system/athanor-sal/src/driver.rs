@@ -547,7 +547,9 @@ impl Shell {
     /// `zwlr_layer_surface_v1.set_layer`: the surface is not created again. Refused, with nothing
     /// changed, for another namespace, which the protocol fixes when the surface is created, and
     /// for another layer on a layer shell older than version 2, which has no `set_layer`: close
-    /// the surface and open another. Takes effect with the next frame.
+    /// the surface and open another. Takes effect at once: the driver commits the new state, with
+    /// the size of the widgets, without waiting for a frame, which the compositor may hold back
+    /// from a covered surface. The widgets are drawn again at the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
         let surface = self
             .get_mut(id)
@@ -577,9 +579,14 @@ impl Shell {
             surface.ui.min_height = 0.0;
         }
         surface.stretch = stretch;
-        // The size is asked again with the next frame.
-        surface.size = (0, 0);
-        self.set_input_region(id, options.input_region.as_deref())
+        surface.ask_size()?;
+        self.set_input_region(id, options.input_region.as_deref())?;
+        // A commit with no new buffer applies the layer surface's state and keeps the buffer
+        // attached; the frame callback of a draw under way is untouched.
+        if let Some(surface) = self.get_mut(id) {
+            surface.wl_surface().commit();
+        }
+        Ok(())
     }
 
     /// The surface the open menu was opened from, if a menu is open.
@@ -1174,6 +1181,18 @@ impl Surface {
             // The integer scale divides the buffer: `layout` draws whole logical pixels.
             None => self.wl_surface().set_buffer_scale(self.scale as i32),
         }
+    }
+
+    /// Asks the compositor for a layer surface's size now: its widgets' size at its scale, and 0
+    /// along a stretched axis. Sent with the next commit.
+    fn ask_size(&mut self) -> Result<(), Error> {
+        layout(&mut self.ui, self.scale)?;
+        if let Shown::Layer(surface) = &self.shown {
+            let asked = requested(logical_size(&self.ui), self.stretch);
+            surface.set_size(asked.0, asked.1);
+            self.size = asked;
+        }
+        Ok(())
     }
 
     /// Hands the tree of the surface just drawn to the accessibility adapter.

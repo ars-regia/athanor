@@ -30,6 +30,9 @@ GET = re.compile(
     r"-> zwlr_layer_shell_v1#\d+\.get_layer_surface\(new id zwlr_layer_surface_v1#(\d+), "
     r"wl_surface#\d+, wl_output#(\d+), (\d+), \"([^\"]*)\"\)"
 )
+WL_SURFACE = re.compile(
+    r"get_layer_surface\(new id zwlr_layer_surface_v1#\d+, wl_surface#(\d+)"
+)
 SET_LAYER = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.set_layer\((\d+)\)")
 BAR = "athanor-sal-layer"
 OVERLAY = "athanor-sal-overlay"
@@ -91,6 +94,34 @@ def extras_placed(lines):
         and closed[0][0] == overlay[0][0]
         and not closed[0][3]
     )
+
+
+def creation(lines, namespace):
+    """The first layer surface of `namespace`: (its line, its zwlr_layer_surface_v1 id, its
+    wl_surface id), or None."""
+    for i, line in enumerate(lines):
+        if (m := GET.search(line)) and m[4] == namespace:
+            return i, m[1], WL_SURFACE.search(line)[1]
+    return None
+
+
+def committed_at_once(lines, namespace):
+    """Whether the first set_layer of the surface of `namespace` is followed by a commit of its
+    wl_surface before any buffer is attached to it: the move applied without waiting for a frame,
+    which the compositor may hold back from a covered surface."""
+    made = creation(lines, namespace)
+    if made is None:
+        return False
+    start, layer, wl = made
+    moved = False
+    for line in lines[start:]:
+        if not moved:
+            moved = bool((m := SET_LAYER.search(line)) and m[1] == layer)
+        elif f"-> wl_surface#{wl}.attach(" in line:
+            return False
+        elif f"-> wl_surface#{wl}.commit()" in line:
+            return True
+    return False
 
 
 def physical(logical, scale):
@@ -199,9 +230,13 @@ def main():
                     f"{EXTRA}: the surfaces opened by its name are not as S1 wants them",
                     lambda: extras_placed(TRACE.read_text().splitlines()),
                 )
+                if not committed_at_once(TRACE.read_text().splitlines(), OVERLAY):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: set_layer waited for a frame to commit"
+                    )
                 print(
                     f"{EXTRA}: a surface opened by its name moved from the background to the "
-                    "overlay layer in place, another opened and closed"
+                    "overlay layer in place, committed at once, another opened and closed"
                 )
             elif step == "an output removed":
                 until(
