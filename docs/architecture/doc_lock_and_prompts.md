@@ -139,7 +139,7 @@ Status: **revision 4 (2026-11-06) proposed, awaiting the maintainer's approval; 
   The first line, without `silent`, makes PAM itself tell a locked-out user the minutes left and stops before the password is checked; system-auth's own faillock lines count the failure. The file never includes `pam_gnome_keyring` or `pam_oo7`: the keyring stays as unlocked as it was when the lock appeared, and the password is not handed to any daemon. system-auth carries no `nullok` (A2-23), so an empty password never unlocks.
 
 - **Retries** are unbounded at the lock; the rate is PAM's (`pam_faildelay`, then the lockout). The lock never caches a password between attempts.
-- **Fingerprint retries** (proposed, revision 4). The fingerprint stack (LP9) has no `pam_faildelay`: its rate is the reader's and pam_fprintd's, and its bound the lockout. A `die` result, no reader or no enrolled finger, is a `FAILURE` that counts nothing. The lock therefore never restarts a fingerprint transaction after an uncounted `FAILURE`: it offers the finger again only on a user action at the lock or when a reader is added, never in a loop.
+- **Fingerprint retries** (proposed, revision 4). The fingerprint stack (LP9) has no `pam_faildelay`: its rate is the reader's and pam_fprintd's, and its bound the lockout. A `die` result, no reader or no enrolled finger, is a `FAILURE` that counts nothing. The lock therefore never restarts a fingerprint transaction after an uncounted `FAILURE`: it offers the finger again only on a user action at the lock or when a reader is added, never in a loop. After a counted `FAILURE`, a finger that did not match, it starts a new transaction at once, since each transaction takes one finger (LP9) and the lockout bounds the count (maintainer decision, 2026-11-06).
 - **The greeter** keeps greetd as its transport. Its conversation model, bounded buffers and message classification move into `athanor-auth` (D2) in a change of their own, once the lock has run on the crate (LP18 step 4), with the greeter's tests unchanged; until then the lock and the agent use the crate and the greeter keeps its copy.
 
 **LP9. Fingerprint.**
@@ -149,11 +149,13 @@ Status: **revision 4 (2026-11-06) proposed, awaiting the maintainer's approval; 
 
   ```
   auth     requisite  pam_faillock.so preauth silent
-  auth     [success=done authinfo_unavail=die user_unknown=die default=bad]  pam_fprintd.so
+  auth     [success=done authinfo_unavail=die user_unknown=die default=bad]  pam_fprintd.so max-tries=1
   auth     required   pam_faillock.so authfail
   auth     required   pam_deny.so
   account  include    system-auth
   ```
+
+  The same line takes `max-tries=1`: one finger per transaction, so that every finger that does not match is counted by `authfail`, where pam_fprintd's default of three tries would let five counted failures admit fifteen fingers; the lock starts a new transaction after a counted failure (LP8) (maintainer decision, 2026-11-06).
 
 - **In polkit's prompts,** the image ships `/etc/pam.d/polkit-1`, which overrides the vendor file (section 1): the vendor's four `include system-auth` lines, preceded in `auth` by `auth requisite pam_faillock.so preauth` and `auth sufficient pam_fprintd.so`. pam_fprintd runs first and the password is asked after it ends, because polkit's helper runs one PAM conversation; the dialog shows its `PAM_TEXT_INFO` until then. The timeout and number of tries pam_fprintd takes before the password field appears are set in that line by the plan, after spike L8.
 - **Login stays password-only.** authselect's `with-fingerprint` is never enabled, because it would add `pam_fprintd` to system-auth and so to greetd and sudo (section 1). Fingerprint never replaces the password at the greeter: greetd's session unlocks the keyring with the password (`auth.rs`, comment at line 266).

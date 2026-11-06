@@ -141,6 +141,13 @@ class LockStacks(unittest.TestCase):
     def test_an_include_other_than_system_auth_fails(self):
         self.assertEqual(len(self.edit("athanor-lock", "auth     include    system-auth", "auth include password-auth")), 2)
 
+    def test_more_than_one_finger_per_transaction_fails(self):
+        for new in ("pam_fprintd.so", "pam_fprintd.so max-tries=3"):
+            with self.subTest(new=new):
+                self.assertEqual(len(self.edit("athanor-lock-fingerprint", "pam_fprintd.so max-tries=1", new)), 1)
+                self.tearDown()
+                self.setUp()
+
     def test_counting_a_missing_reader_fails(self):
         self.assertEqual(len(self.edit("athanor-lock-fingerprint", "authinfo_unavail=die user_unknown=die ", "")), 1)
 

@@ -3251,7 +3251,7 @@ LOCK_PAM = {
     ],
     "athanor-lock-fingerprint": [
         "auth requisite pam_faillock.so preauth silent",
-        "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_fprintd.so",
+        "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_fprintd.so max-tries=1",
         "auth required pam_faillock.so authfail",
         "auth required pam_deny.so",
         "account include system-auth",
