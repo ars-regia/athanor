@@ -18,7 +18,7 @@ pub fn open_regular(path: &Path) -> io::Result<File> {
     }
     let file = OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOCTTY)
         .open(path)?;
     let kind = file.metadata()?.file_type();
     if kind.is_file() {
