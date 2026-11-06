@@ -34,18 +34,7 @@ applies to Claude Code only.
   `mergeable` is `MERGEABLE`; `reviewDecision` is `REVIEW_REQUIRED`, `APPROVED` or empty
   (`required_approving_review_count` 0, ADR-0107, leaves it empty after an approval); no
   reviewer's latest review in `gh pr view <n> --json reviews` is `CHANGES_REQUESTED`; base and
-  head sha equal the card's. The checks ran on the current base: either the head contains the
-  base head (`git merge-base --is-ancestor <base sha> <head sha>`), or every workflow run behind
-  the head's checks (the run id in each check's `detailsUrl` in
-  `gh pr view <n> --json statusCheckRollup`) is a `pull_request` run created more than a minute
-  after the base head landed (`event` and `created_at` of `gh api repos/<repo>/actions/runs/<id>`,
-  against the base commit's committer date, which GitHub sets when it merges), since a run keeps
-  the base of the event that created it, through a queue or a re-run. A pull request with a
-  check that has no workflow run, or on a base that also takes pushes, such as `rebase/*`, where
-  the committer date does not mark when the head landed, takes the first way only. Otherwise
-  the base is merged into the branch and the card waits for the new checks *(maintainer decision, 2026-11-05: #1000
-  merged on checks that predated #992, and `iso-v0` failed the toolkit-surfaces job until
-  #1012)*. A new commit or a retarget voids the card and any approval on it.
+  head sha equal the card's. A new commit or a retarget voids the card and any approval on it.
 
   The authorisation depends on who opened the pull request. One the App opened needs an
   `APPROVED` review by `hr-mes` whose `commit.oid` in `gh pr view <n> --json reviews` is the
