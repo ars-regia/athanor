@@ -16,6 +16,13 @@
 # While the runner reports a job (busy in the registration), vm.sh holds a logind sleep
 # inhibitor: a host that suspends freezes the guest and GitHub cancels the job. An idle
 # guest waiting for a job holds none, so the host still suspends when nothing runs.
+#
+# RuntimeMaxSec in the unit counts from the boot of the guest, idle time included: on
+# 2026-11-01 a guest idle for seven hours took the weekly kernel job and was stopped seven
+# minutes into it. A guest that has not taken a job within IDLE_RECYCLE_SECONDS is
+# recycled (see recycle_idle_guest()), so a job starts with about seven of the unit's eight
+# hours, more than the six kernel-build.yml allows. No guest is recycled while the API
+# cannot be read: an outage that outlasts the bound can still leave a job less time.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -35,12 +42,15 @@ umask 077
 # unreachable before it is merely logged (the guest's own job timeout, RuntimeMaxSec in
 # the unit, is the real backstop — killing a running job over a network blip is worse
 # than a late shutdown); how long the guest has to power off after the ACPI request
-# before it is terminated.
+# before it is terminated; how long a guest may wait for a job before it is recycled
+# (kernel-build.yml allows a job six hours: one hour of waiting plus six of job stays
+# under the unit's eight).
 POLL_SECONDS=30
 POLL_RETRY_ATTEMPTS=4
 POLL_RETRY_SECONDS=5
 UNREACHABLE_WARN_SECONDS=900
 POWERDOWN_TIMEOUT=120
+IDLE_RECYCLE_SECONDS=3600
 
 github() { # github METHOD PATH [JSON]: HTTP status to stdout, body to $RUNTIME/response.
            # Exits 0 whenever the request reached GitHub, whatever status came back; a
@@ -151,6 +161,25 @@ hold_sleep_inhibitor() { # hold_sleep_inhibitor true|false: the inhibitor lives 
   fi
 }
 
+recycle_idle_guest() { # removes the registration of a guest that never took a job, then
+  # powers it off; returns 1, guest untouched, when the registration could not be removed.
+  # Removing it first narrows the race with a job being assigned meanwhile: GitHub refuses
+  # to delete a runner that is running a job (HTTP 422), and once the registration is gone
+  # no new job is assigned to it. What GitHub does with a job assigned but not yet reported
+  # busy when the registration is removed is not documented: that job may be lost.
+  local status
+  if ! status=$(github DELETE "repos/$REPOSITORY/actions/runners/$id"); then
+    echo "warning: runner $name ($id): idle recycle deferred, GitHub unreachable" >&2
+    return 1
+  fi
+  if [[ $status != 204 ]]; then
+    echo "runner $name ($id): idle recycle deferred, registration not removed: HTTP $status"
+    return 1
+  fi
+  echo "runner $name ($id): no job within ${IDLE_RECYCLE_SECONDS}s, registration removed; powering the guest off"
+  stop_guest
+}
+
 cleanup() {
   # Runs as the EXIT trap under set -e: every fallible command here is guarded, or a
   # network hiccup at the end of a successful job would report the job as failed.
@@ -217,6 +246,7 @@ balloon_pid=$!
 # only logs a warning here (see UNREACHABLE_WARN_SECONDS above) — only a definitive 404
 # powers the guest off.
 unreachable_since=''
+job_seen=false
 while guest_running; do
   sleep "$POLL_SECONDS" & wait $!
   guest_running || break
@@ -230,7 +260,14 @@ while guest_running; do
     200)
       unreachable_since=''
       # A malformed answer counts as busy: holding the lock a poll too long is harmless.
-      hold_sleep_inhibitor "$(jq -r 'if .busy == false then "false" else "true" end' "$RUNTIME/response" 2> /dev/null || echo true)" ;;
+      busy=$(jq -r 'if .busy == false then "false" else "true" end' "$RUNTIME/response" 2> /dev/null || echo true)
+      hold_sleep_inhibitor "$busy"
+      # Once the guest has taken a job it is never recycled: only the 404 above ends it.
+      if [[ $busy == true ]]; then
+        job_seen=true
+      elif [[ $job_seen == false ]] && (( SECONDS >= IDLE_RECYCLE_SECONDS )) && recycle_idle_guest; then
+        break
+      fi ;;
     *)
       if [[ -z $unreachable_since ]]; then
         unreachable_since=$SECONDS
