@@ -17,10 +17,12 @@ use smithay::backend::renderer::element::memory::{
 };
 use smithay::backend::renderer::element::solid::SolidColorRenderElement;
 use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
+    render_elements_from_surface_tree, KindEvaluation, WaylandSurfaceRenderElement,
 };
-use smithay::backend::renderer::element::{AsRenderElements, Element, Id, Kind, RenderElement};
-use smithay::backend::renderer::utils::CommitCounter;
+use smithay::backend::renderer::element::{Element, Id, Kind, RenderElement, UnderlyingStorage};
+use smithay::backend::renderer::utils::{
+    CommitCounter, DamageSet, OpaqueRegions, RendererSurfaceStateUserData,
+};
 use smithay::backend::renderer::{Color32F, ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::utils::bbox_from_surface_tree;
 use smithay::desktop::{layer_map_for_output, LayerSurface, PopupManager, Space, Window};
@@ -30,7 +32,7 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
 use smithay::wayland::shell::wlr_layer::Layer;
 use std::cell::RefCell;
 
@@ -57,7 +59,7 @@ const DIVIDER: usize = 1;
 
 smithay::backend::renderer::element::render_elements! {
     pub Stacked<R> where R: ImportAll + ImportMem;
-    Surface=WaylandSurfaceRenderElement<R>,
+    Surface=SurfaceElement<R>,
     Line=SolidColorRenderElement,
     Corner=MemoryRenderBufferRenderElement<R>,
     Pixels=Pixels<R>,
@@ -113,6 +115,175 @@ where
         self.inner
             .draw(frame, src, dst, damage, opaque_regions, cache)
     }
+}
+
+/// A client's surface whose opaque region holds only the output's pixels it covers whole.
+/// Smithay rounds each edge of the logical region to the nearest pixel, so that at a fractional
+/// scale a pixel the region covers by half, which the client antialiases, counts as opaque and
+/// nothing is drawn beneath it (#978). wl_surface.set_opaque_region makes the region a hint
+/// that must not grow past what the client paints opaque; a pixel lost costs only overdraw.
+pub struct SurfaceElement<R: Renderer> {
+    inner: WaylandSurfaceRenderElement<R>,
+    /// The surface's opaque region, in its own logical pixels.
+    opaque: Vec<Rectangle<i32, Logical>>,
+}
+
+impl<R: Renderer + ImportAll> Element for SurfaceElement<R> {
+    fn id(&self) -> &Id {
+        self.inner.id()
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        self.inner.current_commit()
+    }
+
+    fn location(&self, scale: Scale<f64>) -> Point<i32, Physical> {
+        self.inner.location(scale)
+    }
+
+    fn src(&self) -> Rectangle<f64, Buffer> {
+        self.inner.src()
+    }
+
+    fn transform(&self) -> Transform {
+        self.inner.transform()
+    }
+
+    fn geometry(&self, scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.inner.geometry(scale)
+    }
+
+    fn damage_since(
+        &self,
+        scale: Scale<f64>,
+        commit: Option<CommitCounter>,
+    ) -> DamageSet<i32, Physical> {
+        self.inner.damage_since(scale, commit)
+    }
+
+    fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        if self.inner.alpha() < 1.0 {
+            return OpaqueRegions::default();
+        }
+        // The buffer is stretched over the element's whole pixels, as its damage is.
+        let size = self.inner.geometry(scale).size;
+        let view = self.inner.view().dst;
+        self.opaque
+            .iter()
+            .filter_map(|region| covered(*region, view, size))
+            .collect()
+    }
+
+    fn alpha(&self) -> f32 {
+        self.inner.alpha()
+    }
+
+    fn kind(&self) -> Kind {
+        self.inner.kind()
+    }
+}
+
+impl<R> RenderElement<R> for SurfaceElement<R>
+where
+    R: Renderer + ImportAll,
+    R::TextureId: Texture + 'static,
+{
+    fn draw(
+        &self,
+        frame: &mut R::Frame<'_, '_>,
+        src: Rectangle<f64, Buffer>,
+        dst: Rectangle<i32, Physical>,
+        damage: &[Rectangle<i32, Physical>],
+        opaque_regions: &[Rectangle<i32, Physical>],
+        cache: Option<&UserDataMap>,
+    ) -> Result<(), R::Error> {
+        self.inner
+            .draw(frame, src, dst, damage, opaque_regions, cache)
+    }
+
+    fn underlying_storage(&self, renderer: &mut R) -> Option<UnderlyingStorage<'_>> {
+        self.inner.underlying_storage(renderer)
+    }
+}
+
+/// The pixels `region` covers whole when a surface of `view` logical pixels is stretched over
+/// `size` physical ones: its start rounded up, its end down, and nothing when no pixel is left.
+fn covered(
+    region: Rectangle<i32, Logical>,
+    view: Size<i32, Logical>,
+    size: Size<i32, Physical>,
+) -> Option<Rectangle<i32, Physical>> {
+    if view.w <= 0 || view.h <= 0 {
+        return None;
+    }
+    let end = region.loc + region.size;
+    let start = (
+        scaled(region.loc.x, view.w, size.w, true),
+        scaled(region.loc.y, view.h, size.h, true),
+    );
+    let end = (
+        scaled(end.x, view.w, size.w, false),
+        scaled(end.y, view.h, size.h, false),
+    );
+    (end.0 > start.0 && end.1 > start.1).then(|| Rectangle::from_extremities(start, end))
+}
+
+/// The physical edge of logical edge `at` of a surface `view` wide stretched over `size` pixels,
+/// rounded up or down. In integers: the ratio as a float, size / view, puts the far edge of a
+/// whole surface a rounding error short of `size`, and the floor then drops its last row.
+fn scaled(at: i32, view: i32, size: i32, up: bool) -> i32 {
+    let product = i64::from(at.clamp(0, view)) * i64::from(size);
+    let view = i64::from(view);
+    let rounding = if up { view - 1 } else { 0 };
+    // At most `size`, since the edge is clamped to the surface.
+    ((product + rounding) / view) as i32
+}
+
+/// The elements of `surface`'s tree, as `render_elements_from_surface_tree` makes them, each
+/// with its opaque region kept to the pixels it covers whole. Every client surface the
+/// compositor draws goes through it.
+pub fn surface_elements<R, E>(
+    renderer: &mut R,
+    surface: &WlSurface,
+    location: impl Into<Point<i32, Physical>>,
+    scale: impl Into<Scale<f64>>,
+    alpha: f32,
+    kind: impl Into<KindEvaluation>,
+) -> Vec<E>
+where
+    R: Renderer + ImportAll,
+    R::TextureId: Clone + 'static,
+    E: From<SurfaceElement<R>>,
+{
+    let mut regions: Vec<(Id, Vec<Rectangle<i32, Logical>>)> = Vec::new();
+    with_surface_tree_downward(
+        surface,
+        (),
+        |_, _, _| TraversalAction::DoChildren(()),
+        |surface, states, _| {
+            let opaque = states
+                .data_map
+                .get::<RendererSurfaceStateUserData>()
+                .and_then(|data| data.lock().ok()?.opaque_regions().map(<[_]>::to_vec));
+            if let Some(opaque) = opaque {
+                regions.push((Id::from_wayland_resource(surface), opaque));
+            }
+        },
+        |_, _, _| true,
+    );
+    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<R>>(
+        renderer, surface, location, scale, alpha, kind,
+    )
+    .into_iter()
+    .map(|inner| {
+        let opaque = regions
+            .iter()
+            .position(|(id, _)| id == inner.id())
+            .map(|at| regions.swap_remove(at).1)
+            .unwrap_or_default();
+        E::from(SurfaceElement { inner, opaque })
+    })
+    .collect()
 }
 
 /// The black behind a full-screen window, whose element is `surface`'s for its whole life.
@@ -734,7 +905,7 @@ where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + Texture + 'static,
 {
-    render_elements_from_surface_tree::<_, Stacked<R>>(
+    surface_elements::<_, Stacked<R>>(
         renderer,
         surface,
         (at - place.origin).to_physical_precise_round(place.scale),
@@ -912,13 +1083,24 @@ where
     let layers = |renderer: &mut R, layers: Vec<&LayerSurface>, elements: &mut Vec<Stacked<R>>| {
         for layer in layers {
             if let Some(geometry) = map.layer_geometry(layer) {
-                elements.extend(AsRenderElements::<R>::render_elements::<Stacked<R>>(
-                    layer,
-                    renderer,
-                    geometry.loc.to_physical_precise_round(scale),
-                    Scale::from(scale),
-                    1.0,
-                ));
+                // A layer surface's popups stand above it.
+                let at = geometry.loc.to_physical_precise_round(scale);
+                let surface = layer.wl_surface();
+                let tree = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
+                    surface_elements::<_, Stacked<R>>(
+                        renderer,
+                        surface,
+                        at,
+                        scale,
+                        1.0,
+                        Kind::Unspecified,
+                    )
+                };
+                for (popup, offset) in PopupManager::popups_for_surface(surface) {
+                    let offset = (offset - popup.geometry().loc).to_physical_precise_round(scale);
+                    elements.extend(tree(renderer, popup.wl_surface(), at + offset));
+                }
+                elements.extend(tree(renderer, surface, at));
             }
         }
     };
@@ -963,6 +1145,31 @@ mod tests {
 
     fn rectangle(x: i32, y: i32, w: i32, h: i32) -> Rectangle<i32, Logical> {
         Rectangle::new((x, y).into(), (w, h).into())
+    }
+
+    /// A fullscreen surface on 1366x768 at scale 1.25 is 1093x614 logical pixels stretched over
+    /// the whole output: its opaque region covers every row and column, where the ratio as a
+    /// float, 768 / 614, put the bottom edge at 767.999 and lost the last row.
+    #[test]
+    fn a_whole_surface_stays_opaque_to_its_last_pixel() {
+        let view = Size::from((1093, 614));
+        let size = Size::from((1366, 768));
+        assert_eq!(
+            covered(rectangle(0, 0, 1093, 614), view, size),
+            Some(Rectangle::new((0, 0).into(), (1366, 768).into()))
+        );
+        // A region past the surface covers no more than the surface.
+        assert_eq!(
+            covered(rectangle(-5, -5, 1200, 700), view, size),
+            Some(Rectangle::new((0, 0).into(), (1366, 768).into()))
+        );
+        // Inside, an edge still rounds inward: logical 1 to 3 is physical 1.25 to 3.75.
+        let (view, size) = (Size::from((4, 4)), Size::from((5, 5)));
+        assert_eq!(
+            covered(rectangle(1, 1, 2, 2), view, size),
+            Some(Rectangle::new((2, 2).into(), (1, 1).into()))
+        );
+        assert_eq!(covered(rectangle(1, 1, 1, 1), view, size), None);
     }
 
     /// A shadow stays outside the frame; a tree past the margin, or past a quarter of a small
