@@ -519,19 +519,7 @@ impl Shell {
     /// Sets the part of a layer surface that takes the pointer, in logical pixels; `None` is all
     /// of it. Takes effect with the next frame.
     pub fn set_input_region(&mut self, id: SurfaceId, rects: Option<&[Rect]>) -> Result<(), Error> {
-        let region = match rects {
-            Some(rects) => {
-                let region = Region::new(&self.compositor)?;
-                for r in rects {
-                    // Whole pixels that cover the widget: the origin down, the far edge up.
-                    let (x, y) = (r.x.floor(), r.y.floor());
-                    let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
-                    region.add(x as i32, y as i32, w as i32, h as i32);
-                }
-                Some(region)
-            }
-            None => None,
-        };
+        let region = self.region(rects)?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -542,15 +530,34 @@ impl Shell {
         Ok(())
     }
 
+    /// A `wl_region` of `rects`, in logical pixels; `None` for all of the surface.
+    fn region(&self, rects: Option<&[Rect]>) -> Result<Option<Region>, Error> {
+        let Some(rects) = rects else {
+            return Ok(None);
+        };
+        let region = Region::new(&self.compositor)?;
+        for r in rects {
+            // Whole pixels that cover the widget: the origin down, the far edge up.
+            let (x, y) = (r.x.floor(), r.y.floor());
+            let (w, h) = ((r.x + r.w).ceil() - x, (r.y + r.h).ceil() - y);
+            region.add(x as i32, y as i32, w as i32, h as i32);
+        }
+        Ok(Some(region))
+    }
+
     /// Changes a layer surface's layer, anchor, margin, exclusive zone, keyboard and input
     /// region to `options`'. The layer changes in place, through
     /// `zwlr_layer_surface_v1.set_layer`: the surface is not created again. Refused, with nothing
-    /// changed, for another namespace, which the protocol fixes when the surface is created, and
-    /// for another layer on a layer shell older than version 2, which has no `set_layer`: close
-    /// the surface and open another. Takes effect at once: the driver commits the new state, with
+    /// changed and no request sent, for another namespace, which the protocol fixes when the
+    /// surface is created, for another layer on a layer shell older than version 2, which has no
+    /// `set_layer`: close the surface and open another; and for widgets that cannot be laid out
+    /// at the surface's scale. Takes effect at once: the driver commits the new state, with
     /// the size of the widgets, without waiting for a frame, which the compositor may hold back
     /// from a covered surface. The widgets are drawn again at the next frame.
     pub fn set_layer(&mut self, id: SurfaceId, options: &LayerOptions) -> Result<(), Error> {
+        // What can refuse comes before any request: a request sent stays pending, and the next
+        // commit, of this call or not, would apply it.
+        let region = self.region(options.input_region.as_deref())?;
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
@@ -561,7 +568,21 @@ impl Shell {
             SurfaceKind::Wlr(wlr) => wlr.version(),
             _ => 0,
         };
-        if let Some(new) = layer_change(placed, options, version)? {
+        let new = layer_change(placed, options, version)?;
+        let stretch = stretched(options.anchor);
+        let min = (surface.ui.min_width, surface.ui.min_height);
+        // An axis no longer stretched takes its widgets' size again.
+        if surface.stretch.0 && !stretch.0 {
+            surface.ui.min_width = 0.0;
+        }
+        if surface.stretch.1 && !stretch.1 {
+            surface.ui.min_height = 0.0;
+        }
+        if let Err(error) = layout(&mut surface.ui, surface.scale) {
+            (surface.ui.min_width, surface.ui.min_height) = min;
+            return Err(error);
+        }
+        if let Some(new) = new {
             layer.set_layer(new);
             placed.0 = new;
         }
@@ -570,22 +591,15 @@ impl Shell {
         layer.set_margin(top, right, bottom, left);
         layer.set_exclusive_zone(options.exclusive_zone);
         layer.set_keyboard_interactivity(options.keyboard);
-        let stretch = stretched(options.anchor);
-        // An axis no longer stretched takes its widgets' size again.
-        if surface.stretch.0 && !stretch.0 {
-            surface.ui.min_width = 0.0;
-        }
-        if surface.stretch.1 && !stretch.1 {
-            surface.ui.min_height = 0.0;
-        }
         surface.stretch = stretch;
-        surface.ask_size()?;
-        self.set_input_region(id, options.input_region.as_deref())?;
+        surface.request_size();
+        surface
+            .wl_surface()
+            .set_input_region(region.as_ref().map(Region::wl_region));
+        surface.dirty = true;
         // A commit with no new buffer applies the layer surface's state and keeps the buffer
         // attached; the frame callback of a draw under way is untouched.
-        if let Some(surface) = self.get_mut(id) {
-            surface.wl_surface().commit();
-        }
+        surface.wl_surface().commit();
         Ok(())
     }
 
@@ -1183,16 +1197,14 @@ impl Surface {
         }
     }
 
-    /// Asks the compositor for a layer surface's size now: its widgets' size at its scale, and 0
-    /// along a stretched axis. Sent with the next commit.
-    fn ask_size(&mut self) -> Result<(), Error> {
-        layout(&mut self.ui, self.scale)?;
+    /// Asks the compositor for a layer surface's size now: its widgets' size as last laid out, and
+    /// 0 along a stretched axis. Sent with the next commit.
+    fn request_size(&mut self) {
         if let Shown::Layer(surface) = &self.shown {
             let asked = requested(logical_size(&self.ui), self.stretch);
             surface.set_size(asked.0, asked.1);
             self.size = asked;
         }
-        Ok(())
     }
 
     /// Hands the tree of the surface just drawn to the accessibility adapter.

@@ -10,8 +10,9 @@ times the size its viewport maps it to.
 
 With `--extra HEADLESS-2` the client also opens two surfaces on that output by its name when it
 is added (Sal's requirement S1, doc_osd.md): one on the background layer that `set_layer` moves
-to the overlay layer in place, and one the client closes; when the output is removed, the client
-must be told that the first closed.
+to the overlay layer in place, after a refused `set_layer` that must send none of its requests,
+and one the client closes; when the output is removed, the client must be told that the first
+closed.
 """
 
 import json
@@ -34,6 +35,8 @@ WL_SURFACE = re.compile(
     r"get_layer_surface\(new id zwlr_layer_surface_v1#\d+, wl_surface#(\d+)"
 )
 SET_LAYER = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.set_layer\((\d+)\)")
+# The margin of the set_layer the client has refused.
+REFUSED_MARGIN = ".set_margin(0, 0, 40, 0)"
 BAR = "athanor-sal-layer"
 OVERLAY = "athanor-sal-overlay"
 CLOSED = "athanor-sal-closed"
@@ -248,6 +251,14 @@ def main():
                     f"{EXTRA}: the surfaces opened by its name are not as S1 wants them",
                     lambda: extras_placed(TRACE.read_text().splitlines()),
                 )
+                until(
+                    f"{EXTRA}: the client did not report the refused set_layer",
+                    lambda: f"refused {OVERLAY}" in STDOUT.read_text().splitlines(),
+                )
+                if any(REFUSED_MARGIN in line for line in TRACE.read_text().splitlines()):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: a refused set_layer sent its margin"
+                    )
                 if not committed_at_once(TRACE.read_text().splitlines(), OVERLAY):
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: set_layer waited for a frame to commit"
@@ -258,7 +269,8 @@ def main():
                     )
                 print(
                     f"{EXTRA}: a surface opened by its name moved from the background to the "
-                    "overlay layer in place, committed at once, another opened and closed role first"
+                    "overlay layer in place, committed at once, another opened and closed role first; "
+                    "a refused set_layer sent nothing"
                 )
             elif step == "an output removed":
                 until(
