@@ -8,7 +8,7 @@ mod migrate;
 mod zoom;
 
 pub use file::{open, open_regular};
-pub use migrate::{migrate, CosmicBackground, CosmicSource};
+pub use migrate::migrate;
 pub use zoom::{zoom, Crop};
 
 use std::collections::BTreeMap;

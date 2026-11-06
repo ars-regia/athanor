@@ -7,5 +7,6 @@ license = "GPL-3.0-or-later"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
+athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
 libc = { workspace = true }
 tracing = { workspace = true }

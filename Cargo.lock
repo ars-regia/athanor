@@ -797,6 +797,7 @@ dependencies = [
 name = "athanor-wallpaper"
 version = "1.0.0"
 dependencies = [
+ "athanor-sulphur-client",
  "libc",
  "tracing",
 ]

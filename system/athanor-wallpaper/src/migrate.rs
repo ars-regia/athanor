@@ -1,30 +1,10 @@
-//! SD16's one-time migration from `com.system76.CosmicBackground` v1. Reading and parsing
-//! the COSMIC files is not here (SH2: only `athanor-sulphur-client` knows COSMIC); this is
-//! the mapping from what they hold to the schema's keys.
+//! SD16's one-time migration from cosmic-bg's store. Reading and parsing it is
+//! `athanor-sulphur-client`'s (SH2, `athanor_sulphur_client::background`); this is the
+//! mapping from what it read to the schema's keys.
 
 use crate::{Settings, HEARTH, HEARTH_DIR};
-use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-
-/// A cosmic-bg source (`Path(..)` or `Color(..)`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CosmicSource {
-    Path(PathBuf),
-    /// A colour or gradient: it has no image, and the hearth stands for it.
-    Color,
-}
-
-/// The keys of the store that were present and valid; a missing or unparsable one is `None`
-/// or absent.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct CosmicBackground {
-    /// The entry `all`.
-    pub all: Option<CosmicSource>,
-    /// The entries `output.<name>`, by connector name.
-    pub outputs: BTreeMap<String, CosmicSource>,
-    /// The key `same-on-all`.
-    pub same_on_all: Option<bool>,
-}
+use athanor_sulphur_client::background::{Background, Source};
+use std::path::Path;
 
 fn is_hearth(path: &Path) -> bool {
     path.parent() == Some(Path::new(HEARTH_DIR))
@@ -34,9 +14,9 @@ fn is_hearth(path: &Path) -> bool {
         )
 }
 
-fn value(source: &CosmicSource) -> String {
+fn value(source: &Source) -> String {
     match source {
-        CosmicSource::Path(path) if !is_hearth(path) => path.to_string_lossy().into_owned(),
+        Source::Path(path) if !is_hearth(path) => path.to_string_lossy().into_owned(),
         _ => HEARTH.to_owned(),
     }
 }
@@ -46,7 +26,7 @@ fn value(source: &CosmicSource) -> String {
 /// replaces the key it maps to, a key it holds nothing for keeps the value it has (the
 /// default when nothing set it), and `migrated` becomes true. `None` is a store that is
 /// absent or unreadable.
-pub fn migrate(settings: Settings, cosmic: Option<&CosmicBackground>) -> Settings {
+pub fn migrate(settings: Settings, cosmic: Option<&Background>) -> Settings {
     if settings.migrated {
         return settings;
     }
@@ -69,20 +49,20 @@ pub fn migrate(settings: Settings, cosmic: Option<&CosmicBackground>) -> Setting
 mod tests {
     use super::*;
 
-    fn path(p: &str) -> CosmicSource {
-        CosmicSource::Path(p.into())
+    fn path(p: &str) -> Source {
+        Source::Path(p.into())
     }
 
     #[test]
     fn maps_all_outputs_and_same_on_all() {
-        let cosmic = CosmicBackground {
+        let cosmic = Background {
             all: Some(path("/home/u/a.png")),
             outputs: [
                 (
                     "DP-1".to_owned(),
                     path("/usr/share/backgrounds/athanor/hearth-light.png"),
                 ),
-                ("HDMI-A-1".to_owned(), CosmicSource::Color),
+                ("HDMI-A-1".to_owned(), Source::Color),
                 ("eDP-1".to_owned(), path("/home/u/b.png")),
             ]
             .into(),
@@ -101,9 +81,9 @@ mod tests {
     fn the_shipped_hearth_and_a_colour_become_the_hearth() {
         for all in [
             path("/usr/share/backgrounds/athanor/hearth-dark.png"),
-            CosmicSource::Color,
+            Source::Color,
         ] {
-            let cosmic = CosmicBackground {
+            let cosmic = Background {
                 all: Some(all),
                 ..Default::default()
             };
@@ -113,7 +93,7 @@ mod tests {
             );
         }
         // Another file called hearth-light.png elsewhere is the person's own image.
-        let cosmic = CosmicBackground {
+        let cosmic = Background {
             all: Some(path("/home/u/hearth-light.png")),
             ..Default::default()
         };
@@ -133,7 +113,7 @@ mod tests {
                 ..Settings::default()
             }
         );
-        let out = migrate(Settings::default(), Some(&CosmicBackground::default()));
+        let out = migrate(Settings::default(), Some(&Background::default()));
         assert_eq!(
             out,
             Settings {
@@ -150,7 +130,7 @@ mod tests {
             migrated: true,
             ..Settings::default()
         };
-        let cosmic = CosmicBackground {
+        let cosmic = Background {
             all: Some(path("/home/u/a.png")),
             ..Default::default()
         };
@@ -163,7 +143,7 @@ mod tests {
             picture: "/mine.png".into(),
             ..Settings::default()
         };
-        let cosmic = CosmicBackground {
+        let cosmic = Background {
             same_on_all: Some(false),
             ..Default::default()
         };
