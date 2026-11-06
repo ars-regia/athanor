@@ -2430,6 +2430,9 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
         // The field's menu takes the keys once open: a repeat would reach it as a context-menu
         // event of the item in focus.
         Keysym::Menu | Keysym::F10 => true,
+        // A held Escape closes the menu once: a repeat would reach the surface under it as
+        // `Event::Escape`, which closes a dialog the user only meant to leave the menu of.
+        Keysym::Escape => true,
         _ => false,
     }
 }
@@ -2457,6 +2460,9 @@ mod tests {
         // A held Menu key or Shift+F10 opens the field's menu once, and does not repeat into it.
         assert!(once(Keysym::Menu, false));
         assert!(once(Keysym::F10, false));
+        // A held Escape closes the menu, and does not repeat into the surface's escape.
+        assert!(once(Keysym::Escape, false));
+        assert!(once_per_press(Keysym::Escape, false, false, false));
     }
 
     #[test]
