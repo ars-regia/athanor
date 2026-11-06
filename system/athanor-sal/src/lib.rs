@@ -24,7 +24,7 @@ pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use render::Error;
 pub use theme::{Rgba, Theme};
 pub use widget::{
-    Event, Key, Kind, PointerButton, Rect, Slider, Ui, Widget, WidgetId, WindowButton,
+    Event, Key, Kind, PointerButton, Rect, RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
 };
 
 #[cfg(test)]
