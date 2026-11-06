@@ -10,8 +10,9 @@ times the size its viewport maps it to.
 
 With `--extra HEADLESS-2` the client also opens two surfaces on that output by its name when it
 is added (Sal's requirement S1, doc_osd.md): one on the background layer that `set_layer` moves
-to the overlay layer in place, and one the client closes; when the output is removed, the client
-must be told that the first closed.
+to the overlay layer in place, after a refused `set_layer` that must send none of its requests,
+and one the client closes; when the output is removed, the client must be told that the first
+closed.
 """
 
 import json
@@ -34,6 +35,10 @@ WL_SURFACE = re.compile(
     r"get_layer_surface\(new id zwlr_layer_surface_v1#\d+, wl_surface#(\d+)"
 )
 SET_LAYER = re.compile(r"-> zwlr_layer_surface_v1#(\d+)\.set_layer\((\d+)\)")
+# The wl_output.name event, which names an output (version 4).
+OUTPUT_NAME = re.compile(r"\] wl_output#(\d+)\.name\(\"([^\"]*)\"\)")
+# The margin of the set_layer the client has refused.
+REFUSED_MARGIN = ".set_margin(0, 0, 40, 0)"
 BAR = "athanor-sal-layer"
 OVERLAY = "athanor-sal-overlay"
 CLOSED = "athanor-sal-closed"
@@ -72,12 +77,23 @@ def live_surfaces(lines, namespace=None):
     }
 
 
+def created_on(lines, namespace):
+    """The name of the output the first layer surface of `namespace` was created on, as the
+    client's wl_output last named it before then, or None."""
+    names = {}
+    for line in lines:
+        if m := OUTPUT_NAME.search(line):
+            names[m[1]] = m[2]
+        elif (m := GET.search(line)) and m[4] == namespace:
+            return names.get(m[2])
+    return None
+
+
 def extras_placed(lines):
     """Whether the surfaces of --extra stand as S1 wants them once EXTRA is added: the overlay
-    one live on the output of a bar other than the first, created on the background layer and
-    moved to the overlay layer, the closed one created on the same output and destroyed."""
+    one live on EXTRA, by the name its wl_output gave, created on the background layer and
+    moved to the overlay layer, the closed one created on EXTRA too and destroyed."""
     seen = surfaces(lines)
-    bars = [o for o, n, _, _ in seen.values() if n == BAR]
     overlay = [v for v in seen.values() if v[1] == OVERLAY]
     closed = [v for v in seen.values() if v[1] == CLOSED]
     created_on_background = any(
@@ -85,11 +101,10 @@ def extras_placed(lines):
         for line in lines
     )
     return (
-        len(bars) >= 2
-        and len(overlay) == 1
+        len(overlay) == 1
         and len(closed) == 1
-        and overlay[0][0] in bars[1:]
-        and overlay[0][0] != bars[0]
+        and created_on(lines, OVERLAY) == EXTRA
+        and created_on(lines, CLOSED) == EXTRA
         and created_on_background
         and overlay[0][2] == OVERLAY_LAYER
         and overlay[0][3]
@@ -248,6 +263,14 @@ def main():
                     f"{EXTRA}: the surfaces opened by its name are not as S1 wants them",
                     lambda: extras_placed(TRACE.read_text().splitlines()),
                 )
+                until(
+                    f"{EXTRA}: the client did not report the refused set_layer",
+                    lambda: f"refused {OVERLAY}" in STDOUT.read_text().splitlines(),
+                )
+                if any(REFUSED_MARGIN in line for line in TRACE.read_text().splitlines()):
+                    raise SystemExit(
+                        f"toolkit_layer_check: {step}: a refused set_layer sent its margin"
+                    )
                 if not committed_at_once(TRACE.read_text().splitlines(), OVERLAY):
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: set_layer waited for a frame to commit"
@@ -258,7 +281,8 @@ def main():
                     )
                 print(
                     f"{EXTRA}: a surface opened by its name moved from the background to the "
-                    "overlay layer in place, committed at once, another opened and closed role first"
+                    "overlay layer in place, committed at once, another opened and closed role first; "
+                    "a refused set_layer sent nothing"
                 )
             elif step == "an output removed":
                 until(
