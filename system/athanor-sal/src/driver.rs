@@ -6,7 +6,7 @@
 
 mod clipboard;
 
-use crate::a11y::{tree_update, tree_updates};
+use crate::a11y::{tree_update, tree_updates, withdrawn};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
@@ -599,9 +599,17 @@ impl Shell {
         let surface = self
             .get_mut(id)
             .ok_or_else(|| format!("no open surface {id:?}"))?;
-        match (&surface.a11y, accessible) {
-            // Dropping the adapter takes its window off the bus.
-            (Some(_), false) => surface.a11y = None,
+        match (surface.a11y.as_mut(), accessible) {
+            // Dropping the adapter takes its window off the application's children, and leaves
+            // its nodes on the bus: the window is deactivated and its nodes withdrawn first.
+            (Some(a11y), false) => {
+                if surface.window_focused {
+                    a11y.update_window_focus_state(false);
+                }
+                let update = withdrawn(&surface.ui, f64::from(surface.scale));
+                a11y.update_if_active(|| update);
+                surface.a11y = None;
+            }
             (None, true) => {
                 let tree = tree_update(&surface.ui, f64::from(surface.scale));
                 if let Ok(mut initial) = surface.initial.lock() {

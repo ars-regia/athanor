@@ -10,9 +10,14 @@ AT-SPI alone:
 - "Announce" makes the status announce "Volume 50 percent" once, at polite priority, and leaves
   no node of it in the status's tree;
 - "Hide status" takes the status out of the application's windows, and "Show status" brings it
-  back with its name.
+  back with its name, three times over, and the application's objects on the bus are as many
+  after as before: a surface out of the tree leaves none of its nodes registered;
+- "Hide dialog" deactivates the dialog when it is the active window ("window:deactivate"), and
+  the status's "Show dialog" brings it back.
 """
 
+import shlex
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -49,7 +54,18 @@ def children(node):
 
 
 def windows(app):
-    return [(w.get_role_name(), w.get_name() or "") for w in children(app)]
+    """The application's windows, by role and name; one that leaves the bus while it is read,
+    as a hidden surface does, is no longer among them."""
+    from gi.repository import GLib
+
+    found = []
+    for w in children(app):
+        try:
+            found.append((w.get_role_name(), w.get_name() or ""))
+        except GLib.GError as error:
+            if "Unknown object" not in error.message:
+                raise
+    return found
 
 
 def window(app, role_and_name):
@@ -70,6 +86,22 @@ def descendant(node, role, name):
         if (found := descendant(child, role, name)) is not None:
             return found
     return None
+
+
+def objects(app):
+    """The paths of the application's nodes on the accessibility bus, `<adapter>/<node>` under
+    accesskit's prefix: not the root, nor the adapters' empty parent paths, which zbus keeps."""
+    reply = subprocess.run(
+        ["busctl", "--user", "call", "org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    address = shlex.split(reply)[1]
+    tree = subprocess.run(
+        ["busctl", f"--address={address}", "tree", "--list", app.app.bus_name],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    prefix = "/org/a11y/atspi/accessible/"
+    return [p for p in tree.split() if p.startswith(prefix) and "/" in p[len(prefix):]]
 
 
 def click(dialog, name):
@@ -124,18 +156,52 @@ def main():
             f"the status holds {nodes} node(s) after the announcement, {status_nodes} before"
         )
 
-    if not click(dialog, "Hide status"):
-        failures.append("no button 'Hide status' in the dialog")
-    elif not pump(GLib, TIMEOUT, lambda: windows(app) == [DIALOG]):
-        failures.append(
-            f"with the status hidden the windows are {windows(app)}, expected {[DIALOG]}"
-        )
-    if not click(dialog, "Show status"):
-        failures.append("no button 'Show status' in the dialog")
-    elif not pump(GLib, TIMEOUT, lambda: sorted(windows(app)) == both):
-        failures.append(
-            f"with the status shown again the windows are {windows(app)}, expected {both}"
-        )
+    before = objects(app)
+    for cycle in range(1, 4):
+        if not click(dialog, "Hide status"):
+            failures.append("no button 'Hide status' in the dialog")
+            break
+        if not pump(GLib, TIMEOUT, lambda: windows(app) == [DIALOG]):
+            failures.append(
+                f"with the status hidden the windows are {windows(app)}, expected {[DIALOG]}"
+            )
+            break
+        click(dialog, "Show status")
+        if not pump(GLib, TIMEOUT, lambda: sorted(windows(app)) == both):
+            failures.append(
+                f"with the status shown again the windows are {windows(app)}, expected {both}"
+            )
+            break
+        if not pump(GLib, TIMEOUT, lambda: len(objects(app)) == len(before)):
+            after = objects(app)
+            failures.append(
+                f"after {cycle} hide and show cycle(s) the application has {len(after)} "
+                f"node(s) on the bus, {len(before)} before; new: {sorted(set(after) - set(before))}"
+            )
+            break
+    print(f"{len(before)} node(s) on the bus before the cycles")
+
+    deactivated = []
+    windows_listener = Atspi.EventListener.new(
+        lambda event: deactivated.append(event.any_data)
+    )
+    windows_listener.register("window:deactivate")
+    if not dialog.get_state_set().contains(Atspi.StateType.ACTIVE):
+        failures.append("the dialog is not the active window: its deactivation is not checked")
+    elif not click(dialog, "Hide dialog"):
+        failures.append("no button 'Hide dialog' in the dialog")
+    elif not pump(GLib, TIMEOUT, lambda: windows(app) == [STATUS]):
+        failures.append(f"with the dialog hidden the windows are {windows(app)}, expected {[STATUS]}")
+    else:
+        pump(GLib, TIMEOUT, lambda: deactivated)
+        if deactivated != [DIALOG[1]]:
+            failures.append(f"windows deactivated {deactivated}, expected [{DIALOG[1]!r}]")
+        if not click(window(app, STATUS), "Show dialog"):
+            failures.append("no button 'Show dialog' in the status")
+        elif not pump(GLib, TIMEOUT, lambda: sorted(windows(app)) == both):
+            failures.append(
+                f"with the dialog shown again the windows are {windows(app)}, expected {both}"
+            )
 
     for line in failures:
         print(f"FAIL {line}", file=sys.stderr)
