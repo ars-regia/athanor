@@ -4,10 +4,12 @@
 //!
 //! With `--extra <output>`, once that output is announced, two more layer surfaces open on it by
 //! its name, `athanor-sal-overlay` on the background layer and `athanor-sal-closed` on the top
-//! one: after its first frame the first moves to the overlay layer and the second closes. Before
-//! the move, a `set_layer` with widgets too wide to lay out, a margin of 40 at the bottom and an
-//! input region of (1, 2) 3 by 4 is refused, printing `refused <namespace>`. Prints
-//! `closed <namespace>` for each surface closed without the application asking.
+//! one. The first moves to the overlay layer after its first frame; before the move, a
+//! `set_layer` with widgets too wide to lay out, a margin of 40 at the bottom and an input
+//! region of (1, 2) 3 by 4 is refused, printing `refused <namespace>`. The second closes in the
+//! turn its first frame is drawn, before the driver reports it, printing
+//! `closed athanor-sal-closed before its drawn`; a surface reported drawn once closed ends the
+//! client. Prints `closed <namespace>` for each surface closed without the application asking.
 
 use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
@@ -30,6 +32,8 @@ struct Bars {
     extra: Option<String>,
     /// The surfaces of `--extra`, with their namespace.
     extras: Vec<(SurfaceId, &'static str)>,
+    /// Whether the driver reported the first frame of the surface the application closes.
+    closed_drawn: bool,
 }
 
 fn button(name: &str) -> Ui {
@@ -71,12 +75,28 @@ impl Application for Bars {
         }
     }
 
+    fn turn(&mut self, shell: &mut Shell) {
+        // The surface's first frame was drawn in this turn's events; the driver reports it after
+        // the turn, and must not once it is closed.
+        let closing = self.extras.iter().find(|(id, n)| *n == CLOSED && shell.drawn(*id));
+        let Some(&(id, _)) = closing else {
+            return;
+        };
+        shell.close(id);
+        if !self.closed_drawn {
+            println!("closed {CLOSED} before its drawn");
+        }
+    }
+
     fn drawn(&mut self, shell: &mut Shell, surface: SurfaceId) {
+        if shell.ui(surface).is_none() {
+            return shell.fail(format!("{surface:?} reported drawn once closed").into());
+        }
         let Some(&(_, namespace)) = self.extras.iter().find(|(id, _)| *id == surface) else {
             return;
         };
         if namespace == CLOSED {
-            shell.close(surface);
+            self.closed_drawn = true;
             return;
         }
         // Refused: the margin and the region it asks for are never sent, and so never applied.
@@ -129,6 +149,7 @@ fn main() -> ExitCode {
     let bars = Bars {
         extra,
         extras: Vec::new(),
+        closed_drawn: false,
     };
     match driver::run(bars) {
         Ok(()) => ExitCode::SUCCESS,

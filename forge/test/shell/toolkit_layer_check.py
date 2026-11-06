@@ -11,8 +11,8 @@ times the size its viewport maps it to.
 With `--extra HEADLESS-2` the client also opens two surfaces on that output by its name when it
 is added (Sal's requirement S1, doc_osd.md): one on the background layer that `set_layer` moves
 to the overlay layer in place, after a refused `set_layer` that must send none of its requests,
-and one the client closes; when the output is removed, the client must be told that the first
-closed.
+and one the client closes in the turn its first frame is drawn, which the driver must then not
+report drawn; when the output is removed, the client must be told that the first closed.
 """
 
 import json
@@ -281,6 +281,11 @@ def main():
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: set_layer waited for a frame to commit"
                     )
+                until(
+                    f"{EXTRA}: the client did not close {CLOSED} between its first frame and its "
+                    "report",
+                    lambda: f"closed {CLOSED} before its drawn" in STDOUT.read_text().splitlines(),
+                )
                 if not destroyed_in_order(TRACE.read_text().splitlines(), CLOSED):
                     raise SystemExit(
                         f"toolkit_layer_check: {step}: {CLOSED} lost its wl_surface before its role"
