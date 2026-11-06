@@ -370,33 +370,56 @@ def signing_environments(root):
     return holders, problems
 
 
+def ruleset_refs(ruleset):
+    """The ref patterns a ruleset includes, or None when it names none or `~ALL` (every ref)."""
+    include = ((ruleset.get("conditions") or {}).get("ref_name") or {}).get("include")
+    return None if not include or "~ALL" in include else include
+
+
+def refs_overlap(a, b):
+    """Whether two lists of ref patterns (None: every ref) can match the same ref. Excludes are
+    ignored, which can only report more."""
+    # Two globs that overlap without one matching the other (`a*`, `*b`) read as disjoint: the
+    # rulesets name literal branches or a single glob, so this holds until two globs meet.
+    return a is None or b is None or any(
+        fnmatch.fnmatchcase(x, y) or fnmatch.fnmatchcase(y, x) for x in a for y in b)
+
+
 def merge_queue_problems(root):
-    """PIPE-N06: a ruleset with a merge queue needs every required status context reported by
-    a workflow that runs on merge_group; otherwise a merge group never gets the context and
-    cannot be satisfied. A job reports its name (its id when it has none); a job that calls a
-    reusable workflow reports `<name> / <inner context>`, and a matrix job without a name reports
-    `<id> (<values>)`, so both are matched as GitHub composes them."""
+    """PIPE-N06: a ruleset with a merge queue needs every status context required on the
+    branches it covers reported by a workflow that runs on merge_group; otherwise a merge group
+    never gets the context and cannot be satisfied. A context required only on another branch
+    (`Kernel gate` on `main` for a queue on `iso-v0`) does not count. A job reports its name
+    (its id when it has none); a job that calls a reusable workflow reports
+    `<name> / <inner context>`, and a matrix job without a name reports `<id> (<values>)`, so
+    both are matched as GitHub composes them."""
     root = Path(root)
     rulesets = json.loads(read(root / RULESETS_JSON))
     queued = sorted(name for name, rs in rulesets.items()
                     if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", [])))
     if not queued:
         return []
-    required = {check["context"]
-                for protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).values() if protection
-                for check in (protection.get("required_status_checks") or {}).get("checks", [])}
-    required |= {check["context"] for rs in rulesets.values() for rule in rs.get("rules", [])
-                 if rule.get("type") == "required_status_checks"
-                 for check in rule["parameters"]["required_status_checks"]}
+    sources = [([f"refs/heads/{branch}"], check["context"])
+               for branch, protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).items()
+               if protection
+               for check in (protection.get("required_status_checks") or {}).get("checks", [])]
+    sources += [(ruleset_refs(rs), check["context"]) for rs in rulesets.values()
+                for rule in rs.get("rules", []) if rule.get("type") == "required_status_checks"
+                for check in rule["parameters"]["required_status_checks"]]
     reported = set()
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if isinstance(doc, dict) and "merge_group" in triggers(doc):
             reported |= job_contexts(root, doc)
-    return [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
-            f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
-            for name in queued for context in sorted(required)
-            if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+    problems = []
+    for name in queued:
+        refs = ruleset_refs(rulesets[name])
+        required = {context for where, context in sources if refs_overlap(refs, where)}
+        problems += [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
+                     f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
+                     for context in sorted(required)
+                     if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+    return problems
 
 
 def job_contexts(root, doc, depth=0):
