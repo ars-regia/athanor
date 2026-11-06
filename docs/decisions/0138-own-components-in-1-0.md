@@ -21,11 +21,13 @@ and SystemPrompter (`doc_lock_and_prompts.md` LP18), the window switcher on Alt+
 ADR-0135 decision 3) and the retirement of cosmic-idle, cosmic-bg and cosmic-settings as "after 1.0".
 `doc_launcher.md` LA12 ([ADR-0061](0061-desktop-minor-decisions.md), A2-24) keeps cosmic-launcher,
 cosmic-app-library and pop-launcher in the image because cosmic-launcher also serves Alt+Tab.
-[ADR-0124](0124-visual-language-revision-3.md) already built Athanor's own toolkit, Sal, and froze
-the GTK shell: it "gets nothing new until it is removed".
+[ADR-0121](0121-own-compositor-and-toolkit.md) decided Athanor's own toolkit and
+[ADR-0134](0134-alchemical-names-for-the-pillars.md) decision 5 named it Sal;
+[ADR-0124](0124-visual-language-revision-3.md) froze the GTK shell: it "gets nothing new until it is
+removed".
 
-On 2026-11-06 the maintainer said: "dobbiamo sostituire tutto quello che non è proprietario",
-"dobbiamo andare in stato proprietario" and "stiamo abbandonando gtk, va scritto in sal".
+On 2026-11-06 the maintainer said (translated from Italian): "we must replace everything that is not
+our own", "we must move to a fully own state" and "we are abandoning GTK, it is to be written in Sal".
 
 ## Decision
 
@@ -52,8 +54,11 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    `athanor-shelld` (`doc_languages.md` LN9) and the theme service `athanor-style`
    (`doc_visual_language.md` VL4), placed by the maintainer on 2026-11-06 because without them
    Super+Space, the layout seed and the theme would regress when the daemon leaves. External-monitor
-   brightness over DDC/CI, which cosmic-settings-daemon 1.11 sets when no backlight exists, moves to
-   `athanor-osd` through the brightness model of `athanor-services` (`doc_session_daemons.md`).
+   brightness over DDC/CI moves to `athanor-osd` through the brightness model of `athanor-services`
+   (`doc_control_center.md`, the external-monitors row and spike S4, for the model). That
+   cosmic-settings-daemon 1.11 sets it when no backlight exists is read on the host from the binary's
+   strings (`ddc-hi`, "DDC/CI error") and recorded in `doc_session_daemons.md` revision 3, role 12,
+   proposed in #1023.
    cosmic-idle, cosmic-bg and cosmic-settings-daemon leave
    in 1.0. This amends ADR-0103 D13 for those three. cosmic-settings and cosmic-workspaces are not
    placed by this record.
@@ -63,7 +68,8 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    lock-aware `athanor-usbguard-policy` replaces `athanor-usbguard-hook`. They were in 1.1 only because the
    lock was. Decided by the maintainer on 2026-11-06 by the option "Both in 1.0".
 6. **New surfaces are written in Sal, not GTK4:** the lock, the agent's dialog, the switcher, the
-   launcher, the application library, the OSD and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly.
+   launcher, the application library, the OSD and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly, with no toolkit
+   (decided by the maintainer on 2026-11-06: "Idle: wayland-client, no toolkit").
 
 ## Alternatives rejected
 
@@ -82,15 +88,20 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
 - Each step is judged on the reference laptop, as the specifications say.
 - The specifications that name GTK for these surfaces get their own revisions before the code, under
   ADR-0074. This record rewrites none of them:
-  - `doc_lock_and_prompts.md` LP2, LP14, LP15 and LP17 (the lock and the agent);
-  - `doc_osd.md` (the OSD);
-  - `doc_session_daemons.md` SD6: the wallpaper service is specified as a headless `wl_shm` client,
-    and the decision to write it in Sal changes that (SD1 names no GTK and is not in the list);
-  - `doc_overview.md`, which specifies no window switcher yet: its GTK4 and gtk4-layer-shell lines
-    (about lines 92, 94, 119, 270 and 386) concern the overview, which stays in 1.1, and the switcher
-    is specified there in Sal.
+  - `doc_lock_and_prompts.md` LP2, LP14, LP15 and LP17 (the lock and the agent) and its line 290
+    ("LP18 step 4 for 1.1"): revised in #1019 (revision 4);
+  - `doc_osd.md` (the OSD): revised in #1018 (revision 3);
+  - `doc_overview.md`: revised in #1020 (revision 3 specifies `athanor-switcher`, section 8, OV20 to
+    OV28). Its GTK4 and gtk4-layer-shell lines concern the overview, which stays in 1.1;
   - `doc_launcher.md`, which binds the launcher and the application library to GTK4 (SH4, about
-    lines 7, 24 and 26); `athanor-launcher` and `athanor-library` are written in Sal.
+    lines 7, 24 and 26); `athanor-launcher` and `athanor-library` are written in Sal: proposed in
+    #1021;
+  - `doc_session_daemons.md`: proposed in #1023. SD1's table (`doc_session_daemons.md:50-53`) and
+    its `athanor-wallpaper` row (:52) describe the daemons as "headless, no GTK", and SD6 specifies
+    the wallpaper service as a headless `wl_shm` client; writing it in Sal changes both.
+  - `doc_shell.md` SH3 and SH4: decision 6 contradicts SH4 (GTK4), and SH3 names cosmic-greeter and
+    cosmic-osd as leaving later. `doc_lock_and_prompts.md` revision 4 (about line 293) and
+    `doc_launcher.md` revision 3 already ask for it. Still owed.
 - The specifications whose placements this record changes, and which their next revisions must amend:
   - `doc_own_stack.md`: the status line (line 3) and the 1.1 placement of the window switcher (about
     lines 423, 666, 778, 917 to 920, 940 and 1205) and of the application library after the switch
@@ -100,12 +111,13 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
     and 686, and the sentences that open at 420 and 656 up to their switcher clauses at 423 and 666,
     concern the compositor's switch and cosmic-workspaces, which stay in 1.1, and do not conflict;
   - `doc_session.md` SN15 and SN16 (about lines 176 to 216), which name cosmic-greeter's locker
-    scope;
-  - `doc_lock_and_prompts.md` about line 290 ("LP18 step 4 for 1.1").
+    scope.
 - The 1.0 exit column of `release-1.0.md` section 4.1 inherits the conditions of decision 28, which
   change for the lock, the idle daemon and the agent when `doc_own_stack.md` is amended.
 - `docs/operations/release-1.0.md` is amended in this pull request: row 12, section 1, section 3 and
   the notes of section 4.2 on rows 9, 12, 13 and 19, and the greeter row of section 2.
 - Amended: ADR-0103 D13 (for cosmic-idle, cosmic-bg, cosmic-settings-daemon and the lock and agent),
+  ADR-0115 (decision 4 and the notes on rows 9 and 19, which moved Athanor's own lock, the polkit agent
+  and LP18 steps 4 and 10 to 1.1; the SystemPrompter stays in 1.1),
   ADR-0135 decision 3 (the window switcher). Their texts keep their words; their status lines and the
   index name this record.

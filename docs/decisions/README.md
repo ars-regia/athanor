@@ -182,7 +182,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115, ADR-0135 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
 | ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | amended by ADR-0136 | update, build, release, security |
-| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131 | process, docs, platform, security, shell |
+| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131, ADR-0138 | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
