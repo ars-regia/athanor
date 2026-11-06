@@ -132,6 +132,7 @@ The stop of each unit is bounded by the manager's default stop timeout. An appli
 - **The idle daemon keeps its inhibitors across a crash** (A2-20, #156), as `athanor-shelld` keeps its unread notifications (ST5):
   - At every change it writes its table to `$XDG_RUNTIME_DIR/athanor-idle/inhibitors.json`, mode 0600, through a temporary file and a rename: for each inhibitor its cookie, the unique bus name of its owner, its application id, its kind (idle or suspend only) and its reason. The directory is the unit's `RuntimeDirectory=` with `RuntimeDirectoryPreserve=yes`, so it survives a restart and leaves with `$XDG_RUNTIME_DIR` at the end of the login.
   - At start it restores each entry whose owner still has its unique name on the bus (`NameHasOwner`); unique names are never reused on a bus, so a present name is the same client. Other entries are dropped, each with one journal line at info. New cookies continue above the highest restored one, so an `UnInhibit` after the restart finds its inhibitor.
+  - The file has this shape: `{"version":1,"inhibitors":[{"cookie":u32,"owner":"<unique name>","app_id":"...","kind":"idle"|"suspend","reason":"..."}]}` (maintainer decision, 2026-11-06, proposed, revision 3).
   - A file that does not parse is removed, the event logged at warning, and the daemon starts with no inhibitor.
   - Needs: SD4, SD5.
 

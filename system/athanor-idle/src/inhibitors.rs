@@ -92,6 +92,22 @@ impl Inhibitors {
         }
     }
 
+    /// The live inhibitors in cookie order, for `inhibitors.json` (SN7).
+    pub fn iter(&self) -> impl Iterator<Item = (u32, &Inhibitor)> {
+        self.table.iter().map(|(c, i)| (*c, i))
+    }
+
+    /// Puts back an inhibitor under its old cookie; new cookies continue above the highest
+    /// restored one (SN7). A cookie of 0 or one already live is refused.
+    pub fn restore(&mut self, cookie: u32, inhibitor: Inhibitor) -> bool {
+        if cookie == 0 || self.table.contains_key(&cookie) {
+            return false;
+        }
+        self.table.insert(cookie, inhibitor);
+        self.last = self.last.max(cookie);
+        true
+    }
+
     pub fn len(&self) -> usize {
         self.table.len()
     }

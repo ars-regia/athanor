@@ -364,7 +364,8 @@ The retirement order is therefore cosmic-idle (step 1), cosmic-bg (step 2), cosm
   | --- | --- | --- | --- |
   | D0 | this revision | none | the maintainer's approval |
   | I1 | `athanor-idle`'s library: the timer choice, the inhibitor table, the sequence blank, off, lock request and its cancellation; tests without a display (SD19) | 1 | D0 |
-  | I2 | `org.freedesktop.ScreenSaver`, `inhibitors.json` (`doc_session.md` SN7) and `os.athanor.Idle1.InhibitSuspend` (SD5) | 1 | I1 |
+  | I2 | `org.freedesktop.ScreenSaver` and `inhibitors.json` (`doc_session.md` SN7), without `InhibitSuspend` (maintainer decision, 2026-11-06, proposed, revision 3) | 1 | I1 |
+| I2b | `os.athanor.Idle1.InhibitSuspend` and `Uninhibit` with SD5's admission by cgroup and executable, a pull request of its own because the admission is an authorisation check (maintainer decision, 2026-11-06, proposed, revision 3) | 1 | I2 |
   | I3 | the Wayland side: `ext-idle-notify-v1`, the overlay with a single-pixel buffer, `zwlr_output_power_v1`, `LockSession`, tested on Sulphur's fixture (`src/fixture.rs`); `org.athanor.desktop.idle`, SD16's migration and the fail-closed follow of the Power page, with the public reader of `athanor-sulphur-client` that tells an absent key from an unreadable file (SD3); the comment of `Cargo.toml:78-79`, which names `wayland-protocols-wlr` a dev-dependency of Sulphur's fixture only, is rewritten in this pull request | 1 | I2 |
   | I4 | the package, the unit, the allow-list line and the end of cosmic-idle (step 1); gate L7b on the reference laptop | 1 | I3 |
   | I5 | the Power page of Athanor's Settings writes `org.athanor.desktop.idle` (SE11) | none | Athanor's Settings |
