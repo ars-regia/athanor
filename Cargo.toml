@@ -28,6 +28,7 @@ members = [
   "system/athanor-sal",
   "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0",
   "system/athanor-auth",
+  "system/athanor-edid",
   "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
 ]
 
