@@ -6,7 +6,7 @@
 
 mod clipboard;
 
-use crate::a11y::tree_update;
+use crate::a11y::{tree_update, tree_updates};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
@@ -589,6 +589,34 @@ impl Shell {
         Ok(())
     }
 
+    /// Whether the surface `id` is in the accessibility tree, as it is when it opens. A surface
+    /// kept mapped while it shows nothing (`doc_launcher.md` LA8) leaves the tree, as a hidden
+    /// GTK window does: its window leaves the application's children on AT-SPI, and comes back
+    /// with its widgets as they are, the next frame publishing them again. Out of the tree, the
+    /// surface announces nothing ([`Ui::announce`]). Refused for a surface that is not open.
+    pub fn set_accessible(&mut self, id: SurfaceId, accessible: bool) -> Result<(), Error> {
+        let actions = self.actions.clone();
+        let surface = self
+            .get_mut(id)
+            .ok_or_else(|| format!("no open surface {id:?}"))?;
+        match (&surface.a11y, accessible) {
+            // Dropping the adapter takes its window off the bus.
+            (Some(_), false) => surface.a11y = None,
+            (None, true) => {
+                let tree = tree_update(&surface.ui, f64::from(surface.scale));
+                if let Ok(mut initial) = surface.initial.lock() {
+                    *initial = tree;
+                }
+                let mut a11y = adapter(id, &surface.initial, &actions);
+                a11y.update_window_focus_state(surface.window_focused);
+                surface.a11y = Some(a11y);
+                surface.dirty = true;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// The surface the open menu was opened from, if a menu is open.
     pub fn popup_parent(&self) -> Option<SurfaceId> {
         self.popup.filter(|p| p.menu).map(|p| p.parent)
@@ -875,11 +903,7 @@ impl Shell {
         };
         // The first tree comes from the last update drawn.
         let initial = Arc::new(Mutex::new(tree_update(&ui, 1.0)));
-        let a11y = accesskit_unix::Adapter::new(
-            Activation(Arc::clone(&initial)),
-            Actions(id, self.actions.clone()),
-            Deactivation,
-        );
+        let a11y = Some(adapter(id, &initial, &self.actions));
         // A layer surface asks for its widgets' size before the first configure.
         let size = match &shown {
             Shown::Layer(surface) => {
@@ -901,6 +925,7 @@ impl Shell {
             ui,
             a11y,
             initial,
+            window_focused: false,
             scale: 1.0,
             size,
             stretch,
@@ -1065,8 +1090,12 @@ struct Surface {
     fractional: Option<(WpFractionalScaleV1, WpViewport)>,
     shown: Shown,
     ui: Ui,
-    a11y: accesskit_unix::Adapter,
+    /// The surface's window on the accessibility bus; `None` while [`Shell::set_accessible`]
+    /// keeps it out of the tree.
+    a11y: Option<accesskit_unix::Adapter>,
     initial: Arc<Mutex<TreeUpdate>>,
+    /// The adapter's window is the focused one, which a new adapter takes over.
+    window_focused: bool,
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
@@ -1197,12 +1226,29 @@ impl Surface {
 
     /// Hands the tree of the surface just drawn to the accessibility adapter.
     fn publish_tree(&mut self) {
-        let update = tree_update(&self.ui, f64::from(self.scale));
-        if let Ok(mut initial) = self.initial.lock() {
-            initial.clone_from(&update);
+        for update in tree_updates(&mut self.ui, f64::from(self.scale)) {
+            if let Ok(mut initial) = self.initial.lock() {
+                initial.clone_from(&update);
+            }
+            if let Some(a11y) = &mut self.a11y {
+                a11y.update_if_active(|| update);
+            }
         }
-        self.a11y.update_if_active(|| update);
     }
+}
+
+/// The accessibility adapter of surface `id`, whose first tree is `initial`'s and whose actions
+/// travel on `actions` to the event loop.
+fn adapter(
+    id: SurfaceId,
+    initial: &Arc<Mutex<TreeUpdate>>,
+    actions: &Sender<(SurfaceId, ActionRequest)>,
+) -> accesskit_unix::Adapter {
+    accesskit_unix::Adapter::new(
+        Activation(Arc::clone(initial)),
+        Actions(id, actions.clone()),
+        Deactivation,
+    )
 }
 
 struct Activation(Arc<Mutex<TreeUpdate>>);
@@ -1681,7 +1727,10 @@ impl App {
         }
         for (id, is_focused) in [(self.window_focus, false), (focused, true)] {
             if let Some(surface) = id.and_then(|id| self.shell.get_mut(id)) {
-                surface.a11y.update_window_focus_state(is_focused);
+                surface.window_focused = is_focused;
+                if let Some(a11y) = &mut surface.a11y {
+                    a11y.update_window_focus_state(is_focused);
+                }
             }
         }
         self.window_focus = focused;

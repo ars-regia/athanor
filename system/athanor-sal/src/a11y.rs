@@ -2,9 +2,9 @@
 //! the same paths as the keyboard and the pointer.
 
 use crate::focus::list_stop;
-use crate::widget::{Event, Kind, Ui, WidgetId};
+use crate::widget::{Event, Kind, RootRole, Ui, WidgetId};
 use accesskit::{
-    Action, ActionData, ActionRequest, HasPopup, Node, NodeId, Orientation, Rect, Role,
+    Action, ActionData, ActionRequest, HasPopup, Live, Node, NodeId, Orientation, Rect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 use std::ops::Range;
@@ -26,13 +26,21 @@ pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
 
+/// The node of the root's announcement ([`Ui::announce`]), beside the widgets' ids and their
+/// text runs, which never reach it.
+const ANNOUNCEMENT: NodeId = NodeId(u64::MAX);
+
 /// The node of widget `id`, with its bounds in physical pixels at `scale`. The match is
 /// exhaustive, so a new kind of widget cannot be added without its node.
 pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     let widget = ui.widget(id);
     let mut node = match &widget.kind {
         Kind::Column if id == Ui::ROOT => {
-            let mut node = Node::new(Role::Window);
+            let mut node = Node::new(match ui.root_role {
+                RootRole::Window => Role::Window,
+                RootRole::Status => Role::Status,
+                RootRole::AlertDialog => Role::AlertDialog,
+            });
             node.set_label(ui.title.as_str());
             node
         }
@@ -89,9 +97,17 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node
         }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
-        // active, as GTK's ToggleButton.
-        Kind::Toggle { label, active } => {
-            let mut node = Node::new(Role::Button);
+        // active, as GTK's ToggleButton; a radio as a radio button, checked when active.
+        Kind::Toggle {
+            label,
+            active,
+            radio,
+        } => {
+            let mut node = Node::new(if *radio {
+                Role::RadioButton
+            } else {
+                Role::Button
+            });
             node.set_label(label.as_str());
             node.set_toggled(if *active {
                 Toggled::True
@@ -193,6 +209,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     if let Kind::ListRow(_) = widget.kind {
         children.push(row_label_id(id));
     }
+    if id == Ui::ROOT && ui.announcement.is_some() {
+        children.push(ANNOUNCEMENT);
+    }
     if let Kind::Field(field) | Kind::TextArea(field) = &widget.kind {
         let lines = field.line_ranges();
         children.extend((0..lines.len()).map(|n| text_run_id(id, n)));
@@ -269,6 +288,30 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
+/// The announcement of [`Ui::announce`]: a polite live region, which the AT-SPI bridge announces
+/// as the node is added (`accesskit_atspi_common`, `adapter.rs`, `add_node`).
+fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
+    let text = ui.announcement.as_deref()?;
+    let mut node = Node::new(Role::Label);
+    node.set_value(text);
+    node.set_live(Live::Polite);
+    node.set_bounds(bounds(ui, Ui::ROOT, scale));
+    Some((ANNOUNCEMENT, node))
+}
+
+/// The updates that publish `ui`, in order. With an announcement asked for, the first holds it
+/// and the second no longer does: the bridge announces the text once and keeps no stale copy of
+/// it in the tree. The announcement is taken.
+pub fn tree_updates(ui: &mut Ui, scale: f64) -> Vec<TreeUpdate> {
+    let mut updates = Vec::with_capacity(2);
+    if ui.announcement.is_some() {
+        updates.push(tree_update(ui, scale));
+        ui.announcement = None;
+    }
+    updates.push(tree_update(ui, scale));
+    updates
+}
+
 /// The whole tree of the visible widgets, as the adapter's first update and after every change.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
@@ -280,6 +323,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
             .chain(shown().filter_map(|id| row_label(ui, id, scale)))
+            .chain(announcement(ui, scale))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -348,6 +392,7 @@ mod tests {
             Kind::Toggle {
                 label: "Toggle".into(),
                 active: true,
+                radio: false,
             },
         );
         let field = ui.field(Ui::ROOT, "Field", "text");
@@ -1019,5 +1064,135 @@ mod tests {
         assert_eq!(states(&ui, "Name"), [false, false, false, true]);
         ui.set_expanded(app, true);
         assert_eq!(states(&ui, "Files"), [true, true, false, true]);
+    }
+
+    /// An AT-SPI adapter of `ui` in-process, and the announcements it emits: their text and
+    /// politeness.
+    type Announcements = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
+    fn at_spi(ui: &Ui) -> (accesskit_atspi_common::Adapter, Announcements) {
+        use accesskit::{ActionHandler, ActionRequest};
+        use accesskit_atspi_common::{
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, ObjectEvent,
+            WindowBounds,
+        };
+        struct Heard(Announcements);
+        impl AdapterCallback for Heard {
+            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn emit_event(&self, _: &Adapter, event: Event) {
+                if let Event::Object {
+                    event: ObjectEvent::Announcement(text, politeness),
+                    ..
+                } = event
+                {
+                    let heard = (text, format!("{politeness:?}"));
+                    self.0.lock().expect("not poisoned").push(heard);
+                }
+            }
+        }
+        struct NoActions;
+        impl ActionHandler for NoActions {
+            fn do_action(&mut self, _: ActionRequest) {}
+        }
+        let heard = Announcements::default();
+        let adapter = Adapter::new(
+            &AppContext::new(None),
+            Heard(heard.clone()),
+            tree_update(ui, 1.0),
+            false,
+            WindowBounds::default(),
+            NoActions,
+        );
+        (adapter, heard)
+    }
+
+    /// The root reads as the role the application sets, named by the title, as an on-screen
+    /// display (`status`) and an end-of-session dialog (`alertdialog`) need them (doc_osd.md
+    /// OD11, OD18, requirement S2); a window by default.
+    #[test]
+    fn the_root_takes_the_role_the_application_sets() {
+        use accesskit_atspi_common::Role as AtspiRole;
+        let root = |ui: &Ui| {
+            let (adapter, _) = at_spi(ui);
+            let root = adapter.platform_node(adapter.root_id());
+            (root.role().expect("a role"), root.name().expect("a name"))
+        };
+        let mut ui = Ui::new("Volume 45 percent", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Label("45".into()));
+        ui.layout();
+        assert_eq!(root(&ui), (AtspiRole::Frame, "Volume 45 percent".into()));
+        ui.root_role = RootRole::Status;
+        assert_eq!(root(&ui), (AtspiRole::StatusBar, "Volume 45 percent".into()));
+        ui.root_role = RootRole::AlertDialog;
+        ui.title = "Shut down now?".into();
+        assert_eq!(root(&ui), (AtspiRole::Alert, "Shut down now?".into()));
+    }
+
+    /// The radios of a group read as radio buttons, the active one checked, where the toggles
+    /// read as GTK's toggle buttons, pressed (doc_osd.md OD19, requirement S2). Activating
+    /// another moves the check, as for the toggles.
+    #[test]
+    fn radios_read_as_radio_buttons_and_toggles_as_toggle_buttons() {
+        use accesskit_atspi_common::{Role as AtspiRole, State};
+        let mut ui = Ui::new("What did you plug in?", Theme::default(), false);
+        let choices = ui.add(Ui::ROOT, Kind::Column);
+        let headphones = ui.radio(choices, "Headphones", true);
+        let headset = ui.radio(choices, "Headset with microphone", false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        ui.toggle(row, "Island", true);
+        ui.layout();
+        let read = |ui: &Ui, name: &str| {
+            let (adapter, _) = at_spi(ui);
+            let root = adapter.platform_node(adapter.root_id());
+            let node = (0..root.child_count().expect("children"))
+                .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+                .map(|child| root.relative(child))
+                .find(|child| child.name().ok().as_deref() == Some(name))
+                .expect("the node reaches AT-SPI");
+            let state = node.state();
+            let states = [State::Checkable, State::Checked, State::Pressed];
+            (node.role().expect("a role"), states.map(|s| state.contains(s)))
+        };
+        let radio = AtspiRole::RadioButton;
+        assert_eq!(read(&ui, "Headphones"), (radio, [true, true, false]));
+        assert_eq!(read(&ui, "Headset with microphone"), (radio, [true, false, false]));
+        let toggle = (AtspiRole::ToggleButton, [false, false, true]);
+        assert_eq!(read(&ui, "Island"), toggle);
+        assert_eq!(ui.activate(headset), Some(Event::Selected(headset)));
+        assert!(!ui.is_active(headphones));
+        assert_eq!(read(&ui, "Headphones"), (radio, [true, false, false]));
+        assert_eq!(read(&ui, "Headset with microphone"), (radio, [true, true, false]));
+    }
+
+    /// An announcement reaches AT-SPI once, at polite priority, from a live region that leaves
+    /// the tree with the next update, so the tree holds no stale text; the same text announced
+    /// again is heard again (doc_osd.md OD11, requirement S2).
+    #[test]
+    fn an_announcement_is_heard_once_and_leaves_no_node() {
+        let mut ui = Ui::new("Volume", Theme::default(), false);
+        ui.root_role = RootRole::Status;
+        ui.add(Ui::ROOT, Kind::Label("45".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi(&ui);
+        let children = |adapter: &accesskit_atspi_common::Adapter| {
+            let root = adapter.platform_node(adapter.root_id());
+            root.child_count().expect("children")
+        };
+        let before = children(&adapter);
+        for _ in 0..2 {
+            ui.announce("Volume 45 percent");
+            let updates = tree_updates(&mut ui, 1.0);
+            assert_eq!(updates.len(), 2);
+            for update in updates {
+                adapter.update(update);
+            }
+            assert_eq!(children(&adapter), before);
+        }
+        // Nothing more is announced once it was.
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
+        assert_eq!(*heard.lock().expect("not poisoned"), [polite.clone(), polite]);
     }
 }

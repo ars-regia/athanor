@@ -63,6 +63,7 @@
 #                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the input method as its rig unit (run build-compositor first)
 #   rig.sh toolkit-clipboard   athanor-sal's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
 #   rig.sh toolkit-layer    athanor-sal's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
+#   rig.sh toolkit-a11y     athanor-sal's root roles, radios, announcements and a surface out of the AT-SPI tree, read on the accessibility bus (Sal's S2; run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-sal's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
 #   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
@@ -731,13 +732,14 @@ build-toolkit)
                  && cargo rustdoc --locked -p athanor-sal -- -D warnings \
                  && cargo test --locked -p athanor-sal \
                  && cargo test --locked -p athanor-sal --features gpu \
-                 && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer \
+                 && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer --example a11y \
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-sal-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-sal-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-sal-input-method \
                  && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-sal-layer \
                  && install -m 0755 /out/target/release/examples/popup /out/bin/athanor-sal-popup \
                  && install -m 0755 /out/target/release/examples/pointer /out/bin/athanor-sal-pointer \
+                 && install -m 0755 /out/target/release/examples/a11y /out/bin/athanor-sal-a11y \
                  && cargo clippy --locked --manifest-path system/athanor-sal/gallery/Cargo.toml --all-targets -- -D warnings \
                  && cargo build --release --locked --manifest-path system/athanor-sal/gallery/Cargo.toml \
                  && install -m 0755 /out/target/release/athanor-sal-gallery /out/bin/athanor-sal-gallery'
@@ -1535,6 +1537,16 @@ toolkit-layer)
     # backend adds and removes outputs, which athanor-sulphur's fixture cannot yet (C1 task 8).
     require athanor-sal-layer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_layer_check.py
+    ;;
+toolkit-a11y)
+    # Sal's requirement S2 (doc_osd.md OD11, OD18, OD19): what an on-screen display and its
+    # dialogs need of the accessibility tree, read through AT-SPI (toolkit_a11y_check.py).
+    require athanor-sal-a11y build-toolkit
+    in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=4 \
+        RIG_HOLD="python3 /repo/forge/test/shell/toolkit_a11y_check.py" \
+        dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 toolkit-a11y -- \
+        bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
+                 && exec /out/bin/athanor-sal-a11y"
     ;;
 toolkit-popup)
     # The dock plan, task 4: a menu and a tooltip in xdg-popups of a layer surface, under sway's
