@@ -221,3 +221,22 @@ jobs:
           name: bench-results
           path: bench-out/
           if-no-files-found: error
+
+  alert:
+    # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
+    # success closes it. A job of its own on a GitHub runner, after the others whatever their
+    # result: the repro job that lost its self-hosted runner on 2026-11-01 never ran a last
+    # step.
+    needs: [repro, variant, bench]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: ./.github/actions/alert
+        with:
+          needs: ${{ toJSON(needs) }}
