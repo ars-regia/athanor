@@ -77,8 +77,9 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
   - `doc_osd.md` (the OSD);
   - `doc_session_daemons.md` SD6: the wallpaper service is specified as a headless `wl_shm` client,
     and the decision to write it in Sal changes that (SD1 names no GTK and is not in the list);
-  - `doc_overview.md`, which names GTK4 and gtk4-layer-shell for the switcher (about lines 92, 94,
-    119, 270 and 386).
+  - `doc_overview.md`, which specifies no window switcher yet: its GTK4 and gtk4-layer-shell lines
+    (about lines 92, 94, 119, 270 and 386) concern the overview, which stays in 1.1, and the switcher
+    is specified there in Sal.
   - `doc_launcher.md`, which binds the launcher and the application library to GTK4 (SH4, about
     lines 7 and 24); `athanor-library` is written in Sal.
 - The specifications whose placements this record changes, and which their next revisions must amend:
