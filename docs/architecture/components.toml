@@ -705,6 +705,15 @@ item = "section 10"
 purpose = "Start-up of a shell unit: crash-loop record, readiness, journal, Landlock"
 
 [[component]]
+path = "system/athanor-wallpaper"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD6"
+purpose = "The wallpaper's logic: hearth, per-output and same-on-all resolution, zoom geometry, regular-file check, cosmic-bg migration"
+
+[[component]]
 path = "system/athanor-auth"
 kind = "crate"
 area = "security"

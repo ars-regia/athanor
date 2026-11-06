@@ -1,0 +1,11 @@
+[package]
+name = "athanor-wallpaper"
+version = "1.0.0"
+edition = "2021"
+description = "The wallpaper's logic: which image each output shows, the zoom geometry, the regular-file check and the migration from cosmic-bg"
+license = "GPL-3.0-or-later"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+libc = { workspace = true }
+tracing = { workspace = true }

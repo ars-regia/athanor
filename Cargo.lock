@@ -794,6 +794,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-wallpaper"
+version = "1.0.0"
+dependencies = [
+ "libc",
+ "tracing",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
