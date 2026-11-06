@@ -77,7 +77,7 @@ class TemplateUnit(unittest.TestCase):
         service = unit(SOURCES / "usr/lib/systemd/system/athanor-unlockd@.service")
         self.assertEqual(dict(service["Service"]), {**POLKIT_HELPER, **ADDITIONS})
 
-    def test_the_socket_accepts_one_helper_per_connection_under_run_athanor(self):
+    def test_the_socket_accepts_one_helper_per_connection_and_never_trips(self):
         socket = unit(SOURCES / "usr/lib/systemd/system/athanor-unlockd.socket")
         self.assertEqual(
             dict(socket["Socket"]),
@@ -85,7 +85,9 @@ class TemplateUnit(unittest.TestCase):
                 "ListenStream": "/run/athanor/unlockd.socket",
                 "Accept": "yes",
                 "RemoveOnStop": "yes",
+                "MaxConnections": "16",
                 "MaxConnectionsPerSource": "4",
+                "TriggerLimitIntervalSec": "0",
             },
         )
         self.assertEqual(dict(socket["Install"]), {"WantedBy": "sockets.target"})
