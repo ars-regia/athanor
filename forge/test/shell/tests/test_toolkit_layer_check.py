@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from toolkit_layer_check import drawn_at, live_surfaces, physical
+from toolkit_layer_check import created_on, drawn_at, live_surfaces, physical
 
 TRACE = """\
 [1.0]  -> zwlr_layer_shell_v1#10.get_layer_surface(new id zwlr_layer_surface_v1#30, wl_surface#29, wl_output#12, 2, "x")
@@ -28,6 +28,24 @@ class TestToolkitLayerCheck(unittest.TestCase):
         self.assertTrue(drawn_at(TRACE, 1.5))
         self.assertFalse(drawn_at(TRACE, 2.0))
         self.assertFalse(drawn_at(TRACE[:4], 1.5))
+
+    def test_a_surface_is_on_the_output_its_wl_output_last_named(self):
+        get = (
+            '[2.{}]  -> zwlr_layer_shell_v1#8.get_layer_surface(new id zwlr_layer_surface_v1#{}, '
+            'wl_surface#{}, wl_output#23, 0, "{}")'
+        )
+        trace = [
+            '[2.0] wl_output#12.name("HEADLESS-1")',
+            '[2.1] wl_output#23.name("HEADLESS-2")',
+            get.format(2, 35, 32, "o"),
+            # The id of an output that left, bound again for another.
+            '[2.3] wl_output#23.name("HEADLESS-3")',
+            get.format(4, 36, 33, "p"),
+        ]
+        self.assertEqual(created_on(trace, "o"), "HEADLESS-2")
+        self.assertEqual(created_on(trace, "p"), "HEADLESS-3")
+        self.assertIsNone(created_on(trace, "q"))
+        self.assertIsNone(created_on(trace[2:], "o"), "an output never named was named")
 
     def test_the_physical_size_rounds_as_the_fractional_scale_protocol_does(self):
         self.assertEqual(physical(101, 150 / 120), 126)
