@@ -294,6 +294,19 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_pid_is_internal_not_gone() {
+        // The fdinfo read comes first: with no /proc mounted its ENOENT is an internal error,
+        // exit 1, never a reaped peer.
+        let checked = check(
+            UID,
+            || Err(io::Error::from(io::ErrorKind::NotFound).into()),
+            |_| unreachable!("no cgroup read without a pid"),
+            |_| Ok(vec![wayland(UID, true)]),
+        );
+        assert!(checked.is_err(), "{checked:?}");
+    }
+
+    #[test]
     fn only_a_reaped_process_reads_as_gone() {
         for errno in [libc::ESRCH, libc::EINVAL, libc::ENODATA, libc::ENOENT] {
             assert!(reaped(&io::Error::from_raw_os_error(errno)), "{errno}");
