@@ -41,6 +41,9 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    cosmic-comp's; in 1.0 it shows every window of every workspace, by icon and title, on Alt+Tab and
    Alt+Shift+Tab. Athanor's own application library, `athanor-library` (`doc_launcher.md` LA1, LA7), is
    in 1.0 too, and cosmic-app-library leaves in the same change as cosmic-launcher and pop-launcher.
+   The launcher itself, `athanor-launcher`, today a GTK4 program, is rewritten in Sal in 1.0, chosen
+   by the maintainer on 2026-11-06 over keeping it in GTK4 until 1.1; the key that opens it when
+   sticky keys are on is decided later (`doc_launcher.md`).
    The overview, `athanor-overview`, and cosmic-workspaces' retirement stay in 1.1 (ADR-0135).
 3. **`athanor-idle` and `athanor-wallpaper` (`doc_session_daemons.md`) are in 1.0, and so is the
    replacement of every role of cosmic-settings-daemon.** This brings forward their owners per SD2:
@@ -54,7 +57,7 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    lock-aware `athanor-usbguard-policy` replaces `athanor-usbguard-hook`. They were in 1.1 only because the
    lock was. Decided by the maintainer on 2026-11-06 by the option "Both in 1.0".
 6. **New surfaces are written in Sal, not GTK4:** the lock, the agent's dialog, the switcher, the
-   application library, the OSD and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly.
+   launcher, the application library, the OSD and the wallpaper. Daemons with no surface, such as `athanor-idle`, use wayland-client directly.
 
 ## Alternatives rejected
 
@@ -81,7 +84,7 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
     (about lines 92, 94, 119, 270 and 386) concern the overview, which stays in 1.1, and the switcher
     is specified there in Sal.
   - `doc_launcher.md`, which binds the launcher and the application library to GTK4 (SH4, about
-    lines 7, 24 and 26); `athanor-library` is written in Sal.
+    lines 7, 24 and 26); `athanor-launcher` and `athanor-library` are written in Sal.
 - The specifications whose placements this record changes, and which their next revisions must amend:
   - `doc_own_stack.md`: the status line (line 3) and the 1.1 placement of the window switcher (about
     lines 423, 666, 778, 917 to 920, 940 and 1205) and of the application library after the switch
