@@ -23,6 +23,15 @@ pub struct Inhibitor {
     pub reason: String,
 }
 
+/// Why `remove` changed nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoveError {
+    /// The cookie is not live.
+    UnknownCookie,
+    /// The caller is not the peer that created the inhibitor.
+    NotOwner,
+}
+
 #[derive(Debug, Default)]
 pub struct Inhibitors {
     table: BTreeMap<u32, Inhibitor>,
@@ -49,9 +58,14 @@ impl Inhibitors {
         None
     }
 
-    /// `UnInhibit` / `Uninhibit`: `None` for a cookie that is not live.
-    pub fn remove(&mut self, cookie: u32) -> Option<Inhibitor> {
-        self.table.remove(&cookie)
+    /// `UnInhibit` / `Uninhibit`, accepted only from the peer that created the inhibitor;
+    /// any other caller is refused and nothing changes.
+    pub fn remove(&mut self, cookie: u32, caller: &str) -> Result<Inhibitor, RemoveError> {
+        match self.table.get(&cookie) {
+            None => Err(RemoveError::UnknownCookie),
+            Some(i) if i.owner != caller => Err(RemoveError::NotOwner),
+            Some(_) => self.table.remove(&cookie).ok_or(RemoveError::UnknownCookie),
+        }
     }
 
     /// An owner left the bus: its inhibitors end, and are returned for the journal.
@@ -111,7 +125,7 @@ mod tests {
         let a = t.add(inh(Kind::Screen, ":1.1"));
         let b = t.add(inh(Kind::Screen, ":1.1"));
         assert_eq!((a, b), (Some(1), Some(2)));
-        t.remove(1);
+        let _ = t.remove(1, ":1.1");
         assert_eq!(t.add(inh(Kind::Screen, ":1.1")), Some(3));
     }
 
@@ -128,8 +142,22 @@ mod tests {
     fn unknown_cookie_removes_nothing() {
         let mut t = Inhibitors::new();
         t.add(inh(Kind::Screen, ":1.1"));
-        assert_eq!(t.remove(99), None);
+        assert_eq!(
+            t.remove(99, ":1.1").unwrap_err(),
+            RemoveError::UnknownCookie
+        );
         assert_eq!(t.len(), 1);
+    }
+
+    #[test]
+    fn only_the_creating_peer_can_remove() {
+        let mut t = Inhibitors::new();
+        let c = t.add(inh(Kind::Screen, ":1.1")).unwrap();
+        assert_eq!(t.remove(c, ":1.2").unwrap_err(), RemoveError::NotOwner);
+        assert_eq!(t.len(), 1);
+        assert_eq!(t.hold(), Hold::All);
+        assert!(t.remove(c, ":1.1").is_ok());
+        assert!(t.is_empty());
     }
 
     #[test]
@@ -137,7 +165,7 @@ mod tests {
         let mut t = Inhibitors::new();
         let c = t.add(inh(Kind::Screen, ":1.1")).unwrap();
         assert_eq!(t.hold(), Hold::All);
-        assert_eq!(t.remove(c).unwrap().app_id, "org.example.App");
+        assert_eq!(t.remove(c, ":1.1").unwrap().app_id, "org.example.App");
         assert_eq!(t.hold(), Hold::None);
     }
 

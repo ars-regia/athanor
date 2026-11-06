@@ -6,6 +6,6 @@ pub mod inhibitors;
 pub mod sequence;
 pub mod timers;
 
-pub use inhibitors::{Inhibitor, Inhibitors, Kind};
+pub use inhibitors::{Inhibitor, Inhibitors, Kind, RemoveError};
 pub use sequence::{Action, Event, Phase, Sequence, Timer, FADE, LOCK_DELAY};
 pub use timers::{choose, Config, Hold, Timeouts};

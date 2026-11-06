@@ -27,8 +27,11 @@ pub enum Event {
     SuspendIdled,
     /// `resumed` of the blank notification.
     Resumed,
-    /// A timer the sequence armed has elapsed.
-    Timer(Timer),
+    /// `Timer::Fade` has elapsed.
+    FadeDone,
+    /// `Timer::LockDelay` has elapsed. `session_locked` is the `LockedHint` read just now: a
+    /// session that locked during the fade is not asked to lock again.
+    LockDue { session_locked: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,7 +107,7 @@ impl Sequence {
                 },
                 Phase::Awake,
             ) => self.blank(session_locked, reduced_motion),
-            (Event::Timer(Timer::Fade), Phase::Fading) => {
+            (Event::FadeDone, Phase::Fading) => {
                 self.phase = Phase::Off;
                 self.lock = Lock::Pending;
                 vec![
@@ -115,9 +118,13 @@ impl Sequence {
                     },
                 ]
             }
-            (Event::Timer(Timer::LockDelay), Phase::Off) if self.lock == Lock::Pending => {
+            (Event::LockDue { session_locked }, Phase::Off) if self.lock == Lock::Pending => {
                 self.lock = Lock::Settled;
-                vec![Action::LockSession]
+                if session_locked {
+                    Vec::new()
+                } else {
+                    vec![Action::LockSession]
+                }
             }
             (Event::Resumed, _) => self.resume(),
             // A duplicate `idled`, or a timer that was cancelled in flight.
@@ -135,8 +142,7 @@ impl Sequence {
         }
         self.overlay = true;
         if reduced_motion {
-            // SD4 says "opaque at once" and "at the end every output is set to off";
-            // the outputs go off at once here (open point reported with I1).
+            // Opaque at once, the outputs off at once, the lock request 500 ms later.
             self.phase = Phase::Off;
             self.lock = Lock::Pending;
             return vec![
@@ -210,7 +216,7 @@ mod tests {
         );
         assert_eq!(s.phase(), Phase::Fading);
         assert_eq!(
-            s.handle(Event::Timer(Timer::Fade)),
+            s.handle(Event::FadeDone),
             vec![
                 Action::OutputsOff,
                 Action::Arm {
@@ -220,10 +226,16 @@ mod tests {
             ]
         );
         assert_eq!(
-            s.handle(Event::Timer(Timer::LockDelay)),
+            s.handle(Event::LockDue {
+                session_locked: false
+            }),
             vec![Action::LockSession]
         );
-        assert!(s.handle(Event::Timer(Timer::LockDelay)).is_empty());
+        assert!(s
+            .handle(Event::LockDue {
+                session_locked: false
+            })
+            .is_empty());
     }
 
     #[test]
@@ -238,7 +250,12 @@ mod tests {
         // The cancelled timer fires in flight: ignored, no lock follows.
         assert!(run(
             &mut s,
-            &[Event::Timer(Timer::Fade), Event::Timer(Timer::LockDelay)]
+            &[
+                Event::FadeDone,
+                Event::LockDue {
+                    session_locked: false
+                }
+            ]
         )
         .is_empty());
     }
@@ -246,7 +263,7 @@ mod tests {
     #[test]
     fn resumed_after_off_before_the_lock_request_cancels_the_lock() {
         let mut s = Sequence::new();
-        run(&mut s, &[BLANK, Event::Timer(Timer::Fade)]);
+        run(&mut s, &[BLANK, Event::FadeDone]);
         assert_eq!(
             s.handle(Event::Resumed),
             vec![
@@ -255,7 +272,11 @@ mod tests {
                 Action::OutputsOn
             ]
         );
-        assert!(s.handle(Event::Timer(Timer::LockDelay)).is_empty());
+        assert!(s
+            .handle(Event::LockDue {
+                session_locked: false
+            })
+            .is_empty());
     }
 
     #[test]
@@ -265,8 +286,10 @@ mod tests {
             &mut s,
             &[
                 BLANK,
-                Event::Timer(Timer::Fade),
-                Event::Timer(Timer::LockDelay),
+                Event::FadeDone,
+                Event::LockDue {
+                    session_locked: false,
+                },
             ],
         );
         assert_eq!(
@@ -292,8 +315,32 @@ mod tests {
             reduced_motion: false,
         };
         assert_eq!(s.handle(locked), vec![Action::OutputsOff]);
-        assert!(s.handle(Event::Timer(Timer::LockDelay)).is_empty());
+        assert!(s
+            .handle(Event::LockDue {
+                session_locked: false
+            })
+            .is_empty());
         assert_eq!(s.handle(Event::Resumed), vec![Action::OutputsOn]);
+    }
+
+    #[test]
+    fn a_session_that_locks_during_the_fade_is_not_asked_to_lock() {
+        let mut s = Sequence::new();
+        run(&mut s, &[BLANK, Event::FadeDone]);
+        assert!(s
+            .handle(Event::LockDue {
+                session_locked: true
+            })
+            .is_empty());
+        assert!(s
+            .handle(Event::LockDue {
+                session_locked: false
+            })
+            .is_empty());
+        assert_eq!(
+            s.handle(Event::Resumed),
+            vec![Action::RemoveOverlay, Action::OutputsOn]
+        );
     }
 
     #[test]
@@ -310,7 +357,9 @@ mod tests {
             }
         );
         assert_eq!(
-            s.handle(Event::Timer(Timer::LockDelay)),
+            s.handle(Event::LockDue {
+                session_locked: false
+            }),
             vec![Action::LockSession]
         );
     }
