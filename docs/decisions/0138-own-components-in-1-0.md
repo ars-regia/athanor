@@ -39,9 +39,9 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
    [ADR-0085](0085-keyring-prompter-secret-exchange-source.md), A2-31 / [ADR-0068](0068-session-budget-and-prompter-timing.md)).
 2. **Athanor's own window switcher on Alt+Tab is in 1.0** (`doc_overview.md`). Then one change makes
    `athanor-launcher` the default and removes cosmic-launcher and pop-launcher, as LA12, A2-24 and
-   ADR-0061 require. The switcher is a Sal client, `athanor-switcher`, that serves Sulphur's session and
-   cosmic-comp's; in 1.0 it shows every window of every workspace, by icon and title, on Alt+Tab and
-   Alt+Shift+Tab. Athanor's own application library, `athanor-library` (`doc_launcher.md` LA1, LA7), is
+   ADR-0061 require. As `doc_overview.md` section 8 (OV20 to OV28, approved with #1020) specifies, the switcher is a
+   Sal client, `athanor-switcher`, that serves Sulphur's session and cosmic-comp's, and in 1.0 it
+   shows every window of every workspace, by icon and title, on Alt+Tab and Alt+Shift+Tab. Athanor's own application library, `athanor-library` (`doc_launcher.md` LA1, LA7), is
    in 1.0 too, and cosmic-app-library leaves in the same change as cosmic-launcher and pop-launcher.
    The launcher itself, `athanor-launcher`, today a GTK4 program, is rewritten in Sal in 1.0, chosen
    by the maintainer on 2026-11-06 over keeping it in GTK4 until 1.1; the key that opens it when
@@ -88,7 +88,7 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
 - Each step is judged on the reference laptop, as the specifications say.
 - The specifications that name GTK for these surfaces get their own revisions before the code, under
   ADR-0074. This record rewrites none of them:
-  - `doc_lock_and_prompts.md` LP2, LP14, LP15 and LP17 (the lock and the agent) and its line 290
+  - `doc_lock_and_prompts.md` LP2, LP14, LP15 and LP17 (the lock and the agent) and its line 309
     ("LP18 step 4 for 1.1"): revised in #1019 (revision 4);
   - `doc_osd.md` (the OSD): revised in #1018 (revision 3);
   - `doc_overview.md`: revised in #1020 (revision 3 specifies `athanor-switcher`, section 8, OV20 to
