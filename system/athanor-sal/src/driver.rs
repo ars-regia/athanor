@@ -232,7 +232,7 @@ pub trait Application {
     /// The first frame of `surface` was committed: called in the turn of the event loop that
     /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
     /// compositor may withhold from a surface it does not show. Where a `Type=notify`
-    /// service tells systemd it is ready.
+    /// service tells systemd it is ready. Not called for a surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
     /// The layer surface `surface` closed without the application asking: the compositor closed
@@ -386,9 +386,15 @@ fn run_on(
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
         }
-        for surface in std::mem::take(&mut app.shell.first_frames) {
-            app.application.drawn(&mut app.shell, surface);
-        }
+        // A surface closed since its first frame, by the compositor, with its output or by an
+        // earlier `drawn`, is not reported drawn.
+        let first_frames = std::mem::take(&mut app.shell.first_frames);
+        each_open(
+            &mut app,
+            first_frames,
+            |app, surface| app.shell.ui(surface).is_some(),
+            |app, surface| app.application.drawn(&mut app.shell, surface),
+        );
         app.closed_by_application();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
@@ -969,6 +975,21 @@ impl Shell {
 fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl FnMut(&mut T, S)) {
     while let Some(surface) = next(state) {
         lost(state, surface);
+    }
+}
+
+/// Calls `call` on each of `surfaces` that `open` finds open in `state` when its turn comes, so
+/// that one closed before, or by an earlier `call`, is skipped.
+fn each_open<T, S: Copy>(
+    state: &mut T,
+    surfaces: Vec<S>,
+    open: impl Fn(&T, S) -> bool,
+    mut call: impl FnMut(&mut T, S),
+) {
+    for surface in surfaces {
+        if open(state, surface) {
+            call(state, surface);
+        }
     }
 }
 
@@ -2613,6 +2634,24 @@ mod tests {
         );
         assert_eq!(state.1, [1], "a surface closed at the application's asking was lost");
         assert_eq!(state.0, [(3, 8)]);
+    }
+
+    #[test]
+    fn a_surface_closed_before_its_turn_is_not_reported_drawn() {
+        // Surfaces 1, 2 and 3 drew their first frame; 2 closed since, and drawing 1 closes 3.
+        let mut state = (vec![1, 3], Vec::new());
+        each_open(
+            &mut state,
+            vec![1, 2, 3],
+            |(open, _), surface| open.contains(&surface),
+            |(open, told), surface| {
+                told.push(surface);
+                if surface == 1 {
+                    open.retain(|s| *s != 3);
+                }
+            },
+        );
+        assert_eq!(state.1, [1], "a closed surface was reported drawn");
     }
 
     #[test]
