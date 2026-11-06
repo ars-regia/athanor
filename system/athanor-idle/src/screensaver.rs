@@ -2,12 +2,16 @@
 //! table: the logic stays in [`Inhibitors`], and `inhibitors.json` in [`crate::store`].
 //! `os.athanor.Idle1.InhibitSuspend` is not here (pull request I2b).
 
-use crate::inhibitors::{Inhibitor, Inhibitors, Kind, RemoveError};
+use crate::inhibitors::{
+    truncate, Inhibitor, Inhibitors, Kind, RemoveError, MAX_ENTRIES, MAX_PER_OWNER, MAX_TEXT,
+};
 use crate::store;
 use crate::timers::Hold;
 use futures_util::StreamExt;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tokio::sync::watch;
 use zbus::fdo::{self, DBusProxy, RequestNameFlags};
 use zbus::message::Header;
@@ -54,18 +58,29 @@ impl ScreenSaver {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
-        let app_id = app_id_of(conn, sender.clone().into()).await;
-        let mut table = self.0.lock();
-        let cookie = table
-            .add(Inhibitor {
-                kind: Kind::Screen,
-                owner: sender.to_string(),
-                app_id: app_id.clone(),
-                reason: reason.to_owned(),
-            })
-            .ok_or_else(|| fdo::Error::Failed("no cookie left".into()))?;
-        tracing::info!(cookie, app_id, application_name, reason, "inhibit");
-        self.0.changed(&table);
+        let owner = sender.to_string();
+        let app_id = truncate(&app_id_of(conn, sender.clone().into()).await, MAX_TEXT);
+        let reason = truncate(reason, MAX_TEXT);
+        let cookie = {
+            let mut table = self.0.lock();
+            if table.count_owner(&owner) >= MAX_PER_OWNER || table.len() >= MAX_ENTRIES {
+                return Err(fdo::Error::LimitsExceeded("too many inhibitors".into()));
+            }
+            let cookie = table
+                .add(Inhibitor {
+                    kind: Kind::Screen,
+                    owner,
+                    app_id: app_id.clone(),
+                    reason: reason.clone(),
+                })
+                .ok_or_else(|| fdo::Error::Failed("no cookie left".into()))?;
+            tracing::info!(cookie, app_id, application_name, reason, "inhibit");
+            self.0.changed(&table);
+            cookie
+        };
+        // The caller may have left while the application id was read: its signal came
+        // before the entry existed, so look again now that it does.
+        reconcile(conn, &self.0).await;
         Ok(cookie)
     }
 
@@ -88,6 +103,39 @@ impl ScreenSaver {
             )),
         }
     }
+}
+
+/// Drops the inhibitors whose owner is no longer on the bus. A failed question changes
+/// nothing; the next reconciliation asks again.
+async fn reconcile(conn: &Connection, state: &State) {
+    let Ok(bus) = DBusProxy::new(conn).await else {
+        return;
+    };
+    let owners: BTreeSet<String> = state.lock().iter().map(|(_, i)| i.owner.clone()).collect();
+    for owner in owners {
+        let Ok(name) = BusName::try_from(owner.as_str()) else {
+            continue;
+        };
+        if bus.name_has_owner(name).await == Ok(false) {
+            let mut table = state.lock();
+            for i in table.remove_owner(&owner) {
+                tracing::info!(
+                    app_id = i.app_id,
+                    reason = i.reason,
+                    "owner gone, uninhibit"
+                );
+            }
+            state.changed(&table);
+        }
+    }
+}
+
+/// A unique name as the bus hands them out, `:N.M`; a well-known name is never an owner.
+fn is_unique_form(name: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    name.strip_prefix(':')
+        .and_then(|r| r.split_once('.'))
+        .is_some_and(|(a, b)| digits(a) && digits(b))
 }
 
 /// The application id of the caller's unit, empty outside an application unit.
@@ -155,6 +203,14 @@ pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<H
     match store::load(&file) {
         Ok(entries) => {
             for (cookie, i) in entries {
+                if !is_unique_form(&i.owner) {
+                    tracing::warn!(
+                        cookie,
+                        owner = i.owner,
+                        "owner is not a unique name, dropped"
+                    );
+                    continue;
+                }
                 let present = match BusName::try_from(i.owner.as_str()) {
                     Ok(n) => bus.name_has_owner(n).await.unwrap_or(false),
                     Err(_) => false,
@@ -174,7 +230,6 @@ pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<H
         file,
         hold,
     });
-    state.changed(&state.lock());
 
     for path in PATHS {
         conn.object_server()
@@ -183,20 +238,36 @@ pub async fn serve(conn: &Connection, file: PathBuf) -> Result<watch::Receiver<H
     }
     conn.request_name_with_flags(NAME, RequestNameFlags::DoNotQueue.into())
         .await?;
+    // Only the instance that owns the name writes the file.
+    state.changed(&state.lock());
 
+    // zbus queues 64 signals per stream and, when the queue is full, makes its socket reader
+    // wait for the consumer: nothing is dropped. A stream error, and every 60 s, look at the
+    // owners again all the same.
+    let conn = conn.clone();
     tokio::spawn(async move {
-        while let Some(signal) = left.next().await {
-            let Ok(args) = signal.args() else { continue };
-            if args.new_owner().is_none() && matches!(args.name(), BusName::Unique(_)) {
-                let mut table = state.lock();
-                for i in table.remove_owner(args.name().as_str()) {
-                    tracing::info!(
-                        app_id = i.app_id,
-                        reason = i.reason,
-                        "owner left, uninhibit"
-                    );
-                }
-                state.changed(&table);
+        let mut tick = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            tokio::select! {
+                signal = left.next() => match signal {
+                    None => break,
+                    Some(signal) => match signal.args() {
+                        Ok(args) => {
+                            if args.new_owner().is_none() && matches!(args.name(), BusName::Unique(_)) {
+                                let mut table = state.lock();
+                                for i in table.remove_owner(args.name().as_str()) {
+                                    tracing::info!(app_id = i.app_id, reason = i.reason, "owner left, uninhibit");
+                                }
+                                state.changed(&table);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("bad NameOwnerChanged: {e}");
+                            reconcile(&conn, &state).await;
+                        }
+                    },
+                },
+                _ = tick.tick() => reconcile(&conn, &state).await,
             }
         }
     });
@@ -341,6 +412,67 @@ mod tests {
         // The owner leaving the bus drops its inhibitors.
         a.close().await.unwrap();
         settle(&mut rx2, Hold::None).await;
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_leaves_at_once_leaves_no_orphan() {
+        let bus = Bus::start("orphan");
+        let file = bus.dir.join("inhibitors.json");
+        let server = bus.connect().await;
+        let rx = serve(&server, file.clone()).await.unwrap();
+        for _ in 0..5 {
+            let c = bus.connect().await;
+            let msg = zbus::Message::method_call(PATHS[0], "Inhibit")
+                .unwrap()
+                .destination(NAME)
+                .unwrap()
+                .interface(NAME)
+                .unwrap()
+                .with_flags(zbus::message::Flags::NoReplyExpected)
+                .unwrap()
+                .build(&("app", "fire and forget"))
+                .unwrap();
+            c.send(&msg).await.unwrap();
+            c.close().await.unwrap();
+        }
+        // Handlers run in tasks: give them time, then nothing may hold.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(*rx.borrow(), Hold::None);
+        assert!(!fs::read_to_string(&file)
+            .unwrap()
+            .contains("fire and forget"));
+    }
+
+    #[tokio::test]
+    async fn bounds_and_a_forged_well_known_owner() {
+        let bus = Bus::start("bounds");
+        let file = bus.dir.join("inhibitors.json");
+        fs::write(
+            &file,
+            br#"{"version":1,"inhibitors":[{"cookie":7,"owner":"org.freedesktop.DBus","app_id":"x","kind":"idle","reason":"forged"}]}"#,
+        )
+        .unwrap();
+        let server = bus.connect().await;
+        let rx = serve(&server, file.clone()).await.unwrap();
+        assert_eq!(*rx.borrow(), Hold::None);
+        assert!(!fs::read_to_string(&file).unwrap().contains("forged"));
+
+        let a = bus.connect().await;
+        for _ in 0..MAX_PER_OWNER {
+            call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        }
+        let err = call(&a, PATHS[0], "Inhibit", &("app", "r"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("LimitsExceeded"), "{err}");
+    }
+
+    #[test]
+    fn only_dotted_numeric_unique_names_are_owners() {
+        assert!(is_unique_form(":1.5"));
+        for bad in ["org.freedesktop.DBus", ":1", ":a.b", ":1.", "", ":.1"] {
+            assert!(!is_unique_form(bad), "{bad}");
+        }
     }
 
     #[test]
