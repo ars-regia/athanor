@@ -224,8 +224,7 @@ mod tests {
     #[test]
     fn a_failure_is_a_verdict_and_names_the_fingerprint_service() {
         let mut stream = helper(b"FAILURE\n");
-        let verdict =
-            transact(&mut stream, Service::Fingerprint, type_in(b"")).expect("a verdict");
+        let verdict = transact(&mut stream, Service::Fingerprint, type_in(b"")).expect("a verdict");
         assert!(!verdict.success);
         assert_eq!(stream.writes[0], b"athanor-lock-fingerprint");
     }
@@ -271,7 +270,13 @@ mod tests {
             Service::from_selector(b"athanor-lock-fingerprint"),
             Some(Service::Fingerprint)
         );
-        for line in [&b"athanor-lock "[..], b"login", b"", b"ATHANOR-LOCK", b"athanor-lock\r"] {
+        for line in [
+            &b"athanor-lock "[..],
+            b"login",
+            b"",
+            b"ATHANOR-LOCK",
+            b"athanor-lock\r",
+        ] {
             assert_eq!(Service::from_selector(line), None);
         }
         assert!(Service::Fingerprint.name().len() < MAX_SELECTOR);
