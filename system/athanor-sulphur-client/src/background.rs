@@ -57,16 +57,18 @@ fn read_in(dir: &Path) -> Option<Background> {
     // A sorted order, so the cap below keeps the same entries at every start.
     names.sort();
     let mut found = Background::default();
+    let mut capped = false;
     for name in names {
         let path = dir.join(&name);
         if name == "all" {
             found.all = source_of(&name, &path);
         } else if let Some(output) = name.strip_prefix("output.") {
             if found.outputs.len() == MAX_OUTPUTS {
-                tracing::warn!(
-                    "{COMPONENT} has more than {MAX_OUTPUTS} output entries; the rest are skipped"
-                );
-                break;
+                if !capped {
+                    tracing::warn!("{COMPONENT} has more than {MAX_OUTPUTS} output entries; the rest are skipped");
+                    capped = true;
+                }
+                continue;
             }
             if let Some(source) = source_of(&name, &path) {
                 found.outputs.insert(output.to_owned(), source);
@@ -149,9 +151,11 @@ fn parse_source(text: &str) -> Option<Source> {
                 c @ ('"' | '\\' | '\'') => c,
                 'x' => {
                     let hex: String = chars.by_ref().take(2).collect();
-                    let byte = u8::from_str_radix(&hex, 16)
-                        .ok()
-                        .filter(|b| hex.len() == 2 && *b < 0x80)?;
+                    // Exactly two hex digits: from_str_radix would also take a leading `+`.
+                    if hex.len() != 2 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                        return None;
+                    }
+                    let byte = u8::from_str_radix(&hex, 16).ok().filter(|b| *b < 0x80)?;
                     char::from(byte)
                 }
                 'u' => {
@@ -244,6 +248,8 @@ mod tests {
             Some(Source::Path("/a/\u{e9}\rA\u{1F600}".into()))
         );
         for bad in [
+            r#"(source: Path("/a\x+5"))"#,
+            r#"(source: Path("/a\x4"))"#,
             r#"(source: Path("/a\u{110000}"))"#,
             r#"(source: Path("/a\u{zz}"))"#,
             r#"(source: Path("/a\q"))"#,
@@ -280,6 +286,7 @@ mod tests {
     fn output_entries_are_capped_in_name_order() {
         let dir = std::env::temp_dir().join(format!("athanor-bg-cap-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("same-on-all"), "false").unwrap();
         for n in 0..MAX_OUTPUTS + 5 {
             std::fs::write(dir.join(format!("output.O{n:03}")), SHIPPED).unwrap();
         }
@@ -287,5 +294,7 @@ mod tests {
         assert_eq!(found.outputs.len(), MAX_OUTPUTS);
         assert!(found.outputs.contains_key("O000"));
         assert!(!found.outputs.contains_key(&format!("O{:03}", MAX_OUTPUTS)));
+        // `same-on-all` sorts after the outputs and is still read.
+        assert_eq!(found.same_on_all, Some(false));
     }
 }
