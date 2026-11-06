@@ -74,8 +74,9 @@ extern "C" {
         pam_conversation: *const PamConv,
         pamh: *mut *mut PamHandle,
     ) -> c_int;
-    /// Linux-PAM 1.4 and later: the service files are read from `confdir`. Only the tests pass
-    /// one, a directory of their own control stacks.
+    /// Linux-PAM 1.4 and later: the service files are read from `confdir`. Only the tests
+    /// declare it, so the helper neither links it nor can pick a stack from a directory.
+    #[cfg(test)]
     fn pam_start_confdir(
         service_name: *const c_char,
         user: *const c_char,
@@ -142,36 +143,53 @@ pub fn authenticate<R: Read, W: Write>(
     user: &CStr,
     conversation: &mut Conversation<R, W>,
 ) -> Transaction {
-    transact(user, None, conversation)
+    let service = service_name(conversation.service);
+    transact(user, conversation, |conv, handle| {
+        // SAFETY: the strings are NUL-terminated and live for the call; `transact` passes a
+        // `conv` that outlives the transaction and the handle it ends with `pam_end`.
+        unsafe { pam_start(service.as_ptr(), user.as_ptr(), conv, handle) }
+    })
 }
 
-fn transact<R: Read, W: Write>(
+/// As [`authenticate`], with the service files of `confdir`: the tests' own control stacks.
+#[cfg(test)]
+fn authenticate_in<R: Read, W: Write>(
     user: &CStr,
-    confdir: Option<&CStr>,
+    confdir: &CStr,
     conversation: &mut Conversation<R, W>,
 ) -> Transaction {
     let service = service_name(conversation.service);
+    transact(user, conversation, |conv, handle| {
+        // SAFETY: as for `pam_start` in `authenticate`; `confdir` is NUL-terminated and
+        // lives for the call.
+        unsafe {
+            pam_start_confdir(
+                service.as_ptr(),
+                user.as_ptr(),
+                conv,
+                confdir.as_ptr(),
+                handle,
+            )
+        }
+    })
+}
+
+/// Runs the transaction `start` begins: it gets the conversation and the handle to fill, and
+/// returns pam_start's status.
+fn transact<R: Read, W: Write>(
+    user: &CStr,
+    conversation: &mut Conversation<R, W>,
+    start: impl FnOnce(&PamConv, &mut *mut PamHandle) -> c_int,
+) -> Transaction {
+    // `conv` and the conversation it points to outlive the transaction, which ends with
+    // `pam_end` below before this function returns; nothing else touches the conversation
+    // meanwhile.
     let conv = PamConv {
         conv: Some(converse::<R, W>),
         appdata_ptr: ptr::from_mut(conversation).cast(),
     };
     let mut handle: *mut PamHandle = ptr::null_mut();
-    let start = match confdir {
-        // SAFETY: the strings are NUL-terminated and live for the call; `conv` and the
-        // conversation it points to outlive the transaction, which ends with `pam_end` below
-        // before this function returns, and nothing else touches the conversation meanwhile.
-        None => unsafe { pam_start(service.as_ptr(), user.as_ptr(), &conv, &mut handle) },
-        // SAFETY: as for `pam_start`; `confdir` is NUL-terminated and lives for the call.
-        Some(dir) => unsafe {
-            pam_start_confdir(
-                service.as_ptr(),
-                user.as_ptr(),
-                &conv,
-                dir.as_ptr(),
-                &mut handle,
-            )
-        },
-    };
+    let start = start(&conv, &mut handle);
     let mut transaction = Transaction {
         start,
         authenticate: None,
@@ -460,7 +478,7 @@ mod tests {
 
     fn run(confdir: &Confdir, service: Service, input: &'static [u8]) -> (Transaction, Vec<u8>) {
         let mut conversation = Conversation::new(input, Vec::new(), service, 1000);
-        let transaction = transact(c"athanor-test", Some(&confdir.path()), &mut conversation);
+        let transaction = authenticate_in(c"athanor-test", &confdir.path(), &mut conversation);
         (transaction, conversation.writer)
     }
 
