@@ -48,7 +48,13 @@ Decided by the maintainer on 2026-11-06. Each is a placement under ADR-0135 deci
 3. **`athanor-idle` and `athanor-wallpaper` (`doc_session_daemons.md`) are in 1.0, and so is the
    replacement of every role of cosmic-settings-daemon.** This brings forward their owners per SD2:
    `athanor-osd` (`doc_osd.md`), the accessibility service (`doc_accessibility.md`, `athanor-a11y`) and
-   the session service (`athanor-sessiond`). cosmic-idle, cosmic-bg and cosmic-settings-daemon leave
+   the session service (`athanor-sessiond`), and also the keyboard layout switch and xkb seed of
+   `athanor-shelld` (`doc_languages.md` LN9) and the theme service `athanor-style`
+   (`doc_visual_language.md` VL4), placed by the maintainer on 2026-11-06 because without them
+   Super+Space, the layout seed and the theme would regress when the daemon leaves. External-monitor
+   brightness over DDC/CI, which cosmic-settings-daemon 1.11 sets when no backlight exists, moves to
+   `athanor-osd` through the brightness model of `athanor-services` (`doc_session_daemons.md`).
+   cosmic-idle, cosmic-bg and cosmic-settings-daemon leave
    in 1.0. This amends ADR-0103 D13 for those three. cosmic-settings and cosmic-workspaces are not
    placed by this record.
 4. **Sulphur's wlr-output-management is completed in 1.0:** modes, position, enable and adaptive
