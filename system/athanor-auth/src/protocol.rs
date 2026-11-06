@@ -1,7 +1,8 @@
 //! The line protocol of polkit-agent-helper-1, which `athanor-unlockd` speaks too (LP8): the
 //! helper writes `PAM_PROMPT_ECHO_OFF <text>`, `PAM_PROMPT_ECHO_ON <text>`, `PAM_ERROR_MSG
 //! <text>` or `PAM_TEXT_INFO <text>`, then `SUCCESS` or `FAILURE`; the client writes one line
-//! per prompt. The text is escaped as glib's `g_strescape` does and read back as
+//! per prompt. `athanor-unlockd` adds a third verdict, `UNAVAILABLE`, for a fingerprint
+//! transaction that ended uncounted: no reader, or no enrolled finger (LP8). The text is escaped as glib's `g_strescape` does and read back as
 //! `g_strcompress` does; answers travel unescaped.
 
 use crate::MAX_LINE;
@@ -31,6 +32,7 @@ impl Kind {
 /// The verdict lines, newline included.
 pub const SUCCESS: &[u8] = b"SUCCESS\n";
 pub const FAILURE: &[u8] = b"FAILURE\n";
+pub const UNAVAILABLE: &[u8] = b"UNAVAILABLE\n";
 
 /// A line of the helper, parsed. PAM's messages are not secrets, so they are plain strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +43,7 @@ pub enum Line {
     Info(String),
     Success,
     Failure,
+    Unavailable,
 }
 
 /// Why a line of the helper was refused.
@@ -67,6 +70,7 @@ pub fn parse(line: &[u8]) -> Result<Line, ProtocolError> {
     match line {
         b"SUCCESS" => return Ok(Line::Success),
         b"FAILURE" => return Ok(Line::Failure),
+        b"UNAVAILABLE" => return Ok(Line::Unavailable),
         _ => {}
     }
     let space = line
@@ -175,7 +179,7 @@ mod tests {
 
     #[test]
     fn every_line_kind_parses() {
-        let cases: [(&[u8], Line); 6] = [
+        let cases: [(&[u8], Line); 7] = [
             (
                 b"PAM_PROMPT_ECHO_OFF Password: ",
                 Line::PromptSecret("Password: ".into()),
@@ -194,6 +198,7 @@ mod tests {
             ),
             (b"SUCCESS", Line::Success),
             (b"FAILURE", Line::Failure),
+            (b"UNAVAILABLE", Line::Unavailable),
         ];
         for (line, want) in cases {
             assert_eq!(parse(line), Ok(want), "{}", String::from_utf8_lossy(line));
@@ -214,6 +219,8 @@ mod tests {
             b"SUCCESS ",
             b"FAILURE\r",
             b"SUCCESSFUL",
+            b"UNAVAILABLE ",
+            b"unavailable",
             b"",
             b" SUCCESS",
         ] {

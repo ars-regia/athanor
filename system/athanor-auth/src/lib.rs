@@ -12,7 +12,9 @@ mod protocol;
 use std::io::{self, Read, Write};
 
 pub use buffer::{read_line, read_line_within, Full, ReadError, Secret};
-pub use protocol::{encode, escape, parse, unescape, Kind, Line, ProtocolError, FAILURE, SUCCESS};
+pub use protocol::{
+    encode, escape, parse, unescape, Kind, Line, ProtocolError, FAILURE, SUCCESS, UNAVAILABLE,
+};
 
 /// The bound of a line in both directions, its newline included (LP8).
 pub const MAX_LINE: usize = 4096;
@@ -45,6 +47,28 @@ impl Service {
     }
 }
 
+/// The verdict of a transaction (LP8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    Success,
+    /// Refused, or a finger that did not match: a counted failure.
+    Failure,
+    /// A fingerprint transaction that ended uncounted, with no reader or no enrolled finger:
+    /// the lock offers the finger again only on a user action or a new reader.
+    Unavailable,
+}
+
+impl Outcome {
+    /// The verdict line, newline included.
+    pub const fn line(self) -> &'static [u8] {
+        match self {
+            Outcome::Success => SUCCESS,
+            Outcome::Failure => FAILURE,
+            Outcome::Unavailable => UNAVAILABLE,
+        }
+    }
+}
+
 /// A question PAM asks, in PAM's own words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Prompt {
@@ -57,7 +81,7 @@ pub enum Prompt {
 /// How a transaction ended, with the messages PAM sent on the way.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Verdict {
-    pub success: bool,
+    pub outcome: Outcome,
     /// PAM_ERROR_MSG texts, in order.
     pub errors: Vec<String>,
     /// PAM_TEXT_INFO texts, in order.
@@ -114,7 +138,7 @@ where
     let mut line = Secret::new();
     let mut reply = Secret::new();
     let mut verdict = Verdict {
-        success: false,
+        outcome: Outcome::Failure,
         errors: Vec::new(),
         info: Vec::new(),
     };
@@ -122,10 +146,14 @@ where
         read_line(stream, &mut line)?;
         let prompt = match parse(line.as_bytes())? {
             Line::Success => {
-                verdict.success = true;
+                verdict.outcome = Outcome::Success;
                 return Ok(verdict);
             }
             Line::Failure => return Ok(verdict),
+            Line::Unavailable => {
+                verdict.outcome = Outcome::Unavailable;
+                return Ok(verdict);
+            }
             Line::Error(text) => {
                 verdict.errors.push(text);
                 continue;
@@ -212,7 +240,7 @@ mod tests {
         assert_eq!(
             verdict,
             Verdict {
-                success: true,
+                outcome: Outcome::Success,
                 errors: vec!["nope".into()],
                 info: vec!["hello".into()],
             }
@@ -225,8 +253,30 @@ mod tests {
     fn a_failure_is_a_verdict_and_names_the_fingerprint_service() {
         let mut stream = helper(b"FAILURE\n");
         let verdict = transact(&mut stream, Service::Fingerprint, type_in(b"")).expect("a verdict");
-        assert!(!verdict.success);
+        assert_eq!(verdict.outcome, Outcome::Failure);
         assert_eq!(stream.writes[0], b"athanor-lock-fingerprint");
+    }
+
+    #[test]
+    fn an_unavailable_reader_is_its_own_verdict() {
+        let mut stream = helper(b"PAM_ERROR_MSG No reader\nUNAVAILABLE\n");
+        let verdict = transact(&mut stream, Service::Fingerprint, type_in(b"")).expect("a verdict");
+        assert_eq!(verdict.outcome, Outcome::Unavailable);
+        assert_eq!(verdict.errors, ["No reader"]);
+    }
+
+    #[test]
+    fn each_outcome_has_its_line() {
+        for outcome in [Outcome::Success, Outcome::Failure, Outcome::Unavailable] {
+            let line = outcome.line();
+            let want = match parse(&line[..line.len() - 1]).expect("a verdict line") {
+                Line::Success => Outcome::Success,
+                Line::Failure => Outcome::Failure,
+                Line::Unavailable => Outcome::Unavailable,
+                other => panic!("{other:?} is no verdict"),
+            };
+            assert_eq!(want, outcome);
+        }
     }
 
     #[test]
