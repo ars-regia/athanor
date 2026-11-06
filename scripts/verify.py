@@ -2397,6 +2397,128 @@ def check_shell_failures():
 
 
 # --------------------------------------------------------------------------- #
+# 7-ter. css — the shell's CSS takes its lengths and its motion from the tokens
+# --------------------------------------------------------------------------- #
+
+# doc_visual_language.md VL11: a length in `px` that does not come from a token, a font size in
+# `px`, and a transition or an animation whose duration is not one of `[sal.motion]`'s three or
+# whose curve is not its `curve` fail. The GTK shell keeps today's CSS until it is removed (VL1,
+# ADR-0124 decision 7), so what it holds today stands here by file and kind, a budget that only
+# goes down; a file not named, the toolkit's included, has a budget of zero.
+CSS_DIRS = ["system", "forge/specs"]
+CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
+CSS_BUDGETS = {
+    "forge/specs/athanor-control-center/athanor-control-center-1.0.0/src/ui.rs": {"px": 2},
+    "forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/ui/mod.rs": {"px": 10},
+    "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
+    "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
+    "system/athanor-style/src/accent_template.css": {"px": 2},
+    "system/athanor-style/src/style.css": {"px": 178, "font-px": 15, "duration": 9, "curve": 15},
+}
+# A literal length in pixels; `${token}px` in a template, or `{}px` in Rust, is not one.
+CSS_PX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)px\b")
+# A value runs to `;` or a brace; a template's `${token}` is part of it.
+CSS_DECLARATION = re.compile(r"([a-z-]+)\s*:\s*((?:\$\{\w+\}|[^;{}])*)")
+# A string literal of Rust source holds CSS when it holds a declaration, ended by `;` or by the
+# `}` of its rule. Only whole literals are read: CSS built with `concat!` or `format!`, or split
+# across literals, is seen piece by piece, and a piece without a declaration is not read.
+CSS_IN_RUST = re.compile(r"[a-z-]+\s*:\s*[^;{}\n]+(?:;|\})")
+CSS_MOTION = {"transition", "transition-duration", "transition-timing-function", "transition-delay",
+              "animation", "animation-duration", "animation-timing-function", "animation-delay"}
+CSS_TIME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)(ms|s)\b")
+CSS_CURVE = re.compile(r"cubic-bezier\(([^)]*)\)|\b(?:ease(?:-in-out|-in|-out)?|linear|step-start|step-end|steps)\b")
+
+
+def css_texts(path, text):
+    """[(line, css)]: a stylesheet whole, or each string literal of Rust source outside its
+    test items that holds a CSS declaration, with the line it starts on."""
+    if path.suffix != ".rs":
+        return [(1, text)]
+    code, found, i, line = without_test_items(text), [], 0, 1
+    while i < len(code):
+        j = skip_rust(code, i)
+        if j == i:
+            line += code[i] == "\n"
+            i += 1
+            continue
+        if code[i] not in "/'" and CSS_IN_RUST.search(code, i, j):
+            found.append((line, code[i:j]))
+        line += code.count("\n", i, j)
+        i = j
+    return found
+
+
+def css_problems(css, motion):
+    """[(line, kind, text)] of `css`, lines counted from 0: each literal `px` length (kind
+    `px`), font size in `px` (`font-px`), and duration or delay (`duration`) or curve (`curve`)
+    of a transition or an animation that `motion`, the `[sal.motion]` table, does not hold; a
+    time of zero is none."""
+    durations = {motion["fast"], motion["normal"], motion["slow"]}
+    curve = [float(x) for x in motion["curve"]]
+    found = []
+    for m in CSS_PX.finditer(css):
+        if float(m.group(1)):
+            found.append((css.count("\n", 0, m.start()), "px", m.group(0)))
+    for m in CSS_DECLARATION.finditer(css):
+        name, value = m.group(1), m.group(2)
+        at = css.count("\n", 0, m.start())
+        if name in ("font", "font-size") and "px" in value:
+            found.append((at, "font-px", f"{name}: {value.strip()}"))
+        if name not in CSS_MOTION:
+            continue
+        for t in CSS_TIME.finditer(value):
+            ms = round(float(t.group(1)) * (1 if t.group(2) == "ms" else 1000), 3)
+            if ms and ms not in durations:
+                found.append((at, "duration", t.group(0)))
+        for c in CSS_CURVE.finditer(value):
+            if c.group(1) is None or [float(x) for x in c.group(1).split(",")] != curve:
+                found.append((at, "curve", c.group(0)))
+    return found
+
+
+def css_findings(root=ROOT):
+    """{path: [(line, kind, text)]} over the stylesheets, templates and Rust sources of
+    CSS_DIRS, generated sheets, vendored crates and test code aside."""
+    motion = tomllib.loads(read(root / CSS_TOKENS))["sal"]["motion"]
+    rust = [p for d in CSS_DIRS for p in walk(root / d, ".rs")]
+    tests = test_module_files(rust)
+    files = [p for d in CSS_DIRS for suffix in (".css", ".css.in") for p in walk(root / d, suffix)]
+    files += [p for p in rust if not (is_test_file(p) or p in tests)]
+    found = {}
+    for p in sorted(files):
+        path = str(p.relative_to(root))
+        if "/generated/" in path or vendored(path):
+            continue
+        for start, css in css_texts(p, read(p)):
+            for line, kind, text in css_problems(css, motion):
+                found.setdefault(path, []).append((start + line, kind, text))
+    return found
+
+
+def css_budget(r, found, budgets):
+    """Fails `r` per finding of a file and kind over its budget in `budgets`, and once per
+    budget above its findings, so that the budget comes down with them."""
+    for path in sorted(set(found) | set(budgets)):
+        for kind in ("px", "font-px", "duration", "curve"):
+            hits = [f for f in found.get(path, []) if f[1] == kind]
+            budget = budgets.get(path, {}).get(kind, 0)
+            if len(hits) > budget:
+                for line, _, text in hits:
+                    r.fail(f"{path}:{line}: {text}: {kind} over the budget of {budget}; take the "
+                           "value from a token of tokens.toml (doc_visual_language.md VL11)")
+            elif len(hits) < budget:
+                r.fail(f"{path}: {kind}: {len(hits)} finding(s) under the budget of {budget}; "
+                       "lower CSS_BUDGETS in scripts/verify.py to match")
+
+
+@check("css", "The shell's CSS takes its lengths and motion from the tokens (VL11)")
+def check_css():
+    r = Result()
+    css_budget(r, css_findings(), CSS_BUDGETS)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7a. allow-list — a shell client that needs a privileged global has its line
 # --------------------------------------------------------------------------- #
 
