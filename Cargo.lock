@@ -747,6 +747,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-unlockd"
+version = "1.0.0"
+dependencies = [
+ "athanor-auth",
+ "athanor-unit",
+ "libc",
+ "nix 0.29.0",
+ "tracing",
+ "zbus",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-update"
 version = "1.0.0"
 dependencies = [
@@ -3682,6 +3695,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]

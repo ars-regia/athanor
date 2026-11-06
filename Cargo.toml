@@ -28,6 +28,7 @@ members = [
   "system/athanor-sal",
   "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0",
   "system/athanor-auth",
+  "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
 ]
 
 # The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery
