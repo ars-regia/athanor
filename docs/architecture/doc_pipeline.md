@@ -1078,8 +1078,9 @@ would publish from code not yet on the branch; PB11's measurements reopen it.
 build run that succeeded (PL55). The kernel is the exception (ADR-0110), once #368 and #373
 are merged: the push to `iso-v0`
 publishes the RPMs of the merged pull request's `pr.yml` kernel build when the four
-conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. Today `pr.yml` runs its
-selected builds on `merge_group` too; PB11 restricts them to `pull_request`.
+conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. On `merge_group`,
+`scripts/ci/changes.py` selects no build (kernel, specs, shell), so `pr.yml` runs its selected
+builds on `pull_request` only (PB11).
 
 **PL45. The bar is built once per run** and its output passed to the jobs that test it.
 

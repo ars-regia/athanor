@@ -4,7 +4,8 @@ name: Pull Request
 # request and every merge group runs it whole: no path filter decides whether it runs (PL3).
 #
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
-#   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs.
+#   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs. On
+#   merge_group it selects no build (kernel, specs, shell): the pull request proved them (PL44).
 # check-*: the parts of `just check`, the gate a contributor runs locally, one job and one recipe
 #   each so they run in parallel: check-static (lint, every verify.py check with
 #   scripts/ci/known-red.txt, kernel profile, Calmo), check-system and check-other (the Python
@@ -54,7 +55,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$BASE"
-          python3 -B scripts/ci/changes.py "$BASE" "$RUNNER_TEMP/out/changes.json"
+          python3 -B scripts/ci/changes.py "$BASE" "$RUNNER_TEMP/out/changes.json" "$GITHUB_EVENT_NAME"
           echo "json=$(< "$RUNNER_TEMP/out/changes.json")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

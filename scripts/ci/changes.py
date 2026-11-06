@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Change detection for pr.yml: which areas of the tree a change touches.
 
-Usage: changes.py BASE OUT
+Usage: changes.py BASE OUT [EVENT]
 
 Lists the files that differ between BASE and HEAD (both sides of a rename) and writes OUT,
 the changes.json of doc_pipeline.md section 3.3:
@@ -19,6 +19,9 @@ of every crate of the workspace run in `just check` on every change. A change to
 itself (pr.yml or scripts/ci) selects every area, so a change to the gate is tested by every job
 it gates.
 docs_only is true when every changed file is documentation and no area is selected.
+EVENT is the event that runs pr.yml. On merge_group the builds (kernel, specs, shell) are never
+selected: the pull request proved them, and the release build proves them again (PL44, M3).
+docs_only is still measured on the paths.
 
 Path filters never decide whether pr.yml runs (PL3): this script decides which of its jobs
 do, and the gate job reads the same file.
@@ -111,6 +114,8 @@ AREAS = {
 # Build's, not Spec Build Check's.
 EXCLUDED = {"specs": ("forge/specs/azoth/",)}
 EVERY_AREA = (".github/workflows/pr.yml", "scripts/ci/")
+# The areas that build, which the merge_group run never selects (doc_pipeline.md PL44).
+BUILDS = ("kernel", "specs", "shell")
 
 
 def touches(path, entries):
@@ -158,7 +163,7 @@ def git(cwd, *args):
     ).stdout
 
 
-def main(base, out, cwd="."):
+def main(base, out, cwd=".", event="pull_request"):
     # A two-dot tree diff: BASE is an ancestor of HEAD (the merge commit's first parent on
     # pull_request, the queue's base on merge_group), and only the two trees are needed.
     # -z: without it git quotes and escapes a path with a non-ASCII byte, a tab or a quote,
@@ -167,15 +172,17 @@ def main(base, out, cwd="."):
     changed = [path for path in out_z.split("\0") if path]
     result = {"base": git(cwd, "rev-parse", "--verify", f"{base}^{{commit}}").strip()}
     result.update(classify(changed))
+    if event == "merge_group":
+        result.update(dict.fromkeys(BUILDS, False))
     path = pathlib.Path(out)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, sort_keys=True) + "\n")
-    print(f"changes: {len(changed)} file(s) changed since {result['base'][:12]}")
+    print(f"changes: {len(changed)} file(s) changed since {result['base'][:12]} ({event})")
     for key in (*AREAS, "docs_only"):
         print(f"changes: {key}={'yes' if result[key] else 'no'}")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        sys.exit("usage: changes.py BASE OUT")
-    main(*sys.argv[1:])
+    if len(sys.argv) not in (3, 4):
+        sys.exit("usage: changes.py BASE OUT [EVENT]")
+    main(sys.argv[1], sys.argv[2], event=sys.argv[3] if len(sys.argv) == 4 else "pull_request")
