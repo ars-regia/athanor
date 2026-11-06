@@ -625,8 +625,10 @@ binds the registry: the `GITHUB_TOKEN` of any workflow run with `packages: write
 branch, can push GHCR tags, so a contributor with write access can copy an already signed
 digest onto `:stable` and skip the evidence, the dwell and the approval. Machines still
 refuse an unsigned or older image (UT5). The maintainer accepted this risk on 2026-10-11
-([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md) item 5) until #405 adds the check that compares `:stable` with
-the promotion records. A dispatch made with
+([ADR-0111](../decisions/0111-pipeline-revision-3-approval.md) item 5) until #405, which added the daily job `stable-promotions` of
+`maintenance.yml` (`scripts/ci/stable_promotions.py`): it fails unless `:stable` is the digest of the newest
+promotion record, `:stable-previous` that record's `previous_stable` and every `:stable-<day>` the last record of
+its day (doc_ci.md CI29), so a copy no promotion made is detected. A dispatch made with
 `GITHUB_TOKEN` starts a run, unlike the other events that token creates
 (https://docs.github.com/en/actions/security-for-github-actions/security-guides/automatic-token-authentication).
 The maintainer may dispatch `release.yml` by hand with a build run id, on `iso-v0`,
@@ -1534,7 +1536,7 @@ decides ancestry through the `compare` endpoint; PL60's summary comes from a pre
 job; PL16 names the separate verify job; the ISO's `:latest` moves on `main` only
 (section 4.10). Four risks are accepted: a hand dispatch can cancel a pending release
 (PL57); a marker that does not verify is ignored (PL55, PB4b); a signed digest can be
-copied onto `:stable` outside the promotion until #405 (PL54); `:latest` is signed with no
+copied onto `:stable` outside the promotion until #405, whose daily check now detects it (PL54); `:latest` is signed with no
 human approval from step 3 (PL56). PB13 lands in two pull requests and its gate gains the
 negative cases; PB12 lists the trusted workflow paths. The mechanisms of PQ17 and PQ18 are
 confirmed. The out-of-date inventory of section 3.5 is left to #406.

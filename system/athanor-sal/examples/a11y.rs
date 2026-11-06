@@ -3,7 +3,8 @@
 //! buttons that drive the other surface, and a status that never takes the keyboard, named by
 //! its text. The rig's check of Sal's requirement S2 (`toolkit_a11y_check.py`): "Hide status"
 //! takes the status out of the accessibility tree, "Show status" brings it back, and
-//! "Announce" makes it announce "Volume 50 percent".
+//! "Announce" makes it announce "Volume 50 percent"; "Hide dialog" takes the dialog out, and the
+//! status's "Show dialog" brings it back.
 
 use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
@@ -19,6 +20,8 @@ const ANNOUNCED: &str = "Volume 50 percent";
 struct Osd {
     /// The dialog opened, on the first output.
     opened: bool,
+    /// The dialog, once it is on an output.
+    dialog: Option<SurfaceId>,
     /// The status surface, once the dialog has opened it.
     status: Option<SurfaceId>,
 }
@@ -42,20 +45,22 @@ impl Application for Osd {
         let choices = ui.add(Ui::ROOT, Kind::Column);
         ui.radio(choices, "Headphones", true);
         ui.radio(choices, "Headset with microphone", false);
-        for name in ["Hide status", "Show status", "Announce"] {
+        for name in ["Hide status", "Show status", "Announce", "Hide dialog"] {
             ui.add(Ui::ROOT, Kind::Button(name.into()));
         }
         let keyboard = KeyboardInteractivity::OnDemand;
         Some((ui, options("athanor-sal-dialog", Anchor::empty(), keyboard)))
     }
 
-    fn output_changed(&mut self, shell: &mut Shell, _: SurfaceId, _: &OutputInfo) {
+    fn output_changed(&mut self, shell: &mut Shell, dialog: SurfaceId, _: &OutputInfo) {
         if self.status.is_some() {
             return;
         }
+        self.dialog = Some(dialog);
         let mut ui = Ui::new("Volume 45 percent", Theme::default(), false);
         ui.root_role = RootRole::Status;
         ui.add(Ui::ROOT, Kind::Label("45 %".into()));
+        ui.add(Ui::ROOT, Kind::Button("Show dialog".into()));
         let keyboard = KeyboardInteractivity::None;
         let options = options("athanor-sal-status", Anchor::TOP, keyboard);
         match shell.open_layer(ui, options, None) {
@@ -65,7 +70,8 @@ impl Application for Osd {
     }
 
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
-        let (Event::Clicked(id), Some(status)) = (event, self.status) else {
+        let (Event::Clicked(id), Some(dialog), Some(status)) = (event, self.dialog, self.status)
+        else {
             return;
         };
         let name = match shell.ui(surface).map(|ui| &ui.widget(id).kind) {
@@ -75,6 +81,8 @@ impl Application for Osd {
         let done = match name.as_str() {
             "Hide status" => shell.set_accessible(status, false),
             "Show status" => shell.set_accessible(status, true),
+            "Hide dialog" => shell.set_accessible(dialog, false),
+            "Show dialog" => shell.set_accessible(dialog, true),
             "Announce" => shell
                 .ui_mut(status)
                 .map(|ui| ui.announce(ANNOUNCED))

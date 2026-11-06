@@ -312,6 +312,19 @@ pub fn tree_updates(ui: &mut Ui, scale: f64) -> Vec<TreeUpdate> {
     updates
 }
 
+/// The last update of a surface leaving the accessibility tree: the tree as it stands with its
+/// root hidden, so the bridge removes the root and every node under it, each defunct, out of
+/// the cache and its objects unregistered from the bus (`accesskit_atspi_common`, `adapter.rs`,
+/// `node_updated`). Dropping the adapter alone unregisters none of them.
+pub fn withdrawn(ui: &Ui, scale: f64) -> TreeUpdate {
+    let mut update = tree_update(ui, scale);
+    let root = node_id(Ui::ROOT);
+    for (_, node) in update.nodes.iter_mut().filter(|(id, _)| *id == root) {
+        node.set_hidden();
+    }
+    update
+}
+
 /// The whole tree of the visible widgets, as the adapter's first update and after every change.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
@@ -1066,27 +1079,57 @@ mod tests {
         assert_eq!(states(&ui, "Files"), [true, true, false, true]);
     }
 
-    /// An AT-SPI adapter of `ui` in-process, and the announcements it emits: their text and
-    /// politeness.
-    type Announcements = std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>;
-    fn at_spi(ui: &Ui) -> (accesskit_atspi_common::Adapter, Announcements) {
+    /// What an in-process AT-SPI adapter told the bus.
+    #[derive(Default)]
+    struct Heard {
+        /// The announcements: their text and politeness.
+        announcements: Vec<(String, String)>,
+        /// The windows deactivated, by name.
+        deactivated: Vec<String>,
+        /// The nodes with interfaces registered on the bus, and their interfaces' bits.
+        registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
+    }
+    type Bus = std::sync::Arc<std::sync::Mutex<Heard>>;
+
+    /// An AT-SPI adapter of `ui` in-process, unfocused, and what it tells the bus.
+    fn at_spi(ui: &Ui) -> (accesskit_atspi_common::Adapter, Bus) {
+        at_spi_focused(ui, false)
+    }
+
+    fn at_spi_focused(ui: &Ui, focused: bool) -> (accesskit_atspi_common::Adapter, Bus) {
         use accesskit::{ActionHandler, ActionRequest};
         use accesskit_atspi_common::{
             Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, ObjectEvent,
-            WindowBounds,
+            WindowBounds, WindowEvent,
         };
-        struct Heard(Announcements);
-        impl AdapterCallback for Heard {
-            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
-            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+        struct Recorder(Bus);
+        impl AdapterCallback for Recorder {
+            fn register_interfaces(&self, _: &Adapter, id: FullNodeId, set: InterfaceSet) {
+                let mut heard = self.0.lock().expect("not poisoned");
+                *heard.registered.entry(id).or_default() |= set.bits();
+            }
+            fn unregister_interfaces(&self, _: &Adapter, id: FullNodeId, set: InterfaceSet) {
+                let mut heard = self.0.lock().expect("not poisoned");
+                if let Some(bits) = heard.registered.get_mut(&id) {
+                    *bits &= !set.bits();
+                }
+                heard.registered.retain(|_, bits| *bits != 0);
+            }
             fn emit_event(&self, _: &Adapter, event: Event) {
-                if let Event::Object {
-                    event: ObjectEvent::Announcement(text, politeness),
-                    ..
-                } = event
-                {
-                    let heard = (text, format!("{politeness:?}"));
-                    self.0.lock().expect("not poisoned").push(heard);
+                let mut heard = self.0.lock().expect("not poisoned");
+                match event {
+                    Event::Object {
+                        event: ObjectEvent::Announcement(text, politeness),
+                        ..
+                    } => heard
+                        .announcements
+                        .push((text, format!("{politeness:?}"))),
+                    Event::Window {
+                        name,
+                        event: WindowEvent::Deactivated,
+                        ..
+                    } => heard.deactivated.push(name),
+                    _ => {}
                 }
             }
         }
@@ -1094,12 +1137,12 @@ mod tests {
         impl ActionHandler for NoActions {
             fn do_action(&mut self, _: ActionRequest) {}
         }
-        let heard = Announcements::default();
+        let heard = Bus::default();
         let adapter = Adapter::new(
             &AppContext::new(None),
-            Heard(heard.clone()),
+            Recorder(heard.clone()),
             tree_update(ui, 1.0),
-            false,
+            focused,
             WindowBounds::default(),
             NoActions,
         );
@@ -1193,6 +1236,29 @@ mod tests {
             adapter.update(update);
         }
         let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
-        assert_eq!(*heard.lock().expect("not poisoned"), [polite.clone(), polite]);
+        let heard = heard.lock().expect("not poisoned");
+        assert_eq!(heard.announcements, [polite.clone(), polite]);
+    }
+
+    /// A surface leaving the accessibility tree first deactivates its window when it was the
+    /// active one, then unregisters every node of it, the root included, from the bus: what
+    /// `Shell::set_accessible` does before it drops the adapter, which unregisters none
+    /// (requirement S2).
+    #[test]
+    fn a_withdrawn_tree_deactivates_its_window_and_leaves_nothing_on_the_bus() {
+        let mut ui = Ui::new("What did you plug in?", Theme::default(), false);
+        ui.root_role = RootRole::AlertDialog;
+        let choices = ui.add(Ui::ROOT, Kind::Column);
+        ui.radio(choices, "Headphones", true);
+        ui.radio(choices, "Headset with microphone", false);
+        ui.add(Ui::ROOT, Kind::Button("Hide status".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi_focused(&ui, true);
+        assert!(heard.lock().expect("not poisoned").registered.len() > 1);
+        adapter.update_window_focus_state(false);
+        adapter.update(withdrawn(&ui, 1.0));
+        let heard = heard.lock().expect("not poisoned");
+        assert_eq!(heard.deactivated, ["What did you plug in?"]);
+        assert!(heard.registered.is_empty(), "{:?}", heard.registered);
     }
 }

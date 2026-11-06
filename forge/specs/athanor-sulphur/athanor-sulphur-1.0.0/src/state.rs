@@ -23,7 +23,6 @@ use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
-use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Kind, RenderElement, RenderElementStates,
 };
@@ -1401,7 +1400,7 @@ where
 {
     let scale = output.current_scale().fractional_scale();
     let surface = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
-        render_elements_from_surface_tree::<_, Stacked<R>>(
+        crate::marks::surface_elements::<_, Stacked<R>>(
             renderer,
             surface,
             at,
