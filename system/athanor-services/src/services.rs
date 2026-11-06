@@ -4,11 +4,11 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use athanor_services::battery::{self, BatteryCommand, BatteryState};
-use athanor_services::bluetooth::{self, BluetoothCommand, BluetoothState, PairingRequest};
-use athanor_services::media::{self, MediaCommand, MediaState};
-use athanor_services::network::{self, NetworkCommand, NetworkState, PasswordPrompt};
-use athanor_services::{audio, Buses};
+use crate::battery::{self, BatteryCommand, BatteryState};
+use crate::bluetooth::{self, BluetoothCommand, BluetoothState, PairingRequest};
+use crate::media::{self, MediaCommand, MediaState};
+use crate::network::{self, NetworkCommand, NetworkState, PasswordPrompt};
+use crate::{audio, Buses};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
 
@@ -50,8 +50,8 @@ impl Services {
     /// This registers no agent: NetworkManager takes one secret agent and BlueZ one default
     /// pairing agent per session, and those belong to the bar (doc_control_center.md). A
     /// surface that reuses the pages calls `start` alone and its pages work. A surface other
-    /// than the bar does not pair yet: its Bluetooth page is [`bluetooth::Page::without_pairing`],
-    /// because a pairing needs a bondable adapter and the bar's model clears `Pairable`.
+    /// than the bar does not pair yet: its Bluetooth page is `without_pairing`, because a
+    /// pairing needs a bondable adapter and the bar's model clears `Pairable`.
     /// [`Services::register_bluetooth_guest_agent`] exists for the design that will let one;
     /// nothing calls it. A NetworkManager password is answered by the bar's agent when the bar
     /// runs.
