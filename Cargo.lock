@@ -546,6 +546,10 @@ name = "athanor-i18n"
 version = "1.0.0"
 
 [[package]]
+name = "athanor-idle"
+version = "1.0.0"
+
+[[package]]
 name = "athanor-launcher"
 version = "1.0.0"
 dependencies = [

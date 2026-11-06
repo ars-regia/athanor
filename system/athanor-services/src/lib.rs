@@ -16,8 +16,10 @@ pub mod mirror;
 pub mod network;
 pub mod props;
 pub mod runtime;
+mod services;
 
 pub use runtime::{Bus, Buses, Runtime};
+pub use services::Services;
 
 #[cfg(test)]
 mod testbus;

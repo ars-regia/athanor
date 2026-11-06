@@ -15,7 +15,6 @@ pub mod network;
 pub mod widgets;
 
 mod host;
-mod services;
 
+pub use athanor_services::Services;
 pub use host::Host;
-pub use services::Services;
