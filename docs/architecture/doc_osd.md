@@ -386,7 +386,7 @@ Taken by the maintainer on 2026-11-06, for revision 3:
 - **M13. The key path under athanor-sulphur** (OD3). **A:** the rows of `DEFAULTS` call `os.athanor.Osd1` directly through the `session-calls` worker on the session bus: no `/bin/sh`, no `gdbus`, and no fallback of M7.
 - **M14. The touchpad under athanor-sulphur** (OD3, OD6). **A:** the compositor stays the owner of the switch and sends its state as an event of a private protocol, which `athanor-osd` watches (K2).
 
-Proposed by revision 3, awaiting the maintainer's approval:
+Proposed by revision 3, approved with #1018:
 
 - **M15. The hidden state** (OD7, OD18, OD19): the pinned 1×1 surface on the background layer is kept under athanor-sulphur, and Sal gains the layer change (S1).
 - **M16. OD19 in step 4b** (OD17): monitor identification and the headset dialog are built switched off before the retirement step, which switches them on.

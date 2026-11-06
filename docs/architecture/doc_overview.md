@@ -475,7 +475,7 @@ Maintainer decision A2-24 (#159), from specification audit 2 of 2026-10-05. It o
 
 ## 8. Revision 3: the window switcher on Alt+Tab
 
-Proposed on 2026-11-06 and awaiting the maintainer's approval; until then nothing in this section may be implemented (ADR-0074). It designs what section 7 left undecided and overrides section 7 where they disagree. ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places the switcher in release 1.0 (decision 2) and writes it in Sal (decision 6). Each rule names its source: "(maintainer decision, 2026-11-06)", or "(proposed, revision 3)" for what the approval of this revision decides.
+Proposed on 2026-11-06 and approved by the maintainer with #1020 (ADR-0074). It designs what section 7 left undecided and overrides section 7 where they disagree. ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) places the switcher in release 1.0 (decision 2) and writes it in Sal (decision 6). Each rule names its source: "(maintainer decision, 2026-11-06)", or "(proposed, revision 3)" for what the approval of this revision decides.
 
 ### Scope
 
