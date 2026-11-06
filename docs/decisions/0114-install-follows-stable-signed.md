@@ -2,7 +2,7 @@
 id: ADR-0114
 title: "Installed systems follow :stable with the signature policy, set by the kickstart's %post"
 date: 2026-10-14
-status: accepted
+status: amended by ADR-0136
 issues: [146]
 areas: [update, build, release, security]
 ---
