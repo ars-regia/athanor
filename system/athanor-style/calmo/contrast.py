@@ -94,15 +94,18 @@ def check(tokens):
 def main():
     failures = 0
     accented = 0
-    for case, fg, bg, kind, ratio, needed in check(tk.load()):
-        ok = ratio >= needed
-        failures += not ok
-        # The accent cases print only what fails: they are some five thousand rows.
-        if case in tk.VARIANTS or not ok:
-            print(
-                f"{'ok  ' if ok else 'FAIL'} {case:18s} {fg:13s} on {str(bg):34s} {kind:5s} {ratio:5.2f} (needs {needed})"
-            )
-        accented += case not in tk.VARIANTS
+    tokens = tk.load()
+    # The GTK shell's palette, then the toolkit's, tinted on its own factory accent (VL10).
+    for theme, palette_tokens in (("", tokens), ("sal ", tk.sal(tokens))):
+        for case, fg, bg, kind, ratio, needed in check(palette_tokens):
+            ok = ratio >= needed
+            failures += not ok
+            # The accent cases print only what fails: they are some five thousand rows.
+            if case in tk.VARIANTS or not ok:
+                print(
+                    f"{'ok  ' if ok else 'FAIL'} {theme + case:22s} {fg:13s} on {str(bg):34s} {kind:5s} {ratio:5.2f} (needs {needed})"
+                )
+            accented += case not in tk.VARIANTS
     print(f"{accented} pair(s) checked with the presets and the hue sweep")
     print(f"{failures} failing pair(s)")
     return 1 if failures else 0
