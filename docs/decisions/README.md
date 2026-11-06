@@ -181,7 +181,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0111 | 0111 | [Approve pipeline revision 3 with its review fixes and four accepted risks](0111-pipeline-revision-3-approval.md) | accepted | build, signing, release, process |
 | ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115, ADR-0135 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
-| ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | accepted | update, build, release, security |
+| ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | amended by ADR-0136 | update, build, release, security |
 | ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131 | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
@@ -203,3 +203,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0133 | 0133 | [The own compositor takes the magnifier, the colour filters and the keyboard aids](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md) | accepted | accessibility, shell |
 | ADR-0134 | 0134 | [The pillars of Athanor take alchemical names; every other package keeps a descriptive one](0134-alchemical-names-for-the-pillars.md) | accepted | shell, update, security, process |
 | ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | accepted | process, docs, shell, security |
+| ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
