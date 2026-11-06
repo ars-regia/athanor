@@ -181,6 +181,27 @@ class MainTest(unittest.TestCase):
         self.assertFalse(written["docs_only"])
         self.assertRegex(written["base"], r"^[0-9a-f]{40}$")
 
+    def test_every_area_is_a_build_or_the_audit(self):
+        # A new area must be placed: a build, which merge_group never selects, or not.
+        self.assertEqual(set(changes.AREAS), {*changes.BUILDS, "rust_audit"})
+
+    def test_a_merge_group_selects_no_build_but_still_the_audit(self):
+        (self.root / "forge/specs/azoth/notes.txt").write_text("kernel 2\n")
+        (self.root / "system/athanor-sal").mkdir(parents=True)
+        (self.root / "system/athanor-sal/lib.rs").write_text("fn main() {}\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "change")
+        out = self.root / "out" / "changes.json"
+        changes.main("HEAD^1", str(out), cwd=self.root)
+        on_pr = json.loads(out.read_text())
+        self.assertTrue(on_pr["kernel"] and on_pr["shell"] and on_pr["rust_audit"])
+        changes.main("HEAD^1", str(out), cwd=self.root, event="merge_group")
+        written = json.loads(out.read_text())
+        for area in changes.BUILDS:
+            self.assertFalse(written[area], area)
+        self.assertTrue(written["rust_audit"])
+        self.assertFalse(written["docs_only"])
+
     def test_a_path_git_would_quote_still_selects_its_area(self):
         # Without -z, git prints such a path quoted and escaped ("forge/specs/azoth/p\303\240...").
         for name in ("p\u00e0tch.patch", "tab\there.patch", 'quote".patch'):
