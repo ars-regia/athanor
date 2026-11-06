@@ -39,8 +39,11 @@ struct State {
     table: Mutex<Inhibitors>,
     file: PathBuf,
     hold: watch::Sender<Hold>,
-    /// The bus as the query connection sees it.
+    /// The query connection, and the bus as it sees it.
+    query: Connection,
     bus: DBusProxy<'static>,
+    /// Told when the query connection is found closed: the daemon can no longer follow the bus.
+    query_gone: Notify,
     /// Set, under the table's lock, when the bus is gone: nothing is added any more.
     closed: AtomicBool,
     /// Set once the name is owned: only that instance writes the file.
@@ -56,7 +59,8 @@ impl State {
     /// the inhibitor still holds for as long as this process lives.
     fn changed(&self, table: &Inhibitors) {
         self.hold.send_replace(table.hold());
-        if !self.owns_name.load(Ordering::SeqCst) {
+        // After the end the file keeps the table for the restart (SN7).
+        if !self.owns_name.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
             return;
         }
         if let Err(e) = store::save(&self.file, table) {
@@ -67,18 +71,38 @@ impl State {
     /// `NameHasOwner` on the query connection.
     async fn has_owner(&self, owner: &str) -> std::result::Result<bool, String> {
         let name = BusName::try_from(owner).map_err(|e| e.to_string())?;
-        ask(self.bus.name_has_owner(name)).await
+        self.ask(self.bus.name_has_owner(name)).await
     }
-}
 
-/// A question to the bus: an error and a timeout both come back as text.
-async fn ask<T, E: Display>(
-    call: impl Future<Output = std::result::Result<T, E>>,
-) -> std::result::Result<T, String> {
-    match tokio::time::timeout(ASK, call).await {
-        Ok(Ok(v)) => Ok(v),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("timed out".into()),
+    /// A question to the bus: an error and a timeout both come back as text, and a failure
+    /// with the query connection closed ends the daemon's view of the bus (fail closed).
+    async fn ask<T, E: Display>(
+        &self,
+        call: impl Future<Output = std::result::Result<T, E>>,
+    ) -> std::result::Result<T, String> {
+        let answer = match tokio::time::timeout(ASK, call).await {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(_) => Err("timed out".into()),
+        };
+        if answer.is_err() {
+            self.check_query();
+        }
+        answer
+    }
+
+    fn check_query(&self) {
+        if self.query.is_closed() {
+            self.query_gone.notify_one();
+        }
+    }
+
+    /// The bus is gone: nothing is added any more and the timers are free. In memory only.
+    fn close(&self) {
+        let mut table = self.lock();
+        self.closed.store(true, Ordering::SeqCst);
+        table.clear();
+        self.hold.send_replace(table.hold());
     }
 }
 
@@ -183,7 +207,10 @@ fn is_unique_form(name: &str) -> bool {
 /// The application id of the caller's unit, empty outside an application unit or when the
 /// bus does not answer.
 async fn app_id_of(state: &State, name: BusName<'_>) -> String {
-    match ask(state.bus.get_connection_unix_process_id(name)).await {
+    match state
+        .ask(state.bus.get_connection_unix_process_id(name))
+        .await
+    {
         Ok(pid) => std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
             .map(|c| app_id_from_cgroup(&c))
             .unwrap_or_default(),
@@ -236,7 +263,10 @@ fn unescape(s: &str) -> String {
 
 /// Restores the saved inhibitors whose owner is still on the bus, serves the interface on
 /// both paths and owns the name (no `AllowReplacement`, no queue). `query` is a second
-/// connection to the same bus, used only for questions (see the module rule). Returns the
+/// connection to the same bus, opened apart (never a clone of `conn`, which would share its
+/// socket reader), with no objects, no signal subscriptions and no names, used only for
+/// questions (see the module rule); `serve` refuses a clone. The daemon ends, as for the main
+/// stream, when `query` is closed. Returns the
 /// channel that carries what the table holds, and a handle that completes when the daemon can
 /// no longer follow the bus (the `NameOwnerChanged` stream ended): the table is then cleared,
 /// so the timers are free, and the caller is expected to exit and let the manager restart it
@@ -246,6 +276,11 @@ pub async fn serve(
     query: &Connection,
     file: PathBuf,
 ) -> Result<(watch::Receiver<Hold>, JoinHandle<()>)> {
+    if query.unique_name() == conn.unique_name() {
+        return Err(zbus::Error::Failure(
+            "the query connection must be opened apart from the main one".into(),
+        ));
+    }
     let bus = DBusProxy::builder(query)
         .cache_properties(CacheProperties::No)
         .build()
@@ -255,7 +290,9 @@ pub async fn serve(
         table: Mutex::new(Inhibitors::new()),
         file,
         hold,
+        query: query.clone(),
         bus,
+        query_gone: Notify::new(),
         closed: AtomicBool::new(false),
         owns_name: AtomicBool::new(false),
     });
@@ -276,6 +313,7 @@ pub async fn serve(
                     _ = tick.tick() => {}
                     _ = again.notified() => {}
                 }
+                state.check_query();
                 reconcile(&state, all_owners(&state)).await;
             }
         })
@@ -284,7 +322,17 @@ pub async fn serve(
     let ended = {
         let state = state.clone();
         tokio::spawn(async move {
-            while let Some(signal) = left.next().await {
+            loop {
+                let signal = tokio::select! {
+                    s = left.next() => match s {
+                        Some(s) => s,
+                        None => break,
+                    },
+                    _ = state.query_gone.notified() => {
+                        tracing::error!("the query connection ended");
+                        break;
+                    }
+                };
                 match signal.args() {
                     Ok(args) => {
                         if args.new_owner().is_none() && matches!(args.name(), BusName::Unique(_)) {
@@ -306,12 +354,10 @@ pub async fn serve(
                 }
             }
             reconciler.abort();
-            tracing::error!("the bus connection ended: inhibitors cleared, the daemon must exit");
-            // In memory only: the file keeps the table for the restart (SN7).
-            let mut table = state.lock();
-            state.closed.store(true, Ordering::SeqCst);
-            table.clear();
-            state.hold.send_replace(table.hold());
+            tracing::error!(
+                "the bus is no longer followed: inhibitors cleared, the daemon must exit"
+            );
+            state.close();
         })
     };
     let stop_drain = ended.abort_handle();
@@ -626,6 +672,38 @@ mod tests {
         a.close().await.unwrap();
         b.close().await.unwrap();
         settle(&mut rx, Hold::None).await;
+    }
+
+    #[tokio::test]
+    async fn a_closed_query_connection_ends_the_daemon_view_of_the_bus() {
+        let bus = Bus::start("qend");
+        let server = bus.connect().await;
+        let q = bus.connect().await;
+        let (mut rx, end) = serve(&server, &q, bus.dir.join("i.json")).await.unwrap();
+        let a = bus.connect().await;
+        call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        settle(&mut rx, Hold::All).await;
+        q.close().await.unwrap();
+        // The next question fails and finds the connection closed.
+        let _ = call(&a, PATHS[0], "Inhibit", &("app", "again")).await;
+        tokio::time::timeout(Duration::from_secs(10), end)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*rx.borrow(), Hold::None);
+        // Nothing is added after the end.
+        assert!(call(&a, PATHS[0], "Inhibit", &("app", "late"))
+            .await
+            .is_err());
+        assert_eq!(*rx.borrow(), Hold::None);
+    }
+
+    #[tokio::test]
+    async fn a_clone_of_the_main_connection_is_refused_as_the_query() {
+        let bus = Bus::start("clone");
+        let server = bus.connect().await;
+        let err = serve(&server, &server.clone(), bus.dir.join("i.json")).await;
+        assert!(err.is_err());
     }
 
     #[tokio::test]
