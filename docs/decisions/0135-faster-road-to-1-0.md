@@ -2,7 +2,7 @@
 id: ADR-0135
 title: "A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1"
 date: 2026-11-05
-status: accepted
+status: amended by ADR-0138
 issues: [835, 877]
 areas: [process, docs, shell, security]
 ---
