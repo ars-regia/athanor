@@ -8,7 +8,8 @@
 //! 3. the peer: the lock's unit of its uid, with an active Wayland session; otherwise `FAILURE`;
 //! 4. the client's first line, the PAM service (D28); end of stream ends with no verdict;
 //! 5. the transaction for the account of the peer's uid, and nothing the client names;
-//! 6. `SUCCESS` and exit 0, or `FAILURE` and exit 2; an internal error is `FAILURE` and exit 1.
+//! 6. `SUCCESS` and exit 0; `FAILURE`, or `UNAVAILABLE` for a fingerprint transaction that
+//!    ended uncounted, and exit 2; an internal error is `FAILURE` and exit 1.
 //!
 //! The journal gets one line per transaction: uid, service, verdict, never the client's text.
 
@@ -25,7 +26,7 @@ use std::io::{self, Write};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::process::ExitCode;
 
-use athanor_auth::{read_line_within, ReadError, Secret, Service, FAILURE, MAX_SELECTOR, SUCCESS};
+use athanor_auth::{read_line_within, Outcome, ReadError, Secret, Service, FAILURE, MAX_SELECTOR};
 use nix::unistd::{Uid, User};
 
 use crate::conversation::Conversation;
@@ -35,8 +36,8 @@ use crate::peer::{Internal, Refused};
 /// How the helper ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum End {
-    /// The transaction ran: `true` for `SUCCESS`.
-    Verdict(bool),
+    /// The transaction ran.
+    Verdict(Outcome),
     /// The peer may not ask, or named no service of the lock: no PAM transaction ran.
     Refused,
     /// The client closed before naming a service.
@@ -46,8 +47,12 @@ enum End {
 /// The line written to the client and the exit status, for an end or an internal error.
 fn outcome(end: &Result<End, Box<dyn Error>>) -> (Option<&'static [u8]>, u8) {
     match end {
-        Ok(End::Verdict(true)) => (Some(SUCCESS), 0),
-        Ok(End::Verdict(false) | End::Refused) => (Some(FAILURE), 2),
+        Ok(End::Verdict(Outcome::Success)) => (Some(Outcome::Success.line()), 0),
+        // UNAVAILABLE shares FAILURE's status, which the unit's SuccessExitStatus= covers.
+        Ok(End::Verdict(verdict @ (Outcome::Failure | Outcome::Unavailable))) => {
+            (Some(verdict.line()), 2)
+        }
+        Ok(End::Refused) => (Some(FAILURE), 2),
         Ok(End::Closed) => (None, 2),
         Err(_) => (Some(FAILURE), 1),
     }
@@ -124,18 +129,18 @@ fn serve(
     let user = CString::new(account.name)?;
     let mut conversation = Conversation::new(reader, writer, service, uid);
     let transaction = authenticate(&user, &mut conversation);
-    let success = transaction.succeeded();
+    let verdict = transaction.outcome(service);
     tracing::info!(
         uid,
         service = service.name(),
-        verdict = if success { "success" } else { "failure" },
+        verdict = ?verdict,
         start = transaction.start,
         authenticate = ?transaction.authenticate,
         account = ?transaction.account,
         user_kept = transaction.user_kept,
         "transaction"
     );
-    Ok(End::Verdict(success))
+    Ok(End::Verdict(verdict))
 }
 
 #[cfg(test)]
@@ -144,12 +149,21 @@ mod tests {
     use std::cell::RefCell;
     use std::os::unix::net::UnixStream;
 
+    /// A transaction that could not start: PAM_SYSTEM_ERR.
+    const NOT_STARTED: Transaction = Transaction {
+        start: 4,
+        authenticate: None,
+        user_kept: false,
+        account: None,
+    };
+
     /// Runs `serve` on a socket pair whose client wrote `input` and closed its write end, with
-    /// `checked` as the peer check's answer; returns the end, the uid the check got, and the
-    /// user PAM was started for, if it was.
+    /// `checked` as the peer check's answer and `transaction` as PAM's; returns the end, the
+    /// uid the check got, and the user PAM was started for, if it was.
     fn serve_with(
         input: &[u8],
         checked: Result<(), Refused>,
+        transaction: Transaction,
     ) -> (End, Option<u32>, Option<CString>) {
         let (helper, mut client) = UnixStream::pair().expect("a socket pair");
         client.write_all(input).expect("the client's lines");
@@ -167,12 +181,7 @@ mod tests {
             },
             |user, _| {
                 *started.borrow_mut() = Some(user.to_owned());
-                Transaction {
-                    start: 4,
-                    authenticate: None,
-                    user_kept: false,
-                    account: None,
-                }
+                transaction
             },
         )
         .expect("no internal error");
@@ -188,7 +197,7 @@ mod tests {
                 cgroup: "0::/user.slice\n".into(),
             },
         ] {
-            let (end, asked, started) = serve_with(b"athanor-lock\n", Err(refused));
+            let (end, asked, started) = serve_with(b"athanor-lock\n", Err(refused), NOT_STARTED);
             assert_eq!(end, End::Refused);
             assert_eq!(asked, Some(nix::unistd::getuid().as_raw()));
             assert_eq!(started, None, "PAM started for a refused peer");
@@ -200,21 +209,45 @@ mod tests {
         let own = User::from_uid(nix::unistd::getuid())
             .expect("the passwd database")
             .expect("an account for the test's uid");
-        let (end, asked, started) = serve_with(b"athanor-lock\nnobody\n", Ok(()));
-        assert_eq!(end, End::Verdict(false));
+        let (end, asked, started) = serve_with(b"athanor-lock\nnobody\n", Ok(()), NOT_STARTED);
+        assert_eq!(end, End::Verdict(Outcome::Failure));
         assert_eq!(asked, Some(own.uid.as_raw()));
         assert_eq!(
             started,
             Some(CString::new(own.name).expect("a name without NUL"))
         );
-        let (end, _, started) = serve_with(b"nobody\n", Ok(()));
+        let (end, _, started) = serve_with(b"nobody\n", Ok(()), NOT_STARTED);
         assert_eq!((end, started), (End::Refused, None));
     }
 
     #[test]
+    fn only_the_fingerprint_service_answers_unavailable() {
+        // PAM_AUTHINFO_UNAVAIL from the authentication phase.
+        let unavailable = Transaction {
+            start: 0,
+            authenticate: Some(9),
+            ..NOT_STARTED
+        };
+        let (end, _, _) = serve_with(b"athanor-lock-fingerprint\n", Ok(()), unavailable);
+        assert_eq!(end, End::Verdict(Outcome::Unavailable));
+        let (end, _, _) = serve_with(b"athanor-lock\n", Ok(()), unavailable);
+        assert_eq!(end, End::Verdict(Outcome::Failure));
+    }
+
+    #[test]
     fn each_end_writes_its_line_and_exits_with_its_status() {
-        assert_eq!(outcome(&Ok(End::Verdict(true))), (Some(SUCCESS), 0));
-        assert_eq!(outcome(&Ok(End::Verdict(false))), (Some(FAILURE), 2));
+        assert_eq!(
+            outcome(&Ok(End::Verdict(Outcome::Success))),
+            (Some(&b"SUCCESS\n"[..]), 0)
+        );
+        assert_eq!(
+            outcome(&Ok(End::Verdict(Outcome::Failure))),
+            (Some(FAILURE), 2)
+        );
+        assert_eq!(
+            outcome(&Ok(End::Verdict(Outcome::Unavailable))),
+            (Some(&b"UNAVAILABLE\n"[..]), 2)
+        );
         assert_eq!(outcome(&Ok(End::Refused)), (Some(FAILURE), 2));
         assert_eq!(outcome(&Ok(End::Closed)), (None, 2));
         assert_eq!(outcome(&Err("no pidfd".into())), (Some(FAILURE), 1));

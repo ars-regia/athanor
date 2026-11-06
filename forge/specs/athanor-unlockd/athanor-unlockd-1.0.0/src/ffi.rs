@@ -14,7 +14,7 @@ use std::io::{self, Read, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::ptr;
 
-use athanor_auth::{Kind, Secret, Service};
+use athanor_auth::{Kind, Outcome, Secret, Service};
 
 use crate::conversation::{ConvError, Conversation, Message};
 
@@ -22,6 +22,8 @@ use crate::conversation::{ConvError, Conversation, Message};
 const PAM_SUCCESS: c_int = 0;
 const PAM_BUF_ERR: c_int = 5;
 const PAM_PERM_DENIED: c_int = 6;
+const PAM_AUTHINFO_UNAVAIL: c_int = 9;
+const PAM_USER_UNKNOWN: c_int = 10;
 const PAM_CONV_ERR: c_int = 19;
 const PAM_USER: c_int = 2;
 const PAM_DISALLOW_NULL_AUTHTOK: c_int = 0x0001;
@@ -104,6 +106,25 @@ impl Transaction {
             && self.authenticate == Some(PAM_SUCCESS)
             && self.user_kept
             && self.account == Some(PAM_SUCCESS)
+    }
+
+    /// The verdict for `service`. `UNAVAILABLE` only for the fingerprint service, and only
+    /// for the two codes its stack ends on with `die` and without counting (no reader, no
+    /// enrolled finger), from the authentication phase: the password stack's
+    /// `PAM_USER_UNKNOWN` stays `FAILURE`, so no verdict tells whether an account exists.
+    pub fn outcome(&self, service: Service) -> Outcome {
+        if self.succeeded() {
+            Outcome::Success
+        } else if service == Service::Fingerprint
+            && matches!(
+                self.authenticate,
+                Some(PAM_AUTHINFO_UNAVAIL | PAM_USER_UNKNOWN)
+            )
+        {
+            Outcome::Unavailable
+        } else {
+            Outcome::Failure
+        }
     }
 }
 
@@ -466,6 +487,52 @@ mod tests {
         assert_eq!(transaction.authenticate, Some(PAM_SUCCESS));
         assert_ne!(transaction.account, Some(PAM_SUCCESS));
         assert!(!transaction.succeeded());
+    }
+
+    #[test]
+    fn an_uncounted_fingerprint_end_is_unavailable() {
+        let fingerprint = "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_debug.so auth=authinfo_unavail\naccount required pam_permit.so\n";
+        let dir = Confdir::new("unavailable", PERMIT, fingerprint);
+        let (transaction, _) = run(&dir, Service::Fingerprint, b"");
+        assert_eq!(transaction.authenticate, Some(PAM_AUTHINFO_UNAVAIL));
+        assert_eq!(
+            transaction.outcome(Service::Fingerprint),
+            Outcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn an_unknown_user_on_the_password_stack_is_a_failure() {
+        let stack =
+            "auth required pam_debug.so auth=user_unknown\naccount required pam_permit.so\n";
+        let dir = Confdir::new("unknown", stack, stack);
+        let (password, _) = run(&dir, Service::Password, b"");
+        assert_eq!(password.authenticate, Some(PAM_USER_UNKNOWN));
+        assert_eq!(password.outcome(Service::Password), Outcome::Failure);
+        let (fingerprint, _) = run(&dir, Service::Fingerprint, b"");
+        assert_eq!(fingerprint.authenticate, Some(PAM_USER_UNKNOWN));
+        assert_eq!(
+            fingerprint.outcome(Service::Fingerprint),
+            Outcome::Unavailable
+        );
+    }
+
+    #[test]
+    fn an_unavailable_account_phase_is_a_failure() {
+        let stack =
+            "auth required pam_permit.so\naccount required pam_debug.so acct=authinfo_unavail\n";
+        let dir = Confdir::new("account-unavail", stack, stack);
+        let (transaction, _) = run(&dir, Service::Fingerprint, b"");
+        assert_eq!(transaction.account, Some(PAM_AUTHINFO_UNAVAIL));
+        assert_eq!(transaction.outcome(Service::Fingerprint), Outcome::Failure);
+    }
+
+    #[test]
+    fn a_finger_that_does_not_match_is_a_failure() {
+        let fingerprint = "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_debug.so auth=auth_err\naccount required pam_permit.so\n";
+        let dir = Confdir::new("mismatch", PERMIT, fingerprint);
+        let (transaction, _) = run(&dir, Service::Fingerprint, b"");
+        assert_eq!(transaction.outcome(Service::Fingerprint), Outcome::Failure);
     }
 
     #[test]
