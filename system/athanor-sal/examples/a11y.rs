@@ -4,7 +4,7 @@
 //! its text. The rig's check of Sal's requirement S2 (`toolkit_a11y_check.py`): "Hide status"
 //! takes the status out of the accessibility tree, "Show status" brings it back, and
 //! "Announce" makes it announce "Volume 50 percent"; "Hide dialog" takes the dialog out, and the
-//! status's "Show dialog" brings it back.
+//! status's "Show dialog" brings it back; "Close status" closes the status.
 
 use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
@@ -45,7 +45,13 @@ impl Application for Osd {
         let choices = ui.add(Ui::ROOT, Kind::Column);
         ui.radio(choices, "Headphones", true);
         ui.radio(choices, "Headset with microphone", false);
-        for name in ["Hide status", "Show status", "Announce", "Hide dialog"] {
+        for name in [
+            "Hide status",
+            "Show status",
+            "Announce",
+            "Hide dialog",
+            "Close status",
+        ] {
             ui.add(Ui::ROOT, Kind::Button(name.into()));
         }
         let keyboard = KeyboardInteractivity::OnDemand;
@@ -83,6 +89,10 @@ impl Application for Osd {
             "Show status" => shell.set_accessible(status, true),
             "Hide dialog" => shell.set_accessible(dialog, false),
             "Show dialog" => shell.set_accessible(dialog, true),
+            "Close status" => {
+                shell.close(status);
+                Ok(())
+            }
             "Announce" => shell
                 .ui_mut(status)
                 .map(|ui| ui.announce(ANNOUNCED))

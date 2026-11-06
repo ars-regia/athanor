@@ -13,7 +13,9 @@ AT-SPI alone:
   back with its name, three times over, and the application's objects on the bus are as many
   after as before: a surface out of the tree leaves none of its nodes registered;
 - "Hide dialog" deactivates the dialog when it is the active window ("window:deactivate"), and
-  the status's "Show dialog" brings it back.
+  the status's "Show dialog" brings it back;
+- "Close status" closes the status, and leaves on the bus as many of the application's objects
+  as with the status hidden: a closed surface leaves none of its nodes registered.
 """
 
 import shlex
@@ -157,6 +159,7 @@ def main():
         )
 
     before = objects(app)
+    alone = None
     for cycle in range(1, 4):
         if not click(dialog, "Hide status"):
             failures.append("no button 'Hide status' in the dialog")
@@ -166,6 +169,8 @@ def main():
                 f"with the status hidden the windows are {windows(app)}, expected {[DIALOG]}"
             )
             break
+        if alone is None:
+            alone = objects(app)
         click(dialog, "Show status")
         if not pump(GLib, TIMEOUT, lambda: sorted(windows(app)) == both):
             failures.append(
@@ -202,6 +207,22 @@ def main():
             failures.append(
                 f"with the dialog shown again the windows are {windows(app)}, expected {both}"
             )
+
+    dialog = window(app, DIALOG)
+    if alone is None:
+        failures.append("the status was never hidden: its close is not checked")
+    elif dialog is None or not click(dialog, "Close status"):
+        failures.append("no button 'Close status' in the dialog")
+    elif not pump(GLib, TIMEOUT, lambda: windows(app) == [DIALOG]):
+        failures.append(f"with the status closed the windows are {windows(app)}, expected {[DIALOG]}")
+    elif not pump(GLib, TIMEOUT, lambda: len(objects(app)) == len(alone)):
+        after = objects(app)
+        failures.append(
+            f"with the status closed the application has {len(after)} node(s) on the bus, "
+            f"{len(alone)} with it hidden; left: {sorted(set(after) - set(alone))}"
+        )
+    else:
+        print(f"{len(alone)} node(s) on the bus with the status closed, as with it hidden")
 
     for line in failures:
         print(f"FAIL {line}", file=sys.stderr)
