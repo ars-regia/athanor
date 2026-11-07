@@ -376,7 +376,7 @@ The retirement order is therefore cosmic-idle (step 1), cosmic-bg (step 2), cosm
   | W5 | the Wallpaper page of Athanor's Settings writes `org.athanor.desktop.background` (SE13) | none | Athanor's Settings |
   | R1 | Sulphur's wlr-output-management: modes, position, enable and adaptive sync (SD23), with fixture tests | none | D0 |
   | R2 | the Displays page with keep or revert (SE12); cosmic-randr leaves with cosmic-settings (SE23) | none | Athanor's Settings, R1 |
-  | S1 | `athanor-sessiond`: battery notices, the reset of COSMIC's appearance values, headset detection, mono audio | 3, 8 | D0; OD19 for the dialog |
+  | S1 | `athanor-sessiond`: battery notices and the reset of COSMIC's appearance values (maintainer decision, 2026-11-07: mono audio comes after S6, headset detection waits on OD19) | 3, 8 | D0 |
   | S2 | `athanor-osd` with the DDC/CI path and the guard (SD2, roles 12 and 13), and `athanor-unit`'s Landlock rule on a single node, `athanor-a11y`, LN9 in `athanor-shelld` and VL4's apply function, under their own specifications | 8 | their revisions under ADR-0138 |
   | S3 | the end of cosmic-settings-daemon: its unit, its polkit rule, its want, `src/bindings/cosmic.rs` (step 8) | 8 | S1, S2 |
 
