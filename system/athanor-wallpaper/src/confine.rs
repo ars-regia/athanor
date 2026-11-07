@@ -18,7 +18,7 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::io;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use athanor_unit::{dirs, sandbox};
@@ -59,15 +59,11 @@ pub fn reads(var: impl Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
     read
 }
 
-/// dconf's runtime directory, `runtime/dconf`, created with mode 0700 or checked to be a
-/// directory, not a link, of the owner of `runtime` and of mode 0700.
-pub fn dconf_dir(runtime: &Path) -> io::Result<PathBuf> {
-    dirs::private_dir(runtime, "dconf")
-}
-
-/// The directories the daemon may write: dconf's, when [`dconf_dir`] admits it, else none.
-pub fn writes(runtime: &Path) -> Vec<PathBuf> {
-    match dconf_dir(runtime) {
+/// The directories the daemon may write, held open as `dirs::private_dir` checked them:
+/// dconf's, `runtime/dconf`, when it passes, else none. The grant names the descriptor, so a
+/// link swapped in for the path afterwards widens nothing.
+pub fn writes(runtime: &Path) -> Vec<OwnedFd> {
+    match dirs::private_dir(runtime, "dconf") {
         Ok(dconf) => vec![dconf],
         Err(error) => {
             tracing::warn!(%error, "dconf's runtime directory is not granted");
@@ -78,16 +74,16 @@ pub fn writes(runtime: &Path) -> Vec<PathBuf> {
 
 /// Restricts the calling thread and those it starts afterwards to reading `read` and writing
 /// beneath `write`, with no TCP. The caller has proved the process single-threaded.
-pub fn apply(read: &[PathBuf], write: &[PathBuf]) -> Result<(), Box<dyn Error>> {
+pub fn apply(read: &[PathBuf], write: &[OwnedFd]) -> Result<(), Box<dyn Error>> {
     let read: Vec<&Path> = read.iter().map(PathBuf::as_path).collect();
-    let write: Vec<&Path> = write.iter().map(PathBuf::as_path).collect();
-    sandbox::restrict(&read, &write)?;
+    sandbox::restrict(&read, write)?;
     sandbox::deny_tcp()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |name| {
@@ -152,7 +148,7 @@ mod tests {
         mode(&runtime.join("dconf"), 0o755);
         assert!(writes(&runtime).is_empty());
         mode(&runtime.join("dconf"), 0o700);
-        assert_eq!(writes(&runtime), [runtime.join("dconf")]);
+        assert_eq!(writes(&runtime).len(), 1);
         std::fs::remove_dir_all(&runtime).expect("cleanup");
     }
 
@@ -225,7 +221,7 @@ mod tests {
         let runtime = base.join("runtime");
         let tcp = std::net::TcpListener::bind("127.0.0.1:0").expect("tcp");
         let write = writes(&runtime);
-        assert_eq!(write, [runtime.join("dconf")]);
+        assert_eq!(write.len(), 1, "dconf's directory is granted");
         apply(&reads(|name| std::env::var_os(name)), &write).expect("confined");
 
         let refused = |path: &Path| {
