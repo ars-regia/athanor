@@ -12,6 +12,7 @@ default = ["daemon"]
 # (athanor-preview-render's `wallpaper` kind) shares with no toolkit in its tree.
 daemon = [
   "dep:athanor-sal",
+  "dep:athanor-sulphur-client",
   "dep:athanor-unit",
   "dep:gio",
   "dep:glib",
@@ -26,7 +27,7 @@ required-features = ["daemon"]
 
 [dependencies]
 athanor-sal = { path = "../athanor-sal", optional = true }
-athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
+athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false, optional = true }
 athanor-unit = { path = "../athanor-unit", optional = true }
 gio = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }

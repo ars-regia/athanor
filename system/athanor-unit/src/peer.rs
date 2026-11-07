@@ -198,7 +198,7 @@ mod tests {
                 "{cgroup:?}: {refused:?}"
             );
         }
-        for exe in ["/usr/bin/b", "/usr/bin/a (deleted)", "/tmp/usr/bin/a"] {
+        for exe in ["/usr/bin/b", "/usr/bin/a (deleted)", "/var/usr/bin/a"] {
             let refused = run(&[Some(7), Some(7)], WANT, exe, true);
             assert!(
                 matches!(refused, Err(Refused::Exe(_))),

@@ -5,6 +5,9 @@
 //! into a [`Settings`] and draws what this crate resolves, and the decoder scales with it.
 
 mod file;
+// The migration reads cosmic-bg's store through the compositor client, which the decoder must
+// not link.
+#[cfg(feature = "daemon")]
 mod migrate;
 pub mod plan;
 pub mod protocol;
@@ -12,6 +15,7 @@ mod scale;
 mod zoom;
 
 pub use file::{open, open_regular};
+#[cfg(feature = "daemon")]
 pub use migrate::migrate;
 pub use scale::write_zoomed;
 pub use zoom::{zoom, Crop};
