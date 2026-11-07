@@ -3,14 +3,22 @@ name = "athanor-idle"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "The logic of the idle daemon with no display and no bus: the timer choice, the inhibitor table and the blank, off, lock request sequence (doc_session_daemons.md, SD4, SD5)"
+description = "The idle daemon: the timer choice, the inhibitor table, the blank, off, lock request sequence, its Wayland and D-Bus sides, and the follow of the Power page (doc_session_daemons.md, SD3, SD4, SD5)"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
+# The one COSMIC store the daemon reads, the Power page's (SD3); without its gtk feature.
+athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
+athanor-unit = { path = "../athanor-unit" }
 libc = { workspace = true }
 futures-util = { workspace = true }
+gio = { workspace = true }
+glib = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
 zbus = { workspace = true }

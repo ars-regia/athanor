@@ -567,7 +567,7 @@ fn ax4_a_virtual_modifier_is_let_go_by_its_key() {
     assert!(call(&mut run, ORCA, ORCA, &ORCA_PROCESS, Change::Watch(true)));
     key(&mut run, KEY_S, KeyState::Pressed);
     let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
-    assert_eq!(presses, [], "S held, A is Orca's");
+    assert_eq!(presses, Vec::<u32>::new(), "S held, A is Orca's");
     key(&mut run, KEY_LEFTSHIFT, KeyState::Pressed);
     key(&mut run, KEY_S, KeyState::Released);
     key(&mut run, KEY_LEFTSHIFT, KeyState::Released);
@@ -873,7 +873,7 @@ fn ax11_the_monitor_hears_the_keys_the_aids_let_through() {
     run.state.set_sticky_keys(false, false);
     run.state.set_slow_keys(true, 200).expect("in bounds");
     let (presses, _) = sent_to(&mut window, &mut run, &[KEY_A]);
-    assert_eq!(presses, [], "a short press reaches no window");
+    assert_eq!(presses, Vec::<u32>::new(), "a short press reaches no window");
     assert_eq!(heard(&queued), [], "nor Orca");
     run.stop();
 }
