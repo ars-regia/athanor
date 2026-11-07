@@ -2,7 +2,7 @@
 # notifications-acceptance.sh [stage...]
 # Package 2b.3 of docs/architecture/doc_bar.md in the dev VM's real session, under both real
 # unit files and the real user manager: athanor-shelld refuses athanor-bar.service's List when
-# the bar runs with drop-ins under ~/.config (stage refused-user-dropin, issue #1047),
+# the bar runs with a drop-in under ~/.config (stage refused-user-dropin, issue #1047),
 # the bar fetches the list again after a crash and shows what arrived meanwhile (item 9),
 # popups survive an output that comes and goes (BR6), and the bar stays within 64 MB holding
 # notifications (item 17). COSMIC owns the notification and tray names on the session bus,
@@ -10,6 +10,12 @@
 # (the same socket-activated dbus-broker pair as shelld-acceptance.sh), through a drop-in
 # each. On that bus the bar has no accessibility bus: the stages read its journal and the
 # units' state; the screenshots in .scratch/notifications-acceptance/ are for the eye.
+# The private-bus drop-in is installed under /usr/lib/systemd/user, where the daemon admits
+# drop-ins (like the unit files, it vanishes at the next guest reboot). Stage
+# refused-user-dropin adds a second drop-in under ~/.config for the bar alone, expects the
+# refusal, then removes it and restarts the bar. The later stages run against the units as the
+# image ships them: stage away, which waits for "listed 0 notifications", is therefore also the
+# positive end-to-end check of admission (a bar the daemon refused never lists).
 # Deploys both binaries from .scratch/shell-rig/bin (forge/test/shell/rig.sh build-bar and
 # build-shelld) and both units; INSTALLED=1 keeps the image's and sets up the private bus
 # only. With no argument it runs every stage in order; with
@@ -28,6 +34,7 @@ SHELLD_DATA=$ROOT/forge/specs/athanor-shelld/athanor-shelld-1.0.0/data
 SHOTS=$ROOT/.scratch/notifications-acceptance
 BUS_UNIT=athanor-notifications-acceptance-bus
 DROP_IN=notifications-acceptance.conf
+USER_DROP_IN=refused-user-dropin.conf
 PSS_LIMIT_KB=$((64 * 1024))
 HEAD2=/sys/class/drm/card1-Virtual-2/status
 STAGES=(deploy refused-user-dropin away hotplug memory cleanup)
@@ -75,10 +82,15 @@ new_main_pid() { # new_main_pid OLD-PID: the bar is active, with a different, re
     [[ $pid != "$1" && $pid != 0 ]]
 }
 
-# The bar's journal since an epoch second holds a line matching an extended regex.
-bar_logged() { # bar_logged SINCE REGEX
-    in_session "journalctl --user -u athanor-bar --since @$1 --no-pager -o cat | grep -qE '$2'"
+# The journal of a user unit since an epoch second holds a line matching an extended regex.
+# The regex is quoted for the guest's shell, whatever it contains.
+unit_logged() { # unit_logged UNIT SINCE REGEX
+    local pattern
+    printf -v pattern %q "$3"
+    in_session "journalctl --user -u $1 --since @$2 --no-pager -o cat | grep -qE -e $pattern"
 }
+bar_logged() { unit_logged athanor-bar "$@"; } # bar_logged SINCE REGEX
+shelld_logged() { unit_logged athanor-shelld "$@"; } # shelld_logged SINCE REGEX
 
 # Sends a notification the way an application does, on the private bus.
 notify() { # notify SUMMARY EXPIRE-TIMEOUT
@@ -139,12 +151,11 @@ stage_deploy() {
         'Type=notify-reload' "Sockets=$BUS_UNIT.socket" \
         "ExecStart=/usr/bin/dbus-broker-launch --scope user --config-file %h/.config/systemd/user/$BUS_UNIT.conf" |
         in_session "cat > ~/.config/systemd/user/$BUS_UNIT.service"
-    local unit
-    for unit in athanor-bar athanor-shelld; do
-        printf '%s\n' '[Service]' "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/$BUS_UNIT" |
-            in_session "mkdir -p ~/.config/systemd/user/$unit.service.d && \
-            cat > ~/.config/systemd/user/$unit.service.d/$DROP_IN"
-    done
+    # The bus drop-in goes under /usr/lib/systemd/user, where the daemon admits drop-ins.
+    printf '%s\n' '[Service]' "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/$BUS_UNIT" > "$SHOTS/$DROP_IN"
+    "$HERE/deploy.sh" \
+        "$SHOTS/$DROP_IN:/usr/lib/systemd/user/athanor-bar.service.d/$DROP_IN" \
+        "$SHOTS/$DROP_IN:/usr/lib/systemd/user/athanor-shelld.service.d/$DROP_IN" > /dev/null
     in_session systemctl --user daemon-reload
     in_session systemctl --user start "$BUS_UNIT.service" || fail "systemctl --user start $BUS_UNIT.service"
     wait_until 5 in_session test -S "\$XDG_RUNTIME_DIR/$BUS_UNIT" ||
@@ -152,19 +163,35 @@ stage_deploy() {
     bar cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
 }
 
+# Removes the bar's user drop-in. Also run by stage_cleanup, so a failed assertion restores it.
+remove_user_dropin() {
+    in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$USER_DROP_IN" &&
+        in_session systemctl --user daemon-reload
+}
+
 # A negative test (issue #1047): the daemon admits only the unit as the image ships it, so a
-# bar started with drop-ins under ~/.config/systemd/user, as this script's private bus needs,
-# must be refused AccessDenied on the private interface. Admitting it is the failure.
+# bar started with a drop-in under ~/.config/systemd/user must be refused AccessDenied on the
+# private interface, for that drop-in. Admitting it, or refusing it for another reason, is the
+# failure. The drop-in is removed and the bar restarted before the stage ends.
 stage_refused_user_dropin() {
     local since
     since=$(in_session date +%s)
+    printf '%s\n' '[Service]' 'Environment=ACCEPTANCE_USER_DROPIN=1' |
+        in_session "mkdir -p ~/.config/systemd/user/athanor-bar.service.d && \
+        cat > ~/.config/systemd/user/athanor-bar.service.d/$USER_DROP_IN"
+    in_session systemctl --user daemon-reload
     fresh_start
     wait_until 15 bar_logged "$since" "athanor-shelld refused the bar's List" ||
-        fail "the bar's journal has no refusal of its List: a bar with user drop-ins was not refused"
+        fail "the bar's journal has no refusal of its List: a bar with a user drop-in was not refused"
+    shelld_logged "$since" \
+        "refused on the private interface: athanor-bar\\.service has the drop-in .*/\\.config/systemd/user/athanor-bar\\.service\\.d/$USER_DROP_IN, outside /usr/lib/systemd/user" ||
+        fail "the daemon's journal gives no drop-in reason for refusing the bar"
     if bar_logged "$since" 'listed [0-9]+ notifications from athanor-shelld'; then
-        fail "athanor-shelld admitted a bar started with drop-ins under ~/.config/systemd/user"
+        fail "athanor-shelld admitted a bar started with a drop-in under ~/.config/systemd/user"
     fi
     "$HERE/screenshot.sh" "$SHOTS/refused-user-dropin.png" > /dev/null
+    remove_user_dropin || fail "cannot remove the bar's user drop-in"
+    fresh_start
 }
 
 # Item 9: a notification sent while no bar runs shows once the bar is back. The daemon
@@ -259,11 +286,15 @@ stage_cleanup() {
             failed=1
         }
     fi
-    in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$DROP_IN \
-    ~/.config/systemd/user/athanor-shelld.service.d/$DROP_IN \
+    guest_ssh "sudo rm -f /usr/lib/systemd/user/athanor-bar.service.d/$DROP_IN \
+    /usr/lib/systemd/user/athanor-shelld.service.d/$DROP_IN" || {
+        echo "cleanup: removing the bus drop-ins under /usr/lib/systemd/user failed" >&2
+        failed=1
+    }
+    in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$USER_DROP_IN \
     ~/.config/systemd/user/$BUS_UNIT.socket ~/.config/systemd/user/$BUS_UNIT.service \
     ~/.config/systemd/user/$BUS_UNIT.conf" || {
-        echo "cleanup: removing the drop-ins and the private-bus unit files failed" >&2
+        echo "cleanup: removing the user drop-in and the private-bus unit files failed" >&2
         failed=1
     }
     in_session systemctl --user daemon-reload || {
