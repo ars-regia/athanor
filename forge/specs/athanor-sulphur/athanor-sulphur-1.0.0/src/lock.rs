@@ -109,9 +109,9 @@ impl SessionLockHandler for State {
     }
 
     /// Sized to the output, before Smithay sends the first configure; the first lock surface
-    /// takes the keyboard.
+    /// takes the keyboard. One for an output no longer shown is never configured nor focused.
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
-        let Some(output) = Output::from_resource(&output) else {
+        let Some(output) = self.shown_output(&output) else {
             return;
         };
         // Only the surfaces of the lock in force: a refused lock's are never shown.

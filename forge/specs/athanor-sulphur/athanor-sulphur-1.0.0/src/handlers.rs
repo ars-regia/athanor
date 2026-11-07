@@ -966,7 +966,8 @@ impl XdgShellHandler for State {
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.end_window_grab(&window);
-            self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+            let output = output.as_ref().and_then(|output| self.shown_output(output));
+            self.full_screen(&window, output);
             self.repoint();
         }
     }

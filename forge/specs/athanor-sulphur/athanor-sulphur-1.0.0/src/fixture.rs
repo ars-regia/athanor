@@ -7171,6 +7171,44 @@ fn sd23_a_configuration_places_an_output() {
     run.stop();
 }
 
+/// A layer surface asked for on the wl_output of an output a configuration disabled is closed
+/// (SD23): the client's stale object names an output no longer shown.
+#[test]
+fn sd23_a_layer_surface_on_a_disabled_output_is_closed() {
+    let mut run = Running::start(None);
+    let mut client = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = client.bind(4);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = client.bind(4);
+    let qh = client.queue.handle();
+    let offered = client.outputs_offered(&mut run);
+    let stale: wl_output::WlOutput = client.registry.bind(offered[1], 4, &qh, ());
+    client.roundtrip(&mut run);
+
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded");
+
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        Some(&stale),
+        zwlr_layer_shell_v1::Layer::Top,
+        "stale".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, 100);
+    assert!(!client.answer(&mut run, &surface), "closed");
+    run.stop();
+}
+
 /// A configuration placing an output beyond the reach of the space's arithmetic fails, on
 /// either axis and with either sign, and the output keeps its place (SD23): a sum past
 /// `i32::MAX` would abort the session.

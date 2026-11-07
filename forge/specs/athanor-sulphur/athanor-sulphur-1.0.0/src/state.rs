@@ -48,6 +48,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
@@ -531,6 +532,12 @@ impl State {
         }
         self.output_heads_changed();
         self.workspaces_changed();
+    }
+
+    /// The output `wl_output` names, while it is shown: a client may still name one disabled
+    /// or unplugged, whose global is gone, and none is then given.
+    pub fn shown_output(&self, wl_output: &WlOutput) -> Option<Output> {
+        Output::from_resource(wl_output).filter(|output| self.space.outputs().any(|o| o == output))
     }
 
     /// An output that goes: its layer surfaces are closed, its lock surface is forgotten, so
