@@ -11,9 +11,6 @@ mod surface;
 
 use std::cell::RefCell;
 use std::env;
-use std::fs::DirBuilder;
-use std::os::unix::fs::DirBuilderExt;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -41,18 +38,7 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR, or no absolute HOME to place the cache");
         return ExitCode::FAILURE;
     };
-    // The unit makes both; created here too, so that a run outside it has them to grant.
-    let dconf = dirs.runtime.join("dconf");
-    let mut write: Vec<PathBuf> = Vec::new();
-    for (dir, mode) in [(dirs.cache.clone(), 0o755), (dconf, 0o700)] {
-        match DirBuilder::new().recursive(true).mode(mode).create(&dir) {
-            Ok(()) => write.push(dir),
-            Err(error) => {
-                tracing::warn!(%error, dir = %dir.display(), "cannot create the directory; it is not granted")
-            }
-        }
-    }
-    let grants = confine::Grants::new(write, |name| env::var_os(name));
+    let grants = confine::overlay(&dirs, |name| env::var_os(name));
     if let Err(error) = sandbox::ensure_single_threaded().and_then(|()| grants.apply()) {
         tracing::error!(%error, "cannot confine the overlay with Landlock; refusing to run unconfined");
         return ExitCode::FAILURE;

@@ -10,7 +10,9 @@
 //!   GSettings reads for the appearance and the reduced-motion preference (T1), the schema
 //!   directories GLib reads besides `/usr`, and libpulse's `~/.config/pulse` (its cookie);
 //! - write beneath the cache, `$XDG_CACHE_HOME` (fontconfig's), and `$XDG_RUNTIME_DIR/dconf`,
-//!   whose shared-memory flag dconf's client opens for writing to learn of a change.
+//!   whose shared-memory flag dconf's client opens for writing to learn of a change, when it
+//!   passes `dirs::private_dir`. Both are granted by the descriptor opened here, so a link
+//!   swapped in for either path afterwards widens nothing.
 //!
 //! Nothing beneath `/proc` (maintainer decision, 2026-11-07): Landlock cannot narrow it to one
 //! process, and it would expose the environment of every process of the user.
@@ -20,15 +22,33 @@
 
 use std::error::Error;
 use std::ffi::OsString;
+use std::fs::{self, File};
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
+use athanor_unit::dirs::{self, Dirs};
 use athanor_unit::sandbox;
 
-/// What the overlay reads and the directories it writes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the overlay reads and the directories it writes, held open.
+#[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<PathBuf>,
+    pub write: Vec<OwnedFd>,
+}
+
+/// The overlay's grants: the cache, created if missing, and dconf's runtime directory when it
+/// passes `dirs::private_dir`. A directory that cannot be opened is not granted, and says so.
+pub fn overlay(dirs: &Dirs, var: impl Fn(&str) -> Option<OsString>) -> Grants {
+    let mut write = Vec::new();
+    match fs::create_dir_all(&dirs.cache).and_then(|()| File::open(&dirs.cache)) {
+        Ok(cache) => write.push(cache.into()),
+        Err(error) => tracing::warn!(%error, dir = %dirs.cache.display(), "the cache is not granted"),
+    }
+    match dirs::private_dir(&dirs.runtime, "dconf") {
+        Ok(dconf) => write.push(dconf),
+        Err(error) => tracing::warn!(%error, "dconf's runtime directory is not granted"),
+    }
+    Grants::new(write, var)
 }
 
 /// `name` as an absolute path, or `None`.
@@ -48,9 +68,8 @@ fn list(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Vec<PathBuf> {
 }
 
 impl Grants {
-    /// From the environment as `var` reads it and the write directories `write`, which must
-    /// exist.
-    pub fn new(write: Vec<PathBuf>, var: impl Fn(&str) -> Option<OsString>) -> Grants {
+    /// From the environment as `var` reads it and the write directories `write`.
+    pub fn new(write: Vec<OwnedFd>, var: impl Fn(&str) -> Option<OsString>) -> Grants {
         let home = absolute(&var, "HOME");
         let config =
             absolute(&var, "XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")));
@@ -81,8 +100,7 @@ impl Grants {
     /// caller has proved the process single-threaded (`sandbox::ensure_single_threaded`).
     pub fn apply(&self) -> Result<(), Box<dyn Error>> {
         let read: Vec<&Path> = self.read.iter().map(PathBuf::as_path).collect();
-        let write: Vec<&Path> = self.write.iter().map(PathBuf::as_path).collect();
-        sandbox::restrict(&read, &write)?;
+        sandbox::restrict(&read, &self.write)?;
         sandbox::deny_tcp()
     }
 }
@@ -103,10 +121,7 @@ mod tests {
     #[test]
     fn the_grants_follow_the_environment() {
         let grants = Grants::new(
-            vec![
-                "/home/u/.cache/athanor-osd".into(),
-                "/run/user/1000/dconf".into(),
-            ],
+            Vec::new(),
             env(&[
                 ("HOME", "/home/u"),
                 ("GSETTINGS_SCHEMA_DIR", "/opt/schemas:relative"),
@@ -131,13 +146,6 @@ mod tests {
                 "/var/lib/flatpak/exports/share/fonts",
                 "/var/lib/flatpak/exports/share/icons",
                 "/var/lib/flatpak/exports/share/glib-2.0/schemas",
-            ]
-        );
-        assert_eq!(
-            grants.write,
-            [
-                Path::new("/home/u/.cache/athanor-osd"),
-                Path::new("/run/user/1000/dconf")
             ]
         );
     }
