@@ -7,8 +7,6 @@
 
 #![forbid(unsafe_code)]
 
-use std::fmt::Write as _;
-
 /// Length of the EDID base block. Extension blocks that follow it are not read.
 pub const BASE_BLOCK_LEN: usize = 128;
 
@@ -74,12 +72,11 @@ pub fn parse(edid: &[u8]) -> Result<Identity, Error> {
 
     let model = descriptor(block, TAG_NAME).unwrap_or_else(|| format!("{product:04x}"));
     let serial = descriptor(block, TAG_SERIAL).unwrap_or_else(|| {
-        let mut s = String::new();
-        if number != 0 {
-            // Writing to a String does not fail.
-            let _ = write!(s, "{number}");
+        if number == 0 {
+            String::new()
+        } else {
+            number.to_string()
         }
-        s
     });
     Ok(Identity {
         make,
@@ -236,6 +233,25 @@ mod tests {
         e[54 + 5..54 + 9].copy_from_slice(b"EVIL");
         seal(&mut e);
         assert_eq!(parse(&e).unwrap().serial, 0x4C32_3331u32.to_string());
+    }
+
+    #[test]
+    fn a_nonzero_fifth_byte_is_not_a_text_descriptor() {
+        let mut e = dell();
+        e[54 + DESCRIPTOR_LEN + 4] = 0x01;
+        seal(&mut e);
+        assert_eq!(parse(&e).unwrap().model, "a0b3");
+    }
+
+    #[test]
+    fn the_fourth_slot_is_read() {
+        let e = edid(
+            "DEL",
+            1,
+            0,
+            &[(0x10, b""), (0x10, b""), (0x10, b""), (TAG_NAME, b"LAST\n")],
+        );
+        assert_eq!(parse(&e).unwrap().model, "LAST");
     }
 
     #[test]

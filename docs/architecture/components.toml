@@ -696,6 +696,15 @@ item = "OS7"
 purpose = "Athanor's own widget toolkit: Wayland driver, widgets, Parley text, AccessKit accessibility"
 
 [[component]]
+path = "system/athanor-idle"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD4"
+purpose = "The idle daemon's logic with no display: the timer choice, the inhibitor table and the blank, off, lock request sequence"
+
+[[component]]
 path = "system/athanor-trust-state"
 kind = "crate"
 area = "signing-update"
@@ -712,6 +721,15 @@ status = "specified"
 spec = "doc_kernel_profile.md"
 item = "section 10"
 purpose = "Start-up of a shell unit: crash-loop record, readiness, journal, Landlock"
+
+[[component]]
+path = "system/athanor-wallpaper"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD6"
+purpose = "The wallpaper's logic: hearth, per-output and same-on-all resolution, zoom geometry, regular-file check, cosmic-bg migration"
 
 [[component]]
 path = "system/athanor-auth"
