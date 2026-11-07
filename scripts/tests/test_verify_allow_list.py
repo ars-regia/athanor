@@ -253,13 +253,14 @@ class AllowList(unittest.TestCase):
         )
         self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
         self.assertEqual(self.problems(), [])
-        for call in ("Client::connect(&display)", "Client::connect_wayland(&connection)"):
-            with self.subTest(call):
-                self.package(
-                    "athanor-idle",
-                    dependency,
-                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn main() {{ {call}; }}\n"},
-                )
+        # An alias of Client still names it, so the binds still count.
+        for source in (
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&display); }\n",
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect_wayland(&connection); }\n",
+            "use athanor_sulphur_client::Client as Compositor;\nfn main() { Compositor::connect(&display); }\n",
+        ):
+            with self.subTest(source):
+                self.package("athanor-idle", dependency, {"src/main.rs": source})
                 out = self.problems()
                 self.assertEqual(len(out), 1, out)
                 self.assertIn("/usr/bin/athanor-idle", out[0])

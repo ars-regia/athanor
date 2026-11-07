@@ -2563,8 +2563,8 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
 # every name of them in the crate. connection.rs binds the rest when a client connects, so it
-# counts for a target only when code outside the crate calls `Client::connect` or
-# `Client::connect_wayland`: a crate that reads only the crate's `idle` module, as athanor-idle
+# counts for a target only when code outside the crate names `Client`, the one type that
+# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
 # does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
@@ -2585,7 +2585,7 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/connection.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\bClient\s*::\s*connect(?:_wayland)?\b(?!\s*::)"))}
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the

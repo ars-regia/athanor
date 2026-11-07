@@ -1,4 +1,6 @@
+# The bus starts athanor-idle.service, where the daemon is confined and has its
+# allow-list identity; it never runs the program itself.
 [D-BUS Service]
 Name=org.freedesktop.ScreenSaver
-Exec=/usr/bin/athanor-idle
+Exec=/bin/false
 SystemdService=athanor-idle.service

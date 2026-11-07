@@ -809,9 +809,9 @@ mod tests {
     /// interfaces each uses (doc_session.md, SN12; #683, widened). `Client::connect` binds every
     /// privileged global the compositor offers it; a client is granted only the ones it uses:
     /// the dock lists windows, the launcher lists and captures them, the control center only
-    /// draws on the overlay layer. Then the upstream clients of doc_session.md revision 4,
-    /// SN12 and SN15, which no crate of the tree builds: the locker, the idle daemon and
-    /// cosmic-osd.
+    /// draws on the overlay layer; athanor-idle blanks the outputs and draws its fade
+    /// (doc_session_daemons.md, SD22). Then the upstream clients of doc_session.md revision 4,
+    /// SN12 and SN15, which no crate of the tree builds: the locker and cosmic-osd.
     const SHELL_CLIENTS: [(&str, &str, &[&str]); 8] = [
         (
             "athanor-bar",
@@ -863,14 +863,14 @@ mod tests {
             ],
         ),
         (
+            "athanor-idle",
+            "athanor-idle.service",
+            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
+        ),
+        (
             "cosmic-greeter",
             "cosmic-greeter-locker.scope",
             &["ext_session_lock_manager_v1"],
-        ),
-        (
-            "cosmic-idle",
-            "cosmic-idle.scope",
-            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
         ),
         ("cosmic-osd", "cosmic-osd.service", &["zwlr_layer_shell_v1"]),
         (
