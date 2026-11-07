@@ -141,8 +141,11 @@ pub enum Role {
     Layer(LayerOptions),
 }
 
-/// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets. New fields are
-/// added over time: start from [`LayerOptions::default`] and set the fields that differ.
+/// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets, and along an
+/// axis anchored on both edges at least the size the compositor configures: a surface anchored
+/// on all four whose widgets are a [`crate::Kind::Picture`] takes exactly the configured size.
+/// New fields are added over time: start from [`LayerOptions::default`] and set the fields that
+/// differ.
 #[non_exhaustive]
 pub struct LayerOptions {
     /// The layer of the shell the surface sits on.
@@ -2573,6 +2576,29 @@ mod tests {
         assert_eq!(requested((300, 60), stretched(bottom)), (300, 60));
         assert_eq!(requested((300, 60), stretched(spanning)), (0, 60));
         assert_eq!(requested((60, 300), stretched(side)), (60, 0));
+    }
+
+    #[test]
+    fn a_picture_on_all_four_edges_takes_the_size_configured() -> Result<(), Error> {
+        let all = stretched(Anchor::all());
+        assert_eq!(all, (true, true));
+        let theme = Theme {
+            margin: 0.0,
+            ..Theme::default()
+        };
+        let mut ui = Ui::new("Wallpaper", theme, false);
+        ui.picture(Ui::ROOT, crate::Image::from_rgba8(1, 1, vec![0, 0, 0, 255])?, "");
+        // Before the first configure: 0 on both axes, which the compositor sizes.
+        layout(&mut ui, 1.0)?;
+        assert_eq!(requested(logical_size(&ui), all), (0, 0));
+        // As `configure` sets it, at an output's size and again at another.
+        for configured in [(1280.0, 800.0), (853.0, 533.0)] {
+            (ui.min_width, ui.min_height) = configured;
+            layout(&mut ui, 1.5)?;
+            assert_eq!(ui.size(), configured);
+            assert_eq!(requested(logical_size(&ui), all), (0, 0));
+        }
+        Ok(())
     }
 
     #[test]
