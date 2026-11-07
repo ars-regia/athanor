@@ -1,6 +1,6 @@
 //! Landlock at start, as the greeter and the notifier do: first prove the process is
-//! single-threaded, then restrict. A headless unit names the trees it reads and the one
-//! directory it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
+//! single-threaded, then restrict. A headless unit names the trees it reads and the
+//! directories it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
 //! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`).
 //! Connecting to a bus socket is not a filesystem access Landlock mediates.
 //! A program that has no business on the network also calls `deny_tcp`.
@@ -26,9 +26,10 @@ pub fn ensure_single_threaded() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Read-only beneath each of `read` that exists, read-write beneath `write`, nothing else.
-/// A kernel that cannot enforce the ruleset is an error, not a best effort.
-pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
+/// Read-only beneath each of `read` that exists, read-write beneath each of `write`, which
+/// must exist, nothing else. A kernel that cannot enforce the ruleset is an error, not a best
+/// effort.
+pub fn restrict(read: &[&Path], write: &[&Path]) -> Result<(), Box<dyn Error>> {
     let all = AccessFs::from_all(ABI::V1);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -40,7 +41,9 @@ pub fn restrict(read: &[&Path], write: &Path) -> Result<(), Box<dyn Error>> {
             AccessFs::from_read(ABI::V1),
         ))?;
     }
-    ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(write)?, all))?;
+    for path in write {
+        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, all))?;
+    }
     ruleset.restrict_self()?;
     Ok(())
 }
@@ -127,7 +130,7 @@ mod tests {
         }
         // Landlock confines the calling thread and its children: the test binary stays free.
         std::thread::spawn(move || {
-            restrict(&[&readable], &writable).expect("Landlock must be enforced, not skipped");
+            restrict(&[&readable], &[&writable]).expect("Landlock must be enforced, not skipped");
             assert!(std::fs::read(readable.join("file")).is_ok());
             assert_eq!(
                 std::fs::write(readable.join("new"), b"x")

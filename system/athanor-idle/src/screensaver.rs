@@ -204,30 +204,44 @@ fn is_unique_form(name: &str) -> bool {
         .is_some_and(|(a, b)| digits(a) && digits(b))
 }
 
-/// The application id of the caller's unit, empty outside an application unit or when the
-/// bus does not answer.
+/// The application id of the caller's unit (SD8), empty outside an application unit. A failure
+/// or a timeout of the questions is logged and records an empty id. The daemon reads nothing
+/// under `/proc`, which its Landlock does not grant (SD17).
 async fn app_id_of(state: &State, name: BusName<'_>) -> String {
-    match state
-        .ask(state.bus.get_connection_unix_process_id(name))
-        .await
-    {
-        Ok(pid) => std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
-            .map(|c| app_id_from_cgroup(&c))
-            .unwrap_or_default(),
+    match state.ask(unit_of(state, name)).await {
+        Ok(unit) => app_id_from_unit(&unit),
         Err(e) => {
-            tracing::warn!("cannot tell the caller's process: {e}");
+            tracing::warn!("cannot tell the caller's unit; its application id is empty: {e}");
             String::new()
         }
     }
 }
 
-/// `app-athanor-<escaped id>@<random>.service` (SD8) gives `<id>`; anything else, empty.
-pub fn app_id_from_cgroup(cgroup: &str) -> String {
-    let unit = cgroup
-        .lines()
-        .filter_map(|l| l.rsplit('/').next())
-        .find(|u| u.starts_with("app-athanor-"))
-        .unwrap_or_default();
+/// The unit of `name`'s process, asked on the query connection: its pidfd from the bus
+/// (`GetConnectionCredentials`, `ProcessFD`), then the unit that holds it from the user's
+/// systemd (`GetUnitByPIDFD`), which a reused pid cannot mislead.
+async fn unit_of(state: &State, name: BusName<'_>) -> Result<String> {
+    let credentials = state.bus.get_connection_credentials(name).await?;
+    let pidfd = credentials
+        .process_fd()
+        .ok_or_else(|| zbus::Error::Failure("the bus gives no ProcessFD".into()))?;
+    let reply = state
+        .query
+        .call_method(
+            Some("org.freedesktop.systemd1"),
+            "/org/freedesktop/systemd1",
+            Some("org.freedesktop.systemd1.Manager"),
+            "GetUnitByPIDFD",
+            &(zbus::zvariant::Fd::from(pidfd),),
+        )
+        .await?;
+    let (_path, unit, _invocation): (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) =
+        reply.body().deserialize()?;
+    Ok(unit)
+}
+
+/// `app-athanor-<escaped id>@<random>.service` (SD8) gives `<id>`; any other unit, empty.
+pub fn app_id_from_unit(unit: &str) -> String {
     let Some(rest) = unit.strip_prefix("app-athanor-") else {
         return String::new();
     };
@@ -742,10 +756,15 @@ mod tests {
 
     #[test]
     fn the_application_id_comes_from_the_unit_name() {
-        let cg = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-athanor-org.gnome.Totem@1a2b.service\n";
-        assert_eq!(app_id_from_cgroup(cg), "org.gnome.Totem");
-        let cg = "0::/app.slice/app-athanor-org.x.My\\x2dApp@9.service";
-        assert_eq!(app_id_from_cgroup(cg), "org.x.My-App");
-        assert_eq!(app_id_from_cgroup("0::/user.slice/session-3.scope"), "");
+        assert_eq!(
+            app_id_from_unit("app-athanor-org.gnome.Totem@1a2b.service"),
+            "org.gnome.Totem"
+        );
+        assert_eq!(
+            app_id_from_unit("app-athanor-org.x.My\\x2dApp@9.service"),
+            "org.x.My-App"
+        );
+        assert_eq!(app_id_from_unit("session-3.scope"), "");
+        assert_eq!(app_id_from_unit("app-athanor-no-instance.service"), "");
     }
 }

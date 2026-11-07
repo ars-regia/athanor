@@ -1,4 +1,6 @@
 # Workspace crates that no package ships, one name per line; read by scripts/verify.py (check "shipped").
+# athanor-idle: its package, unit and allow-list line come in I4 (doc_session_daemons.md).
 #
 # Crates outside [workspace.members] need no name here, because the "shipped" check reads
 # members only.
+athanor-idle
