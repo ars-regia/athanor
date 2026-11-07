@@ -8,7 +8,6 @@
 
 use std::cell::RefCell;
 use std::error::Error as StdError;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -16,7 +15,7 @@ use std::time::Instant;
 use athanor_idle::battery::Battery;
 use athanor_idle::wayland::{Display, Notice, Which};
 use athanor_idle::{
-    bus, choose, follow, screensaver, Action, Config, Event, Sequence, Timeouts, Timer,
+    bus, choose, follow, screensaver, store, Action, Config, Event, Sequence, Timeouts, Timer,
     LOCK_TIMEOUT,
 };
 use athanor_sulphur_client::idle as power_page;
@@ -337,13 +336,9 @@ async fn daemon(
     let system_watch = zbus::connection::Builder::system()?.build().await?;
     let system = bus::System::new(system_query);
 
-    let dir = runtime.join("athanor-idle");
-    match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
-        Err(error) if error.kind() != std::io::ErrorKind::AlreadyExists => {
-            tracing::warn!(%error, "cannot create {}; inhibitors will not survive a restart", dir.display());
-        }
-        _ => {}
-    }
+    let dir = store::runtime_dir(&runtime).inspect_err(|error| {
+        tracing::error!(%error, "refusing to start: the runtime directory is not the daemon's");
+    })?;
     let (mut hold, mut ended) =
         screensaver::serve(&session, &session_query, dir.join("inhibitors.json")).await?;
 

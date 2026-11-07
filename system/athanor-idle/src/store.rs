@@ -3,8 +3,8 @@
 use crate::inhibitors::{truncate, Inhibitor, Inhibitors, Kind, MAX_ENTRIES, MAX_TEXT};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::Path;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 #[derive(Serialize, Deserialize)]
@@ -27,6 +27,37 @@ struct Entry {
 struct File {
     version: u32,
     inhibitors: Vec<Entry>,
+}
+
+/// `$XDG_RUNTIME_DIR/athanor-idle`, the directory of `inhibitors.json` and the one the daemon
+/// may write (SD17), created with mode 0700. One that exists already must be a directory, not
+/// a link, owned by the owner of `runtime` and of mode 0700, or it is refused: another process
+/// of the user could otherwise point the daemon's writes elsewhere.
+pub fn runtime_dir(runtime: &Path) -> io::Result<PathBuf> {
+    let dir = runtime.join("athanor-idle");
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => return Ok(dir),
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        Err(_) => {}
+    }
+    let owner = fs::metadata(runtime)?.uid();
+    let found = fs::symlink_metadata(&dir)?;
+    let refuse = |why: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} {why}", dir.display()),
+        ))
+    };
+    if !found.file_type().is_dir() {
+        return refuse("is not a directory");
+    }
+    if found.uid() != owner {
+        return refuse("is not owned by the user");
+    }
+    if found.permissions().mode() & 0o7777 != 0o700 {
+        return refuse("does not have mode 0700");
+    }
+    Ok(dir)
 }
 
 /// The largest file read back (proposed, revision 3).
@@ -135,6 +166,30 @@ fn discard(path: &Path, why: &str) -> io::Result<Vec<(u32, Inhibitor)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_runtime_dir_is_created_or_checked() {
+        let runtime = dir("runtime");
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+        let made = runtime_dir(&runtime).unwrap();
+        assert_eq!(made, runtime.join("athanor-idle"));
+        assert_eq!(fs::metadata(&made).unwrap().permissions().mode() & 0o7777, 0o700);
+        assert_eq!(runtime_dir(&runtime).unwrap(), made, "an existing one that passes");
+
+        fs::set_permissions(&made, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(runtime_dir(&runtime).is_err(), "mode 0755");
+        fs::remove_dir(&made).unwrap();
+
+        let elsewhere = runtime.join("elsewhere");
+        fs::DirBuilder::new().mode(0o700).create(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &made).unwrap();
+        assert!(runtime_dir(&runtime).is_err(), "a link to a directory");
+        fs::remove_file(&made).unwrap();
+
+        fs::write(&made, b"").unwrap();
+        assert!(runtime_dir(&runtime).is_err(), "a file");
+        fs::remove_dir_all(&runtime).unwrap();
+    }
 
     fn dir(name: &str) -> std::path::PathBuf {
         static COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
