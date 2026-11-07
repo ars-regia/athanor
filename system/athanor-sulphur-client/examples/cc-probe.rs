@@ -191,6 +191,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Err(err) = client.watch_windows() {
+        println!("{}", json!({"error": err.to_string()}));
+        return ExitCode::FAILURE;
+    }
     client.connect_events(|_, e| println!("{}", json!({"event": event(e)})));
     if let Err(err) = client.watch_keyboard_group() {
         println!("{}", json!({"error": err.to_string()}));

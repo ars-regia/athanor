@@ -2559,12 +2559,13 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # client binds the capture globals at the first `Client::capture`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
 # `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
-# `Client::watch_accessibility`, and its tiling manager at the first `Client::watch_tiling`;
-# capture.rs, actions.rs, keyboard_group.rs, a11y.rs and workspace_tiling.rs hold every name of
-# them in the crate. connection.rs binds the rest when a client connects, so it counts for a
-# target only when code outside the crate calls `Client::connect` or `Client::connect_wayland`:
-# a crate that reads only the crate's `idle` module, as athanor-idle does, binds nothing
-# through it (maintainer decision, 2026-11-07).
+# `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
+# toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
+# capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
+# every name of them in the crate. connection.rs binds the rest when a client connects, so it
+# counts for a target only when code outside the crate calls `Client::connect` or
+# `Client::connect_wayland`: a crate that reads only the crate's `idle` module, as athanor-idle
+# does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2579,14 +2580,17 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              "system/athanor-sulphur-client/src/workspace_tiling.rs":
              ("system/athanor-sulphur-client",
               re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/windows.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/connection.rs":
              ("system/athanor-sulphur-client",
               re.compile(r"\bClient\s*::\s*connect(?:_wayland)?\b(?!\s*::)"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
-# first watch of the accessibility state and at the first watch of the tiling. Each names at least
-# one, or the check no longer sees what the client binds.
+# first watch of the accessibility state, at the first watch of the tiling and at the first watch
+# of the windows. Each names at least one, or the check no longer sees what the client binds.
 CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
                 "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
                 "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
@@ -2595,7 +2599,9 @@ CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
                 "system/athanor-sulphur-client/src/a11y.rs":
                 "at the first watch of the accessibility state",
                 "system/athanor-sulphur-client/src/workspace_tiling.rs":
-                "at the first watch of the tiling"}
+                "at the first watch of the tiling",
+                "system/athanor-sulphur-client/src/windows.rs":
+                "at the first watch of the windows"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 
