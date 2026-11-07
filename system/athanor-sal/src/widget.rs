@@ -2,7 +2,7 @@
 //! right-to-left.
 
 use crate::focus;
-use crate::text::{keeps, printable, Brush, TextContext, TextField};
+use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
@@ -137,6 +137,12 @@ pub enum Kind {
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
     /// it with [`Ui::slider`], which keeps its range valid.
     Slider(Slider),
+    /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
+    /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
+    /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
+    /// width of its column or group, or its cell in a row; [`Ui::set_sensitive`] gives it the
+    /// insensitive look. Add it with [`Ui::level`], which keeps its range valid.
+    Level(Level),
     /// A single-line text field.
     Field(Box<TextField>),
     /// A text field of several lines, as GTK's `TextView` in a `ScrolledWindow`: as wide as a
@@ -248,6 +254,17 @@ pub enum Kind {
     },
 }
 
+/// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
+/// the maximum, and a value from 0 to the maximum. The fields are closed to applications so
+/// that these hold: make one with [`Ui::level`] and change it with [`Ui::set_level`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Level {
+    pub(crate) name: String,
+    pub(crate) value: f64,
+    pub(crate) full: f64,
+    pub(crate) max: f64,
+}
+
 /// The state of a [`Kind::Slider`]: a name, a range and a value that is always on one of its
 /// steps. The fields are closed to applications so that the invariants hold: the range is
 /// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
@@ -330,6 +347,8 @@ pub struct Widget {
     pub rect: Rect,
     pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
+    /// How its text is set: see [`Ui::set_text_style`].
+    pub(crate) style: TextStyle,
     /// `Some` for a widget that opens a popup: whether it is open.
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,
@@ -348,6 +367,7 @@ impl Widget {
             rect: Rect::default(),
             visible: true,
             text: None,
+            style: TextStyle::default(),
             expanded: None,
             tooltip: None,
             description: None,
@@ -550,6 +570,8 @@ pub struct Ui {
     offered: Option<(WidgetId, String)>,
     /// The text [`Ui::announce`] asked for, until the driver publishes it.
     pub(crate) announcement: Option<String>,
+    /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
+    pub(crate) pose: crate::motion::Pose,
 }
 
 impl Ui {
@@ -572,6 +594,7 @@ impl Ui {
             clips: Vec::new(),
             offered: None,
             announcement: None,
+            pose: crate::motion::Pose::REST,
         }
     }
 
@@ -898,6 +921,7 @@ impl Ui {
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
             Kind::Slider(slider) => &mut slider.name,
+            Kind::Level(level) => &mut level.name,
             _ => return None,
         };
         if *now == text {
@@ -946,7 +970,53 @@ impl Ui {
         Some(self.add(parent, Kind::Slider(slider)))
     }
 
-    /// The value of the slider `id`, or `None` if it is not a slider.
+    /// Adds a level named `name` for assistive technologies, from 0 to `max`, drawn in the
+    /// warning colour beyond `full`, set to `value` held to 0 to `max`. `None`, and nothing
+    /// added, unless every number is finite and `0 < full <= max`.
+    ///
+    /// # Panics
+    ///
+    /// When the numbers are taken and `parent` names no widget of this `Ui`.
+    pub fn level(
+        &mut self,
+        parent: WidgetId,
+        name: &str,
+        value: f64,
+        full: f64,
+        max: f64,
+    ) -> Option<WidgetId> {
+        let finite = [value, full, max].iter().all(|n| n.is_finite());
+        if !(finite && 0.0 < full && full <= max) {
+            return None;
+        }
+        let level = Level {
+            name: name.to_owned(),
+            value: value.clamp(0.0, max),
+            full,
+            max,
+        };
+        Some(self.add(parent, Kind::Level(level)))
+    }
+
+    /// Sets the level `id` to `value`, held to 0 to its maximum. `false`, and nothing changes,
+    /// for a widget that is not a level and for NaN. Only the application sets a level: an
+    /// assistive technology reads it.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_level(&mut self, id: WidgetId, value: f64) -> bool {
+        let Kind::Level(level) = &mut self.widgets[id].kind else {
+            return false;
+        };
+        if value.is_nan() {
+            return false;
+        }
+        level.value = value.clamp(0.0, level.max);
+        true
+    }
+
+    /// The value of the slider or level `id`, or `None` if it is neither.
     ///
     /// # Panics
     ///
@@ -954,6 +1024,7 @@ impl Ui {
     pub fn value(&self, id: WidgetId) -> Option<f64> {
         match &self.widgets[id].kind {
             Kind::Slider(slider) => Some(slider.value),
+            Kind::Level(level) => Some(level.value),
             _ => None,
         }
     }
@@ -1225,6 +1296,21 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
+    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check or a switch,
+    /// from its next layout; a field keeps the body text. `false`, and nothing changes, for a
+    /// scale that is not a finite number above zero.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_text_style(&mut self, id: WidgetId, style: TextStyle) -> bool {
+        if !(style.scale.is_finite() && style.scale > 0.0) {
+            return false;
+        }
+        self.widgets[id].style = style;
+        true
+    }
+
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
     /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
     /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
@@ -1461,6 +1547,7 @@ impl Ui {
             _ => gap,
         };
         let widget = &mut self.widgets[id];
+        let style = widget.style.clone();
         let (w, h) = match &mut widget.kind {
             Kind::Menu | Kind::List { .. } => {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
@@ -1524,7 +1611,7 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.layout(text, size, rtl);
+                let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width(), layout.height());
                 widget.text = Some(layout);
                 wh
@@ -1533,14 +1620,14 @@ impl Ui {
             | Kind::Toggle { label: text, .. }
             | Kind::MenuItem(text)
             | Kind::ListRow(text) => {
-                let layout = self.text.layout(text, size, rtl);
+                let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
                 wh
             }
             Kind::Check { label, .. } | Kind::Switch { label, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
-                let layout = self.text.layout(label, size, rtl);
+                let layout = self.text.layout(label, size, rtl, &style);
                 let wh = (
                     mark_w + gap + layout.width(),
                     mark_h.max(layout.height()) + pad,
@@ -1548,7 +1635,7 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Slider(_) => (field_width, slider_knob(size) + pad),
+            Kind::Slider(_) | Kind::Level(_) => (field_width, slider_knob(size) + pad),
             Kind::Field(field) => {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
@@ -1641,6 +1728,7 @@ impl Ui {
                             | Kind::Menu
                             | Kind::Switch { .. }
                             | Kind::Slider(_)
+                            | Kind::Level(_)
                             | Kind::Scroll { .. }
                             | Kind::List { .. }
                             | Kind::Island { .. }
@@ -3173,6 +3261,69 @@ mod tests {
         // Only a slider has a value.
         let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
         assert_eq!((ui.value(label), ui.set_value(label, 1.0)), (None, None));
+    }
+
+    #[test]
+    fn a_level_holds_its_range_and_takes_no_focus() {
+        let mut ui = Ui::new("Level", Theme::default(), false);
+        for (value, full, max) in [
+            (1.0, 0.0, 100.0),
+            (1.0, 101.0, 100.0),
+            (1.0, -1.0, 100.0),
+            (f64::NAN, 100.0, 100.0),
+            (1.0, 100.0, f64::INFINITY),
+        ] {
+            let id = ui.level(Ui::ROOT, "Volume", value, full, max);
+            assert_eq!(id, None, "{value} {full} {max}");
+        }
+        let id = ui.level(Ui::ROOT, "Volume", 200.0, 100.0, 150.0);
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.value(id), Some(150.0), "held to its maximum");
+        for (set, now) in [(-5.0, 0.0), (120.0, 120.0), (f64::INFINITY, 150.0)] {
+            assert!(ui.set_level(id, set));
+            assert_eq!(ui.value(id), Some(now), "{set}");
+        }
+        assert!(!ui.set_level(id, f64::NAN));
+        assert_eq!(ui.value(id), Some(150.0));
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        assert!(!ui.set_level(label, 1.0));
+        assert!(!ui.widget(id).is_focusable());
+        // It fills its column, as a slider does.
+        ui.layout();
+        let (root, r) = (ui.widget(Ui::ROOT).rect, ui.widget(id).rect);
+        assert_eq!(r.w, root.w - 2.0 * ui.theme.margin);
+    }
+
+    #[test]
+    fn a_label_takes_its_style_at_the_next_layout_and_refuses_a_bad_scale() {
+        let mut ui = Ui::new("Style", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("45".into()));
+        ui.layout();
+        let body = ui.widget(label).rect;
+        let display = TextStyle {
+            scale: 5.0,
+            weight: 300,
+            features: vec![*b"tnum"],
+        };
+        assert!(ui.set_text_style(label, display.clone()));
+        ui.layout();
+        let large = ui.widget(label).rect;
+        assert!(
+            large.h > 4.0 * body.h && large.w > 4.0 * body.w,
+            "{large:?} from {body:?}"
+        );
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let bad = TextStyle {
+                scale,
+                ..TextStyle::default()
+            };
+            assert!(!ui.set_text_style(label, bad), "{scale}");
+        }
+        assert_eq!(
+            ui.widget(label).style,
+            display,
+            "a refused style changes nothing"
+        );
     }
 
     #[test]

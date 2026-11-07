@@ -7,6 +7,7 @@
 mod clipboard;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
+use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
@@ -69,7 +70,7 @@ use smithay_client_toolkit::{
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
@@ -238,6 +239,11 @@ pub trait Application {
     /// service tells systemd it is ready. Not called for a surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
+    /// The motion of `surface` ([`Shell::animate`]) reached its end pose, which the surface keeps:
+    /// called in the turn of the event loop that drew it, after [`Application::turn`]. Not
+    /// called for a motion a later one replaced, nor for a surface closed by then.
+    fn settled(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
+
     /// The layer surface `surface` closed without the application asking: the compositor closed
     /// it (`zwlr_layer_surface_v1.closed`), or the output it was opened on left. It is no longer
     /// open, and the driver opens nothing in its place.
@@ -350,6 +356,8 @@ fn run_on(
         first_frames: Vec::new(),
         outputs: Vec::new(),
         closing: Vec::new(),
+        reduced_motion: false,
+        settled: Vec::new(),
     };
     let mut app = App {
         application: Box::new(application),
@@ -384,7 +392,7 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(None, &mut app)?;
+        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
@@ -397,6 +405,22 @@ fn run_on(
             first_frames,
             |app, surface| app.shell.ui(surface).is_some(),
             |app, surface| app.application.drawn(&mut app.shell, surface),
+        );
+        // A surface that an earlier `settled` of this batch moved again is not reported settled
+        // here: a running motion settles later, and an instantaneous one is queued anew for the
+        // next turn.
+        let settled = std::mem::take(&mut app.shell.settled);
+        settle_each(
+            &mut app,
+            settled,
+            |app| &app.shell.settled,
+            |app, surface| {
+                app.shell
+                    .surfaces
+                    .iter()
+                    .any(|s| s.id == surface && s.motion.is_none())
+            },
+            |app, surface| app.application.settled(&mut app.shell, surface),
         );
         app.closed_by_application();
         app.sync_window_focus();
@@ -499,6 +523,10 @@ pub struct Shell {
     outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
     /// The surfaces [`Shell::close`] closed since the driver last ended what they held.
     closing: Vec<SurfaceId>,
+    /// Whether motions only fade ([`Shell::set_reduced_motion`]).
+    reduced_motion: bool,
+    /// The surfaces whose motion ended since [`Application::settled`] last ran.
+    settled: Vec<SurfaceId>,
 }
 
 impl Shell {
@@ -642,6 +670,45 @@ impl Shell {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Moves the surface `id` from `motion.from` to `motion.to`, its widgets with it, one step per
+    /// frame callback of the surface: no timer, so a surface the compositor does not show does
+    /// not move until it shows it. The first pose is drawn at once, and the motion's time starts
+    /// at the surface's next frame callback; at the end the surface keeps `to` and the
+    /// application is told through [`Application::settled`]. A motion asked while another is
+    /// under way replaces it, from wherever `from` says: [`Shell::pose`] gives the current pose,
+    /// so that an interrupted motion does not jump. With reduced motion only the opacity moves,
+    /// over `motion.reduced`. The offset moves what is drawn inside the surface, which keeps its
+    /// size: leave it room. Refused for a surface that is not open.
+    pub fn animate(&mut self, id: SurfaceId, motion: Motion) -> Result<(), Error> {
+        let reduced = self.reduced_motion;
+        let surface = self
+            .get_mut(id)
+            .ok_or_else(|| format!("no open surface {id:?}"))?;
+        surface.ui.pose = motion.at(Duration::ZERO, reduced);
+        surface.dirty = true;
+        let ended = motion.ended(Duration::ZERO, reduced);
+        surface.motion = (!ended).then(|| Running::new(motion));
+        requeue(&mut self.settled, id, ended);
+        Ok(())
+    }
+
+    /// How the surface `id` is drawn now: [`Pose::REST`] unless a motion moved it.
+    pub fn pose(&self, id: SurfaceId) -> Option<Pose> {
+        self.ui(id).map(|ui| ui.pose)
+    }
+
+    /// Reduced motion, as the application reads it from the session (GNOME's
+    /// `enable-animations` off, doc_visual_language.md VL9): every motion, those under way
+    /// included from their next frame, then moves only its opacity, over its `reduced` time.
+    pub fn set_reduced_motion(&mut self, reduced: bool) {
+        self.reduced_motion = reduced;
+    }
+
+    /// Whether reduced motion is on: off until [`Shell::set_reduced_motion`] turns it on.
+    pub fn reduced_motion(&self) -> bool {
+        self.reduced_motion
     }
 
     /// The surface the open menu was opened from, if a menu is open.
@@ -963,6 +1030,7 @@ impl Shell {
             frame_pending: false,
             redraw: false,
             dirty: false,
+            motion: None,
         });
         if input_region.is_some() {
             self.set_input_region(id, input_region.as_deref())?;
@@ -1023,6 +1091,30 @@ fn each_open<T, S: Copy>(
             call(state, surface);
         }
     }
+}
+
+/// How long the loop waits for an event: not at all while a surface is queued `pending` for the
+/// next turn, which no event is coming to wake, and until one arrives otherwise.
+fn wait(pending: bool) -> Option<std::time::Duration> {
+    pending.then_some(std::time::Duration::ZERO)
+}
+
+/// Calls `call` on each of the `settled` surfaces that is `at_rest` and that `queued` does not
+/// find queued anew in `state` when its turn comes: one that an earlier `call` of this batch
+/// moved again is reported on the turn it is queued for, not twice.
+fn settle_each<T>(
+    state: &mut T,
+    settled: Vec<SurfaceId>,
+    queued: impl Fn(&T) -> &[SurfaceId],
+    at_rest: impl Fn(&T, SurfaceId) -> bool,
+    call: impl FnMut(&mut T, SurfaceId),
+) {
+    each_open(
+        state,
+        settled,
+        |state, surface| !queued(state).contains(&surface) && at_rest(state, surface),
+        call,
+    );
 }
 
 /// The output named `name` among `outputs` and their names.
@@ -1183,6 +1275,8 @@ struct Surface {
     redraw: bool,
     /// The widgets changed since the last draw.
     dirty: bool,
+    /// The motion under way, which each frame callback advances.
+    motion: Option<Running>,
 }
 
 impl Drop for Surface {
@@ -2083,13 +2177,34 @@ impl CompositorHandler for App {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, wl: &wl_surface::WlSurface, _: u32) {
+    fn frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        wl: &wl_surface::WlSurface,
+        time: u32,
+    ) {
+        let reduced = self.shell.reduced_motion;
         let Some(surface) = self.shell.find(wl) else {
             return;
         };
         surface.frame_pending = false;
-        if surface.redraw {
-            let id = surface.id;
+        let id = surface.id;
+        // The motion under way takes its next step, which this callback's time places.
+        let ended = surface.motion.as_mut().is_some_and(|running| {
+            let (pose, ended) = running.frame(time, reduced);
+            surface.ui.pose = pose;
+            surface.redraw = true;
+            ended
+        });
+        if ended {
+            surface.motion = None;
+        }
+        let redraw = surface.redraw;
+        if ended {
+            self.shell.settled.push(id);
+        }
+        if redraw {
             self.update(id, None);
         }
     }
@@ -2510,9 +2625,64 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
     }
 }
 
+/// Forgets the settling of a motion of `id` that a new one replaces, so that the application
+/// is not told of it during the new one, and queues `id` once if the new motion `ended` at once.
+fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
+    settled.retain(|s| *s != id);
+    if ended {
+        settled.push(id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        // A motion of `a` ended this turn; a new one under way replaces it.
+        let mut settled = vec![a, b];
+        requeue(&mut settled, a, false);
+        assert_eq!(settled, [b]);
+        // Two motions that end at once: `a` settles once.
+        requeue(&mut settled, a, true);
+        requeue(&mut settled, a, true);
+        assert_eq!(settled, [b, a]);
+    }
+
+    #[test]
+    fn a_surface_moved_again_within_a_batch_is_reported_once_on_the_next_turn() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        // Reporting `a` replaces `b`, settled in the same batch, by an instantaneous motion.
+        let mut state = (Vec::new(), Vec::new());
+        let turn = |state: &mut (Vec<SurfaceId>, Vec<SurfaceId>), batch| {
+            settle_each(
+                state,
+                batch,
+                |s| &s.0,
+                |_, _| true,
+                |s, id| {
+                    s.1.push(id);
+                    if id == a {
+                        requeue(&mut s.0, b, true);
+                    }
+                },
+            );
+        };
+        turn(&mut state, vec![a, b]);
+        assert_eq!(state.1, [a], "b is not reported with the batch that moved it");
+        let next = std::mem::take(&mut state.0);
+        turn(&mut state, next);
+        assert_eq!(state.1, [a, b], "b is reported once, on the next turn");
+        assert!(state.0.is_empty());
+    }
+
+    #[test]
+    fn the_loop_does_not_block_while_a_surface_is_queued() {
+        assert_eq!(wait(true), Some(std::time::Duration::ZERO));
+        assert_eq!(wait(false), None);
+    }
 
     #[test]
     fn a_held_key_acts_again_but_the_clipboard_keys_and_the_activating_ones() {
