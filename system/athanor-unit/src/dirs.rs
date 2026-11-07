@@ -4,11 +4,16 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Component, Path, PathBuf};
 
+use nix::errno::Errno;
 use nix::fcntl::OFlag;
+use nix::sys::stat::Mode;
+
+/// The most links a walk follows, as the kernel's own resolution (MAXSYMLINKS).
+const MAX_LINKS: usize = 40;
 
 /// A descriptor this module opened and checked: what a Landlock write grant names
 /// (`sandbox::restrict`, `sandbox::restrict_writes`). Its field is private, so only the
@@ -32,28 +37,30 @@ impl AsFd for Checked {
 /// checked on that descriptor: a directory, owned by the owner of `runtime`, of mode 0700.
 /// Another process of the user could otherwise point a confined daemon's writes elsewhere. The
 /// descriptor is what a Landlock grant names (`sandbox::restrict`): a link swapped in for the
-/// path after the check widens nothing. Only `name`, the final component, is opened without
-/// following a link: a link in `runtime` or above it is still followed, and the walk that
-/// refuses one is #1061.
+/// path after the check widens nothing. `runtime` is reached by `walk`, and `name` is created
+/// and opened in that descriptor, so a link in `runtime` or above it is refused unless a
+/// directory of root's alone holds it (#1061).
 pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
     let dir = runtime.join(name);
-    match fs::DirBuilder::new().mode(0o700).create(&dir) {
-        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
-        _ => {}
-    }
     let refuse = |why: String| {
         io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!("{} {why}", dir.display()),
         )
     };
-    // std adds O_CLOEXEC.
-    let opened = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags((OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_DIRECTORY).bits())
-        .open(&dir)
+    if Path::new(name).file_name() != Some(OsStr::new(name)) {
+        return Err(refuse(
+            "is not one name in its runtime directory".to_owned(),
+        ));
+    }
+    let parent = walk(&dir, runtime)?;
+    match nix::sys::stat::mkdirat(Some(parent.as_raw_fd()), name, Mode::S_IRWXU) {
+        Ok(()) | Err(Errno::EEXIST) => {}
+        Err(e) => return Err(e.into()),
+    }
+    let opened = open_at(&parent, OsStr::new(name), OFlag::O_DIRECTORY)
         .map_err(|e| refuse(format!("is not a directory, or is a link: {e}")))?;
-    let owner = fs::metadata(runtime)?.uid();
+    let owner = parent.metadata()?.uid();
     let found = opened.metadata()?;
     if !found.file_type().is_dir() {
         return Err(refuse("is not a directory".to_owned()));
@@ -71,9 +78,9 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
 /// in its last component, and checked on that descriptor: a directory owned by the process's
 /// user or by root (`/tmp`), never another user's. The descriptor is what the grant names
 /// (`sandbox::restrict`, `sandbox::restrict_writes`), so a link put at the path before the
-/// open is refused, and one swapped in after it widens nothing. Only the final component is
-/// opened without following a link: a link in an intermediate component is still followed,
-/// and the walk that refuses one is #1061.
+/// open is refused, and one swapped in after it widens nothing. The components above the final
+/// one are reached by `walk`, so a link in one of them is refused unless a directory of root's
+/// alone holds it (#1061).
 pub fn owned_dir(path: &Path) -> io::Result<Checked> {
     let (opened, found) = not_a_link(path, OFlag::O_DIRECTORY)?;
     if found.uid() != 0 && found.uid() != nix::unistd::geteuid().as_raw() {
@@ -129,14 +136,15 @@ fn refused(path: &Path, why: &str) -> io::Error {
     )
 }
 
-/// `path` opened with O_PATH, O_NOFOLLOW and `kind`, and what fstat says of it; refused when it
-/// is a link, or not a directory when `kind` holds O_DIRECTORY.
+/// `path` opened with O_PATH, O_NOFOLLOW and `kind` in the directory `walk` reaches above it,
+/// and what fstat says of it; refused when it is a link, or not a directory when `kind` holds
+/// O_DIRECTORY.
 fn not_a_link(path: &Path, kind: OFlag) -> io::Result<(fs::File, fs::Metadata)> {
-    // std adds O_CLOEXEC. With O_PATH and O_NOFOLLOW a link opens as itself: refused below.
-    let opened = fs::OpenOptions::new()
-        .read(true)
-        .custom_flags((OFlag::O_PATH | OFlag::O_NOFOLLOW | kind).bits())
-        .open(path)?;
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return Err(refused(path, "names no final component"));
+    };
+    // With O_PATH and O_NOFOLLOW a link opens as itself: refused below.
+    let opened = open_at(&walk(path, dir)?, name, kind)?;
     let found = opened.metadata()?;
     if found.file_type().is_symlink() {
         return Err(refused(path, "is a link"));
@@ -145,6 +153,112 @@ fn not_a_link(path: &Path, kind: OFlag) -> io::Result<(fs::File, fs::Metadata)> 
         return Err(refused(path, "is not a directory"));
     }
     Ok((opened, found))
+}
+
+/// The directory `dir` names, on behalf of `path`, reached from `/` one component at a time:
+/// each is opened with O_PATH and O_NOFOLLOW in the descriptor of the one before, so the kernel
+/// never resolves more than one name. A link on the way is read with readlinkat and its target
+/// walked in turn, at most `MAX_LINKS` of them, only when the directory that holds it is one
+/// `follows_links` trusts (`/home` links to `var/home` in `/`); any other link is refused. `..`
+/// goes back to the descriptor the walk held before, never above `/`, so it is the directory
+/// the walk came through and not one the kernel looks up again after a rename.
+fn walk(path: &Path, dir: &Path) -> io::Result<fs::File> {
+    if !dir.is_absolute() {
+        return Err(refused(path, "is not an absolute path"));
+    }
+    let mut here = (root()?, PathBuf::from("/"));
+    let mut above = Vec::new();
+    let mut todo = names(dir);
+    let mut links = 0;
+    while let Some(name) = todo.pop() {
+        if name == ".." {
+            if let Some(up) = above.pop() {
+                here = up;
+            }
+            continue;
+        }
+        let at = here.1.join(&name);
+        // Without O_DIRECTORY, which would fail on a link before it could be told from a file:
+        // fstat tells a directory from a link on the descriptor.
+        let opened = open_at(&here.0, &name, OFlag::empty())?;
+        let found = opened.metadata()?;
+        if found.is_dir() {
+            above.push(std::mem::replace(&mut here, (opened, at)));
+            continue;
+        }
+        if !found.file_type().is_symlink() {
+            return Err(Errno::ENOTDIR.into());
+        }
+        let holder = here.0.metadata()?;
+        if !follows_links(holder.uid(), holder.mode()) {
+            let why = format!(
+                "has a link on the way, {}, in a directory that is not root's alone",
+                at.display()
+            );
+            return Err(refused(path, &why));
+        }
+        links += 1;
+        if links > MAX_LINKS {
+            return Err(refused(
+                path,
+                "has more links on the way than the kernel follows",
+            ));
+        }
+        let target = PathBuf::from(nix::fcntl::readlinkat(
+            Some(here.0.as_raw_fd()),
+            name.as_os_str(),
+        )?);
+        if target.as_os_str().is_empty() {
+            return Err(Errno::ENOENT.into());
+        }
+        if target.is_absolute() {
+            here = (root()?, PathBuf::from("/"));
+            above.clear();
+        }
+        todo.extend(names(&target));
+    }
+    Ok(here.0)
+}
+
+/// Whether `walk` follows a link in a directory of owner `uid` and mode `mode`: only in one of
+/// root's that neither its group nor others can write, where no user can put a link.
+fn follows_links(uid: u32, mode: u32) -> bool {
+    uid == 0 && mode & 0o022 == 0
+}
+
+/// The names of `path` after its root, `..` included, last first: `walk` pops the next one.
+fn names(path: &Path) -> Vec<OsString> {
+    let mut names: Vec<OsString> = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name.to_owned()),
+            Component::ParentDir => Some(OsString::from("..")),
+            Component::RootDir | Component::CurDir | Component::Prefix(_) => None,
+        })
+        .collect();
+    names.reverse();
+    names
+}
+
+/// `/`, opened with O_PATH: where `walk` starts. std adds O_CLOEXEC.
+fn root() -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlag::O_PATH | OFlag::O_DIRECTORY).bits())
+        .open("/")
+}
+
+/// `name`, one component, opened in `dir` with O_PATH, O_NOFOLLOW, O_CLOEXEC and `kind`.
+#[allow(unsafe_code)]
+fn open_at(dir: &fs::File, name: &OsStr, kind: OFlag) -> io::Result<fs::File> {
+    let fd = nix::fcntl::openat(
+        Some(dir.as_raw_fd()),
+        name,
+        OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC | kind,
+        Mode::empty(),
+    )?;
+    // SAFETY: on success openat returned a new descriptor that nothing else owns.
+    Ok(fs::File::from(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -200,6 +314,7 @@ impl Dirs {
 mod tests {
     use super::*;
     use crate::sandbox;
+    use std::os::unix::fs::DirBuilderExt;
 
     fn runtime(name: &str) -> PathBuf {
         let runtime =
@@ -312,6 +427,79 @@ mod tests {
         .expect("the confined thread");
         assert!(!elsewhere.join("file").exists());
         fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn a_link_on_the_way_in_a_directory_the_user_writes_is_refused() {
+        let runtime = runtime("hop");
+        let (shared, real) = (runtime.join("shared"), runtime.join("real"));
+        // Writable by others as well, so the link is refused whoever runs the test: the shell
+        // rig runs it as root, and a directory of root's alone would pass.
+        fs::create_dir(&shared).expect("shared");
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).expect("chmod");
+        fs::create_dir(&real).expect("real");
+        private_dir(&real, "d").expect("a private directory");
+        fs::write(real.join("f"), b"").expect("file");
+        let hop = shared.join("hop");
+        std::os::unix::fs::symlink(&real, &hop).expect("symlink");
+        owned_dir(&real.join("d")).expect("the directory itself");
+        owned_node(&real.join("f")).expect("the node itself");
+        for (what, opened) in [
+            ("owned_dir", owned_dir(&hop.join("d"))),
+            ("owned_node", owned_node(&hop.join("f"))),
+            ("private_dir", private_dir(&hop, "d")),
+        ] {
+            let error = opened.expect_err(what);
+            assert_eq!(
+                error.kind(),
+                io::ErrorKind::PermissionDenied,
+                "{what}: {error}"
+            );
+            assert!(error.to_string().contains("shared/hop"), "{what}: {error}");
+        }
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn a_link_is_followed_only_in_a_directory_of_roots_alone() {
+        assert!(follows_links(0, 0o040755), "/");
+        assert!(follows_links(0, 0o040555), "/ on a bootc system");
+        assert!(!follows_links(1000, 0o040700), "a directory of the user's");
+        assert!(
+            !follows_links(1000, 0o040755),
+            "a directory of the user's that others read"
+        );
+        assert!(!follows_links(0, 0o040775), "its group writes it");
+        assert!(!follows_links(0, 0o041777), "others write it, as /tmp");
+    }
+
+    #[test]
+    fn a_link_in_a_directory_of_roots_alone_is_followed() {
+        // Fedora's /bin links to usr/bin in /, and /var/run to ../run in /var: the walk reaches
+        // the directory the kernel does, `..` included. A system without them skips that pair.
+        for (link, target) in [("/bin", "/usr/bin"), ("/var/run", "/run")] {
+            let link = Path::new(link);
+            if !fs::symlink_metadata(link).is_ok_and(|found| found.file_type().is_symlink()) {
+                continue;
+            }
+            let walked = walk(link, link).expect("walked").metadata().expect("fstat");
+            let followed = fs::metadata(target).expect("the target");
+            assert_eq!(
+                (walked.dev(), walked.ino()),
+                (followed.dev(), followed.ino()),
+                "{}",
+                link.display()
+            );
+        }
+        let up = walk(Path::new("/usr/.."), Path::new("/usr/..")).expect("/usr/..");
+        assert_eq!(
+            up.metadata().expect("fstat").ino(),
+            fs::metadata("/").expect("/").ino()
+        );
+        assert!(
+            walk(Path::new("usr"), Path::new("usr")).is_err(),
+            "a relative path"
+        );
     }
 
     fn vars<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
