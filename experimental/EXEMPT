@@ -2,3 +2,4 @@
 #
 # Crates outside [workspace.members] need no name here, because the "shipped" check reads
 # members only.
+athanor-sessiond

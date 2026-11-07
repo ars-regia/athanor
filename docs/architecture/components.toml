@@ -705,6 +705,15 @@ item = "SD4"
 purpose = "The idle daemon's logic with no display: the timer choice, the inhibitor table and the blank, off, lock request sequence"
 
 [[component]]
+path = "system/athanor-sessiond"
+kind = "crate"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD14"
+purpose = "The headless session daemon that replaces cosmic-settings-daemon: battery notices from UPower's warning level and the reset of COSMIC's appearance values"
+
+[[component]]
 path = "system/athanor-trust-state"
 kind = "crate"
 area = "signing-update"

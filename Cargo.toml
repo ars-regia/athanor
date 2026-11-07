@@ -31,6 +31,7 @@ members = [
   "system/athanor-auth",
   "system/athanor-edid",
   "system/athanor-idle",
+  "system/athanor-sessiond",
   "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
 ]
 
