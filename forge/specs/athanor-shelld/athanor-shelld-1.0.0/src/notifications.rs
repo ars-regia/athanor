@@ -314,10 +314,12 @@ impl Private {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
-        let credentials = match tokio::time::timeout(
-            ASK,
-            DBusProxy::new(&self.query).await?.get_connection_credentials(sender.clone().into()),
-        )
+        let credentials = match tokio::time::timeout(ASK, async {
+            DBusProxy::new(&self.query)
+                .await?
+                .get_connection_credentials(sender.clone().into())
+                .await
+        })
         .await
         {
             Ok(credentials) => credentials?,
