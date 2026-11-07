@@ -105,7 +105,7 @@ class ImageSession(unittest.TestCase):
         self.root = pathlib.Path(self.tmp.name)
         for b in (
             "usr/bin/cosmic-greeter",
-            "usr/bin/cosmic-idle",
+            "usr/bin/athanor-idle",
             "usr/bin/cosmic-osd",
         ):
             self.write(b, "")
@@ -174,7 +174,7 @@ class ImageSession(unittest.TestCase):
     def test_each_missing_binary_fails(self):
         for binary in (
             "usr/bin/cosmic-greeter",
-            "usr/bin/cosmic-idle",
+            "usr/bin/athanor-idle",
             "usr/bin/cosmic-osd",
         ):
             with self.subTest(binary=binary):
@@ -229,10 +229,10 @@ class ImageSession(unittest.TestCase):
     def test_a_commented_supervisor_line_fails(self):
         self.edit(
             SUPERVISOR,
-            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
-            "# systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
+            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &",
+            "# systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &",
         )
-        self.assertProblem("cosmic-idle.scope")
+        self.assertProblem("cosmic-greeter-locker.scope")
 
     def test_a_compositor_session_that_does_not_start_the_supervisor_fails(self):
         self.edit(COMPOSITOR_SESSION, 'session_components "$$" target < /dev/null &\n', "")

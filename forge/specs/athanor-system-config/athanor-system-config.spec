@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:76.fc43}
+Release:        %{?autorelease}%{!?autorelease:77.fc43}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -15,7 +15,7 @@ Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
 # session-components runs the session's screen locker and idle daemon.
-Requires: cosmic-greeter cosmic-idle
+Requires: cosmic-greeter athanor-idle
 # Core UI andDaemons
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
@@ -91,6 +91,10 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 %config(noreplace) %attr(0600,root,root) /etc/usbguard/rules.d/10-athanor-baseline.conf
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-77
+- The session no longer runs cosmic-idle: the supervisor starts the locker alone, and the
+  package requires athanor-idle, a user unit (doc_session_daemons.md, SD22 step 1).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-76
 - Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
   binaries, user unit, session script and data directory.

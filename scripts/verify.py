@@ -2536,7 +2536,6 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # must keep one line, for the unit it runs in, and a spec that comes to install one ends its
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
 UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
             "/usr/bin/cosmic-osd": "cosmic-osd.service",
             "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"

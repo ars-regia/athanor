@@ -35,12 +35,12 @@ import sys
 from check_image_contacts import enabled_units, is_masked
 
 LAUNCHER = "usr/bin/athanor-desktop"
-BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/cosmic-idle", "usr/bin/cosmic-osd")
+BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/athanor-idle", "usr/bin/cosmic-osd")
 SUPERVISOR = "usr/libexec/athanor/session-components"
 COMPOSITOR = "usr/bin/athanor-sulphur"
 COMPOSITOR_SESSION = "usr/bin/athanor-sulphur-session"
 # What each script must hold as a whole active line (doc_session.md SN15): the sessions start
-# the supervisor, which runs the locker and the idle daemon, each in a scope of its own.
+# the supervisor, which runs the locker in a scope of its own.
 LAUNCHER_LINES = (
     ". /usr/libexec/athanor/session-components",
     'session_components "$$" &',
@@ -51,9 +51,7 @@ COMPOSITOR_LINES = (
 )
 SUPERVISED = (
     'session_component "$anchor" cosmic-greeter \\',
-    'session_component "$anchor" cosmic-idle \\',
     "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &",
-    "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 # Unit directories as an image has them, the lowest priority first (systemd.unit(5), "User Unit
