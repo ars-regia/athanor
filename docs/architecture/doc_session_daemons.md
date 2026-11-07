@@ -269,7 +269,7 @@ Status: **revision 3 (2026-11-06), approved by the maintainer with the pull requ
 - `Critical` (4): "Battery critically low", "Connect the charger", urgency critical, `resident`.
 - `Low` and `Critical` carry the action "Battery settings", which calls `os.athanor.ControlCenter1.Show("battery")` (`doc_control_center.md` CC5). *Amended 2026-10-09 (ADR-0100):* the action comes from `doc_notification_center.md` NC13, whose own low-battery notice is withdrawn so that one process watches UPower.
 - `Action` (5): "The computer will act soon to save its state", urgency critical; what it does is UPower's `CriticalPowerAction`.
-- A notice closes when the state goes above its level or the machine is charging. Thresholds are UPower's (section 1), not ours. No sound is played other than the notification's own (BR4); the 3 s nag and the plug sounds of cosmic-settings-daemon are not kept. Peripheral batteries are excluded (SD21).
+- A notice closes when the state goes above its level or the machine is charging. Thresholds are UPower's (section 1), not ours. A notice whose raise failed stays owed until the level changes or a notification server appears, and a server that appears gets the current level's notice again (maintainer decision, 2026-11-07). No sound is played other than the notification's own (BR4); the 3 s nag and the plug sounds of cosmic-settings-daemon are not kept. Peripheral batteries are excluded (SD21).
 
 **SD15. Headset detection and mono audio.** Replaces cosmic-settings-daemon's audio roles: the one behind OD19, and mono audio.
 
