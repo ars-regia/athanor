@@ -15,6 +15,8 @@ Type=dbus
 BusName=org.freedesktop.ScreenSaver
 NotifyAccess=main
 ExecStart=/usr/bin/athanor-idle
+# Bounded as athanor-shelld is: the session target waits for this unit (doc_session.md SN6).
+TimeoutStartSec=10s
 Restart=always
 RestartSec=100ms
 RestartSteps=5
