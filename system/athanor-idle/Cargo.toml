@@ -1,0 +1,9 @@
+[package]
+name = "athanor-idle"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The logic of the idle daemon with no display and no bus: the timer choice, the inhibitor table and the blank, off, lock request sequence (doc_session_daemons.md, SD4, SD5)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]

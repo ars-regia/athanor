@@ -38,6 +38,7 @@ fn apply_writes_the_store_then_the_compositor() {
         accent: Accent::Teal,
         accent_mode: AccentMode::Wallpaper,
         accent_computed: Rgb::from_hex("#336699"),
+        animations: true,
     };
     let seen = Cell::new(None);
     appearance::apply(
@@ -97,4 +98,13 @@ fn apply_writes_the_store_then_the_compositor() {
     .expect("apply");
     assert_eq!(interface.string("color-scheme"), "prefer-dark");
     assert!(!Appearance::read().high_contrast);
+
+    // Reduced motion is GNOME's `enable-animations` turned off; `apply` never writes it.
+    assert!(Appearance::read().animations);
+    interface
+        .set_boolean("enable-animations", false)
+        .expect("enable-animations");
+    assert!(!Appearance::read().animations);
+    appearance::apply(|current| current.high_contrast = true, |_| Ok(())).expect("apply");
+    assert!(!interface.boolean("enable-animations") && !Appearance::read().animations);
 }
