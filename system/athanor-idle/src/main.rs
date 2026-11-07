@@ -16,7 +16,7 @@ use athanor_idle::battery::Battery;
 use athanor_idle::confine;
 use athanor_idle::wayland::{Display, Notice, Which};
 use athanor_idle::{
-    bus, choose, follow, screensaver, Action, Config, Event, Sequence, Timeouts, Timer,
+    bus, choose, follow, screensaver, Action, Config, Event, Hold, Sequence, Timeouts, Timer,
     LOCK_TIMEOUT,
 };
 use athanor_sulphur_client::idle as power_page;
@@ -295,7 +295,8 @@ impl Driver {
         self.display.set_timeout(Which::Suspend, timeouts.suspend);
     }
 
-    async fn notice(&mut self, notice: Notice) {
+    /// `hold` is what the inhibitor table holds now, which a queued `idled` must respect.
+    async fn notice(&mut self, notice: Notice, hold: Hold) {
         match notice {
             Notice::Idled(Which::Blank) => {
                 self.blank_idle = true;
@@ -309,7 +310,7 @@ impl Driver {
                 self.blank_idle = false;
                 self.handle(Event::Resumed);
             }
-            Notice::Idled(Which::Suspend) => self.handle(Event::SuspendIdled),
+            Notice::Idled(Which::Suspend) => self.handle(Event::SuspendIdled { hold }),
             Notice::Resumed(Which::Suspend) => {}
         }
     }
@@ -413,7 +414,7 @@ async fn daemon(
                     read => read?,
                 }
                 for notice in driver.display.dispatch()? {
-                    driver.notice(notice).await;
+                    driver.notice(notice, *hold.borrow()).await;
                 }
             }
             () = sleep_until(deadline), if deadline.is_some() => driver.expire().await,

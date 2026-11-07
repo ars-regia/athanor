@@ -1,6 +1,7 @@
-//! `org.freedesktop.ScreenSaver` on the session bus (SD5), a thin layer over the inhibitor
-//! table: the logic stays in [`Inhibitors`], and `inhibitors.json` in [`crate::store`].
-//! `os.athanor.Idle1.InhibitSuspend` is not here (pull request I2b).
+//! `org.freedesktop.ScreenSaver` and `os.athanor.Idle1` on the session bus (SD5), a thin layer
+//! over the inhibitor table: the logic stays in [`Inhibitors`], and `inhibitors.json` in
+//! [`crate::store`]. `os.athanor.Idle1.InhibitSuspend` is admitted only from the main process
+//! of the portal backend's unit, as [`athanor_unit::bus_caller::admit`] checks it.
 //!
 //! Rule: no task that consumes the main connection's streams (the object server, the
 //! `NameOwnerChanged` drain) ever awaits a reply on that connection, since zbus has one socket
@@ -12,6 +13,7 @@ use crate::inhibitors::{
 };
 use crate::store;
 use crate::timers::Hold;
+use athanor_unit::bus_caller::{self, OnBus, Questions, Service};
 use futures_util::StreamExt;
 use std::collections::BTreeSet;
 use std::fmt::Display;
@@ -31,6 +33,14 @@ use zbus::{Connection, Result};
 pub const NAME: &str = "org.freedesktop.ScreenSaver";
 /// The two object paths the name is served on, as cosmic-idle does.
 pub const PATHS: [&str; 2] = ["/org/freedesktop/ScreenSaver", "/ScreenSaver"];
+/// The name, path and interface of the suspend-only inhibitors.
+pub const IDLE_NAME: &str = "os.athanor.Idle1";
+pub const IDLE_PATH: &str = "/os/athanor/Idle1";
+/// The one service whose main process may call `InhibitSuspend` (SD5, `doc_portal.md` PT11).
+pub const PORTAL: Service<'static> = Service {
+    unit: "xdg-desktop-portal-athanor.service",
+    exec: "/usr/libexec/xdg-desktop-portal-athanor",
+};
 /// How long a question to the bus may take.
 const ASK: Duration = Duration::from_secs(2);
 
@@ -74,21 +84,59 @@ impl State {
         self.ask(self.bus.name_has_owner(name)).await
     }
 
-    /// A question to the bus: an error and a timeout both come back as text, and a failure
-    /// with the query connection closed ends the daemon's view of the bus (fail closed).
+    /// A question to the bus, [`bounded`]; a failure with the query connection closed ends the
+    /// daemon's view of the bus (fail closed).
     async fn ask<T, E: Display>(
         &self,
         call: impl Future<Output = std::result::Result<T, E>>,
     ) -> std::result::Result<T, String> {
-        let answer = match tokio::time::timeout(ASK, call).await {
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(e)) => Err(e.to_string()),
-            Err(_) => Err("timed out".into()),
-        };
+        let answer = bounded(call).await;
         if answer.is_err() {
             self.check_query();
         }
         answer
+    }
+
+    /// The questions of [`athanor_unit::bus_caller`], on the query connection.
+    fn questions(&self) -> OnBus<'_> {
+        OnBus {
+            bus: &self.bus,
+            systemd: &self.query,
+        }
+    }
+
+    /// Adds `inhibitor` within the bounds and returns its cookie; the caller logs it.
+    fn add(&self, inhibitor: Inhibitor) -> fdo::Result<u32> {
+        let mut table = self.lock();
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(fdo::Error::Failed("the bus connection ended".into()));
+        }
+        if table.count_owner(&inhibitor.owner) >= MAX_PER_OWNER || table.len() >= MAX_ENTRIES {
+            return Err(fdo::Error::LimitsExceeded("too many inhibitors".into()));
+        }
+        let cookie = table
+            .add(inhibitor)
+            .ok_or_else(|| fdo::Error::Failed("no cookie left".into()))?;
+        self.changed(&table);
+        Ok(cookie)
+    }
+
+    /// Ends the inhibitor `cookie` of this kind, for its owner only.
+    fn remove(&self, cookie: u32, kind: Kind, caller: &str) -> fdo::Result<()> {
+        let mut table = self.lock();
+        match table.remove(cookie, kind, caller) {
+            Ok(i) => {
+                tracing::info!(cookie, app_id = i.app_id, reason = i.reason, "uninhibit");
+                self.changed(&table);
+                Ok(())
+            }
+            Err(RemoveError::UnknownCookie) => {
+                Err(fdo::Error::InvalidArgs(format!("no inhibitor {cookie}")))
+            }
+            Err(RemoveError::NotOwner) => Err(fdo::Error::AccessDenied(
+                "the inhibitor belongs to another peer".into(),
+            )),
+        }
     }
 
     fn check_query(&self) {
@@ -106,6 +154,24 @@ impl State {
     }
 }
 
+/// `call` under the 2 s bound of a question to the bus: an error and a timeout both come back
+/// as text.
+async fn bounded<T, E: Display>(
+    call: impl Future<Output = std::result::Result<T, E>>,
+) -> std::result::Result<T, String> {
+    match tokio::time::timeout(ASK, call).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("timed out".into()),
+    }
+}
+
+/// SD5's admission of `InhibitSuspend`: `peer` is the main process of [`PORTAL`], every step
+/// within one bound.
+async fn admit_portal(questions: &impl Questions, peer: &str) -> std::result::Result<(), String> {
+    bounded(bus_caller::admit(questions, peer, PORTAL)).await
+}
+
 struct ScreenSaver(Arc<State>);
 
 #[zbus::interface(name = "org.freedesktop.ScreenSaver")]
@@ -121,28 +187,15 @@ impl ScreenSaver {
             .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
         let owner = sender.to_string();
         let application_name = truncate(application_name, MAX_TEXT);
-        let app_id = truncate(&app_id_of(&self.0, sender.clone().into()).await, MAX_TEXT);
+        let app_id = truncate(&app_id_of(&self.0, sender.as_str()).await, MAX_TEXT);
         let reason = truncate(reason, MAX_TEXT);
-        let cookie = {
-            let mut table = self.0.lock();
-            if self.0.closed.load(Ordering::SeqCst) {
-                return Err(fdo::Error::Failed("the bus connection ended".into()));
-            }
-            if table.count_owner(&owner) >= MAX_PER_OWNER || table.len() >= MAX_ENTRIES {
-                return Err(fdo::Error::LimitsExceeded("too many inhibitors".into()));
-            }
-            let cookie = table
-                .add(Inhibitor {
-                    kind: Kind::Screen,
-                    owner: owner.clone(),
-                    app_id: app_id.clone(),
-                    reason: reason.clone(),
-                })
-                .ok_or_else(|| fdo::Error::Failed("no cookie left".into()))?;
-            tracing::info!(cookie, app_id, application_name, reason, "inhibit");
-            self.0.changed(&table);
-            cookie
-        };
+        let cookie = self.0.add(Inhibitor {
+            kind: Kind::Screen,
+            owner: owner.clone(),
+            app_id: app_id.clone(),
+            reason: reason.clone(),
+        })?;
+        tracing::info!(cookie, app_id, application_name, reason, "inhibit");
         // The caller may have left while the application id was read: its signal came
         // before the entry existed, so look again, at this owner only, now that it does.
         reconcile(&self.0, BTreeSet::from([owner])).await;
@@ -153,20 +206,52 @@ impl ScreenSaver {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
-        let mut table = self.0.lock();
-        match table.remove(cookie, sender.as_str()) {
-            Ok(i) => {
-                tracing::info!(cookie, app_id = i.app_id, reason = i.reason, "uninhibit");
-                self.0.changed(&table);
-                Ok(())
-            }
-            Err(RemoveError::UnknownCookie) => {
-                Err(fdo::Error::InvalidArgs(format!("no inhibitor {cookie}")))
-            }
-            Err(RemoveError::NotOwner) => Err(fdo::Error::AccessDenied(
-                "the inhibitor belongs to another peer".into(),
-            )),
+        self.0.remove(cookie, Kind::Screen, sender.as_str())
+    }
+}
+
+struct Idle1(Arc<State>);
+
+#[zbus::interface(name = "os.athanor.Idle1")]
+impl Idle1 {
+    /// A suspend-only inhibitor, admitted only from the portal backend (SD5); `app_id` is the
+    /// portal's word for the application, recorded and never checked.
+    async fn inhibit_suspend(
+        &self,
+        app_id: &str,
+        reason: &str,
+        #[zbus(header)] header: Header<'_>,
+    ) -> fdo::Result<u32> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
+        let owner = sender.to_string();
+        if let Err(e) = admit_portal(&self.0.questions(), &owner).await {
+            self.0.check_query();
+            tracing::warn!(owner, "InhibitSuspend refused: {e}");
+            return Err(fdo::Error::AccessDenied(
+                "only the portal backend may inhibit suspend".into(),
+            ));
         }
+        let app_id = truncate(app_id, MAX_TEXT);
+        let reason = truncate(reason, MAX_TEXT);
+        let cookie = self.0.add(Inhibitor {
+            kind: Kind::SuspendOnly,
+            owner: owner.clone(),
+            app_id: app_id.clone(),
+            reason: reason.clone(),
+        })?;
+        tracing::info!(cookie, app_id, reason, "inhibit suspend");
+        // As for `Inhibit`: the caller may have left while it was admitted.
+        reconcile(&self.0, BTreeSet::from([owner])).await;
+        Ok(cookie)
+    }
+
+    async fn uninhibit(&self, cookie: u32, #[zbus(header)] header: Header<'_>) -> fdo::Result<()> {
+        let sender = header
+            .sender()
+            .ok_or_else(|| fdo::Error::Failed("no sender".into()))?;
+        self.0.remove(cookie, Kind::SuspendOnly, sender.as_str())
     }
 }
 
@@ -207,37 +292,17 @@ fn is_unique_form(name: &str) -> bool {
 /// The application id of the caller's unit (SD8), empty outside an application unit. A failure
 /// or a timeout of the questions is logged and records an empty id. The daemon reads nothing
 /// under `/proc`, which its Landlock does not grant (SD17).
-async fn app_id_of(state: &State, name: BusName<'_>) -> String {
-    match state.ask(unit_of(state, name)).await {
+async fn app_id_of(state: &State, name: &str) -> String {
+    match state
+        .ask(bus_caller::unit_of(&state.questions(), name))
+        .await
+    {
         Ok(unit) => app_id_from_unit(&unit),
         Err(e) => {
             tracing::warn!("cannot tell the caller's unit; its application id is empty: {e}");
             String::new()
         }
     }
-}
-
-/// The unit of `name`'s process, asked on the query connection: its pidfd from the bus
-/// (`GetConnectionCredentials`, `ProcessFD`), then the unit that holds it from the user's
-/// systemd (`GetUnitByPIDFD`), which a reused pid cannot mislead.
-async fn unit_of(state: &State, name: BusName<'_>) -> Result<String> {
-    let credentials = state.bus.get_connection_credentials(name).await?;
-    let pidfd = credentials
-        .process_fd()
-        .ok_or_else(|| zbus::Error::Failure("the bus gives no ProcessFD".into()))?;
-    let reply = state
-        .query
-        .call_method(
-            Some("org.freedesktop.systemd1"),
-            "/org/freedesktop/systemd1",
-            Some("org.freedesktop.systemd1.Manager"),
-            "GetUnitByPIDFD",
-            &(zbus::zvariant::Fd::from(pidfd),),
-        )
-        .await?;
-    let (_path, unit, _invocation): (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) =
-        reply.body().deserialize()?;
-    Ok(unit)
 }
 
 /// `app-athanor-<escaped id>@<random>.service` (SD8) gives `<id>`; any other unit, empty.
@@ -275,8 +340,9 @@ fn unescape(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Restores the saved inhibitors whose owner is still on the bus, serves the interface on
-/// both paths and owns the name (no `AllowReplacement`, no queue). `query` is a second
+/// Restores the saved inhibitors whose owner is still on the bus, serves the ScreenSaver
+/// interface on both paths and `os.athanor.Idle1` on its own, and owns both names (no
+/// `AllowReplacement`, no queue). `query` is a second
 /// connection to the same bus, opened apart (never a clone of `conn`, which would share its
 /// socket reader), with no objects, no signal subscriptions and no names, used only for
 /// questions (see the module rule); `serve` refuses a clone. The daemon ends, as for the main
@@ -404,8 +470,13 @@ pub async fn serve(
                 .at(path, ScreenSaver(state.clone()))
                 .await?;
         }
-        conn.request_name_with_flags(NAME, RequestNameFlags::DoNotQueue.into())
+        conn.object_server()
+            .at(IDLE_PATH, Idle1(state.clone()))
             .await?;
+        for name in [NAME, IDLE_NAME] {
+            conn.request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
+                .await?;
+        }
         Ok::<(), zbus::Error>(())
     }
     .await;
@@ -744,6 +815,208 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("LimitsExceeded"), "{err}");
+    }
+
+    /// A bus that never answers: the admission ends at the 2 s bound, refused.
+    struct Silent;
+
+    impl Questions for Silent {
+        async fn credentials(
+            &self,
+            _peer: &str,
+        ) -> std::result::Result<bus_caller::Credentials, String> {
+            std::future::pending().await
+        }
+
+        async fn unit_by_pidfd(
+            &self,
+            _pidfd: std::os::fd::BorrowedFd<'_>,
+        ) -> std::result::Result<(zbus::zvariant::OwnedObjectPath, String), String> {
+            Err("not asked".into())
+        }
+
+        async fn unit(
+            &self,
+            _path: &zbus::zvariant::OwnedObjectPath,
+        ) -> std::result::Result<bus_caller::Unit, String> {
+            Err("not asked".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn an_admission_that_does_not_answer_is_refused_at_the_bound() {
+        let answer = tokio::time::timeout(ASK * 2, admit_portal(&Silent, ":1.9"))
+            .await
+            .expect("the admission is bounded");
+        assert_eq!(answer, Err("timed out".into()));
+    }
+
+    /// The user's systemd as the portal's unit shows it, for the peer of process `pid`.
+    struct FakeSystemd;
+
+    #[zbus::interface(name = "org.freedesktop.systemd1.Manager")]
+    impl FakeSystemd {
+        #[zbus(name = "GetUnitByPIDFD")]
+        fn get_unit_by_pidfd(
+            &self,
+            _pidfd: zbus::zvariant::Fd<'_>,
+        ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
+            (
+                zbus::zvariant::OwnedObjectPath::try_from(UNIT_PATH).unwrap(),
+                PORTAL.unit.into(),
+                Vec::new(),
+            )
+        }
+    }
+
+    const UNIT_PATH: &str = "/org/freedesktop/systemd1/unit/portal";
+
+    struct FakeService {
+        pid: u32,
+    }
+
+    #[zbus::interface(name = "org.freedesktop.systemd1.Service")]
+    impl FakeService {
+        #[zbus(property, name = "MainPID")]
+        fn main_pid(&self) -> u32 {
+            self.pid
+        }
+
+        #[zbus(property, name = "ExecStart")]
+        #[allow(clippy::type_complexity)]
+        fn exec_start(
+            &self,
+        ) -> Vec<(String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32)> {
+            vec![(
+                PORTAL.exec.into(),
+                vec![PORTAL.exec.into()],
+                false,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )]
+        }
+    }
+
+    struct FakeUnit;
+
+    #[zbus::interface(name = "org.freedesktop.systemd1.Unit")]
+    impl FakeUnit {
+        #[zbus(property, name = "FragmentPath")]
+        fn fragment_path(&self) -> String {
+            "/usr/lib/systemd/user/xdg-desktop-portal-athanor.service".into()
+        }
+
+        #[zbus(property, name = "DropInPaths")]
+        fn drop_in_paths(&self) -> Vec<String> {
+            vec!["/usr/lib/systemd/user/service.d/10-timeout-abort.conf".into()]
+        }
+    }
+
+    async fn fake_systemd(bus: &Bus, pid: u32) -> Connection {
+        let c = bus.connect().await;
+        c.object_server()
+            .at("/org/freedesktop/systemd1", FakeSystemd)
+            .await
+            .unwrap();
+        c.object_server()
+            .at(UNIT_PATH, FakeService { pid })
+            .await
+            .unwrap();
+        c.object_server().at(UNIT_PATH, FakeUnit).await.unwrap();
+        c.request_name("org.freedesktop.systemd1").await.unwrap();
+        c
+    }
+
+    async fn idle(
+        c: &Connection,
+        member: &str,
+        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+    ) -> zbus::Result<zbus::Message> {
+        c.call_method(Some(IDLE_NAME), IDLE_PATH, Some(IDLE_NAME), member, body)
+            .await
+    }
+
+    #[tokio::test]
+    async fn inhibit_suspend_is_refused_to_a_peer_that_is_not_the_portal() {
+        let bus = Bus::start("refused");
+        let file = bus.dir.join("inhibitors.json");
+        let server = bus.connect().await;
+        let (rx, _end) = serve(&server, &bus.connect().await, file.clone())
+            .await
+            .unwrap();
+        let a = bus.connect().await;
+        // No systemd on this bus: the unit cannot be told, and the call is refused.
+        let err = idle(&a, "InhibitSuspend", &("org.example.App", "r"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("AccessDenied"), "{err}");
+        // A systemd that names the portal's unit with another main process: refused too.
+        let _systemd = fake_systemd(&bus, std::process::id() + 1).await;
+        let err = idle(&a, "InhibitSuspend", &("org.example.App", "r"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("AccessDenied"), "{err}");
+        assert_eq!(*rx.borrow(), Hold::None);
+        // Idle1's Uninhibit does not end a ScreenSaver inhibitor.
+        let c: u32 = call(&a, PATHS[0], "Inhibit", &("app", "r"))
+            .await
+            .unwrap()
+            .body()
+            .deserialize()
+            .unwrap();
+        let err = idle(&a, "Uninhibit", &(c,)).await.unwrap_err();
+        assert!(err.to_string().contains("InvalidArgs"), "{err}");
+        assert_eq!(*rx.borrow(), Hold::All);
+    }
+
+    #[tokio::test]
+    async fn the_portal_s_suspend_inhibitor_keeps_the_blank_and_is_kept() {
+        let bus = Bus::start("suspend");
+        let file = bus.dir.join("inhibitors.json");
+        // This process is the portal's main process, as the fake systemd tells it.
+        let _systemd = fake_systemd(&bus, std::process::id()).await;
+        let server = bus.connect().await;
+        let (mut rx, _end) = serve(&server, &bus.connect().await, file.clone())
+            .await
+            .unwrap();
+        let portal = bus.connect().await;
+        let cookie: u32 = idle(
+            &portal,
+            "InhibitSuspend",
+            &("org.example.Player", "playing"),
+        )
+        .await
+        .unwrap()
+        .body()
+        .deserialize()
+        .unwrap();
+        settle(&mut rx, Hold::SuspendOnly).await;
+        let saved = fs::read_to_string(&file).unwrap();
+        assert!(
+            saved.contains(r#""kind":"suspend""#) && saved.contains("org.example.Player"),
+            "{saved}"
+        );
+        // Only its owner ends it, and not through the ScreenSaver interface.
+        let other = bus.connect().await;
+        assert!(idle(&other, "Uninhibit", &(cookie,)).await.is_err());
+        assert!(call(&portal, PATHS[0], "UnInhibit", &(cookie,))
+            .await
+            .is_err());
+        assert_eq!(*rx.borrow(), Hold::SuspendOnly);
+        idle(&portal, "Uninhibit", &(cookie,)).await.unwrap();
+        settle(&mut rx, Hold::None).await;
+        // Its owner leaving the bus ends it.
+        idle(&portal, "InhibitSuspend", &("org.example.Player", "again"))
+            .await
+            .unwrap();
+        settle(&mut rx, Hold::SuspendOnly).await;
+        portal.close().await.unwrap();
+        settle(&mut rx, Hold::None).await;
     }
 
     #[test]

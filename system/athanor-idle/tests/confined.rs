@@ -2,7 +2,8 @@
 //! a write outside `$XDG_RUNTIME_DIR/athanor-idle` is refused, and what the daemon does still
 //! works: `inhibitors.json`, the read of the Power page's store, GSettings reads and writes
 //! through dconf, the Wayland socket, the session bus and the ScreenSaver interface, which
-//! asks the bus and systemd for a caller's unit and reads nothing under `/proc`.
+//! asks the bus and systemd for a caller's unit and reads nothing under `/proc`;
+//! and `InhibitSuspend`, which refuses a caller that is not the portal.
 //!
 //! Landlock binds the thread that applies it, so the test runs itself again as a child with
 //! the environment of a session of its own and confines that child's test thread.
@@ -155,6 +156,13 @@ fn the_confined_daemon_writes_only_its_directory_and_still_works() {
     );
     // dconf's client keeps a shared-memory flag in `$XDG_RUNTIME_DIR/dconf`; refused, it says so.
     assert!(!stderr.contains("dconf will not work properly"), "{stderr}");
+    // The InhibitSuspend of a caller that is not the portal: one warning, with its reason.
+    let refused: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("InhibitSuspend refused"))
+        .collect();
+    assert_eq!(refused.len(), 1, "{stderr}");
+    eprintln!("{}", refused[0]);
     // The Inhibit of a caller outside any unit: one warning, with its reason, and an empty id.
     let warned: Vec<&str> = stderr
         .lines()
@@ -258,5 +266,20 @@ fn child() {
             // The private bus has no systemd to name the caller's unit: the id is empty, and
             // the journal says why (the parent reads it).
             assert!(saved.contains(r#""app_id":"""#), "{saved}");
+
+            // The test child is not the portal: InhibitSuspend is refused and adds nothing.
+            let error = client
+                .call_method(
+                    Some(screensaver::IDLE_NAME),
+                    screensaver::IDLE_PATH,
+                    Some(screensaver::IDLE_NAME),
+                    "InhibitSuspend",
+                    &("org.example.App", "not the portal"),
+                )
+                .await
+                .expect_err("InhibitSuspend from a peer that is not the portal");
+            assert!(error.to_string().contains("AccessDenied"), "{error}");
+            let saved = fs::read_to_string(dir.join("inhibitors.json")).expect("inhibitors.json");
+            assert!(!saved.contains("not the portal"), "{saved}");
         });
 }
