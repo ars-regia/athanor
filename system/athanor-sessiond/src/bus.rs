@@ -47,7 +47,8 @@ pub async fn run(
         .path(SERVER_PATH)?
         .build();
     let mut server = MessageStream::for_match_rule(rule, signals, None).await?;
-    // A server that appears gets the current notice again, as after a restart (SD14).
+    // A failed raise stays owed until the level changes or a server appears, and a server that
+    // appears gets the current level's notice again (SD14, maintainer decision, 2026-11-07).
     let owner = MatchRule::builder()
         .msg_type(Type::Signal)
         .sender("org.freedesktop.DBus")?
@@ -71,13 +72,7 @@ pub async fn run(
             }
             message = owners.next() => {
                 let message = message.ok_or("the name owner signals ended")??;
-                match message.body().deserialize::<(String, String, String)>() {
-                    Ok((_, _, new)) => notices.server(Some(new.as_str()).filter(|new| !new.is_empty())),
-                    Err(err) => {
-                        tracing::warn!(%err, "a NameOwnerChanged signal does not parse");
-                        None
-                    }
-                }
+                owner_step(&message, &mut notices)
             }
             message = server.next() => {
                 let message = message.ok_or("the notification signals ended")??;
@@ -133,6 +128,36 @@ fn read(upower: &watch::Receiver<Snapshot>) -> (Option<Level>, Option<model::Bat
     match props::lookup(&snapshot.objects, DISPLAY_DEVICE, DEVICE_IFACE) {
         Some(device) => (battery::wanted(device), model::battery(device)),
         None => (None, None),
+    }
+}
+
+/// The notification server's new owner, `Some(None)` when it left, from a NameOwnerChanged
+/// signal; `None` unless the bus itself sent it about the server. zbus applies a match rule's
+/// sender on the client side and lets any peer through for a well-known name, so a peer of the
+/// same user could otherwise forge a unicast signal and spoof a server change.
+fn owner_change(message: &Message) -> Option<Option<String>> {
+    let header = message.header();
+    if header.sender().map(|sender| sender.as_str()) != Some("org.freedesktop.DBus") {
+        return None;
+    }
+    let (name, _, new) = message
+        .body()
+        .deserialize::<(String, String, String)>()
+        .ok()?;
+    (name == SERVER).then(|| Some(new).filter(|new| !new.is_empty()))
+}
+
+/// The step a NameOwnerChanged signal asks for; a forged one is ignored with a warning.
+fn owner_step(message: &Message, notices: &mut Notices) -> Option<Step> {
+    match owner_change(message) {
+        Some(new) => notices.server(new.as_deref()),
+        None => {
+            tracing::warn!(
+                sender = ?message.header().sender(),
+                "a NameOwnerChanged signal not sent by the bus about the server is ignored"
+            );
+            None
+        }
     }
 }
 
@@ -224,4 +249,48 @@ where
     .await
     .map_err(|_| format!("{destination} did not answer {method} within 2 s"))??;
     Ok(reply)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owner_changed(sender: &str, name: &str, new: &str) -> Message {
+        Message::signal(
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameOwnerChanged",
+        )
+        .expect("signal")
+        .sender(sender)
+        .expect("sender")
+        .build(&(name, "", new))
+        .expect("message")
+    }
+
+    #[test]
+    fn only_the_bus_speaks_for_the_servers_owner() {
+        let bus = "org.freedesktop.DBus";
+        assert_eq!(
+            owner_change(&owner_changed(bus, SERVER, ":1.7")),
+            Some(Some(":1.7".into()))
+        );
+        assert_eq!(owner_change(&owner_changed(bus, SERVER, "")), Some(None));
+        assert_eq!(
+            owner_change(&owner_changed(bus, "org.example.Other", ":1.7")),
+            None
+        );
+        // A peer's unicast NameOwnerChanged, forged, raises nothing and keeps the notice.
+        let mut notices = Notices::default();
+        notices.update(Some(Level::Critical));
+        notices.raised(":1.7".into(), 1);
+        for forged in [":1.42", ":1.7"] {
+            let forged = owner_changed(forged, SERVER, ":1.43");
+            assert_eq!(owner_step(&forged, &mut notices), None);
+        }
+        assert!(notices.is_shown(":1.7", 1), "the shown notice is kept");
+        // The bus's own signal moves it.
+        let moved = owner_step(&owner_changed(bus, SERVER, ":1.43"), &mut notices);
+        assert_eq!(moved.and_then(|step| step.raise), Some(Level::Critical));
+    }
 }
