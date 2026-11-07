@@ -549,12 +549,19 @@ version = "1.0.0"
 name = "athanor-idle"
 version = "1.0.0"
 dependencies = [
+ "athanor-sulphur-client",
+ "athanor-unit",
  "futures-util",
+ "gio",
+ "glib",
  "libc",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
  "zbus",
 ]
 
@@ -708,6 +715,7 @@ name = "athanor-sulphur"
 version = "1.0.0"
 dependencies = [
  "athanor-edid",
+ "athanor-idle",
  "athanor-unit",
  "bitflags 2.13.1",
  "calloop",

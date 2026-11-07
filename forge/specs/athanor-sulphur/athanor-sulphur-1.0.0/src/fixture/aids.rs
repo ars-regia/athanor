@@ -244,7 +244,7 @@ fn ax11_super_then_a_shows_the_launcher() {
         [Action::Call(&LAUNCHER)],
         "the latched Super takes A, once"
     );
-    assert_eq!(pressed, [], "which the client is not sent");
+    assert_eq!(pressed, Vec::<u32>::new(), "which the client is not sent");
     run.stop();
 }
 
@@ -265,7 +265,7 @@ fn ax11_a_binding_sees_what_the_client_sees() {
         [Action::CloseFocused],
         "the latched Super takes Q"
     );
-    assert_eq!(pressed, [], "which the client is not sent");
+    assert_eq!(pressed, Vec::<u32>::new(), "which the client is not sent");
     run.state.set_sticky_keys(false, false);
     run.state.fired.clear();
 
@@ -393,7 +393,7 @@ fn ax11_the_aids_work_on_the_lock_surface_and_tell_nothing() {
     let (pressed, _) = sent_to(&mut locker, &mut run, &[KEY_A]);
     assert_eq!(
         pressed,
-        [],
+        Vec::<u32>::new(),
         "a short press types nothing on the lock surface"
     );
     for _ in 0..2 {
@@ -509,7 +509,7 @@ fn ax11_the_aids_work_under_a_shortcuts_inhibitor() {
 
     run.state.set_slow_keys(true, 200).expect("in bounds");
     let (pressed, _) = sent_to(&mut window, &mut run, &[KEY_A]);
-    assert_eq!(pressed, [], "slow keys hold a short press back");
+    assert_eq!(pressed, Vec::<u32>::new(), "slow keys hold a short press back");
     assert_eq!(told(&mut run), [Notice::Rejected(Aid::Slow)]);
     run.state.set_slow_keys(false, 0).expect("in bounds");
     run.state.set_sticky_keys(true, false);
@@ -603,7 +603,7 @@ fn ax11_a_press_held_back_outlives_the_last_aid_turned_off() {
     window.roundtrip(&mut run);
     assert_eq!(
         window.client.keys,
-        [],
+        Vec::<u32>::new(),
         "released within the delay, it is rejected"
     );
     assert!(no_key_pressed(&run), "and no press is left with no release");
@@ -653,9 +653,9 @@ fn ax11_a_focus_change_drops_a_press_held_back() {
     key(&mut run.state, KEY_A, false);
     first.roundtrip(&mut run);
     second.roundtrip(&mut run);
-    assert_eq!(first.client.keys, [], "the first window is sent nothing");
-    assert_eq!(second.client.keys, [], "and the second no press");
-    assert_eq!(second.client.released, [], "and no release");
+    assert_eq!(first.client.keys, Vec::<u32>::new(), "the first window is sent nothing");
+    assert_eq!(second.client.keys, Vec::<u32>::new(), "and the second no press");
+    assert_eq!(second.client.released, Vec::<u32>::new(), "and no release");
     assert!(no_key_pressed(&run));
     run.stop();
 }
@@ -693,7 +693,7 @@ fn ax11_a_focus_change_within_a_client_drops_a_press_held_back() {
     wait(&mut run, 1100);
     key(&mut run.state, KEY_A, false);
     local.roundtrip(&mut run);
-    assert_eq!(local.client.keys, [], "neither surface is sent the press");
+    assert_eq!(local.client.keys, Vec::<u32>::new(), "neither surface is sent the press");
     assert!(no_key_pressed(&run));
     run.stop();
 }
@@ -712,8 +712,8 @@ fn ax11_a_loss_of_focus_drops_a_press_held_back() {
     run.state.focus(&window);
     key(&mut run.state, KEY_A, false);
     local.roundtrip(&mut run);
-    assert_eq!(local.client.keys, [], "no press");
-    assert_eq!(local.client.released, [], "and no release");
+    assert_eq!(local.client.keys, Vec::<u32>::new(), "no press");
+    assert_eq!(local.client.released, Vec::<u32>::new(), "and no release");
     run.stop();
 }
 
@@ -735,8 +735,8 @@ fn ax11_a_lock_drops_a_press_held_back() {
     assert!(no_key_pressed(&run), "no press lands under the lock");
     key(&mut run.state, KEY_A, false);
     window.roundtrip(&mut run);
-    assert_eq!(window.client.keys, [], "and the window is sent nothing");
-    assert_eq!(window.client.released, []);
+    assert_eq!(window.client.keys, Vec::<u32>::new(), "and the window is sent nothing");
+    assert_eq!(window.client.released, Vec::<u32>::new());
     run.stop();
 }
 
@@ -756,8 +756,8 @@ fn ax11_an_unlock_keeps_a_password_key_from_the_window_underneath() {
     wait(&mut run, 1100);
     key(&mut run.state, KEY_A, false);
     window.roundtrip(&mut run);
-    assert_eq!(window.client.keys, [], "the window is sent no press");
-    assert_eq!(window.client.released, [], "and no release");
+    assert_eq!(window.client.keys, Vec::<u32>::new(), "the window is sent no press");
+    assert_eq!(window.client.released, Vec::<u32>::new(), "and no release");
     run.stop();
 }
 
@@ -1069,7 +1069,7 @@ fn ax11_a_dropped_modifier_does_not_make_a_key_protected() {
     key(&mut run.state, KEY_F1, true);
     window.roundtrip(&mut run);
     assert_eq!(run.state.fired, []);
-    assert_eq!(window.client.keys, []);
+    assert_eq!(window.client.keys, Vec::<u32>::new());
     run.stop();
 }
 
@@ -1162,7 +1162,7 @@ fn ax11_a_second_press_keeps_the_timer_of_the_first() {
     key(&mut run.state, KEY_A, true);
     wait(&mut run, 1600);
     window.roundtrip(&mut run);
-    assert_eq!(window.client.keys, [], "the first timer was cancelled");
+    assert_eq!(window.client.keys, Vec::<u32>::new(), "the first timer was cancelled");
     wait(&mut run, 500);
     window.roundtrip(&mut run);
     assert_eq!(window.client.keys, [KEY_A], "the delay ends the press");
@@ -1259,7 +1259,7 @@ fn ax11_a_pause_forgets_a_press_held_back() {
     key(&mut run.state, KEY_A, true);
     wait(&mut run, 800);
     window.roundtrip(&mut run);
-    assert_eq!(window.client.keys, [], "the first timer stopped");
+    assert_eq!(window.client.keys, Vec::<u32>::new(), "the first timer stopped");
     wait(&mut run, 400);
     window.roundtrip(&mut run);
     assert_eq!(window.client.keys, [KEY_A], "the second press was timed");

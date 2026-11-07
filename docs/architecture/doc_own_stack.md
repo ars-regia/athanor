@@ -51,6 +51,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   approved by the maintainer with #957.
 - Amended on 2026-11-04: OS7, the text field's clipboard and primary selection.
 - Amended on 2026-11-04: OS7, the text field's context menu.
+- Amended on 2026-11-07: OS7, Sal's picture and full-size layer surface (`doc_session_daemons.md`
+  SD6), with revision 3 of `doc_session_daemons.md`, approved by the maintainer with #1023.
 - Amended on 2026-11-04: the compositor's identifiers renamed to Sulphur (ADR-0134), name only,
   approved by the maintainer with #970.
 - Amended on 2026-11-05: the toolkit's identifiers renamed to Sal (ADR-0134), name only,
@@ -525,6 +527,12 @@ Space choose one, and Escape or a press outside the menu closes it, the focus ba
 Its labels are in English, as the title bar's buttons are, until the toolkit takes its own strings
 from `athanor-i18n`. The field's node says that it opens a menu (`HasPopup::Menu`), which Orca
 reads as "opens popup" once AccessKit's AT-SPI bridge passes it on (#638).
+*Amended on 2026-11-07, with revision 3 of `doc_session_daemons.md`, approved by the maintainer
+with #1023:* Sal gains a picture of decoded pixels that fills its surface with "zoom", and a layer
+surface anchored on opposite edges that takes the size the compositor configures, for
+`athanor-wallpaper`'s background layer surface on each output (`doc_session_daemons.md` SD6). The
+wallpaper's picture only decorates, so it carries an empty description for assistive
+technologies.
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's

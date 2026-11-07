@@ -81,9 +81,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
         // AccessKit's splitter is AT-SPI's separator.
         Kind::Separator => Node::new(Role::Splitter),
-        // An image without a description only decorates: its node is hidden, so assistive
-        // technologies skip it.
-        Kind::Image { description, .. } => {
+        // An image or a picture without a description only decorates: its node is hidden, so
+        // assistive technologies skip it.
+        Kind::Image { description, .. } | Kind::Picture { description, .. } => {
             let mut node = Node::new(Role::Image);
             if description.is_empty() {
                 node.set_hidden();
@@ -486,6 +486,20 @@ mod tests {
             node.set_label(" ");
         }
         assert_eq!(missing(&ui, &update), vec![row, field]);
+    }
+
+    #[test]
+    fn a_picture_that_only_decorates_is_hidden() -> Result<(), crate::Error> {
+        let mut ui = Ui::new("Wallpaper", Theme::default(), false);
+        let pixel = || crate::Image::from_rgba8(1, 1, vec![0, 0, 0, 255]);
+        let decorates = ui.picture(Ui::ROOT, pixel()?, "");
+        let named = ui.picture(Ui::ROOT, pixel()?, "Hearth");
+        ui.layout();
+        let (decorates, named) = (node(&ui, decorates, 1.0), node(&ui, named, 1.0));
+        assert_eq!((decorates.role(), decorates.is_hidden()), (Role::Image, true));
+        assert_eq!((named.role(), named.is_hidden()), (Role::Image, false));
+        assert_eq!(named.label(), Some("Hearth"));
+        Ok(())
     }
 
     #[test]
