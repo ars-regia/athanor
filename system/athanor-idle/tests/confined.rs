@@ -16,7 +16,7 @@ use std::process::{Child, Command, Stdio};
 use athanor_idle::confine;
 use athanor_idle::inhibitors::Inhibitors;
 use athanor_idle::store;
-use athanor_sulphur_client::idle::{read_in, Key};
+use athanor_sulphur_client::idle::{read_in, user_dir, Key};
 use gio::prelude::*;
 
 const CHILD: &str = "ATHANOR_IDLE_CONFINED_CHILD";
@@ -137,9 +137,6 @@ impl Drop for Session {
 fn the_confined_daemon_writes_only_its_directory_and_still_works() {
     let session = Session::start();
     let base = &session.base;
-    let store = base.join("home/.config/cosmic/com.system76.CosmicIdle/v1");
-    fs::create_dir_all(&store).expect("mkdir");
-    fs::write(store.join("screen_off_time"), "Some(60000)").expect("store");
     session.gsettings(&["set", "org.athanor.desktop.idle", "suspend-after-ac", "77"]);
     let _wayland =
         std::os::unix::net::UnixListener::bind(base.join("runtime/wayland-test")).expect("bind");
@@ -174,7 +171,10 @@ fn child() {
         return;
     };
     let runtime = base.join("runtime");
-    let store = base.join("home/.config/cosmic/com.system76.CosmicIdle/v1");
+    // The Power page's store, beneath this session's XDG_CONFIG_HOME.
+    let store = user_dir().expect("the Power page's store");
+    fs::create_dir_all(&store).expect("mkdir");
+    fs::write(store.join("screen_off_time"), "Some(60000)").expect("store");
     let tcp = TcpListener::bind("127.0.0.1:0").expect("tcp");
 
     let (dir, grants) =

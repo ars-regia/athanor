@@ -159,7 +159,7 @@ mod tests {
     fn the_power_page_or_its_nearest_existing_parent_is_read() {
         let base = std::env::temp_dir().join(format!("athanor-idle-grants-{}", std::process::id()));
         let cosmic = base.join("cosmic");
-        let store = cosmic.join("com.system76.CosmicIdle/v1");
+        let store = cosmic.join("component/v1");
         std::fs::create_dir_all(&cosmic).expect("mkdir");
         let read = |store: &Path| Grants::new(vec![base.join("w")], Some(store), env(&[])).read;
         assert!(read(&store).contains(&cosmic), "the store is not there yet");
