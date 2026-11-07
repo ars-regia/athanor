@@ -78,8 +78,9 @@ fn serve(
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        let query = zbus::connection::Builder::session()?.build().await?;
         let conn = zbus::connection::Builder::session()?
-            .serve_at(PATH, settings::Portal::new(store))?
+            .serve_at(PATH, settings::Portal::new(store, query))?
             .name(BUS_NAME)?
             .build()
             .await?;

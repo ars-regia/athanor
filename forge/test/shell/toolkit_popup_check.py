@@ -13,7 +13,8 @@ device, so `athanor-sal-pointer` adds a virtual one. From the client's own trace
 - a click on the layer surface outside the menu closes it, without the compositor's popup_done;
 - a click outside the client closes it through the compositor's popup_done;
 - the secondary button opens it, the down arrow moves past the separator and Return activates
-  the second item; Escape closes the next one; a click activates an item;
+  the second item; Escape closes the next one, and the application hears of an Escape only
+  once no menu is open (Sal's requirement S5); a click activates an item;
 - Shift+F10 on an item asks for a popup of the menu, which the driver refuses, and the menu
   stays open;
 - the output goes with the menu open: the client destroys the popup before its layer surface.
@@ -281,6 +282,15 @@ def main():
         subprocess.run([*TYPE, "-k", "Escape"], env=wayland, check=True)
         step(
             "Escape closes it", lambda: made()[4]["destroyed"] and not made()[4]["done"]
+        )
+        if "escape" in printed().split():
+            raise SystemExit(
+                "toolkit_popup_check: the Escape that closed the menu reached the application"
+            )
+        subprocess.run([*TYPE, "-k", "Escape"], env=wayland, check=True)
+        step(
+            "Escape with no menu open reaches the application",
+            lambda: printed().split().count("escape") == 1,
         )
 
         send("click 272")

@@ -6,6 +6,8 @@
 //! application id in the call is whatever that process says. So every method answers only
 //! the frontend, and every other caller is refused with a journal line (doc_portal.md, PT3).
 
+use std::time::Duration;
+
 use zbus::fdo::DBusProxy;
 use zbus::message::Header;
 use zbus::names::{BusName, UniqueName};
@@ -14,6 +16,8 @@ use zbus::Connection;
 use crate::Error;
 
 const FRONTEND: &str = "org.freedesktop.portal.Desktop";
+/// Bound on the one question to the bus. `conn` is the query connection (issue #1035).
+const ASK: Duration = Duration::from_secs(2);
 
 /// Refuses the call unless its sender is the current owner of the frontend's name.
 pub async fn authorise(header: &Header<'_>, conn: &Connection) -> Result<(), Error> {
@@ -28,23 +32,33 @@ pub async fn authorise(header: &Header<'_>, conn: &Connection) -> Result<(), Err
     Err(Error::AccessDenied(format!("only {FRONTEND} may call this interface")))
 }
 
-/// Whether `sender` owns the frontend's name. Fails closed: a bus that cannot say, or a
-/// name nobody owns, is `false`.
+/// Whether `sender` owns the frontend's name. Fails closed: a bus that cannot say, a bus that
+/// does not answer within `ASK`, or a name nobody owns, is `false`. `conn` must be a connection
+/// that serves nothing and subscribes to nothing, so that the reply is never queued behind
+/// the calls this daemon is answering.
 async fn is_frontend(conn: &Connection, sender: &UniqueName<'_>) -> bool {
+    is_frontend_within(conn, sender, ASK).await
+}
+
+async fn is_frontend_within(conn: &Connection, sender: &UniqueName<'_>, limit: Duration) -> bool {
     let Ok(name) = BusName::from_static_str(FRONTEND) else {
         return false;
     };
     let Ok(bus) = DBusProxy::new(conn).await else {
         return false;
     };
-    match bus.get_name_owner(name).await {
-        Ok(owner) => owner.as_str() == sender.as_str(),
-        Err(_) => false,
+    match tokio::time::timeout(limit, bus.get_name_owner(name)).await {
+        Ok(Ok(owner)) => owner.as_str() == sender.as_str(),
+        Ok(Err(_)) => false,
+        Err(_) => {
+            tracing::warn!("the bus did not say who owns {FRONTEND} in time");
+            false
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
@@ -62,14 +76,14 @@ mod tests {
     const SETTINGS: &str = "org.freedesktop.impl.portal.Settings";
 
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
-    struct Bus {
+    pub(crate) struct Bus {
         daemon: Child,
         address: String,
         dir: PathBuf,
     }
 
     impl Bus {
-        fn start(name: &str) -> Bus {
+        pub(crate) fn start(name: &str) -> Bus {
             let dir = env::temp_dir().join(format!("athanor-portal-{name}-{}", process::id()));
             fs::create_dir_all(&dir).expect("mkdir");
             let mut daemon = Command::new("dbus-daemon")
@@ -89,7 +103,7 @@ mod tests {
             }
         }
 
-        fn builder(&self) -> Builder<'static> {
+        pub(crate) fn builder(&self) -> Builder<'static> {
             Builder::address(self.address.as_str()).expect("address")
         }
     }
@@ -123,8 +137,25 @@ mod tests {
         assert!(!is_frontend(&other, &other_id).await);
     }
 
+    /// A bus daemon that accepts the connection and never answers a call to it.
+    #[tokio::test]
+    async fn a_bus_that_does_not_answer_is_not_the_frontend() {
+        let bus = Bus::start("silent");
+        let query = bus.builder().build().await.expect("query");
+        let id = query.unique_name().expect("unique name").clone();
+        // Stopped: the socket stays open, the process answers nothing.
+        let pid = bus.daemon.id().to_string();
+        assert!(Command::new("kill").args(["-STOP", &pid]).status().expect("kill").success());
+        let started = std::time::Instant::now();
+        let frontend = is_frontend_within(&query, &id, Duration::from_millis(300)).await;
+        Command::new("kill").args(["-CONT", &pid]).status().expect("kill");
+        assert!(!frontend);
+        assert!(started.elapsed() < Duration::from_secs(5), "the check hung");
+    }
+
     /// A portal serving one appearance value, on `bus`.
     async fn portal(bus: &Bus) -> Connection {
+        let query = bus.builder().build().await.expect("query");
         let mut store = Store::new();
         store.insert(
             "org.freedesktop.appearance".into(),
@@ -133,7 +164,7 @@ mod tests {
         bus.builder()
             .name(PORTAL_NAME)
             .expect("name")
-            .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store))))
+            .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store)), query))
             .expect("serve")
             .build()
             .await
