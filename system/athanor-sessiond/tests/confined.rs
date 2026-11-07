@@ -1,5 +1,5 @@
 //! The daemon's Landlock (SD17) on a real bus with real dconf: under the grants it computes, a
-//! write outside its crash reports and `$XDG_RUNTIME_DIR/dconf` is refused, and the reset of
+//! write outside `$XDG_RUNTIME_DIR/dconf` and a read outside its trees are refused, and the reset of
 //! COSMIC's appearance values (SD16) still reads and writes through dconf without the critical
 //! line dconf's client logs when its shared-memory flag is refused.
 //!
@@ -16,6 +16,9 @@ use athanor_sessiond::{appearance, confine};
 use gio::prelude::*;
 
 const CHILD: &str = "ATHANOR_SESSIOND_CONFINED_CHILD";
+const MODE: &str = "ATHANOR_SESSIOND_CONFINED_MODE";
+/// dconf's client says so when its shared-memory flag in `$XDG_RUNTIME_DIR/dconf` is refused.
+const REFUSED_FLAG: &str = "dconf will not work properly";
 /// The three keys under the GNOME schema's id, so the test does not depend on the machine's.
 const SCHEMA: &str = r#"<schemalist>
   <schema id="org.gnome.desktop.interface" path="/org/gnome/desktop/interface/">
@@ -90,7 +93,6 @@ impl Session {
         command
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", home.join(".config"))
-            .env("XDG_STATE_HOME", home.join(".local/state"))
             .env("XDG_RUNTIME_DIR", base.join("runtime"))
             .env("GSETTINGS_SCHEMA_DIR", base.join("schemas"))
             .env("DBUS_SESSION_BUS_ADDRESS", address)
@@ -117,6 +119,24 @@ impl Session {
         );
         String::from_utf8_lossy(&out.stdout).trim().to_owned()
     }
+
+    /// Runs the confined half, `child`, in `mode`; returns its stderr.
+    fn child(&self, mode: &str) -> String {
+        let out = self
+            .command(std::env::current_exe().expect("exe"))
+            .args(["child", "--exact", "--nocapture", "--test-threads=1"])
+            .env(CHILD, &self.base)
+            .env(MODE, mode)
+            .output()
+            .expect("child");
+        let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+        assert!(
+            out.status.success(),
+            "child {mode}: {}{stderr}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        stderr
+    }
 }
 
 impl Drop for Session {
@@ -136,20 +156,12 @@ fn the_confined_daemon_writes_only_its_grants_and_resets_through_dconf() {
     session.gsettings(&["set", interface, "icon-theme", "Cosmic"]);
     session.gsettings(&["set", interface, "font-name", "Inter 11"]);
 
-    let out = session
-        .command(std::env::current_exe().expect("exe"))
-        .args(["child", "--exact", "--nocapture", "--test-threads=1"])
-        .env(CHILD, base)
-        .output()
-        .expect("child");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success(),
-        "child: {}{stderr}",
-        String::from_utf8_lossy(&out.stdout)
-    );
-    // dconf's client keeps a shared-memory flag in `$XDG_RUNTIME_DIR/dconf`; refused, it says so.
-    assert!(!stderr.contains("CRITICAL"), "{stderr}");
+    // The control: without dconf's grant, the client logs its critical line.
+    let without = session.child("without-dconf");
+    assert!(without.contains(REFUSED_FLAG), "{without}");
+
+    let with = session.child("granted");
+    assert!(!with.contains("CRITICAL"), "{with}");
     assert_eq!(
         session.gsettings(&["get", interface, "icon-theme"]),
         "'Adwaita'"
@@ -158,9 +170,6 @@ fn the_confined_daemon_writes_only_its_grants_and_resets_through_dconf() {
         session.gsettings(&["get", interface, "font-name"]),
         "'Inter 11'"
     );
-    assert!(base
-        .join("home/.local/state/athanor/crash-reports")
-        .is_dir());
     assert!(!base.join("outside").exists());
     assert!(!base.join("runtime/stray").exists());
 }
@@ -175,18 +184,16 @@ fn child() {
     athanor_unit::journal::init();
     let tcp = TcpListener::bind("127.0.0.1:0").expect("tcp");
 
-    let grants = confine::daemon(|name| std::env::var_os(name)).expect("grants");
-    assert_eq!(
-        grants.write,
-        [
-            base.join("home/.local/state/athanor/crash-reports"),
-            runtime.join("dconf")
-        ]
-    );
+    let mut grants = confine::daemon(|name| std::env::var_os(name), Some(&base.join("schemas")))
+        .expect("grants");
+    assert_eq!(grants.write, [runtime.join("dconf")]);
+    let granted = std::env::var(MODE).as_deref() == Ok("granted");
+    if !granted {
+        grants.write.clear();
+    }
     grants.apply().expect("confine");
 
-    let refused = |path: &Path| {
-        let error = fs::write(path, b"x").expect_err("a write outside the grants");
+    let refused = |error: std::io::Error, path: &Path| {
         assert_eq!(
             error.kind(),
             ErrorKind::PermissionDenied,
@@ -194,15 +201,37 @@ fn child() {
             path.display()
         );
     };
-    refused(&base.join("outside"));
-    refused(&runtime.join("stray"));
-    // The user's database is read, and written only by dconf's service.
-    refused(&base.join("home/.config/dconf/user"));
+    for path in [
+        base.join("outside"),
+        runtime.join("stray"),
+        // The user's database is read, and written only by dconf's service.
+        base.join("home/.config/dconf/user"),
+    ] {
+        refused(
+            fs::write(&path, b"x").expect_err("a write outside the grants"),
+            &path,
+        );
+    }
+    // Nothing is read outside the grants: the home, /proc.
+    for path in [base.join("home"), PathBuf::from("/proc/self")] {
+        refused(
+            fs::read_dir(&path).expect_err("a read outside the grants"),
+            &path,
+        );
+    }
+    let environ = Path::new("/proc/self/environ");
+    refused(
+        fs::read(environ).expect_err("/proc is not granted"),
+        environ,
+    );
     let error = TcpStream::connect(tcp.local_addr().expect("addr")).expect_err("TCP");
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
 
-    let backend = gio::SettingsBackend::default();
-    assert_eq!(backend.type_().name(), "DConfSettingsBackend");
-    let settings = appearance::open().expect("the interface schema");
-    assert_eq!(appearance::reset(&settings), Ok(vec!["icon-theme"]));
+    let settings = appearance::open().expect("dconf's backend and the interface schema");
+    if granted {
+        assert_eq!(appearance::reset(&settings), Ok(vec!["icon-theme"]));
+    } else {
+        // A read alone opens dconf's flag.
+        assert_eq!(settings.string("icon-theme"), "Cosmic");
+    }
 }

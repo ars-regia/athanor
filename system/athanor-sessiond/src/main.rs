@@ -13,8 +13,7 @@ use zbus::Connection;
 const DOMAIN: &str = "athanor-sessiond";
 
 /// Landlock while the process has one thread (SD17), with the grants of `confine`.
-fn confine_self() -> Result<(), Box<dyn Error>> {
-    let grants = confine::daemon(|name| env::var_os(name))?;
+fn confine_self(grants: &confine::Grants) -> Result<(), Box<dyn Error>> {
     sandbox::ensure_single_threaded()?;
     grants.apply()
 }
@@ -40,8 +39,15 @@ fn main() -> ExitCode {
         tracing::warn!(path = %path.display(), ?err, "the catalog cannot be read; the notices are in English");
         Catalog::empty()
     });
-    if let Err(err) = confine_self() {
-        tracing::error!(%err, "refusing to run unconfined");
+    let grants = match confine::daemon(|name| env::var_os(name), None) {
+        Ok(grants) => grants,
+        Err(err) => {
+            tracing::error!(%err, "the session's directories are unknown; cannot confine");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(err) = confine_self(&grants) {
+        tracing::error!(%err, "Landlock cannot be applied; refusing to run unconfined");
         return ExitCode::FAILURE;
     }
     // A failed reset is logged and the daemon goes on: its battery notices do not wait on dconf.

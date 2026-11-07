@@ -1,16 +1,16 @@
 //! The daemon's own Landlock (`doc_session_daemons.md` SD17), applied at start while the
 //! process has one thread, before any GIO object and before the Tokio thread, as athanor-idle
-//! applies its own: read-only beneath the trees below, read-write beneath its crash reports
-//! and `$XDG_RUNTIME_DIR/dconf` alone, and no TCP. dconf's client opens its shared-memory flag,
-//! `$XDG_RUNTIME_DIR/dconf/user`, for writing; refused, it logs a critical line and reads the
-//! database again at every access. dconf's directory is granted only when it is private to the
-//! user (maintainer decision, 2026-11-07).
+//! applies its own: read-only beneath the trees below, read-write beneath `$XDG_RUNTIME_DIR/dconf`
+//! alone, and no TCP. dconf's client opens its shared-memory flag, `$XDG_RUNTIME_DIR/dconf/user`,
+//! for writing; refused, it logs a critical line and reads the database again at every access.
+//! dconf's directory is granted only when it is private to the user (maintainer decision,
+//! 2026-11-07). The crash reports SD17 grants (`doc_session.md` SN8) are not written yet, so
+//! their directory is not granted until they are.
 //!
 //! - `/usr` and `/etc`: the libraries, GIO's modules, the GSettings schemas of the image,
 //!   dconf's profile and system databases, the locale.
 //! - The user's dconf database, `$XDG_CONFIG_HOME/dconf`, which GSettings reads directly; its
 //!   writes go to dconf's service on the bus.
-//! - `$GSETTINGS_SCHEMA_DIR`, when it is set.
 //!
 //! Connecting to the buses is not a filesystem access Landlock mediates.
 
@@ -18,10 +18,8 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use athanor_unit::dirs::{private_dir, Dirs};
+use athanor_unit::dirs::private_dir;
 use athanor_unit::sandbox;
-
-const UNIT: &str = "athanor-sessiond";
 
 /// What the daemon reads and the directories it writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,28 +28,26 @@ pub struct Grants {
     pub write: Vec<PathBuf>,
 }
 
-/// The grants from the environment as `var` reads it. Creates
-/// `$XDG_STATE_HOME/athanor/crash-reports` (SD17, amended 2026-10-06, #156) if missing; grants
-/// `$XDG_RUNTIME_DIR/dconf` when `private_dir` accepts it, and says why when it does not.
-pub fn daemon(var: impl Fn(&str) -> Option<OsString>) -> Result<Grants, Box<dyn Error>> {
+/// The grants from the environment as `var` reads it. `$XDG_RUNTIME_DIR/dconf` is granted when
+/// `private_dir` accepts it, and a warning says why when it does not. `schemas` is one more
+/// schema directory to read, which only a test names: the environment never widens the grants.
+pub fn daemon(
+    var: impl Fn(&str) -> Option<OsString>,
+    schemas: Option<&Path>,
+) -> Result<Grants, Box<dyn Error>> {
     let absolute = |name: &str| var(name).map(PathBuf::from).filter(|p| p.is_absolute());
-    let dirs = Dirs::from_vars(UNIT, &var)
-        .ok_or("XDG_RUNTIME_DIR, or both XDG_CONFIG_HOME and HOME, is not an absolute path")?;
-    let state = absolute("XDG_STATE_HOME")
-        .or_else(|| absolute("HOME").map(|home| home.join(".local/state")))
-        .ok_or("neither XDG_STATE_HOME nor HOME is an absolute path")?;
-    let crash_reports = state.join("athanor/crash-reports");
-    std::fs::create_dir_all(&crash_reports)?;
+    let runtime = absolute("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not an absolute path")?;
+    let config = absolute("XDG_CONFIG_HOME")
+        .or_else(|| absolute("HOME").map(|home| home.join(".config")))
+        .ok_or("neither XDG_CONFIG_HOME nor HOME is an absolute path")?;
 
-    let mut write = vec![crash_reports];
-    match private_dir(&dirs.runtime, "dconf") {
+    let mut write = Vec::new();
+    match private_dir(&runtime, "dconf") {
         Ok(dconf) => write.push(dconf),
         Err(error) => tracing::warn!(%error, "dconf's runtime directory is not granted"),
     }
-    let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into(), dirs.config.join("dconf")];
-    if let Some(schemas) = var("GSETTINGS_SCHEMA_DIR") {
-        read.extend(std::env::split_paths(&schemas).filter(|p| p.is_absolute()));
-    }
+    let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into(), config.join("dconf")];
+    read.extend(schemas.map(Path::to_path_buf));
     Ok(Grants { read, write })
 }
 
@@ -72,7 +68,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
-    fn dconf_is_granted_only_while_it_is_private() {
+    fn dconf_is_granted_only_while_it_is_private_and_the_environment_never_widens() {
         let base =
             std::env::temp_dir().join(format!("athanor-sessiond-grants-{}", std::process::id()));
         let runtime = base.join("runtime");
@@ -81,7 +77,8 @@ mod tests {
             let value = match name {
                 "HOME" => base.join("home"),
                 "XDG_RUNTIME_DIR" => runtime.clone(),
-                "GSETTINGS_SCHEMA_DIR" => PathBuf::from("/opt/schemas:relative"),
+                // A unit's environment can be changed by the user: it grants nothing.
+                "GSETTINGS_SCHEMA_DIR" | "XDG_DATA_DIRS" => PathBuf::from("/"),
                 _ => return None,
             };
             Some(value.into_os_string())
@@ -92,25 +89,31 @@ mod tests {
         };
 
         mode(0o755);
-        let grants = daemon(var).expect("grants");
-        assert_eq!(
-            grants.write,
-            [base.join("home/.local/state/athanor/crash-reports")]
-        );
-        assert!(grants.write[0].is_dir(), "created");
+        let grants = daemon(var, None).expect("grants");
+        assert!(grants.write.is_empty(), "{grants:?}");
         assert_eq!(
             grants.read,
             [
                 PathBuf::from("/usr"),
                 PathBuf::from("/etc"),
                 base.join("home/.config/dconf"),
-                PathBuf::from("/opt/schemas"),
             ]
+        );
+        assert!(
+            !base.join("home/.local/state").exists(),
+            "nothing is created"
         );
 
         mode(0o700);
-        let grants = daemon(var).expect("grants");
-        assert_eq!(grants.write.get(1), Some(&runtime.join("dconf")));
+        let grants = daemon(var, Some(Path::new("/opt/schemas"))).expect("grants");
+        assert_eq!(grants.write, [runtime.join("dconf")]);
+        assert_eq!(grants.read.last(), Some(&PathBuf::from("/opt/schemas")));
         std::fs::remove_dir_all(&base).expect("cleanup");
+
+        let unset = daemon(|name| (name == "HOME").then(|| "/home/u".into()), None);
+        assert_eq!(
+            unset.expect_err("no runtime directory").to_string(),
+            "XDG_RUNTIME_DIR is not an absolute path"
+        );
     }
 }
