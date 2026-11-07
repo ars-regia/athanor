@@ -257,7 +257,17 @@ pub fn paint<C: Canvas>(
 ) -> Result<(), Error> {
     let (w, h) = ui.size();
     let (w, h) = (w.ceil(), h.ceil());
-    ctx.set_transform(Affine::scale(f64::from(scale)));
+    // The surface's motion: everything, the background included, in one layer at its opacity
+    // and moved by its offset. At rest neither the layer nor the move is made.
+    let pose = ui.pose;
+    let faded = pose.opacity < 1.0;
+    if faded {
+        ctx.push_opacity_layer(pose.opacity.max(0.0));
+    }
+    let (dx, dy) = pose.offset;
+    ctx.set_transform(
+        Affine::scale(f64::from(scale)) * Affine::translate((f64::from(dx), f64::from(dy))),
+    );
     let t = ui.theme.clone();
     ctx.set_paint(color(t.background));
     ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
@@ -610,6 +620,9 @@ pub fn paint<C: Canvas>(
     }
     let sensitive = order.iter().filter(|&&(_, root)| root.is_none());
     indicators(ui, ctx, sensitive.map(|&(w, _)| w));
+    if faded {
+        ctx.pop_layer();
+    }
     Ok(())
 }
 
@@ -819,6 +832,55 @@ mod tests {
         let ink = at(bar.x + bar.w / 2.0, bar.y + bar.h / 2.0);
         let half = mix(t.background, t.border, INSENSITIVE);
         assert!(near(&ink, half), "the indicator {ink:?} is not {half:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_pose_draws_the_surface_at_its_opacity_and_offset() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Pose", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
+        let rest = render(&mut ui, 2.0)?;
+        let r = ui.widget(button).rect;
+        // At physical pixel (x, y) of `p`, for logical coordinates at scale 2.
+        let at = |p: &Pixmap, x: f32, y: f32| {
+            let i = 4 * (usize::from(p.width()) * (y * 2.0) as usize + (x * 2.0) as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let (x, y) = (r.x + 4.0, r.y + r.h / 2.0);
+        ui.pose = crate::Pose {
+            opacity: 0.5,
+            offset: (0.0, 0.0),
+        };
+        let faded = render(&mut ui, 2.0)?;
+        // Premultiplied: every channel of the opaque background and of the fill at half.
+        for (got, want) in [
+            (at(&faded, 1.0, 1.0), at(&rest, 1.0, 1.0)),
+            (at(&faded, x, y), at(&rest, x, y)),
+        ] {
+            let off = got
+                .iter()
+                .zip(&want)
+                .map(|(&a, &b)| a.abs_diff(b.div_ceil(2)))
+                .max();
+            assert!(
+                off.is_some_and(|d| d <= 1),
+                "{got:?} is not half of {want:?}"
+            );
+        }
+        ui.pose = crate::Pose {
+            opacity: 1.0,
+            offset: (5.0, 7.0),
+        };
+        let moved = render(&mut ui, 2.0)?;
+        assert_eq!(
+            moved.width(),
+            rest.width(),
+            "the move keeps the surface's size"
+        );
+        assert_eq!(at(&moved, x + 5.0, y + 7.0), at(&rest, x, y));
+        assert_ne!(at(&moved, x, y), at(&rest, x, y));
+        ui.pose = crate::Pose::REST;
+        assert_eq!(hash(&render(&mut ui, 2.0)?), hash(&rest));
         Ok(())
     }
 

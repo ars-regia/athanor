@@ -212,6 +212,8 @@ jobs:
         run: bash forge/test/shell/rig.sh toolkit-layer
       - name: Tooltip and menu popups of a layer surface
         run: bash forge/test/shell/rig.sh toolkit-popup
+      - name: A layer surface's motion on its frame callbacks
+        run: bash forge/test/shell/rig.sh toolkit-motion
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

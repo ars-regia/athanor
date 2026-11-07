@@ -534,6 +534,8 @@ pub struct Ui {
     offered: Option<(WidgetId, String)>,
     /// The text [`Ui::announce`] asked for, until the driver publishes it.
     pub(crate) announcement: Option<String>,
+    /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
+    pub(crate) pose: crate::motion::Pose,
 }
 
 impl Ui {
@@ -556,6 +558,7 @@ impl Ui {
             clips: Vec::new(),
             offered: None,
             announcement: None,
+            pose: crate::motion::Pose::REST,
         }
     }
 
