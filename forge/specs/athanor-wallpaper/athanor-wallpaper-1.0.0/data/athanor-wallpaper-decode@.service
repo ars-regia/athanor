@@ -38,7 +38,8 @@ SystemCallFilter=@system-service @mount @privileged
 # glycin and bubblewrap need connect(2), so sockets are hidden by path: the nix daemon's is
 # the one filesystem socket outside /run.
 InaccessiblePaths=-/nix/var/nix/daemon-socket -/var/nix/var/nix/daemon-socket
-# A fixed value, since a static unit cannot count the cores: the launcher's 32 + 4 per core at
-# 64 cores. The loaders' thread pool sizes itself by the cores; 44 was the smallest that worked
-# on 16 (render.rs).
-TasksMax=288
+# A fixed value, since a static unit cannot count the cores as the launcher's 32 + 4 per core
+# does (render.rs; 44 was the smallest that worked on 16 cores): 64 covers 8 cores at that rule,
+# and on more the loaders' thread pool, which sizes itself by the cores, is bounded here
+# (maintainer decision, 2026-11-07).
+TasksMax=64
