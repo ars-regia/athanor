@@ -32,7 +32,9 @@ impl AsFd for Checked {
 /// checked on that descriptor: a directory, owned by the owner of `runtime`, of mode 0700.
 /// Another process of the user could otherwise point a confined daemon's writes elsewhere. The
 /// descriptor is what a Landlock grant names (`sandbox::restrict`): a link swapped in for the
-/// path after the check widens nothing.
+/// path after the check widens nothing. Only `name`, the final component, is opened without
+/// following a link: a link in `runtime` or above it is still followed, and the walk that
+/// refuses one is #1061.
 pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
     let dir = runtime.join(name);
     match fs::DirBuilder::new().mode(0o700).create(&dir) {
@@ -69,7 +71,9 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
 /// in its last component, and checked on that descriptor: a directory owned by the process's
 /// user or by root (`/tmp`), never another user's. The descriptor is what the grant names
 /// (`sandbox::restrict`, `sandbox::restrict_writes`), so a link put at the path before the
-/// open is refused, and one swapped in after it widens nothing.
+/// open is refused, and one swapped in after it widens nothing. Only the final component is
+/// opened without following a link: a link in an intermediate component is still followed,
+/// and the walk that refuses one is #1061.
 pub fn owned_dir(path: &Path) -> io::Result<Checked> {
     let (opened, found) = not_a_link(path, OFlag::O_DIRECTORY)?;
     if found.uid() != 0 && found.uid() != nix::unistd::geteuid().as_raw() {
