@@ -61,6 +61,9 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
   before any of it is applied, one the outputs cannot take or that leaves no output enabled
   fails and changes nothing, a step the GPU refuses undoes those taken, and every manager is
   sent the result (doc_session_daemons.md SD23).
+- Keep what the user configured: an output given no position keeps its own, and a monitor
+  whose modes change while it stays plugged in keeps its place and, while it still offers
+  it, its mode.
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
   with athanor-edid: wl_output and xdg_output carry the make and model, and the serial

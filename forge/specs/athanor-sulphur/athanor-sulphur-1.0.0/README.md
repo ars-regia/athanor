@@ -221,7 +221,10 @@ adaptive sync or a disable. Every head is checked before anything is applied,
 and a step the GPU refuses halfway undoes the steps taken. A disabled output leaves the space
 and its `wl_output` global goes, and its lock surface is forgotten: enabled again while locked,
 it shows the background until the locker gives it a new one. An applied configuration is sent
-to every manager.
+to every manager. Positions are taken as given, overlapping or apart; an output a configuration
+gives no position keeps its own, and one enabled again goes to the right of the others. A
+monitor whose modes change while it stays plugged in keeps its place, and the mode it shows
+while it still offers that mode, else it takes its preferred one.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
 and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped

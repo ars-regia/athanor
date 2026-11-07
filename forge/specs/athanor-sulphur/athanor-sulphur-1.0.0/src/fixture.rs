@@ -6912,7 +6912,7 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
     run.stop();
 }
 
-/// A configuration turns an output: its logical size turns with it, the next output follows,
+/// A configuration turns an output: its logical size turns with it, the next output keeps its place,
 /// and the frame keeps the panel's size.
 #[test]
 fn os9_a_configuration_turns_an_output() {
@@ -6940,7 +6940,7 @@ fn os9_a_configuration_turns_an_output() {
     let area = run.state.space.output_geometry(&first).expect("mapped");
     assert_eq!(area.size, (height, width).into());
     let next = run.state.space.output_geometry(&second).expect("mapped");
-    assert_eq!(next.loc.x, height, "the next output follows");
+    assert_eq!(next.loc.x, width, "the next output keeps its place");
     control_center.pump(&mut run, "the change is sent", |client, _| {
         client.output_serial != Some(serial)
     });
@@ -7285,6 +7285,69 @@ fn sd23_adaptive_sync_is_set_and_reported() {
     control_center.pump(&mut run, "the head reports it off", |client, _| {
         client.output_serial != Some(serial) && !client.heads[0].adaptive_sync
     });
+    run.stop();
+}
+
+/// An output a configuration gives no position keeps its own (maintainer decision,
+/// 2026-11-07): a scale changed on one output moves neither; an output enabled again with no
+/// position goes to the right of the others, which keep their places.
+#[test]
+fn sd23_a_configuration_without_a_position_keeps_every_place() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let mut outputs = run.state.space.outputs().cloned();
+    let (first, second) = (
+        outputs.next().expect("the first output"),
+        outputs.next().expect("the second output"),
+    );
+    drop(outputs);
+    let at = |run: &Running, output: &smithay::output::Output| {
+        run.state.space.output_geometry(output).expect("mapped").loc
+    };
+    let below = (0, OUTPUTS[0].height).into();
+    let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
+        head.set_position(0, OUTPUTS[0].height)
+    });
+    assert_eq!(placed, "succeeded");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+
+    let scaled = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_scale(2.0)
+    });
+    assert_eq!(scaled, "succeeded");
+    assert_eq!(at(&run, &first), (0, 0).into(), "the first keeps its place");
+    assert_eq!(at(&run, &second), below, "the second keeps its place");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let enabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        config.enable_head(&seen.head, qh, ());
+    });
+    assert_eq!(enabled, "succeeded");
+    assert_eq!(at(&run, &first), (0, 0).into(), "the first keeps its place");
+    assert_eq!(
+        at(&run, &second),
+        (OUTPUTS[0].width / 2, 0).into(),
+        "enabled again, to the right of the first"
+    );
     run.stop();
 }
 

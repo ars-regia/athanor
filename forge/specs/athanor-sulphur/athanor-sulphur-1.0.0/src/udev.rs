@@ -290,6 +290,14 @@ fn offer_modes(output: &Output, connector: &connector::Info) {
     }
 }
 
+/// The mode an output keeps when its monitor's modes change: the one it shows while the monitor
+/// still offers it, else the monitor's preferred one.
+fn kept_mode(offered: &[Mode], current: Option<Mode>, preferred: Mode) -> Mode {
+    current
+        .filter(|mode| offered.contains(mode))
+        .unwrap_or(preferred)
+}
+
 /// The mode of `connector` that `wanted` is, the preferred one first.
 // ponytail: the first of the modes that read the same, interlaced or not; their flags when a
 // client needs to tell them apart.
@@ -835,8 +843,9 @@ impl State {
     }
 
     /// The modes of the monitor on `connector`, driven by `crtc`, changed: set up when it has no
-    /// output; else its output goes to the preferred mode when it shows another. The new mode is
-    /// tried first, and when the GPU refuses it the output keeps the mode it has.
+    /// output; else its output keeps the mode it shows while the monitor still offers it, and
+    /// goes to the preferred mode when it does not (`kept_mode`), keeping its place. The new
+    /// mode is tried first, and when the GPU refuses it the output keeps the mode it has.
     fn changed(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
@@ -844,10 +853,15 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return self.connected(connector, crtc);
         };
-        let Some(wanted) = preferred_mode(connector) else {
+        let Some(preferred) = preferred_mode(connector) else {
             return;
         };
-        let wl_mode = Mode::from(wanted);
+        let offered: Vec<Mode> = connector.modes().iter().map(|&mode| Mode::from(mode)).collect();
+        let wl_mode = kept_mode(&offered, head.output.current_mode(), Mode::from(preferred));
+        let Some(wanted) = drm_mode(connector, wl_mode) else {
+            return;
+        };
+        head.output.set_preferred(Mode::from(preferred));
         if head.output.current_mode() == Some(wl_mode) {
             let output = head.output.clone();
             offer_modes(&output, connector);
@@ -883,10 +897,9 @@ impl State {
             "a monitor changed mode"
         );
         output.change_current_state(Some(wl_mode), None, None, None);
-        output.set_preferred(wl_mode);
         offer_modes(&output, connector);
         layer_map_for_output(&output).arrange();
-        self.arrange_outputs();
+        self.fit_to_outputs();
         self.request_redraw();
     }
 
@@ -1816,8 +1829,8 @@ fn render(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::{
-        first_fault, identity_of, lock_shown, output_of, pacing, EdidFault, FailureLog, Frames, LockFrames,
-        Wake,
+        first_fault, identity_of, kept_mode, lock_shown, output_of, pacing, EdidFault, FailureLog,
+        Frames, LockFrames, Wake,
     };
     use std::time::{Duration, Instant};
 
@@ -2067,6 +2080,20 @@ pub(crate) mod tests {
     #[test]
     fn a_lock_with_no_output_is_shown() {
         assert!(lock_shown([]));
+    }
+
+    /// A monitor whose modes change keeps the mode the user set while it still offers it, and
+    /// goes to its preferred mode only when it does not.
+    #[test]
+    fn a_changed_monitor_keeps_the_mode_it_still_offers() {
+        let mode = |width: i32| smithay::output::Mode {
+            size: (width, 1080).into(),
+            refresh: 60_000,
+        };
+        let offered = [mode(1920), mode(1280)];
+        assert_eq!(kept_mode(&offered, Some(mode(1280)), mode(1920)), mode(1280));
+        assert_eq!(kept_mode(&offered, Some(mode(1024)), mode(1920)), mode(1920));
+        assert_eq!(kept_mode(&offered, None, mode(1920)), mode(1920));
     }
 
     #[test]

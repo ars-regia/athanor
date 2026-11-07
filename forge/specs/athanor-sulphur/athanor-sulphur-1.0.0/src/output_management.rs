@@ -10,8 +10,9 @@
 //! output, or a step the backend refuses. Every head is checked before anything is applied, and
 //! when the backend refuses a step halfway, the steps it took are undone (`take_all`). An
 //! applied configuration is announced to every manager once, each head as its output now is.
-//! Positions are taken as given; a configuration that sets none lays the outputs side by side
-//! again, as a change of scale or transform did before.
+//! Positions are taken as given, overlapping or apart; an output a configuration gives no
+//! position keeps its own, and one it enables again goes to the right of the others
+//! (maintainer decision, 2026-11-07).
 
 use crate::identity::Privilege;
 use crate::input::{turn, RightsTheFrame};
@@ -636,19 +637,13 @@ impl State {
             }
             layer_map_for_output(output).arrange();
         }
-        let placed: Vec<(Output, Point<i32, Logical>)> = plans
-            .iter()
-            .filter_map(|plan| Some((plan.output.clone(), plan.wanted.as_ref()?.position?)))
-            .collect();
-        if placed.is_empty() {
-            // Side by side again, at their new logical sizes.
-            self.arrange_outputs();
-        } else {
-            for (output, at) in placed {
-                self.space.map_output(&output, at);
+        // An output given no place keeps its own; one enabled again went to the right above.
+        for plan in plans {
+            if let Some(at) = plan.wanted.as_ref().and_then(|wanted| wanted.position) {
+                self.space.map_output(&plan.output, at);
             }
-            self.fit_to_outputs();
         }
+        self.fit_to_outputs();
         self.output_management.applying = false;
         self.output_heads_changed();
         self.request_redraw();
