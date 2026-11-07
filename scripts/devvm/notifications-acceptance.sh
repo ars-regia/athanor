@@ -89,7 +89,7 @@ unit_logged() { # unit_logged UNIT SINCE REGEX
     printf -v pattern %q "$3"
     in_session "journalctl --user -u $1 --since @$2 --no-pager -o cat | grep -qE -e $pattern"
 }
-bar_logged() { unit_logged athanor-bar "$@"; } # bar_logged SINCE REGEX
+bar_logged() { unit_logged athanor-bar "$@"; }       # bar_logged SINCE REGEX
 shelld_logged() { unit_logged athanor-shelld "$@"; } # shelld_logged SINCE REGEX
 
 # Sends a notification the way an application does, on the private bus.
@@ -151,8 +151,14 @@ stage_deploy() {
         'Type=notify-reload' "Sockets=$BUS_UNIT.socket" \
         "ExecStart=/usr/bin/dbus-broker-launch --scope user --config-file %h/.config/systemd/user/$BUS_UNIT.conf" |
         in_session "cat > ~/.config/systemd/user/$BUS_UNIT.service"
-    # The bus drop-in goes under /usr/lib/systemd/user, where the daemon admits drop-ins.
+    # The bus drop-in goes under /usr/lib/systemd/user, where the daemon admits drop-ins. An
+    # earlier version of this script put it under ~/.config, where it would now be refused.
+    in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$DROP_IN \
+    ~/.config/systemd/user/athanor-shelld.service.d/$DROP_IN" ||
+        fail "cannot remove a user-side $DROP_IN left by an earlier run"
     printf '%s\n' '[Service]' "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/$BUS_UNIT" > "$SHOTS/$DROP_IN"
+    # deploy.sh installs with the source's mode: readable by the user manager whatever the umask.
+    chmod 0644 "$SHOTS/$DROP_IN"
     "$HERE/deploy.sh" \
         "$SHOTS/$DROP_IN:/usr/lib/systemd/user/athanor-bar.service.d/$DROP_IN" \
         "$SHOTS/$DROP_IN:/usr/lib/systemd/user/athanor-shelld.service.d/$DROP_IN" > /dev/null
@@ -163,7 +169,8 @@ stage_deploy() {
     bar cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
 }
 
-# Removes the bar's user drop-in. Also run by stage_cleanup, so a failed assertion restores it.
+# Removes the bar's user drop-in. stage_cleanup removes the same file, so a failed assertion
+# restores the unit too.
 remove_user_dropin() {
     in_session "rm -f ~/.config/systemd/user/athanor-bar.service.d/$USER_DROP_IN" &&
         in_session systemctl --user daemon-reload
