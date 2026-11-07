@@ -1067,7 +1067,12 @@ impl State {
                 powered: true,
             },
         );
-        self.schedule(crtc, Duration::ZERO);
+        // An output the power client turned off stays off when a refused configuration drives
+        // it again; one it never saw, a new monitor or one enabled again, is on (output power
+        // plan, D8).
+        if self.output_power.is_on(output) || !self.turn_off(crtc) {
+            self.schedule(crtc, Duration::ZERO);
+        }
         Ok(())
     }
 
@@ -1362,22 +1367,42 @@ impl State {
             self.schedule(crtc, Duration::ZERO);
             return true;
         }
-        if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
-            tracing::warn!(%error, output = output.name(), "the output could not be turned off");
+        if !self.turn_off(crtc) {
             return true;
+        }
+        tracing::info!(output = output.name(), "the output is off");
+        // The lock may have waited only for this output.
+        self.confirm_lock();
+        false
+    }
+
+    /// Turns the head of `crtc` off: its CRTC disabled, its timer gone and nothing drawn, its
+    /// surfaces' frame callbacks sent at the throttle. False when the GPU refused, and the
+    /// head stays on.
+    fn turn_off(&mut self, crtc: crtc::Handle) -> bool {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return false;
+        };
+        let Some(head) = drm.outputs.get_mut(&crtc) else {
+            return false;
+        };
+        if let Err(error) = head
+            .drm_output
+            .with_compositor(|compositor| compositor.clear())
+        {
+            let output = head.output.name();
+            tracing::warn!(%error, output, "the output could not be turned off");
+            return false;
         }
         head.powered = false;
         head.frames.powered_off();
         if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
-        tracing::info!(output = output.name(), "the output is off");
-        // The lock may have waited only for this output.
-        self.confirm_lock();
         if self.frame_callbacks_waiting() {
             self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
         }
-        false
+        true
     }
 
     /// A lock is confirmed only once every output presented a frame drawn locked.
