@@ -2,6 +2,7 @@
 //! and no bus, tested without either, and the Wayland and D-Bus sides the daemon drives it
 //! with.
 
+pub mod battery;
 pub mod bus;
 pub mod follow;
 pub mod inhibitors;

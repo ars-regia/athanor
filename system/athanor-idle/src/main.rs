@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
 
+use athanor_idle::battery::Battery;
 use athanor_idle::wayland::{Display, Notice, Which};
 use athanor_idle::{
     bus, choose, follow, screensaver, Action, Config, Event, Sequence, Timeouts, Timer,
@@ -346,11 +347,10 @@ async fn daemon(
     let (mut hold, mut ended) =
         screensaver::serve(&session, &session_query, dir.join("inhibitors.json")).await?;
 
-    let mut battery = bus::upower_changes(&system_watch).await?;
-    let mut on_battery = system.on_battery().await.unwrap_or_else(|error| {
-        tracing::warn!(%error, "cannot read UPower's OnBattery; counted as on mains");
-        false
-    });
+    let mut changes = bus::upower_changes(&system_watch).await?;
+    let mut owners = bus::upower_owners(&system_watch).await?;
+    let mut battery = Battery::new();
+    let mut retry = read_battery(&system, &mut battery).await;
 
     let display = Display::connect()?;
     // A duplicate of the display's socket, which only tells when it is readable; it shares the
@@ -371,7 +371,7 @@ async fn daemon(
         answers,
     };
     driver
-        .apply(choose(&prefs.config, on_battery, *hold.borrow()))
+        .apply(choose(&prefs.config, battery.on_battery(), *hold.borrow()))
         .await;
     driver.display.flush()?;
     tracing::info!("athanor-idle is running");
@@ -384,12 +384,17 @@ async fn daemon(
                 driver.reduced_motion = prefs.reduced_motion;
             }
             changed = hold.changed() => changed?,
-            changed = battery.next() => {
+            changed = changes.next() => {
                 changed.ok_or("UPower's property stream ended")?;
-                match system.on_battery().await {
-                    Ok(now) => on_battery = now,
-                    Err(error) => tracing::warn!(%error, "cannot read UPower's OnBattery; kept as it was"),
+                retry = read_battery(&system, &mut battery).await;
+            }
+            gained = owners.next() => {
+                if gained.ok_or("UPower's owner stream ended")? {
+                    retry = read_battery(&system, &mut battery).await;
                 }
+            }
+            () = sleep_until(retry), if retry.is_some() => {
+                retry = read_battery(&system, &mut battery).await;
             }
             ready = socket.readable() => {
                 ready?;
@@ -407,10 +412,23 @@ async fn daemon(
             _ = &mut ended => return Err("the bus is no longer followed".into()),
         }
         driver
-            .apply(choose(&prefs.config, on_battery, *hold.borrow()))
+            .apply(choose(&prefs.config, battery.on_battery(), *hold.borrow()))
             .await;
         driver.display.flush()?;
     }
+}
+
+/// Reads `OnBattery` into `battery`: when to read again after a failure, `None` after a
+/// success. A failure keeps what was known, mains before the first success.
+async fn read_battery(system: &bus::System, battery: &mut Battery) -> Option<Instant> {
+    let read = match system.on_battery().await {
+        Ok(now) => Some(now),
+        Err(error) => {
+            tracing::warn!(%error, "cannot read UPower's OnBattery; kept as it was, read again later");
+            None
+        }
+    };
+    battery.answer(read).map(|wait| Instant::now() + wait)
 }
 
 async fn sleep_until(deadline: Option<Instant>) {

@@ -188,6 +188,24 @@ pub async fn upower_changes(
     Ok(changes.map(|_| ()))
 }
 
+/// A stream that yields, for every `NameOwnerChanged` of `org.freedesktop.UPower` read on
+/// `watch`, whether the name gained an owner (`battery::gained_owner`).
+pub async fn upower_owners(
+    watch: &Connection,
+) -> zbus::Result<impl futures_util::Stream<Item = bool> + Unpin + 'static> {
+    let dbus = zbus::fdo::DBusProxy::new(watch).await?;
+    let changes = dbus
+        .receive_name_owner_changed_with_args(&[(0, "org.freedesktop.UPower")])
+        .await?;
+    Ok(changes.map(|signal| match signal.args() {
+        Ok(args) => crate::battery::gained_owner(args.new_owner().as_deref()),
+        Err(error) => {
+            tracing::warn!(%error, "cannot decode UPower's NameOwnerChanged; read again");
+            true
+        }
+    }))
+}
+
 /// Shows `summary` as a session notification, on `query`, a connection that serves nothing.
 pub async fn notify(query: &Connection, summary: &str) -> zbus::Result<u32> {
     let notifications = NotificationsProxy::builder(query)
