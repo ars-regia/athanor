@@ -2561,7 +2561,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
 # `Client::watch_accessibility`, and its tiling manager at the first `Client::watch_tiling`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs and workspace_tiling.rs hold every name of
-# them in the crate.
+# them in the crate. connection.rs binds the rest when a client connects, so it counts for a
+# target only when code outside the crate calls `Client::connect` or `Client::connect_wayland`:
+# a crate that reads only the crate's `idle` module, as athanor-idle does, binds nothing
+# through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2575,7 +2578,10 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/workspace_tiling.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\s*::\s*connect(?:_wayland)?\b(?!\s*::)"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the

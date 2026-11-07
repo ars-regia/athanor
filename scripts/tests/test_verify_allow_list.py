@@ -226,13 +226,37 @@ class AllowList(unittest.TestCase):
             "athanor-dock",
             '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n',
             {
-                "src/main.rs": "use athanor_sulphur_client::connect;\nfn main() { connect(); }\n"
+                "src/main.rs": "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&d); }\n"
             },
         )
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("ext_foreign_toplevel_list_v1", out[0])
         self.assertIn("/usr/bin/athanor-dock", out[0])
+
+    def test_the_connection_counts_only_for_a_target_that_connects(self):
+        # connection.rs binds its globals when a client connects: athanor-idle uses the
+        # crate's `idle` module alone and binds none of them (maintainer decision, 2026-11-07).
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.package(
+            "athanor-idle",
+            dependency,
+            {"src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
+        self.assertEqual(self.problems(), [])
+        for call in ("Client::connect(&display)", "Client::connect_wayland(&connection)"):
+            with self.subTest(call):
+                self.package(
+                    "athanor-idle",
+                    dependency,
+                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn main() {{ {call}; }}\n"},
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-idle", out[0])
+                self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
@@ -438,7 +462,7 @@ class AllowList(unittest.TestCase):
     def test_a_line_grants_every_privileged_global_the_target_binds(self):
         self.client()
         dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
-        dock = "use athanor_sulphur_client::connect;\nfn f() { w.set_layer(Layer::Top); }\n"
+        dock = "use athanor_sulphur_client::Client;\nfn f() { Client::connect(&d); w.set_layer(Layer::Top); }\n"
         launcher = "use athanor_sulphur_client::Client;\nfn f() { client.capture(id); }\n"
         cases = {
             # What the client binds at connect, missing from the line.
