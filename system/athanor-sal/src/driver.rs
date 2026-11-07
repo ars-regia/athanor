@@ -392,7 +392,7 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(None, &mut app)?;
+        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
@@ -410,16 +410,15 @@ fn run_on(
         // here: a running motion settles later, and an instantaneous one is queued anew for the
         // next turn.
         let settled = std::mem::take(&mut app.shell.settled);
-        each_open(
+        settle_each(
             &mut app,
             settled,
+            |app| &app.shell.settled,
             |app, surface| {
-                !app.shell.settled.contains(&surface)
-                    && app
-                        .shell
-                        .surfaces
-                        .iter()
-                        .any(|s| s.id == surface && s.motion.is_none())
+                app.shell
+                    .surfaces
+                    .iter()
+                    .any(|s| s.id == surface && s.motion.is_none())
             },
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
@@ -1092,6 +1091,30 @@ fn each_open<T, S: Copy>(
             call(state, surface);
         }
     }
+}
+
+/// How long the loop waits for an event: not at all while a surface is queued `pending` for the
+/// next turn, which no event is coming to wake, and until one arrives otherwise.
+fn wait(pending: bool) -> Option<std::time::Duration> {
+    pending.then_some(std::time::Duration::ZERO)
+}
+
+/// Calls `call` on each of the `settled` surfaces that is `at_rest` and that `queued` does not
+/// find queued anew in `state` when its turn comes: one that an earlier `call` of this batch
+/// moved again is reported on the turn it is queued for, not twice.
+fn settle_each<T>(
+    state: &mut T,
+    settled: Vec<SurfaceId>,
+    queued: impl Fn(&T) -> &[SurfaceId],
+    at_rest: impl Fn(&T, SurfaceId) -> bool,
+    call: impl FnMut(&mut T, SurfaceId),
+) {
+    each_open(
+        state,
+        settled,
+        |state, surface| !queued(state).contains(&surface) && at_rest(state, surface),
+        call,
+    );
 }
 
 /// The output named `name` among `outputs` and their names.
@@ -2626,6 +2649,39 @@ mod tests {
         requeue(&mut settled, a, true);
         requeue(&mut settled, a, true);
         assert_eq!(settled, [b, a]);
+    }
+
+    #[test]
+    fn a_surface_moved_again_within_a_batch_is_reported_once_on_the_next_turn() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        // Reporting `a` replaces `b`, settled in the same batch, by an instantaneous motion.
+        let mut state = (Vec::new(), Vec::new());
+        let turn = |state: &mut (Vec<SurfaceId>, Vec<SurfaceId>), batch| {
+            settle_each(
+                state,
+                batch,
+                |s| &s.0,
+                |_, _| true,
+                |s, id| {
+                    s.1.push(id);
+                    if id == a {
+                        requeue(&mut s.0, b, true);
+                    }
+                },
+            );
+        };
+        turn(&mut state, vec![a, b]);
+        assert_eq!(state.1, [a], "b is not reported with the batch that moved it");
+        let next = std::mem::take(&mut state.0);
+        turn(&mut state, next);
+        assert_eq!(state.1, [a, b], "b is reported once, on the next turn");
+        assert!(state.0.is_empty());
+    }
+
+    #[test]
+    fn the_loop_does_not_block_while_a_surface_is_queued() {
+        assert_eq!(wait(true), Some(std::time::Duration::ZERO));
+        assert_eq!(wait(false), None);
     }
 
     #[test]
