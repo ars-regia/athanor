@@ -1516,16 +1516,16 @@ pub fn build_output(
     output
 }
 
-/// Offers `output` to the clients; the global is kept in its user data, and one it had still
-/// is removed, so that no global outlives its slot.
+/// Offers `output` to the clients; the global is kept in its user data. One it had still is
+/// withdrawn first, so that no client sees two globals for one output.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
-    let global = output.create_global::<State>(dh);
     let slot = output.user_data().get_or_insert(OutputGlobal::default);
-    let previous = slot.0.borrow_mut().replace(global);
-    if let Some(previous) = previous {
+    if slot.0.borrow().is_some() {
         tracing::warn!(output = output.name(), "an output was offered twice");
-        dh.remove_global::<State>(previous);
+        withdraw_output(dh, output);
     }
+    let global = output.create_global::<State>(dh);
+    *slot.0.borrow_mut() = Some(global);
 }
 
 /// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a
