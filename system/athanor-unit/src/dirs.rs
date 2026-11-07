@@ -2,7 +2,9 @@
 //! empty value counts as unset (XDG Base Directory Specification).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dirs {
@@ -51,6 +53,37 @@ impl Dirs {
             runtime,
         })
     }
+}
+
+/// `runtime/name`, a directory private to the user, created with mode 0700. One that exists
+/// already must be a directory, not a link, owned by the owner of `runtime` and of mode 0700,
+/// or it is refused: another process of the user could otherwise point a confined unit's
+/// writes elsewhere.
+pub fn private_dir(runtime: &Path, name: &str) -> io::Result<PathBuf> {
+    let dir = runtime.join(name);
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => return Ok(dir),
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        Err(_) => {}
+    }
+    let owner = fs::metadata(runtime)?.uid();
+    let found = fs::symlink_metadata(&dir)?;
+    let refuse = |why: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} {why}", dir.display()),
+        ))
+    };
+    if !found.file_type().is_dir() {
+        return refuse("is not a directory");
+    }
+    if found.uid() != owner {
+        return refuse("is not owned by the user");
+    }
+    if found.permissions().mode() & 0o7777 != 0o700 {
+        return refuse("does not have mode 0700");
+    }
+    Ok(dir)
 }
 
 #[cfg(test)]
@@ -204,5 +237,44 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn a_private_dir_is_created_or_checked() {
+        let runtime =
+            std::env::temp_dir().join(format!("athanor-unit-private-{}", std::process::id()));
+        fs::create_dir_all(&runtime).unwrap();
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+        let made = private_dir(&runtime, "athanor-idle").unwrap();
+        assert_eq!(made, runtime.join("athanor-idle"));
+        assert_eq!(
+            fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            private_dir(&runtime, "athanor-idle").unwrap(),
+            made,
+            "an existing one that passes"
+        );
+
+        fs::set_permissions(&made, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(private_dir(&runtime, "athanor-idle").is_err(), "mode 0755");
+        fs::remove_dir(&made).unwrap();
+
+        let elsewhere = runtime.join("elsewhere");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&elsewhere)
+            .unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &made).unwrap();
+        assert!(
+            private_dir(&runtime, "athanor-idle").is_err(),
+            "a link to a directory"
+        );
+        fs::remove_file(&made).unwrap();
+
+        fs::write(&made, b"").unwrap();
+        assert!(private_dir(&runtime, "athanor-idle").is_err(), "a file");
+        fs::remove_dir_all(&runtime).unwrap();
     }
 }
