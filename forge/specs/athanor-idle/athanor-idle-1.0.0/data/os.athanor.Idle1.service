@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=os.athanor.Idle1
+Exec=/usr/bin/athanor-idle
+SystemdService=athanor-idle.service
