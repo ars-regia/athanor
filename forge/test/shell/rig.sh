@@ -19,7 +19,7 @@
 #   rig.sh no-gtk           athanor-apps, the compositor client, athanor-style and athanor-dock without gtk: no GTK crate in their tree, clippy and tests
 #   rig.sh build-shelld     clippy, tests and release build of athanor-shelld into <out>/bin
 #   rig.sh build-compositor clippy, tests and release build of athanor-sulphur into <out>/bin
-#   rig.sh build-toolkit    clippy, tests and release build of athanor-sal's chooser, text field, test input method, layer surfaces, popups, test pointer and gallery into <out>/bin,
+#   rig.sh build-toolkit    clippy, tests and release build of athanor-sal's chooser, text field, test input method, layer surfaces, popups, test pointer, picture and gallery into <out>/bin,
 #                           with and without the gpu feature; the binaries carry it, so ATHANOR_SAL_RENDERER=gpu works
 #   rig.sh compositor-globals   the globals athanor-sulphur offers, read by wayland-info under it, the privileged ones refused (run build-compositor first)
 #   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
@@ -64,6 +64,7 @@
 #   rig.sh toolkit-clipboard   athanor-sal's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
 #   rig.sh toolkit-layer    athanor-sal's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
 #   rig.sh toolkit-motion   athanor-sal's layer surface moves in, out and in with reduced motion on its frame callbacks under headless sway, each motion settling in its time (Sal's S3; run build-toolkit first)
+#   rig.sh toolkit-picture  athanor-sal's picture on a full-size background layer surface under headless sway: the output's size at each mode and scale, on each output (SD6; run build-toolkit first)
 #   rig.sh toolkit-a11y     athanor-sal's root roles, radios, announcements and a surface out of the AT-SPI tree, read on the accessibility bus (Sal's S2; run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-sal's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
 #   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
@@ -734,6 +735,7 @@ build-toolkit)
                  && cargo test --locked -p athanor-sal \
                  && cargo test --locked -p athanor-sal --features gpu \
                  && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer --example a11y \
+                 && cargo build --release --locked -p athanor-sal --features gpu --example picture \
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-sal-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-sal-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-sal-input-method \
@@ -741,6 +743,7 @@ build-toolkit)
                  && install -m 0755 /out/target/release/examples/popup /out/bin/athanor-sal-popup \
                  && install -m 0755 /out/target/release/examples/pointer /out/bin/athanor-sal-pointer \
                  && install -m 0755 /out/target/release/examples/a11y /out/bin/athanor-sal-a11y \
+                 && install -m 0755 /out/target/release/examples/picture /out/bin/athanor-sal-picture \
                  && cargo clippy --locked --manifest-path system/athanor-sal/gallery/Cargo.toml --all-targets -- -D warnings \
                  && cargo build --release --locked --manifest-path system/athanor-sal/gallery/Cargo.toml \
                  && install -m 0755 /out/target/release/athanor-sal-gallery /out/bin/athanor-sal-gallery'
@@ -1544,6 +1547,12 @@ toolkit-motion)
     # and settles in its time, with and without reduced motion (toolkit_motion_check.py).
     require athanor-sal-layer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_motion_check.py
+    ;;
+toolkit-picture)
+    # doc_session_daemons.md SD6, pull request W2: the wallpaper's surface, anchored on all four
+    # edges, takes the size sway configures as its outputs change mode and scale and as one is added.
+    require athanor-sal-picture build-toolkit
+    in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_picture_check.py
     ;;
 toolkit-a11y)
     # Sal's requirement S2 (doc_osd.md OD11, OD18, OD19): what an on-screen display and its

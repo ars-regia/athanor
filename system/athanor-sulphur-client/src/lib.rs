@@ -11,6 +11,7 @@ mod capture;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
+pub mod idle;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
 mod keyboard_group;

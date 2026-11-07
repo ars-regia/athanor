@@ -210,6 +210,8 @@ jobs:
         run: bash forge/test/shell/rig.sh orca gallery it
       - name: One layer surface per output as outputs come and go
         run: bash forge/test/shell/rig.sh toolkit-layer
+      - name: A full-size background picture on each output
+        run: bash forge/test/shell/rig.sh toolkit-picture
       - name: Tooltip and menu popups of a layer surface
         run: bash forge/test/shell/rig.sh toolkit-popup
       - name: A layer surface's motion on its frame callbacks

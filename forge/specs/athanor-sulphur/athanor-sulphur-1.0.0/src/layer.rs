@@ -28,7 +28,8 @@ impl WlrLayerShellHandler for State {
         &mut self.layer_shell_state
     }
 
-    /// Maps the surface on the output the client names, or on the first one.
+    /// Maps the surface on the output the client names, or on the first one when it names none;
+    /// one it names that is no longer shown closes it.
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -36,10 +37,10 @@ impl WlrLayerShellHandler for State {
         _layer: Layer,
         namespace: String,
     ) {
-        let output = output
-            .as_ref()
-            .and_then(Output::from_resource)
-            .or_else(|| self.space.outputs().next().cloned());
+        let output = match &output {
+            Some(named) => self.shown_output(named),
+            None => self.space.outputs().next().cloned(),
+        };
         let Some(output) = output else {
             // Nothing to show it on: the protocol's answer is `closed`.
             surface.send_close();
