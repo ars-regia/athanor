@@ -84,12 +84,42 @@ fn main() -> ExitCode {
 }
 
 fn image(input: Vec<u8>, side: u32) -> Result<Picture, String> {
-    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8Premultiplied)?;
+    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8Premultiplied).map_err(|err| err.to_string())?;
     packed(frame.width(), frame.height(), frame.stride() as usize, frame.buf_slice(), side, |px| px)
 }
 
+/// Why a picture has no frame.
+#[derive(Debug)]
+enum Undecoded {
+    /// The picture's own: it is not a regular file, is too large, or is in a format no loader
+    /// reads. Asking again gives the same.
+    Picture(String),
+    /// Anything else: a loader that did not start, was killed or ran past its time. Asking
+    /// again may succeed. glycin 4 names no other kind of error to the caller, so a picture
+    /// a loader finds corrupt is here too, and is asked for again.
+    Fault(String),
+}
+
+impl std::fmt::Display for Undecoded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Picture(why) | Self::Fault(why) => f.write_str(why),
+        }
+    }
+}
+
+impl From<glycin::Error> for Undecoded {
+    fn from(err: glycin::Error) -> Self {
+        if err.unsupported_format().is_some() {
+            Self::Picture(err.to_string())
+        } else {
+            Self::Fault(err.to_string())
+        }
+    }
+}
+
 /// The first frame of an image, decoded by glycin's loaders in bubblewrap, in `format`.
-fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame, String> {
+fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame, Undecoded> {
     let selection = match format {
         glycin::MemoryFormat::R8g8b8a8 => glycin::MemoryFormatSelection::R8g8b8a8,
         _ => glycin::MemoryFormatSelection::R8g8b8a8Premultiplied,
@@ -100,10 +130,15 @@ fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame,
             .sandbox_selector(glycin::SandboxSelector::Bwrap)
             .accepted_memory_formats(selection)
             .limits(glycin::Limits::default().timeout(Duration::from_secs(3)).max_dimensions((MAX_DECODE, MAX_DECODE)));
-        let mut image = loader.load().await.map_err(|err| err.to_string())?;
-        let frame = image.next_frame().await.map_err(|err| err.to_string())?;
+        let mut image = loader.load().await?;
+        // glycin's own check of the limit tells it from no other error: this one does.
+        let details = image.details();
+        if details.width() > MAX_DECODE || details.height() > MAX_DECODE {
+            return Err(Undecoded::Picture(format!("a side is over {MAX_DECODE} pixels")));
+        }
+        let frame = image.next_frame().await?;
         if frame.memory_format() != format {
-            return Err("the loader returned another memory format".to_owned());
+            return Err(Undecoded::Fault("the loader returned another memory format".to_owned()));
         }
         Ok(frame)
     })
@@ -120,11 +155,13 @@ fn wallpaper() -> Result<(), String> {
     let mut out = BufWriter::with_capacity(1 << 20, io::stdout().lock());
     let frame = match picture(File::from(file)) {
         Ok(frame) => frame,
-        Err(err) => {
+        Err(Undecoded::Picture(err)) => {
             // The picture's fault, not the decoder's: told so, the daemon does not ask again.
             out.write_all(&protocol::refusal()).and_then(|()| out.flush()).map_err(|err| err.to_string())?;
             return Err(err);
         }
+        // No frame: the daemon sees a fault and asks again.
+        Err(Undecoded::Fault(err)) => return Err(err),
     };
     let image = (frame.width(), frame.height());
     for size in sizes {
@@ -135,15 +172,16 @@ fn wallpaper() -> Result<(), String> {
 }
 
 /// The picture in `file`, which must be a regular file, decoded.
-fn picture(file: File) -> Result<glycin::Frame, String> {
-    let metadata = file.metadata().map_err(|err| format!("the file cannot be read: {err}"))?;
+fn picture(file: File) -> Result<glycin::Frame, Undecoded> {
+    let unread = |err| Undecoded::Fault(format!("the file cannot be read: {err}"));
+    let metadata = file.metadata().map_err(unread)?;
     if !metadata.file_type().is_file() {
-        return Err("the descriptor is not a regular file".to_owned());
+        return Err(Undecoded::Picture("the descriptor is not a regular file".to_owned()));
     }
     let mut input = Vec::new();
-    file.take(MAX_INPUT + 1).read_to_end(&mut input).map_err(|err| format!("the file cannot be read: {err}"))?;
+    file.take(MAX_INPUT + 1).read_to_end(&mut input).map_err(unread)?;
     if input.len() as u64 > MAX_INPUT {
-        return Err(format!("the file is larger than {MAX_INPUT} bytes"));
+        return Err(Undecoded::Picture(format!("the file is larger than {MAX_INPUT} bytes")));
     }
     decode(input, glycin::MemoryFormat::R8g8b8a8)
 }
@@ -336,7 +374,14 @@ mod tests {
     #[test]
     fn only_a_regular_file_is_read() {
         let device = File::open("/dev/null").expect("a device");
-        let refused = picture(device).err().unwrap_or_default();
-        assert!(refused.contains("not a regular file"), "{refused}");
+        let refused = picture(device).err();
+        assert!(matches!(&refused, Some(Undecoded::Picture(why)) if why.contains("not a regular file")), "{refused:?}");
+    }
+
+    #[test]
+    fn a_loader_s_failure_is_a_fault_not_a_refusal() {
+        // A timeout, a spawn failure or a killed loader: none is an unsupported format.
+        let undecoded = Undecoded::from(glycin::Error::other("the loader was killed"));
+        assert!(matches!(undecoded, Undecoded::Fault(_)), "{undecoded:?}");
     }
 }
