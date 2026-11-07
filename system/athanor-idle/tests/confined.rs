@@ -14,8 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
 use athanor_idle::confine;
-use athanor_idle::inhibitors::Inhibitors;
-use athanor_idle::store;
+use athanor_idle::screensaver;
 use athanor_sulphur_client::idle::{read_in, user_dir, Key};
 use gio::prelude::*;
 
@@ -202,7 +201,8 @@ fn child() {
     let error = TcpStream::connect(tcp.local_addr().expect("addr")).expect_err("TCP");
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
 
-    store::save(&dir.join("inhibitors.json"), &Inhibitors::new()).expect("inhibitors.json");
+    // What the ScreenSaver interface reads for a caller's application id.
+    fs::read_to_string("/proc/self/cgroup").expect("/proc/<pid>/cgroup");
     assert_eq!(read_in(&store).screen_off_time, Key::Millis(60000));
     UnixStream::connect(runtime.join("wayland-test")).expect("the Wayland socket");
 
@@ -221,5 +221,27 @@ fn child() {
             let bus = zbus::Connection::session().await.expect("the session bus");
             let dbus = zbus::fdo::DBusProxy::new(&bus).await.expect("proxy");
             dbus.get_id().await.expect("GetId");
+
+            // The ScreenSaver interface keeps its table in inhibitors.json (SN7).
+            let query = zbus::Connection::session()
+                .await
+                .expect("the query connection");
+            let (_hold, _end) = screensaver::serve(&bus, &query, dir.join("inhibitors.json"))
+                .await
+                .expect("the ScreenSaver interface");
+            let client = zbus::Connection::session().await.expect("a client");
+            let reply = client
+                .call_method(
+                    Some(screensaver::NAME),
+                    screensaver::PATHS[0],
+                    Some(screensaver::NAME),
+                    "Inhibit",
+                    &("app", "confined"),
+                )
+                .await
+                .expect("Inhibit");
+            let _cookie: u32 = reply.body().deserialize().expect("a cookie");
+            let saved = fs::read_to_string(dir.join("inhibitors.json")).expect("inhibitors.json");
+            assert!(saved.contains("confined"), "{saved}");
         });
 }
