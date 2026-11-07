@@ -35,7 +35,6 @@ use wayland_client::{
 };
 use wayland_protocols::ext::foreign_toplevel_list::v1::client::{
     ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
-    ext_foreign_toplevel_list_v1::{self, ExtForeignToplevelListV1},
 };
 use wayland_protocols::ext::workspace::v1::client::{
     ext_workspace_group_handle_v1::{self, ExtWorkspaceGroupHandleV1},
@@ -62,7 +61,6 @@ use crate::protocols::toplevel_info::client::{
 };
 use crate::protocols::toplevel_management::client::zcosmic_toplevel_manager_v1::ZcosmicToplevelManagerV1;
 use crate::protocols::toplevel_state::client::{
-    athanor_toplevel_manager_v1::AthanorToplevelManagerV1,
     athanor_toplevel_state_v1::{self, AthanorToplevelStateV1},
 };
 use crate::protocols::workspace_v2::client::{
@@ -123,8 +121,9 @@ pub(crate) struct Inner {
     gdk: RefCell<Option<Gdk>>,
     connection: Connection,
     pub(crate) qh: QueueHandle<State>,
-    /// The compositor's globals, for those bound only when a call needs them: the capture
-    /// globals and the window actions, which a client that never captures or acts never binds.
+    /// The compositor's globals, for those bound only when a call needs them: the windows, the
+    /// capture globals and the window actions, which a client that never watches the windows,
+    /// captures or acts never binds.
     pub(crate) registry: GlobalList,
     queue: RefCell<EventQueue<State>>,
     pub(crate) state: RefCell<State>,
@@ -153,10 +152,10 @@ impl Drop for Inner {
 }
 
 impl Client {
-    /// Binds what the compositor offers and reads the initial state; the capture globals
-    /// wait for the first [`Client::capture`]. A global the compositor does not offer is not
-    /// an error: its part of the API stays empty, and its actions return
-    /// [`Error::Unavailable`].
+    /// Binds what the compositor offers and reads the initial state; the windows wait for
+    /// [`Client::watch_windows`], the capture globals for the first [`Client::capture`]. A
+    /// global the compositor does not offer is not an error: its part of the API stays empty,
+    /// and its actions return [`Error::Unavailable`].
     #[cfg(feature = "gtk")]
     pub fn connect(display: &gdk::Display) -> Result<Client, Error> {
         let wayland = display
@@ -194,12 +193,7 @@ impl Client {
             .map_err(|err| Error::Connection(err.to_string()))?;
         let qh = queue.handle();
         let mut state = State::bind(&globals, &qh);
-        // The first roundtrip announces the objects, the second their initial state.
-        for _ in 0..2 {
-            queue
-                .roundtrip(&mut state)
-                .map_err(|err| Error::Connection(err.to_string()))?;
-        }
+        announce(&mut queue, &mut state)?;
         state.events.clear();
 
         // The source holds a `Weak<Inner>`, which must stay on this thread: refuse a default
@@ -279,8 +273,8 @@ impl Client {
         self.inner.state.borrow().keyboard_group
     }
 
-    /// Whether the compositor is athanor-sulphur: `athanor_toplevel_manager_v1`, which only
-    /// it offers and only to the shell, is bound (doc_own_stack.md, decision 28).
+    /// Whether the compositor is athanor-sulphur: it offers its toplevel manager, which only it
+    /// offers and only to the shell (doc_own_stack.md, decision 28), watched or not.
     pub fn own_compositor(&self) -> bool {
         self.inner.state.borrow().own_compositor()
     }
@@ -446,6 +440,24 @@ impl Client {
     pub(crate) fn flush(&self) -> Result<(), Error> {
         self.inner.flush()
     }
+
+    /// Reads the announcement and the initial state of objects bound after the connection, as
+    /// the connection read its own.
+    pub(crate) fn announce(&self) -> Result<(), Error> {
+        let mut queue = self.inner.queue.borrow_mut();
+        let mut state = self.inner.state.borrow_mut();
+        announce(&mut queue, &mut state)
+    }
+}
+
+/// The first roundtrip announces the objects, the second their initial state.
+fn announce(queue: &mut EventQueue<State>, state: &mut State) -> Result<(), Error> {
+    for _ in 0..2 {
+        queue
+            .roundtrip(state)
+            .map_err(|err| Error::Connection(err.to_string()))?;
+    }
+    Ok(())
 }
 
 /// A full socket is not a failure: what could not be written stays in the shared
@@ -750,9 +762,11 @@ mod queue_source {
 
 #[derive(Default)]
 pub(crate) struct Globals {
-    toplevel_info: Option<ZcosmicToplevelInfoV1>,
+    /// The toplevel list and the window state, bound at the first watch of the windows.
+    pub(crate) windows: crate::windows::Globals,
+    /// The compositor offers athanor-sulphur's toplevel manager (`Client::own_compositor`).
+    own_compositor: bool,
     pub(crate) toplevel_manager: Option<ZcosmicToplevelManagerV1>,
-    athanor_toplevel: Option<AthanorToplevelManagerV1>,
     /// athanor-sulphur's window actions, bound at the first action (plan D2).
     pub(crate) actions: crate::actions::Globals,
     /// athanor-sulphur's keyboard group, bound at the first watch.
@@ -775,8 +789,8 @@ pub(crate) struct Globals {
 
 pub(crate) struct Toplevel {
     pub(crate) ext: ExtForeignToplevelHandleV1,
-    cosmic: Option<ZcosmicToplevelHandleV1>,
-    athanor: Option<AthanorToplevelStateV1>,
+    pub(crate) cosmic: Option<ZcosmicToplevelHandleV1>,
+    pub(crate) athanor: Option<AthanorToplevelStateV1>,
 }
 
 struct WorkspaceHandles {
@@ -787,7 +801,7 @@ struct WorkspaceHandles {
 #[derive(Default)]
 pub(crate) struct State {
     pub(crate) globals: Globals,
-    windows: Table<WindowId, Window>,
+    pub(crate) windows: Table<WindowId, Window>,
     pub(crate) toplevels: HashMap<WindowId, Toplevel>,
     workspaces: Table<WorkspaceId, Workspace>,
     workspace_handles: HashMap<WorkspaceId, WorkspaceHandles>,
@@ -838,9 +852,9 @@ impl State {
             }
         }
         state.globals = Globals {
-            toplevel_info: bind(globals, qh, 2..=3),
+            windows: crate::windows::Globals::default(),
+            own_compositor: crate::windows::own_compositor(globals),
             toplevel_manager: bind(globals, qh, 1..=4),
-            athanor_toplevel: bind(globals, qh, 1..=1),
             actions: crate::actions::Globals::default(),
             keyboard_group: crate::keyboard_group::Globals::default(),
             workspace_tiling: crate::workspace_tiling::Globals::default(),
@@ -855,8 +869,6 @@ impl State {
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
         };
-        // Only its events are needed; the proxy stays alive without a handle.
-        bind::<ExtForeignToplevelListV1>(globals, qh, 1..=1);
         state
     }
 
@@ -969,7 +981,7 @@ impl State {
 
     /// `Client::own_compositor`, for the modules that bind at the first call.
     pub(crate) fn own_compositor(&self) -> bool {
-        self.globals.athanor_toplevel.is_some()
+        self.globals.own_compositor
     }
 
     pub(crate) fn ext_workspaces(&self) -> Vec<(WorkspaceId, ExtWorkspaceHandleV1)> {
@@ -1162,57 +1174,6 @@ impl Dispatch<ZcosmicKeyboardLayoutV1, ()> for State {
         let zcosmic_keyboard_layout_v1::Event::Group { group } = event;
         state.set_group(group);
     }
-}
-
-impl Dispatch<ExtForeignToplevelListV1, ()> for State {
-    fn event(
-        state: &mut Self,
-        _: &ExtForeignToplevelListV1,
-        event: ext_foreign_toplevel_list_v1::Event,
-        _: &(),
-        _: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        let ext_foreign_toplevel_list_v1::Event::Toplevel { toplevel } = event else {
-            return;
-        };
-        let Some(&id) = toplevel.data::<WindowId>() else {
-            return;
-        };
-        let cosmic = state
-            .globals
-            .toplevel_info
-            .as_ref()
-            .map(|info| info.get_cosmic_toplevel(&toplevel, qh, id));
-        // COSMIC's extension first (plan D3). One state object per window: the compositor
-        // ends the connection on a second.
-        let athanor = match (&cosmic, &state.globals.athanor_toplevel) {
-            (None, Some(manager)) => Some(manager.get_toplevel_state(&toplevel, qh, id)),
-            _ => None,
-        };
-        state.windows.insert(
-            id,
-            Window {
-                id,
-                app_id: String::new(),
-                title: String::new(),
-                state: WindowState::default(),
-                outputs: Vec::new(),
-            },
-        );
-        state.toplevels.insert(
-            id,
-            Toplevel {
-                ext: toplevel,
-                cosmic,
-                athanor,
-            },
-        );
-    }
-
-    event_created_child!(State, ExtForeignToplevelListV1, [
-        ext_foreign_toplevel_list_v1::EVT_TOPLEVEL_OPCODE => (ExtForeignToplevelHandleV1, WindowId(fresh()))
-    ]);
 }
 
 impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
@@ -1522,7 +1483,6 @@ macro_rules! ignore_events {
 
 ignore_events!(
     ZcosmicToplevelManagerV1,
-    AthanorToplevelManagerV1,
     ZcosmicWorkspaceManagerV2,
     ZcosmicKeyboardLayoutManagerV1,
     WpSecurityContextManagerV1,

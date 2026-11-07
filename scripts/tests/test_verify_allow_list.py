@@ -23,6 +23,7 @@ athanor_toplevel_actions_v1 privileged
 athanor_keyboard_group_manager_v1 privileged
 athanor_a11y_manager_v1 privileged
 athanor_workspace_tiling_manager_v1 privileged
+athanor_toplevel_manager_v1 privileged
 """
 
 SPEC = """\
@@ -77,18 +78,19 @@ class AllowList(unittest.TestCase):
         self.write(f"forge/specs/{name}/{name}.spec", text)
 
     def client(self):
-        """A path dependency that binds the toplevel list at connect, the image copy
-        capture at the first `capture`, the window actions at the first action of
-        `window_actions`, the keyboard group at the first `watch_keyboard_group`, the
-        accessibility manager at the first `watch_accessibility` and the tiling manager at the
-        first `watch_tiling`, as athanor-sulphur-client does."""
+        """A path dependency that binds a privileged global at connect (the toplevel list
+        stands for the workspace manager), the image copy capture at the first `capture`, the
+        window actions at the first action of `window_actions`, the keyboard group at the first
+        `watch_keyboard_group`, the accessibility manager at the first `watch_accessibility`,
+        the tiling manager at the first `watch_tiling` and athanor-sulphur's toplevel manager at
+        the first `watch_windows`, as athanor-sulphur-client does."""
         self.write(
             f"{CLIENT}/Cargo.toml", '[package]\nname = "athanor-sulphur-client"\n'
         )
         self.write(
             f"{CLIENT}/src/lib.rs",
             "mod a11y;\nmod actions;\nmod capture;\nmod connection;\nmod keyboard_group;\n"
-            "mod workspace_tiling;\npub fn connect() {}\n",
+            "mod windows;\nmod workspace_tiling;\npub fn connect() {}\n",
         )
         self.write(
             f"{CLIENT}/src/connection.rs",
@@ -114,6 +116,11 @@ class AllowList(unittest.TestCase):
         self.write(
             f"{CLIENT}/src/workspace_tiling.rs",
             'fn set_state() { Unavailable("athanor_workspace_tiling_manager_v1") }\n',
+        )
+        self.write(
+            f"{CLIENT}/src/windows.rs",
+            "use crate::protocols::toplevel_state::client::athanor_toplevel_manager_v1::"
+            "AthanorToplevelManagerV1;\n",
         )
 
     def problems(self, upstream=None):
@@ -322,6 +329,41 @@ class AllowList(unittest.TestCase):
                 )
                 self.assertEqual(self.problems(), [])
 
+    def test_the_toplevel_manager_counts_only_for_a_target_that_watches_the_windows(self):
+        # The client binds athanor-sulphur's toplevel manager at the first
+        # `Client::watch_windows` only: the OSD, which reads the workspaces and the outputs and
+        # never the windows (doc_osd.md OD8), needs no grant of it.
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.package(
+            "athanor-osd",
+            dependency,
+            {"src/main.rs": "use athanor_sulphur_client::connect;\nfn f() { client.workspaces(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n")
+        self.assertEqual(self.problems(), [])
+        for call in ("client.watch_windows()", "Client::watch_windows(&client)"):
+            with self.subTest(call):
+                self.package(
+                    "athanor-dock",
+                    dependency,
+                    {"src/main.rs": f"use athanor_sulphur_client::Client;\nfn f() {{ {call}; }}\n"},
+                )
+                self.lines(
+                    "/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n"
+                )
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-dock", out[0])
+                self.assertIn("athanor_toplevel_manager_v1", out[0])
+                self.lines(
+                    "/usr/bin/athanor-osd athanor-osd.service ext_foreign_toplevel_list_v1\n"
+                    "/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1 "
+                    "athanor_toplevel_manager_v1\n"
+                )
+                self.assertEqual(self.problems(), [])
+
     def test_the_keyboard_group_counts_only_for_a_target_that_watches_it(self):
         # The client binds the keyboard group at the first `Client::watch_keyboard_group`
         # only: the control center, which never watches it, needs no grant of it.
@@ -522,6 +564,9 @@ class AllowList(unittest.TestCase):
             ),
             "a client whose tiling watch moved": (
                 f"{CLIENT}/src/workspace_tiling.rs", "\n", "binds at the first watch of the tiling",
+            ),
+            "a client whose window watch moved": (
+                f"{CLIENT}/src/windows.rs", "\n", "binds at the first watch of the windows",
             ),
             "no target": ("forge/specs/athanor-dock/athanor-dock.spec", "Name: athanor-dock\n", "no target"),
         }
