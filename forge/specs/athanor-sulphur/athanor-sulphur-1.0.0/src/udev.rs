@@ -856,7 +856,11 @@ impl State {
         let Some(preferred) = preferred_mode(connector) else {
             return;
         };
-        let offered: Vec<Mode> = connector.modes().iter().map(|&mode| Mode::from(mode)).collect();
+        let offered: Vec<Mode> = connector
+            .modes()
+            .iter()
+            .map(|&mode| Mode::from(mode))
+            .collect();
         let wl_mode = kept_mode(&offered, head.output.current_mode(), Mode::from(preferred));
         let Some(wanted) = drm_mode(connector, wl_mode) else {
             return;
@@ -2092,8 +2096,14 @@ pub(crate) mod tests {
             refresh: 60_000,
         };
         let offered = [mode(1920), mode(1280)];
-        assert_eq!(kept_mode(&offered, Some(mode(1280)), mode(1920)), mode(1280));
-        assert_eq!(kept_mode(&offered, Some(mode(1024)), mode(1920)), mode(1920));
+        assert_eq!(
+            kept_mode(&offered, Some(mode(1280)), mode(1920)),
+            mode(1280)
+        );
+        assert_eq!(
+            kept_mode(&offered, Some(mode(1024)), mode(1920)),
+            mode(1920)
+        );
         assert_eq!(kept_mode(&offered, None, mode(1920)), mode(1920));
     }
 
