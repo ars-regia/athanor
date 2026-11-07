@@ -143,7 +143,8 @@ fn pidfd_pid(pidfd: BorrowedFd<'_>) -> io::Result<Option<i32>> {
 fn running(pidfd: BorrowedFd<'_>) -> io::Result<bool> {
     let mut fds = [PollFd::new(pidfd, PollFlags::POLLIN)];
     poll(&mut fds, PollTimeout::ZERO)?;
-    Ok(fds[0].revents().is_none_or(|events| events.is_empty()))
+    // Bits poll(2) names that nix does not know read as `None`: not proved running.
+    Ok(fds[0].revents().is_some_and(|events| events.is_empty()))
 }
 
 #[cfg(test)]
