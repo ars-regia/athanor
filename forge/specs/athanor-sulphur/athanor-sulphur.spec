@@ -71,6 +71,8 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
   is disabled.
 - Answer a tested output configuration as an applied one: adaptive sync on an output without
   it, and any step on the nested output, fail both.
+- Confirm the lock only once every step of an output configuration is taken, not while
+  they are taken.
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
   with athanor-edid: wl_output and xdg_output carry the make and model, and the serial

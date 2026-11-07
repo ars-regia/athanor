@@ -1084,8 +1084,6 @@ impl State {
         if let Some((timer, _)) = drm.outputs.remove(&crtc).and_then(|head| head.timer) {
             self.loop_handle.remove(timer);
         }
-        // The lock may have waited only for this output.
-        self.confirm_lock();
     }
 
     /// Takes a step of an output configuration on the monitor `step` names; the GPU's refusal
@@ -1383,7 +1381,7 @@ impl State {
     }
 
     /// A lock is confirmed only once every output presented a frame drawn locked.
-    fn confirm_lock(&mut self) {
+    pub(crate) fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
             if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.frames.lock))) {
                 self.locked_drawn();

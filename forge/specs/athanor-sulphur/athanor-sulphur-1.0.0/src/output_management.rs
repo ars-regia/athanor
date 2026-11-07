@@ -659,6 +659,8 @@ impl State {
     /// it may refuse, and is then undone whole; then the outputs' state, the space and the heads.
     fn apply_plans(&mut self, plans: &[Plan], steps: &[Step]) -> Result<(), String> {
         take_all(steps, Step::undo, |step| self.backend_step(step))?;
+        // Only now, with every step taken: the lock may have waited only for an output disabled.
+        self.confirm_lock();
 
         self.output_management.applying = true;
         for plan in plans {
