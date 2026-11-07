@@ -183,7 +183,11 @@ def main():
     finally:
         for process in (client, compositor):
             process.terminate()
-            process.wait()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 
 if __name__ == "__main__":
