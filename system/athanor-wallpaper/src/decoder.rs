@@ -5,14 +5,15 @@
 
 use std::fs::File;
 use std::io::{self, IoSlice};
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::net::UnixStream;
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::path::Path;
 use std::time::Duration;
 
 use athanor_wallpaper::protocol::{self, FRAME_HEADER_LEN};
 use gio::prelude::*;
-use nix::sys::socket::{sendmsg, ControlMessage, MsgFlags};
+use nix::sys::socket::{
+    connect, sendmsg, socket, AddressFamily, ControlMessage, MsgFlags, SockFlag, SockType, UnixAddr,
+};
 
 /// How long one decode may take, the connection and every frame included: the decoder's unit
 /// ends it after `RuntimeMaxSec=5` too.
@@ -21,34 +22,64 @@ pub const DEADLINE: Duration = Duration::from_secs(5);
 /// The pixels of each size asked, in the order asked: straight RGBA8, rows packed.
 pub type Frames = Vec<((u32, u32), Vec<u8>)>;
 
-/// Decodes `file` at `sizes` through the decoder listening on `socket`, within [`DEADLINE`].
-pub async fn decode(socket: &Path, file: File, sizes: &[(u32, u32)]) -> Result<Frames, String> {
-    glib::future_with_timeout(DEADLINE, exchange(socket, file, sizes))
-        .await
-        .map_err(|_| format!("the decoder did not answer within {DEADLINE:?}"))?
+/// Why a decode gave no frames.
+#[derive(Debug, PartialEq)]
+pub enum Failure {
+    /// The decoder answered that the picture cannot be decoded: asking again gives the same.
+    Refused,
+    /// The decoder could not be reached, ended the connection or did not answer in time:
+    /// asking again may succeed.
+    Fault(String),
 }
 
-async fn exchange(socket: &Path, file: File, sizes: &[(u32, u32)]) -> Result<Frames, String> {
-    let request = protocol::request(sizes).ok_or("no valid size to ask for")?;
-    // A Unix socket's connect does not wait on the listener: it succeeds or fails at once.
-    let stream = UnixStream::connect(socket)
-        .map_err(|err| format!("cannot reach the decoder at {}: {err}", socket.display()))?;
-    send(&stream, &file, &request).map_err(|err| format!("cannot send the request: {err}"))?;
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused => f.write_str("the decoder cannot decode the picture"),
+            Self::Fault(why) => f.write_str(why),
+        }
+    }
+}
+
+/// Decodes `file` at `sizes` through the decoder listening on `socket`, within [`DEADLINE`].
+pub async fn decode(socket: &Path, file: File, sizes: &[(u32, u32)]) -> Result<Frames, Failure> {
+    glib::future_with_timeout(DEADLINE, exchange(socket, file, sizes))
+        .await
+        .map_err(|_| Failure::Fault(format!("the decoder did not answer within {DEADLINE:?}")))?
+}
+
+async fn exchange(socket: &Path, file: File, sizes: &[(u32, u32)]) -> Result<Frames, Failure> {
+    let fault = Failure::Fault;
+    let request =
+        protocol::request(sizes).ok_or_else(|| fault("no valid size to ask for".into()))?;
+    // Non-blocking: a Unix socket whose backlog is full answers EAGAIN at once instead of
+    // holding the loop, and that is a fault to retry like any other.
+    let stream = connected(socket).map_err(|err| {
+        fault(format!(
+            "cannot reach the decoder at {}: {err}",
+            socket.display()
+        ))
+    })?;
+    send(stream.as_fd(), &file, &request)
+        .map_err(|err| fault(format!("cannot send the request: {err}")))?;
     drop(file);
-    stream
-        .set_nonblocking(true)
-        .map_err(|err| err.to_string())?;
-    let socket = gio::Socket::from_fd(OwnedFd::from(stream)).map_err(|err| err.to_string())?;
+    let socket = gio::Socket::from_fd(stream).map_err(|err| fault(err.to_string()))?;
     // The connection owns the stream and closes it when dropped: it lives until the end.
     let connection = socket.connection_factory_create_connection();
     let input = connection.input_stream();
     let mut frames = Vec::with_capacity(sizes.len());
     for &size in sizes {
         let header = read(&input, vec![0; FRAME_HEADER_LEN]).await?;
-        let header: [u8; FRAME_HEADER_LEN] =
-            header.try_into().map_err(|_| "a short frame header")?;
+        let header: [u8; FRAME_HEADER_LEN] = header
+            .try_into()
+            .map_err(|_| fault("a short frame header".into()))?;
+        if frames.is_empty() && header == protocol::refusal() {
+            return Err(Failure::Refused);
+        }
         if !protocol::check_frame(&header, size) {
-            return Err(format!("the decoder answered another frame than {size:?}"));
+            return Err(fault(format!(
+                "the decoder answered another frame than {size:?}"
+            )));
         }
         frames.push((
             size,
@@ -58,8 +89,20 @@ async fn exchange(socket: &Path, file: File, sizes: &[(u32, u32)]) -> Result<Fra
     Ok(frames)
 }
 
+/// A non-blocking stream connected to `path`.
+fn connected(path: &Path) -> nix::Result<OwnedFd> {
+    let fd = socket(
+        AddressFamily::Unix,
+        SockType::Stream,
+        SockFlag::SOCK_NONBLOCK | SockFlag::SOCK_CLOEXEC,
+        None,
+    )?;
+    connect(fd.as_raw_fd(), &UnixAddr::new(path)?)?;
+    Ok(fd)
+}
+
 /// Sends `request` with `file` as `SCM_RIGHTS`, whole: a new connection's buffer holds it.
-fn send(stream: &UnixStream, file: &File, request: &[u8]) -> io::Result<()> {
+fn send(stream: BorrowedFd<'_>, file: &File, request: &[u8]) -> io::Result<()> {
     let fds = [file.as_raw_fd()];
     let sent = sendmsg::<()>(
         stream.as_raw_fd(),
@@ -78,12 +121,16 @@ fn send(stream: &UnixStream, file: &File, request: &[u8]) -> io::Result<()> {
 }
 
 /// Fills `buf` from `input`; an end before it is full is the decoder's failure.
-async fn read(input: &gio::InputStream, buf: Vec<u8>) -> Result<Vec<u8>, String> {
+async fn read(input: &gio::InputStream, buf: Vec<u8>) -> Result<Vec<u8>, Failure> {
     let want = buf.len();
     match input.read_all_future(buf, glib::Priority::DEFAULT).await {
         Ok((buf, read, None)) if read == want => Ok(buf),
-        Ok((_, read, None)) => Err(format!("the decoder ended after {read} of {want} bytes")),
-        Ok((_, _, Some(err))) | Err((_, err)) => Err(format!("cannot read the decoder: {err}")),
+        Ok((_, read, None)) => Err(Failure::Fault(format!(
+            "the decoder ended after {read} of {want} bytes"
+        ))),
+        Ok((_, _, Some(err))) | Err((_, err)) => {
+            Err(Failure::Fault(format!("cannot read the decoder: {err}")))
+        }
     }
 }
 
@@ -91,7 +138,7 @@ async fn read(input: &gio::InputStream, buf: Vec<u8>) -> Result<Vec<u8>, String>
 mod tests {
     use super::*;
     use std::io::{Read, Write};
-    use std::os::unix::net::UnixListener;
+    use std::os::unix::net::{UnixListener, UnixStream};
     use std::path::PathBuf;
 
     /// A listener in a fresh directory, and its path.
@@ -105,7 +152,7 @@ mod tests {
     }
 
     /// Runs `decode` against a decoder that does `serve` with the connection.
-    fn run(name: &str, sizes: &[(u32, u32)], serve: fn(UnixStream)) -> Result<Frames, String> {
+    fn run(name: &str, sizes: &[(u32, u32)], serve: fn(UnixStream)) -> Result<Frames, Failure> {
         let (listener, path) = listener(name);
         let server = std::thread::spawn(move || {
             let (stream, _) = listener.accept().expect("accept");
@@ -159,7 +206,51 @@ mod tests {
         });
         assert!(short.is_err(), "{short:?}");
         let closed = run("closed", &[(2, 1)], drop);
-        assert!(closed.is_err(), "{closed:?}");
+        assert!(matches!(closed, Err(Failure::Fault(_))), "{closed:?}");
+    }
+
+    #[test]
+    fn a_refusal_is_told_from_a_fault() {
+        let refused = run("refused", &[(2, 1), (1, 1)], |mut stream| {
+            take_request(&mut stream);
+            stream.write_all(&protocol::refusal()).expect("refusal");
+        });
+        assert_eq!(refused, Err(Failure::Refused));
+    }
+
+    #[test]
+    fn a_full_backlog_does_not_hold_the_caller() {
+        use nix::sys::socket::{bind, listen, Backlog};
+        let dir =
+            std::env::temp_dir().join(format!("athanor-wallpaper-full-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let path = dir.join("decode");
+        let _ = std::fs::remove_file(&path);
+        let listener = socket(
+            AddressFamily::Unix,
+            SockType::Stream,
+            SockFlag::empty(),
+            None,
+        )
+        .expect("socket");
+        bind(
+            listener.as_raw_fd(),
+            &UnixAddr::new(&path).expect("address"),
+        )
+        .expect("bind");
+        listen(&listener, Backlog::new(0).expect("backlog")).expect("listen");
+        // A backlog of 0 queues one connection; the next one would wait for an accept.
+        let _queued = UnixStream::connect(&path).expect("the queued connection");
+        let (done, result) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let file = File::open("/proc/self/exe").expect("a file");
+            let _ = done.send(glib::MainContext::new().block_on(decode(&path, file, &[(1, 1)])));
+        });
+        let result = result
+            .recv_timeout(DEADLINE + Duration::from_secs(2))
+            .expect("decode returned");
+        assert!(matches!(result, Err(Failure::Fault(_))), "{result:?}");
+        drop(listener);
     }
 
     #[test]
@@ -169,7 +260,7 @@ mod tests {
             take_request(&mut stream);
             std::thread::sleep(DEADLINE + Duration::from_secs(1));
         });
-        assert!(silent.is_err(), "{silent:?}");
+        assert!(matches!(silent, Err(Failure::Fault(_))), "{silent:?}");
         assert!(started.elapsed() >= DEADLINE);
     }
 
@@ -180,6 +271,6 @@ mod tests {
             File::open("/proc/self/exe").expect("a file"),
             &[(1, 1)],
         ));
-        assert!(missing.is_err());
+        assert!(matches!(missing, Err(Failure::Fault(_))), "{missing:?}");
     }
 }

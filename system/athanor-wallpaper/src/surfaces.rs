@@ -1,33 +1,40 @@
 //! The Sal application (SD6): one background surface per output, showing the picture its
 //! connector's keys name, decoded at the output's buffer size. A surface shows the plain colour
 //! of [`PLACEHOLDER`] until its pixels arrive, and keeps the picture it shows until the next
-//! one is decoded. A picture that cannot be opened or decoded shows the hearth; a hearth that
-//! cannot keeps the colour.
+//! one is decoded. A picture that cannot be opened, or that the decoder refuses, shows the
+//! hearth until the keys change; a hearth that cannot keeps the colour. A fault of the decoder
+//! is retried (see [`Wallpaper::fault`]).
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::Duration;
 
 use athanor_sal::driver::{Anchor, Application, Layer, LayerOptions, OutputInfo, Shell};
 use athanor_sal::{Event, Image, SurfaceId, Theme, Ui};
 use athanor_wallpaper::plan::{buffer_size, requests};
+use athanor_wallpaper::protocol::MAX_CONNECTIONS;
 use athanor_wallpaper::{hearth_path, open_regular, ColorScheme, Settings, Source};
 
-use crate::decoder::{self, Frames};
+use crate::decoder::{self, Failure, Frames};
 
 /// The namespace of the surfaces (SD6).
 const NAMESPACE: &str = "wallpaper";
 /// The colour shown until the pixels arrive, and when no picture can be shown: the hearth's
 /// darkest tone.
 pub const PLACEHOLDER: [u8; 4] = [0x27, 0x29, 0x2a, 0xff];
+/// How long a picture whose decode met a fault of the decoder waits before it is asked again.
+// ponytail: a fixed back-off; double it up to a cap if a broken decoder restarting every
+// two seconds for the hearth matters.
+const BACKOFF: Duration = Duration::from_secs(2);
 
 /// A picture at a size.
 type Key = (PathBuf, (u32, u32));
 /// A buffer size.
 type Size = (u32, u32);
 /// A decode that ended: the picture, the sizes asked, and the frames or why there are none.
-type Decoded = (PathBuf, Vec<Size>, Result<Frames, String>);
+type Decoded = (PathBuf, Vec<Size>, Result<Frames, Failure>);
 
 /// What reaches the application from GLib's sources between turns.
 #[derive(Default)]
@@ -36,6 +43,8 @@ pub struct Inbox {
     pub settings_changed: bool,
     /// A decode ended: the picture, the sizes asked, and the frames or why there are none.
     decoded: Vec<Decoded>,
+    /// The pictures whose back-off ended.
+    retry: Vec<PathBuf>,
 }
 
 /// One output's surface: its connector, its buffer size and the picture it shows.
@@ -57,8 +66,18 @@ pub struct Wallpaper {
     outputs: HashMap<SurfaceId, Output>,
     cache: HashMap<Key, Image>,
     in_flight: HashSet<Key>,
-    /// The pictures that failed since the keys last changed: they show the hearth.
+    /// The connections open to the decoder, at most [`MAX_CONNECTIONS`].
+    connections: usize,
+    /// The pictures that failed to open or that the decoder refused, since the keys last
+    /// changed: they show the hearth.
     failed: HashSet<PathBuf>,
+    /// The pictures waiting out their back-off after a fault of the decoder.
+    waiting: HashSet<PathBuf>,
+    /// The pictures, the hearth never, that met a second fault: they show the hearth until an
+    /// output or the keys change.
+    stalled: HashSet<PathBuf>,
+    /// The faults of each picture since it last decoded.
+    faults: HashMap<PathBuf, u32>,
     /// The invalid value last logged for each connector.
     invalid: HashMap<String, String>,
     placeholder: Option<Image>,
@@ -80,7 +99,11 @@ impl Wallpaper {
             outputs: HashMap::new(),
             cache: HashMap::new(),
             in_flight: HashSet::new(),
+            connections: 0,
             failed: HashSet::new(),
+            waiting: HashSet::new(),
+            stalled: HashSet::new(),
+            faults: HashMap::new(),
             invalid: HashMap::new(),
             placeholder,
             ready: false,
@@ -88,7 +111,7 @@ impl Wallpaper {
     }
 
     /// The picture `connector` shows at `size`: its source, or the hearth when that failed.
-    fn key(&mut self, connector: &str, size: (u32, u32)) -> Key {
+    fn picture_for(&mut self, connector: &str, size: (u32, u32)) -> Key {
         match self.settings.invalid_value(connector) {
             Some(value) if self.invalid.get(connector).map(String::as_str) != Some(value) => {
                 tracing::warn!(
@@ -104,7 +127,7 @@ impl Wallpaper {
             }
         }
         let path = match self.settings.source_for(connector) {
-            Source::Path(path) if !self.failed.contains(&path) => path,
+            Source::Path(path) if !self.held(&path) => path,
             _ => hearth_path(self.scheme),
         };
         (path, size)
@@ -121,39 +144,78 @@ impl Wallpaper {
         ui
     }
 
+    /// Whether `path` is not asked for now: failed, waiting or stalled.
+    fn held(&self, path: &Path) -> bool {
+        self.failed.contains(path) || self.waiting.contains(path) || self.stalled.contains(path)
+    }
+
     /// Applies what the inbox holds, starts the decodes still needed and shows what is decoded.
     fn refresh(&mut self, shell: &mut Shell) {
+        let wants = self.plan();
+        self.show(shell, wants);
+    }
+
+    /// Each surface with a size and the picture it wants, its decode started (see
+    /// [`Wallpaper::decode_for`]).
+    fn plan(&mut self) -> Vec<(SurfaceId, Key)> {
+        let targets = self
+            .outputs
+            .iter()
+            .filter_map(|(id, output)| Some((*id, output.connector.clone(), output.size?)))
+            .collect();
+        self.decode_for(targets)
+    }
+
+    /// Applies what the inbox holds and starts the decodes `targets`, (surface, connector,
+    /// size), still need, at most [`MAX_CONNECTIONS`] at once; the rest start as those end.
+    /// Generic over the surface's id so that it is tested without a display.
+    fn decode_for<I: Copy>(&mut self, targets: Vec<(I, String, Size)>) -> Vec<(I, Key)> {
         let inbox = std::mem::take(&mut *self.inbox.borrow_mut());
         if inbox.settings_changed {
             (self.settings, self.scheme) = (self.read)();
             self.failed.clear();
+            self.stalled.clear();
+            self.faults.clear();
+        }
+        for path in inbox.retry {
+            self.waiting.remove(&path);
         }
         for (path, sizes, result) in inbox.decoded {
+            self.connections = self.connections.saturating_sub(1);
             for size in &sizes {
                 self.in_flight.remove(&(path.clone(), *size));
             }
-            match result.and_then(images) {
-                Ok(images) => {
-                    for (size, image) in images {
-                        self.cache.insert((path.clone(), size), image);
+            match result {
+                Ok(frames) => match images(frames) {
+                    Ok(images) => {
+                        self.faults.remove(&path);
+                        for (size, image) in images {
+                            self.cache.insert((path.clone(), size), image);
+                        }
                     }
-                }
-                Err(error) => self.fail(&path, &error),
+                    Err(error) => self.fail(&path, &error),
+                },
+                Err(Failure::Refused) => self.fail(&path, &Failure::Refused.to_string()),
+                Err(Failure::Fault(error)) => self.fault(path, &error),
             }
         }
         // Each failure to open turns its outputs to the hearth, which is then opened in turn;
         // a failed hearth asks for nothing more, so this ends within two rounds.
         loop {
-            let wants = self.wants();
+            let wants: Vec<(I, Key)> = targets
+                .iter()
+                .map(|(id, connector, size)| (*id, self.picture_for(connector, *size)))
+                .collect();
             self.cache
                 .retain(|key, _| wants.iter().any(|(_, k)| k == key));
             let missing = wants.iter().map(|(_, key)| key.clone()).filter(|key| {
-                !self.cache.contains_key(key)
-                    && !self.in_flight.contains(key)
-                    && !self.failed.contains(&key.0)
+                !self.cache.contains_key(key) && !self.in_flight.contains(key) && !self.held(&key.0)
             });
             let mut opened = true;
             for (path, sizes) in requests(missing) {
+                if self.connections >= MAX_CONNECTIONS {
+                    break;
+                }
                 match open_regular(&path) {
                     Ok(file) => self.start(path, file, sizes),
                     Err(error) => {
@@ -163,23 +225,9 @@ impl Wallpaper {
                 }
             }
             if opened {
-                self.show(shell, wants);
-                return;
+                return wants;
             }
         }
-    }
-
-    /// Each surface with a size and the picture it wants.
-    fn wants(&mut self) -> Vec<(SurfaceId, Key)> {
-        let outputs: Vec<_> = self
-            .outputs
-            .iter()
-            .filter_map(|(id, output)| Some((*id, output.connector.clone(), output.size?)))
-            .collect();
-        outputs
-            .into_iter()
-            .map(|(id, connector, size)| (id, self.key(&connector, size)))
-            .collect()
     }
 
     fn show(&mut self, shell: &mut Shell, wants: Vec<(SurfaceId, Key)>) {
@@ -210,13 +258,37 @@ impl Wallpaper {
         self.failed.insert(path.to_owned());
     }
 
+    /// A fault of the decoder on `path`: it is asked for again after [`BACKOFF`], the hearth
+    /// every time and any other picture once, after which it waits for a change of an output
+    /// or of the keys. Meanwhile the picture's outputs show the hearth, and the hearth's keep
+    /// what they show.
+    fn fault(&mut self, path: PathBuf, error: &str) {
+        let faults = self.faults.entry(path.clone()).or_default();
+        *faults += 1;
+        let faults = *faults;
+        if faults > 1 && path != hearth_path(self.scheme) {
+            tracing::warn!(path = %path.display(), error, "the decoder failed again; the hearth is shown until an output or the keys change");
+            self.stalled.insert(path);
+            return;
+        }
+        tracing::warn!(path = %path.display(), error, faults, "the decoder failed; the picture is asked for again in {BACKOFF:?}");
+        self.waiting.insert(path.clone());
+        let inbox = Rc::clone(&self.inbox);
+        // On the context the decodes run on, like them.
+        glib::MainContext::ref_thread_default().spawn_local(async move {
+            glib::timeout_future(BACKOFF).await;
+            inbox.borrow_mut().retry.push(path);
+        });
+    }
+
     /// Decodes `file` at `sizes` on GLib's main context; the outcome lands in the inbox.
     fn start(&mut self, path: PathBuf, file: std::fs::File, sizes: Vec<(u32, u32)>) {
         for size in &sizes {
             self.in_flight.insert((path.clone(), *size));
         }
+        self.connections += 1;
         let (socket, inbox) = (self.socket.clone(), Rc::clone(&self.inbox));
-        glib::MainContext::default().spawn_local(async move {
+        glib::MainContext::ref_thread_default().spawn_local(async move {
             let result = decoder::decode(&socket, file, &sizes).await;
             inbox.borrow_mut().decoded.push((path, sizes, result));
         });
@@ -252,8 +324,8 @@ impl Application for Wallpaper {
             .clone()
             .zip(size(info))
             .and_then(|(connector, size)| {
-                let key = self.key(&connector, size);
-                self.cache.get(&key).cloned()
+                let wanted = self.picture_for(&connector, size);
+                self.cache.get(&wanted).cloned()
             });
         let mut options = LayerOptions::default();
         options.layer = Layer::Background;
@@ -272,6 +344,7 @@ impl Application for Wallpaper {
         });
         output.connector = info.name.clone().unwrap_or_default();
         output.size = size(info);
+        self.stalled.clear();
         self.refresh(shell);
     }
 
@@ -293,5 +366,101 @@ impl Application for Wallpaper {
     fn closed(&mut self, shell: &mut Shell, surface: SurfaceId) {
         self.outputs.remove(&surface);
         self.refresh(shell);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    /// Long enough for a fault and a back-off.
+    const WITHIN: Duration = Duration::from_secs(10);
+
+    /// A wallpaper showing a picture of its own on each of `count` outputs, with its decoder at
+    /// `socket`; and those outputs as targets.
+    fn wallpaper(
+        name: &str,
+        count: usize,
+        socket: &Path,
+    ) -> (Wallpaper, Vec<(usize, String, Size)>) {
+        let dir =
+            std::env::temp_dir().join(format!("athanor-wallpaper-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("directory");
+        let mut per_output = BTreeMap::new();
+        let mut targets = Vec::new();
+        for i in 0..count {
+            let (connector, picture) = (format!("DP-{i}"), dir.join(format!("{i}.png")));
+            std::fs::write(&picture, b"not decoded here").expect("picture");
+            per_output.insert(connector.clone(), picture.display().to_string());
+            targets.push((i, connector, (4, 3)));
+        }
+        let settings = Settings {
+            per_output,
+            same_on_all: false,
+            ..Settings::default()
+        };
+        let read: Read = Box::new(move || (settings.clone(), ColorScheme::Light));
+        let inbox = Rc::new(RefCell::new(Inbox::default()));
+        (Wallpaper::new(read, socket.to_owned(), inbox), targets)
+    }
+
+    /// Runs `context` until the inbox holds what `done` waits for, or [`WITHIN`] passes.
+    fn until(context: &glib::MainContext, wallpaper: &Wallpaper, done: impl Fn(&Inbox) -> bool) {
+        let start = std::time::Instant::now();
+        while !done(&wallpaper.inbox.borrow()) && start.elapsed() < WITHIN {
+            context.iteration(false);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn decodes_open_at_most_the_socket_s_connections() {
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (mut wallpaper, targets) =
+                    wallpaper("cap", MAX_CONNECTIONS + 2, Path::new("/nonexistent/decode"));
+                let wants = wallpaper.decode_for(targets);
+                assert_eq!(wants.len(), MAX_CONNECTIONS + 2);
+                assert_eq!(wallpaper.connections, MAX_CONNECTIONS);
+                assert_eq!(wallpaper.in_flight.len(), MAX_CONNECTIONS);
+            })
+            .expect("a thread-default context");
+    }
+
+    #[test]
+    fn a_fault_is_asked_again_and_a_second_one_waits_for_a_change() {
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (mut wallpaper, targets) =
+                    wallpaper("fault", 1, Path::new("/nonexistent/decode"));
+                let picture = wallpaper.decode_for(targets.clone())[0].1 .0.clone();
+                let hearth = hearth_path(ColorScheme::Light);
+                until(&context, &wallpaper, |inbox| !inbox.decoded.is_empty());
+                // The decoder cannot be reached: the picture waits, it has not failed, and its
+                // output asks for the hearth meanwhile.
+                let wants = wallpaper.decode_for(targets.clone());
+                assert!(wallpaper.waiting.contains(&picture));
+                assert!(!wallpaper.failed.contains(&picture));
+                assert_eq!(wants[0].1 .0, hearth);
+                until(&context, &wallpaper, |inbox| inbox.retry.contains(&picture));
+                let wants = wallpaper.decode_for(targets.clone());
+                assert_eq!(wants[0].1 .0, picture, "asked again after the back-off");
+                until(&context, &wallpaper, |inbox| {
+                    inbox.decoded.iter().any(|(path, _, _)| *path == picture)
+                });
+                wallpaper.decode_for(targets.clone());
+                assert!(wallpaper.stalled.contains(&picture));
+                assert!(!wallpaper.failed.contains(&picture));
+                // The hearth, faulting as often, is never given up.
+                for _ in 0..3 {
+                    wallpaper.fault(hearth.clone(), "test");
+                }
+                assert!(!wallpaper.stalled.contains(&hearth));
+                assert!(wallpaper.waiting.contains(&hearth));
+            })
+            .expect("a thread-default context");
     }
 }
