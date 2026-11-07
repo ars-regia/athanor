@@ -136,6 +136,38 @@ impl Image {
         })
     }
 
+    /// Takes pixels already decoded: `width` by `height` pixels of straight-alpha sRGB RGBA8, row
+    /// by row from the top left, which are premultiplied in place. Refused when `pixels` does not
+    /// hold exactly that many, or when a side is 0 or over 65535, the largest a buffer holds.
+    /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output. The `gpu`
+    /// renderer draws no image larger than its atlas (4096 by 4096, or the device's limit when
+    /// smaller): it logs one line and leaves that part of the surface empty.
+    pub fn from_rgba8(width: u32, height: u32, mut pixels: Vec<u8>) -> Result<Self, Error> {
+        let (w, h) = (u16::try_from(width), u16::try_from(height));
+        let (Ok(w @ 1..), Ok(h @ 1..)) = (w, h) else {
+            return Err(
+                format!("an image of {width}x{height} pixels, 1 to 65535 on a side").into(),
+            );
+        };
+        let expected = usize::from(w) * usize::from(h) * 4;
+        if pixels.len() != expected {
+            let len = pixels.len();
+            return Err(format!(
+                "{len} bytes for {width}x{height} RGBA8 pixels, {expected} expected"
+            )
+            .into());
+        }
+        // vello_cpu reads the buffer as whole pixels, its capacity included; a copy is allocated
+        // to its length exactly.
+        if !pixels.capacity().is_multiple_of(4) {
+            pixels = pixels.as_slice().to_vec();
+        }
+        let metadata = PixelMetadata::new(ImageAlphaType::Alpha, true);
+        Ok(Self {
+            pixmap: Arc::new(Pixmap::from_parts(pixels, w, h, metadata)),
+        })
+    }
+
     /// The width in pixels.
     pub fn width(&self) -> u16 {
         self.pixmap.width()

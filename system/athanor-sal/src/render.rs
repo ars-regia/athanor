@@ -35,9 +35,20 @@ pub trait Canvas {
     /// Strokes a path with the current stroke and paint.
     fn stroke_path(&mut self, path: &BezPath);
     /// Fills `rect` with an image, scaled to it on each axis: the caller keeps the aspect ratio.
+    fn fill_image(&mut self, resources: &Self::Resources, rect: &Rect, pixmap: &Arc<Pixmap>) {
+        let whole = Rect::new(0.0, 0.0, f64::from(pixmap.width()), f64::from(pixmap.height()));
+        self.fill_image_part(resources, rect, pixmap, &whole);
+    }
+    /// Fills `rect` with the part `source` of an image, in its pixels, scaled to it on each axis.
     /// vello_cpu reads the pixmap as it draws; vello_gpu draws the copy uploaded to its atlas
     /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no copy of.
-    fn fill_image(&mut self, resources: &Self::Resources, rect: &Rect, pixmap: &Arc<Pixmap>);
+    fn fill_image_part(
+        &mut self,
+        resources: &Self::Resources,
+        rect: &Rect,
+        pixmap: &Arc<Pixmap>,
+        source: &Rect,
+    );
     /// Limits what is drawn next to the inside of a path, until the matching [`Canvas::pop_clip`].
     fn push_clip_path(&mut self, path: &BezPath);
     /// Ends the innermost clip.
@@ -78,7 +89,13 @@ macro_rules! canvas {
             fn stroke_path(&mut self, path: &BezPath) {
                 <$canvas>::stroke_path(self, path);
             }
-            fn fill_image(&mut self, resources: &$resources, rect: &Rect, pixmap: &Arc<Pixmap>) {
+            fn fill_image_part(
+                &mut self,
+                resources: &$resources,
+                rect: &Rect,
+                pixmap: &Arc<Pixmap>,
+                part: &Rect,
+            ) {
                 let Some(source) = $image_source(resources, pixmap) else {
                     return;
                 };
@@ -91,9 +108,10 @@ macro_rules! canvas {
                     self,
                     Affine::translate((rect.x0, rect.y0))
                         * Affine::scale_non_uniform(
-                            rect.width() / f64::from(pixmap.width()),
-                            rect.height() / f64::from(pixmap.height()),
-                        ),
+                            rect.width() / part.width(),
+                            rect.height() / part.height(),
+                        )
+                        * Affine::translate((-part.x0, -part.y0)),
                 );
                 <$canvas>::fill_rect(self, rect);
                 <$canvas>::set_paint_transform(self, Affine::IDENTITY);
@@ -214,6 +232,33 @@ fn draw_text<C: Canvas>(
         }
     }
     Ok(())
+}
+
+/// "Zoom" (fill and crop), as `athanor-wallpaper`'s `zoom` computes it (doc_session_daemons.md
+/// SD6), which this crate cannot depend on: the centred part of an `image` (width, height) with
+/// the aspect of the `buffer`, as x, y, width and height in image pixels, rounded down, so that
+/// scaling it to the buffer may stretch it by less than one image pixel. `None` when either has
+/// a zero side.
+fn zoom(image: (u32, u32), buffer: (u32, u32)) -> Option<(u32, u32, u32, u32)> {
+    let ((iw, ih), (bw, bh)) = (image, buffer);
+    if iw == 0 || ih == 0 || bw == 0 || bh == 0 {
+        return None;
+    }
+    let (iw, ih, bw, bh) = (u64::from(iw), u64::from(ih), u64::from(bw), u64::from(bh));
+    // The image is wider than the buffer when iw/ih > bw/bh: cut the sides, else top and bottom.
+    let (width, height) = if iw * bh > ih * bw {
+        ((ih * bw / bh).max(1), ih)
+    } else {
+        (iw, (iw * bh / bw).max(1))
+    };
+    // Each value is at most the image's side, so it fits in u32.
+    let narrow = |v: u64| u32::try_from(v).ok();
+    Some((
+        narrow((iw - width) / 2)?,
+        narrow((ih - height) / 2)?,
+        narrow(width)?,
+        narrow(height)?,
+    ))
 }
 
 /// Lays the window out and draws it with vello_cpu at `scale` physical pixels per logical pixel.
@@ -441,6 +486,27 @@ pub fn paint<C: Canvas>(
                 let x = f64::from(r.x) + (f64::from(r.w) - w) / 2.0;
                 let y = f64::from(r.y) + (f64::from(r.h) - h) / 2.0;
                 ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+            }
+            Kind::Picture { image, .. } => {
+                // Whole physical pixels that cover the rectangle, so that no edge is left
+                // half drawn at a fractional scale, and pixels scaled to that size beforehand
+                // are drawn one to one.
+                let s = f64::from(scale);
+                let (x0, y0) = ((f64::from(r.x) * s).floor(), (f64::from(r.y) * s).floor());
+                let x1 = (f64::from(r.x + r.w) * s).ceil();
+                let y1 = (f64::from(r.y + r.h) * s).ceil();
+                let buffer = ((x1 - x0) as u32, (y1 - y0) as u32);
+                let size = (u32::from(image.width()), u32::from(image.height()));
+                if let Some((cx, cy, cw, ch)) = zoom(size, buffer) {
+                    let part = Rect::new(
+                        f64::from(cx),
+                        f64::from(cy),
+                        f64::from(cx + cw),
+                        f64::from(cy + ch),
+                    );
+                    let rect = Rect::new(x0 / s, y0 / s, x1 / s, y1 / s);
+                    ctx.fill_image_part(resources, &rect, image.pixmap(), &part);
+                }
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
@@ -698,6 +764,88 @@ mod tests {
             ui.commit("abc");
         }
         render(&mut ui, 1.0)
+    }
+
+    /// A surface of `min` logical pixels with a margin of 0 holding only a picture of `pixels`,
+    /// opaque RGB, `width` wide, drawn at `scale`: its pixels as RGB.
+    fn picture(
+        width: u32,
+        pixels: &[[u8; 3]],
+        min: (f32, f32),
+        scale: f32,
+    ) -> Result<Vec<[u8; 3]>, Error> {
+        let height = pixels.len() as u32 / width;
+        let rgba = pixels.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect();
+        let image = crate::Image::from_rgba8(width, height, rgba)?;
+        let theme = crate::Theme {
+            margin: 0.0,
+            ..crate::Theme::default()
+        };
+        let mut ui = crate::Ui::new("Wallpaper", theme, false);
+        ui.picture(crate::Ui::ROOT, image, "");
+        (ui.min_width, ui.min_height) = min;
+        let drawn = render(&mut ui, scale)?;
+        let rgb = drawn.data_as_u8_slice().as_chunks::<4>().0;
+        Ok(rgb.iter().map(|&[r, g, b, _]| [r, g, b]).collect())
+    }
+
+    const RED: [u8; 3] = [0xc0, 0x10, 0x20];
+    const GREEN: [u8; 3] = [0x10, 0xc0, 0x30];
+    const BLUE: [u8; 3] = [0x20, 0x30, 0xc0];
+    const GREY: [u8; 3] = [0x80, 0x80, 0x80];
+
+    #[test]
+    fn zoom_crops_as_the_wallpapers_library_does() {
+        // athanor-wallpaper's zoom.rs tests, case by case.
+        assert_eq!(zoom((1920, 1080), (960, 540)), Some((0, 0, 1920, 1080)));
+        assert_eq!(zoom((4000, 1000), (1000, 1000)), Some((1500, 0, 1000, 1000)));
+        assert_eq!(zoom((1000, 4000), (2000, 1000)), Some((0, 1750, 1000, 500)));
+        assert_eq!(zoom((101, 100), (100, 100)), Some((0, 0, 100, 100)));
+        assert_eq!(zoom((0, 10), (10, 10)), None);
+        assert_eq!(zoom((10, 10), (10, 0)), None);
+        assert!(zoom((u32::MAX, u32::MAX), (u32::MAX, 1)).is_some());
+        assert!(zoom((1, u32::MAX), (u32::MAX, 1)).is_some());
+    }
+
+    #[test]
+    fn a_picture_fills_every_pixel_of_its_surface() -> Result<(), Error> {
+        // 11 by 7 logical pixels are 16.5 by 10.5 at 1.5: the buffer's last column and row are
+        // the picture's, not half the background's.
+        for scale in [1.0, 1.5, 2.0] {
+            let drawn = picture(1, &[GREY], (11.0, 7.0), scale)?;
+            assert!(!drawn.is_empty());
+            assert!(drawn.iter().all(|&px| px == GREY), "at {scale}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_picture_at_its_buffers_size_is_drawn_one_to_one() -> Result<(), Error> {
+        let pixels = [RED, GREEN, BLUE, GREY, BLUE, GREEN, RED, GREY];
+        assert_eq!(picture(4, &pixels, (4.0, 2.0), 1.0)?, pixels);
+        assert_eq!(picture(4, &pixels, (2.0, 1.0), 2.0)?, pixels);
+        Ok(())
+    }
+
+    #[test]
+    fn a_picture_loses_what_overflows_its_surface() -> Result<(), Error> {
+        assert_eq!(picture(3, &[RED, GREEN, BLUE], (1.0, 1.0), 1.0)?, [GREEN]);
+        let tall = [RED, GREEN, BLUE];
+        assert_eq!(picture(1, &tall, (1.0, 1.0), 1.0)?, [GREEN]);
+        Ok(())
+    }
+
+    #[test]
+    fn decoded_pixels_of_the_wrong_size_are_refused() {
+        let image = |w, h, len| crate::Image::from_rgba8(w, h, vec![0; len]).is_ok();
+        assert!(image(2, 3, 24));
+        assert!(!image(2, 3, 23));
+        assert!(!image(0, 3, 0));
+        assert!(!image(65536, 1, 65536 * 4));
+        // A capacity that is not whole pixels is copied, not refused.
+        let mut odd = Vec::with_capacity(27);
+        odd.resize(24, 0);
+        assert!(crate::Image::from_rgba8(2, 3, odd).is_ok());
     }
 
     #[test]
