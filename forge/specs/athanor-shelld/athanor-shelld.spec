@@ -42,7 +42,7 @@ done
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The bar's private interface admits the main process of athanor-bar.service as the user's
   systemd, verified by the system's, tells it (issue #1047), no longer the caller's cgroup
-  read from /proc.
+  read from /proc, and its Landlock ruleset no longer grants /proc.
 
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Stage 2 switch (doc_bar.md, BR8): enabled for every user by
