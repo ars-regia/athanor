@@ -16,16 +16,18 @@
 
 use std::error::Error;
 use std::ffi::OsString;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use athanor_unit::dirs::private_dir;
 use athanor_unit::sandbox;
 
-/// What the daemon reads and the directories it writes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the daemon reads and the directories it writes, held open as `private_dir` checked
+/// them: a link swapped in for the path afterwards widens nothing.
+#[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<PathBuf>,
+    pub write: Vec<OwnedFd>,
 }
 
 /// The grants from the environment as `var` reads it. `$XDG_RUNTIME_DIR/dconf` is granted when
@@ -56,8 +58,7 @@ impl Grants {
     /// process single-threaded (`sandbox::ensure_single_threaded`).
     pub fn apply(&self) -> Result<(), Box<dyn Error>> {
         let read: Vec<&Path> = self.read.iter().map(PathBuf::as_path).collect();
-        let write: Vec<&Path> = self.write.iter().map(PathBuf::as_path).collect();
-        sandbox::restrict(&read, &write)?;
+        sandbox::restrict(&read, &self.write)?;
         sandbox::deny_tcp()
     }
 }
@@ -65,7 +66,15 @@ impl Grants {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    /// The device and inode `fd` names.
+    fn identity(fd: &OwnedFd) -> (u64, u64) {
+        let meta = std::fs::File::from(fd.try_clone().expect("dup"))
+            .metadata()
+            .expect("fstat");
+        (meta.dev(), meta.ino())
+    }
 
     #[test]
     fn dconf_is_granted_only_while_it_is_private_and_the_environment_never_widens() {
@@ -106,7 +115,11 @@ mod tests {
 
         mode(0o700);
         let grants = daemon(var, Some(Path::new("/opt/schemas"))).expect("grants");
-        assert_eq!(grants.write, [runtime.join("dconf")]);
+        let dconf = std::fs::metadata(runtime.join("dconf")).expect("dconf");
+        let [granted] = grants.write.as_slice() else {
+            panic!("{grants:?}")
+        };
+        assert_eq!(identity(granted), (dconf.dev(), dconf.ino()));
         assert_eq!(grants.read.last(), Some(&PathBuf::from("/opt/schemas")));
         std::fs::remove_dir_all(&base).expect("cleanup");
 

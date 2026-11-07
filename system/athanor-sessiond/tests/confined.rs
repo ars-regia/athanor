@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
@@ -186,7 +187,14 @@ fn child() {
 
     let mut grants = confine::daemon(|name| std::env::var_os(name), Some(&base.join("schemas")))
         .expect("grants");
-    assert_eq!(grants.write, [runtime.join("dconf")]);
+    let dconf = fs::metadata(runtime.join("dconf")).expect("dconf");
+    let [checked] = grants.write.as_slice() else {
+        panic!("{grants:?}")
+    };
+    let checked = fs::File::from(checked.try_clone().expect("dup"))
+        .metadata()
+        .expect("fstat");
+    assert_eq!((checked.dev(), checked.ino()), (dconf.dev(), dconf.ino()));
     let granted = std::env::var(MODE).as_deref() == Ok("granted");
     if !granted {
         grants.write.clear();
