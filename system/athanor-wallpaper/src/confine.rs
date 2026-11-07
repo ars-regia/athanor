@@ -132,6 +132,11 @@ mod tests {
 
     /// The variable that makes the test below its own confined child.
     const CHILD: &str = "ATHANOR_WALLPAPER_CONFINED_CHILD";
+    const SCHEMA: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../forge/specs/athanor-system-config/SOURCES/usr/share/glib-2.0/schemas/",
+        "org.athanor.desktop.background.gschema.xml"
+    );
 
     fn mode(path: &Path, mode: u32) {
         use std::os::unix::fs::PermissionsExt;
@@ -162,6 +167,19 @@ mod tests {
             std::fs::create_dir_all(base.join(dir)).expect("mkdir");
         }
         mode(&base.join("runtime"), 0o700);
+        // The daemon's own schema, compiled for this session: nothing of the host's schemas.
+        let schemas = base.join("schemas");
+        std::fs::create_dir_all(&schemas).expect("mkdir");
+        std::fs::copy(
+            SCHEMA,
+            schemas.join("org.athanor.desktop.background.gschema.xml"),
+        )
+        .expect("schema");
+        let compiled = std::process::Command::new("glib-compile-schemas")
+            .arg(&schemas)
+            .status()
+            .expect("glib-compile-schemas on PATH");
+        assert!(compiled.success());
         let home = base.join("home");
         let out = std::process::Command::new(std::env::current_exe().expect("exe"))
             .args([
@@ -175,8 +193,10 @@ mod tests {
             .env("XDG_CONFIG_HOME", home.join(".config"))
             .env("XDG_DATA_HOME", home.join(".local/share"))
             .env("XDG_RUNTIME_DIR", base.join("runtime"))
+            .env("GSETTINGS_SCHEMA_DIR", &schemas)
+            // No system schemas, as on a runner without them.
+            .env("XDG_DATA_DIRS", base.join("no-data"))
             .env_remove("GSETTINGS_BACKEND")
-            .env_remove("GSETTINGS_SCHEMA_DIR")
             .env_remove("DCONF_PROFILE")
             .env_remove("DBUS_SESSION_BUS_ADDRESS")
             .output()
@@ -226,8 +246,15 @@ mod tests {
         // dconf's client opens its flag beneath the grant on the first read of a key.
         use gio::prelude::*;
         let backend = gio::SettingsBackend::default();
-        assert_eq!(backend.type_().name(), "DConfSettingsBackend");
-        let interface = gio::Settings::new("org.gnome.desktop.interface");
-        let _ = interface.string("color-scheme");
+        assert_eq!(
+            backend.type_().name(),
+            "DConfSettingsBackend",
+            "GIO's dconf module is not installed"
+        );
+        let schema = gio::SettingsSchemaSource::default()
+            .and_then(|source| source.lookup("org.athanor.desktop.background", true))
+            .expect("the schema compiled for this session");
+        let ours = gio::Settings::new_full(&schema, None::<&gio::SettingsBackend>, None);
+        let _ = ours.string("picture");
     }
 }
