@@ -36,9 +36,12 @@ fn main() -> ExitCode {
     };
     // Before any GIO object and any thread: GLib's worker threads are confined from their
     // first instruction (SD17).
-    let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| Ok(confine::dconf_dir(&runtime)?))
-        .and_then(|dconf| confine::apply(&confine::reads(|name| std::env::var_os(name)), &dconf));
+    let confined = sandbox::ensure_single_threaded().and_then(|()| {
+        confine::apply(
+            &confine::reads(|name| std::env::var_os(name)),
+            &confine::writes(&runtime),
+        )
+    });
     if let Err(error) = confined {
         tracing::error!(%error, "refusing to run unconfined");
         return ExitCode::FAILURE;
