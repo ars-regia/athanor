@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -58,6 +58,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- Watch the windows at start: athanor-sulphur-client binds the window globals only for a
+  client that asks for them, and this one reads the output of the focused window, where
+  the panel opens.
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
   binaries, user unit, session script and data directory.

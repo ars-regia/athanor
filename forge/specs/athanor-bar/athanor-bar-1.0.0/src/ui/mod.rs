@@ -185,7 +185,13 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     }
     appearance::load(&display, &Appearance::read());
     let client = match Client::connect(&display) {
-        Ok(client) => Some(client),
+        Ok(client) => {
+            // The window list and the windows of the notifications.
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
         Err(err) => {
             tracing::error!(error = %err, "no compositor client; the modules that need it stay hidden");
             None
