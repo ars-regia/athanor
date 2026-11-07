@@ -42,6 +42,7 @@ use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
@@ -94,6 +95,11 @@ use std::time::Duration;
 /// A surface on no output, or shown on another one, still gets a frame callback this often.
 pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
 
+/// How long a withdrawn `wl_output` global keeps its name before it is destroyed, as wlroots'
+/// `wlr_global_destroy_safe` does: a client that sent `bind` before it read `global_remove` is
+/// still answered by the global it meant.
+pub const OUTPUT_GRACE: Duration = Duration::from_secs(5);
+
 /// What the outputs show where no surface is: cosmic-comp's clear colour, srgb(39,41,42), so
 /// that the shell's surfaces match the cosmic-comp goldens (OS19, item 1; #736). cosmic-bg
 /// covers it with the wallpaper in both sessions.
@@ -117,6 +123,8 @@ pub enum Backend {
 pub struct State {
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, State>,
+    /// `OUTPUT_GRACE`, a field so that a test need not wait for it.
+    pub output_grace: Duration,
     pub loop_signal: LoopSignal,
     pub clock: Clock<Monotonic>,
 
@@ -380,6 +388,7 @@ impl State {
         Ok(Self {
             display_handle: dh,
             loop_handle: event_loop.handle(),
+            output_grace: OUTPUT_GRACE,
             loop_signal: event_loop.get_signal(),
             clock,
             space: Space::default(),
@@ -1517,28 +1526,46 @@ pub fn build_output(
 }
 
 /// Offers `output` to the clients; the global is kept in its user data. One it had still is
-/// withdrawn first, so that no client sees two globals for one output.
+/// destroyed first, so that no client sees two globals for one output.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
     let slot = output.user_data().get_or_insert(OutputGlobal::default);
-    if slot.0.borrow().is_some() {
+    if let Some(old) = take_global(output) {
         tracing::warn!(output = output.name(), "an output was offered twice");
-        withdraw_output(dh, output);
+        output.leave_all();
+        dh.remove_global::<State>(old);
     }
     let global = output.create_global::<State>(dh);
     *slot.0.borrow_mut() = Some(global);
 }
 
 /// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a
-/// configuration gets a new one when it is enabled again (`publish_output`).
-pub fn withdraw_output(dh: &DisplayHandle, output: &Output) {
+/// configuration gets a new one when it is enabled again (`publish_output`). The global is
+/// disabled now and destroyed after `State::output_grace`: `wayland-backend` hands the lowest
+/// free name to the next global, and a client that has not yet read `global_remove` may send
+/// `bind` for the old name, which must not reach another output (or another interface).
+pub fn withdraw_output(state: &State, output: &Output) {
     output.leave_all();
-    let global = output
-        .user_data()
-        .get::<OutputGlobal>()
-        .and_then(|slot| slot.0.borrow_mut().take());
-    if let Some(global) = global {
+    let Some(global) = take_global(output) else {
+        return;
+    };
+    let dh = &state.display_handle;
+    dh.disable_global::<State>(global.clone());
+    let doomed = global.clone();
+    let timer = Timer::from_duration(state.output_grace);
+    if let Err(error) = state.loop_handle.insert_source(timer, move |_, _, state| {
+        state.display_handle.remove_global::<State>(doomed.clone());
+        TimeoutAction::Drop
+    }) {
+        tracing::warn!(%error, "no timer for the grace of a withdrawn output; destroying it now");
         dh.remove_global::<State>(global);
     }
+}
+
+fn take_global(output: &Output) -> Option<GlobalId> {
+    output
+        .user_data()
+        .get::<OutputGlobal>()
+        .and_then(|slot| slot.0.borrow_mut().take())
 }
 
 /// The global of an output, kept in its user data while the output is offered.
