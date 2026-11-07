@@ -4,18 +4,36 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io;
-use std::os::fd::OwnedFd;
+use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use nix::fcntl::OFlag;
+
+/// A descriptor this module opened and checked: what a Landlock write grant names
+/// (`sandbox::restrict`, `sandbox::restrict_writes`). Its field is private, so only the
+/// functions here build one, and a grant is never a descriptor opened some other way:
+///
+/// ```compile_fail
+/// fn grant(dir: std::fs::File) {
+///     let _ = athanor_unit::sandbox::restrict_writes(&[dir], &[]);
+/// }
+/// ```
+#[derive(Debug)]
+pub struct Checked(OwnedFd);
+
+impl AsFd for Checked {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
 
 /// `runtime/name`, created with mode 0700 if missing, opened once without following a link and
 /// checked on that descriptor: a directory, owned by the owner of `runtime`, of mode 0700.
 /// Another process of the user could otherwise point a confined daemon's writes elsewhere. The
 /// descriptor is what a Landlock grant names (`sandbox::restrict`): a link swapped in for the
 /// path after the check widens nothing.
-pub fn private_dir(runtime: &Path, name: &str) -> io::Result<OwnedFd> {
+pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
     let dir = runtime.join(name);
     match fs::DirBuilder::new().mode(0o700).create(&dir) {
         Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
@@ -44,7 +62,7 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<OwnedFd> {
     if found.permissions().mode() & 0o7777 != 0o700 {
         return Err(refuse("does not have mode 0700".to_owned()));
     }
-    Ok(opened.into())
+    Ok(Checked(opened.into()))
 }
 
 /// `path`, a directory a write grant names: opened once with O_PATH, without following a link
@@ -52,26 +70,26 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<OwnedFd> {
 /// user or by root (`/tmp`), never another user's. The descriptor is what the grant names
 /// (`sandbox::restrict`, `sandbox::restrict_writes`), so a link put at the path before the
 /// open is refused, and one swapped in after it widens nothing.
-pub fn owned_dir(path: &Path) -> io::Result<OwnedFd> {
+pub fn owned_dir(path: &Path) -> io::Result<Checked> {
     let (opened, found) = not_a_link(path, OFlag::O_DIRECTORY)?;
     if found.uid() != 0 && found.uid() != nix::unistd::geteuid().as_raw() {
         return Err(refused(path, "is owned by another user"));
     }
-    Ok(opened.into())
+    Ok(Checked(opened.into()))
 }
 
 /// `path`, a node of the system's that a `WriteFile` grant names (`/dev/dri`, `/dev/null`):
 /// opened as `owned_dir` opens a directory, of any kind other than a link. Its owner is not
 /// checked: no user can put anything at those paths, and in a user namespace that does not map
 /// root (the shell rig's container, the greeter's sandbox) their owner reads as the overflow id.
-pub fn owned_node(path: &Path) -> io::Result<OwnedFd> {
-    not_a_link(path, OFlag::empty()).map(|(opened, _)| opened.into())
+pub fn owned_node(path: &Path) -> io::Result<Checked> {
+    not_a_link(path, OFlag::empty()).map(|(opened, _)| Checked(opened.into()))
 }
 
 /// Each of `paths` that exists, opened by `open` (`owned_dir`, `owned_node`). One that fails its
 /// check is left out with a warning, so that a grant only narrows; a missing one is skipped, as
 /// Landlock has nothing to hold on to.
-pub fn existing(paths: &[&Path], open: fn(&Path) -> io::Result<OwnedFd>) -> Vec<OwnedFd> {
+pub fn existing(paths: &[&Path], open: fn(&Path) -> io::Result<Checked>) -> Vec<Checked> {
     paths
         .iter()
         .filter_map(|path| match open(path) {
@@ -87,7 +105,7 @@ pub fn existing(paths: &[&Path], open: fn(&Path) -> io::Result<OwnedFd>) -> Vec<
 
 /// `private_dir` of each of `names` in `runtime`. One that fails is left out with a warning, so
 /// that a grant only narrows.
-pub fn private_dirs(runtime: &Path, names: &[&str]) -> Vec<OwnedFd> {
+pub fn private_dirs(runtime: &Path, names: &[&str]) -> Vec<Checked> {
     names
         .iter()
         .filter_map(|name| {
@@ -281,7 +299,7 @@ mod tests {
         let thread_runtime = runtime.clone();
         std::thread::spawn(move || {
             let write = existing(&[&thread_runtime.join("granted"), &cache], owned_dir);
-            sandbox::restrict_writes(&write, &[] as &[OwnedFd]).expect("confined");
+            sandbox::restrict_writes(&write, &[]).expect("confined");
             fs::write(thread_runtime.join("granted/file"), b"x").expect("the checked directory");
             let error = fs::write(cache.join("file"), b"x").expect_err("the link");
             assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);

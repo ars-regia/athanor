@@ -161,7 +161,6 @@ mod tests {
     use super::*;
     use athanor_unit::{dirs, sandbox};
     use std::ffi::OsString;
-    use std::os::fd::OwnedFd;
 
     #[test]
     fn the_flags_select_their_mode() {
@@ -348,8 +347,7 @@ mod tests {
                 };
                 let write: Vec<&Path> = grants.write.iter().map(PathBuf::as_path).collect();
                 let write = dirs::existing(&write, dirs::owned_dir);
-                sandbox::restrict_writes(&write, &[] as &[OwnedFd])
-                    .map_err(|err| err.to_string())?;
+                sandbox::restrict_writes(&write, &[]).map_err(|err| err.to_string())?;
                 std::fs::write(inside.join("ok"), "x").map_err(|err| format!("inside: {err}"))?;
                 match std::fs::write(outside.join("no"), "x") {
                     Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),

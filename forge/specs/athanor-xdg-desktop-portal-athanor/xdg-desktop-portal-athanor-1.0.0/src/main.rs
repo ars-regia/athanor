@@ -9,7 +9,6 @@ mod settings;
 
 use std::env;
 use std::error::Error as StdError;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, RwLock};
@@ -66,7 +65,7 @@ fn main() -> ExitCode {
 /// screenshots' grants of PT3 join with the first window.
 fn confine(runtime: &Path) -> Result<(), Box<dyn StdError>> {
     sandbox::ensure_single_threaded()?;
-    sandbox::restrict_writes(&[dirs::private_dir(runtime, "dconf")?], &[] as &[OwnedFd])?;
+    sandbox::restrict_writes(&[dirs::private_dir(runtime, "dconf")?], &[])?;
     sandbox::deny_tcp()
 }
 

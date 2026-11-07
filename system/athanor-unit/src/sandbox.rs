@@ -10,6 +10,7 @@ use std::error::Error;
 use std::os::fd::AsFd;
 use std::path::Path;
 
+use crate::dirs::Checked;
 use landlock::{
     Access, AccessFs, AccessNet, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
     RulesetAttr, RulesetCreatedAttr, ABI,
@@ -29,10 +30,10 @@ pub fn ensure_single_threaded() -> Result<(), Box<dyn Error>> {
 }
 
 /// Read-only beneath each of `read` that exists, read-write beneath each directory `write`
-/// holds open, nothing else. A write grant is a descriptor, not a path, so the directory
-/// granted is the one the caller checked (`dirs::private_dir`), whatever the path names now.
+/// holds open, nothing else. A write grant is a `dirs::Checked` descriptor, not a path, so the
+/// directory granted is the one `dirs` checked, whatever the path names now.
 /// A kernel that cannot enforce the ruleset is an error, not a best effort.
-pub fn restrict(read: &[&Path], write: &[impl AsFd]) -> Result<(), Box<dyn Error>> {
+pub fn restrict(read: &[&Path], write: &[Checked]) -> Result<(), Box<dyn Error>> {
     let all = AccessFs::from_all(ABI::V1);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -54,13 +55,10 @@ pub fn restrict(read: &[&Path], write: &[impl AsFd]) -> Result<(), Box<dyn Error
 /// Reads stay open. Every write access beneath each directory `write` holds open; writing to
 /// existing files, and nothing else, beneath each of `write_file` (a device directory such as
 /// `/dev/dri`, or a node). No other write anywhere, truncation included (Landlock ABI 3). As for
-/// `restrict`, a grant is a descriptor the caller checked (`dirs::owned_dir`, `dirs::owned_node`,
+/// `restrict`, a grant is a `dirs::Checked` descriptor (`dirs::owned_dir`, `dirs::owned_node`,
 /// `dirs::private_dir`), not a path. A kernel that cannot enforce the ruleset is an error, not a
 /// best effort.
-pub fn restrict_writes(
-    write: &[impl AsFd],
-    write_file: &[impl AsFd],
-) -> Result<(), Box<dyn Error>> {
+pub fn restrict_writes(write: &[Checked], write_file: &[Checked]) -> Result<(), Box<dyn Error>> {
     let writes = AccessFs::from_write(ABI::V3);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -138,7 +136,7 @@ mod tests {
         }
         // Landlock confines the calling thread and its children: the test binary stays free.
         std::thread::spawn(move || {
-            let writable_dir = std::fs::File::open(&writable).expect("open");
+            let writable_dir = crate::dirs::owned_dir(&writable).expect("open");
             restrict(&[&readable], &[writable_dir])
                 .expect("Landlock must be enforced, not skipped");
             assert!(std::fs::read(readable.join("file")).is_ok());
