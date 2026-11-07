@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use athanor_services::audio::{self, AudioCommand, AudioState, Device};
 
+use crate::bus;
 use crate::i18n::{tr, tr_with};
 
 /// A volume key moves the volume by this much (OD6).
@@ -23,6 +24,10 @@ pub const ANNOUNCE_AFTER: Duration = Duration::from_millis(300);
 /// How long a command's target stands for the model's state, which has not caught up with it
 /// yet (OD6, "each key acts on the state it sees").
 pub const PENDING_FOR: Duration = Duration::from_secs(1);
+/// How long a key waits for the audio model's first settled state before it acts on the state
+/// as it is (OD13). The unit restarts after 100 ms and the next key within 1 s of a kill shows
+/// its overlay (ST5), so the wait leaves about 400 ms for the start itself.
+pub const SETTLE_WAIT: Duration = Duration::from_millis(500);
 /// More calls than this within [`RATE_WINDOW`] from one sender are dropped (OD4).
 pub const RATE_LIMIT: u32 = 30;
 pub const RATE_WINDOW: Duration = Duration::from_secs(1);
@@ -132,6 +137,10 @@ pub struct Core {
     shown: Option<Source>,
     hide_at: Option<Instant>,
     announce_at: Option<Instant>,
+    /// Keys that came before the model settled, replayed in order once it does.
+    held: Vec<Key>,
+    /// When the first held key stops waiting for the model.
+    hold_until: Option<Instant>,
 }
 
 impl Core {
@@ -144,6 +153,8 @@ impl Core {
             shown: None,
             hide_at: None,
             announce_at: None,
+            held: Vec::new(),
+            hold_until: None,
         }
     }
 
@@ -184,9 +195,41 @@ impl Core {
         })
     }
 
-    /// A key: the commands it sends and the overlay it shows. No device to act on, as while
-    /// the sound server is away, does nothing and shows nothing.
+    /// Whether keys wait for the model: it has not settled and [`SETTLE_WAIT`] has not ended.
+    fn holding(&mut self, state: &AudioState, now: Instant) -> bool {
+        !state.settled && now < *self.hold_until.get_or_insert(now + SETTLE_WAIT)
+    }
+
+    /// Replays the held keys, in order, against `state`.
+    fn release(&mut self, state: &AudioState, now: Instant) -> Vec<Effect> {
+        self.hold_until = None;
+        std::mem::take(&mut self.held)
+            .into_iter()
+            .flat_map(|key| self.act(key, state, now))
+            .collect()
+    }
+
+    /// A key: held while the model has not settled (OD13), else carried out at once.
     pub fn key(&mut self, key: Key, state: &AudioState, now: Instant) -> Vec<Effect> {
+        if self.holding(state, now) {
+            if self.held.len() < bus::KEYS {
+                self.held.push(key);
+            } else {
+                tracing::warn!(
+                    ?key,
+                    "too many keys wait for the audio state; one is dropped"
+                );
+            }
+            return Vec::new();
+        }
+        let mut effects = self.release(state, now);
+        effects.extend(self.act(key, state, now));
+        effects
+    }
+
+    /// A key against a state: the commands it sends and the overlay it shows. No device to
+    /// act on, as while the sound server is away, does nothing and shows nothing.
+    fn act(&mut self, key: Key, state: &AudioState, now: Instant) -> Vec<Effect> {
         let source = match key {
             Key::ToggleMicMute => Source::Input,
             _ => Source::Output,
@@ -241,12 +284,17 @@ impl Core {
 
     /// A new state of the model: the targets it reached or refused are dropped, and the level
     /// on screen follows it. A change nobody pressed a key for shows nothing (OD5).
-    pub fn observe(&mut self, state: &AudioState) -> Vec<Effect> {
+    pub fn observe(&mut self, state: &AudioState, now: Instant) -> Vec<Effect> {
         if state.refused != self.refused {
             self.refused = state.refused;
             self.output = None;
             self.input = None;
         }
+        let mut effects = if state.settled {
+            self.release(state, now)
+        } else {
+            Vec::new()
+        };
         for source in [Source::Output, Source::Input] {
             let reached = device(state, source).is_some_and(|device| {
                 self.target(source).as_ref().is_some_and(|t| {
@@ -259,24 +307,33 @@ impl Core {
                 *self.target(source) = None;
             }
         }
-        self.level(state)
-            .map(|level| Effect::View(View::Show(level)))
-            .into_iter()
-            .collect()
+        effects.extend(
+            self.level(state)
+                .map(|level| Effect::View(View::Show(level))),
+        );
+        effects
     }
 
     /// When [`Core::tick`] has something to do next; `None` while hidden and announced, so
     /// an idle overlay holds no timer (OD13).
     pub fn deadline(&self) -> Option<Instant> {
-        match (self.hide_at, self.announce_at) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        let hold = self.hold_until.filter(|_| !self.held.is_empty());
+        [self.hide_at, self.announce_at, hold]
+            .into_iter()
+            .flatten()
+            .min()
     }
 
     /// The clock reached `now`: the coalesced announcement, then the timeout.
     pub fn tick(&mut self, state: &AudioState, now: Instant) -> Vec<Effect> {
         let mut effects = Vec::new();
+        if !self.held.is_empty() && self.hold_until.is_some_and(|at| at <= now) {
+            tracing::warn!(
+                keys = self.held.len(),
+                "the audio state did not settle in time; the held keys act on it as it is"
+            );
+            effects = self.release(state, now);
+        }
         if self.announce_at.is_some_and(|at| at <= now) {
             self.announce_at = None;
             if let Some(level) = self.level(state) {
@@ -448,8 +505,8 @@ mod tests {
         // Reached, then changed by a mixer: the next key starts from the mixer's value.
         let mut core = Core::new(false);
         core.key(Key::VolumeUp, &state(40.0, false), now);
-        core.observe(&state(45.0, false));
-        core.observe(&state(20.0, false));
+        core.observe(&state(45.0, false), Instant::now());
+        core.observe(&state(20.0, false), Instant::now());
         let effects = core.key(Key::VolumeUp, &state(20.0, false), now);
         assert_eq!(commands(&effects), vec![volume(25)]);
         // Refused: the next key starts from what the model holds.
@@ -459,7 +516,7 @@ mod tests {
             refused: 1,
             ..state(40.0, false)
         };
-        core.observe(&refused);
+        core.observe(&refused, Instant::now());
         assert_eq!(
             commands(&core.key(Key::VolumeUp, &refused, now)),
             vec![volume(45)]
@@ -552,7 +609,10 @@ mod tests {
     #[test]
     fn without_a_device_a_key_does_nothing() {
         let mut core = Core::new(false);
-        let empty = AudioState::default();
+        let empty = AudioState {
+            settled: true,
+            ..AudioState::default()
+        };
         assert!(core.key(Key::VolumeUp, &empty, Instant::now()).is_empty());
         assert_eq!(core.deadline(), None);
     }
@@ -562,11 +622,11 @@ mod tests {
         let now = Instant::now();
         let mut core = Core::new(false);
         assert!(
-            core.observe(&state(30.0, false)).is_empty(),
+            core.observe(&state(30.0, false), Instant::now()).is_empty(),
             "a mixer's change"
         );
         core.key(Key::VolumeUp, &state(30.0, false), now);
-        let effects = core.observe(&state(35.0, false));
+        let effects = core.observe(&state(35.0, false), Instant::now());
         assert!(matches!(
             effects.as_slice(),
             [Effect::View(View::Show(Level { percent, .. }))] if *percent == 35.0
@@ -584,7 +644,7 @@ mod tests {
             let at = start + Duration::from_millis(100 * i);
             core.key(Key::VolumeUp, &seen, at);
             seen = state(45.0 + 5.0 * i as f64, false);
-            core.observe(&seen);
+            core.observe(&seen, Instant::now());
         }
         let last = start + Duration::from_millis(400);
         assert_eq!(core.deadline(), Some(last + ANNOUNCE_AFTER));
@@ -644,5 +704,47 @@ mod tests {
             Admit::Yes,
             "a new window"
         );
+    }
+
+    #[test]
+    fn keys_before_the_model_settles_wait_and_replay_in_order() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        let unsettled = AudioState::default();
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        assert!(core.deadline().is_some(), "the wait has a bound");
+        let effects = core.observe(&state(40.0, false), now + Duration::from_millis(50));
+        assert_eq!(commands(&effects), [45, 50].map(volume).to_vec());
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, Effect::View(View::Show(_)))));
+    }
+
+    #[test]
+    fn held_keys_act_on_the_state_as_it_is_after_the_wait() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        let unsettled = AudioState::default();
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        assert!(core.tick(&unsettled, now).is_empty(), "not yet");
+        assert!(
+            core.tick(&unsettled, now + SETTLE_WAIT).is_empty(),
+            "no device: nothing"
+        );
+        assert!(core.held.is_empty());
+        // Past the wait a key is no longer held.
+        let later = now + SETTLE_WAIT;
+        assert!(core.key(Key::VolumeUp, &state(40.0, false), later).len() > 1);
+    }
+
+    #[test]
+    fn no_more_than_the_bus_queue_waits() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        for _ in 0..bus::KEYS + 4 {
+            core.key(Key::VolumeUp, &AudioState::default(), now);
+        }
+        assert_eq!(core.held.len(), bus::KEYS);
     }
 }

@@ -150,7 +150,7 @@ async fn drive(
             changed = state.changed() => match changed {
                 Ok(()) => {
                     let seen = state.borrow_and_update().clone();
-                    core.observe(&seen)
+                    core.observe(&seen, Instant::now())
                 }
                 Err(_) => {
                     tracing::error!("the audio model stopped");
