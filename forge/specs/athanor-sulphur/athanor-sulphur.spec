@@ -67,6 +67,8 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 - Keep the modes of a disabled monitor's head up to date when its connector's modes change.
 - Refuse an output configuration that places an output more than 2^24 pixels from the
   origin, past which the sums of the space would overflow.
+- Give the keyboard to a lock surface still shown when the output whose lock surface had it
+  is disabled.
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
   with athanor-edid: wl_output and xdg_output carry the make and model, and the serial

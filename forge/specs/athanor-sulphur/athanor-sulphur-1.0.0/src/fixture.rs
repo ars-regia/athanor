@@ -7541,6 +7541,65 @@ fn sd23_an_output_enabled_while_locked_shows_only_the_lock() {
     run.stop();
 }
 
+/// While the session is locked, disabling the output whose lock surface has the keyboard gives
+/// the keyboard to the lock surface of an output still shown (SD23).
+#[test]
+fn sd23_disabling_the_focused_lock_output_moves_the_keyboard() {
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let mut run = Running::start(None);
+    let mut locker = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = locker.bind(1);
+    let qh = locker.queue.handle();
+    let _keyboard = seat.get_keyboard(&qh, ());
+    let lock = locks.lock(&qh, ());
+    let offered = locker.outputs_offered(&mut run);
+    // The second output's surface first: the first live lock surface has the keyboard.
+    let mut surfaces = Vec::new();
+    for name in [offered[1], offered[0]] {
+        let output: wl_output::WlOutput = locker.registry.bind(name, 4, &qh, ());
+        let surface = compositor.create_surface(&qh, ());
+        let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+        locker.client.lock_configure = None;
+        locker.pump(&mut run, "the lock surface is configured", |client, _| {
+            client.lock_configure.is_some()
+        });
+        let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+        lock_surface.ack_configure(serial);
+        let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [0, 0, 0, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        surfaces.push((surface, lock_surface, buffer));
+    }
+    let focused = |state: &State, index: usize| {
+        let wanted = surfaces[index].0.id().protocol_id();
+        focus(state).is_some_and(|surface| surface.id().protocol_id() == wanted)
+    };
+    locker.pump(
+        &mut run,
+        "the second output's lock surface has the keyboard",
+        |_, state| focused(state, 0),
+    );
+
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded", "applied while locked");
+    assert!(
+        focused(&run.state, 1),
+        "the first output's lock surface has the keyboard"
+    );
+    run.stop();
+}
+
 /// A virtual keyboard of zwp-virtual-keyboard-v1, whose client side no crate of the workspace
 /// generates: its requests are sent raw, on the interfaces Smithay's server side describes.
 struct VirtualKeyboard {

@@ -548,6 +548,8 @@ impl State {
         // Its tiles re-homed, or the trees of its workspaces gone, after the fit.
         self.fit_tiles();
     }
+            // The keyboard leaves a lock surface the output took with it.
+            self.set_keyboard_focus(None);
 
     /// After the outputs changed (one went, or took another size): the windows their home output
     /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
