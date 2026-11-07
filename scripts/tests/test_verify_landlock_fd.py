@@ -11,15 +11,7 @@ spec = importlib.util.spec_from_file_location("verify", SCRIPT)
 verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
-READ_GRANT = """    for path in read {
-        ruleset = ruleset.add_rule(PathBeneath::new(
-            PathFd::new(path)?,
-            AccessFs::from_read(ABI::V1),
-        ))?;
-    }
-"""
-WRITE_GRANT = """        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, writes))?;
-"""
+GRANT = "ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, writes))?;\n"
 
 
 def problems(files):
@@ -32,23 +24,28 @@ def problems(files):
 
 
 class LandlockFdTest(unittest.TestCase):
-    def test_a_read_grant_in_the_shared_sandbox_passes(self):
-        self.assertEqual(problems({verify.LANDLOCK_SANDBOX: READ_GRANT}), [])
+    def test_the_shared_sandbox_and_the_pending_rulesets_pass(self):
+        files = {name: GRANT for name in (verify.LANDLOCK_SANDBOX, *verify.LANDLOCK_PATH_PENDING)}
+        self.assertEqual(problems(files), [])
 
-    def test_a_write_grant_from_a_path_in_the_shared_sandbox_is_reported(self):
-        found = problems({verify.LANDLOCK_SANDBOX: READ_GRANT + WRITE_GRANT})
-        self.assertEqual(len(found), 1, found)
-        self.assertIn("sandbox.rs:7: a write grant built from a path", found[0])
-
-    def test_path_fd_anywhere_else_is_reported_even_for_a_read(self):
-        found = problems({"forge/specs/athanor-dock/src/start.rs": READ_GRANT,
-                          "system/athanor-idle/src/confine.rs": WRITE_GRANT})
+    def test_path_fd_anywhere_else_is_reported(self):
+        found = problems({"forge/specs/athanor-dock/src/start.rs": GRANT,
+                          "system/athanor-idle/src/confine.rs": "use landlock::PathFd;\n"})
         self.assertEqual(len(found), 2, found)
-        self.assertTrue(all("PathFd::new grants by path" in problem for problem in found))
+        self.assertTrue(all("PathFd grants by path" in problem for problem in found))
 
-    def test_a_comment_and_a_descriptor_grant_pass(self):
-        code = ("// landlock's PathFd::new(path) follows links.\n"
-                "ruleset = ruleset.add_rule(PathBeneath::new(dir.as_fd(), writes))?;\n")
+    def test_an_alias_is_caught_where_it_is_imported(self):
+        code = "use landlock::{PathFd as Fd};\n\nlet dir = Fd::new(path)?;\n"
+        found = problems({"system/athanor-idle/src/confine.rs": code})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("confine.rs:1:", found[0])
+
+    def test_text_after_a_string_holding_two_slashes_is_still_read(self):
+        code = 'let url = "https://x"; let dir = PathFd::new(path)?;\n'
+        self.assertEqual(len(problems({"system/athanor-idle/src/confine.rs": code})), 1)
+
+    def test_a_descriptor_grant_passes(self):
+        code = "ruleset = ruleset.add_rule(PathBeneath::new(dir.as_fd(), writes))?;\n"
         self.assertEqual(problems({"system/athanor-unit/src/dirs.rs": code}), [])
 
 
