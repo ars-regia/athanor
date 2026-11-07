@@ -27,6 +27,7 @@ class TestToolkitMotionCheck(unittest.TestCase):
     def test_a_motion_too_early_too_late_or_missing_is_a_problem(self):
         good = {"entered": 216, "left": 150, "entered reduced": 117}
         self.assertEqual(problems(good, 30), [])
+        self.assertEqual(problems(dict(good, entered=181), 30), [], "one frame under its time")
         self.assertEqual(len(problems(dict(good, entered=150), 30)), 1, "sooner than its time")
         self.assertEqual(len(problems(dict(good, left=900), 30)), 1, "too late")
         self.assertEqual(len(problems({"entered": 216}, 30)), 2)

@@ -145,10 +145,13 @@ impl Running {
     }
 
     /// The pose to draw after the frame callback of `time`, in its milliseconds, and whether the
-    /// motion ended with it. The milliseconds wrap around, as wl_callback's do.
+    /// motion ended with it. The milliseconds wrap around, as wl_callback's do; a time a little
+    /// before the start, which a compositor may give, counts as the start.
     pub(crate) fn frame(&mut self, time: u32, reduced: bool) -> (Pose, bool) {
         let start = *self.start.get_or_insert(time);
-        let elapsed = Duration::from_millis(u64::from(time.wrapping_sub(start)));
+        let delta = time.wrapping_sub(start);
+        let delta = if delta > i32::MAX as u32 { 0 } else { delta };
+        let elapsed = Duration::from_millis(u64::from(delta));
         (
             self.motion.at(elapsed, reduced),
             self.motion.ended(elapsed, reduced),
@@ -266,6 +269,10 @@ mod tests {
             running.frame(start.wrapping_add(200), false),
             (Pose::REST, true)
         );
+        // A callback a few milliseconds before the start does not end the motion.
+        let mut running = Running::new(entry());
+        running.frame(1000, false);
+        assert_eq!(running.frame(997, false), (entry().from, false));
         // The switch is read at each frame: turned on midway, the motion ends at the reduced time.
         let mut running = Running::new(entry());
         running.frame(1000, false);

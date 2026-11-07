@@ -679,12 +679,9 @@ impl Shell {
             .ok_or_else(|| format!("no open surface {id:?}"))?;
         surface.ui.pose = motion.at(Duration::ZERO, reduced);
         surface.dirty = true;
-        if motion.ended(Duration::ZERO, reduced) {
-            surface.motion = None;
-            self.settled.push(id);
-        } else {
-            surface.motion = Some(Running::new(motion));
-        }
+        let ended = motion.ended(Duration::ZERO, reduced);
+        surface.motion = (!ended).then(|| Running::new(motion));
+        requeue(&mut self.settled, id, ended);
         Ok(())
     }
 
@@ -2595,9 +2592,31 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
     }
 }
 
+/// Forgets the settling of a motion of `id` that a new one replaces, so that the application
+/// is not told of it during the new one, and queues `id` once if the new motion `ended` at once.
+fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
+    settled.retain(|s| *s != id);
+    if ended {
+        settled.push(id);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
+        let (a, b) = (SurfaceId(1), SurfaceId(2));
+        // A motion of `a` ended this turn; a new one under way replaces it.
+        let mut settled = vec![a, b];
+        requeue(&mut settled, a, false);
+        assert_eq!(settled, [b]);
+        // Two motions that end at once: `a` settles once.
+        requeue(&mut settled, a, true);
+        requeue(&mut settled, a, true);
+        assert_eq!(settled, [b, a]);
+    }
 
     #[test]
     fn a_held_key_acts_again_but_the_clipboard_keys_and_the_activating_ones() {

@@ -26,6 +26,9 @@ TIMEOUT = 10
 MOTIONS = {"entered": 200, "left": 133, "entered reduced": 100}
 # How much later than its time a motion may settle: the frames of a loaded rig.
 LATE = 500
+# The client times a motion on its clock and the compositor its callbacks on another: a motion
+# may print one frame under its length.
+FRAME = 20
 # The frame callbacks the three motions ask for at the least, a few for each.
 STEPS = 10
 
@@ -59,8 +62,10 @@ def problems(times, count):
         took = times.get(motion)
         if took is None:
             found.append(f"{motion}: never settled")
-        elif not length <= took <= length + LATE:
-            found.append(f"{motion}: settled in {took} ms, not in {length} to {length + LATE}")
+        elif not length - FRAME <= took <= length + LATE:
+            found.append(
+                f"{motion}: settled in {took} ms, not in {length - FRAME} to {length + LATE}"
+            )
     if count < STEPS:
         found.append(f"{count} frame callbacks asked for, not {STEPS} or more")
     return found
