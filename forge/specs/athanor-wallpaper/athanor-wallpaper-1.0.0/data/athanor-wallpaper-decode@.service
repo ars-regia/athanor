@@ -27,8 +27,15 @@ PrivateNetwork=yes
 PrivateIPC=yes
 TemporaryFileSystem=/tmp
 TemporaryFileSystem=/run
-RuntimeMaxSec=5
-MemoryMax=512M
+# LA9's 512M and 5 s were sized for 1024 px previews. Measured on the reference laptop (8 cores,
+# glycin in bubblewrap, 2026-11-07, maintainer decision): the decoder holds one decoded frame
+# and streams the answers, so memory follows the picture and not the number of sizes asked: an
+# 8K (7680x4320) JPEG, PNG or AVIF peaks at 230 to 265M and an 8K JXL at 445M, a 100 MP
+# (12000x8000) JPEG at 651M. Time follows the sizes: that JPEG takes 3.0 s for one 8K size and
+# 11.6 s for the 8 sizes of a request's maximum. The worst case with a margin of 1.5 is 1G and
+# 18 s.
+RuntimeMaxSec=18
+MemoryMax=1G
 MemorySwapMax=0
 TimeoutStopSec=1
 # The image branch: glycin starts bubblewrap, which needs user namespaces, netlink and the
