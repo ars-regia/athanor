@@ -78,6 +78,7 @@ async fn within<T>(limit: Duration, call: impl std::future::Future<Output = zbus
 struct Logind<'a>(&'a Connection);
 
 impl Logind<'_> {
+    /// A query to logind, bounded by `ASK`. Never a state-changing call: see `Power::reboot`.
     async fn call<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, method: &str, body: &B) -> zbus::Result<zbus::Message> {
         within(ASK, self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body)).await
     }
@@ -199,7 +200,9 @@ impl Power for Logind<'_> {
 
     async fn reboot(&self) -> Result<(), RebootError> {
         // Reboot(interactive = false). Never RebootWithFlags: flag 16 skips the inhibitors.
-        match self.call("Reboot", &(false,)).await {
+        // Not bounded by ASK: Reboot changes state, and a reply later than ASK would be reported
+        // as a failure while the machine reboots anyway. Only the queries above are bounded.
+        match self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), "Reboot", &(false,)).await {
             Ok(_) => Ok(()),
             Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.login1.BlockedByInhibitorLock" => Err(RebootError::Blocked),
             Err(err) => {
