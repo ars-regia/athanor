@@ -39,6 +39,13 @@ const VERSION: u32 = 4;
 /// The scales a configuration may set, as `--scale` takes them.
 const SCALES: std::ops::RangeInclusive<f64> = 1.0..=4.0;
 
+/// How far from the origin a configuration may place an output, on either axis. A mode is at
+/// most 65535 pixels a side (DRM's `u16`), so a corner is within 2^24 + 2^16; the space adds
+/// and doubles such sums (centring, overlaps, the bounding box of every output) and the
+/// renderer scales them by up to 4, which stays far below `i32::MAX`, 2^31 - 1, where an
+/// overflow would abort the session.
+const REACH: i32 = 1 << 24;
+
 /// The user data of the global and of every object of the protocol but the modes.
 pub struct Heads;
 
@@ -681,6 +688,13 @@ impl Change {
             return None;
         }
         if self.scale.is_some_and(|scale| !SCALES.contains(&scale)) {
+            return None;
+        }
+        let reach = -REACH..=REACH;
+        if self
+            .position
+            .is_some_and(|at| !reach.contains(&at.x) || !reach.contains(&at.y))
+        {
             return None;
         }
         Some(Wanted {

@@ -215,7 +215,8 @@ after it. Only the lock and the input method's own release end it.
 heads, enabled or disabled, with their modes, position, transform, scale and adaptive sync,
 and configurations that set any of them (doc_session_daemons.md SD23). One the outputs cannot
 take, or one that leaves no output enabled, fails and changes nothing: a mode the monitor does
-not offer, a scale outside 1 to 4, adaptive sync on a monitor without it, and on the nested
+not offer, a scale outside 1 to 4, a position more than 2^24 from the origin, adaptive sync on
+a monitor without it, and on the nested
 output another transform, since its transform rights the backend's frame, another mode,
 adaptive sync or a disable. Every head is checked before anything is applied,
 and a step the GPU refuses halfway undoes the steps taken. A disabled output leaves the space

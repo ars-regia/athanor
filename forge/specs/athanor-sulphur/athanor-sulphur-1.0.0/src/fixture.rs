@@ -7171,6 +7171,33 @@ fn sd23_a_configuration_places_an_output() {
     run.stop();
 }
 
+/// A configuration placing an output beyond the reach of the space's arithmetic fails, on
+/// either axis and with either sign, and the output keeps its place (SD23): a sum past
+/// `i32::MAX` would abort the session.
+#[test]
+fn sd23_a_configuration_placing_an_output_out_of_reach_fails() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+    let before = run.state.space.output_geometry(&second).expect("mapped");
+
+    for (x, y) in [(i32::MAX, 0), (0, i32::MAX), (i32::MIN, 0), (0, i32::MIN)] {
+        let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
+            head.set_position(x, y)
+        });
+        assert_eq!(placed, "failed", "placed at ({x}, {y})");
+        assert_eq!(run.state.space.output_geometry(&second), Some(before));
+    }
+    run.stop();
+}
+
 /// A configuration disables an output and enables it again (SD23): disabled, it leaves the
 /// space and its wl_output global goes, and its head stays, reported disabled; enabled, it
 /// comes back with a new global, and its head is reported enabled with its mode.
