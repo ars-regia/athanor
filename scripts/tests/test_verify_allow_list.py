@@ -880,6 +880,30 @@ class AllowList(unittest.TestCase):
                 self.assertEqual(len(out), 1, out)
                 self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
+    def test_a_call_counts_in_a_crate_that_reaches_its_owner_through_another(self):
+        # Z gets a Client through Y, which depends on athanor-sulphur-client, and watches the
+        # windows: Z lists neither the owner nor needs to (maintainer decision, 2026-11-07).
+        self.client()
+        self.write(
+            "system/athanor-mid/Cargo.toml",
+            '[package]\nname = "athanor-mid"\n[dependencies]\n'
+            'athanor-sulphur-client = { path = "../athanor-sulphur-client" }\n',
+        )
+        self.write(
+            "system/athanor-mid/src/lib.rs",
+            "pub use athanor_sulphur_client::Client;\n",
+        )
+        manifest = '[dependencies]\nathanor-mid = { path = "../../../../system/athanor-mid" }\n'
+        self.package(
+            "athanor-dock",
+            manifest,
+            {"src/main.rs": "use athanor_mid::Client;\nfn f(c: Client) { c.watch_windows(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-dock athanor-dock.service ext_foreign_toplevel_list_v1\n")
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("athanor_toplevel_manager_v1", out[0])
+
     def test_sal_names_no_top_or_overlay_layer_for_its_clients(self):
         # The tree itself: a default layer of Sal's, or any top or overlay variant in its
         # production code, would ask for that layer for every Sal client, the wallpaper's

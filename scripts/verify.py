@@ -2784,14 +2784,20 @@ def path_dependencies(crate, manifest, root):
 
 
 def depends_on(root, where, owner):
-    """Whether the crate of `where`, a file relative to `root`, has the crate at `owner`, relative
-    to `root` too, among the path dependencies of its Cargo.toml, under any name."""
+    """Whether the crate of `where`, a file relative to `root`, reaches the crate at `owner`,
+    relative to `root` too, through the path dependencies of its Cargo.toml, under any name,
+    directly or through the dependencies of those."""
     root = root.resolve()
     crate = next((d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None)
-    if crate is None:
-        return False
-    manifest = tomllib.loads(read(crate / "Cargo.toml"))
-    return any(dep == (root / owner).resolve() for _, _, dep in path_dependencies(crate, manifest, root))
+    seen, todo = set(), [crate] if crate else []
+    while todo:
+        crate = todo.pop()
+        if crate in seen:
+            continue
+        seen.add(crate)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        todo += [dep for _, _, dep in path_dependencies(crate, manifest, root)]
+    return (root / owner).resolve() in seen
 
 
 def target_files(crate, entry, features, defaults, root):
