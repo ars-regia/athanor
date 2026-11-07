@@ -1,0 +1,45 @@
+[Unit]
+Description=Athanor session services
+# A guard (doc_session.md, SN6): it restarts for as long as the session lasts. It has no
+# Wayland connection, so it has no edge on the readiness gate (SN3, SD17).
+After=graphical-session.target
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+# Ready once confined (SD17), before the reset of COSMIC's appearance values, which never
+# holds the readiness (SD16, maintainer decision, 2026-11-07).
+Type=notify
+ExecStart=/usr/bin/athanor-sessiond
+Restart=always
+RestartSec=100ms
+RestartSteps=5
+RestartMaxDelaySec=30s
+Slice=session.slice
+
+# GSettings maps dconf's shared-memory flag beneath %t/dconf read-write to learn that a key
+# changed, as athanor-idle.service explains; Landlock grants the same path (SD17). Private,
+# as the grant requires (athanor_unit::dirs::private_dir), and kept at a stop, since dconf's
+# other clients share it.
+RuntimeDirectory=dconf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Both D-Buses and journald, all over Unix sockets.
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=athanor-session.target

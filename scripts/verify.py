@@ -4314,6 +4314,7 @@ SESSION_UNITS = {
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
     "athanor-update-notify.service": ("surface", False, "preset"),
+    "athanor-sessiond.service": ("guard", False, "preset"),
     # SN6 names no class for the Super+C oneshot (doc_control_center.md, CC9); it runs once
     # per login and never restarts, as a session step does.
     "athanor-control-center-shortcut.service": ("step", False, "preset"),
@@ -4321,7 +4322,6 @@ SESSION_UNITS = {
     "xdg-desktop-portal-athanor.service": ("helper", True, "activated"),
     "athanor-desktop.service": ("step", False, "target"),
     "athanor-skel-sync.service": ("step", False, "target"),
-    "athanor-appearance-reset.service": ("step", False, "preset"),
     "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
