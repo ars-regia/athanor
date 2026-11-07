@@ -220,8 +220,8 @@ output another transform, since its transform rights the backend's frame, anothe
 adaptive sync or a disable. Every head is checked before anything is applied,
 and a step the GPU refuses halfway undoes the steps taken. A disabled output leaves the space
 and its `wl_output` global goes, and its lock surface is forgotten: enabled again while locked,
-it shows the background until the locker gives it a new one; its head offers the modes its
-monitor has now, which change while it is disabled. An applied configuration is sent
+it shows the background until the locker gives it a new one; while it is disabled its head
+still follows the modes its monitor offers. An applied configuration is sent
 to every manager. Positions are taken as given, overlapping or apart; an output a configuration
 gives no position keeps its own, and one enabled again goes to the right of the others. A
 monitor whose modes change while it stays plugged in keeps its place, and the mode it shows
