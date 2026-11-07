@@ -406,16 +406,20 @@ fn run_on(
             |app, surface| app.shell.ui(surface).is_some(),
             |app, surface| app.application.drawn(&mut app.shell, surface),
         );
-        // A surface that an earlier `settled` of this batch moved again is not reported settled.
+        // A surface that an earlier `settled` of this batch moved again is not reported settled
+        // here: a running motion settles later, and an instantaneous one is queued anew for the
+        // next turn.
         let settled = std::mem::take(&mut app.shell.settled);
         each_open(
             &mut app,
             settled,
             |app, surface| {
-                app.shell
-                    .surfaces
-                    .iter()
-                    .any(|s| s.id == surface && s.motion.is_none())
+                !app.shell.settled.contains(&surface)
+                    && app
+                        .shell
+                        .surfaces
+                        .iter()
+                        .any(|s| s.id == surface && s.motion.is_none())
             },
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
