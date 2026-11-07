@@ -146,15 +146,29 @@ def only_adds_members(path, old, new):
     except tomllib.TOMLDecodeError:
         return False
     if path == "Cargo.toml":
+        if not all(isinstance(text.get("workspace", {}), dict) for text in (old, new)):
+            return False
         before = old.get("workspace", {}).pop("members", [])
         after = new.get("workspace", {}).pop("members", [])
-        return set(before) <= set(after) and old == new
-    before, after = old.pop("package", []), new.pop("package", [])
+        # A glob adds every crate it matches, not one new crate.
+        added = [member for member in after if member not in before]
+        return (
+            set(before) <= set(after)
+            and not any(isinstance(m, str) and set(m) & set("*?[") for m in added)
+            and canonical(old) == canonical(new)
+        )
+    before = {canonical(package) for package in old.pop("package", [])}
+    after = new.pop("package", [])
     return (
-        old == new
-        and all(package in after for package in before)
-        and all("source" not in package for package in after if package not in before)
+        canonical(old) == canonical(new)
+        and before <= {canonical(package) for package in after}
+        and all("source" not in package for package in after if canonical(package) not in before)
     )
+
+
+def canonical(value):
+    """value as text that tells apart what == does not: true from 1, 1 from 1.0."""
+    return json.dumps(value, sort_keys=True, default=str)
 
 
 def classify(changed, members_only=()):
@@ -199,7 +213,10 @@ def show(cwd, rev, path):
         encoding="utf-8",
         errors="surrogateescape",
     )
-    return done.stdout if done.returncode == 0 else None
+    if done.returncode != 0:
+        print(f"changes: no {path} at {rev[:12]}: {done.stderr.strip()}")
+        return None
+    return done.stdout
 
 
 def main(base, out, cwd=".", event="pull_request"):

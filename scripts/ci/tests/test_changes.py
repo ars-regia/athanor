@@ -167,6 +167,9 @@ class OnlyAddsMembersTest(unittest.TestCase):
             MANIFEST.replace('"2"', '"3"'),
             MANIFEST + '[workspace.dependencies]\nlibc = "0.2"\n',
             MANIFEST + "[profile.release]\nlto = true\n",
+            MANIFEST.replace('["system/a"]', '["system/a", "system/*"]'),
+            '[workspace]\nresolver = "2"\nmembers = ["system/a"]\n[profile.release]\ndebug = 1\n',
+            'workspace = "x"\n',
             "not toml [",
         ):
             with self.subTest(new=new):
@@ -183,6 +186,13 @@ class OnlyAddsMembersTest(unittest.TestCase):
         ):
             with self.subTest(new=new):
                 self.assertFalse(changes.only_adds_members("Cargo.lock", LOCK, new))
+
+    def test_a_changed_type_is_a_change(self):
+        # Python's == takes true for 1 and 1 for 1.0; cargo does not.
+        old = MANIFEST + "[profile.release]\ndebug = true\n"
+        self.assertFalse(changes.only_adds_members("Cargo.toml", old, old.replace("true", "1")))
+        lock = LOCK + '\n[[package]]\nname = "c"\nversion = "0.1.0"\nn = 1\n'
+        self.assertFalse(changes.only_adds_members("Cargo.lock", lock, lock.replace("n = 1", "n = 1.0")))
 
     def test_a_members_only_file_selects_the_audit_but_not_the_shell(self):
         self.assertEqual(
@@ -278,6 +288,16 @@ class MainTest(unittest.TestCase):
         (self.root / "Cargo.toml").write_text(MANIFEST)
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "workspace")
+        out = self.root / "out" / "changes.json"
+        changes.main("HEAD^1", str(out), cwd=self.root)
+        self.assertTrue(json.loads(out.read_text())["shell"])
+
+    def test_a_deleted_root_lock_selects_the_shell(self):
+        (self.root / "Cargo.lock").write_text(LOCK)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "lock")
+        self.git("rm", "-q", "Cargo.lock")
+        self.git("commit", "-q", "-m", "drop")
         out = self.root / "out" / "changes.json"
         changes.main("HEAD^1", str(out), cwd=self.root)
         self.assertTrue(json.loads(out.read_text())["shell"])
