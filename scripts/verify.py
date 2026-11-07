@@ -3624,13 +3624,18 @@ def check_gpu_grants():
     return r
 
 
-# landlock::PathFd opens a path following links: a write grant built from it widens to
-# wherever a link put at the path points (#1052). athanor_unit::sandbox takes its write grants
-# as dirs::Checked, which only athanor_unit::dirs builds, so the type holds that rule; this
-# check keeps PathFd itself, under any name a `use ... as` gives it, out of every other file.
-# athanor_unit::sandbox keeps it for its read grants.
+# landlock::PathFd opens a path following links, and a ruleset can name any descriptor: a
+# write grant built from either widens to wherever a link put at the path points (#1052).
+# athanor_unit::sandbox takes its write grants as dirs::Checked, which only athanor_unit::dirs
+# builds. This check holds the rest: no crate but athanor-unit and the pending ones depends on
+# the landlock crate, so every other one confines through athanor_unit::sandbox; no Rust file
+# outside those crates' rulesets names PathFd, under any name a `use ... as` gives it; and in
+# athanor_unit's sandbox.rs, PathFd appears only in its import and as the parent of a read grant.
 LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
+LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\(")
+LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
 # Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
 # user namespace where the system's nodes are owned by nobody, and the chooser grants the
 # target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
@@ -3639,23 +3644,60 @@ LANDLOCK_PATH_PENDING = (
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
     "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
 )
+LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
+
+
+def landlock_dependencies(manifest):
+    """The dependency tables of a Cargo manifest that name the landlock crate, by its own
+    name or as the `package` of a renamed one."""
+    tables = {name: manifest.get(name, {}) for name in ("dependencies", "dev-dependencies", "build-dependencies")}
+    for target, spec in manifest.get("target", {}).items():
+        for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            tables[f"target.{target}.{name}"] = spec.get(name, {})
+    return [table for table, deps in tables.items()
+            if any(name == "landlock" or (isinstance(dep, dict) and dep.get("package") == "landlock")
+                   for name, dep in deps.items())]
 
 
 def landlock_fd_problems(root):
-    """The token PathFd, comments and strings included, in no Rust file but athanor_unit's
-    sandbox.rs and the pending ones: no Landlock write grant is built from a path."""
+    """No crate but athanor-unit and the pending ones depends on landlock; no Rust file but
+    their rulesets names PathFd; athanor_unit's sandbox.rs names it only in its import and as
+    the parent of a read grant. So a Landlock write grant is never built from a path."""
     root = Path(root)
     problems = []
     for base in RS_DIRS:
+        for path in sorted(walk(root / base, "Cargo.toml")):
+            relative = path.relative_to(root).as_posix()
+            if path.name != "Cargo.toml" or relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+                continue
+            try:
+                manifest = tomllib.loads(read(path))
+            except tomllib.TOMLDecodeError as err:
+                problems.append(f"{relative}: not valid TOML: {err}")
+                continue
+            for table in landlock_dependencies(manifest):
+                problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
+                                f"athanor_unit::sandbox, whose grants are dirs::Checked")
         for path in sorted(walk(root / base, ".rs")):
             relative = path.relative_to(root).as_posix()
-            if relative == LANDLOCK_SANDBOX or relative in LANDLOCK_PATH_PENDING:
+            if relative in LANDLOCK_PATH_PENDING:
                 continue
             text = read(path)
+            allowed = []
+            if relative == LANDLOCK_SANDBOX:
+                allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
+                allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
+                            if not re.search(r"\bPathFd\s+as\b", match.group())]
             for match in PATH_FD.finditer(text):
+                if any(start <= match.start() < end for start, end in allowed):
+                    continue
                 line = text.count("\n", 0, match.start()) + 1
-                problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
-                                f"links; grant by an athanor_unit::dirs::Checked descriptor")
+                if relative == LANDLOCK_SANDBOX:
+                    problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
+                                    f"grant; a write grant is a dirs::Checked descriptor")
+                else:
+                    problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
+                                    f"links; grant by an athanor_unit::dirs::Checked descriptor")
     return problems
 
 

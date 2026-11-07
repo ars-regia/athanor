@@ -12,6 +12,18 @@ verify = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify)
 
 GRANT = "ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, writes))?;\n"
+READ_GRANT = """use landlock::{
+    AccessFs, PathBeneath, PathFd, Ruleset,
+};
+
+    for path in read {
+        ruleset = ruleset.add_rule(PathBeneath::new(
+            PathFd::new(path)?,
+            AccessFs::from_read(ABI::V1),
+        ))?;
+    }
+"""
+LANDLOCK = '[dependencies]\nlandlock = { workspace = true }\n'
 
 
 def problems(files):
@@ -24,9 +36,29 @@ def problems(files):
 
 
 class LandlockFdTest(unittest.TestCase):
-    def test_the_shared_sandbox_and_the_pending_rulesets_pass(self):
-        files = {name: GRANT for name in (verify.LANDLOCK_SANDBOX, *verify.LANDLOCK_PATH_PENDING)}
-        self.assertEqual(problems(files), [])
+    def test_the_pending_rulesets_pass(self):
+        self.assertEqual(problems({name: GRANT for name in verify.LANDLOCK_PATH_PENDING}), [])
+
+    def test_the_shared_sandbox_reads_through_path_fd_and_never_writes(self):
+        self.assertEqual(problems({verify.LANDLOCK_SANDBOX: READ_GRANT}), [])
+        found = problems({verify.LANDLOCK_SANDBOX: READ_GRANT + GRANT})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("sandbox.rs:11: PathFd other than the parent of a read grant", found[0])
+
+    def test_an_alias_in_the_shared_sandbox_is_refused(self):
+        code = "use landlock::{PathFd as Fd, AccessFs};\n"
+        self.assertEqual(len(problems({verify.LANDLOCK_SANDBOX: code})), 1)
+
+    def test_only_athanor_unit_and_the_pending_crates_depend_on_landlock(self):
+        allowed = {name: LANDLOCK for name in (verify.LANDLOCK_CRATE, *verify.LANDLOCK_CRATES_PENDING)}
+        self.assertEqual(problems(allowed), [])
+        found = problems({"forge/specs/athanor-dock/athanor-dock-1.0.0/Cargo.toml": LANDLOCK,
+                          "system/athanor-idle/Cargo.toml":
+                              '[target.\'cfg(unix)\'.dev-dependencies]\nll = { package = "landlock" }\n'})
+        self.assertEqual(len(found), 2, found)
+        self.assertTrue(any("athanor-dock-1.0.0/Cargo.toml: [dependencies] names the landlock crate"
+                            in problem for problem in found), found)
+        self.assertTrue(any("[target.cfg(unix).dev-dependencies]" in problem for problem in found), found)
 
     def test_path_fd_anywhere_else_is_reported(self):
         found = problems({"forge/specs/athanor-dock/src/start.rs": GRANT,
