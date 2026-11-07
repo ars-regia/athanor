@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-shelld
 Version:        1.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
 License:        GPL-3.0-or-later
 
@@ -39,6 +39,11 @@ done
 /usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-4
+- The system bus connection of the bar's admission is built under 2 s at start and again, within
+  the same bound, by the admission that finds it missing or closed; the daemon starts without
+  it and refuses the private interface until it answers (issue #1047).
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
 - The bar's private interface admits the main process of athanor-bar.service as the user's
   systemd, verified by the system's, tells it (issue #1047), no longer the caller's cgroup

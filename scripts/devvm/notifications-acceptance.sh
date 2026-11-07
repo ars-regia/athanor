@@ -152,6 +152,10 @@ stage_deploy() {
 }
 
 # The real daemon admits the real unit: the rig cannot show this (plan ruling 10).
+# Since issue #1047 the daemon admits only the unit as the image ships it, verified through
+# systemd (doc_bar.md BR1), so this stage is refused on the private bus: the drop-ins under
+# ~/.config are outside /usr/lib/systemd/user, and the user manager is not on that bus to be
+# vouched for. Running the bar as the real unit needs the real session bus, which COSMIC owns.
 stage_admitted() {
     local since
     since=$(in_session date +%s)

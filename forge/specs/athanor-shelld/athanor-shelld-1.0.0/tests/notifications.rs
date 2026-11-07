@@ -497,7 +497,7 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
         bus.builder(),
         athanor_shelld::server::Config {
             state_dir: bus.dir.join("state"),
-            system: None,
+            system_address: None,
         },
     )
     .await;
@@ -522,4 +522,57 @@ async fn a_query_the_bus_never_answers_refuses_the_call_instead_of_hanging() {
     .expect("the call must be answered, not left waiting")
     .expect_err("refused");
     assert!(err.to_string().contains("AccessDenied"), "{err}");
+}
+
+#[tokio::test]
+async fn without_a_system_bus_the_private_interface_refuses_and_the_rest_serves() {
+    let bus = Bus::start("nosystem");
+    let _daemon = bus
+        .daemon_on(BAR, &bus, Some(Bus::planned_address("nosystem-none")))
+        .await;
+    let client = bus.client().await;
+    let err = private(&client)
+        .await
+        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .await
+        .expect_err("refused");
+    assert!(err.to_string().contains("AccessDenied"), "{err}");
+    let (caps,): (Vec<String>,) = public(&client)
+        .await
+        .call("GetCapabilities", &())
+        .await
+        .expect("capabilities");
+    assert!(!caps.is_empty());
+    let items: Vec<String> = zbus::Proxy::new(
+        &client,
+        "org.kde.StatusNotifierWatcher",
+        "/StatusNotifierWatcher",
+        "org.kde.StatusNotifierWatcher",
+    )
+    .await
+    .expect("watcher")
+    .get_property("RegisteredStatusNotifierItems")
+    .await
+    .expect("the watcher answers");
+    assert!(items.is_empty());
+}
+
+#[tokio::test]
+async fn a_system_bus_that_appears_later_admits_the_bar_without_a_restart() {
+    let bus = Bus::start("late-user");
+    let _daemon = bus
+        .daemon_on(BAR, &bus, Some(Bus::planned_address("late-user-system")))
+        .await;
+    let proxy = private(&bus.client().await).await;
+    let refused = proxy
+        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .await
+        .expect_err("no system bus yet");
+    assert!(refused.to_string().contains("AccessDenied"), "{refused}");
+    let system_bus = Bus::start("late-user-system");
+    let _systemd = system_bus.systemd_for(&bus).await;
+    proxy
+        .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
+        .await
+        .expect("admitted once the system bus answers");
 }

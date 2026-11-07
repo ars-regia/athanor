@@ -73,10 +73,19 @@ impl Bus {
 
     /// As `daemon`, but its query connection is on `query`'s bus.
     pub async fn daemon_asking(&self, unit: &str, query: &Bus) -> Daemon {
-        let pid = process::id();
-        let systemd = fake_systemd(self, unit, pid).await;
         let system_bus = Bus::start(&format!("{}-system", self.name));
-        let system = fake_systemd(&system_bus, &user_service(self), pid).await;
+        let system = fake_systemd(&system_bus, &user_service(self), process::id()).await;
+        let mut daemon = self
+            .daemon_on(unit, query, Some(system_bus.address.clone()))
+            .await;
+        daemon._systemd.push(system);
+        daemon._system_bus = Some(system_bus);
+        daemon
+    }
+
+    /// As `daemon`, but the system bus is at `address`, which may answer nothing yet.
+    pub async fn daemon_on(&self, unit: &str, query: &Bus, address: Option<String>) -> Daemon {
+        let systemd = fake_systemd(self, unit, process::id()).await;
         let state_dir = self.dir.join("state");
         fs::create_dir_all(&state_dir).expect("state dir");
         let connection = server::start(
@@ -84,24 +93,35 @@ impl Bus {
             query.builder(),
             Config {
                 state_dir,
-                system: Some(system_bus.client().await),
+                system_address: address,
             },
         )
         .await
         .expect("daemon");
         Daemon {
             _connection: connection,
-            _systemd: [systemd, system],
-            _system_bus: system_bus,
+            _systemd: vec![systemd],
+            _system_bus: None,
         }
+    }
+
+    /// The address `Bus::start(name)` will listen on, before it does.
+    pub fn planned_address(name: &str) -> String {
+        let dir = env::temp_dir().join(format!("athanor-shelld-{name}-{}", process::id()));
+        format!("unix:path={}", dir.join("bus").display())
+    }
+
+    /// Gives the system bus the user's and the system's systemd, as `daemon` does.
+    pub async fn systemd_for(&self, user_bus: &Bus) -> Connection {
+        fake_systemd(self, &user_service(user_bus), process::id()).await
     }
 }
 
 /// A running daemon and the fakes it asks; dropped together.
 pub struct Daemon {
     _connection: Connection,
-    _systemd: [Connection; 2],
-    _system_bus: Bus,
+    pub _systemd: Vec<Connection>,
+    _system_bus: Option<Bus>,
 }
 
 impl Drop for Bus {
