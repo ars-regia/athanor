@@ -16,7 +16,11 @@ Slice=session.slice
 # create that directory itself, and would then never see a change: systemd creates it before
 # the start, writable for this unit, and keeps it at the stop because every GSettings client
 # of the session shares it. Landlock grants the same path and no other (main.rs).
+# Mode 0700, as every unit that declares it: systemd applies a unit's mode at each start, and
+# athanor-idle, athanor-sessiond and athanor-osd grant the directory only while it is 0700
+# (athanor_unit::dirs::private_dir).
 RuntimeDirectory=dconf
+RuntimeDirectoryMode=0700
 RuntimeDirectoryPreserve=yes
 
 ProtectSystem=strict
