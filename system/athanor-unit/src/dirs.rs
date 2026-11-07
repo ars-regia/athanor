@@ -2,7 +2,50 @@
 //! empty value counts as unset (XDG Base Directory Specification).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::fs;
+use std::io;
+use std::os::fd::OwnedFd;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
+use nix::fcntl::OFlag;
+
+/// `runtime/name`, created with mode 0700 if missing, opened once without following a link and
+/// checked on that descriptor: a directory, owned by the owner of `runtime`, of mode 0700.
+/// Another process of the user could otherwise point a confined daemon's writes elsewhere. The
+/// descriptor is what a Landlock grant names (`sandbox::restrict`): a link swapped in for the
+/// path after the check widens nothing.
+pub fn private_dir(runtime: &Path, name: &str) -> io::Result<OwnedFd> {
+    let dir = runtime.join(name);
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        _ => {}
+    }
+    let refuse = |why: String| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} {why}", dir.display()),
+        )
+    };
+    // std adds O_CLOEXEC.
+    let opened = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlag::O_PATH | OFlag::O_NOFOLLOW | OFlag::O_DIRECTORY).bits())
+        .open(&dir)
+        .map_err(|e| refuse(format!("is not a directory, or is a link: {e}")))?;
+    let owner = fs::metadata(runtime)?.uid();
+    let found = opened.metadata()?;
+    if !found.file_type().is_dir() {
+        return Err(refuse("is not a directory".to_owned()));
+    }
+    if found.uid() != owner {
+        return Err(refuse("is not owned by the user".to_owned()));
+    }
+    if found.permissions().mode() & 0o7777 != 0o700 {
+        return Err(refuse("does not have mode 0700".to_owned()));
+    }
+    Ok(opened.into())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dirs {
@@ -56,6 +99,74 @@ impl Dirs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sandbox;
+
+    fn runtime(name: &str) -> PathBuf {
+        let runtime =
+            std::env::temp_dir().join(format!("athanor-unit-{name}-{}", std::process::id()));
+        fs::remove_dir_all(&runtime).ok();
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&runtime)
+            .expect("runtime");
+        runtime
+    }
+
+    #[test]
+    fn a_private_dir_is_created_or_checked() {
+        let runtime = runtime("private");
+        let made = runtime.join("d");
+        private_dir(&runtime, "d").expect("created");
+        assert_eq!(
+            fs::metadata(&made).expect("made").permissions().mode() & 0o7777,
+            0o700
+        );
+        private_dir(&runtime, "d").expect("an existing one that passes");
+
+        fs::set_permissions(&made, fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert!(private_dir(&runtime, "d").is_err(), "mode 0755");
+        fs::remove_dir(&made).expect("rmdir");
+
+        fs::write(&made, b"").expect("file");
+        assert!(private_dir(&runtime, "d").is_err(), "a file");
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn a_link_swapped_in_after_creation_is_refused() {
+        let runtime = runtime("swapped");
+        private_dir(&runtime, "d").expect("created");
+        fs::rename(runtime.join("d"), runtime.join("moved")).expect("rename");
+        std::os::unix::fs::symlink(runtime.join("moved"), runtime.join("d")).expect("symlink");
+        let refused = private_dir(&runtime, "d").expect_err("a link to a good directory");
+        assert_eq!(refused.kind(), io::ErrorKind::PermissionDenied, "{refused}");
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn the_grant_follows_the_descriptor_not_the_path() {
+        let runtime = runtime("grant");
+        let checked = private_dir(&runtime, "d").expect("created");
+        // After the check, the path is swapped for a link to another directory of the user.
+        fs::rename(runtime.join("d"), runtime.join("moved")).expect("rename");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(runtime.join("elsewhere"))
+            .expect("elsewhere");
+        std::os::unix::fs::symlink(runtime.join("elsewhere"), runtime.join("d")).expect("symlink");
+        let thread_runtime = runtime.clone();
+        // Landlock binds the thread that applies it: the test's other threads stay free.
+        std::thread::spawn(move || {
+            sandbox::restrict(&[], &[checked]).expect("confined");
+            fs::write(thread_runtime.join("moved/file"), b"x").expect("the checked directory");
+            let error = fs::write(thread_runtime.join("d/file"), b"x").expect_err("the link");
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        })
+        .join()
+        .expect("the confined thread");
+        assert!(!runtime.join("elsewhere/file").exists());
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
 
     fn vars<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |name| {
