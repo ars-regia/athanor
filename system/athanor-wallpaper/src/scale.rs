@@ -91,7 +91,12 @@ pub fn write_zoomed(
 mod tests {
     use super::*;
 
-    fn zoomed(pixels: &[u8], stride: usize, image: (u32, u32), size: (u32, u32)) -> Option<Vec<u8>> {
+    fn zoomed(
+        pixels: &[u8],
+        stride: usize,
+        image: (u32, u32),
+        size: (u32, u32),
+    ) -> Option<Vec<u8>> {
         let mut out = Vec::new();
         write_zoomed(pixels, stride, image, size, &mut out).ok()?;
         Some(out)

@@ -275,5 +275,4 @@ mod tests {
         );
         assert!(matches!(refused, Err(Refused::NoPidfd(_))), "{refused:?}");
     }
-
 }
