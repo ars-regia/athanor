@@ -292,7 +292,7 @@ Status: **revision 3 (2026-11-06), approved by the maintainer with the pull requ
   - `org.gnome.desktop.wm.preferences button-layout` is kept as a user value: the daemon copied the user's own COSMIC choice into it.
   - The rule is idempotent, so it needs no `migrated` key, and none is added for `athanor-sessiond`. A failing read or reset is logged to the journal and leaves the unit failed; the login goes on.
   - Accepted risk: a user who deliberately chooses exactly `Open Sans` as the interface font or `Noto Sans Mono` as the monospace font sees it reset at the next login.
-  - At SD22 step 3 the reset moves into `athanor-sessiond`, with the same rule at each of its starts, and the unit leaves. The reset goes through the dconf service on the bus, so SD17's "writes nothing" holds.
+  - At SD22 step 3 the reset moves into `athanor-sessiond`, with the same rule at each of its starts, and the unit leaves. The reset goes through the dconf service on the bus, so the daemon writes no setting itself; its only writes are those SD17 grants it, its crash reports and dconf's shared-memory flag beneath `$XDG_RUNTIME_DIR/dconf` (maintainer decision, 2026-11-07).
 
 **SD17. The daemons' own confinement.**
 
@@ -508,7 +508,7 @@ Taken by the maintainer on 2026-10-08, each as recommended in the review:
 
 Taken by the maintainer on 2026-10-08, accepting the recommendations of review batch 2 (ADR-0095):
 
-15. **Decision 15 (review batch 2, `doc_tetragon.md` decision 18, Q1). Runtime security events.** `athanor-sessiond` subscribes to `os.athanor.RuntimeEvents1` and raises the notices of `doc_tetragon.md` TG8; it needs no new filesystem access, so SD17's "reads only" holds.
+15. **Decision 15 (review batch 2, `doc_tetragon.md` decision 18, Q1). Runtime security events.** `athanor-sessiond` subscribes to `os.athanor.RuntimeEvents1` and raises the notices of `doc_tetragon.md` TG8; it needs no new filesystem access, so SD17's grants for `athanor-sessiond` hold unchanged: it reads, and writes only its crash reports and beneath `$XDG_RUNTIME_DIR/dconf` (maintainer decision, 2026-11-07).
 16. **Decision 16 (review batch 2, threat model Q5). A stale reference.** SD9's residual risk no longer cites the open doubt T2 of the threat model, which is decided.
 
 Taken by the maintainer on 2026-10-15 (#473):
