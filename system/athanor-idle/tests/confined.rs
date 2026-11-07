@@ -179,7 +179,11 @@ fn child() {
 
     let (dir, grants) =
         confine::daemon(&runtime, Some(&store), |name| std::env::var_os(name)).expect("grants");
-    assert_eq!(grants.write.len(), 2, "athanor-idle's and dconf's: {grants:?}");
+    assert_eq!(
+        grants.write.len(),
+        2,
+        "athanor-idle's and dconf's: {grants:?}"
+    );
     grants.apply().expect("confine");
     eprintln!("grants: {grants:?}");
 

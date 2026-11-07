@@ -178,15 +178,25 @@ mod tests {
         fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
         let made = runtime_dir(&runtime).unwrap();
         assert_eq!(made, runtime.join("athanor-idle"));
-        assert_eq!(fs::metadata(&made).unwrap().permissions().mode() & 0o7777, 0o700);
-        assert_eq!(runtime_dir(&runtime).unwrap(), made, "an existing one that passes");
+        assert_eq!(
+            fs::metadata(&made).unwrap().permissions().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            runtime_dir(&runtime).unwrap(),
+            made,
+            "an existing one that passes"
+        );
 
         fs::set_permissions(&made, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(runtime_dir(&runtime).is_err(), "mode 0755");
         fs::remove_dir(&made).unwrap();
 
         let elsewhere = runtime.join("elsewhere");
-        fs::DirBuilder::new().mode(0o700).create(&elsewhere).unwrap();
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&elsewhere)
+            .unwrap();
         std::os::unix::fs::symlink(&elsewhere, &made).unwrap();
         assert!(runtime_dir(&runtime).is_err(), "a link to a directory");
         fs::remove_file(&made).unwrap();

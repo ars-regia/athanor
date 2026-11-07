@@ -47,15 +47,13 @@ fn main() -> ExitCode {
     };
     // Before any GIO object and any thread: GLib's worker threads, zbus and Tokio are confined
     // from their first instruction (SD17).
-    let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| {
-            let (dir, grants) =
-                confine::daemon(&runtime, power_page::user_dir().as_deref(), |name| {
-                    std::env::var_os(name)
-                })?;
-            grants.apply()?;
-            Ok(dir)
-        });
+    let confined = sandbox::ensure_single_threaded().and_then(|()| {
+        let (dir, grants) = confine::daemon(&runtime, power_page::user_dir().as_deref(), |name| {
+            std::env::var_os(name)
+        })?;
+        grants.apply()?;
+        Ok(dir)
+    });
     let dir = match confined {
         Ok(dir) => dir,
         Err(error) => {

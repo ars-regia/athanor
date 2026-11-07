@@ -362,7 +362,10 @@ mod tests {
         assert!(told(&mut follow, Key::Absent), "absent is another state");
         assert!(!told(&mut follow, Key::Absent));
         assert!(!told(&mut follow, Key::Never), "a valid read is no skip");
-        assert!(told(&mut follow, Key::Absent), "skipped again after a valid read");
+        assert!(
+            told(&mut follow, Key::Absent),
+            "skipped again after a valid read"
+        );
         // A key skipped at start is not told again while it stays so.
         let mut follow = Follow::start(&blank(Key::Absent));
         assert!(!told(&mut follow, Key::Absent));
