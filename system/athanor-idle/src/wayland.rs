@@ -88,6 +88,10 @@ struct Overlay {
     size: Option<(i32, i32)>,
     /// A frame callback is pending.
     frame: bool,
+    /// The buffer last attached. Each draw destroys the one before, released or not, so a
+    /// compositor that never sends `release` cannot make them grow: a single-pixel buffer has
+    /// no storage the compositor could still be reading.
+    buffer: Option<wl_buffer::WlBuffer>,
 }
 
 impl Overlay {
@@ -95,6 +99,9 @@ impl Overlay {
         self.viewport.destroy();
         self.layer.destroy();
         self.surface.destroy();
+        if let Some(buffer) = self.buffer {
+            buffer.destroy();
+        }
     }
 }
 
@@ -196,6 +203,7 @@ impl State {
             viewport,
             size: None,
             frame: false,
+            buffer: None,
         })
     }
 
@@ -218,6 +226,9 @@ impl State {
             overlay.frame = true;
         }
         overlay.surface.commit();
+        if let Some(old) = overlay.buffer.replace(buffer) {
+            old.destroy();
+        }
     }
 
     fn set_power(&self, output: &Output) {
@@ -574,22 +585,6 @@ impl Dispatch<wl_callback::WlCallback, wl_surface::WlSurface> for State {
     }
 }
 
-impl Dispatch<wl_buffer::WlBuffer, ()> for State {
-    fn event(
-        _: &mut Self,
-        buffer: &wl_buffer::WlBuffer,
-        event: wl_buffer::Event,
-        _: &(),
-        _: &Connection,
-        _: &QueueHandle<Self>,
-    ) {
-        // Each draw makes a buffer of its own; the compositor is done with this one.
-        if let wl_buffer::Event::Release = event {
-            buffer.destroy();
-        }
-    }
-}
-
 impl Dispatch<zwlr_output_power_v1::ZwlrOutputPowerV1, ()> for State {
     fn event(
         state: &mut Self,
@@ -615,6 +610,8 @@ wayland_client::delegate_noop!(State: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(State: ignore wl_seat::WlSeat);
 wayland_client::delegate_noop!(State: ignore wl_output::WlOutput);
 wayland_client::delegate_noop!(State: ignore wl_surface::WlSurface);
+// `release`: the next draw or the overlay's removal destroys the buffer (`Overlay::buffer`).
+wayland_client::delegate_noop!(State: ignore wl_buffer::WlBuffer);
 wayland_client::delegate_noop!(State: wl_region::WlRegion);
 wayland_client::delegate_noop!(State: ext_idle_notifier_v1::ExtIdleNotifierV1);
 wayland_client::delegate_noop!(State: zwlr_layer_shell_v1::ZwlrLayerShellV1);
