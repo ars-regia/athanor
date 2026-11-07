@@ -75,8 +75,13 @@ pub struct Wallpaper {
     /// The pictures waiting out their back-off after a fault of the decoder.
     waiting: HashSet<PathBuf>,
     /// The pictures, the hearth never, that met a second fault: they show the hearth until an
-    /// output or the keys change.
+    /// output or the keys change, or once until then, a decode succeeds.
     stalled: HashSet<PathBuf>,
+    /// The pictures a decode's success has taken out of `stalled` once since an output or the
+    /// keys last changed: a second stall keeps them there until the next change.
+    released: HashSet<PathBuf>,
+    /// The hearth's path for a colour scheme; tests point it elsewhere.
+    hearth: fn(ColorScheme) -> PathBuf,
     /// The faults of each picture since it last decoded.
     faults: HashMap<PathBuf, u32>,
     /// The invalid value last logged for each connector.
@@ -104,6 +109,8 @@ impl Wallpaper {
             failed: HashSet::new(),
             waiting: HashSet::new(),
             stalled: HashSet::new(),
+            released: HashSet::new(),
+            hearth: hearth_path,
             faults: HashMap::new(),
             invalid: HashMap::new(),
             placeholder,
@@ -129,7 +136,7 @@ impl Wallpaper {
         }
         let path = match self.settings.source_for(connector) {
             Source::Path(path) if !self.held(&path) => path,
-            _ => hearth_path(self.scheme),
+            _ => (self.hearth)(self.scheme),
         };
         (path, size)
     }
@@ -176,6 +183,7 @@ impl Wallpaper {
             (self.settings, self.scheme) = (self.read)();
             self.failed.clear();
             self.stalled.clear();
+            self.released.clear();
             self.faults.clear();
         }
         for path in inbox.retry {
@@ -190,8 +198,10 @@ impl Wallpaper {
                 Ok(frames) => match images(frames) {
                     Ok(images) => {
                         self.faults.remove(&path);
-                        // The decoder works again: each stalled picture gets one more attempt.
-                        self.stalled.clear();
+                        // The decoder works again: each stalled picture gets one more attempt,
+                        // once until the next change.
+                        self.stalled
+                            .retain(|stalled| !self.released.insert(stalled.clone()));
                         for (size, image) in images {
                             self.cache.insert((path.clone(), size), image);
                         }
@@ -209,8 +219,16 @@ impl Wallpaper {
                 .iter()
                 .map(|(id, connector, size)| (*id, self.picture_for(connector, *size)))
                 .collect();
-            self.cache
-                .retain(|key, _| wants.iter().any(|(_, k)| k == key));
+            // While a picture has faulted, its outputs may turn back to the hearth: the hearth
+            // stays decoded at the sizes the outputs have.
+            let hearth = (self.hearth)(self.scheme);
+            let faulted = !self.faults.is_empty();
+            self.cache.retain(|key, _| {
+                wants.iter().any(|(_, k)| k == key)
+                    || (faulted
+                        && key.0 == hearth
+                        && targets.iter().any(|(_, _, size)| *size == key.1))
+            });
             let missing = wants.iter().map(|(_, key)| key.clone()).filter(|key| {
                 !self.cache.contains_key(key) && !self.in_flight.contains(key) && !self.held(&key.0)
             });
@@ -253,7 +271,7 @@ impl Wallpaper {
     }
 
     fn fail(&mut self, path: &Path, error: &str) {
-        if path == hearth_path(self.scheme) {
+        if path == (self.hearth)(self.scheme) {
             tracing::error!(path = %path.display(), error, "the hearth cannot be shown");
         } else {
             tracing::warn!(path = %path.display(), error, "the picture cannot be shown; the hearth is shown");
@@ -273,7 +291,7 @@ impl Wallpaper {
         }
         *faults += 1;
         let faults = *faults;
-        if faults > 1 && path != hearth_path(self.scheme) {
+        if faults > 1 && path != (self.hearth)(self.scheme) {
             tracing::warn!(path = %path.display(), error, "the decoder failed again; the hearth is shown until an output or the keys change");
             self.stalled.insert(path);
             return;
@@ -353,6 +371,7 @@ impl Application for Wallpaper {
         output.connector = info.name.clone().unwrap_or_default();
         output.size = size(info);
         self.stalled.clear();
+        self.released.clear();
         self.refresh(shell);
     }
 
@@ -508,10 +527,74 @@ mod tests {
                     0,
                     Ok(vec![((4, 3), pixels)]),
                 ));
-                wallpaper.decode_for(targets);
+                wallpaper.decode_for(targets.clone());
                 assert!(wallpaper.stalled.is_empty());
-                assert!(wallpaper.in_flight.contains(&(stalled, (4, 3))));
-                assert!(wallpaper.cache.contains_key(&(healthy, (4, 3))));
+                assert!(wallpaper.in_flight.contains(&(stalled.clone(), (4, 3))));
+                assert!(wallpaper.cache.contains_key(&(healthy.clone(), (4, 3))));
+                // Stalled again, it waits for a change: another success does not release it.
+                wallpaper.inbox.borrow_mut().decoded.push((
+                    stalled.clone(),
+                    vec![(4, 3)],
+                    2,
+                    Err(Failure::Fault("again".into())),
+                ));
+                let pixels = vec![0; athanor_wallpaper::protocol::frame_len((8, 6))];
+                wallpaper.inbox.borrow_mut().decoded.push((
+                    healthy,
+                    vec![(8, 6)],
+                    0,
+                    Ok(vec![((8, 6), pixels)]),
+                ));
+                wallpaper.decode_for(targets);
+                assert!(wallpaper.stalled.contains(&stalled));
+                assert!(!wallpaper.in_flight.contains(&(stalled, (4, 3))));
+            })
+            .expect("a thread-default context");
+    }
+
+    /// The hearth of [`a_picture_that_always_faults_is_decoded_a_bounded_number_of_times`].
+    fn test_hearth(_: ColorScheme) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "athanor-wallpaper-hearth-{}.png",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn a_picture_that_always_faults_is_decoded_a_bounded_number_of_times() {
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let (mut wallpaper, targets) =
+                    wallpaper("bounded", 1, Path::new("/nonexistent/decode"));
+                let picture = PathBuf::from(&wallpaper.settings.per_output["DP-0"]);
+                let hearth = test_hearth(ColorScheme::Light);
+                std::fs::write(&hearth, b"not decoded here").expect("hearth");
+                wallpaper.hearth = test_hearth;
+                // The decoder answers each decode at once, faulting on the picture and decoding
+                // the hearth, and every back-off ends at once.
+                let mut decodes: HashMap<PathBuf, u32> = HashMap::new();
+                for _ in 0..50 {
+                    wallpaper.decode_for(targets.clone());
+                    let mut inbox = wallpaper.inbox.borrow_mut();
+                    inbox.retry.extend(wallpaper.waiting.iter().cloned());
+                    for (path, size) in wallpaper.in_flight.iter().cloned() {
+                        *decodes.entry(path.clone()).or_default() += 1;
+                        let seen = wallpaper.faults.get(&path).copied().unwrap_or(0);
+                        let result = if path == picture {
+                            Err(Failure::Fault("a truncated picture".into()))
+                        } else {
+                            let pixels = vec![0; athanor_wallpaper::protocol::frame_len(size)];
+                            Ok(vec![(size, pixels)])
+                        };
+                        inbox.decoded.push((path, vec![size], seen, result));
+                    }
+                }
+                std::fs::remove_file(&hearth).expect("cleanup");
+                assert_eq!(decodes.get(&picture), Some(&2), "{decodes:?}");
+                assert_eq!(decodes.get(&hearth), Some(&1), "{decodes:?}");
+                assert!(wallpaper.stalled.contains(&picture));
+                assert!(wallpaper.cache.contains_key(&(hearth, (4, 3))));
             })
             .expect("a thread-default context");
     }
