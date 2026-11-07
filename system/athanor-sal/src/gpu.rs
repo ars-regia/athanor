@@ -39,15 +39,34 @@ struct Painter {
     scene: vello_gpu::Scene,
     /// The first error wgpu reported outside a call's result, which the next frame returns.
     errors: Arc<Mutex<Option<String>>>,
+    /// The size of the atlas vello_gpu made on `device`.
+    atlas_side: (u32, u32),
 }
 
 /// The total area of the images uploaded to vello_gpu's atlas, in pixels: one atlas of the eight
 /// it may grow to. vello_gpu panics when an upload finds no room (`upload_image` unwraps the
-/// allocation), and an image is at most `MAX_IMAGE_SIDE` on a side, so the room this leaves
-/// keeps the packing from failing.
+/// allocation), and an image is uploaded only when it fits the atlas on each side
+/// ([`atlas_side`]), so the room this leaves keeps the packing from failing.
 // ponytail: an area budget, not the atlas's own accounting; read the allocator's free space
 // if vello_gpu ever exposes it.
 const ATLAS_BUDGET: u64 = 4096 * 4096;
+
+/// The width and height of vello_gpu's atlas on a device whose textures are at most
+/// `device_max` on a side: its default size, clamped to that limit as `Renderer::new` clamps
+/// it. An image larger on either side fails its upload, which vello_gpu unwraps.
+fn atlas_side(device_max: u32) -> (u32, u32) {
+    let (width, height) = vello_gpu::MemorySettings::default()
+        .image_atlas_config
+        .atlas_size;
+    let max = u16::try_from(device_max).unwrap_or(u16::MAX);
+    let side = |s: u16| u32::from(s.min(max).max(1));
+    (side(width), side(height))
+}
+
+/// Whether `pixmap` fits an atlas of `side`.
+fn fits(pixmap: &Pixmap, (width, height): (u32, u32)) -> bool {
+    u32::from(pixmap.width()) <= width && u32::from(pixmap.height()) <= height
+}
 
 /// vello_gpu's resources, and the images of the window uploaded to its atlas. vello_gpu 0.3
 /// panics on an image paint that carries its pixmap ("pixmap image sources are not supported
@@ -194,6 +213,7 @@ impl Painter {
                 slot.get_or_insert_with(|| error.to_string());
             }
         }));
+        let atlas_side = atlas_side(device.limits().max_texture_dimension_2d);
         let (renderer, resources) = vello_gpu::Renderer::new(
             &device,
             &RenderTargetConfig {
@@ -213,6 +233,7 @@ impl Painter {
             },
             scene: vello_gpu::Scene::new(1, 1),
             errors,
+            atlas_side,
         })
     }
 
@@ -245,12 +266,15 @@ impl Painter {
     }
 
     /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
-    /// holds any more. An image that would pass [`ATLAS_BUDGET`] is left out, and logged.
+    /// holds any more. An image larger than the atlas on a side, or that would pass
+    /// [`ATLAS_BUDGET`], is left out, and logged.
     fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
         let wanted: Vec<&Arc<Pixmap>> = ui
             .ids()
             .filter_map(|id| match &ui.widget(id).kind {
-                Kind::Image { image, .. } | Kind::IconButton { image, .. } => Some(image.pixmap()),
+                Kind::Image { image, .. }
+                | Kind::IconButton { image, .. }
+                | Kind::Picture { image, .. } => Some(image.pixmap()),
                 _ => None,
             })
             .collect();
@@ -278,12 +302,18 @@ impl Painter {
             if resources.image(pixmap).is_some() {
                 continue;
             }
-            if used + area(pixmap) > ATLAS_BUDGET {
+            let large = !fits(pixmap, self.atlas_side);
+            if large || used + area(pixmap) > ATLAS_BUDGET {
                 // Left out, so not drawn; the rest of the window is.
                 if !resources.skipped.iter().any(|s| Arc::ptr_eq(s, pixmap)) {
+                    let (width, height) = self.atlas_side;
+                    let reason = if large {
+                        format!("the GPU atlas is {width}x{height} pixels")
+                    } else {
+                        format!("the window's images pass the GPU atlas budget of {ATLAS_BUDGET} pixels")
+                    };
                     eprintln!(
-                        "athanor-sal: an image of {}x{} pixels is not drawn: the window's \
-                         images pass the GPU atlas budget of {ATLAS_BUDGET} pixels",
+                        "athanor-sal: an image of {}x{} pixels is not drawn: {reason}",
                         pixmap.width(),
                         pixmap.height()
                     );
@@ -393,6 +423,22 @@ mod tests {
             .get(at..at + 4)
             .ok_or("the centre is outside the frame")?;
         Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
+    }
+
+    /// A picture wider than the atlas is left out instead of reaching vello_gpu's upload, which
+    /// aborts on it; one as wide as the atlas is uploaded. The atlas side follows the device's
+    /// limit below the default.
+    #[test]
+    fn a_picture_wider_than_the_atlas_is_not_uploaded() -> Result<(), Error> {
+        let side = atlas_side(8192);
+        assert_eq!(side, (4096, 4096));
+        assert_eq!(atlas_side(2048), (2048, 2048));
+        let wide = Image::from_rgba8(4097, 1, vec![0; 4097 * 4])?;
+        assert!(!fits(wide.pixmap(), side));
+        let edge = Image::from_rgba8(4096, 1, vec![0; 4096 * 4])?;
+        assert!(fits(edge.pixmap(), side));
+        assert!(!fits(edge.pixmap(), atlas_side(2048)));
+        Ok(())
     }
 
     fn solid(rgba: [u8; 4]) -> Image {
