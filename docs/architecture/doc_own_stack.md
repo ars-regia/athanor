@@ -380,8 +380,9 @@ own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 p
 Sulphur's wlr-output-management applies modes, positions, enabling and disabling and adaptive
 sync as well as scale and transform (maintainer decision, 2026-11-07; ADR-0138 decision 4). A
 configuration takes only a mode the monitor lists, or a custom mode of refresh 0 at the size of
-the current mode, and answers CVT custom timings `failed`. Positions are taken as given, so that
-overlapping outputs mirror each other, and an output given no position keeps its own. A disabled
+the current mode, and answers CVT custom timings `failed`. Positions within 2^24 pixels of the
+origin are taken as given, so that overlapping outputs mirror each other, and one further away is
+answered `failed`; an output given no position keeps its own. A disabled
 output is handled as an unplugged one, and its head stays in output management, reported
 disabled. A configuration is checked whole before anything is applied, a step the GPU refuses
 undoes the steps taken, and an applied one is sent to every manager with one `done`. A monitor
