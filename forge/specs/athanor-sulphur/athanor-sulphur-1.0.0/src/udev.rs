@@ -164,7 +164,7 @@ fn read_edid(
 
 /// The two ways a connector's EDID can fail, each logged once per connector.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum EdidFault {
+pub(crate) enum EdidFault {
     Unreadable,
     Invalid,
 }
@@ -179,15 +179,16 @@ fn first_fault(
     seen.insert((connector, fault))
 }
 
-/// What the output of `connector` reports as make, model and serial: the identity in its EDID
+/// The output of `connector`, reporting the make, model and serial in its EDID
 /// (`athanor-edid`, so the strings equal athanor-osd's), or today's placeholder when the
 /// connector has no EDID blob, it cannot be read, or it does not parse.
-fn connector_identity(
+fn connector_output(
     device: &impl ControlDevice,
     connector: connector::Handle,
     name: &str,
     seen: &mut HashSet<(connector::Handle, EdidFault)>,
-) -> athanor_edid::Identity {
+    mode: Mode,
+) -> Output {
     let edid = match read_edid(device, connector) {
         Ok(edid) => edid,
         Err(error) => {
@@ -199,7 +200,26 @@ fn connector_identity(
             None
         }
     };
-    identity_of(edid.as_deref(), name, connector, seen)
+    output_of(edid.as_deref(), name, connector, seen, mode)
+}
+
+/// The output that `edid` describes, drawn at `mode`: what `set_up` hands the clients.
+pub(crate) fn output_of(
+    edid: Option<&[u8]>,
+    name: &str,
+    connector: connector::Handle,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    mode: Mode,
+) -> Output {
+    let identity = identity_of(edid, name, connector, seen);
+    crate::state::build_output(
+        name,
+        &identity,
+        mode.size,
+        mode.refresh,
+        Transform::Normal,
+        1.0,
+    )
 }
 
 /// `edid` as an identity, or the placeholder.
@@ -900,19 +920,12 @@ impl State {
         };
         let mode = preferred_mode(connector).ok_or("the monitor has no mode")?;
         let wl_mode = Mode::from(mode);
-        let identity = connector_identity(
+        let output = connector_output(
             drm.heads.device(),
             connector.handle(),
             name,
             &mut drm.edid_faults,
-        );
-        let output = crate::state::build_output(
-            name,
-            &identity,
-            wl_mode.size,
-            wl_mode.refresh,
-            Transform::Normal,
-            1.0,
+            wl_mode,
         );
         let mut planes = drm
             .heads
@@ -1623,16 +1636,16 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::{
-        first_fault, identity_of, lock_shown, pacing, EdidFault, FailureLog, Frames, LockFrames,
+        first_fault, identity_of, lock_shown, output_of, pacing, EdidFault, FailureLog, Frames, LockFrames,
         Wake,
     };
     use std::time::{Duration, Instant};
 
     /// A base block for "DEL", product 0xA0B3, serial 1, with a name descriptor and a correct
     /// checksum.
-    fn dell() -> Vec<u8> {
+    pub(crate) fn dell() -> Vec<u8> {
         let mut b = vec![0u8; 128];
         b[..8].copy_from_slice(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
         b[8..10].copy_from_slice(&((4u16 << 10) | (5 << 5) | 12).to_be_bytes());
@@ -1673,6 +1686,22 @@ mod tests {
             (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
             ("DEL", "U2412M", "1")
         );
+    }
+
+    #[test]
+    fn set_up_builds_the_output_from_the_identity_in_the_edid() {
+        let mode = smithay::output::Mode {
+            size: (1920, 1080).into(),
+            refresh: 60_000,
+        };
+        let edid = dell();
+        let output = output_of(Some(&edid), "DP-1", handle(), &mut Default::default(), mode);
+        let physical = output.physical_properties();
+        assert_eq!(
+            (physical.make.as_str(), physical.model.as_str(), physical.serial_number.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+        assert_eq!(output.current_mode(), Some(mode));
     }
 
     #[test]

@@ -388,6 +388,8 @@ struct OutputHead {
     head: zwlr_output_head_v1::ZwlrOutputHeadV1,
     name: String,
     scale: f64,
+    /// The make, model and serial number sent for the head (version 2).
+    identity: [String; 3],
     /// Every mode sent for the head, the finished ones included.
     modes: Vec<zwlr_output_mode_v1::ZwlrOutputModeV1>,
 }
@@ -1022,6 +1024,7 @@ impl Dispatch<zwlr_output_manager_v1::ZwlrOutputManagerV1, ()> for Client {
                 head,
                 name: String::new(),
                 scale: 0.0,
+                identity: Default::default(),
                 modes: Vec::new(),
             }),
             zwlr_output_manager_v1::Event::Done { serial } => client.output_serial = Some(serial),
@@ -1049,6 +1052,11 @@ impl Dispatch<zwlr_output_head_v1::ZwlrOutputHeadV1, ()> for Client {
         match event {
             zwlr_output_head_v1::Event::Name { name } => seen.name = name,
             zwlr_output_head_v1::Event::Scale { scale } => seen.scale = scale,
+            zwlr_output_head_v1::Event::Make { make } => seen.identity[0] = make,
+            zwlr_output_head_v1::Event::Model { model } => seen.identity[1] = model,
+            zwlr_output_head_v1::Event::SerialNumber { serial_number } => {
+                seen.identity[2] = serial_number
+            }
             zwlr_output_head_v1::Event::Mode { mode } => seen.modes.push(mode),
             _ => {}
         }
@@ -11214,6 +11222,35 @@ fn a_window_fitted_after_a_mode_change_stays_on_its_output() {
     assert!(run.state.activate_workspace(list[1]));
     assert!(on_second(&run, &parked), "the parked window comes back on its output");
     assert_eq!(run.state.workspace_of(&parked), Some(list[1]));
+    run.stop();
+}
+
+/// The output `set_up` builds from a monitor's EDID reaches the control center's head with the
+/// make, model and serial of the EDID, not the placeholder's.
+#[test]
+fn os9_a_head_carries_the_identity_in_the_edid() {
+    let mut run = Running::start(None);
+    let mode = smithay::output::Mode {
+        size: (800, 600).into(),
+        refresh: 60_000,
+    };
+    let edid = crate::udev::tests::dell();
+    let handle = smithay::reexports::drm::control::from_u32(7).expect("a nonzero id");
+    let output = crate::udev::output_of(Some(&edid), "DP-1", handle, &mut Default::default(), mode);
+    run.state.map_output(&output);
+    run.state.output_heads_changed();
+    let mut control_center = Local::control_center(&mut run);
+    let _manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = control_center.bind(4);
+    control_center.pump(&mut run, "the heads are sent", |client, _| {
+        client.output_serial.is_some()
+    });
+    let head = control_center
+        .client
+        .heads
+        .iter()
+        .find(|head| head.name == "DP-1")
+        .expect("the head of the monitor");
+    assert_eq!(head.identity, ["DEL", "U2412M", "1"]);
     run.stop();
 }
 
