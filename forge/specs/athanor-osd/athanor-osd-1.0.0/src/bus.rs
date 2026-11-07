@@ -1,7 +1,7 @@
 //! `os.athanor.Osd1` (doc_osd.md OD4), with the methods of step 1: `VolumeUp`, `VolumeDown`,
 //! `ToggleMute` and `ToggleMicMute`. Any peer on the session bus may call; more than
-//! [`logic::RATE_LIMIT`] calls a second from one sender are dropped, and a caller that is not
-//! the compositor or the bar is logged, as BR1's informative check. A method only hands its key
+//! [`logic::RATE_LIMIT`] calls a second from one sender are dropped, and each caller is logged
+//! once by its unique name and user. A method only hands its key
 //! to the core and returns: it awaits nothing, on any connection.
 
 use std::collections::HashSet;
@@ -76,7 +76,7 @@ impl Osd {
             }
             self.checked.insert(sender.clone());
             self.runtime
-                .spawn(log_unexpected(self.query.clone(), sender));
+                .spawn(log_caller(self.query.clone(), sender));
         }
         if self.keys.send(key).is_err() {
             tracing::error!(?key, "the overlay's core stopped; the key is lost");
@@ -84,9 +84,9 @@ impl Osd {
     }
 }
 
-/// Logs `sender` when its cgroup is not the compositor's or the bar's (OD4). Informative: the
-/// call was taken either way.
-async fn log_unexpected(query: Connection, sender: OwnedUniqueName) {
+/// Logs `sender` once with its user, from the bus's credentials (OD4). Informative: the call
+/// was taken either way. Nothing is read beneath `/proc`, which the overlay is not granted.
+async fn log_caller(query: Connection, sender: OwnedUniqueName) {
     let credentials = tokio::time::timeout(ASK, async {
         DBusProxy::new(&query)
             .await?
@@ -94,32 +94,19 @@ async fn log_unexpected(query: Connection, sender: OwnedUniqueName) {
             .await
     })
     .await;
-    let pid = match credentials {
-        Ok(Ok(credentials)) => credentials.process_id(),
-        Ok(Err(error)) => {
-            tracing::info!(%sender, %error, "the caller's credentials are unavailable; it is not checked");
-            return;
-        }
-        Err(_) => {
-            tracing::info!(%sender, "the bus did not give the caller's credentials in time; it is not checked");
-            return;
-        }
-    };
-    let Some(pid) = pid else {
-        tracing::info!(%sender, "the bus gave no process id for the caller; it is not checked");
-        return;
-    };
-    match std::fs::read_to_string(format!("/proc/{pid}/cgroup")) {
-        Ok(cgroup) if logic::expected_caller(&cgroup) => {}
-        Ok(cgroup) => tracing::info!(
+    match credentials {
+        Ok(Ok(credentials)) => tracing::info!(
             %sender,
-            pid,
-            cgroup = cgroup.trim(),
-            "a caller that is neither the compositor nor the bar"
+            uid = ?credentials.unix_user_id(),
+            "a caller of os.athanor.Osd1"
         ),
-        Err(error) => {
-            tracing::info!(%sender, pid, %error, "the caller's cgroup is unreadable; it is not checked")
+        Ok(Err(error)) => {
+            tracing::info!(%sender, %error, "a caller of os.athanor.Osd1, whose credentials are unavailable")
         }
+        Err(_) => tracing::info!(
+            %sender,
+            "a caller of os.athanor.Osd1; the bus did not give its credentials in time"
+        ),
     }
 }
 

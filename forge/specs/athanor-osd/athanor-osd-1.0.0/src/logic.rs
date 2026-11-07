@@ -357,21 +357,6 @@ impl Rate {
     }
 }
 
-/// Whether the caller whose `/proc/<pid>/cgroup` is `cgroup` is one OD4 expects: the
-/// compositor (athanor-sulphur's unit, or cosmic-comp in the login session's scope) or the
-/// bar. Informative, as BR1's check: the call is taken either way.
-pub fn expected_caller(cgroup: &str) -> bool {
-    let Some(path) = cgroup.lines().find_map(|line| line.strip_prefix("0::")) else {
-        return false;
-    };
-    let last = path.rsplit('/').next().unwrap_or_default();
-    matches!(last, "athanor-sulphur.service" | "athanor-bar.service")
-        || last
-            .strip_prefix("session-")
-            .and_then(|rest| rest.strip_suffix(".scope"))
-            .is_some_and(|id| !id.is_empty())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,20 +644,5 @@ mod tests {
             Admit::Yes,
             "a new window"
         );
-    }
-
-    #[test]
-    fn the_expected_callers_are_the_compositor_and_the_bar() {
-        for (cgroup, expected) in [
-            ("0::/user.slice/user-1000.slice/user@1000.service/session.slice/athanor-sulphur.service\n", true),
-            ("0::/user.slice/user-1000.slice/user@1000.service/session.slice/athanor-bar.service\n", true),
-            ("0::/user.slice/user-1000.slice/session-3.scope\n", true),
-            ("0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-x.scope\n", false),
-            ("0::/user.slice/user-1000.slice/session-.scope\n", false),
-            ("1:name=systemd:/athanor-bar.service\n", false),
-            ("", false),
-        ] {
-            assert_eq!(expected_caller(cgroup), expected, "{cgroup}");
-        }
     }
 }

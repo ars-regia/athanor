@@ -6,12 +6,14 @@
 //! - read beneath `/usr` and `/etc`: the libraries, the icon themes and fonts of the image,
 //!   fontconfig's configuration, the GSettings schemas, dconf's profile, libpulse's
 //!   `client.conf` and the machine id;
-//! - read beneath `/proc`: the cgroup of a caller of `os.athanor.Osd1` (OD4);
 //! - read the user's fonts, icon themes and fontconfig configuration, the dconf database
 //!   GSettings reads for the appearance and the reduced-motion preference (T1), the schema
 //!   directories GLib reads besides `/usr`, and libpulse's `~/.config/pulse` (its cookie);
 //! - write beneath the cache, `$XDG_CACHE_HOME` (fontconfig's), and `$XDG_RUNTIME_DIR/dconf`,
 //!   whose shared-memory flag dconf's client opens for writing to learn of a change.
+//!
+//! Nothing beneath `/proc` (maintainer decision, 2026-11-07): Landlock cannot narrow it to one
+//! process, and it would expose the environment of every process of the user.
 //!
 //! Connecting to the Wayland socket, the session bus and the sound server's socket is not a
 //! filesystem access Landlock mediates, so none of the three is granted.
@@ -59,7 +61,7 @@ impl Grants {
             data_dirs = vec!["/usr/local/share".into(), "/usr/share".into()];
         }
 
-        let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into(), "/proc".into()];
+        let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into()];
         if let Some(config) = &config {
             read.extend(["dconf", "fontconfig", "pulse"].map(|d| config.join(d)));
         }
@@ -117,7 +119,6 @@ mod tests {
             [
                 "/usr",
                 "/etc",
-                "/proc",
                 "/home/u/.config/dconf",
                 "/home/u/.config/fontconfig",
                 "/home/u/.config/pulse",
@@ -145,9 +146,6 @@ mod tests {
     fn nothing_beneath_the_home_without_an_absolute_home() {
         let grants = Grants::new(Vec::new(), env(&[("HOME", "relative")]));
         assert!(grants.read.iter().all(|p| !p.starts_with("relative")));
-        assert_eq!(
-            grants.read[..3],
-            [Path::new("/usr"), Path::new("/etc"), Path::new("/proc")]
-        );
+        assert_eq!(grants.read[..2], [Path::new("/usr"), Path::new("/etc")]);
     }
 }
