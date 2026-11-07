@@ -541,6 +541,15 @@ version = "1.0.0"
 [[package]]
 name = "athanor-idle"
 version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "zbus",
+]
 
 [[package]]
 name = "athanor-launcher"
