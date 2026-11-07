@@ -1221,7 +1221,7 @@ impl State {
             "a monitor was unplugged"
         );
         self.remove_output(&output);
-        crate::state::withdraw_output(&self.display_handle, &output);
+        crate::state::withdraw_output(self, &output);
         // The monitor that was the only one not yet showing the lock, or the last one, is gone.
         self.confirm_lock();
         self.request_redraw();

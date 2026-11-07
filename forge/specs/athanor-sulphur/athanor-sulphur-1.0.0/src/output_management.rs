@@ -668,7 +668,7 @@ impl State {
             let Some(wanted) = &plan.wanted else {
                 if plan.now.enabled {
                     self.remove_output(output);
-                    withdraw_output(&self.display_handle, output);
+                    withdraw_output(self, output);
                     self.output_management.disabled.push(output.clone());
                 }
                 continue;
