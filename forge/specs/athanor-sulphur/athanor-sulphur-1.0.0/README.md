@@ -212,10 +212,16 @@ surface taking the keyboard takes it off; neither ends it: it is back for the ne
 with no key held, without a new request, so that it serves the launcher's field and the window
 after it. Only the lock and the input method's own release end it.
 `src/output_management.rs` serves wlr-output-management, which the pinned Smithay lacks: the
-heads with their modes, position, transform and scale, and a configuration succeeds when it
-changes nothing but scales from 1 to 4 and transforms; one that disables a head or asks for
-another mode, position or adaptive sync fails, and so does another transform of the nested
-output, whose transform rights the backend's frame.
+heads, enabled or disabled, with their modes, position, transform, scale and adaptive sync,
+and configurations that set any of them (doc_session_daemons.md SD23). One the outputs cannot
+take, or one that leaves no output enabled, fails and changes nothing: a mode the monitor does
+not offer, a scale outside 1 to 4, adaptive sync on a monitor without it, and on the nested
+output another transform, since its transform rights the backend's frame, another mode,
+adaptive sync or a disable. Every head is checked before anything is applied,
+and a step the GPU refuses halfway undoes the steps taken. A disabled output leaves the space
+and its `wl_output` global goes, and its lock surface is forgotten: enabled again while locked,
+it shows the background until the locker gives it a new one. An applied configuration is sent
+to every manager.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
 and `ext-image-copy-capture-v1` copies the output, drawn whole without the pointer, into a
 client's `wl_shm` buffer; the lock refuses it as it refuses a window's capture. No shipped

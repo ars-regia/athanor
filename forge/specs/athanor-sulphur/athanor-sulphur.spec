@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        21%{?dist}
+Release:        22%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,6 +55,12 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
+- Apply modes, positions, enabling and disabling and adaptive sync through
+  wlr-output-management, besides scales and transforms: a configuration is checked whole
+  before any of it is applied, one the outputs cannot take or that leaves no output enabled
+  fails and changes nothing, a step the GPU refuses undoes those taken, and every manager is
+  sent the result (doc_session_daemons.md SD23).
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
   with athanor-edid: wl_output and xdg_output carry the make and model, and the serial

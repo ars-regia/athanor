@@ -40,6 +40,11 @@ impl Lock {
 }
 
 impl Lock {
+    /// `output` is gone or disabled: the surface the locker gave it is no longer shown there.
+    pub fn forget_output(&mut self, output: &Output) {
+        self.surfaces.retain(|(on, _)| on != output);
+    }
+
     /// Each lock surface takes the size of its output, after the outputs were laid out again.
     pub fn resize(&self, space: &smithay::desktop::Space<smithay::desktop::Window>) {
         for (output, surface) in self.surfaces.iter().filter(|(_, surface)| surface.alive()) {

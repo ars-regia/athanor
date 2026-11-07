@@ -81,7 +81,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
@@ -533,11 +533,15 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and its windows join the first
-    /// output's active workspace, centred on that output when it does not show them.
+    /// An output that goes: its layer surfaces are closed, its lock surface is forgotten, so
+    /// that it shows only the background if it comes back while locked, and its windows join
+    /// the first output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
         self.close_layers(output);
+        if let Some(lock) = &mut self.lock {
+            lock.forget_output(output);
+        }
         self.space.unmap_output(output);
         self.fit_to_outputs();
         self.workspaces_changed();
@@ -1499,13 +1503,26 @@ pub fn build_output(
 /// Offers `output` to the clients; the global is kept in its user data.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
     let global = output.create_global::<State>(dh);
-    output
-        .user_data()
-        .insert_if_missing(|| OutputGlobal(global));
+    let slot = output.user_data().get_or_insert(OutputGlobal::default);
+    *slot.0.borrow_mut() = Some(global);
 }
 
-/// The global of an output, kept in its user data: removed with the output.
-pub struct OutputGlobal(pub GlobalId);
+/// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a
+/// configuration gets a new one when it is enabled again (`publish_output`).
+pub fn withdraw_output(dh: &DisplayHandle, output: &Output) {
+    output.leave_all();
+    let global = output
+        .user_data()
+        .get::<OutputGlobal>()
+        .and_then(|slot| slot.0.borrow_mut().take());
+    if let Some(global) = global {
+        dh.remove_global::<State>(global);
+    }
+}
+
+/// The global of an output, kept in its user data while the output is offered.
+#[derive(Default)]
+pub struct OutputGlobal(RefCell<Option<GlobalId>>);
 
 /// Dispatches the clients' requests. The callback owns the display: it dispatches without the
 /// unsafe access a source holding it would need.

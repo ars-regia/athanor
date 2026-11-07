@@ -392,6 +392,10 @@ struct OutputHead {
     identity: [String; 3],
     /// Every mode sent for the head, the finished ones included.
     modes: Vec<zwlr_output_mode_v1::ZwlrOutputModeV1>,
+    enabled: bool,
+    current: Option<zwlr_output_mode_v1::ZwlrOutputModeV1>,
+    position: (i32, i32),
+    adaptive_sync: bool,
 }
 
 /// A window of the foreign toplevel list as the client has seen it.
@@ -1026,6 +1030,10 @@ impl Dispatch<zwlr_output_manager_v1::ZwlrOutputManagerV1, ()> for Client {
                 scale: 0.0,
                 identity: Default::default(),
                 modes: Vec::new(),
+                enabled: false,
+                current: None,
+                position: (0, 0),
+                adaptive_sync: false,
             }),
             zwlr_output_manager_v1::Event::Done { serial } => client.output_serial = Some(serial),
             _ => {}
@@ -1058,6 +1066,13 @@ impl Dispatch<zwlr_output_head_v1::ZwlrOutputHeadV1, ()> for Client {
                 seen.identity[2] = serial_number
             }
             zwlr_output_head_v1::Event::Mode { mode } => seen.modes.push(mode),
+            zwlr_output_head_v1::Event::Enabled { enabled } => seen.enabled = enabled != 0,
+            zwlr_output_head_v1::Event::CurrentMode { mode } => seen.current = Some(mode),
+            zwlr_output_head_v1::Event::Position { x, y } => seen.position = (x, y),
+            zwlr_output_head_v1::Event::AdaptiveSync { state } => {
+                seen.adaptive_sync =
+                    state == WEnum::Value(zwlr_output_head_v1::AdaptiveSyncState::Enabled)
+            }
             _ => {}
         }
     }
@@ -4655,6 +4670,66 @@ impl Local {
         self.client.configured.expect("an answer")
     }
 
+    /// Sends an output configuration on `serial` in which `each` enables or disables each head
+    /// and sets what it asks of it, applies it and returns the compositor's answer.
+    fn configure_each(
+        &mut self,
+        run: &mut Running,
+        manager: &zwlr_output_manager_v1::ZwlrOutputManagerV1,
+        serial: u32,
+        each: impl Fn(
+            &zwlr_output_configuration_v1::ZwlrOutputConfigurationV1,
+            &OutputHead,
+            &QueueHandle<Client>,
+        ),
+    ) -> &'static str {
+        let qh = self.queue.handle();
+        let configuration = manager.create_configuration(serial, &qh, ());
+        for seen in &self.client.heads {
+            each(&configuration, seen, &qh);
+        }
+        self.client.configured = None;
+        configuration.apply();
+        self.pump(run, "an answer to the configuration", |client, _| {
+            client.configured.is_some()
+        });
+        configuration.destroy();
+        self.client.configured.expect("an answer")
+    }
+
+    /// The head named `name` as the client has seen it.
+    fn head(&self, name: &str) -> &OutputHead {
+        self.client
+            .heads
+            .iter()
+            .find(|head| head.name == name)
+            .expect("the head")
+    }
+
+    /// Binds the manager as the control center, once it has its heads; returns it and the
+    /// serial of their `done`.
+    fn output_manager(
+        &mut self,
+        run: &mut Running,
+    ) -> (zwlr_output_manager_v1::ZwlrOutputManagerV1, u32) {
+        let manager: zwlr_output_manager_v1::ZwlrOutputManagerV1 = self.bind(4);
+        self.pump(run, "the heads are sent", |client, _| {
+            client.output_serial.is_some()
+        });
+        (manager, self.client.output_serial.expect("a serial"))
+    }
+
+    /// The wl_output globals it is offered, listed again.
+    fn outputs_offered(&mut self, run: &mut Running) -> Vec<u32> {
+        self.relist(run);
+        let outputs = self
+            .client
+            .globals
+            .iter()
+            .filter(|(_, i, _)| i == "wl_output");
+        outputs.map(|(name, _, _)| *name).collect()
+    }
+
     /// Lists the globals again, on a new registry.
     fn relist(&mut self, run: &mut Running) {
         self.client.globals.clear();
@@ -6736,8 +6811,8 @@ fn a_destroyed_state_object_is_forgotten() {
 /// `zwlr_output_manager_v1` is the control center's only (open question 10 of the OS9 plan):
 /// the bar, whose line does not name it, does not see it. The control center sets the first
 /// output's scale through it, which the output keeps in the next frame and a window already
-/// mapped there is told as its preferred scale; a configuration that asks for more than a scale
-/// fails, and one on a stale serial is cancelled.
+/// mapped there is told as its preferred scale; a configuration that asks for a mode the output
+/// does not offer fails, and one on a stale serial is cancelled.
 #[test]
 fn os9_the_output_manager_is_granted_to_the_control_center() {
     const MANAGER: &str = "zwlr_output_manager_v1";
@@ -6795,9 +6870,9 @@ fn os9_the_output_manager_is_granted_to_the_control_center() {
 
     let turned = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
         head.set_scale(1.5);
-        head.set_position(7, 7);
+        head.set_custom_mode(333, 333, 60_000);
     });
-    assert_eq!(turned, "failed", "a position");
+    assert_eq!(turned, "failed", "a mode the output does not offer");
     let stale = serial.wrapping_add(1);
     let late = control_center.configure(&mut run, &manager, stale, "headless-0", |head| {
         head.set_scale(1.5)
@@ -6905,7 +6980,7 @@ fn os9_a_refused_head_leaves_the_others_as_they_were() {
         if seen.name == "headless-0" {
             head.set_transform(wl_output::Transform::_90);
         } else {
-            head.set_position(1, 1);
+            head.set_scale(8.0);
         }
     }
     control_center.client.configured = None;
@@ -6988,6 +7063,391 @@ fn os9_a_mode_finished_in_a_race_fails_the_configuration() {
         head.set_scale(1.5)
     });
     assert_eq!(scaled, "succeeded", "the client is still connected");
+    run.stop();
+}
+
+/// The mode headless-0 is offered besides its own, in the tests of SD23.
+fn offered_mode() -> smithay::output::Mode {
+    smithay::output::Mode {
+        size: (1024, 768).into(),
+        refresh: 60_000,
+    }
+}
+
+/// Offers `offered_mode()` on headless-0 and waits for the control center to be sent it; returns the
+/// output and the serial of the change.
+fn offer_a_mode(run: &mut Running, control_center: &mut Local) -> (smithay::output::Output, u32) {
+    let first = run
+        .state
+        .space
+        .outputs()
+        .find(|output| output.name() == "headless-0")
+        .cloned()
+        .expect("the first output");
+    let before = control_center.head("headless-0").modes.len();
+    first.add_mode(offered_mode());
+    run.state.output_heads_changed();
+    control_center.pump(run, "the mode is sent", |client, _| {
+        client
+            .heads
+            .iter()
+            .any(|head| head.name == "headless-0" && head.modes.len() == before + 1)
+    });
+    control_center.roundtrip(run);
+    (
+        first,
+        control_center.client.output_serial.expect("a serial"),
+    )
+}
+
+/// A configuration sets a mode the output offers (SD23): the output takes it, its frame has the
+/// mode's size, and its head reports it as current. A mode it does not offer fails and changes
+/// nothing.
+#[test]
+fn sd23_a_configuration_sets_a_mode_the_output_offers() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, _) = control_center.output_manager(&mut run);
+    let (first, serial) = offer_a_mode(&mut run, &mut control_center);
+    let own = first.current_mode();
+
+    let refused = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_custom_mode(1000, 700, 60_000)
+    });
+    assert_eq!(refused, "failed", "a mode the output does not offer");
+    assert_eq!(first.current_mode(), own, "unchanged");
+
+    let offered = control_center.client.heads[0]
+        .modes
+        .last()
+        .cloned()
+        .expect("the mode");
+    let set = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_mode(&offered)
+    });
+    assert_eq!(set, "succeeded");
+    assert_eq!(first.current_mode(), Some(offered_mode()));
+    let frame = run.state.capture(0).expect("the next frame");
+    assert_eq!(
+        frame.len(),
+        (1024 * 768 * 4) as usize,
+        "the frame has the mode's size"
+    );
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    assert_eq!(area.size, (1024, 768).into());
+    control_center.pump(&mut run, "the head reports the mode", |client, _| {
+        client.output_serial != Some(serial) && client.heads[0].current.as_ref() == Some(&offered)
+    });
+    run.stop();
+}
+
+/// A configuration places an output where it asks (SD23), and the head reports it there.
+#[test]
+fn sd23_a_configuration_places_an_output() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+
+    let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
+        head.set_position(0, OUTPUTS[0].height)
+    });
+
+    assert_eq!(placed, "succeeded");
+    let area = run.state.space.output_geometry(&second).expect("mapped");
+    assert_eq!(area.loc, (0, OUTPUTS[0].height).into(), "below the first");
+    control_center.pump(&mut run, "the head reports the place", |client, _| {
+        client
+            .heads
+            .iter()
+            .any(|head| head.name == "headless-1" && head.position == (0, OUTPUTS[0].height))
+    });
+    run.stop();
+}
+
+/// A configuration disables an output and enables it again (SD23): disabled, it leaves the
+/// space and its wl_output global goes, and its head stays, reported disabled; enabled, it
+/// comes back with a new global, and its head is reported enabled with its mode.
+#[test]
+fn sd23_a_configuration_disables_and_enables_an_output() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+    let offered = control_center.outputs_offered(&mut run);
+    assert_eq!(offered.len(), 2);
+
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded");
+    assert_eq!(run.state.space.outputs().count(), 1, "out of the space");
+    assert_eq!(
+        control_center.outputs_offered(&mut run),
+        offered[..1],
+        "its global is gone"
+    );
+    control_center.pump(&mut run, "the head is reported disabled", |client, _| {
+        client.output_serial != Some(serial)
+            && client.heads.len() == 2
+            && client
+                .heads
+                .iter()
+                .any(|head| head.name == "headless-1" && !head.enabled)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+
+    let enabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        config.enable_head(&seen.head, qh, ());
+    });
+    assert_eq!(enabled, "succeeded");
+    assert!(
+        run.state.space.output_geometry(&second).is_some(),
+        "in the space again"
+    );
+    let again = control_center.outputs_offered(&mut run);
+    assert_eq!(again.len(), 2, "a global again");
+    control_center.pump(&mut run, "the head is reported enabled", |client, _| {
+        client
+            .heads
+            .iter()
+            .any(|head| head.name == "headless-1" && head.enabled && head.current.is_some())
+    });
+    run.stop();
+}
+
+/// A configuration that leaves no output enabled fails and changes nothing (SD23).
+#[test]
+fn sd23_a_configuration_with_no_output_enabled_fails() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+
+    let dark = control_center.configure_each(&mut run, &manager, serial, |config, seen, _| {
+        config.disable_head(&seen.head)
+    });
+
+    assert_eq!(dark, "failed");
+    assert_eq!(run.state.space.outputs().count(), 2, "unchanged");
+    let one = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-0" {
+            config.enable_head(&seen.head, qh, ());
+        } else {
+            config.disable_head(&seen.head);
+        }
+    });
+    assert_eq!(one, "succeeded", "one output enabled is enough");
+    run.stop();
+}
+
+/// A configuration turns adaptive sync on and off (SD23), and the head reports it as the output
+/// has it.
+#[test]
+fn sd23_adaptive_sync_is_set_and_reported() {
+    use zwlr_output_head_v1::AdaptiveSyncState;
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    assert!(
+        !control_center.head("headless-0").adaptive_sync,
+        "off at first"
+    );
+
+    let on = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_adaptive_sync(AdaptiveSyncState::Enabled)
+    });
+    assert_eq!(on, "succeeded");
+    control_center.pump(&mut run, "the head reports it on", |client, _| {
+        client.output_serial != Some(serial) && client.heads[0].adaptive_sync
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+
+    let off = control_center.configure(&mut run, &manager, serial, "headless-0", |head| {
+        head.set_adaptive_sync(AdaptiveSyncState::Disabled)
+    });
+    assert_eq!(off, "succeeded");
+    control_center.pump(&mut run, "the head reports it off", |client, _| {
+        client.output_serial != Some(serial) && !client.heads[0].adaptive_sync
+    });
+    run.stop();
+}
+
+/// A configuration is checked whole before any of it is applied (SD23): one that sets a mode
+/// on one output and a place on another, with a mode the other does not offer, changes neither;
+/// without that mode it sets both.
+#[test]
+fn sd23_a_refused_configuration_changes_nothing() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, _) = control_center.output_manager(&mut run);
+    let (first, serial) = offer_a_mode(&mut run, &mut control_center);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+    let (own, at) = (
+        first.current_mode(),
+        run.state
+            .space
+            .output_geometry(&second)
+            .expect("mapped")
+            .loc,
+    );
+    let configure = |control_center: &mut Local, run: &mut Running, bad: bool| {
+        control_center.configure_each(run, &manager, serial, |config, seen, qh| {
+            let head = config.enable_head(&seen.head, qh, ());
+            if seen.name == "headless-0" {
+                head.set_mode(seen.modes.last().expect("the mode"));
+            } else {
+                head.set_position(0, OUTPUTS[0].height);
+                if bad {
+                    head.set_custom_mode(333, 333, 60_000);
+                }
+            }
+        })
+    };
+
+    assert_eq!(configure(&mut control_center, &mut run, true), "failed");
+    assert_eq!(first.current_mode(), own, "the first keeps its mode");
+    let now = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("mapped")
+        .loc;
+    assert_eq!(now, at, "the second keeps its place");
+
+    assert_eq!(configure(&mut control_center, &mut run, false), "succeeded");
+    assert_eq!(first.current_mode(), Some(offered_mode()));
+    let now = run
+        .state
+        .space
+        .output_geometry(&second)
+        .expect("mapped")
+        .loc;
+    assert_eq!(now, (0, OUTPUTS[0].height).into());
+    run.stop();
+}
+
+/// An applied configuration is announced to every manager (SD23), not only to the one that
+/// sent it.
+#[test]
+fn sd23_every_manager_hears_of_an_applied_configuration() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let mut other = Local::control_center(&mut run);
+    let (_other_manager, other_serial) = other.output_manager(&mut run);
+
+    let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
+        head.set_position(0, OUTPUTS[0].height)
+    });
+
+    assert_eq!(placed, "succeeded");
+    let told = |client: &Client, serial: u32| {
+        client.output_serial != Some(serial)
+            && client
+                .heads
+                .iter()
+                .any(|head| head.name == "headless-1" && head.position == (0, OUTPUTS[0].height))
+    };
+    control_center.pump(&mut run, "the manager that sent it is told", |client, _| {
+        told(client, serial)
+    });
+    other.pump(&mut run, "the other manager is told", |client, _| {
+        told(client, other_serial)
+    });
+    run.stop();
+}
+
+/// While the session is locked a configuration applies as it does unlocked (SD23): an output
+/// disabled and enabled again shows only the background, not the lock surface it had, until the
+/// locker gives it a new one, which it then shows.
+#[test]
+fn sd23_an_output_enabled_while_locked_shows_only_the_lock() {
+    const GREEN: [u8; 4] = [0, 255, 0, 255];
+    let mut run = Running::start(None);
+    let (mut locker, lock) = lock_session(&mut run);
+    let compositor: wl_compositor::WlCompositor = locker.bind(4);
+    let shm: wl_shm::WlShm = locker.bind(1);
+    let qh = locker.queue.handle();
+    // A lock surface on the output of global `name`, in `colour`, which the buffer takes as
+    // B, G, R, X.
+    let cover = |locker: &mut Local, run: &mut Running, name: u32, [r, g, b, a]: [u8; 4]| {
+        let output: wl_output::WlOutput = locker.registry.bind(name, 4, &qh, ());
+        let surface = compositor.create_surface(&qh, ());
+        let lock_surface = lock.get_lock_surface(&surface, &output, &qh, ());
+        locker.client.lock_configure = None;
+        locker.pump(run, "the lock surface is configured", |client, _| {
+            client.lock_configure.is_some()
+        });
+        let (serial, width, height) = locker.client.lock_configure.expect("a configure");
+        lock_surface.ack_configure(serial);
+        let (buffer, _) = locker.buffer(&shm, width as i32, height as i32, [b, g, r, a]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        locker.roundtrip(run);
+    };
+    let middle = |run: &mut Running| {
+        let frame = run.state.capture(1).expect("a frame");
+        let (width, height) = (OUTPUTS[1].width, OUTPUTS[1].height);
+        pixel(&frame, width, width / 2, height / 2)
+    };
+    let offered = locker.outputs_offered(&mut run);
+    cover(&mut locker, &mut run, offered[1], GREEN);
+    assert_eq!(
+        middle(&mut run),
+        GREEN,
+        "the second output shows its lock surface"
+    );
+
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded", "applied while locked");
+    control_center.pump(&mut run, "the change is sent", |client, _| {
+        client.output_serial != Some(serial)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let enabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        config.enable_head(&seen.head, qh, ());
+    });
+    assert_eq!(enabled, "succeeded", "applied while locked");
+    assert!(run.state.lock.is_some(), "still locked");
+    assert!(background(&middle(&mut run)), "only the background");
+
+    let again = locker.outputs_offered(&mut run);
+    let new = again
+        .iter()
+        .find(|name| **name != offered[0])
+        .expect("its global");
+    cover(&mut locker, &mut run, *new, RED);
+    assert_eq!(middle(&mut run), RED, "the lock surface the locker gave it");
     run.stop();
 }
 
