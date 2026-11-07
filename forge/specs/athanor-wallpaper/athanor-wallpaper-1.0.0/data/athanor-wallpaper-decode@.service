@@ -39,7 +39,8 @@ SystemCallFilter=@system-service @mount @privileged
 # the one filesystem socket outside /run.
 InaccessiblePaths=-/nix/var/nix/daemon-socket -/var/nix/var/nix/daemon-socket
 # A fixed value, since a static unit cannot count the cores as the launcher's 32 + 4 per core
-# does (render.rs; 44 was the smallest that worked on 16 cores): 64 covers 8 cores at that rule,
-# and on more the loaders' thread pool, which sizes itself by the cores, is bounded here
-# (maintainer decision, 2026-11-07).
-TasksMax=64
+# does (render.rs). glycin sizes its thread pool by the core count: 44 was the smallest value
+# that worked on 16 cores, about 28 plus the cores, so 64 fails above about 36 cores. 256 covers
+# machines of about 200 cores and still bounds a runaway loader (maintainer decision,
+# 2026-11-07).
+TasksMax=256
