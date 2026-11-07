@@ -1,0 +1,18 @@
+[package]
+name = "athanor-sessiond"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The session services that replace cosmic-settings-daemon: battery notices and the reset of COSMIC's appearance values (doc_session_daemons.md, SD14, SD16)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+athanor-i18n = { path = "../athanor-i18n" }
+athanor-services = { path = "../athanor-services" }
+athanor-unit = { path = "../athanor-unit" }
+futures-util = { workspace = true }
+gio = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }
