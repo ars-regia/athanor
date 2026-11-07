@@ -932,12 +932,13 @@ impl State {
     /// to the right of the others. One that could not be set up is remembered with the modes and
     /// the CRTC it failed with, and is tried again only when either changes.
     fn connected(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
-        // A monitor a configuration disabled stays dark until one enables it.
-        let disabled = self.output_management.disabled.iter();
-        if disabled
-            .filter_map(connector_of)
-            .any(|shown| shown == connector.handle())
-        {
+        // A monitor a configuration disabled stays dark until one enables it, offering the modes
+        // it has now.
+        let mut disabled = self.output_management.disabled.iter();
+        let shown = disabled.find(|output| connector_of(output) == Some(connector.handle()));
+        if let Some(output) = shown.cloned() {
+            offer_modes(&output, connector);
+            self.output_heads_changed();
             return;
         }
         let Backend::Drm(drm) = &mut self.backend else {
