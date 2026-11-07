@@ -1,5 +1,6 @@
 //! The Wayland driver on smithay-client-toolkit: xdg-toplevel windows, wlr-layer-shell surfaces
-//! and their xdg-popups (a menu, or a tooltip), several in one process, each drawn in shared memory by vello_cpu or through wgpu by
+//! and their xdg-popups (a menu, or a tooltip), the lock surfaces of ext-session-lock-v1, several
+//! in one process, each drawn in shared memory by vello_cpu or through wgpu by
 //! vello_gpu at the compositor's fractional scale, the keyboard and the pointer, the input method
 //! through text-input-v3, the clipboard and the primary selection, and one AccessKit adapter on
 //! AT-SPI per surface.
@@ -48,6 +49,10 @@ use smithay_client_toolkit::{
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
+    session_lock::{
+        SessionLock, SessionLockHandler, SessionLockState, SessionLockSurface,
+        SessionLockSurfaceConfigure,
+    },
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
@@ -244,10 +249,32 @@ pub trait Application {
     /// called for a motion a later one replaced, nor for a surface closed by then.
     fn settled(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
-    /// The layer surface `surface` closed without the application asking: the compositor closed
-    /// it (`zwlr_layer_surface_v1.closed`), or the output it was opened on left. It is no longer
-    /// open, and the driver opens nothing in its place.
+    /// The layer surface or lock surface `surface` closed without the application asking: the
+    /// compositor closed a layer surface (`zwlr_layer_surface_v1.closed`), or the output it was
+    /// opened on left. It is no longer open, and the driver opens nothing in its place.
     fn closed(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
+
+    /// The lock surface for `output` while the session lock of [`Shell::lock`] is asked for or
+    /// held: asked for each output announced when the lock is asked for, at the end of that turn,
+    /// then for each output announced while it holds. The surface takes the size its first
+    /// configure gives and each later one, as ext-session-lock-v1 requires, and widgets that lay
+    /// out larger end the run. `None` leaves the output without one, which the compositor then
+    /// blanks; it is asked again only when the output leaves and comes back, or at the next lock.
+    /// [`Application::output_changed`] follows the output of each lock surface.
+    fn lock_surface(&mut self, _output: &OutputInfo) -> Option<Ui> {
+        None
+    }
+
+    /// The compositor confirmed the session lock of [`Shell::lock`]
+    /// (`ext_session_lock_v1.locked`): the outputs show nothing but the lock surfaces, until
+    /// [`Shell::unlock`].
+    fn locked(&mut self, _shell: &mut Shell) {}
+
+    /// The compositor refused the session lock of [`Shell::lock`], or ended it
+    /// (`ext_session_lock_v1.finished`). The driver has answered as the protocol asks, with
+    /// `unlock_and_destroy` for a lock it had confirmed and `destroy` otherwise, and closed the
+    /// lock surfaces; [`Shell::lock`] may ask again.
+    fn finished(&mut self, _shell: &mut Shell) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -358,6 +385,11 @@ fn run_on(
         closing: Vec::new(),
         reduced_motion: false,
         settled: Vec::new(),
+        // Bound as the others; where the compositor withholds it, as athanor-sulphur does from a
+        // client its allow-list does not name, Shell::lock is refused.
+        session_lock_state: SessionLockState::new(&globals, &qh),
+        session_lock: None,
+        lock_asked: Vec::new(),
     };
     let mut app = App {
         application: Box::new(application),
@@ -394,6 +426,8 @@ fn run_on(
     while !app.shell.exit {
         event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
+        // A lock asked for in this turn has its surfaces before anything is drawn.
+        app.open_lock_surfaces();
         if let Err(error) = app.shell.draw_dirty() {
             app.fail(error);
         }
@@ -527,6 +561,12 @@ pub struct Shell {
     reduced_motion: bool,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
     settled: Vec<SurfaceId>,
+    /// ext_session_lock_manager_v1, of which [`Shell::lock`] asks a lock.
+    session_lock_state: SessionLockState,
+    /// The session lock asked for or held, until [`Shell::unlock`] or `finished` ends it.
+    session_lock: Option<SessionLock>,
+    /// The outputs [`Application::lock_surface`] was asked about since the lock was asked for.
+    lock_asked: Vec<wl_output::WlOutput>,
 }
 
 impl Shell {
@@ -754,6 +794,70 @@ impl Shell {
         }
     }
 
+    /// Asks the compositor to lock the session (ext-session-lock-v1). Each output announced, and
+    /// each one announced while the lock holds, gets the surface [`Application::lock_surface`]
+    /// makes for it; the compositor answers with [`Application::locked`] or
+    /// [`Application::finished`]. Refused while a lock is asked for or held, and where the
+    /// compositor offers no `ext_session_lock_manager_v1`.
+    pub fn lock(&mut self) -> Result<(), Error> {
+        if self.session_lock.is_some() {
+            return Err("the session lock is already asked for or held".into());
+        }
+        let lock = self
+            .session_lock_state
+            .lock(&self.qh)
+            .map_err(|e| format!("no session lock: {e}"))?;
+        self.session_lock = Some(lock);
+        self.lock_asked.clear();
+        Ok(())
+    }
+
+    /// Ends the session lock that [`Application::locked`] confirmed, with `unlock_and_destroy`,
+    /// and closes the lock surfaces after it, so that the compositor never falls back to a plain
+    /// colour on an output in between. Refused without a lock, and for a lock the compositor has
+    /// not answered yet, which the protocol forbids withdrawing until then.
+    pub fn unlock(&mut self) -> Result<(), Error> {
+        match self.session_lock.take() {
+            Some(lock) if lock.is_locked() => {
+                lock.unlock();
+                self.close_lock_surfaces();
+                Ok(())
+            }
+            Some(lock) => {
+                self.session_lock = Some(lock);
+                Err("the session lock is not answered yet: wait for locked or finished".into())
+            }
+            None => Err("no session lock to end".into()),
+        }
+    }
+
+    /// Opens `ui` as the lock surface of `output` under the lock asked for. The compositor
+    /// configures it at once, and it is committed only then, with its first buffer, as
+    /// ext-session-lock-v1 requires.
+    fn open_lock(&mut self, ui: Ui, output: &wl_output::WlOutput) -> Result<SurfaceId, Error> {
+        let lock = self.session_lock.as_ref().ok_or("no session lock")?;
+        let (wl, fractional) = self.new_surface();
+        let surface = lock.create_lock_surface(wl, output, &self.qh);
+        let id = self.adopt(ui, Shown::Lock(surface), fractional, None, (true, true))?;
+        if let Some(surface) = self.get_mut(id) {
+            surface.output = Some(output.clone());
+        }
+        Ok(id)
+    }
+
+    /// Closes every lock surface.
+    fn close_lock_surfaces(&mut self) {
+        let locks: Vec<SurfaceId> = self
+            .surfaces
+            .iter()
+            .filter(|s| matches!(s.shown, Shown::Lock(_)))
+            .map(|s| s.id)
+            .collect();
+        for id in locks {
+            self.close(id);
+        }
+    }
+
     fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
         self.surfaces.iter_mut().find(|s| s.id == id)
     }
@@ -814,6 +918,11 @@ impl Shell {
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
         if matches!(from.shown, Shown::Popup(_)) {
             return Err(format!("no popup of the popup {parent:?}: one is open at a time").into());
+        }
+        // ext-session-lock-v1 gives a lock surface no popup, and the compositor shows nothing
+        // else while locked.
+        if matches!(from.shown, Shown::Lock(_)) {
+            return Err(format!("no popup of the lock surface {parent:?}").into());
         }
         if anchor.index() >= from.ui.len() {
             return Err(format!("no widget {anchor:?} on {parent:?}").into());
@@ -983,8 +1092,10 @@ impl Shell {
         // ponytail: a popup draws on vello_cpu: a wgpu device of its own would cost every tooltip
         // and menu a new instance, adapter, device and renderer in the event loop. Sharing the
         // window's needs `Gpu` split into one device and a surface per wl_surface.
+        // A lock surface too: a present wgpu drops leaves a commit without a buffer, which
+        // ext-session-lock-v1 makes a protocol error.
         #[cfg(feature = "gpu")]
-        let gpu = if self.gpu && !matches!(shown, Shown::Popup(_)) {
+        let gpu = if self.gpu && !matches!(shown, Shown::Popup(_) | Shown::Lock(_)) {
             // SAFETY: the surface owns the wgpu surface and drops it before its wl_surface, by
             // the order of Surface's fields.
             #[allow(unsafe_code)]
@@ -1007,7 +1118,8 @@ impl Shell {
                 size
             }
             Shown::Popup(_) => logical_size(&ui),
-            Shown::Window(_) => (0, 0),
+            // A lock surface takes the size of its configure.
+            Shown::Window(_) | Shown::Lock(_) => (0, 0),
         };
         self.next += 1;
         self.surfaces.push(Surface {
@@ -1035,7 +1147,11 @@ impl Shell {
         if input_region.is_some() {
             self.set_input_region(id, input_region.as_deref())?;
         }
-        if let Some(surface) = self.get_mut(id) {
+        // A lock surface is committed only after its first configure, with a buffer.
+        let first_commit = self
+            .get_mut(id)
+            .filter(|surface| !matches!(surface.shown, Shown::Lock(_)));
+        if let Some(surface) = first_commit {
             surface.wl_surface().commit();
         }
         Ok(id)
@@ -1208,6 +1324,8 @@ enum Shown {
     Window(Window),
     Layer(LayerSurface),
     Popup(Popup),
+    /// Dropped, it destroys its role, then its wl_surface.
+    Lock(SessionLockSurface),
 }
 
 impl Shown {
@@ -1216,6 +1334,7 @@ impl Shown {
             Shown::Window(window) => window.wl_surface(),
             Shown::Layer(surface) => surface.wl_surface(),
             Shown::Popup(popup) => popup.wl_surface(),
+            Shown::Lock(surface) => surface.wl_surface(),
         }
     }
 }
@@ -1255,7 +1374,7 @@ struct Surface {
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
-    /// The logical size last asked of a layer surface.
+    /// The logical size last asked of a layer surface, or configured of a lock surface.
     size: (u32, u32),
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
@@ -1345,6 +1464,15 @@ impl Surface {
             return Ok(());
         }
         let pixmap = render(&mut self.ui, self.scale)?;
+        // ext-session-lock-v1 ends the client that commits another size than the configured one.
+        if matches!(self.shown, Shown::Lock(_)) && logical_size(&self.ui) != self.size {
+            return Err(format!(
+                "a lock surface's widgets lay out to {:?}, not the {:?} configured",
+                logical_size(&self.ui),
+                self.size
+            )
+            .into());
+        }
         let (w, h) = (i32::from(pixmap.width()), i32::from(pixmap.height()));
         let (buffer, canvas) = pool.create_buffer(w, h, w * 4, wl_shm::Format::Argb8888)?;
         // vello_cpu writes premultiplied RGBA bytes; ARGB8888 is BGRA in memory.
@@ -1802,7 +1930,7 @@ impl App {
             outputs,
             ..
         } = self;
-        let seen = outputs.seen(output, |output| {
+        let seen = outputs.seen(output.clone(), |output| {
             application
                 .output(&info)
                 .map(|(ui, options)| shell.open(ui, Role::Layer(options), Some(output)))
@@ -1817,6 +1945,40 @@ impl App {
             }
             Ok(None) => {}
             Err(error) => self.fail(error),
+        }
+        // The lock surface of the output follows its change; one announced while locked gets one.
+        let lock = self.shell.surfaces.iter().find(|s| {
+            matches!(s.shown, Shown::Lock(_)) && s.output.as_ref() == Some(&output)
+        });
+        if let Some(id) = lock.map(|s| s.id) {
+            self.application.output_changed(&mut self.shell, id, &info);
+        }
+        self.open_lock_surfaces();
+    }
+
+    /// Gives each output announced that the application was not asked about since the lock was
+    /// asked for the surface [`Application::lock_surface`] makes for it.
+    fn open_lock_surfaces(&mut self) {
+        let unasked: Vec<_> = self
+            .shell
+            .outputs
+            .iter()
+            .filter(|(output, _)| !self.shell.lock_asked.contains(output))
+            .cloned()
+            .collect();
+        for (output, info) in unasked {
+            // The application may end the lock from `output_changed`.
+            if self.shell.session_lock.is_none() || self.shell.exit {
+                return;
+            }
+            self.shell.lock_asked.push(output.clone());
+            let Some(ui) = self.application.lock_surface(&info) else {
+                continue;
+            };
+            match self.shell.open_lock(ui, &output) {
+                Ok(id) => self.application.output_changed(&mut self.shell, id, &info),
+                Err(error) => return self.fail(error),
+            }
         }
     }
 
@@ -2253,6 +2415,7 @@ impl OutputHandler for App {
         output: wl_output::WlOutput,
     ) {
         self.shell.outputs.retain(|(o, _)| *o != output);
+        self.shell.lock_asked.retain(|o| *o != output);
         self.outputs.left(&output);
         // One at a time: a surface of the output the application closes from
         // Application::closed is closed at its asking, and it is not told of it.
@@ -2296,6 +2459,43 @@ impl LayerShellHandler for App {
         if surface.stretch.1 && height > 0 {
             surface.ui.min_height = height as f32;
         }
+        surface.configured = true;
+        let id = surface.id;
+        self.changed(id, None);
+    }
+}
+
+impl SessionLockHandler for App {
+    fn locked(&mut self, _: &Connection, _: &QueueHandle<Self>, _: SessionLock) {
+        self.application.locked(&mut self.shell);
+    }
+
+    fn finished(&mut self, _: &Connection, _: &QueueHandle<Self>, lock: SessionLock) {
+        // The protocol's answer: `unlock_and_destroy` for a lock that was confirmed, `destroy`,
+        // as the last clone drops, for one that never was; then the lock surfaces close.
+        lock.unlock();
+        self.shell.session_lock = None;
+        self.shell.close_lock_surfaces();
+        self.closed_by_application();
+        self.application.finished(&mut self.shell);
+    }
+
+    fn configure(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        lock_surface: SessionLockSurface,
+        configure: SessionLockSurfaceConfigure,
+        _: u32,
+    ) {
+        let Some(surface) = self.shell.find(lock_surface.wl_surface()) else {
+            return;
+        };
+        // Exactly the size configured, which smithay-client-toolkit has acknowledged.
+        let (width, height) = configure.new_size;
+        surface.ui.min_width = width as f32;
+        surface.ui.min_height = height as f32;
+        surface.size = (width, height);
         surface.configured = true;
         let id = surface.id;
         self.changed(id, None);

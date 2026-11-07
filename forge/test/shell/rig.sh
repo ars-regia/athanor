@@ -63,6 +63,7 @@
 #                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the input method as its rig unit (run build-compositor first)
 #   rig.sh toolkit-clipboard   athanor-sal's text field copies, cuts and pastes through wl-clipboard, with its keys and its context menu, under cosmic-comp, never athanor-sulphur (run build-toolkit first; needs a rig image with wl-clipboard)
 #   rig.sh toolkit-layer    athanor-sal's layer surfaces under headless sway: one per output as outputs are added, removed, added again and scaled to 1.5 (run build-toolkit first)
+#   rig.sh toolkit-lock     athanor-sal's session lock under headless sway: one lock surface per output as outputs are added, removed, added again and scaled to 1.5, and unlock_and_destroy before the surfaces go (LP18; run build-toolkit first)
 #   rig.sh toolkit-motion   athanor-sal's layer surface moves in, out and in with reduced motion on its frame callbacks under headless sway, each motion settling in its time (Sal's S3; run build-toolkit first)
 #   rig.sh toolkit-picture  athanor-sal's picture on a full-size background layer surface under headless sway: the output's size at each mode and scale, on each output (SD6; run build-toolkit first)
 #   rig.sh toolkit-a11y     athanor-sal's root roles, radios, announcements and a surface out of the AT-SPI tree, read on the accessibility bus (Sal's S2; run build-toolkit first)
@@ -734,12 +735,13 @@ build-toolkit)
                  && cargo rustdoc --locked -p athanor-sal -- -D warnings \
                  && cargo test --locked -p athanor-sal \
                  && cargo test --locked -p athanor-sal --features gpu \
-                 && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer --example a11y \
+                 && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example lock --example popup --example pointer --example a11y \
                  && cargo build --release --locked -p athanor-sal --features gpu --example picture \
                  && install -m 0755 /out/target/release/examples/chooser /out/bin/athanor-sal-chooser \
                  && install -m 0755 /out/target/release/examples/field /out/bin/athanor-sal-field \
                  && install -m 0755 /out/target/release/examples/input_method /out/bin/athanor-sal-input-method \
                  && install -m 0755 /out/target/release/examples/layer /out/bin/athanor-sal-layer \
+                 && install -m 0755 /out/target/release/examples/lock /out/bin/athanor-sal-lock \
                  && install -m 0755 /out/target/release/examples/popup /out/bin/athanor-sal-popup \
                  && install -m 0755 /out/target/release/examples/pointer /out/bin/athanor-sal-pointer \
                  && install -m 0755 /out/target/release/examples/a11y /out/bin/athanor-sal-a11y \
@@ -1541,6 +1543,12 @@ toolkit-layer)
     # backend adds and removes outputs, which athanor-sulphur's fixture cannot yet (C1 task 8).
     require athanor-sal-layer build-toolkit
     in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_layer_check.py
+    ;;
+toolkit-lock)
+    # doc_lock_and_prompts.md LP18: the driver's ext-session-lock-v1 role, one lock surface per
+    # output, under sway's headless backend, which adds and removes outputs.
+    require athanor-sal-lock build-toolkit
+    in_rig "$(rig_image)" env XDG_RUNTIME_DIR=/run/user/1000 python3 /repo/forge/test/shell/toolkit_lock_check.py
     ;;
 toolkit-motion)
     # Sal's requirement S3 (doc_osd.md OD10): a motion advances on the surface's frame callbacks
