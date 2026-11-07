@@ -1465,8 +1465,8 @@ pub fn placeholder_identity(model: &str) -> athanor_edid::Identity {
 }
 
 /// An output with no global yet (`publish_output`): for a backend that learns whether the
-/// monitor works only after it has the output. `identity` is what `wl_output` and
-/// wlr-output-management report as make, model and serial.
+/// monitor works only after it has the output. `identity` is what `wl_output` reports as make
+/// and model, and wlr-output-management as make, model and serial.
 pub fn build_output(
     name: &str,
     identity: &athanor_edid::Identity,

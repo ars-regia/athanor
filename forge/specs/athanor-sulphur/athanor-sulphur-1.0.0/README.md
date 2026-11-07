@@ -347,10 +347,11 @@ athanor-sulphur --drm
 ```
 
 It offers `linux-dmabuf` with feedback naming the render node and, when the GPU can wait on a
-syncobj, `linux-drm-syncobj-v1`. A monitor plugged in gets an output and its `wl_output`, which
-reports the make, model and serial that `athanor-edid` reads from the connector's EDID blob (the
-placeholder make `Athanor`, model `DRM` and no serial when there is none or it does not parse);
-one unplugged loses them, and its layer surfaces are closed. When the session is paused (another
+syncobj, `linux-drm-syncobj-v1`. A monitor plugged in gets an output and its `wl_output`. The make,
+model and serial are those that `athanor-edid` reads from the connector's EDID blob (the
+placeholder make `Athanor`, model `DRM` and no serial when there is none or it does not parse).
+`wl_output` and `xdg_output` carry the make and model (and the description "<make> - <model>"),
+not the serial; the serial reaches only wlr-output-management, which is privileged. One unplugged loses them, and its layer surfaces are closed. When the session is paused (another
 virtual terminal) it stops drawing, and when it resumes it takes the devices back, scans the
 monitors again and draws every output. An output draws only when something may have changed (a
 client's request or commit, input, a monitor plugged in or out, the lock), at most once a
