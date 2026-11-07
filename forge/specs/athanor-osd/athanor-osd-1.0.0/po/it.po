@@ -15,7 +15,7 @@ msgstr "Audio disattivato"
 #: src/logic.rs:73
 #, rust-format
 msgid "Volume {percent} percent"
-msgstr "Volume {percent} percento"
+msgstr "Volume {percent} per cento"
 
 #: src/logic.rs:74
 msgid "Microphone muted"
@@ -24,7 +24,7 @@ msgstr "Microfono disattivato"
 #: src/logic.rs:75
 #, rust-format
 msgid "Microphone {percent} percent"
-msgstr "Microfono {percent} percento"
+msgstr "Microfono {percent} per cento"
 
 #: src/surface.rs:174
 msgid "Volume"

@@ -9,7 +9,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 # doc_osd.md OD2: Sal, the models, the compositor client without GTK, the style without GTK,
 # the translations, the unit's confinement, Tokio and zbus. GLib's main context is the one the
 # compositor client already runs on (the toolkit dock's `glib`); no gtk4, gdk4 or
-# gtk4-layer-shell in the tree (`verify.py osd-no-gtk`).
+# gtk4-layer-shell in the tree (`rig.sh no-gtk`).
 [dependencies]
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-sal = { path = "../../../../system/athanor-sal" }
