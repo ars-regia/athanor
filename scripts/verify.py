@@ -5056,8 +5056,8 @@ def zbus_replies(files, root):
     """Findings for the Rust `files` (paths under `root`): a method of an `#[interface]` impl
     that takes `#[zbus(connection)] conn` and awaits a statement that passes `conn` on, or calls
     on it. zbus 5.19 reads one socket per connection and hands each message to every stream
-    with a queue of 64; the object server is one sequential task, so a method that awaits a reply
-    on the connection that serves it stalls for good once 64 messages queue ahead of the reply
+    with a queue of 64. A handler that awaits a reply on that connection while a stream of it
+    fills stops the reader, so the reply is never read and the wait is for good
     (issue #1035). The fix is a second connection that serves nothing, subscribes to nothing and
     owns no name, with each query under `tokio::time::timeout`; a method then reads it from
     `self`, not from the argument.
