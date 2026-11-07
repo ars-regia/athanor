@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        24%{?dist}
+Release:        25%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-25
+- athanor_unit::dirs walks the path of the bar's Landlock write grants one component at
+  a time (#1061): a link above the final component is followed only in a directory of
+  root's alone, as /home, and any other is refused: that grant is left out with a
+  warning.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
 - Landlock grants the bar's writes by descriptors athanor_unit::dirs opened and checked
   (#1052): a directory that is a link or another user's is left out with a warning, and the

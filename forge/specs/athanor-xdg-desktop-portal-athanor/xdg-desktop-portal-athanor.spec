@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        9%{?dist}
 Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later
@@ -49,6 +49,11 @@ install -D -m 0644 %{crate_dir}/athanor-portals.conf %{buildroot}%{_datadir}/xdg
 %{_datadir}/xdg-desktop-portal/athanor-portals.conf
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
+- athanor_unit::dirs walks the path of the portal's Landlock write grants one component at
+  a time (#1061): a link above the final component is followed only in a directory of
+  root's alone, as /home, and any other is refused, which stops the portal.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
 - Landlock grants $XDG_RUNTIME_DIR/dconf by the descriptor athanor_unit::dirs::private_dir
   opened and checked (#1052): the user's, of mode 0700, and not a link. The unit sets

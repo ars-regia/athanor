@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        17%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -76,6 +76,11 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
+- athanor_unit::dirs walks the path of athanor-update-notify's Landlock write grants one component at
+  a time (#1061): a link above the final component is followed only in a directory of
+  root's alone, as /home, and any other is refused, which stops the notifier.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - athanor-update-notify confines itself with athanor_unit's Landlock ruleset (#1052) and
   grants its state directory by a descriptor of dirs::owned_dir: a state directory that is a

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        12%{?dist}
+Release:        13%{?dist}
 Summary:        The Athanor dock
 License:        GPL-3.0-or-later
 
@@ -51,6 +51,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-dock
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-dock.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-13
+- athanor_unit::dirs walks the path of the dock's Landlock write grants one component at
+  a time (#1061): a link above the final component is followed only in a directory of
+  root's alone, as /home, and any other is refused: that grant is left out with a
+  warning.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - Landlock grants the dock's writes by descriptors athanor_unit::dirs opened and checked
   (#1052): a directory that is a link or another user's is left out with a warning, and the

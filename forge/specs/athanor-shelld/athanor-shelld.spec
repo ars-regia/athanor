@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-shelld
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        6%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
 License:        GPL-3.0-or-later
 
@@ -39,6 +39,11 @@ done
 /usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-6
+- athanor_unit::dirs walks the path of shelld's Landlock write grants one component at
+  a time (#1061): a link above the final component is followed only in a directory of
+  root's alone, as /home, and any other is refused, which stops the daemon.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-5
 - Landlock grants shelld's state directory by a descriptor of athanor_unit::dirs::owned_dir
   (#1052): a state directory that is a link or another user's stops the daemon.
