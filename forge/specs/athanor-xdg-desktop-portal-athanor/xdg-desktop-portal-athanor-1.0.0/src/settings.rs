@@ -267,11 +267,14 @@ pub async fn emit(emitter: &SignalEmitter<'_>, change: &Change) {
 
 pub struct Portal {
     store: Arc<RwLock<Store>>,
+    /// The query connection: it serves nothing, subscribes to nothing and owns no name, so the
+    /// caller check never waits for a reply behind the calls this object answers (issue #1035).
+    query: Connection,
 }
 
 impl Portal {
-    pub fn new(store: Arc<RwLock<Store>>) -> Portal {
-        Portal { store }
+    pub fn new(store: Arc<RwLock<Store>>, query: Connection) -> Portal {
+        Portal { store, query }
     }
 }
 
@@ -281,9 +284,8 @@ impl Portal {
         &self,
         namespaces: Vec<String>,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> Result<HashMap<String, HashMap<String, OwnedValue>>, Error> {
-        caller::authorise(&header, conn).await?;
+        caller::authorise(&header, &self.query).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         Ok(store
             .iter()
@@ -303,9 +305,8 @@ impl Portal {
         namespace: String,
         key: String,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> Result<OwnedValue, Error> {
-        caller::authorise(&header, conn).await?;
+        caller::authorise(&header, &self.query).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         store
             .get(&namespace)
@@ -375,14 +376,16 @@ mod tests {
     /// The interface is written by hand (PT2 asks for zbus-xmlgen output); this holds it to
     /// xdg-desktop-portal's own definition, vendored unmodified from tag 1.20.4: every method,
     /// signal and property, with the type and direction of each argument.
-    #[test]
-    fn the_interface_matches_the_upstream_definition() {
+    #[tokio::test]
+    async fn the_interface_matches_the_upstream_definition() {
+        let bus = crate::caller::tests::Bus::start("introspect");
+        let query = bus.builder().build().await.expect("query");
         let upstream = members(include_str!(
             "../interfaces/org.freedesktop.impl.portal.Settings.xml"
         ));
         let mut ours = String::new();
         zbus::object_server::Interface::introspect_to_writer(
-            &Portal::new(Arc::default()),
+            &Portal::new(Arc::default(), query),
             &mut ours,
             0,
         );

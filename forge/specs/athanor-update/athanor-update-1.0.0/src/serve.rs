@@ -64,17 +64,28 @@ impl From<Refusal> for Error {
 }
 
 const LOGIND: &str = "org.freedesktop.login1";
+/// Bound on one question to the bus daemon or to logind, asked on the query connection.
+const ASK: Duration = Duration::from_secs(2);
+/// Bound on the polkit check, which may wait for the user to answer a prompt.
+const POLKIT_PROMPT: Duration = Duration::from_secs(300);
+
+/// A reply within `limit`, or an error: a call with no answer must not hold a request for good
+/// (issue #1035).
+async fn within<T>(limit: Duration, call: impl std::future::Future<Output = zbus::Result<T>>) -> zbus::Result<T> {
+    tokio::time::timeout(limit, call).await.unwrap_or_else(|_| Err(zbus::Error::Failure("no answer in time".into())))
+}
 
 struct Logind<'a>(&'a Connection);
 
 impl Logind<'_> {
+    /// A query to logind, bounded by `ASK`. Never a state-changing call: see `Power::reboot`.
     async fn call<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, method: &str, body: &B) -> zbus::Result<zbus::Message> {
-        self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body).await
+        within(ASK, self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body)).await
     }
 
     /// A property of one of logind's objects, read with `org.freedesktop.DBus.Properties.Get`.
     async fn property<T: TryFrom<OwnedValue, Error = zbus::zvariant::Error>>(&self, path: &ObjectPath<'_>, interface: &str, name: &str) -> zbus::Result<T> {
-        let reply = self.0.call_method(Some(LOGIND), path, Some("org.freedesktop.DBus.Properties"), "Get", &(interface, name)).await?;
+        let reply = within(ASK, self.0.call_method(Some(LOGIND), path, Some("org.freedesktop.DBus.Properties"), "Get", &(interface, name))).await?;
         Ok(T::try_from(reply.body().deserialize::<OwnedValue>()?)?)
     }
 }
@@ -91,7 +102,7 @@ type Session = (String, u32, String, String, OwnedObjectPath);
 /// as polkit assigns one to a process of a systemd user unit. Never a value the caller supplies.
 async fn caller_session(conn: &Connection, sender: &str) -> zbus::Result<OwnedObjectPath> {
     let name = zbus::names::BusName::try_from(sender)?;
-    let credentials = zbus::fdo::DBusProxy::new(conn).await?.get_connection_credentials(name).await?;
+    let credentials = within(ASK, async { Ok(zbus::fdo::DBusProxy::new(conn).await?.get_connection_credentials(name).await?) }).await?;
     let logind = Logind(conn);
     // PID 0 would name the service's own process to logind.
     if let Some(pid) = credentials.process_id().filter(|pid| *pid != 0) {
@@ -189,7 +200,9 @@ impl Power for Logind<'_> {
 
     async fn reboot(&self) -> Result<(), RebootError> {
         // Reboot(interactive = false). Never RebootWithFlags: flag 16 skips the inhibitors.
-        match self.call("Reboot", &(false,)).await {
+        // Not bounded by ASK: Reboot changes state, and a reply later than ASK would be reported
+        // as a failure while the machine reboots anyway. Only the queries above are bounded.
+        match self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), "Reboot", &(false,)).await {
             Ok(_) => Ok(()),
             Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "org.freedesktop.login1.BlockedByInhibitorLock" => Err(RebootError::Blocked),
             Err(err) => {
@@ -232,6 +245,10 @@ impl Drop for InFlight {
 
 struct Update1 {
     activity: Arc<Activity>,
+    /// The query connection: it serves no object, subscribes to no signal and owns no name, so
+    /// the replies to the polkit, bus daemon and logind calls are never queued behind the
+    /// requests the serving connection delivers (issue #1035).
+    query: Connection,
 }
 
 /// The unique name the bus daemon stamped on the call: the subject polkit judges.
@@ -240,11 +257,19 @@ fn sender_of(header: &Header<'_>) -> Result<String, Error> {
 }
 
 async fn polkit(conn: &Connection, sender: &str, action: &str) -> Result<(), Refusal> {
-    match check_polkit_auth_zbus(conn, sender, action, true).await {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(Refusal::NotAuthorized),
-        Err(err) => {
+    polkit_within(conn, sender, action, POLKIT_PROMPT).await
+}
+
+async fn polkit_within(conn: &Connection, sender: &str, action: &str, limit: Duration) -> Result<(), Refusal> {
+    match tokio::time::timeout(limit, check_polkit_auth_zbus(conn, sender, action, true)).await {
+        Ok(Ok(true)) => Ok(()),
+        Ok(Ok(false)) => Err(Refusal::NotAuthorized),
+        Ok(Err(err)) => {
             tracing::error!(%err, action, "polkit could not be asked");
+            Err(Refusal::NotAuthorized)
+        }
+        Err(_) => {
+            tracing::error!(action, "polkit did not answer in time: the request is refused");
             Err(Refusal::NotAuthorized)
         }
     }
@@ -252,7 +277,7 @@ async fn polkit(conn: &Connection, sender: &str, action: &str) -> Result<(), Ref
 
 async fn uid_of(conn: &Connection, sender: &str) -> Option<u32> {
     let name = zbus::names::BusName::try_from(sender).ok()?;
-    zbus::fdo::DBusProxy::new(conn).await.ok()?.get_connection_unix_user(name).await.ok()
+    within(ASK, async { Ok(zbus::fdo::DBusProxy::new(conn).await?.get_connection_unix_user(name).await?) }).await.ok()
 }
 
 /// The journal entry of a change of the opt-out, in the journal's native protocol: notice
@@ -300,34 +325,34 @@ impl Update1 {
 
 #[interface(name = "os.athanor.Update1")]
 impl Update1 {
-    async fn apply(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+    async fn apply(&self, #[zbus(header)] header: Header<'_>) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
-        let caller = Sender::new(conn, sender_of(&header)?).await;
+        let caller = Sender::new(&self.query, sender_of(&header)?).await;
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
-        Ok(requests::apply(&ctx, &Logind(conn), &caller).await?)
+        Ok(requests::apply(&ctx, &Logind(&self.query), &caller).await?)
     }
 
-    async fn go_back(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+    async fn go_back(&self, #[zbus(header)] header: Header<'_>) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
         let sender = sender_of(&header)?;
-        polkit(conn, &sender, ACTION_ROLLBACK).await?;
+        polkit(&self.query, &sender, ACTION_ROLLBACK).await?;
         // UT6: the caller's uid at notice. It identifies who asked; polkit already decided.
-        let uid = uid_of(conn, &sender).await;
+        let uid = uid_of(&self.query, &sender).await;
         tracing::info!(?uid, "going back to the previous version was requested and authorized");
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
-        Ok(requests::go_back(&ctx, &Logind(conn)).await?)
+        Ok(requests::go_back(&ctx, &Logind(&self.query)).await?)
     }
 
     /// Postpones the security update that would apply at the next shutdown, once per lineage
     /// (UT13).
-    async fn postpone(&self, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+    async fn postpone(&self, #[zbus(header)] header: Header<'_>) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
         let sender = sender_of(&header)?;
-        polkit(conn, &sender, requests::ACTION_POSTPONE).await?;
+        polkit(&self.query, &sender, requests::ACTION_POSTPONE).await?;
         // UT6: the caller's uid at notice, read while the caller is still on the bus.
-        let uid = uid_of(conn, &sender).await;
+        let uid = uid_of(&self.query, &sender).await;
         let (tools, store) = (System, crate::store::Store::system());
         // Made after the prompt: the budget is judged at the time of the answer.
         let ctx = Context::system(&tools, &store, now());
@@ -337,11 +362,11 @@ impl Update1 {
     }
 
     /// The opt-out of UT13. polkit asks for an administrator every time.
-    async fn set_automatic_security_updates(&self, enabled: bool, #[zbus(header)] header: Header<'_>, #[zbus(connection)] conn: &Connection) -> Result<(), Error> {
+    async fn set_automatic_security_updates(&self, enabled: bool, #[zbus(header)] header: Header<'_>) -> Result<(), Error> {
         let _in_flight = self.activity.enter();
         let sender = sender_of(&header)?;
-        polkit(conn, &sender, requests::ACTION_SET_AUTOMATIC).await?;
-        let uid = uid_of(conn, &sender).await;
+        polkit(&self.query, &sender, requests::ACTION_SET_AUTOMATIC).await?;
+        let uid = uid_of(&self.query, &sender).await;
         let (tools, store) = (System, crate::store::Store::system());
         let ctx = Context::system(&tools, &store, now());
         let (changed, result) = requests::set_automatic(&ctx, enabled);
@@ -363,7 +388,8 @@ impl Update1 {
 /// The name cannot be owned: the `system.d` policy file is missing, or another owner exists.
 pub async fn run() -> zbus::Result<()> {
     let activity = Arc::new(Activity::default());
-    let conn = zbus::connection::Builder::system()?.name(BUS_NAME)?.serve_at(OBJECT_PATH, Update1 { activity: Arc::clone(&activity) })?.build().await?;
+    let query = zbus::connection::Builder::system()?.build().await?;
+    let conn = zbus::connection::Builder::system()?.name(BUS_NAME)?.serve_at(OBJECT_PATH, Update1 { activity: Arc::clone(&activity), query })?.build().await?;
     let started = Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -677,6 +703,33 @@ mod tests {
         }
     }
 
+    /// polkit that never answers.
+    struct SilentPolkit;
+
+    #[zbus::interface(name = "org.freedesktop.PolicyKit1.Authority")]
+    impl SilentPolkit {
+        async fn check_authorization(
+            &self,
+            _subject: (String, std::collections::HashMap<String, OwnedValue>),
+            _action: String,
+            _details: std::collections::HashMap<String, String>,
+            _flags: u32,
+            _cancellation: String,
+        ) -> zbus::fdo::Result<(bool, bool, std::collections::HashMap<String, String>)> {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_polkit_that_never_answers_refuses_the_request() {
+        let bus = crate::goback::tests::Bus::start("polkit-silent");
+        let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", SilentPolkit).expect("serve").build().await.expect("polkit");
+        let client = bus.builder().build().await.expect("client");
+        let sender = client.unique_name().expect("unique name").to_string();
+        let refused = polkit_within(&client, &sender, requests::ACTION_APPLY, Duration::from_millis(300)).await;
+        assert_eq!(refused, Err(Refusal::NotAuthorized));
+    }
+
     /// polkit recording each action and its flags, and answering every check with a "no".
     #[derive(Clone, Default)]
     struct RecordingPolkit(Arc<Mutex<Vec<(String, u32)>>>);
@@ -701,7 +754,8 @@ mod tests {
         let bus = crate::goback::tests::Bus::start("polkit-actions");
         let polkit = RecordingPolkit::default();
         let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").expect("name").serve_at("/org/freedesktop/PolicyKit1/Authority", polkit.clone()).expect("serve").build().await.expect("polkit");
-        let service = bus.builder().serve_at(OBJECT_PATH, Update1 { activity: Arc::new(Activity::default()) }).expect("serve").build().await.expect("service");
+        let query = bus.builder().build().await.expect("query");
+        let service = bus.builder().serve_at(OBJECT_PATH, Update1 { activity: Arc::new(Activity::default()), query }).expect("serve").build().await.expect("service");
         let client = bus.builder().build().await.expect("client");
         let destination = service.unique_name().expect("unique name").to_owned();
         let not_authorized = |reply: zbus::Result<zbus::Message>| matches!(reply, Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "os.athanor.Update1.Error.NotAuthorized");
@@ -728,11 +782,13 @@ mod tests {
         assert!(activity.idle_for(started).is_some_and(|idle| idle < IDLE), "idle again, counted from the call");
     }
 
-    #[test]
-    fn a_state_call_leaves_the_service_idle_afterwards() {
+    #[tokio::test]
+    async fn a_state_call_leaves_the_service_idle_afterwards() {
         let (path, owner) = scratch("activity");
         published(&path);
-        let service = Update1 { activity: Arc::new(Activity::default()) };
+        let bus = crate::goback::tests::Bus::start("state-idle");
+        let query = bus.builder().build().await.expect("query");
+        let service = Update1 { activity: Arc::new(Activity::default()), query };
         let long_ago = Instant::now().checked_sub(IDLE * 2).expect("the clock has run for two idle periods");
         assert!(service.activity.idle_for(long_ago).is_some_and(|idle| idle >= IDLE), "idle before the call");
         assert!(service.state_at(&path, owner).is_ok());
