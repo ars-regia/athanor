@@ -24,6 +24,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
 use zbus::fdo::{self, DBusProxy, RequestNameFlags};
 use zbus::message::Header;
 use zbus::names::BusName;
@@ -43,8 +44,9 @@ pub const PORTAL: Service<'static> = Service {
 };
 /// How long a question to the bus may take.
 const ASK: Duration = Duration::from_secs(2);
-/// How long the whole restore of `inhibitors.json` may take at start, every question
-/// included: what is not settled by then is dropped, and the blank and the lock start.
+/// How long the whole start may take, the restore of `inhibitors.json` and the reconciliation
+/// after it, every question included: what is not settled by then is dropped, and the blank
+/// and the lock start.
 const RESTORE: Duration = Duration::from_secs(3);
 
 /// The table, the file it is written to and the channel that tells the timers what it holds.
@@ -172,13 +174,63 @@ async fn bounded<T, E: Display>(
     }
 }
 
+impl State {
+    /// An empty table, asking on `query` and `system`, and the channel of what it holds.
+    async fn new(
+        query: &Connection,
+        system: &Connection,
+        file: PathBuf,
+    ) -> Result<(Arc<State>, watch::Receiver<Hold>)> {
+        let bus = DBusProxy::builder(query)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await?;
+        let (hold, rx) = watch::channel(Hold::None);
+        let state = Arc::new(State {
+            table: Mutex::new(Inhibitors::new()),
+            file,
+            hold,
+            query: query.clone(),
+            bus,
+            system: system.clone(),
+            query_gone: Notify::new(),
+            closed: AtomicBool::new(false),
+            owns_name: AtomicBool::new(false),
+        });
+        Ok((state, rx))
+    }
+}
+
+/// The reconciliation at start, within `deadline`: an owner whose question has not been
+/// answered by then is treated as gone, toward locking, so a bus that stalls cannot hold the
+/// timers back.
+async fn reconcile_by(state: &State, deadline: Instant) {
+    let mut owners = all_owners(state);
+    let within = tokio::time::timeout_at(deadline, async {
+        while let Some(owner) = owners.first().cloned() {
+            reconcile(state, BTreeSet::from([owner.clone()])).await;
+            owners.remove(&owner);
+        }
+    })
+    .await;
+    if within.is_err() {
+        let mut table = state.lock();
+        let dropped: usize = owners.iter().map(|o| table.remove_owner(o).len()).sum();
+        tracing::warn!(
+            dropped,
+            "the reconciliation at start took longer than {RESTORE:?}: the owners not asked are treated as gone"
+        );
+    }
+}
+
 /// Puts back the entries of `inhibitors.json` whose owners are on the bus, a suspend
 /// inhibitor only when its owner is admitted again as `InhibitSuspend` admits it. Each owner
-/// is asked once. Within [`RESTORE`] in all: the entries not settled by then are dropped.
-async fn restore(state: &State, entries: Vec<(u32, Inhibitor)>) {
+/// is asked once. Within `deadline`, the end of [`RESTORE`]: the entries not settled by then
+/// are dropped.
+async fn restore(state: &State, entries: Vec<(u32, Inhibitor)>, deadline: Instant) {
     let total = entries.len();
     let mut settled = 0;
-    let within = tokio::time::timeout(RESTORE, async {
+    let within = tokio::time::timeout_at(deadline, async {
         let mut present: HashMap<String, bool> = HashMap::new();
         let mut admitted: HashMap<String, bool> = HashMap::new();
         for (cookie, i) in entries {
@@ -426,7 +478,7 @@ fn unescape(s: &str) -> String {
 /// connection to the same bus, opened apart (never a clone of `conn`, which would share its
 /// socket reader), with no objects, no signal subscriptions and no names, used only for
 /// questions (see the module rule); `serve` refuses a clone. The daemon ends, as for the main
-/// stream, when `query` is closed. Returns the
+/// stream, when `query` or `system` is closed. Returns the
 /// channel that carries what the table holds, and a handle that completes when the daemon can
 /// no longer follow the bus (the `NameOwnerChanged` stream ended): the table is then cleared,
 /// so the timers are free, and the caller is expected to exit and let the manager restart it
@@ -442,22 +494,7 @@ pub async fn serve(
             "the query connection must be opened apart from the main one".into(),
         ));
     }
-    let bus = DBusProxy::builder(query)
-        .cache_properties(CacheProperties::No)
-        .build()
-        .await?;
-    let (hold, rx) = watch::channel(Hold::None);
-    let state = Arc::new(State {
-        table: Mutex::new(Inhibitors::new()),
-        file,
-        hold,
-        query: query.clone(),
-        bus,
-        system: system.clone(),
-        query_gone: Notify::new(),
-        closed: AtomicBool::new(false),
-        owns_name: AtomicBool::new(false),
-    });
+    let (state, rx) = State::new(query, system, file).await?;
 
     // The drain starts before anything else, and does nothing but remove owners.
     let mut left = DBusProxy::new(conn)
@@ -524,9 +561,11 @@ pub async fn serve(
     };
     let stop_drain = ended.abort_handle();
 
+    // One deadline for the restore and the reconciliation that follows it.
+    let deadline = Instant::now() + RESTORE;
     let started = async {
         match store::load(&state.file) {
-            Ok(entries) => restore(&state, entries).await,
+            Ok(entries) => restore(&state, entries, deadline).await,
             Err(e) => tracing::warn!("{} unusable, starting empty: {e}", state.file.display()),
         }
         for path in PATHS {
@@ -544,13 +583,13 @@ pub async fn serve(
             .request_name_with_flags(IDLE_NAME, RequestNameFlags::DoNotQueue.into())
             .await
         {
+            conn.object_server().remove::<Idle1, _>(IDLE_PATH).await?;
             // Nobody could end a suspend inhibitor any more: none is kept.
             let dropped = drop_suspend(&mut state.lock());
             tracing::error!(
                 dropped,
                 "{IDLE_NAME} not owned, InhibitSuspend is unavailable and the restored suspend inhibitors are dropped: {e}"
             );
-            conn.object_server().remove::<Idle1, _>(IDLE_PATH).await?;
         }
         Ok::<(), zbus::Error>(())
     }
@@ -563,7 +602,7 @@ pub async fn serve(
     // Only the instance that owns the name writes the file. An owner that left while the
     // restore ran was not yet in the table when its signal came: look at all of them now.
     state.owns_name.store(true, Ordering::SeqCst);
-    reconcile(&state, all_owners(&state)).await;
+    reconcile_by(&state, deadline).await;
     state.changed(&state.lock());
     Ok((rx, ended))
 }
@@ -1448,6 +1487,46 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(*rx.borrow(), Hold::None);
+    }
+
+    /// The bus stalls after the restore: the reconciliation at start ends at the deadline, and
+    /// the owners it did not ask are treated as gone.
+    #[tokio::test]
+    async fn a_stalled_reconciliation_at_start_ends_at_its_deadline() {
+        let bus = Bus::start("stalled-reconcile");
+        let mut owners = Vec::new();
+        for _ in 0..4 {
+            owners.push(bus.connect().await);
+        }
+        let query = bus.connect().await;
+        let (state, _rx) = State::new(&query, &bus.connect().await, bus.dir.join("i.json"))
+            .await
+            .unwrap();
+        for (cookie, owner) in (1..).zip(&owners) {
+            let held = Inhibitor {
+                kind: Kind::Screen,
+                owner: owner.unique_name().unwrap().to_string(),
+                app_id: "org.example.App".into(),
+                reason: "r".into(),
+            };
+            assert!(state.lock().restore(cookie, held));
+        }
+        let pid = bus.daemon.id().to_string();
+        assert!(Command::new("kill")
+            .args(["-STOP", &pid])
+            .status()
+            .unwrap()
+            .success());
+        let started = Instant::now();
+        reconcile_by(&state, started + RESTORE).await;
+        let took = started.elapsed();
+        assert!(Command::new("kill")
+            .args(["-CONT", &pid])
+            .status()
+            .unwrap()
+            .success());
+        assert!(took < RESTORE + Duration::from_secs(1), "{took:?}");
+        assert!(state.lock().iter().count() < owners.len());
     }
 
     /// Another process holds `os.athanor.Idle1`: the daemon serves the rest, without it.
