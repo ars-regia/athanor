@@ -2,7 +2,7 @@
 //! right-to-left.
 
 use crate::focus;
-use crate::text::{keeps, printable, Brush, TextContext, TextField};
+use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
@@ -314,6 +314,8 @@ pub struct Widget {
     pub rect: Rect,
     pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
+    /// How its text is set: see [`Ui::set_text_style`].
+    pub(crate) style: TextStyle,
     /// `Some` for a widget that opens a popup: whether it is open.
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,
@@ -332,6 +334,7 @@ impl Widget {
             rect: Rect::default(),
             visible: true,
             text: None,
+            style: TextStyle::default(),
             expanded: None,
             tooltip: None,
             description: None,
@@ -1192,6 +1195,21 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
+    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check or a switch,
+    /// from its next layout; a field keeps the body text. `false`, and nothing changes, for a
+    /// scale that is not a finite number above zero.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_text_style(&mut self, id: WidgetId, style: TextStyle) -> bool {
+        if !(style.scale.is_finite() && style.scale > 0.0) {
+            return false;
+        }
+        self.widgets[id].style = style;
+        true
+    }
+
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
     /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
     /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
@@ -1428,6 +1446,7 @@ impl Ui {
             _ => gap,
         };
         let widget = &mut self.widgets[id];
+        let style = widget.style.clone();
         let (w, h) = match &mut widget.kind {
             Kind::Menu | Kind::List { .. } => {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
@@ -1489,7 +1508,7 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.layout(text, size, rtl);
+                let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width(), layout.height());
                 widget.text = Some(layout);
                 wh
@@ -1498,14 +1517,14 @@ impl Ui {
             | Kind::Toggle { label: text, .. }
             | Kind::MenuItem(text)
             | Kind::ListRow(text) => {
-                let layout = self.text.layout(text, size, rtl);
+                let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
                 wh
             }
             Kind::Check { label, .. } | Kind::Switch { label, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
-                let layout = self.text.layout(label, size, rtl);
+                let layout = self.text.layout(label, size, rtl, &style);
                 let wh = (
                     mark_w + gap + layout.width(),
                     mark_h.max(layout.height()) + pad,
@@ -3137,6 +3156,38 @@ mod tests {
         // Only a slider has a value.
         let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
         assert_eq!((ui.value(label), ui.set_value(label, 1.0)), (None, None));
+    }
+
+    #[test]
+    fn a_label_takes_its_style_at_the_next_layout_and_refuses_a_bad_scale() {
+        let mut ui = Ui::new("Style", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("45".into()));
+        ui.layout();
+        let body = ui.widget(label).rect;
+        let display = TextStyle {
+            scale: 5.0,
+            weight: 300,
+            features: vec![*b"tnum"],
+        };
+        assert!(ui.set_text_style(label, display.clone()));
+        ui.layout();
+        let large = ui.widget(label).rect;
+        assert!(
+            large.h > 4.0 * body.h && large.w > 4.0 * body.w,
+            "{large:?} from {body:?}"
+        );
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let bad = TextStyle {
+                scale,
+                ..TextStyle::default()
+            };
+            assert!(!ui.set_text_style(label, bad), "{scale}");
+        }
+        assert_eq!(
+            ui.widget(label).style,
+            display,
+            "a refused style changes nothing"
+        );
     }
 
     #[test]
