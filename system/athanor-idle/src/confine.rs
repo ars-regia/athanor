@@ -19,17 +19,17 @@
 
 use std::error::Error;
 use std::ffi::OsString;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use athanor_unit::sandbox;
+use athanor_unit::{dirs, sandbox};
 
-use crate::store;
-
-/// What the daemon reads and the directories it writes.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What the daemon reads and the directories it writes, held open as `dirs::private_dir`
+/// checked them.
+#[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<PathBuf>,
+    pub write: Vec<OwnedFd>,
 }
 
 /// `name` as an absolute path, or `None`.
@@ -48,28 +48,30 @@ fn list(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// The daemon's directory, `$XDG_RUNTIME_DIR/athanor-idle` (`store::runtime_dir`, an error
-/// when it is not the daemon's), and its grants: that directory and, when it passes the same
-/// check, dconf's.
+/// The daemon's directory, `$XDG_RUNTIME_DIR/athanor-idle`, where it keeps `inhibitors.json`
+/// (`dirs::private_dir`, an error when it is not the daemon's), and its grants: that directory
+/// and, when it passes the same check, dconf's.
 pub fn daemon(
     runtime: &Path,
     power_page: Option<&Path>,
     var: impl Fn(&str) -> Option<OsString>,
 ) -> std::io::Result<(PathBuf, Grants)> {
-    let dir = store::runtime_dir(runtime)?;
-    let mut write = vec![dir.clone()];
-    match store::private_dir(runtime, "dconf") {
+    let mut write = vec![dirs::private_dir(runtime, "athanor-idle")?];
+    match dirs::private_dir(runtime, "dconf") {
         Ok(dconf) => write.push(dconf),
         Err(error) => tracing::warn!(%error, "dconf's runtime directory is not granted"),
     }
-    Ok((dir, Grants::new(write, power_page, var)))
+    Ok((
+        runtime.join("athanor-idle"),
+        Grants::new(write, power_page, var),
+    ))
 }
 
 impl Grants {
     /// From the environment as `var` reads it, the Power page's store `power_page` and the
-    /// write directories `write`, which must exist.
+    /// write directories `write`.
     pub fn new(
-        write: Vec<PathBuf>,
+        write: Vec<OwnedFd>,
         power_page: Option<&Path>,
         var: impl Fn(&str) -> Option<OsString>,
     ) -> Grants {
@@ -110,8 +112,7 @@ impl Grants {
     /// process single-threaded (`sandbox::ensure_single_threaded`).
     pub fn apply(&self) -> Result<(), Box<dyn Error>> {
         let read: Vec<&Path> = self.read.iter().map(PathBuf::as_path).collect();
-        let write: Vec<&Path> = self.write.iter().map(PathBuf::as_path).collect();
-        sandbox::restrict(&read, &write)?;
+        sandbox::restrict(&read, &self.write)?;
         sandbox::deny_tcp()
     }
 }
@@ -132,7 +133,7 @@ mod tests {
     #[test]
     fn the_grants_follow_the_environment() {
         let grants = Grants::new(
-            vec!["/run/user/1000/athanor-idle".into()],
+            Vec::new(),
             None,
             env(&[
                 ("HOME", "/home/u"),
@@ -152,7 +153,6 @@ mod tests {
                 "/var/lib/flatpak/exports/share/glib-2.0/schemas",
             ]
         );
-        assert_eq!(grants.write, [Path::new("/run/user/1000/athanor-idle")]);
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
         let cosmic = base.join("cosmic");
         let store = cosmic.join("component/v1");
         std::fs::create_dir_all(&cosmic).expect("mkdir");
-        let read = |store: &Path| Grants::new(vec![base.join("w")], Some(store), env(&[])).read;
+        let read = |store: &Path| Grants::new(Vec::new(), Some(store), env(&[])).read;
         assert!(read(&store).contains(&cosmic), "the store is not there yet");
         std::fs::create_dir_all(&store).expect("mkdir");
         assert!(read(&store).contains(&store));
