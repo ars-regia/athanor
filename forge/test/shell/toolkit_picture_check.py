@@ -167,6 +167,11 @@ def main():
             try:
                 until(f"{step}: not settled", settled)
             except SystemExit:
+                if client.poll() is not None:
+                    raise SystemExit(
+                        f"toolkit_picture_check: {step}: the client exited with "
+                        f"{client.returncode}"
+                    ) from None
                 raise SystemExit(
                     f"toolkit_picture_check: {step}: {problems()}"
                 ) from None
@@ -176,8 +181,9 @@ def main():
             )
             print(f"{step}: one full-size background picture on each output ({sizes})")
     finally:
-        client.terminate()
-        compositor.terminate()
+        for process in (client, compositor):
+            process.terminate()
+            process.wait()
 
 
 if __name__ == "__main__":
