@@ -11,6 +11,8 @@ StartLimitIntervalSec=0
 # holds the readiness (SD16, maintainer decision, 2026-11-07).
 Type=notify
 ExecStart=/usr/bin/athanor-sessiond
+# Bounded as athanor-shelld is: the session target waits for this unit (doc_session.md SN6).
+TimeoutStartSec=10s
 Restart=always
 RestartSec=100ms
 RestartSteps=5
