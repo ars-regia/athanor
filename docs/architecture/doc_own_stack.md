@@ -377,6 +377,16 @@ cosmic-settings-daemon, as cosmic-comp's session does, from one source file of t
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
+Sulphur's wlr-output-management applies modes, positions, enabling and disabling and adaptive
+sync as well as scale and transform (maintainer decision, 2026-11-07; ADR-0138 decision 4). A
+configuration takes only a mode the monitor lists, or a custom mode of refresh 0 at the size of
+the current mode, and answers CVT custom timings `failed`. Positions within 2^24 pixels of the
+origin are taken as given, so that overlapping outputs mirror each other, and one further away is
+answered `failed`; an output given no position keeps its own. A disabled
+output is handled as an unplugged one, and its head stays in output management, reported
+disabled. A configuration is checked whole before anything is applied, a step the GPU refuses
+undoes the steps taken, and an applied one is sent to every manager with one `done`. A monitor
+whose modes change while it stays plugged in keeps its place, and its mode while it still offers it.
 For 1.0 (decision 20): fractional scale per output; damage tracked per output, so
 that an output redraws only what changed; on an output's removal, its layer surfaces closed and
 their clients told, and its windows moved to a remaining output; outputs of a second GPU recorded as

@@ -74,9 +74,16 @@ impl Inhibitors {
     }
 
     /// `UnInhibit` / `Uninhibit`, accepted only from the peer that created the inhibitor;
-    /// any other caller is refused and nothing changes.
-    pub fn remove(&mut self, cookie: u32, caller: &str) -> Result<Inhibitor, RemoveError> {
+    /// any other caller is refused and nothing changes. Each interface ends only its own
+    /// `kind`: a cookie of the other kind is unknown to it.
+    pub fn remove(
+        &mut self,
+        cookie: u32,
+        kind: Kind,
+        caller: &str,
+    ) -> Result<Inhibitor, RemoveError> {
         match self.table.get(&cookie) {
+            Some(i) if i.kind != kind => Err(RemoveError::UnknownCookie),
             None => Err(RemoveError::UnknownCookie),
             Some(i) if i.owner != caller => Err(RemoveError::NotOwner),
             Some(_) => self.table.remove(&cookie).ok_or(RemoveError::UnknownCookie),
@@ -173,7 +180,7 @@ mod tests {
         let a = t.add(inh(Kind::Screen, ":1.1"));
         let b = t.add(inh(Kind::Screen, ":1.1"));
         assert_eq!((a, b), (Some(1), Some(2)));
-        let _ = t.remove(1, ":1.1");
+        let _ = t.remove(1, Kind::Screen, ":1.1");
         assert_eq!(t.add(inh(Kind::Screen, ":1.1")), Some(3));
     }
 
@@ -202,7 +209,7 @@ mod tests {
         let mut t = Inhibitors::new();
         t.add(inh(Kind::Screen, ":1.1"));
         assert_eq!(
-            t.remove(99, ":1.1").unwrap_err(),
+            t.remove(99, Kind::Screen, ":1.1").unwrap_err(),
             RemoveError::UnknownCookie
         );
         assert_eq!(t.len(), 1);
@@ -212,11 +219,27 @@ mod tests {
     fn only_the_creating_peer_can_remove() {
         let mut t = Inhibitors::new();
         let c = t.add(inh(Kind::Screen, ":1.1")).unwrap();
-        assert_eq!(t.remove(c, ":1.2").unwrap_err(), RemoveError::NotOwner);
+        assert_eq!(
+            t.remove(c, Kind::Screen, ":1.2").unwrap_err(),
+            RemoveError::NotOwner
+        );
         assert_eq!(t.len(), 1);
         assert_eq!(t.hold(), Hold::All);
-        assert!(t.remove(c, ":1.1").is_ok());
+        assert!(t.remove(c, Kind::Screen, ":1.1").is_ok());
         assert!(t.is_empty());
+    }
+
+    #[test]
+    fn each_interface_ends_only_its_own_kind() {
+        let mut t = Inhibitors::new();
+        let c = t.add(inh(Kind::SuspendOnly, ":1.1")).unwrap();
+        assert_eq!(
+            t.remove(c, Kind::Screen, ":1.1").unwrap_err(),
+            RemoveError::UnknownCookie
+        );
+        assert_eq!(t.hold(), Hold::SuspendOnly);
+        assert!(t.remove(c, Kind::SuspendOnly, ":1.1").is_ok());
+        assert_eq!(t.hold(), Hold::None);
     }
 
     #[test]
@@ -224,7 +247,10 @@ mod tests {
         let mut t = Inhibitors::new();
         let c = t.add(inh(Kind::Screen, ":1.1")).unwrap();
         assert_eq!(t.hold(), Hold::All);
-        assert_eq!(t.remove(c, ":1.1").unwrap().app_id, "org.example.App");
+        assert_eq!(
+            t.remove(c, Kind::Screen, ":1.1").unwrap().app_id,
+            "org.example.App"
+        );
         assert_eq!(t.hold(), Hold::None);
     }
 
