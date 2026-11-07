@@ -1,8 +1,9 @@
 name: Shell surfaces
 
 # The visual tests of the shell rig. On a pull request pr.yml calls this workflow when
-# scripts/ci/changes.py selects `shell` (the same paths as the push filter below), and its
-# verdict reaches the required `gate`; the crates' unit tests run in `just check`.
+# scripts/ci/changes.py selects `shell` (the paths of the push filter below, except a root
+# Cargo.toml or Cargo.lock that only adds workspace members, which a path filter cannot read),
+# and its verdict reaches the required `gate`; the crates' unit tests run in `just check`.
 on:
   push:
     branches: [iso-v0]
