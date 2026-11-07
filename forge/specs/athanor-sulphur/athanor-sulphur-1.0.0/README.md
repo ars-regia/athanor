@@ -223,7 +223,8 @@ adaptive sync or a disable. Every head is checked before anything is applied, by
 A disabled output leaves the space
 and its `wl_output` global goes, and its lock surface is forgotten; a layer surface, a lock
 surface, a full screen or a power control asked for on a client's stale `wl_output` of it is
-refused. Enabled again while locked,
+refused. The global it gets when enabled again may take the name its old one had, since the
+Wayland server hands out the lowest free name. Enabled again while locked,
 it shows the background until the locker gives it a new one; while it is disabled its head
 still follows the modes its monitor offers. An applied configuration is sent
 to every manager. Positions are taken as given, overlapping or apart; an output a configuration

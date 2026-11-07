@@ -548,6 +548,8 @@ impl State {
         self.close_layers(output);
         if let Some(lock) = &mut self.lock {
             lock.forget_output(output);
+            // The keyboard leaves a lock surface the output took with it.
+            self.set_keyboard_focus(None);
         }
         self.space.unmap_output(output);
         self.fit_to_outputs();
@@ -555,8 +557,6 @@ impl State {
         // Its tiles re-homed, or the trees of its workspaces gone, after the fit.
         self.fit_tiles();
     }
-            // The keyboard leaves a lock surface the output took with it.
-            self.set_keyboard_focus(None);
 
     /// After the outputs changed (one went, or took another size): the windows their home output
     /// (`State::home_output`) no longer shows are centred on it, a window that lay whole on its
@@ -1509,11 +1509,16 @@ pub fn build_output(
     output
 }
 
-/// Offers `output` to the clients; the global is kept in its user data.
+/// Offers `output` to the clients; the global is kept in its user data, and one it had still
+/// is removed, so that no global outlives its slot.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
     let global = output.create_global::<State>(dh);
     let slot = output.user_data().get_or_insert(OutputGlobal::default);
-    *slot.0.borrow_mut() = Some(global);
+    let previous = slot.0.borrow_mut().replace(global);
+    if let Some(previous) = previous {
+        tracing::warn!(output = output.name(), "an output was offered twice");
+        dh.remove_global::<State>(previous);
+    }
 }
 
 /// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a

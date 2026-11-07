@@ -7176,6 +7176,25 @@ fn sd23_a_configuration_places_an_output() {
     run.stop();
 }
 
+/// An output offered again while it has its global keeps one global, not two.
+#[test]
+fn sd23_an_output_offered_twice_has_one_global() {
+    let mut run = Running::start(None);
+    let mut client = Local::connect(&mut run, None);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .next()
+        .cloned()
+        .expect("an output");
+    crate::state::publish_output(&run.state.display_handle, &first);
+    // The events of the registry the client has before it lists the globals on a new one.
+    client.roundtrip(&mut run);
+    assert_eq!(client.outputs_offered(&mut run).len(), OUTPUTS.len());
+    run.stop();
+}
+
 /// A layer surface asked for on the wl_output of an output a configuration disabled is closed
 /// (SD23): the client's stale object names an output no longer shown.
 #[test]

@@ -77,6 +77,7 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
   again.
 - Refuse a layer surface, a lock surface, a full screen and a power control asked for on a
   stale wl_output of an output no longer shown.
+- Remove the global an output still has when it is offered again.
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
 - Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
   with athanor-edid: wl_output and xdg_output carry the make and model, and the serial
