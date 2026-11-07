@@ -12,7 +12,7 @@ use crate::cursor::{pointer_elements, Cursor, PointerElement};
 use crate::look::FilterElement;
 use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
-use crate::output_management::Step;
+use crate::output_management::{set_can_sync, Step};
 use crate::state::{Backend, State, BACKGROUND, FRAME_THROTTLE};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -1048,6 +1048,12 @@ impl State {
                 &DrmOutputRenderElements::default(),
             )
             .map_err(|error| error.to_string())?;
+        let support =
+            drm_output.with_compositor(|compositor| compositor.vrr_supported(connector.handle()));
+        set_can_sync(
+            output,
+            support.is_ok_and(|support| support != VrrSupport::NotSupported),
+        );
         drm.outputs.insert(
             crtc,
             Head {

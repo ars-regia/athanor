@@ -46,6 +46,9 @@ const SCALES: std::ops::RangeInclusive<f64> = 1.0..=4.0;
 /// overflow would abort the session.
 const REACH: i32 = 1 << 24;
 
+/// Why the nested backend refuses every step.
+const NESTED_REFUSES: &str = "the nested output cannot change so";
+
 /// The user data of the global and of every object of the protocol but the modes.
 pub struct Heads;
 
@@ -93,6 +96,27 @@ pub(crate) fn set_adaptive_sync(output: &Output, on: bool) {
         .get_or_insert(|| AdaptiveSync(Cell::new(false)))
         .0
         .set(on);
+}
+
+/// Whether an output can take adaptive sync, kept in its user data by the backend that drives
+/// it; an output it was never set for, the nested one, cannot.
+struct CanSync(Cell<bool>);
+
+/// Whether `output` can take adaptive sync.
+fn can_sync(output: &Output) -> bool {
+    output
+        .user_data()
+        .get::<CanSync>()
+        .is_some_and(|can| can.0.get())
+}
+
+/// Records whether `output` can take adaptive sync.
+pub(crate) fn set_can_sync(output: &Output, can: bool) {
+    output
+        .user_data()
+        .get_or_insert(|| CanSync(Cell::new(false)))
+        .0
+        .set(can);
 }
 
 /// A change a backend makes to an output, which `undo` takes back.
@@ -144,6 +168,52 @@ impl Step {
             Step::AdaptiveSync { output, on } => Step::AdaptiveSync { output, on: !on },
         }
     }
+}
+
+/// The steps of `plans` for the backend, in the order they are taken.
+fn steps(plans: &[Plan]) -> Result<Vec<Step>, String> {
+    let mut steps = Vec::new();
+    // Disabled first: the bandwidth they free may be what another output's mode needs.
+    for plan in plans
+        .iter()
+        .filter(|plan| plan.now.enabled && plan.wanted.is_none())
+    {
+        let mode = plan.now.mode.ok_or("an output to disable has no mode")?;
+        steps.push(Step::Disable {
+            output: plan.output.clone(),
+            mode,
+            sync: plan.now.adaptive_sync,
+        });
+    }
+    for plan in plans.iter().filter(|plan| plan.now.enabled) {
+        let Some(wanted) = &plan.wanted else {
+            continue;
+        };
+        if Some(wanted.mode) != plan.now.mode {
+            let from = plan.now.mode.ok_or("an output to change has no mode")?;
+            steps.push(Step::Mode {
+                output: plan.output.clone(),
+                from,
+                to: wanted.mode,
+            });
+        }
+        if wanted.adaptive_sync != plan.now.adaptive_sync {
+            steps.push(Step::AdaptiveSync {
+                output: plan.output.clone(),
+                on: wanted.adaptive_sync,
+            });
+        }
+    }
+    for plan in plans.iter().filter(|plan| !plan.now.enabled) {
+        if let Some(wanted) = &plan.wanted {
+            steps.push(Step::Enable {
+                output: plan.output.clone(),
+                mode: wanted.mode,
+                sync: wanted.adaptive_sync,
+            });
+        }
+    }
+    Ok(steps)
 }
 
 /// Takes `steps` in order. When one fails, those taken are undone, the last first, and its
@@ -559,8 +629,22 @@ impl State {
             configuration.failed();
             return;
         }
+        // `test` and `apply` ask the backend the same: what it would refuse fails both.
+        let steps = match steps(&plans) {
+            Ok(steps) => steps,
+            Err(error) => {
+                tracing::warn!(%error, "an output configuration was refused");
+                configuration.failed();
+                return;
+            }
+        };
+        if let Err(error) = steps.iter().try_for_each(|step| self.backend_takes(step)) {
+            tracing::info!(%error, "an output configuration the backend cannot take was refused");
+            configuration.failed();
+            return;
+        }
         if apply {
-            if let Err(error) = self.apply_plans(&plans) {
+            if let Err(error) = self.apply_plans(&plans, &steps) {
                 tracing::warn!(%error, "an output configuration was refused and undone");
                 // A refused DRM test may have committed frames of its own, as `changed` notes.
                 self.request_redraw();
@@ -571,51 +655,10 @@ impl State {
         configuration.succeeded();
     }
 
-    /// Applies `plans`, every one checked already: first what the backend does, which it may
-    /// refuse, and is then undone whole; then the outputs' state, the space and the heads.
-    fn apply_plans(&mut self, plans: &[Plan]) -> Result<(), String> {
-        let mut steps = Vec::new();
-        // Disabled first: the bandwidth they free may be what another output's mode needs.
-        for plan in plans
-            .iter()
-            .filter(|plan| plan.now.enabled && plan.wanted.is_none())
-        {
-            let mode = plan.now.mode.ok_or("an output to disable has no mode")?;
-            steps.push(Step::Disable {
-                output: plan.output.clone(),
-                mode,
-                sync: plan.now.adaptive_sync,
-            });
-        }
-        for plan in plans.iter().filter(|plan| plan.now.enabled) {
-            let Some(wanted) = &plan.wanted else {
-                continue;
-            };
-            if Some(wanted.mode) != plan.now.mode {
-                let from = plan.now.mode.ok_or("an output to change has no mode")?;
-                steps.push(Step::Mode {
-                    output: plan.output.clone(),
-                    from,
-                    to: wanted.mode,
-                });
-            }
-            if wanted.adaptive_sync != plan.now.adaptive_sync {
-                steps.push(Step::AdaptiveSync {
-                    output: plan.output.clone(),
-                    on: wanted.adaptive_sync,
-                });
-            }
-        }
-        for plan in plans.iter().filter(|plan| !plan.now.enabled) {
-            if let Some(wanted) = &plan.wanted {
-                steps.push(Step::Enable {
-                    output: plan.output.clone(),
-                    mode: wanted.mode,
-                    sync: wanted.adaptive_sync,
-                });
-            }
-        }
-        take_all(&steps, Step::undo, |step| self.backend_step(step))?;
+    /// Applies `plans`, every one checked already: first `steps`, what the backend does, which
+    /// it may refuse, and is then undone whole; then the outputs' state, the space and the heads.
+    fn apply_plans(&mut self, plans: &[Plan], steps: &[Step]) -> Result<(), String> {
+        take_all(steps, Step::undo, |step| self.backend_step(step))?;
 
         self.output_management.applying = true;
         for plan in plans {
@@ -657,11 +700,26 @@ impl State {
         Ok(())
     }
 
-    /// Has the backend take `step`. The nested output is the parent compositor's window: it
-    /// takes no mode, no disable and no adaptive sync.
+    /// Whether the backend would take `step`, asked without changing anything. The nested
+    /// output is the parent compositor's window: it takes no mode, no disable and no adaptive
+    /// sync. A monitor may still refuse a step this takes, which only applying it tells.
+    fn backend_takes(&self, step: &Step) -> Result<(), String> {
+        if let Backend::Nested(_) = self.backend {
+            return Err(NESTED_REFUSES.into());
+        }
+        match step {
+            Step::AdaptiveSync { output, on: true }
+            | Step::Enable {
+                output, sync: true, ..
+            } if !can_sync(output) => Err("the output has no adaptive sync".into()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Has the backend take `step`, which `backend_takes` took.
     fn backend_step(&mut self, step: &Step) -> Result<(), String> {
         match &self.backend {
-            Backend::Nested(_) => Err("the nested output cannot change so".into()),
+            Backend::Nested(_) => Err(NESTED_REFUSES.into()),
             Backend::Headless(_) => self.headless_step(step),
             Backend::Drm(_) => self.drm_step(step),
         }

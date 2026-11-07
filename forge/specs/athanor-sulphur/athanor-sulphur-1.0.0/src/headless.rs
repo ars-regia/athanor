@@ -9,7 +9,7 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::look::{FilterElement, Filters};
 use crate::marks::Marks;
-use crate::output_management::Step;
+use crate::output_management::{set_can_sync, Step};
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -246,6 +246,8 @@ impl State {
             drawn: false,
         });
         self.map_output(&output);
+        // A virtual output follows whatever refresh it is given.
+        set_can_sync(&output, true);
         Ok(())
     }
 

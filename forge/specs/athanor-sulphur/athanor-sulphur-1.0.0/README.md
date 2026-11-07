@@ -218,8 +218,9 @@ take, or one that leaves no output enabled, fails and changes nothing: a mode th
 not offer, a scale outside 1 to 4, a position more than 2^24 from the origin, adaptive sync on
 a monitor without it, and on the nested
 output another transform, since its transform rights the backend's frame, another mode,
-adaptive sync or a disable. Every head is checked before anything is applied,
-and a step the GPU refuses halfway undoes the steps taken. A disabled output leaves the space
+adaptive sync or a disable. Every head is checked before anything is applied, by `test` as by
+`apply`, and a step the GPU refuses halfway undoes the steps taken.
+A disabled output leaves the space
 and its `wl_output` global goes, and its lock surface is forgotten: enabled again while locked,
 it shows the background until the locker gives it a new one; while it is disabled its head
 still follows the modes its monitor offers. An applied configuration is sent

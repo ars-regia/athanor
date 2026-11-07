@@ -7315,6 +7315,45 @@ fn sd23_adaptive_sync_is_set_and_reported() {
     run.stop();
 }
 
+/// Testing a configuration asks the backend as applying it does (SD23): adaptive sync on an
+/// output that cannot take it fails the test, and the output keeps it off.
+#[test]
+fn sd23_testing_adaptive_sync_on_an_output_without_it_fails() {
+    use zwlr_output_head_v1::AdaptiveSyncState;
+    let mut run = Running::start(None);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .next()
+        .cloned()
+        .expect("an output");
+    crate::output_management::set_can_sync(&first, false);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+
+    let qh = control_center.queue.handle();
+    let configuration = manager.create_configuration(serial, &qh, ());
+    for seen in &control_center.client.heads {
+        let head = configuration.enable_head(&seen.head, &qh, ());
+        if seen.name == "headless-0" {
+            head.set_adaptive_sync(AdaptiveSyncState::Enabled);
+        }
+    }
+    control_center.client.configured = None;
+    configuration.test();
+    control_center.pump(&mut run, "an answer to the test", |client, _| {
+        client.configured.is_some()
+    });
+    assert_eq!(control_center.client.configured, Some("failed"));
+    control_center.roundtrip(&mut run);
+    assert!(
+        !control_center.head("headless-0").adaptive_sync,
+        "still off"
+    );
+    run.stop();
+}
+
 /// An output a configuration gives no position keeps its own (maintainer decision,
 /// 2026-11-07): a scale changed on one output moves neither; an output enabled again with no
 /// position goes to the right of the others, which keep their places.
