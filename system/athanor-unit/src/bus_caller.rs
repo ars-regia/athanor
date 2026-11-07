@@ -37,6 +37,16 @@ pub const IMAGE_USER_UNITS: &str = "/usr/lib/systemd/user";
 /// The well-known name of systemd on either bus.
 pub const SYSTEMD: &str = "org.freedesktop.systemd1";
 
+/// The system bus socket, fixed: `Builder::system()` would honour `DBUS_SYSTEM_BUS_ADDRESS`,
+/// which a process of the user can set for a service through the user manager's environment.
+const SYSTEM_BUS: &str = "unix:path=/run/dbus/system_bus_socket";
+
+/// A builder for the connection to the system bus that [`OnBus`] asks, at [`SYSTEM_BUS`]
+/// whatever the environment says. Every `system` connection given to [`OnBus`] comes from here.
+pub fn system_bus() -> zbus::Result<zbus::connection::Builder<'static>> {
+    zbus::connection::Builder::address(SYSTEM_BUS)
+}
+
 /// The service whose main process [`admit`] admits.
 #[derive(Clone, Copy, Debug)]
 pub struct Service<'a> {
@@ -364,6 +374,12 @@ mod tests {
         unit: "xdg-desktop-portal-athanor.service",
         exec: "/usr/libexec/xdg-desktop-portal-athanor",
     };
+    #[test]
+    fn the_system_bus_is_the_fixed_socket_whatever_the_environment_says() {
+        assert_eq!(SYSTEM_BUS, "unix:path=/run/dbus/system_bus_socket");
+        assert!(system_bus().is_ok());
+    }
+
     const PID: u32 = 4242;
     const CALLER: &str = ":1.7";
     /// The unique name of the user's systemd on the fake session bus.

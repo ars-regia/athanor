@@ -20,11 +20,12 @@ pub const BAR: Service<'static> = Service {
 /// Bound on the whole admission, every question to the bus and to both systemds included.
 const ASK: Duration = Duration::from_secs(2);
 
-/// A connection to the system bus that serves nothing: at `address` if given, else the system's.
+/// A connection to the system bus that serves nothing: at `address` if given, else at the
+/// fixed socket, never at an address from the environment.
 async fn connect(address: Option<&str>) -> zbus::Result<Connection> {
     match address {
         Some(address) => zbus::connection::Builder::address(address)?.build().await,
-        None => zbus::connection::Builder::system()?.build().await,
+        None => bus_caller::system_bus()?.build().await,
     }
 }
 
