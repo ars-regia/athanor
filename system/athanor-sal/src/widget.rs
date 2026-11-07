@@ -200,6 +200,20 @@ pub enum Kind {
         /// that only decorates.
         description: String,
     },
+    /// A picture of decoded pixels that fills its column's width and the rest of its height, a
+    /// wallpaper's surface whole when it is the root's only child and the theme's margin is 0. It
+    /// is drawn with "zoom": scaled by one factor until it covers its rectangle in physical
+    /// pixels, the overflow cut equally on both sides. It takes no input and adds nothing to its
+    /// column's size, so a layer surface anchored on all four edges takes the size the
+    /// compositor configures. Add it with [`Ui::picture`].
+    #[non_exhaustive]
+    Picture {
+        /// The pixels, from [`crate::Image::from_rgba8`].
+        image: crate::icon::Image,
+        /// What the picture shows, which names it for assistive technologies; empty for a
+        /// picture that only decorates.
+        description: String,
+    },
     /// A dock's island along an edge of its window: its children stacked top to bottom when
     /// `vertical`, side by side in reading order otherwise, each stretched across the line and
     /// all centred along it. As the root's child it fills the window, so a surface stretched
@@ -719,6 +733,23 @@ impl Ui {
         self.add(parent, kind)
     }
 
+    /// Adds `image` as a picture that fills the rest of `parent`, named by `description` for
+    /// assistive technologies; an empty description marks a picture that only decorates. See
+    /// [`Kind::Picture`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn picture(
+        &mut self,
+        parent: WidgetId,
+        image: crate::icon::Image,
+        description: &str,
+    ) -> WidgetId {
+        let description = description.to_owned();
+        self.add(parent, Kind::Picture { image, description })
+    }
+
     /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
     /// the tree, as GTK's does. Its buttons come first in the Tab order too, where GTK's Tab
     /// never reaches them, so the keyboard can minimize and close the window.
@@ -855,7 +886,8 @@ impl Ui {
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
             | Kind::List { name: t, .. }
-            | Kind::Image { description: t, .. } => t,
+            | Kind::Image { description: t, .. }
+            | Kind::Picture { description: t, .. } => t,
             Kind::Slider(slider) => &mut slider.name,
             _ => return None,
         };
@@ -1436,6 +1468,8 @@ impl Ui {
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
             Kind::Image { size, .. } => (*size, *size),
+            // Its place gives it its size.
+            Kind::Picture { .. } => (0.0, 0.0),
             // GTK's box: the padding outside the minimum, across the line of text only.
             Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
             Kind::Island { vertical, margin } => {
@@ -1601,11 +1635,12 @@ impl Ui {
                             | Kind::Scroll { .. }
                             | Kind::List { .. }
                             | Kind::Island { .. }
+                            | Kind::Picture { .. }
                     ) {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
-                    // An island takes the rest of its column's height too.
-                    if matches!(self.widgets[c].kind, Kind::Island { .. }) {
+                    // An island and a picture take the rest of their column's height too.
+                    if matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. }) {
                         let rest = outer.bottom() - edge - cy;
                         let r = &mut self.widgets[c].rect;
                         r.h = r.h.max(rest);

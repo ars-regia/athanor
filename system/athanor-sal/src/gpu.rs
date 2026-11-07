@@ -250,7 +250,9 @@ impl Painter {
         let wanted: Vec<&Arc<Pixmap>> = ui
             .ids()
             .filter_map(|id| match &ui.widget(id).kind {
-                Kind::Image { image, .. } | Kind::IconButton { image, .. } => Some(image.pixmap()),
+                Kind::Image { image, .. }
+                | Kind::IconButton { image, .. }
+                | Kind::Picture { image, .. } => Some(image.pixmap()),
                 _ => None,
             })
             .collect();
