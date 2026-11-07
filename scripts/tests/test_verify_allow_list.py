@@ -233,13 +233,38 @@ class AllowList(unittest.TestCase):
             "athanor-dock",
             '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n',
             {
-                "src/main.rs": "use athanor_sulphur_client::connect;\nfn main() { connect(); }\n"
+                "src/main.rs": "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&d); }\n"
             },
         )
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("ext_foreign_toplevel_list_v1", out[0])
         self.assertIn("/usr/bin/athanor-dock", out[0])
+
+    def test_the_connection_counts_only_for_a_target_that_connects(self):
+        # connection.rs binds its globals when a client connects: athanor-idle uses the
+        # crate's `idle` module alone and binds none of them (maintainer decision, 2026-11-07).
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.package(
+            "athanor-idle",
+            dependency,
+            {"src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
+        self.assertEqual(self.problems(), [])
+        # An alias of Client still names it, so the binds still count.
+        for source in (
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&display); }\n",
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect_wayland(&connection); }\n",
+            "use athanor_sulphur_client::Client as Compositor;\nfn main() { Compositor::connect(&display); }\n",
+        ):
+            with self.subTest(source):
+                self.package("athanor-idle", dependency, {"src/main.rs": source})
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-idle", out[0])
+                self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
@@ -480,7 +505,7 @@ class AllowList(unittest.TestCase):
     def test_a_line_grants_every_privileged_global_the_target_binds(self):
         self.client()
         dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
-        dock = "use athanor_sulphur_client::connect;\nfn f() { w.set_layer(Layer::Top); }\n"
+        dock = "use athanor_sulphur_client::Client;\nfn f() { Client::connect(&d); w.set_layer(Layer::Top); }\n"
         launcher = "use athanor_sulphur_client::Client;\nfn f() { client.capture(id); }\n"
         cases = {
             # What the client binds at connect, missing from the line.
@@ -821,6 +846,39 @@ class AllowList(unittest.TestCase):
         out = self.problems()
         self.assertEqual(len(out), 1, out)
         self.assertIn("top or overlay layer (forge/specs/athanor-wallpaper/", out[0])
+
+    def test_a_call_counts_only_in_a_crate_that_depends_on_its_owner(self):
+        # A crate whose Cargo.toml does not depend on athanor-sulphur-client cannot reach its
+        # Client, whatever it names: Sal's DecorationMode::Client is not the client's
+        # (maintainer decision, 2026-11-07).
+        self.client()
+        self.write("system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n')
+        self.write(
+            "system/athanor-sal/src/lib.rs",
+            "pub fn decorate(m: DecorationMode) -> bool { m == DecorationMode::Client }\n",
+        )
+        manifest = (
+            "[dependencies]\n"
+            'athanor-sal = { path = "../../../../system/athanor-sal" }\n'
+            'athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        )
+        main = "use athanor_sal::decorate;\nuse athanor_sulphur_client::background;\nfn main() {}\n"
+        self.package("athanor-wallpaper", manifest, {"src/main.rs": main})
+        self.assertEqual(self.problems(), [])
+        # The dependency is read from Cargo.toml, under any name the crate gives it.
+        renamed = manifest.replace(
+            "athanor-sulphur-client = { path",
+            'compositor = { package = "athanor-sulphur-client", path',
+        )
+        for manifest, source in (
+            (manifest, main + "fn f() { Client::connect(&d); }\n"),
+            (renamed, "use compositor::Client;\nfn main() { Client::connect(&d); }\n"),
+        ):
+            with self.subTest(source):
+                self.package("athanor-wallpaper", manifest, {"src/main.rs": source})
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_sal_names_no_top_or_overlay_layer_for_its_clients(self):
         # The tree itself: a default layer of Sal's, or any top or overlay variant in its

@@ -2563,7 +2563,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate.
+# every name of them in the crate. connection.rs binds the rest when a client connects, so it
+# counts for a target only when code outside the crate names `Client`, the one type that
+# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
+# does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2580,7 +2583,10 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/windows.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
@@ -2777,6 +2783,17 @@ def path_dependencies(crate, manifest, root):
                 yield name, entry, (base / path).resolve()
 
 
+def depends_on(root, where, owner):
+    """Whether the crate of `where`, a file relative to `root`, has the crate at `owner`, relative
+    to `root` too, among the path dependencies of its Cargo.toml, under any name."""
+    root = root.resolve()
+    crate = next((d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None)
+    if crate is None:
+        return False
+    manifest = tomllib.loads(read(crate / "Cargo.toml"))
+    return any(dep == (root / owner).resolve() for _, _, dep in path_dependencies(crate, manifest, root))
+
+
 def target_files(crate, entry, features, defaults, root):
     """The production files a binary target is built from: its own, and those of the path
     dependencies its code names, followed transitively with the features the build enables
@@ -2931,9 +2948,14 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         layer, names = None, {}
         files = {path.relative_to(root.resolve()): text for path, text in
                  target_files(crate, entry, features, defaults, root).items()}
+        # The call is looked for only in crates whose Cargo.toml depends on the owner: a crate
+        # that does not cannot reach its calls, whatever its code names (Sal's
+        # `DecorationMode::Client` is no `Client` of athanor-sulphur-client; maintainer
+        # decision, 2026-11-07).
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
             owner, call = ON_DEMAND[where.as_posix()]
-            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
+            if not any(call.search(text) for other, text in files.items()
+                       if not other.is_relative_to(owner) and depends_on(root, other, owner)):
                 del files[where]
         layer = top_layer(files)
         for where, text in sorted(files.items()):
