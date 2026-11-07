@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        22%{?dist}
+Release:        23%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+- Landlock grants the bar's writes by descriptors athanor_unit::dirs opened and checked
+  (#1052): a directory that is a link or another user's is left out with a warning, and the
+  launch directory and dconf are private_dir's, mode 0700.
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
 - Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
   binaries, user unit, session script and data directory.
