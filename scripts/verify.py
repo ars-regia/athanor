@@ -3624,6 +3624,54 @@ def check_gpu_grants():
     return r
 
 
+# landlock::PathFd::new opens a path following links: a write grant built from it widens to
+# wherever a link put at the path points (#1052). Write grants go by a descriptor that
+# athanor_unit::dirs opened and checked; the one PathFd::new left is athanor_unit::sandbox's,
+# and only for read grants.
+LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
+PATH_FD = re.compile(r"\bPathFd::new\(")
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\(")
+# Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
+# user namespace where the system's nodes are owned by nobody, and the chooser grants the
+# target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
+# moving them is a decision of its own (#1052). The list only shrinks.
+LANDLOCK_PATH_PENDING = (
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
+    "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
+)
+
+
+def landlock_fd_problems(root):
+    """PathFd::new appears only in athanor_unit's sandbox.rs, and there only as the parent of
+    a read grant: no Landlock write grant is built from a path."""
+    root = Path(root)
+    problems = []
+    for base in RS_DIRS:
+        for path in sorted(walk(root / base, ".rs")):
+            relative = path.relative_to(root).as_posix()
+            if relative in LANDLOCK_PATH_PENDING:
+                continue
+            code = "\n".join(line.split("//")[0] for line in read(path).split("\n"))
+            reads = [match.span() for match in PATH_FD_READ.finditer(code)]
+            for match in PATH_FD.finditer(code):
+                line = code.count("\n", 0, match.start()) + 1
+                if relative != LANDLOCK_SANDBOX:
+                    problems.append(f"{relative}:{line}: PathFd::new grants by path, following "
+                                    f"links; grant by a descriptor of athanor_unit::dirs")
+                elif not any(start <= match.start() < end for start, end in reads):
+                    problems.append(f"{relative}:{line}: a write grant built from a path; take "
+                                    f"it as a descriptor the caller checked")
+    return problems
+
+
+@check("landlock-fd", "Landlock write grants go by a checked descriptor, never by path (#1052)")
+def check_landlock_fd():
+    r = Result()
+    for problem in landlock_fd_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
 # Where the pipeline names its images.
