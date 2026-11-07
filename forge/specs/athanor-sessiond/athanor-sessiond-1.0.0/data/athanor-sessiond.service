@@ -38,6 +38,7 @@ ProtectKernelModules=yes
 ProtectKernelLogs=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
+RestrictNamespaces=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
 # Both D-Buses and journald, all over Unix sockets.
