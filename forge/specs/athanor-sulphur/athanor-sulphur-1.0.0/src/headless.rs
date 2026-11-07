@@ -74,6 +74,10 @@ enum Gpu {
 pub struct Headless {
     gpu: Gpu,
     outputs: Vec<Virtual>,
+    /// The output whose steps of an output configuration the fixture has refused, as a monitor
+    /// may refuse what its backend took to be possible.
+    #[cfg(test)]
+    pub refused: Option<Output>,
 }
 
 struct Virtual {
@@ -116,6 +120,8 @@ pub fn start(
     let headless = Headless {
         gpu,
         outputs: Vec::new(),
+        #[cfg(test)]
+        refused: None,
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
     for (index, spec) in outputs.iter().enumerate() {
@@ -240,14 +246,14 @@ impl State {
             Transform::Normal,
             spec.scale,
         );
+        // A virtual output follows whatever refresh it is given.
+        set_can_sync(&output, true);
         headless.outputs.push(Virtual {
             damage_tracker: OutputDamageTracker::from_output(&output),
             output: output.clone(),
             drawn: false,
         });
         self.map_output(&output);
-        // A virtual output follows whatever refresh it is given.
-        set_can_sync(&output, true);
         Ok(())
     }
 
@@ -258,6 +264,10 @@ impl State {
         let Backend::Headless(headless) = &mut self.backend else {
             return Err("not the headless backend".into());
         };
+        #[cfg(test)]
+        if headless.refused.as_ref() == Some(step.output()) {
+            return Err("the fixture refused the step".into());
+        }
         let (Step::Mode { output, to, .. }
         | Step::Enable {
             output, mode: to, ..

@@ -339,6 +339,8 @@ struct Client {
     heads: Vec<OutputHead>,
     /// The serial of the output manager's last `done`.
     output_serial: Option<u32>,
+    /// How many `done` events the output manager sent.
+    output_dones: usize,
     /// The answer to the last output configuration: `succeeded`, `failed` or `cancelled`.
     configured: Option<&'static str>,
     /// The last preferred scale of wp-fractional-scale, in 120ths.
@@ -1035,7 +1037,10 @@ impl Dispatch<zwlr_output_manager_v1::ZwlrOutputManagerV1, ()> for Client {
                 position: (0, 0),
                 adaptive_sync: false,
             }),
-            zwlr_output_manager_v1::Event::Done { serial } => client.output_serial = Some(serial),
+            zwlr_output_manager_v1::Event::Done { serial } => {
+                client.output_serial = Some(serial);
+                client.output_dones += 1;
+            }
             _ => {}
         }
     }
@@ -7516,7 +7521,7 @@ fn sd23_a_refused_configuration_changes_nothing() {
 }
 
 /// An applied configuration is announced to every manager (SD23), not only to the one that
-/// sent it.
+/// sent it, and in one `done`.
 #[test]
 fn sd23_every_manager_hears_of_an_applied_configuration() {
     let mut run = Running::start(None);
@@ -7524,6 +7529,11 @@ fn sd23_every_manager_hears_of_an_applied_configuration() {
     let (manager, serial) = control_center.output_manager(&mut run);
     let mut other = Local::control_center(&mut run);
     let (_other_manager, other_serial) = other.output_manager(&mut run);
+    control_center.roundtrip(&mut run);
+    let dones = (
+        control_center.client.output_dones,
+        other.client.output_dones,
+    );
 
     let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
         head.set_position(0, OUTPUTS[0].height)
@@ -7543,6 +7553,60 @@ fn sd23_every_manager_hears_of_an_applied_configuration() {
     other.pump(&mut run, "the other manager is told", |client, _| {
         told(client, other_serial)
     });
+    control_center.roundtrip(&mut run);
+    other.roundtrip(&mut run);
+    assert_eq!(control_center.client.output_dones, dones.0 + 1, "one done");
+    assert_eq!(other.client.output_dones, dones.1 + 1, "one done");
+    run.stop();
+}
+
+/// A step the backend refuses midway through a configuration fails it and undoes the steps
+/// taken before it (SD23): the output whose mode changed first keeps its own mode and its
+/// frame, and the refused one keeps adaptive sync off.
+#[test]
+fn sd23_a_step_refused_midway_undoes_the_configuration() {
+    use zwlr_output_head_v1::AdaptiveSyncState;
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, _) = control_center.output_manager(&mut run);
+    let (first, serial) = offer_a_mode(&mut run, &mut control_center);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+    let crate::state::Backend::Headless(headless) = &mut run.state.backend else {
+        panic!("the fixture runs headless");
+    };
+    headless.refused = Some(second);
+    let own = first.current_mode();
+    let frame = run.state.capture(0).expect("a frame").len();
+
+    let refused = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        let head = config.enable_head(&seen.head, qh, ());
+        if seen.name == "headless-0" {
+            head.set_mode(seen.modes.last().expect("the mode"));
+        } else {
+            head.set_adaptive_sync(AdaptiveSyncState::Enabled);
+        }
+    });
+
+    assert_eq!(refused, "failed");
+    assert_eq!(first.current_mode(), own, "the first keeps its mode");
+    assert_eq!(
+        run.state.capture(0).expect("a frame").len(),
+        frame,
+        "and its frame"
+    );
+    control_center.roundtrip(&mut run);
+    assert_eq!(
+        control_center.client.output_serial,
+        Some(serial),
+        "no change is sent"
+    );
+    assert!(!control_center.head("headless-1").adaptive_sync);
     run.stop();
 }
 
