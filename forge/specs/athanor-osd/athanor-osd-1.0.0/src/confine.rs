@@ -1,0 +1,153 @@
+//! The overlay's Landlock (doc_osd.md OD12), applied at start while the process has one
+//! thread, before the audio model's thread, the Tokio runtime and any GIO object. Step 1 grants
+//! what volume and the microphone use, and nothing of the later steps (backlights, the COSMIC
+//! files, i2c-dev):
+//!
+//! - read beneath `/usr` and `/etc`: the libraries, the icon themes and fonts of the image,
+//!   fontconfig's configuration, the GSettings schemas, dconf's profile, libpulse's
+//!   `client.conf` and the machine id;
+//! - read beneath `/proc`: the cgroup of a caller of `os.athanor.Osd1` (OD4);
+//! - read the user's fonts, icon themes and fontconfig configuration, the dconf database
+//!   GSettings reads for the appearance and the reduced-motion preference (T1), the schema
+//!   directories GLib reads besides `/usr`, and libpulse's `~/.config/pulse` (its cookie);
+//! - write beneath the cache, `$XDG_CACHE_HOME` (fontconfig's), and `$XDG_RUNTIME_DIR/dconf`,
+//!   whose shared-memory flag dconf's client opens for writing to learn of a change.
+//!
+//! Connecting to the Wayland socket, the session bus and the sound server's socket is not a
+//! filesystem access Landlock mediates, so none of the three is granted.
+
+use std::error::Error;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use athanor_unit::sandbox;
+
+/// What the overlay reads and the directories it writes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Grants {
+    pub read: Vec<PathBuf>,
+    pub write: Vec<PathBuf>,
+}
+
+/// `name` as an absolute path, or `None`.
+fn absolute(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Option<PathBuf> {
+    var(name).map(PathBuf::from).filter(|p| p.is_absolute())
+}
+
+/// The absolute entries of the colon-separated list `name`.
+fn list(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Vec<PathBuf> {
+    var(name)
+        .map(|value| {
+            std::env::split_paths(&value)
+                .filter(|p| p.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl Grants {
+    /// From the environment as `var` reads it and the write directories `write`, which must
+    /// exist.
+    pub fn new(write: Vec<PathBuf>, var: impl Fn(&str) -> Option<OsString>) -> Grants {
+        let home = absolute(&var, "HOME");
+        let config =
+            absolute(&var, "XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")));
+        let data = absolute(&var, "XDG_DATA_HOME")
+            .or_else(|| home.as_ref().map(|h| h.join(".local/share")));
+        let mut data_dirs = list(&var, "XDG_DATA_DIRS");
+        if data_dirs.is_empty() {
+            data_dirs = vec!["/usr/local/share".into(), "/usr/share".into()];
+        }
+
+        let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into(), "/proc".into()];
+        if let Some(config) = &config {
+            read.extend(["dconf", "fontconfig", "pulse"].map(|d| config.join(d)));
+        }
+        if let Some(home) = &home {
+            read.extend([".fonts", ".icons"].map(|d| home.join(d)));
+        }
+        read.extend(list(&var, "GSETTINGS_SCHEMA_DIR"));
+        for dir in data.iter().chain(&data_dirs) {
+            read.extend(["fonts", "icons", "glib-2.0/schemas"].map(|d| dir.join(d)));
+        }
+        read.retain(|p| !p.starts_with("/usr") || p == Path::new("/usr"));
+        read.dedup();
+        Grants { read, write }
+    }
+
+    /// Restricts the calling thread and those it starts afterwards, and denies TCP. The
+    /// caller has proved the process single-threaded (`sandbox::ensure_single_threaded`).
+    pub fn apply(&self) -> Result<(), Box<dyn Error>> {
+        let read: Vec<&Path> = self.read.iter().map(PathBuf::as_path).collect();
+        let write: Vec<&Path> = self.write.iter().map(PathBuf::as_path).collect();
+        sandbox::restrict(&read, &write)?;
+        sandbox::deny_tcp()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+
+    #[test]
+    fn the_grants_follow_the_environment() {
+        let grants = Grants::new(
+            vec![
+                "/home/u/.cache/athanor-osd".into(),
+                "/run/user/1000/dconf".into(),
+            ],
+            env(&[
+                ("HOME", "/home/u"),
+                ("GSETTINGS_SCHEMA_DIR", "/opt/schemas:relative"),
+                ("XDG_DATA_DIRS", "/usr/share:/var/lib/flatpak/exports/share"),
+            ]),
+        );
+        let read: Vec<&str> = grants.read.iter().filter_map(|p| p.to_str()).collect();
+        assert_eq!(
+            read,
+            [
+                "/usr",
+                "/etc",
+                "/proc",
+                "/home/u/.config/dconf",
+                "/home/u/.config/fontconfig",
+                "/home/u/.config/pulse",
+                "/home/u/.fonts",
+                "/home/u/.icons",
+                "/opt/schemas",
+                "/home/u/.local/share/fonts",
+                "/home/u/.local/share/icons",
+                "/home/u/.local/share/glib-2.0/schemas",
+                "/var/lib/flatpak/exports/share/fonts",
+                "/var/lib/flatpak/exports/share/icons",
+                "/var/lib/flatpak/exports/share/glib-2.0/schemas",
+            ]
+        );
+        assert_eq!(
+            grants.write,
+            [
+                Path::new("/home/u/.cache/athanor-osd"),
+                Path::new("/run/user/1000/dconf")
+            ]
+        );
+    }
+
+    #[test]
+    fn nothing_beneath_the_home_without_an_absolute_home() {
+        let grants = Grants::new(Vec::new(), env(&[("HOME", "relative")]));
+        assert!(grants.read.iter().all(|p| !p.starts_with("relative")));
+        assert_eq!(
+            grants.read[..3],
+            [Path::new("/usr"), Path::new("/etc"), Path::new("/proc")]
+        );
+    }
+}
