@@ -139,7 +139,9 @@ impl Image {
     /// Takes pixels already decoded: `width` by `height` pixels of straight-alpha sRGB RGBA8, row
     /// by row from the top left, which are premultiplied in place. Refused when `pixels` does not
     /// hold exactly that many, or when a side is 0 or over 65535, the largest a buffer holds.
-    /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output.
+    /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output. The `gpu`
+    /// renderer draws no image larger than its atlas (4096 by 4096, or the device's limit when
+    /// smaller): it logs one line and leaves that part of the surface empty.
     pub fn from_rgba8(width: u32, height: u32, mut pixels: Vec<u8>) -> Result<Self, Error> {
         let (w, h) = (u16::try_from(width), u16::try_from(height));
         let (Ok(w @ 1..), Ok(h @ 1..)) = (w, h) else {
