@@ -67,6 +67,8 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 - Keep the modes of a disabled monitor's head up to date when its connector's modes change.
 - Refuse an output configuration that places an output more than 2^24 pixels from the
   origin, past which the sums of the space would overflow.
+- Place an output enabled again at the origin when the right of the others would take it
+  past 2^24 pixels.
 - Give the keyboard to a lock surface still shown when the output whose lock surface had it
   is disabled.
 - Answer a tested output configuration as an applied one: adaptive sync on an output without

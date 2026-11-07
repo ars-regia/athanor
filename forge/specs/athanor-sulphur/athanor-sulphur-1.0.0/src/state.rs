@@ -516,7 +516,9 @@ impl State {
         })
     }
 
-    /// Maps `output` to the right of the outputs already in the space.
+    /// Maps `output` to the right of the outputs already in the space, or at the origin when
+    /// that would take it past `REACH`, the farthest a configuration may place an output; there
+    /// it overlaps what is there, as outputs a configuration places may.
     pub fn map_output(&mut self, output: &Output) {
         let x = self
             .space
@@ -526,6 +528,11 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        let reach = crate::output_management::REACH;
+        let area = self.space.output_geometry(output);
+        if area.is_some_and(|area| area.loc.x + area.size.w > reach) {
+            self.space.map_output(output, (0, 0));
+        }
         if let Some(shown) = self.space.output_geometry(output) {
             let known = output.user_data().get_or_insert(KnownArea::default);
             known.0.set(shown);

@@ -44,7 +44,7 @@ const SCALES: std::ops::RangeInclusive<f64> = 1.0..=4.0;
 /// and doubles such sums (centring, overlaps, the bounding box of every output) and the
 /// renderer scales them by up to 4, which stays far below `i32::MAX`, 2^31 - 1, where an
 /// overflow would abort the session.
-const REACH: i32 = 1 << 24;
+pub(crate) const REACH: i32 = 1 << 24;
 
 /// Why the nested backend refuses every step.
 const NESTED_REFUSES: &str = "the nested output cannot change so";

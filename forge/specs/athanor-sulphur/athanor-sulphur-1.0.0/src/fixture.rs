@@ -7233,6 +7233,53 @@ fn sd23_a_layer_surface_on_a_disabled_output_is_closed() {
     run.stop();
 }
 
+/// An output enabled again goes to the right of the others only while it stays within the
+/// reach a configuration may set, else to the origin (SD23): disabling and enabling outputs
+/// again and again, one placed by a configuration near that reach, never takes one past it.
+#[test]
+fn sd23_outputs_enabled_again_stay_within_reach() {
+    let reach = crate::output_management::REACH;
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, mut serial) = control_center.output_manager(&mut run);
+    let next = |control_center: &mut Local, run: &mut Running, serial: u32| {
+        control_center.pump(run, "the change is sent", |client, _| {
+            client.output_serial != Some(serial)
+        });
+        control_center.client.output_serial.expect("a serial")
+    };
+    let placed = control_center.configure(&mut run, &manager, serial, "headless-1", |head| {
+        head.set_position(reach - 100, 0)
+    });
+    assert_eq!(placed, "succeeded");
+    serial = next(&mut control_center, &mut run, serial);
+
+    for cycle in 0..4 {
+        let name = ["headless-0", "headless-1"][cycle % 2];
+        for enable in [false, true] {
+            let applied =
+                control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+                    if seen.name == name && !enable {
+                        config.disable_head(&seen.head);
+                    } else {
+                        config.enable_head(&seen.head, qh, ());
+                    }
+                });
+            assert_eq!(applied, "succeeded");
+            serial = next(&mut control_center, &mut run, serial);
+        }
+        let output = run
+            .state
+            .space
+            .outputs()
+            .find(|output| output.name() == name);
+        let area = run.state.space.output_geometry(output.expect("enabled"));
+        let area = area.expect("mapped");
+        assert!(area.loc.x + area.size.w <= reach, "{name} at {area:?}");
+    }
+    run.stop();
+}
+
 /// A configuration placing an output beyond the reach of the space's arithmetic fails, on
 /// either axis and with either sign, and the output keeps its place (SD23): a sum past
 /// `i32::MAX` would abort the session.

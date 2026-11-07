@@ -228,7 +228,8 @@ Wayland server hands out the lowest free name. Enabled again while locked,
 it shows the background until the locker gives it a new one; while it is disabled its head
 still follows the modes its monitor offers. An applied configuration is sent
 to every manager. Positions are taken as given, overlapping or apart; an output a configuration
-gives no position keeps its own, and one enabled again goes to the right of the others. A
+gives no position keeps its own, and one enabled again goes to the right of the others, or to
+the origin, overlapping what is there, when that would take it past 2^24. A
 monitor whose modes change while it stays plugged in keeps its place, and the mode it shows
 while it still offers that mode, else it takes its preferred one.
 `ext_output_image_capture_source_manager_v1` (OS9 task 2) names an output by its `wl_output`,
