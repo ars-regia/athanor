@@ -9,6 +9,7 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::look::{FilterElement, Filters};
 use crate::marks::Marks;
+use crate::output_management::{set_can_sync, Step};
 use crate::state::{draw_view, new_output, Backend, State, View};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -73,6 +74,10 @@ enum Gpu {
 pub struct Headless {
     gpu: Gpu,
     outputs: Vec<Virtual>,
+    /// The output whose steps of an output configuration the fixture has refused, as a monitor
+    /// may refuse what its backend took to be possible.
+    #[cfg(test)]
+    pub refused: Option<Output>,
 }
 
 struct Virtual {
@@ -115,6 +120,8 @@ pub fn start(
     let headless = Headless {
         gpu,
         outputs: Vec::new(),
+        #[cfg(test)]
+        refused: None,
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
     for (index, spec) in outputs.iter().enumerate() {
@@ -239,12 +246,63 @@ impl State {
             Transform::Normal,
             spec.scale,
         );
+        // A virtual output follows whatever refresh it is given.
+        set_can_sync(&output, true);
         headless.outputs.push(Virtual {
             damage_tracker: OutputDamageTracker::from_output(&output),
             output: output.clone(),
             drawn: false,
         });
         self.map_output(&output);
+        Ok(())
+    }
+
+    /// Takes a step of an output configuration: a virtual output disabled is no longer drawn
+    /// (`tick`), one enabled or given another mode gets a buffer of its mode's size, and
+    /// adaptive sync changes nothing it draws.
+    pub(crate) fn headless_step(&mut self, step: &Step) -> Result<(), String> {
+        let Backend::Headless(headless) = &mut self.backend else {
+            return Err("not the headless backend".into());
+        };
+        #[cfg(test)]
+        if headless.refused.as_ref() == Some(step.output()) {
+            return Err("the fixture refused the step".into());
+        }
+        let (Step::Mode { output, to, .. }
+        | Step::Enable {
+            output, mode: to, ..
+        }) = step
+        else {
+            return Ok(());
+        };
+        let index = headless
+            .outputs
+            .iter()
+            .position(|virt| virt.output == *output)
+            .ok_or("not a virtual output")?;
+        let size = Size::<i32, BufferCoord>::from((to.size.w, to.size.h));
+        match &mut headless.gpu {
+            Gpu::Gbm {
+                manager,
+                node,
+                buffers,
+            } => {
+                let renderer = gles(manager, node).map_err(|error| error.to_string())?;
+                let buffer = renderer
+                    .create_buffer(FRAME_FORMAT, size)
+                    .map_err(|error| error.to_string())?;
+                *buffers.get_mut(index).ok_or("no buffer")? = buffer;
+            }
+            Gpu::Pixman { renderer, buffers } => {
+                let buffer = renderer
+                    .create_buffer(FRAME_FORMAT, size)
+                    .map_err(|error| error.to_string())?;
+                *buffers.get_mut(index).ok_or("no buffer")? = buffer;
+            }
+        }
+        let virt = &mut headless.outputs[index];
+        virt.drawn = false;
+        virt.damage_tracker = OutputDamageTracker::from_output(&virt.output);
         Ok(())
     }
 
@@ -256,9 +314,14 @@ impl State {
         };
         let frame_target = self.clock.now() + period;
         let mut frames = Vec::with_capacity(headless.outputs.len());
+        let mut shown = 0;
         for index in 0..headless.outputs.len() {
             let started = Instant::now();
             let output = headless.outputs[index].output.clone();
+            if self.output_management.is_disabled(&output) {
+                continue;
+            }
+            shown += 1;
             let popups = self.composing.popups_on(&self.space, &output);
             let pointer = self.seat.get_pointer().map(|p| p.current_location());
             let look = self
@@ -277,7 +340,7 @@ impl State {
                 }
             }
         }
-        let all_drawn = frames.len() == headless.outputs.len();
+        let all_drawn = frames.len() == shown;
         for (output, drawn) in frames {
             self.frame_done(&output, &drawn.states, drawn.damaged, frame_target, period);
         }
