@@ -13,6 +13,7 @@ pub(crate) mod focus;
 #[cfg(feature = "gpu")]
 pub(crate) mod gpu;
 mod icon;
+mod motion;
 mod popup;
 pub(crate) mod render;
 pub(crate) mod text;
@@ -21,10 +22,12 @@ mod widget;
 
 pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
+pub use motion::{Curve, Motion, Pose};
 pub use render::Error;
+pub use text::TextStyle;
 pub use theme::{Rgba, Theme};
 pub use widget::{
-    Event, Key, Kind, PointerButton, Rect, RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
+    Event, Key, Kind, Level, PointerButton, Rect, RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
 };
 
 #[cfg(test)]

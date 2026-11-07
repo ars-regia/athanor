@@ -1,12 +1,38 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
 use crate::widget::Rect;
+use parley::setting::{FontFeature, Tag};
 use parley::{
-    Alignment, AlignmentOptions, BaseDirection, FontContext, GenericFamily, Layout, LayoutContext,
-    PlainEditor, StyleProperty,
+    Alignment, AlignmentOptions, BaseDirection, FontContext, FontFeatures, FontWeight,
+    GenericFamily, Layout, LayoutContext, PlainEditor, StyleProperty,
 };
 
 mod fontconfig;
+
+/// How a widget's text is set: a step of the type scale and OpenType features, as the toolkit's
+/// `size.*` and `font.features` tokens give them (athanor-style's `sal` module), set with
+/// [`crate::Ui::set_text_style`]. The default is body text: the theme's font size, regular, with
+/// the font's own features.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextStyle {
+    /// The size, as a multiple of the theme's `font_size`: a step's `scale`.
+    pub scale: f32,
+    /// The weight, from 1 to 1000 as CSS's `font-weight`: a step's `weight`.
+    pub weight: u16,
+    /// The OpenType features turned on, by tag: `*b"tnum"` for figures of one width, so that a
+    /// number that changes does not move its neighbours.
+    pub features: Vec<[u8; 4]>,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            weight: 400,
+            features: Vec::new(),
+        }
+    }
+}
 
 /// Parley's brush type for our layouts: the colour is chosen when drawing, not when shaping.
 pub type Brush = [u8; 4];
@@ -57,13 +83,25 @@ impl TextContext {
         }
     }
 
-    /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start.
-    pub fn layout(&mut self, text: &str, size: f32, rtl: bool) -> Layout<Brush> {
+    /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start, at
+    /// `size` times the style's scale.
+    pub fn layout(&mut self, text: &str, size: f32, rtl: bool, style: &TextStyle) -> Layout<Brush> {
+        let features: Vec<FontFeature> = style
+            .features
+            .iter()
+            .map(|tag| FontFeature::new(Tag::new(tag), 1))
+            .collect();
         let mut builder = self
             .layouts
             .ranged_builder(&mut self.fonts, text, 1.0, true);
         builder.push_default(GenericFamily::SansSerif);
-        builder.push_default(StyleProperty::FontSize(size));
+        builder.push_default(StyleProperty::FontSize(size * style.scale));
+        builder.push_default(StyleProperty::FontWeight(FontWeight::new(f32::from(
+            style.weight,
+        ))));
+        builder.push_default(StyleProperty::FontFeatures(FontFeatures::from(
+            &features[..],
+        )));
         builder.set_base_direction(base_direction(rtl));
         let mut layout = builder.build(text);
         layout.break_all_lines(None);
@@ -504,7 +542,56 @@ mod tests {
             .map(str::to_owned);
         // GTK's Latin font in the rig and on the image, and its line at the theme's 15 px.
         assert_eq!(family.as_deref(), Some("Noto Sans"));
-        assert_eq!(cx.layout("Keyboard layout", 15.0, true).height(), 20.0);
+        let body = TextStyle::default();
+        assert_eq!(
+            cx.layout("Keyboard layout", 15.0, true, &body).height(),
+            20.0
+        );
+    }
+
+    #[test]
+    fn a_style_sets_the_size_the_weight_and_the_features() {
+        let mut cx = TextContext::default();
+        let width = |cx: &mut TextContext, text: &str, style: &TextStyle| {
+            cx.layout(text, 15.0, false, style).width()
+        };
+        let body = TextStyle::default();
+        let display = TextStyle {
+            scale: 5.0,
+            weight: 300,
+            features: vec![*b"tnum"],
+        };
+        let (small, large) = (
+            cx.layout("45", 15.0, false, &body),
+            cx.layout("45", 15.0, false, &display),
+        );
+        assert!(
+            large.height() > 4.0 * small.height(),
+            "{} at 5 times {}",
+            large.height(),
+            small.height()
+        );
+        let bold = TextStyle {
+            weight: 700,
+            ..TextStyle::default()
+        };
+        assert!(width(&mut cx, "Volume", &bold) > width(&mut cx, "Volume", &body));
+        // Noto Sans's figures are of one width already; its proportional ones show that a
+        // feature reaches the shaping, and tnum keeps them of one width.
+        let proportional = TextStyle {
+            features: vec![*b"pnum"],
+            ..TextStyle::default()
+        };
+        let tabular = TextStyle {
+            features: vec![*b"tnum"],
+            ..TextStyle::default()
+        };
+        assert_eq!(width(&mut cx, "111", &body), width(&mut cx, "000", &body));
+        assert!(width(&mut cx, "111", &proportional) < width(&mut cx, "000", &proportional));
+        assert_eq!(
+            width(&mut cx, "111", &tabular),
+            width(&mut cx, "000", &tabular)
+        );
     }
 
     #[test]
@@ -593,7 +680,7 @@ mod tests {
     fn down_onto_a_shorter_wrapped_line_stays_on_it() {
         let mut cx = TextContext::default();
         let word = "mmmmmm";
-        let width = cx.layout(word, 15.0, false).width() + 2.0;
+        let width = cx.layout(word, 15.0, false, &TextStyle::default()).width() + 2.0;
         let text = format!("{word} i {word}");
         let mut area = TextField::area("Notes", &text, (15.0, false), width, 3);
         let ranges: Vec<_> = area
