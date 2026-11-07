@@ -246,9 +246,15 @@ fn child() {
             let query = zbus::Connection::session()
                 .await
                 .expect("the query connection");
-            let (_hold, _end) = screensaver::serve(&bus, &query, dir.join("inhibitors.json"))
+            // The test has no system bus: a second session connection stands in, where no
+            // systemd answers.
+            let system = zbus::Connection::session()
                 .await
-                .expect("the ScreenSaver interface");
+                .expect("the stand-in system connection");
+            let (_hold, _end) =
+                screensaver::serve(&bus, &query, &system, dir.join("inhibitors.json"))
+                    .await
+                    .expect("the ScreenSaver interface");
             let client = zbus::Connection::session().await.expect("a client");
             let reply = client
                 .call_method(

@@ -52,6 +52,8 @@ struct State {
     /// The query connection, and the bus as it sees it.
     query: Connection,
     bus: DBusProxy<'static>,
+    /// A query connection to the system bus, where the user's systemd is verified.
+    system: Connection,
     /// Told when the query connection is found closed: the daemon can no longer follow the bus.
     query_gone: Notify,
     /// Set, under the table's lock, when the bus is gone: nothing is added any more.
@@ -101,7 +103,8 @@ impl State {
     fn questions(&self) -> OnBus<'_> {
         OnBus {
             bus: &self.bus,
-            systemd: &self.query,
+            session: &self.query,
+            system: &self.system,
         }
     }
 
@@ -354,6 +357,7 @@ fn unescape(s: &str) -> String {
 pub async fn serve(
     conn: &Connection,
     query: &Connection,
+    system: &Connection,
     file: PathBuf,
 ) -> Result<(watch::Receiver<Hold>, JoinHandle<()>)> {
     if query.unique_name() == conn.unique_name() {
@@ -372,6 +376,7 @@ pub async fn serve(
         hold,
         query: query.clone(),
         bus,
+        system: system.clone(),
         query_gone: Notify::new(),
         closed: AtomicBool::new(false),
         owns_name: AtomicBool::new(false),
@@ -456,6 +461,18 @@ pub async fn serve(
                     }
                     // An answer that does not come drops the entry: toward locking.
                     let present = state.has_owner(&i.owner).await == Ok(true);
+                    // A suspend inhibitor is admitted again, as InhibitSuspend admits it.
+                    if present && i.kind == Kind::SuspendOnly {
+                        if let Err(e) = admit_portal(&state.questions(), &i.owner).await {
+                            state.check_query();
+                            tracing::warn!(
+                                cookie,
+                                owner = i.owner,
+                                "suspend inhibitor refused at start: {e}"
+                            );
+                            continue;
+                        }
+                    }
                     if present && state.lock().restore(cookie, i.clone()) {
                         tracing::info!(cookie, app_id = i.app_id, "inhibitor restored");
                     } else {
@@ -473,9 +490,15 @@ pub async fn serve(
         conn.object_server()
             .at(IDLE_PATH, Idle1(state.clone()))
             .await?;
-        for name in [NAME, IDLE_NAME] {
-            conn.request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
-                .await?;
+        conn.request_name_with_flags(NAME, RequestNameFlags::DoNotQueue.into())
+            .await?;
+        // Without its name only InhibitSuspend is missing: the rest of the daemon goes on.
+        if let Err(e) = conn
+            .request_name_with_flags(IDLE_NAME, RequestNameFlags::DoNotQueue.into())
+            .await
+        {
+            tracing::error!("{IDLE_NAME} not owned, InhibitSuspend is unavailable: {e}");
+            conn.object_server().remove::<Idle1, _>(IDLE_PATH).await?;
         }
         Ok::<(), zbus::Error>(())
     }
@@ -579,18 +602,26 @@ mod tests {
         let bus = Bus::start("ss");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let (mut rx, _end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (mut rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(*rx.borrow(), Hold::None);
 
         // A second instance cannot take the name.
         let other = bus.connect().await;
-        assert!(
-            serve(&other, &bus.connect().await, bus.dir.join("other.json"))
-                .await
-                .is_err()
-        );
+        assert!(serve(
+            &other,
+            &bus.connect().await,
+            &bus.connect().await,
+            bus.dir.join("other.json")
+        )
+        .await
+        .is_err());
 
         let a = bus.connect().await;
         let b = bus.connect().await;
@@ -623,9 +654,14 @@ mod tests {
         // A restart restores the live owner's inhibitor and continues above its cookie.
         server.close().await.unwrap();
         let server2 = bus.connect().await;
-        let (mut rx2, _end2) = serve(&server2, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (mut rx2, _end2) = serve(
+            &server2,
+            &bus.connect().await,
+            &bus.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(*rx2.borrow(), Hold::All);
         let c3: u32 = call(&b, PATHS[0], "Inhibit", &("app", "third"))
             .await
@@ -646,9 +682,14 @@ mod tests {
         let bus = Bus::start("orphan");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let (rx, _end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         for _ in 0..5 {
             let c = bus.connect().await;
             let msg = zbus::Message::method_call(PATHS[0], "Inhibit")
@@ -679,6 +720,7 @@ mod tests {
         let (rx, _end) = serve(
             &server,
             &bus.connect().await,
+            &bus.connect().await,
             bus.dir.join("inhibitors.json"),
         )
         .await
@@ -705,9 +747,14 @@ mod tests {
         let bus = Bus::start("end");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let (mut rx, end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (mut rx, end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         let a = bus.connect().await;
         call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
         settle(&mut rx, Hold::All).await;
@@ -738,9 +785,14 @@ mod tests {
     async fn a_burst_of_calls_does_not_stall_the_daemon() {
         let bus = Bus::start("burst");
         let server = bus.connect().await;
-        let (mut rx, _end) = serve(&server, &bus.connect().await, bus.dir.join("i.json"))
-            .await
-            .unwrap();
+        let (mut rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            bus.dir.join("i.json"),
+        )
+        .await
+        .unwrap();
         let a = bus.connect().await;
         for _ in 0..100 {
             a.send(&inhibit_message()).await.unwrap();
@@ -764,7 +816,9 @@ mod tests {
         let bus = Bus::start("qend");
         let server = bus.connect().await;
         let q = bus.connect().await;
-        let (mut rx, end) = serve(&server, &q, bus.dir.join("i.json")).await.unwrap();
+        let (mut rx, end) = serve(&server, &q, &bus.connect().await, bus.dir.join("i.json"))
+            .await
+            .unwrap();
         let a = bus.connect().await;
         call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
         settle(&mut rx, Hold::All).await;
@@ -787,7 +841,13 @@ mod tests {
     async fn a_clone_of_the_main_connection_is_refused_as_the_query() {
         let bus = Bus::start("clone");
         let server = bus.connect().await;
-        let err = serve(&server, &server.clone(), bus.dir.join("i.json")).await;
+        let err = serve(
+            &server,
+            &server.clone(),
+            &bus.connect().await,
+            bus.dir.join("i.json"),
+        )
+        .await;
         assert!(err.is_err());
     }
 
@@ -801,9 +861,14 @@ mod tests {
         )
         .unwrap();
         let server = bus.connect().await;
-        let (rx, _end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(*rx.borrow(), Hold::None);
         assert!(!fs::read_to_string(&file).unwrap().contains("forged"));
 
@@ -821,6 +886,18 @@ mod tests {
     struct Silent;
 
     impl Questions for Silent {
+        async fn user_manager(&self) -> std::result::Result<String, String> {
+            Err("not asked".into())
+        }
+
+        async fn main_pid(
+            &self,
+            _manager: bus_caller::Manager<'_>,
+            _path: &zbus::zvariant::OwnedObjectPath,
+        ) -> std::result::Result<u32, String> {
+            Err("not asked".into())
+        }
+
         async fn credentials(
             &self,
             _peer: &str,
@@ -830,6 +907,7 @@ mod tests {
 
         async fn unit_by_pidfd(
             &self,
+            _manager: bus_caller::Manager<'_>,
             _pidfd: std::os::fd::BorrowedFd<'_>,
         ) -> std::result::Result<(zbus::zvariant::OwnedObjectPath, String), String> {
             Err("not asked".into())
@@ -837,6 +915,7 @@ mod tests {
 
         async fn unit(
             &self,
+            _manager: bus_caller::Manager<'_>,
             _path: &zbus::zvariant::OwnedObjectPath,
         ) -> std::result::Result<bus_caller::Unit, String> {
             Err("not asked".into())
@@ -851,8 +930,11 @@ mod tests {
         assert_eq!(answer, Err("timed out".into()));
     }
 
-    /// The user's systemd as the portal's unit shows it, for the peer of process `pid`.
-    struct FakeSystemd;
+    /// A systemd's manager that places every pidfd in `unit`, at `path`.
+    struct FakeSystemd {
+        unit: String,
+        path: &'static str,
+    }
 
     #[zbus::interface(name = "org.freedesktop.systemd1.Manager")]
     impl FakeSystemd {
@@ -862,14 +944,15 @@ mod tests {
             _pidfd: zbus::zvariant::Fd<'_>,
         ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
             (
-                zbus::zvariant::OwnedObjectPath::try_from(UNIT_PATH).unwrap(),
-                PORTAL.unit.into(),
+                zbus::zvariant::OwnedObjectPath::try_from(self.path).unwrap(),
+                self.unit.clone(),
                 Vec::new(),
             )
         }
     }
 
     const UNIT_PATH: &str = "/org/freedesktop/systemd1/unit/portal";
+    const USER_PATH: &str = "/org/freedesktop/systemd1/unit/user";
 
     struct FakeService {
         pid: u32,
@@ -917,10 +1000,16 @@ mod tests {
         }
     }
 
+    /// The user's systemd on `bus`: it places every caller in the portal's unit, whose main
+    /// process is `pid`. This process owns it, so this process is its main process too.
     async fn fake_systemd(bus: &Bus, pid: u32) -> Connection {
         let c = bus.connect().await;
+        let manager = FakeSystemd {
+            unit: PORTAL.unit.into(),
+            path: UNIT_PATH,
+        };
         c.object_server()
-            .at("/org/freedesktop/systemd1", FakeSystemd)
+            .at("/org/freedesktop/systemd1", manager)
             .await
             .unwrap();
         c.object_server()
@@ -932,6 +1021,36 @@ mod tests {
         c
     }
 
+    /// The system's systemd on `bus`, a stand-in for the system bus: it places every pidfd in
+    /// `unit`, whose main process is `pid`.
+    async fn fake_system(bus: &Bus, unit: &str, pid: u32) -> Connection {
+        let c = bus.connect().await;
+        let manager = FakeSystemd {
+            unit: unit.into(),
+            path: USER_PATH,
+        };
+        c.object_server()
+            .at("/org/freedesktop/systemd1", manager)
+            .await
+            .unwrap();
+        c.object_server()
+            .at(USER_PATH, FakeService { pid })
+            .await
+            .unwrap();
+        c.request_name("org.freedesktop.systemd1").await.unwrap();
+        c
+    }
+
+    /// `user@<uid>.service` of this process's user, who owns `bus`'s directory.
+    fn user_service(bus: &Bus) -> String {
+        format!("user@{}.service", uid(bus))
+    }
+
+    fn uid(bus: &Bus) -> u32 {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(&bus.dir).unwrap().uid()
+    }
+
     async fn idle(
         c: &Connection,
         member: &str,
@@ -941,26 +1060,32 @@ mod tests {
             .await
     }
 
+    fn denied(answer: zbus::Result<zbus::Message>) {
+        let err = answer.unwrap_err();
+        assert!(err.to_string().contains("AccessDenied"), "{err}");
+    }
+
     #[tokio::test]
     async fn inhibit_suspend_is_refused_to_a_peer_that_is_not_the_portal() {
         let bus = Bus::start("refused");
+        let system = Bus::start("refused-system");
         let file = bus.dir.join("inhibitors.json");
         let server = bus.connect().await;
-        let (rx, _end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &system.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         let a = bus.connect().await;
-        // No systemd on this bus: the unit cannot be told, and the call is refused.
-        let err = idle(&a, "InhibitSuspend", &("org.example.App", "r"))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("AccessDenied"), "{err}");
-        // A systemd that names the portal's unit with another main process: refused too.
+        // No systemd on either bus: the unit cannot be told, and the call is refused.
+        denied(idle(&a, "InhibitSuspend", &("org.example.App", "r")).await);
+        // A verified user's systemd that names the portal's unit with another main process.
+        let _system = fake_system(&system, &user_service(&bus), std::process::id()).await;
         let _systemd = fake_systemd(&bus, std::process::id() + 1).await;
-        let err = idle(&a, "InhibitSuspend", &("org.example.App", "r"))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("AccessDenied"), "{err}");
+        denied(idle(&a, "InhibitSuspend", &("org.example.App", "r")).await);
         assert_eq!(*rx.borrow(), Hold::None);
         // Idle1's Uninhibit does not end a ScreenSaver inhibitor.
         let c: u32 = call(&a, PATHS[0], "Inhibit", &("app", "r"))
@@ -974,16 +1099,55 @@ mod tests {
         assert_eq!(*rx.borrow(), Hold::All);
     }
 
+    /// A process of the user that owns `org.freedesktop.systemd1` on the session bus, and
+    /// names the portal's unit, is refused unless the system's systemd vouches for it as the
+    /// main process of `user@<uid>.service`.
+    #[tokio::test]
+    async fn a_user_systemd_the_system_does_not_vouch_for_is_refused() {
+        let pid = std::process::id();
+        for n in 0..3 {
+            let bus = Bus::start(&format!("vouch{n}"));
+            let system = Bus::start(&format!("vouch{n}-system"));
+            let (unit, main_pid) = match n {
+                0 => ("app-athanor-org.example.Fake@1.service".to_owned(), pid),
+                1 => (user_service(&bus), pid + 1),
+                _ => (format!("user@{}.service", uid(&bus) + 1), pid),
+            };
+            let _systemd = fake_systemd(&bus, pid).await;
+            let _system = fake_system(&system, &unit, main_pid).await;
+            let server = bus.connect().await;
+            let (rx, _end) = serve(
+                &server,
+                &bus.connect().await,
+                &system.connect().await,
+                bus.dir.join("inhibitors.json"),
+            )
+            .await
+            .unwrap();
+            let portal = bus.connect().await;
+            denied(idle(&portal, "InhibitSuspend", &("org.example.Player", "x")).await);
+            assert_eq!(*rx.borrow(), Hold::None, "{unit} {main_pid}");
+        }
+    }
+
     #[tokio::test]
     async fn the_portal_s_suspend_inhibitor_keeps_the_blank_and_is_kept() {
         let bus = Bus::start("suspend");
+        let system = Bus::start("suspend-system");
         let file = bus.dir.join("inhibitors.json");
-        // This process is the portal's main process, as the fake systemd tells it.
+        // This process is the portal's main process, as the fake systemd tells it, and the
+        // user's systemd's, as the fake system's tells it.
         let _systemd = fake_systemd(&bus, std::process::id()).await;
+        let _system = fake_system(&system, &user_service(&bus), std::process::id()).await;
         let server = bus.connect().await;
-        let (mut rx, _end) = serve(&server, &bus.connect().await, file.clone())
-            .await
-            .unwrap();
+        let (mut rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &system.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
         let portal = bus.connect().await;
         let cookie: u32 = idle(
             &portal,
@@ -1017,6 +1181,81 @@ mod tests {
         settle(&mut rx, Hold::SuspendOnly).await;
         portal.close().await.unwrap();
         settle(&mut rx, Hold::None).await;
+    }
+
+    /// A suspend inhibitor in the file is admitted again at start: refused, it is dropped.
+    #[tokio::test]
+    async fn a_restored_suspend_inhibitor_is_admitted_again() {
+        for admitted in [false, true] {
+            let tag = format!("restore-{admitted}");
+            let bus = Bus::start(&tag);
+            let system = Bus::start(&format!("{tag}-system"));
+            let pid = std::process::id();
+            let _systemd = fake_systemd(&bus, pid).await;
+            // Without the system's word the user's systemd is not believed.
+            let _system = match admitted {
+                true => Some(fake_system(&system, &user_service(&bus), pid).await),
+                false => None,
+            };
+            let owner = bus.connect().await;
+            let file = bus.dir.join("inhibitors.json");
+            fs::write(
+                &file,
+                format!(
+                    r#"{{"version":1,"inhibitors":[{{"cookie":7,"owner":"{}","app_id":"org.example.Player","kind":"suspend","reason":"playing"}}]}}"#,
+                    owner.unique_name().unwrap()
+                ),
+            )
+            .unwrap();
+            let server = bus.connect().await;
+            let (rx, _end) = serve(
+                &server,
+                &bus.connect().await,
+                &system.connect().await,
+                file.clone(),
+            )
+            .await
+            .unwrap();
+            let want = match admitted {
+                true => Hold::SuspendOnly,
+                false => Hold::None,
+            };
+            assert_eq!(*rx.borrow(), want);
+            let saved = fs::read_to_string(&file).unwrap();
+            assert_eq!(saved.contains("playing"), admitted, "{saved}");
+        }
+    }
+
+    /// Another process holds `os.athanor.Idle1`: the daemon serves the rest, without it.
+    #[tokio::test]
+    async fn without_its_name_idle1_is_missing_and_the_rest_runs() {
+        let bus = Bus::start("idle-name");
+        let squatter = bus.connect().await;
+        squatter.request_name(IDLE_NAME).await.unwrap();
+        let server = bus.connect().await;
+        let (mut rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &bus.connect().await,
+            bus.dir.join("inhibitors.json"),
+        )
+        .await
+        .unwrap();
+        let a = bus.connect().await;
+        call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        settle(&mut rx, Hold::All).await;
+        // Its object is gone from the daemon's connection too.
+        let err = a
+            .call_method(
+                server.unique_name().map(|n| n.as_str()),
+                IDLE_PATH,
+                Some(IDLE_NAME),
+                "InhibitSuspend",
+                &("org.example.App", "r"),
+            )
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("UnknownObject"), "{err}");
     }
 
     #[test]

@@ -352,10 +352,14 @@ async fn daemon(
         .build()
         .await?;
     let system_watch = zbus::connection::Builder::system()?.build().await?;
+    let (mut hold, mut ended) = screensaver::serve(
+        &session,
+        &session_query,
+        &system_query,
+        dir.join("inhibitors.json"),
+    )
+    .await?;
     let system = bus::System::new(system_query);
-
-    let (mut hold, mut ended) =
-        screensaver::serve(&session, &session_query, dir.join("inhibitors.json")).await?;
 
     let mut changes = bus::upower_changes(&system_watch).await?;
     let mut owners = bus::upower_owners(&system_watch).await?;

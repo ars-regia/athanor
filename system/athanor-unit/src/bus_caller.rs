@@ -1,20 +1,25 @@
-//! Who a D-Bus peer is: the unit of its process, asked of the bus and of the user's systemd,
-//! never of `/proc` (doc_session_daemons.md SD5, SD17). Every question goes through
-//! [`Questions`], which the caller implements on a connection that serves nothing (see
-//! [`OnBus`]) and bounds with a timeout of its own: nothing here waits for long, and nothing
-//! here retries.
+//! Who a D-Bus peer is: the unit of its process, asked of the bus and of systemd, never of
+//! `/proc` (doc_session_daemons.md SD5, SD17). Every question goes through [`Questions`], which
+//! the caller implements on connections that serve nothing (see [`OnBus`]) and bounds with a
+//! timeout of its own: nothing here waits for long, and nothing here retries.
 //!
-//! [`unit_of`] names a peer's unit. [`admit`] admits a peer only when it is the main process
-//! of one service of the image, in this order, and refuses at the first step that fails:
+//! [`unit_of`] names a peer's unit, as the session bus's `org.freedesktop.systemd1` tells it: a
+//! record, not a check. [`admit`] admits a peer only when it is the main process of one service
+//! of the image, in this order, and refuses at the first step that fails:
 //!
 //! 1. the bus's credentials of the peer: its user is ours and it carries a pidfd;
-//! 2. `GetUnitByPIDFD` on that pidfd names exactly the service's unit;
-//! 3. that unit's `MainPID` is the peer's `ProcessID` from the same credentials, its one
+//! 2. the user's systemd is verified: the owner of `org.freedesktop.systemd1` on the session
+//!    bus is a unique name whose credentials give our user and a pidfd, and the system's
+//!    systemd, on the system bus, places that pidfd in `user@<uid>.service` with that owner's
+//!    `ProcessID` as its `MainPID`, so a process of the user that took the name is refused;
+//! 3. that manager, asked by its unique name and never by the well-known one, places the
+//!    peer's pidfd in exactly the service's unit;
+//! 4. that unit's `MainPID` is the peer's `ProcessID` from the same credentials, its one
 //!    `ExecStart` runs exactly the service's executable, and its `FragmentPath` and every
 //!    entry of `DropInPaths` lie beneath [`IMAGE_USER_UNITS`], so a transient unit and an
 //!    override under `/etc`, `/run` or the user's configuration are refused;
-//! 4. after those reads the pidfd still refers to a running process, so the pid compared in
-//!    step 3 was not reused.
+//! 5. after those reads both pidfds, the peer's and the manager's, still refer to running
+//!    processes, so neither pid compared above was reused.
 
 use std::future::Future;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -29,7 +34,8 @@ use zbus::Connection;
 /// The user units of the image, read-only under `/usr`.
 pub const IMAGE_USER_UNITS: &str = "/usr/lib/systemd/user";
 
-const SYSTEMD: &str = "org.freedesktop.systemd1";
+/// The well-known name of systemd on either bus.
+pub const SYSTEMD: &str = "org.freedesktop.systemd1";
 
 /// The service whose main process [`admit`] admits.
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +44,15 @@ pub struct Service<'a> {
     pub unit: &'a str,
     /// The path of its one `ExecStart`.
     pub exec: &'a str,
+}
+
+/// Which systemd a question goes to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Manager<'a> {
+    /// The user's, on the session bus, at this bus name.
+    User(&'a str),
+    /// The system's, on the system bus.
+    System,
 }
 
 /// What the bus says of a peer (`GetConnectionCredentials`).
@@ -58,25 +73,42 @@ pub struct Unit {
     pub drop_in_paths: Vec<String>,
 }
 
-/// The three questions, asked of the bus and of the user's systemd.
+/// The questions, asked of the buses and of systemd.
 pub trait Questions {
-    /// `GetConnectionCredentials` of `peer`.
+    /// `GetNameOwner` of [`SYSTEMD`] on the session bus.
+    fn user_manager(&self) -> impl Future<Output = Result<String, String>> + Send;
+    /// `GetConnectionCredentials` of `peer` on the session bus.
     fn credentials(&self, peer: &str) -> impl Future<Output = Result<Credentials, String>> + Send;
     /// `GetUnitByPIDFD`: the unit's object path and its id.
     fn unit_by_pidfd(
         &self,
+        manager: Manager<'_>,
         pidfd: BorrowedFd<'_>,
     ) -> impl Future<Output = Result<(OwnedObjectPath, String), String>> + Send;
+    /// The `MainPID` of the service at `path`.
+    fn main_pid(
+        &self,
+        manager: Manager<'_>,
+        path: &OwnedObjectPath,
+    ) -> impl Future<Output = Result<u32, String>> + Send;
     /// The properties of the unit at `path`.
-    fn unit(&self, path: &OwnedObjectPath) -> impl Future<Output = Result<Unit, String>> + Send;
+    fn unit(
+        &self,
+        manager: Manager<'_>,
+        path: &OwnedObjectPath,
+    ) -> impl Future<Output = Result<Unit, String>> + Send;
 }
 
-/// The unit that holds `peer`'s process: its pidfd from the bus, then `GetUnitByPIDFD`, which a
-/// reused pid cannot mislead.
+/// The unit that holds `peer`'s process: its pidfd from the bus, then `GetUnitByPIDFD` of the
+/// session bus's systemd, which a reused pid cannot mislead. The manager is not verified, so
+/// the answer is only fit to be recorded.
 pub async fn unit_of(questions: &impl Questions, peer: &str) -> Result<String, String> {
     let credentials = questions.credentials(peer).await?;
     let pidfd = pidfd_of(&credentials)?;
-    Ok(questions.unit_by_pidfd(pidfd).await?.1)
+    Ok(questions
+        .unit_by_pidfd(Manager::User(SYSTEMD), pidfd)
+        .await?
+        .1)
 }
 
 /// `Ok` only when `peer` is the main process of `service`, checked as the module says; the
@@ -86,17 +118,19 @@ pub async fn admit(
     peer: &str,
     service: Service<'_>,
 ) -> Result<(), String> {
-    let credentials = questions.credentials(peer).await?;
     let ours = nix::unistd::getuid().as_raw();
+    let credentials = questions.credentials(peer).await?;
     if credentials.uid != Some(ours) {
         return Err(format!("user {:?} is not {ours}", credentials.uid));
     }
     let pidfd = pidfd_of(&credentials)?;
-    let (path, unit) = questions.unit_by_pidfd(pidfd).await?;
+    let manager = user_manager(questions, ours).await?;
+    let systemd = Manager::User(&manager.name);
+    let (path, unit) = questions.unit_by_pidfd(systemd, pidfd).await?;
     if unit != service.unit {
         return Err(format!("unit {unit} is not {}", service.unit));
     }
-    let properties = questions.unit(&path).await?;
+    let properties = questions.unit(systemd, &path).await?;
     if properties.main_pid == 0 || credentials.pid != Some(properties.main_pid) {
         return Err(format!(
             "process {:?} is not the main process {} of {unit}",
@@ -123,7 +157,47 @@ pub async fn admit(
     if !alive(pidfd)? {
         return Err("the process ended while it was checked".into());
     }
+    if !alive(pidfd_of(&manager.credentials)?)? {
+        return Err("the user's systemd ended while it was checked".into());
+    }
     Ok(())
+}
+
+/// The user's systemd as [`admit`] found it: its unique name on the session bus, and what the
+/// bus says of it.
+struct UserManager {
+    name: String,
+    credentials: Credentials,
+}
+
+/// Step 2 of the module: the owner of [`SYSTEMD`] on the session bus is the main process of
+/// `user@<ours>.service`, as the system's systemd tells it.
+async fn user_manager(questions: &impl Questions, ours: u32) -> Result<UserManager, String> {
+    let name = questions.user_manager().await?;
+    let credentials = questions.credentials(&name).await?;
+    if credentials.uid != Some(ours) {
+        return Err(format!(
+            "the owner {name} of {SYSTEMD} is user {:?}, not {ours}",
+            credentials.uid
+        ));
+    }
+    let pidfd =
+        pidfd_of(&credentials).map_err(|e| format!("the owner {name} of {SYSTEMD}: {e}"))?;
+    let expected = format!("user@{ours}.service");
+    let (path, unit) = questions.unit_by_pidfd(Manager::System, pidfd).await?;
+    if unit != expected {
+        return Err(format!(
+            "the owner {name} of {SYSTEMD} runs in {unit}, not {expected}"
+        ));
+    }
+    let main_pid = questions.main_pid(Manager::System, &path).await?;
+    if main_pid == 0 || credentials.pid != Some(main_pid) {
+        return Err(format!(
+            "the owner {name} of {SYSTEMD} is process {:?}, not the main process {main_pid} of {expected}",
+            credentials.pid
+        ));
+    }
+    Ok(UserManager { name, credentials })
 }
 
 fn pidfd_of(credentials: &Credentials) -> Result<BorrowedFd<'_>, String> {
@@ -150,25 +224,34 @@ pub fn alive(pidfd: BorrowedFd<'_>) -> Result<bool, String> {
     Ok(fds[0].revents().is_some_and(|events| events.is_empty()))
 }
 
-/// [`Questions`] on the bus: `bus` is the bus's proxy and `systemd` the connection systemd is
-/// asked on, both of a connection that serves nothing, subscribes to nothing and owns no
-/// name, so a handler can await them (issue #1035).
+/// [`Questions`] on the buses: `bus` is the session bus's proxy on `session`, and `system` a
+/// connection to the system bus. Each serves nothing, subscribes to nothing and owns no name,
+/// so a handler can await them (issue #1035).
 pub struct OnBus<'a> {
     pub bus: &'a DBusProxy<'static>,
-    pub systemd: &'a Connection,
+    pub session: &'a Connection,
+    pub system: &'a Connection,
 }
 
 impl OnBus<'_> {
+    fn at<'m>(&self, manager: Manager<'m>) -> (&Connection, &'m str) {
+        match manager {
+            Manager::User(name) => (self.session, name),
+            Manager::System => (self.system, SYSTEMD),
+        }
+    }
+
     async fn property(
         &self,
+        manager: Manager<'_>,
         path: &OwnedObjectPath,
         interface: &str,
         name: &str,
     ) -> Result<OwnedValue, String> {
-        let reply = self
-            .systemd
+        let (connection, destination) = self.at(manager);
+        let reply = connection
             .call_method(
-                Some(SYSTEMD),
+                Some(destination),
                 path,
                 Some("org.freedesktop.DBus.Properties"),
                 "Get",
@@ -186,7 +269,24 @@ impl OnBus<'_> {
 /// One `ExecStart` entry, `(sasbttttuii)`.
 type Exec = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
 
+const SERVICE: &str = "org.freedesktop.systemd1.Service";
+const UNIT: &str = "org.freedesktop.systemd1.Unit";
+
+fn convert(name: &str, e: zbus::zvariant::Error) -> String {
+    format!("{name}: {e}")
+}
+
 impl Questions for OnBus<'_> {
+    async fn user_manager(&self) -> Result<String, String> {
+        let name = BusName::try_from(SYSTEMD).map_err(|e| e.to_string())?;
+        let owner = self
+            .bus
+            .get_name_owner(name)
+            .await
+            .map_err(|e| format!("the owner of {SYSTEMD}: {e}"))?;
+        Ok(owner.to_string())
+    }
+
     async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
         let name = BusName::try_from(peer).map_err(|e| e.to_string())?;
         let found = self
@@ -207,12 +307,13 @@ impl Questions for OnBus<'_> {
 
     async fn unit_by_pidfd(
         &self,
+        manager: Manager<'_>,
         pidfd: BorrowedFd<'_>,
     ) -> Result<(OwnedObjectPath, String), String> {
-        let reply = self
-            .systemd
+        let (connection, destination) = self.at(manager);
+        let reply = connection
             .call_method(
-                Some(SYSTEMD),
+                Some(destination),
                 "/org/freedesktop/systemd1",
                 Some("org.freedesktop.systemd1.Manager"),
                 "GetUnitByPIDFD",
@@ -225,21 +326,24 @@ impl Questions for OnBus<'_> {
         Ok((path, unit))
     }
 
-    async fn unit(&self, path: &OwnedObjectPath) -> Result<Unit, String> {
-        const SERVICE: &str = "org.freedesktop.systemd1.Service";
-        const UNIT: &str = "org.freedesktop.systemd1.Unit";
-        let convert = |name: &str, e: zbus::zvariant::Error| format!("{name}: {e}");
-        let main_pid = u32::try_from(self.property(path, SERVICE, "MainPID").await?)
-            .map_err(|e| convert("MainPID", e))?;
-        let exec_start = Vec::<Exec>::try_from(self.property(path, SERVICE, "ExecStart").await?)
-            .map_err(|e| convert("ExecStart", e))?
-            .into_iter()
-            .map(|exec| exec.0)
-            .collect();
-        let fragment_path = String::try_from(self.property(path, UNIT, "FragmentPath").await?)
-            .map_err(|e| convert("FragmentPath", e))?;
+    async fn main_pid(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<u32, String> {
+        u32::try_from(self.property(manager, path, SERVICE, "MainPID").await?)
+            .map_err(|e| convert("MainPID", e))
+    }
+
+    async fn unit(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<Unit, String> {
+        let main_pid = self.main_pid(manager, path).await?;
+        let exec_start =
+            Vec::<Exec>::try_from(self.property(manager, path, SERVICE, "ExecStart").await?)
+                .map_err(|e| convert("ExecStart", e))?
+                .into_iter()
+                .map(|exec| exec.0)
+                .collect();
+        let fragment_path =
+            String::try_from(self.property(manager, path, UNIT, "FragmentPath").await?)
+                .map_err(|e| convert("FragmentPath", e))?;
         let drop_in_paths =
-            Vec::<String>::try_from(self.property(path, UNIT, "DropInPaths").await?)
+            Vec::<String>::try_from(self.property(manager, path, UNIT, "DropInPaths").await?)
                 .map_err(|e| convert("DropInPaths", e))?;
         Ok(Unit {
             main_pid,
@@ -261,45 +365,35 @@ mod tests {
         exec: "/usr/libexec/xdg-desktop-portal-athanor",
     };
     const PID: u32 = 4242;
+    const CALLER: &str = ":1.7";
+    /// The unique name of the user's systemd on the fake session bus.
+    const MANAGER: &str = ":1.2";
+    const MANAGER_PID: u32 = 1717;
 
-    /// What the fake bus and systemd answer. Its "pidfd" is the read end of a pipe, which
-    /// polls readable, as a pidfd of an ended process does, once its write end is closed.
-    struct Fake {
+    /// A peer of the fake bus. Its "pidfd" is the read end of a pipe, which polls readable, as
+    /// a pidfd of an ended process does, once its write end is closed.
+    struct Process {
         uid: Option<u32>,
         pid: Option<u32>,
         pidfd: bool,
-        unit: &'static str,
-        properties: Unit,
         /// Keeps the pipe's write end open: the "process" runs.
         _writer: Option<OwnedFd>,
         reader: OwnedFd,
     }
 
-    impl Fake {
-        fn portal() -> Fake {
+    impl Process {
+        fn new(pid: u32) -> Process {
             let (reader, writer) = nix::unistd::pipe().expect("pipe");
-            Fake {
+            Process {
                 uid: Some(nix::unistd::getuid().as_raw()),
-                pid: Some(PID),
+                pid: Some(pid),
                 pidfd: true,
-                unit: PORTAL.unit,
-                properties: Unit {
-                    main_pid: PID,
-                    exec_start: vec![PORTAL.exec.into()],
-                    fragment_path: "/usr/lib/systemd/user/xdg-desktop-portal-athanor.service"
-                        .into(),
-                    drop_in_paths: vec![
-                        "/usr/lib/systemd/user/service.d/10-timeout-abort.conf".into()
-                    ],
-                },
                 _writer: Some(writer),
                 reader,
             }
         }
-    }
 
-    impl Questions for Fake {
-        async fn credentials(&self, _peer: &str) -> Result<Credentials, String> {
+        fn answer(&self) -> Result<Credentials, String> {
             let pidfd = match self.pidfd {
                 true => Some(self.reader.try_clone().map_err(|e| e.to_string())?),
                 false => None,
@@ -310,18 +404,92 @@ mod tests {
                 pidfd,
             })
         }
+    }
+
+    /// What the fake buses and the two systemds answer. Asked at its well-known name, the
+    /// session bus's systemd answers as a process that took the name would.
+    struct Fake {
+        caller: Process,
+        unit: &'static str,
+        properties: Unit,
+        manager: Process,
+        /// What the system's systemd says of the manager's pidfd.
+        manager_unit: String,
+        manager_main_pid: u32,
+    }
+
+    impl Fake {
+        fn portal() -> Fake {
+            Fake {
+                caller: Process::new(PID),
+                unit: PORTAL.unit,
+                properties: Unit {
+                    main_pid: PID,
+                    exec_start: vec![PORTAL.exec.into()],
+                    fragment_path: "/usr/lib/systemd/user/xdg-desktop-portal-athanor.service"
+                        .into(),
+                    drop_in_paths: vec![
+                        "/usr/lib/systemd/user/service.d/10-timeout-abort.conf".into()
+                    ],
+                },
+                manager: Process::new(MANAGER_PID),
+                manager_unit: format!("user@{}.service", nix::unistd::getuid().as_raw()),
+                manager_main_pid: MANAGER_PID,
+            }
+        }
+    }
+
+    const IMPOSTOR: &str = "impostor.service";
+
+    fn path() -> Result<OwnedObjectPath, String> {
+        OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/x").map_err(|e| e.to_string())
+    }
+
+    impl Questions for Fake {
+        async fn user_manager(&self) -> Result<String, String> {
+            Ok(MANAGER.into())
+        }
+
+        async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
+            match peer {
+                CALLER => self.caller.answer(),
+                MANAGER => self.manager.answer(),
+                _ => Err(format!("no peer {peer}")),
+            }
+        }
 
         async fn unit_by_pidfd(
             &self,
+            manager: Manager<'_>,
             _pidfd: BorrowedFd<'_>,
         ) -> Result<(OwnedObjectPath, String), String> {
-            let path = OwnedObjectPath::try_from("/org/freedesktop/systemd1/unit/x")
-                .map_err(|e| e.to_string())?;
-            Ok((path, self.unit.into()))
+            match manager {
+                Manager::User(MANAGER) => Ok((path()?, self.unit.into())),
+                Manager::User(_) => Ok((path()?, IMPOSTOR.into())),
+                Manager::System => Ok((path()?, self.manager_unit.clone())),
+            }
         }
 
-        async fn unit(&self, _path: &OwnedObjectPath) -> Result<Unit, String> {
-            Ok(self.properties.clone())
+        async fn main_pid(
+            &self,
+            manager: Manager<'_>,
+            _path: &OwnedObjectPath,
+        ) -> Result<u32, String> {
+            match manager {
+                Manager::System => Ok(self.manager_main_pid),
+                Manager::User(_) => Err("asked the user's systemd".into()),
+            }
+        }
+
+        async fn unit(
+            &self,
+            manager: Manager<'_>,
+            _path: &OwnedObjectPath,
+        ) -> Result<Unit, String> {
+            match manager {
+                Manager::User(MANAGER) => Ok(self.properties.clone()),
+                other => Err(format!("asked {other:?}")),
+            }
         }
     }
 
@@ -334,32 +502,87 @@ mod tests {
     }
 
     fn refused(fake: &Fake, why: &str) {
-        let error = now(admit(fake, ":1.7", PORTAL)).expect_err("refused");
+        let error = now(admit(fake, CALLER, PORTAL)).expect_err("refused");
         assert!(error.contains(why), "{error}");
     }
 
     #[test]
     fn the_portal_with_the_image_s_drop_in_is_admitted() {
+        // The fake answers the portal's unit only at the manager's unique name.
         let fake = Fake::portal();
-        assert_eq!(now(admit(&fake, ":1.7", PORTAL)), Ok(()));
-        assert_eq!(now(unit_of(&fake, ":1.7")).as_deref(), Ok(PORTAL.unit));
+        assert_eq!(now(admit(&fake, CALLER, PORTAL)), Ok(()));
+    }
+
+    #[test]
+    fn unit_of_asks_the_well_known_name_and_is_only_a_record() {
+        let fake = Fake::portal();
+        assert_eq!(now(unit_of(&fake, CALLER)).as_deref(), Ok(IMPOSTOR));
     }
 
     #[test]
     fn another_user_is_refused() {
         let mut fake = Fake::portal();
-        fake.uid = fake.uid.map(|u| u + 1);
+        fake.caller.uid = fake.caller.uid.map(|u| u + 1);
         refused(&fake, "is not");
-        fake.uid = None;
+        fake.caller.uid = None;
         refused(&fake, "user None");
     }
 
     #[test]
     fn no_pidfd_is_refused() {
         let mut fake = Fake::portal();
-        fake.pidfd = false;
+        fake.caller.pidfd = false;
         refused(&fake, "no ProcessFD");
-        assert!(now(unit_of(&fake, ":1.7")).is_err());
+        assert!(now(unit_of(&fake, CALLER)).is_err());
+    }
+
+    #[test]
+    fn a_manager_of_another_user_is_refused() {
+        let mut fake = Fake::portal();
+        fake.manager.uid = fake.manager.uid.map(|u| u + 1);
+        refused(&fake, "of org.freedesktop.systemd1 is user");
+        fake.manager.uid = None;
+        refused(&fake, "of org.freedesktop.systemd1 is user None");
+    }
+
+    #[test]
+    fn a_manager_without_a_pidfd_is_refused() {
+        let mut fake = Fake::portal();
+        fake.manager.pidfd = false;
+        refused(
+            &fake,
+            "of org.freedesktop.systemd1: the bus gives no ProcessFD",
+        );
+    }
+
+    #[test]
+    fn a_manager_outside_the_user_s_service_is_refused() {
+        // Another user's manager: the tests may run as root, whose is user@0.service.
+        let another = format!("user@{}.service", nix::unistd::getuid().as_raw() + 1);
+        for unit in ["app-athanor-org.example.App@1.service", &another, ""] {
+            let mut fake = Fake::portal();
+            fake.manager_unit = unit.into();
+            refused(&fake, "runs in");
+        }
+    }
+
+    #[test]
+    fn a_manager_that_is_not_the_service_s_main_process_is_refused() {
+        let mut fake = Fake::portal();
+        fake.manager_main_pid = MANAGER_PID + 1;
+        refused(&fake, "not the main process 1718 of user@");
+        fake.manager_main_pid = 0;
+        fake.manager.pid = Some(0);
+        refused(&fake, "of user@");
+        fake.manager.pid = None;
+        refused(&fake, "of user@");
+    }
+
+    #[test]
+    fn a_manager_that_ended_is_refused() {
+        let mut fake = Fake::portal();
+        fake.manager._writer = None;
+        refused(&fake, "the user's systemd ended");
     }
 
     #[test]
@@ -372,11 +595,11 @@ mod tests {
     #[test]
     fn a_process_that_is_not_the_main_one_is_refused() {
         let mut fake = Fake::portal();
-        fake.pid = Some(PID + 1);
+        fake.caller.pid = Some(PID + 1);
         refused(&fake, "is not the main process");
-        fake.pid = None;
+        fake.caller.pid = None;
         refused(&fake, "is not the main process");
-        fake.pid = Some(0);
+        fake.caller.pid = Some(0);
         fake.properties.main_pid = 0;
         refused(&fake, "is not the main process");
     }
@@ -424,7 +647,7 @@ mod tests {
     #[test]
     fn a_process_that_ended_is_refused() {
         let mut fake = Fake::portal();
-        fake._writer = None;
-        refused(&fake, "ended");
+        fake.caller._writer = None;
+        refused(&fake, "the process ended");
     }
 }
