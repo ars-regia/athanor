@@ -50,7 +50,12 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     }
     appearance::load(&display, &Appearance::read());
     let client = match Client::connect(&display) {
-        Ok(client) => Some(client),
+        Ok(client) => {
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
         Err(err) => {
             // No windows to list and no secure launch (SH1, BR2): no dock surface at all.
             tracing::error!(error = %err, "no compositor client; the dock shows no surface");
