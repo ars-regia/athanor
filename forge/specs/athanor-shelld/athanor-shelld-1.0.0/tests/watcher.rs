@@ -338,3 +338,21 @@ async fn a_fifth_distinct_host_is_refused() {
     assert!(err.to_string().contains("LimitsExceeded"), "{err}");
     drop(hosts);
 }
+
+#[tokio::test]
+async fn a_name_the_bus_cannot_resolve_in_time_is_refused() {
+    let bus = Bus::start("sni-timeout");
+    let query_bus = Bus::start("sni-timeout-query");
+    let _daemon = bus.daemon_asking(APP_CGROUP, &query_bus).await;
+    let proxy = watcher(&bus.client().await).await;
+    query_bus.freeze();
+    let err = tokio::time::timeout(
+        Duration::from_secs(20),
+        proxy.call::<_, _, ()>("RegisterStatusNotifierItem", &("org.example.Silent",)),
+    )
+    .await
+    .expect("the call must be answered, not left waiting")
+    .expect_err("refused");
+    assert!(err.to_string().contains("TimedOut"), "{err}");
+    assert!(items(&proxy).await.is_empty());
+}

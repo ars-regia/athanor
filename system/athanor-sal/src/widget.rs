@@ -99,13 +99,17 @@ pub enum Kind {
     /// A button with a label; activating it raises [`Event::Clicked`].
     Button(String),
     /// A toggle button. The toggles that share a parent form a radio group: activating one
-    /// releases the others. Add it with [`Ui::toggle`].
+    /// releases the others. Add it with [`Ui::toggle`], or with [`Ui::radio`] for one that
+    /// assistive technologies read as a radio button.
     #[non_exhaustive]
     Toggle {
         /// The text of the toggle.
         label: String,
         /// Whether this toggle is the active one of its group.
         active: bool,
+        /// Whether assistive technologies read it as a radio button, checked when active, rather
+        /// than as GTK's grouped toggle button, pressed when active. It is drawn the same.
+        radio: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
     /// that share a parent are independent; activating one raises [`Event::Toggled`]. Add it
@@ -387,6 +391,10 @@ pub enum Event {
         /// The widget under the pointer at the release, if any.
         to: Option<WidgetId>,
     },
+    /// Escape reached the surface and no menu took it: the application may close the surface,
+    /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
+    /// closes at Escape, and the surface gets no such event.
+    Escape,
 }
 
 /// A pointer button, as the driver maps it from the evdev codes.
@@ -462,7 +470,8 @@ pub enum Key {
     PageUp,
     /// Page Down: ten steps fewer on a slider.
     PageDown,
-    /// Escape: closes the open popup, which the driver handles.
+    /// Escape: closes the open menu, which the driver handles; with none open, the surface
+    /// hands the application [`Event::Escape`].
     Escape,
     /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
     Menu,
@@ -480,11 +489,30 @@ pub enum Key {
     Paste,
 }
 
+/// What the root of a surface is to assistive technologies, named by [`Ui::title`]. New roles
+/// may be added: match with a `_` arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RootRole {
+    /// A window, as GTK's: AT-SPI's frame.
+    Window,
+    /// A status that never takes the focus, such as an on-screen display: ARIA's `status`,
+    /// AT-SPI's status bar.
+    Status,
+    /// A dialog that asks for an answer before the work goes on: ARIA's `alertdialog`, AT-SPI's
+    /// alert.
+    AlertDialog,
+}
+
 /// One window's widgets, theme, reading direction and keyboard focus.
 pub struct Ui {
     pub(crate) widgets: Widgets,
-    /// The title of the window, which the title bar shows and assistive technologies read.
+    /// The title of the window, which the title bar shows and assistive technologies read as
+    /// the root's name, whatever its [`Ui::root_role`].
     pub title: String,
+    /// What the root is to assistive technologies: a window unless the application says
+    /// otherwise.
+    pub root_role: RootRole,
     /// The colours and sizes the widgets draw with.
     pub theme: Theme,
     /// Whether the interface is mirrored, for a right-to-left language.
@@ -504,6 +532,8 @@ pub struct Ui {
     /// The field whose selection these widgets offered last as the primary selection, and its
     /// text, until the selection ends.
     offered: Option<(WidgetId, String)>,
+    /// The text [`Ui::announce`] asked for, until the driver publishes it.
+    pub(crate) announcement: Option<String>,
 }
 
 impl Ui {
@@ -512,6 +542,7 @@ impl Ui {
         Self {
             widgets: Widgets(vec![Widget::new(Kind::Column, None)]),
             title: title.to_owned(),
+            root_role: RootRole::Window,
             theme,
             rtl,
             min_width: 0.0,
@@ -524,6 +555,7 @@ impl Ui {
             press: None,
             clips: Vec::new(),
             offered: None,
+            announcement: None,
         }
     }
 
@@ -587,7 +619,30 @@ impl Ui {
     /// When `parent` names no widget of this `Ui`.
     pub fn toggle(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
         let label = label.to_owned();
-        self.add(parent, Kind::Toggle { label, active })
+        let radio = false;
+        self.add(parent, Kind::Toggle { label, active, radio })
+    }
+
+    /// Adds a toggle showing `label`, the active one of its group when `active`, which
+    /// assistive technologies read as a radio button: a dialog's choices, where
+    /// [`Ui::toggle`] gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn radio(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        let radio = true;
+        self.add(parent, Kind::Toggle { label, active, radio })
+    }
+
+    /// Announces `text` to assistive technologies at polite priority, once, as a live region of
+    /// the root that leaves the tree as soon as it is announced, so no stale text stays behind:
+    /// what `gtk_accessible_announce` does. Takes effect when the driver next publishes the
+    /// tree, with the next frame; a later call before then replaces the text. A surface out of
+    /// the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
+    pub fn announce(&mut self, text: &str) {
+        self.announcement = Some(text.to_owned());
     }
 
     /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
@@ -1950,8 +2005,12 @@ impl Ui {
     /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
-    /// and never leave it, as GTK's `TextView`.
+    /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
+    /// [`Event::Escape`].
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        if key == Key::Escape {
+            return Some(Event::Escape);
+        }
         let focused = self.focus;
         if let Some(id) = focused {
             let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
@@ -2323,6 +2382,7 @@ mod tests {
         let toggle = |label: &str, active| Kind::Toggle {
             label: label.into(),
             active,
+            radio: false,
         };
         let a = ui.add(row, toggle("A", true));
         let b = ui.add(row, toggle("B", false));
@@ -2680,6 +2740,22 @@ mod tests {
         assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(other)));
         ui.set_focus(None);
         assert_eq!(ui.key(Key::Menu), None);
+    }
+
+    /// Escape hands the application the surface's escape, whatever has the focus, a field
+    /// included, which keeps its text and its focus (requirement S5).
+    #[test]
+    fn escape_is_the_surfaces_whatever_has_the_focus() {
+        let (mut ui, app, _) = with_popup();
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        ui.set_focus(Some(app));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        assert_eq!(ui.field_text(field).as_deref(), Some("a"));
+        assert_eq!(ui.focus(), Some(field));
     }
 
     #[test]

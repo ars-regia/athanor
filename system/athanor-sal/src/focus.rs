@@ -147,6 +147,7 @@ mod tests {
         let toggle = |label: &str| Kind::Toggle {
             label: label.into(),
             active: label == "A",
+            radio: false,
         };
         let a = ui.add(row, toggle("A"));
         let b = ui.add(row, toggle("B"));

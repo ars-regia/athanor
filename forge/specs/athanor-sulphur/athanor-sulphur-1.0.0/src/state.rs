@@ -1449,16 +1449,27 @@ pub fn new_output(
     transform: Transform,
     scale: f64,
 ) -> Output {
-    let output = build_output(name, model, size, refresh, transform, scale);
+    let identity = placeholder_identity(model);
+    let output = build_output(name, &identity, size, refresh, transform, scale);
     publish_output(dh, &output);
     output
 }
 
+/// What an output with no readable EDID reports: make "Athanor", the given model, no serial.
+pub fn placeholder_identity(model: &str) -> athanor_edid::Identity {
+    athanor_edid::Identity {
+        make: "Athanor".into(),
+        model: model.into(),
+        serial: String::new(),
+    }
+}
+
 /// An output with no global yet (`publish_output`): for a backend that learns whether the
-/// monitor works only after it has the output.
+/// monitor works only after it has the output. `identity` is what `wl_output` reports as make
+/// and model, and wlr-output-management as make, model and serial.
 pub fn build_output(
     name: &str,
-    model: &str,
+    identity: &athanor_edid::Identity,
     size: Size<i32, Physical>,
     refresh: i32,
     transform: Transform,
@@ -1469,9 +1480,9 @@ pub fn build_output(
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "Athanor".into(),
-            model: model.into(),
-            serial_number: String::new(),
+            make: identity.make.clone(),
+            model: identity.model.clone(),
+            serial_number: identity.serial.clone(),
         },
     );
     let mode = Mode { size, refresh };

@@ -54,11 +54,27 @@ impl Bus {
 
     /// A daemon that sees this test process in `cgroup`, with its state under the bus directory.
     pub async fn daemon(&self, cgroup: &str) -> Connection {
+        self.daemon_asking(cgroup, self).await
+    }
+
+    /// Stops the bus daemon: its socket stays open and nothing is answered.
+    pub fn freeze(&self) {
+        let pid = self.daemon.id().to_string();
+        assert!(Command::new("kill")
+            .args(["-STOP", &pid])
+            .status()
+            .expect("kill")
+            .success());
+    }
+
+    /// As `daemon`, but its query connection is on `query`'s bus.
+    pub async fn daemon_asking(&self, cgroup: &str, query: &Bus) -> Connection {
         let proc_root = fake_proc(&self.dir, cgroup);
         let state_dir = self.dir.join("state");
         fs::create_dir_all(&state_dir).expect("state dir");
         server::start(
             self.builder(),
+            query.builder(),
             Config {
                 state_dir,
                 bar: BarUnit::with_proc_root(BAR_UNIT, proc_root),

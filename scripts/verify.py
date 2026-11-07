@@ -3242,10 +3242,53 @@ def faillock_problems(root=None):
     return problems
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090)")
+LOCK_PAM_DIR = "forge/specs/athanor-unlockd/SOURCES/usr/lib/pam.d"
+LOCK_PAM = {
+    "athanor-lock": [
+        "auth requisite pam_faillock.so preauth",
+        "auth include system-auth",
+        "account include system-auth",
+    ],
+    "athanor-lock-fingerprint": [
+        "auth requisite pam_faillock.so preauth silent",
+        "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_fprintd.so max-tries=1",
+        "auth required pam_faillock.so authfail",
+        "auth required pam_deny.so",
+        "account include system-auth",
+    ],
+}
+LOCK_PAM_BANNED = ("pam_gnome_keyring", "pam_oo7", "nullok")
+
+
+def lock_pam_problems(root=None):
+    """The session lock's stacks are LP8's lines: no keyring, no nullok, only system-auth included."""
+    root = root or ROOT
+    problems = []
+    for name, expected in LOCK_PAM.items():
+        where = f"{LOCK_PAM_DIR}/{name}"
+        try:
+            text = read(root / where)
+        except OSError as err:
+            problems.append(f"{where}: cannot read ({err})")
+            continue
+        lines = [" ".join(line.split()) for line in text.splitlines()
+                 if line.strip() and not line.lstrip().startswith("#")]
+        for number, line in enumerate(lines, 1):
+            for word in LOCK_PAM_BANNED:
+                if word in line:
+                    problems.append(f"{where}: rule {number} names {word} (LP8)")
+            words = line.split()
+            if len(words) > 2 and words[1] in ("include", "substack") and words[2] != "system-auth":
+                problems.append(f"{where}: rule {number} includes {words[2]}, not system-auth (LP8)")
+        if lines != expected:
+            problems.append(f"{where}: the rules are not LP8's {len(expected)} lines: {lines}")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090), the lock's stacks (LP8)")
 def check_pam():
     r = Result()
-    for problem in nullok_problems() + pwquality_problems() + faillock_problems():
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems() + lock_pam_problems():
         r.fail(problem)
     return r
 
@@ -4982,6 +5025,85 @@ def bus_api_residue(root):
 def check_bus_api_residue():
     r = Result()
     for problem in bus_api_residue(ROOT):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# zbus-replies: an object-server method does not await a reply on its own connection
+# --------------------------------------------------------------------------- #
+
+ZBUS_INTERFACE = re.compile(r"#\[(?:zbus::)?interface\b")
+ZBUS_CONNECTION_ARG = re.compile(r"#\[zbus\(connection\)\]\s*(\w+)\s*:")
+# What a method may do with its connection without waiting for a reply: build an emitter, name
+# the object server, emit.
+ZBUS_NO_REPLY_BEFORE = re.compile(r"(?:SignalEmitter::new|\bemit_\w+|\bbar_emitter\([^()]*,)\s*\(?\s*&?$")
+ZBUS_NO_REPLY_AFTER = re.compile(r"\s*\.(?:object_server|unique_name|emit_signal|request_name|release_name)\b")
+
+
+def matching(txt, at, open_, close):
+    """The index just past the bracket that closes the one at `txt[at]`, or len(txt)."""
+    depth = 0
+    for i in range(at, len(txt)):
+        depth += txt[i] == open_
+        depth -= txt[i] == close
+        if depth == 0:
+            return i + 1
+    return len(txt)
+
+
+def zbus_replies(files, root):
+    """Findings for the Rust `files` (paths under `root`): a method of an `#[interface]` impl
+    that takes `#[zbus(connection)] conn` and awaits a statement that passes `conn` on, or calls
+    on it. zbus 5.19 reads one socket per connection and hands each message to every stream
+    with a queue of 64. A handler that awaits a reply on that connection while a stream of it
+    fills stops the reader, so the reply is never read and the wait is for good
+    (issue #1035). The fix is a second connection that serves nothing, subscribes to nothing and
+    owns no name, with each query under `tokio::time::timeout`; a method then reads it from
+    `self`, not from the argument.
+
+    A source scan, not a type check. It follows no helper: a statement that awaits and names the
+    argument is a finding, except an emitter (`SignalEmitter::new`, `emit_*`, `bar_emitter`) or
+    `conn.object_server()`, `.unique_name()` and the name calls. A connection reached through
+    `self`, and a loop over a stream of a connection whose body awaits a call on that
+    connection, are not seen. Code under `#[cfg(test)]`, tests, benches and examples is skipped.
+    """
+    problems = []
+    for path in files:
+        txt = without_literals(without_test_items(read(path)))
+        for iface in ZBUS_INTERFACE.finditer(txt):
+            brace = txt.find("{", iface.end())
+            if brace < 0:
+                continue
+            block = txt[brace:matching(txt, brace, "{", "}")]
+            for fn in re.finditer(r"\bfn\s+(\w+)[^(]*\(", block):
+                params_end = matching(block, fn.end() - 1, "(", ")")
+                arg = ZBUS_CONNECTION_ARG.search(block, fn.end(), params_end)
+                body_start = block.find("{", params_end)
+                if not arg or body_start < 0:
+                    continue
+                body = block[body_start:matching(block, body_start, "{", "}")]
+                name = re.escape(arg.group(1))
+                for use in re.finditer(rf"(?<![\w.]){name}\b", body):
+                    start = max(body.rfind(c, 0, use.start()) for c in ";{}") + 1
+                    end = body.find(";", use.end())
+                    statement = body[start:end if end >= 0 else len(body)]
+                    if ".await" not in statement:
+                        continue
+                    if ZBUS_NO_REPLY_BEFORE.search(body[start:use.start()]) or ZBUS_NO_REPLY_AFTER.match(body, use.end()):
+                        continue
+                    at = txt[:brace + body_start + use.start()].count("\n") + 1
+                    problems.append(f"{Path(path).relative_to(root)}:{at}: `{fn.group(1)}` awaits a reply on the connection that serves it")
+                    break
+    return problems
+
+
+@check("zbus-replies", "an object-server method awaits no reply on the connection that serves it (issue #1035)")
+def check_zbus_replies():
+    r = Result()
+    files = list(rust_files())
+    skip = test_module_files(files)
+    for problem in zbus_replies([p for p in files if not is_test_file(p) and p not in skip and not vendored(rel(p))], ROOT):
         r.fail(problem)
     return r
 

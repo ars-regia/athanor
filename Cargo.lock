@@ -393,6 +393,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-auth"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-backup"
 version = "1.0.0"
 dependencies = [
@@ -482,6 +490,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-edid"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
@@ -529,6 +544,19 @@ dependencies = [
 [[package]]
 name = "athanor-i18n"
 version = "1.0.0"
+
+[[package]]
+name = "athanor-idle"
+version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "zbus",
+]
 
 [[package]]
 name = "athanor-launcher"
@@ -679,6 +707,7 @@ dependencies = [
 name = "athanor-sulphur"
 version = "1.0.0"
 dependencies = [
+ "athanor-edid",
  "athanor-unit",
  "bitflags 2.13.1",
  "calloop",
@@ -710,6 +739,7 @@ dependencies = [
  "gio-unix",
  "glib",
  "gtk4",
+ "libc",
  "nix 0.29.0",
  "serde_json",
  "thiserror 2.0.20",
@@ -736,6 +766,19 @@ dependencies = [
  "nix 0.29.0",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "athanor-unlockd"
+version = "1.0.0"
+dependencies = [
+ "athanor-auth",
+ "athanor-unit",
+ "libc",
+ "nix 0.29.0",
+ "tracing",
+ "zbus",
+ "zeroize",
 ]
 
 [[package]]
@@ -770,6 +813,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zbus",
+]
+
+[[package]]
+name = "athanor-wallpaper"
+version = "1.0.0"
+dependencies = [
+ "athanor-sulphur-client",
+ "libc",
+ "tracing",
 ]
 
 [[package]]
@@ -3674,6 +3726,7 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+ "memoffset",
 ]
 
 [[package]]

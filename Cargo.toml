@@ -24,9 +24,14 @@ members = [
   "system/athanor-search",
   "system/athanor-services",
   "system/athanor-unit",
+  "system/athanor-wallpaper",
   "system/athanor-trust-state",
   "system/athanor-sal",
   "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0",
+  "system/athanor-auth",
+  "system/athanor-edid",
+  "system/athanor-idle",
+  "forge/specs/athanor-unlockd/athanor-unlockd-1.0.0",
 ]
 
 # The recovery kiosk is out of this workspace since 2026-09-30: what athanor-recovery
