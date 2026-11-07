@@ -79,7 +79,9 @@ fn read(idle: &gio::Settings, interface: Option<&gio::Settings>) -> Prefs {
     }
 }
 
-fn write(idle: &gio::Settings, writes: Vec<(follow::Field, u32)>) {
+/// Writes each value; true when every write succeeded.
+fn write(idle: &gio::Settings, writes: Vec<(follow::Field, u32)>) -> bool {
+    let mut all = true;
     for (field, value) in writes {
         match idle.set_uint(field.key(), value) {
             Ok(()) => tracing::info!(
@@ -87,9 +89,13 @@ fn write(idle: &gio::Settings, writes: Vec<(follow::Field, u32)>) {
                 field.key(),
                 field.store_key()
             ),
-            Err(error) => tracing::warn!(%error, "cannot write {}", field.key()),
+            Err(error) => {
+                tracing::warn!(%error, "cannot write {}", field.key());
+                all = false;
+            }
         }
     }
+    all
 }
 
 /// What the GLib thread keeps alive while the loop runs.
@@ -114,8 +120,8 @@ fn watch(changes: UnboundedSender<Prefs>) -> Option<Watched> {
         tracing::warn!("{INTERFACE} enable-animations is not installed; the blank fades");
     }
 
-    if !idle.boolean("migrated") {
-        write(&idle, follow::migrate(&power_page::read_user()));
+    // A failed write leaves `migrated` false, so the next start copies again.
+    if !idle.boolean("migrated") && write(&idle, follow::migrate(&power_page::read_user())) {
         if let Err(error) = idle.set_boolean("migrated", true) {
             tracing::warn!(%error, "cannot set migrated");
         }
@@ -138,6 +144,7 @@ fn watch(changes: UnboundedSender<Prefs>) -> Option<Watched> {
                 let idle = idle.clone();
                 monitor.connect_changed(move |_, _, _, _| {
                     let writes = follow.borrow_mut().changed(&power_page::read_in(&dir));
+                    // A failed write is in the journal; the page's next change writes again.
                     write(&idle, writes);
                 });
                 Some(monitor)
