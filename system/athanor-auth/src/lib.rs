@@ -51,7 +51,10 @@ impl Service {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Success,
-    /// Refused, or a finger that did not match: a counted failure.
+    /// A failed transaction, whatever failed: among others a password or a finger that did not
+    /// match, which `pam_faillock` counts, an account already locked or a failed account check,
+    /// which it does not, and a peer the helper refused or an internal error of the helper,
+    /// where no PAM transaction ran. The line is the same for all of them.
     Failure,
     /// A fingerprint transaction that ended uncounted, with no reader or no enrolled finger:
     /// the lock offers the finger again only on a user action or a new reader.
