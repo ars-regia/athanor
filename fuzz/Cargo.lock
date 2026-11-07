@@ -316,6 +316,7 @@ dependencies = [
  "nix",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]

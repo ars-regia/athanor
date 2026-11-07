@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use athanor_shelld::server::{WATCHER_NAME, WATCHER_PATH};
 use athanor_shelld::watcher::{MAX_HOSTS, MAX_ITEMS, MAX_ITEMS_PER_OWNER};
-use common::{Bus, APP_CGROUP};
+use common::{Bus, APP};
 use futures_util::StreamExt;
 use zbus::proxy::{Builder, CacheProperties};
 use zbus::{Connection, Proxy};
@@ -35,7 +35,7 @@ async fn items(proxy: &Proxy<'_>) -> Vec<String> {
 #[tokio::test]
 async fn an_item_registered_by_name_leaves_with_its_owner() {
     let bus = Bus::start("sni-name");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let observer = watcher(&bus.client().await).await;
     let mut registered = observer
         .receive_signal("StatusNotifierItemRegistered")
@@ -82,7 +82,7 @@ async fn an_item_registered_by_name_leaves_with_its_owner() {
 #[tokio::test]
 async fn an_item_registered_by_object_path_belongs_to_its_sender() {
     let bus = Bus::start("sni-path");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let app = bus.client().await;
     let unique = app.unique_name().expect("unique").to_string();
     let proxy = watcher(&app).await;
@@ -109,7 +109,7 @@ async fn an_item_registered_by_object_path_belongs_to_its_sender() {
 #[tokio::test]
 async fn names_without_owner_and_garbage_are_refused() {
     let bus = Bus::start("sni-refuse");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let proxy = watcher(&bus.client().await).await;
     for service in [
         "org.kde.StatusNotifierItem-nobody-1",
@@ -130,7 +130,7 @@ async fn names_without_owner_and_garbage_are_refused() {
 #[tokio::test]
 async fn the_sixty_fifth_item_is_refused() {
     let bus = Bus::start("sni-cap");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     // Path-form items are owned by the connection that registers them (MAX_ITEMS_PER_OWNER),
     // so filling the global cap needs enough connections that no single one is refused first —
     // and each must stay open for the rest of the test, or its items leave with it.
@@ -163,7 +163,7 @@ async fn the_sixty_fifth_item_is_refused() {
 #[tokio::test]
 async fn a_ninth_item_from_the_same_owner_is_refused() {
     let bus = Bus::start("sni-owner-cap");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let proxy = watcher(&bus.client().await).await;
     for n in 0..MAX_ITEMS_PER_OWNER {
         proxy
@@ -181,7 +181,7 @@ async fn a_ninth_item_from_the_same_owner_is_refused() {
 #[tokio::test]
 async fn the_host_is_announced_and_leaves_with_its_owner() {
     let bus = Bus::start("sni-host");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let observer = watcher(&bus.client().await).await;
     let mut gone = observer
         .receive_signal("StatusNotifierHostUnregistered")
@@ -224,7 +224,7 @@ async fn the_host_is_announced_and_leaves_with_its_owner() {
 #[tokio::test]
 async fn an_item_cannot_be_registered_under_a_name_the_caller_does_not_own() {
     let bus = Bus::start("sni-item-impersonate");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let owner = bus.client().await;
     owner
         .request_name("org.kde.StatusNotifierItem-owned-1")
@@ -247,7 +247,7 @@ async fn an_item_cannot_be_registered_under_a_name_the_caller_does_not_own() {
 #[tokio::test]
 async fn a_host_cannot_be_registered_under_a_name_the_caller_does_not_own() {
     let bus = Bus::start("sni-host-impersonate");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let owner = bus.client().await;
     owner
         .request_name("org.kde.StatusNotifierHost-owned")
@@ -273,7 +273,7 @@ async fn a_host_cannot_be_registered_under_a_name_the_caller_does_not_own() {
 #[tokio::test]
 async fn an_owner_may_register_its_own_well_known_name() {
     let bus = Bus::start("sni-owned");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let app = bus.client().await;
     app.request_name("org.kde.StatusNotifierItem-owner-2")
         .await
@@ -309,7 +309,7 @@ async fn an_owner_may_register_its_own_well_known_name() {
 #[tokio::test]
 async fn a_fifth_distinct_host_is_refused() {
     let bus = Bus::start("sni-host-cap");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let mut hosts = Vec::new();
     for n in 0..MAX_HOSTS {
         let host = bus.client().await;
@@ -343,7 +343,7 @@ async fn a_fifth_distinct_host_is_refused() {
 async fn a_name_the_bus_cannot_resolve_in_time_is_refused() {
     let bus = Bus::start("sni-timeout");
     let query_bus = Bus::start("sni-timeout-query");
-    let _daemon = bus.daemon_asking(APP_CGROUP, &query_bus).await;
+    let _daemon = bus.daemon_asking(APP, &query_bus).await;
     let proxy = watcher(&bus.client().await).await;
     query_bus.freeze();
     let err = tokio::time::timeout(
