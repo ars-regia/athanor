@@ -117,19 +117,35 @@ fn wallpaper() -> Result<(), String> {
     athanor_unit::peer::admit_user_unit(connection.as_fd(), protocol::DAEMON_SLICE, protocol::DAEMON_UNIT, Path::new(protocol::DAEMON_EXE))
         .map_err(|refused| format!("peer refused: {refused}"))?;
     let (sizes, file) = request(connection)?;
-    let mut input = Vec::new();
-    File::from(file).take(MAX_INPUT + 1).read_to_end(&mut input).map_err(|err| format!("the file cannot be read: {err}"))?;
-    if input.len() as u64 > MAX_INPUT {
-        return Err(format!("the file is larger than {MAX_INPUT} bytes"));
-    }
-    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8)?;
-    let image = (frame.width(), frame.height());
     let mut out = BufWriter::with_capacity(1 << 20, io::stdout().lock());
+    let frame = match picture(File::from(file)) {
+        Ok(frame) => frame,
+        Err(err) => {
+            // The picture's fault, not the decoder's: told so, the daemon does not ask again.
+            out.write_all(&protocol::refusal()).and_then(|()| out.flush()).map_err(|err| err.to_string())?;
+            return Err(err);
+        }
+    };
+    let image = (frame.width(), frame.height());
     for size in sizes {
         out.write_all(&protocol::frame_header(size)).map_err(|err| err.to_string())?;
         athanor_wallpaper::write_zoomed(frame.buf_slice(), frame.stride() as usize, image, size, &mut out).map_err(|err| err.to_string())?;
     }
     out.flush().map_err(|err| err.to_string())
+}
+
+/// The picture in `file`, which must be a regular file, decoded.
+fn picture(file: File) -> Result<glycin::Frame, String> {
+    let metadata = file.metadata().map_err(|err| format!("the file cannot be read: {err}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("the descriptor is not a regular file".to_owned());
+    }
+    let mut input = Vec::new();
+    file.take(MAX_INPUT + 1).read_to_end(&mut input).map_err(|err| format!("the file cannot be read: {err}"))?;
+    if input.len() as u64 > MAX_INPUT {
+        return Err(format!("the file is larger than {MAX_INPUT} bytes"));
+    }
+    decode(input, glycin::MemoryFormat::R8g8b8a8)
 }
 
 /// The request on `connection` and the one file descriptor that came with it.
@@ -315,5 +331,12 @@ mod tests {
         assert_eq!(&out[..5], b"ATPV1");
         assert_eq!(&out[5..13], [1, 0, 0, 0, 2, 0, 0, 0]);
         assert_eq!(out.len(), 13 + 8);
+    }
+
+    #[test]
+    fn only_a_regular_file_is_read() {
+        let device = File::open("/dev/null").expect("a device");
+        let refused = picture(device).err().unwrap_or_default();
+        assert!(refused.contains("not a regular file"), "{refused}");
     }
 }

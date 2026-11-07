@@ -28,6 +28,9 @@ pub const MAX_SIDE: u32 = 8192;
 pub const REQUEST_LEN: usize = REQUEST_MAGIC.len() + 1 + MAX_SIZES * 8;
 /// A frame header's length.
 pub const FRAME_HEADER_LEN: usize = FRAME_MAGIC.len() + 8;
+/// The most connections the daemon holds open to the decoder at once: the socket unit's
+/// `MaxConnections=` and `MaxConnectionsPerSource=` (row W4 of SD22) are this value.
+pub const MAX_CONNECTIONS: usize = 4;
 
 /// A size every side of which is 1 to [`MAX_SIDE`].
 fn valid((width, height): (u32, u32)) -> bool {
@@ -82,6 +85,13 @@ pub fn frame_header((width, height): (u32, u32)) -> [u8; FRAME_HEADER_LEN] {
 /// it asked for, so a decoder cannot make it allocate more.
 pub fn check_frame(header: &[u8; FRAME_HEADER_LEN], expected: (u32, u32)) -> bool {
     header == &frame_header(expected)
+}
+
+/// The header the decoder answers in place of the first frame when the picture cannot be
+/// decoded: a size of zero, which no request asks for. Any other end of the answer is the
+/// decoder's fault, not the picture's.
+pub fn refusal() -> [u8; FRAME_HEADER_LEN] {
+    frame_header((0, 0))
 }
 
 /// The bytes of a frame's pixels.
