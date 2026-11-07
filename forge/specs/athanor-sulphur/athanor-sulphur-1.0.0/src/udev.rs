@@ -45,7 +45,9 @@ use smithay::desktop::Window;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
-use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
+use smithay::reexports::drm::control::{
+    connector, crtc, property, Device as ControlDevice, ModeTypeFlags,
+};
 use smithay::reexports::drm::Device as _;
 use smithay::reexports::input::event::gesture::{
     GestureHoldEvent, GesturePinchEvent, GestureSwipeEvent,
@@ -65,7 +67,7 @@ use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::presentation::Refresh;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// The formats tried for each output's swapchain, in order: 8 bits a channel.
@@ -108,6 +110,8 @@ pub struct Drm {
     outputs: HashMap<crtc::Handle, Head>,
     /// The monitors that could not be set up, with the modes and the CRTC they failed with.
     failed: HashMap<connector::Handle, (connector::Info, crtc::Handle)>,
+    /// The EDID faults already warned of, per connector, so a rescan logs them at debug.
+    edid_faults: HashSet<(connector::Handle, EdidFault)>,
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
     cursor: Cursor,
@@ -125,6 +129,117 @@ enum Wake {
     /// The frame callbacks of a surface shown on no output, at `FRAME_THROTTLE`: a request to
     /// draw does not wait for it.
     Throttle,
+}
+
+/// The EDID of a connector: the bytes of its "EDID" blob property, `None` when it has none
+/// (a monitor that does not answer, or a virtual connector).
+fn read_edid(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let set = device.get_properties(connector)?;
+    let (handles, values) = set.as_props_and_values();
+    // A property that cannot be described is skipped: it may not be the EDID. When none turns
+    // out to be the EDID, the last such error is the failure, since it may have been its own.
+    let mut unreadable = None;
+    for (handle, raw) in handles.iter().zip(values) {
+        let info = match device.get_property(*handle) {
+            Ok(info) => info,
+            Err(error) => {
+                unreadable = Some(error);
+                continue;
+            }
+        };
+        if info.name() != c"EDID" {
+            continue;
+        }
+        return match info.value_type().convert_value(*raw) {
+            // A zero blob id is "no blob".
+            property::Value::Blob(id) if id != 0 => device.get_property_blob(id).map(Some),
+            _ => Ok(None),
+        };
+    }
+    unreadable.map_or(Ok(None), Err)
+}
+
+/// The two ways a connector's EDID can fail, each logged once per connector.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum EdidFault {
+    Unreadable,
+    Invalid,
+}
+
+/// Whether `fault` of `connector` is new, and so deserves a warning; a scan that finds it
+/// again logs at debug.
+fn first_fault(
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    connector: connector::Handle,
+    fault: EdidFault,
+) -> bool {
+    seen.insert((connector, fault))
+}
+
+/// The output of `connector`, reporting the make, model and serial in its EDID
+/// (`athanor-edid`, so the strings equal athanor-osd's), or today's placeholder when the
+/// connector has no EDID blob, it cannot be read, or it does not parse.
+fn connector_output(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+    name: &str,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    mode: Mode,
+) -> Output {
+    let edid = match read_edid(device, connector) {
+        Ok(edid) => edid,
+        Err(error) => {
+            if first_fault(seen, connector, EdidFault::Unreadable) {
+                tracing::warn!(%error, output = name, "the EDID of a monitor could not be read");
+            } else {
+                tracing::debug!(%error, output = name, "the EDID of a monitor could not be read");
+            }
+            None
+        }
+    };
+    output_of(edid.as_deref(), name, connector, seen, mode)
+}
+
+/// The output that `edid` describes, drawn at `mode`: what `set_up` hands the clients.
+pub(crate) fn output_of(
+    edid: Option<&[u8]>,
+    name: &str,
+    connector: connector::Handle,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    mode: Mode,
+) -> Output {
+    let identity = identity_of(edid, name, connector, seen);
+    crate::state::build_output(
+        name,
+        &identity,
+        mode.size,
+        mode.refresh,
+        Transform::Normal,
+        1.0,
+    )
+}
+
+/// `edid` as an identity, or the placeholder.
+fn identity_of(
+    edid: Option<&[u8]>,
+    name: &str,
+    connector: connector::Handle,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+) -> athanor_edid::Identity {
+    let Some(edid) = edid else {
+        return crate::state::placeholder_identity("DRM");
+    };
+    athanor_edid::parse(edid).unwrap_or_else(|error| {
+        if first_fault(seen, connector, EdidFault::Invalid) {
+            tracing::warn!(%error, output = name, "the EDID of a monitor is not valid");
+        } else {
+            tracing::debug!(%error, output = name, "the EDID of a monitor is not valid");
+        }
+        crate::state::placeholder_identity("DRM")
+    })
 }
 
 /// A monitor: the output and what draws it.
@@ -289,6 +404,7 @@ pub fn start(
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
         failed: HashMap::new(),
+        edid_faults: HashSet::new(),
         nvidia,
         cursor: Cursor::from_env(),
         touchpads: Vec::new(),
@@ -804,13 +920,12 @@ impl State {
         };
         let mode = preferred_mode(connector).ok_or("the monitor has no mode")?;
         let wl_mode = Mode::from(mode);
-        let output = crate::state::build_output(
+        let output = connector_output(
+            drm.heads.device(),
+            connector.handle(),
             name,
-            "DRM",
-            wl_mode.size,
-            wl_mode.refresh,
-            Transform::Normal,
-            1.0,
+            &mut drm.edid_faults,
+            wl_mode,
         );
         let mut planes = drm
             .heads
@@ -867,6 +982,9 @@ impl State {
         };
         // Bandwidth or a CRTC may be free now: the monitors that failed are tried again.
         drm.failed.clear();
+        // Another monitor on this connector is warned of afresh.
+        drm.edid_faults
+            .retain(|(handle, _)| *handle != connector.handle());
         let Some(head) = drm.outputs.remove(&crtc) else {
             return;
         };
@@ -1518,9 +1636,86 @@ fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output:
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{lock_shown, pacing, FailureLog, Frames, LockFrames, Wake};
+pub(crate) mod tests {
+    use super::{
+        first_fault, identity_of, lock_shown, output_of, pacing, EdidFault, FailureLog, Frames, LockFrames,
+        Wake,
+    };
     use std::time::{Duration, Instant};
+
+    /// A base block for "DEL", product 0xA0B3, serial 1, with a name descriptor and a correct
+    /// checksum.
+    pub(crate) fn dell() -> Vec<u8> {
+        let mut b = vec![0u8; 128];
+        b[..8].copy_from_slice(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
+        b[8..10].copy_from_slice(&((4u16 << 10) | (5 << 5) | 12).to_be_bytes());
+        b[10..12].copy_from_slice(&0xA0B3u16.to_le_bytes());
+        b[12] = 1;
+        b[54 + 3] = 0xFC;
+        b[54 + 5..54 + 5 + 10].copy_from_slice(b"U2412M\n   ");
+        let sum = b.iter().fold(0u8, |s, x| s.wrapping_add(*x));
+        b[127] = 0u8.wrapping_sub(sum);
+        b
+    }
+
+    fn handle() -> smithay::reexports::drm::control::connector::Handle {
+        smithay::reexports::drm::control::from_u32(7).expect("a nonzero id")
+    }
+
+    #[test]
+    fn an_edid_fault_warns_once_per_connector_and_kind() {
+        let mut seen = Default::default();
+        let other = smithay::reexports::drm::control::from_u32(8).expect("a nonzero id");
+        assert!(first_fault(&mut seen, handle(), EdidFault::Invalid));
+        let again = first_fault(&mut seen, handle(), EdidFault::Invalid);
+        assert!(!again, "a rescan");
+        let kind = first_fault(&mut seen, handle(), EdidFault::Unreadable);
+        assert!(kind, "another kind");
+        let conn = first_fault(&mut seen, other, EdidFault::Invalid);
+        assert!(conn, "another connector");
+        // identity_of records the fault it meets.
+        let id = identity_of(Some(&[0u8; 5]), "DP-1", other, &mut seen);
+        assert_eq!(id.model, "DRM");
+        assert!(!first_fault(&mut seen, other, EdidFault::Invalid));
+    }
+
+    #[test]
+    fn an_output_reports_the_identity_in_its_edid() {
+        let id = identity_of(Some(&dell()), "DP-1", handle(), &mut Default::default());
+        assert_eq!(
+            (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+    }
+
+    #[test]
+    fn set_up_builds_the_output_from_the_identity_in_the_edid() {
+        let mode = smithay::output::Mode {
+            size: (1920, 1080).into(),
+            refresh: 60_000,
+        };
+        let edid = dell();
+        let output = output_of(Some(&edid), "DP-1", handle(), &mut Default::default(), mode);
+        let physical = output.physical_properties();
+        assert_eq!(
+            (physical.make.as_str(), physical.model.as_str(), physical.serial_number.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+        assert_eq!(output.current_mode(), Some(mode));
+    }
+
+    #[test]
+    fn an_output_with_no_edid_or_a_bad_one_keeps_the_placeholder() {
+        let mut bad = dell();
+        bad[127] = bad[127].wrapping_add(1);
+        for edid in [None, Some(bad.as_slice()), Some(&[0u8; 7][..])] {
+            let id = identity_of(edid, "DP-1", handle(), &mut Default::default());
+            assert_eq!(
+                (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+                ("Athanor", "DRM", "")
+            );
+        }
+    }
 
     #[test]
     fn an_output_draws_only_when_asked_and_at_most_once_a_refresh() {

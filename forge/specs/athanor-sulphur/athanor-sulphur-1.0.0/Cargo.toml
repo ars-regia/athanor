@@ -9,6 +9,9 @@ description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milest
 [dependencies]
 # Readiness for the `Type=notify` unit of the preview session (`ready.rs`).
 athanor-unit = { path = "../../../../system/athanor-unit" }
+# A monitor's make, model and serial from the EDID blob of its connector (`udev.rs`); the same
+# parser names the monitor to athanor-osd (doc_osd.md OD4).
+athanor-edid = { path = "../../../../system/athanor-edid" }
 # The generated code of Athanor's own protocols (`toplevel_state.rs`), and the fixture's
 # client bindings of them: the bitfield enums need bitflags.
 bitflags = { workspace = true }
