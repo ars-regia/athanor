@@ -302,7 +302,17 @@ pub fn paint<C: Canvas>(
 ) -> Result<(), Error> {
     let (w, h) = ui.size();
     let (w, h) = (w.ceil(), h.ceil());
-    ctx.set_transform(Affine::scale(f64::from(scale)));
+    // The surface's motion: everything, the background included, in one layer at its opacity
+    // and moved by its offset. At rest neither the layer nor the move is made.
+    let pose = ui.pose;
+    let faded = pose.opacity < 1.0;
+    if faded {
+        ctx.push_opacity_layer(pose.opacity.max(0.0));
+    }
+    let (dx, dy) = pose.offset;
+    ctx.set_transform(
+        Affine::scale(f64::from(scale)) * Affine::translate((f64::from(dx), f64::from(dy))),
+    );
     let t = ui.theme.clone();
     ctx.set_paint(color(t.background));
     ctx.fill_rect(&Rect::new(0.0, 0.0, f64::from(w), f64::from(h)));
@@ -626,6 +636,37 @@ pub fn paint<C: Canvas>(
                 let edge = Circle::new(knob.center, knob.radius - 0.5);
                 ctx.stroke_path(&edge.to_path(0.1));
             }
+            // A track from 0 to max, filled with the accent up to the full mark and with the
+            // warning colour beyond it.
+            Kind::Level(level) => {
+                let at = |value: f64| {
+                    let along = (value / level.max) as f32 * r.w;
+                    if ui.rtl {
+                        r.x + r.w - along
+                    } else {
+                        r.x + along
+                    }
+                };
+                let (cy, thick) = (r.y + r.h / 2.0, 4.0);
+                let bar = |from: f64, to: f64| {
+                    let (from, to) = (at(from), at(to));
+                    let rect = crate::widget::Rect {
+                        x: from.min(to),
+                        y: cy - thick / 2.0,
+                        w: (to - from).abs(),
+                        h: thick,
+                    };
+                    rounded(rect, 0.0, thick / 2.0)
+                };
+                ctx.set_paint(color(t.border));
+                ctx.fill_path(&bar(0.0, level.max));
+                if level.value > level.full {
+                    ctx.set_paint(color(t.warning));
+                    ctx.fill_path(&bar(level.full, level.value));
+                }
+                ctx.set_paint(color(t.accent));
+                ctx.fill_path(&bar(0.0, level.value.min(level.full)));
+            }
             Kind::Field(field) | Kind::TextArea(field) => {
                 ctx.set_paint(color(t.on_accent));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
@@ -676,6 +717,9 @@ pub fn paint<C: Canvas>(
     }
     let sensitive = order.iter().filter(|&&(_, root)| root.is_none());
     indicators(ui, ctx, sensitive.map(|&(w, _)| w));
+    if faded {
+        ctx.pop_layer();
+    }
     Ok(())
 }
 
@@ -971,6 +1015,55 @@ mod tests {
     }
 
     #[test]
+    fn a_pose_draws_the_surface_at_its_opacity_and_offset() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Pose", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
+        let rest = render(&mut ui, 2.0)?;
+        let r = ui.widget(button).rect;
+        // At physical pixel (x, y) of `p`, for logical coordinates at scale 2.
+        let at = |p: &Pixmap, x: f32, y: f32| {
+            let i = 4 * (usize::from(p.width()) * (y * 2.0) as usize + (x * 2.0) as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let (x, y) = (r.x + 4.0, r.y + r.h / 2.0);
+        ui.pose = crate::Pose {
+            opacity: 0.5,
+            offset: (0.0, 0.0),
+        };
+        let faded = render(&mut ui, 2.0)?;
+        // Premultiplied: every channel of the opaque background and of the fill at half.
+        for (got, want) in [
+            (at(&faded, 1.0, 1.0), at(&rest, 1.0, 1.0)),
+            (at(&faded, x, y), at(&rest, x, y)),
+        ] {
+            let off = got
+                .iter()
+                .zip(&want)
+                .map(|(&a, &b)| a.abs_diff(b.div_ceil(2)))
+                .max();
+            assert!(
+                off.is_some_and(|d| d <= 1),
+                "{got:?} is not half of {want:?}"
+            );
+        }
+        ui.pose = crate::Pose {
+            opacity: 1.0,
+            offset: (5.0, 7.0),
+        };
+        let moved = render(&mut ui, 2.0)?;
+        assert_eq!(
+            moved.width(),
+            rest.width(),
+            "the move keeps the surface's size"
+        );
+        assert_eq!(at(&moved, x + 5.0, y + 7.0), at(&rest, x, y));
+        assert_ne!(at(&moved, x, y), at(&rest, x, y));
+        ui.pose = crate::Pose::REST;
+        assert_eq!(hash(&render(&mut ui, 2.0)?), hash(&rest));
+        Ok(())
+    }
+
+    #[test]
     fn an_insensitive_widget_is_drawn_at_half_its_opacity() -> Result<(), Error> {
         let mut ui = crate::Ui::new("Sensitive", crate::Theme::default(), false);
         let button = ui.add(crate::Ui::ROOT, crate::Kind::Button("Files".into()));
@@ -1022,6 +1115,38 @@ mod tests {
         assert_ne!(fill, t.surface.0);
         ui.pointer_leave();
         assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
+        Ok(())
+    }
+
+    #[test]
+    fn a_level_is_drawn_in_the_accent_and_in_warning_past_its_full_mark() -> Result<(), Error> {
+        for rtl in [false, true] {
+            let mut ui = crate::Ui::new("Level", crate::Theme::default(), rtl);
+            let id = ui.level(crate::Ui::ROOT, "Volume", 120.0, 100.0, 150.0);
+            let id = id.unwrap_or(crate::Ui::ROOT);
+            let pixmap = render(&mut ui, 1.0)?;
+            let (r, t) = (ui.widget(id).rect, ui.theme.clone());
+            // The colour at `value` along the track, from the start edge of reading.
+            let at = |value: f32| {
+                let along = value / 150.0 * r.w;
+                let x = if rtl { r.x + r.w - along } else { r.x + along };
+                let y = r.y + r.h / 2.0;
+                let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+                pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+            };
+            assert_eq!(at(50.0), t.accent.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(110.0), t.warning.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(135.0), t.border.0.to_vec(), "rtl {rtl}");
+            // At its full mark or under, no warning.
+            assert!(ui.set_level(id, 100.0));
+            let pixmap = render(&mut ui, 1.0)?;
+            let (y, stride) = ((r.y + r.h / 2.0) as usize, 4 * usize::from(pixmap.width()));
+            let row = &pixmap.data_as_u8_slice()[stride * y..][..stride];
+            assert!(
+                row.chunks(4).all(|p| p != t.warning.0),
+                "rtl {rtl}: no warning at 100 of 150"
+            );
+        }
         Ok(())
     }
 
