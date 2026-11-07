@@ -2,7 +2,40 @@
 //! empty value counts as unset (XDG Base Directory Specification).
 
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::fs;
+use std::io;
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+
+/// `runtime/name`, created with mode 0700; one that exists already must be a directory, not a
+/// link, owned by the owner of `runtime` and of mode 0700, or it is refused: another process of
+/// the user could otherwise point a confined daemon's writes elsewhere.
+pub fn private_dir(runtime: &Path, name: &str) -> io::Result<PathBuf> {
+    let dir = runtime.join(name);
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => return Ok(dir),
+        Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
+        Err(_) => {}
+    }
+    let owner = fs::metadata(runtime)?.uid();
+    let found = fs::symlink_metadata(&dir)?;
+    let refuse = |why: &str| {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("{} {why}", dir.display()),
+        ))
+    };
+    if !found.file_type().is_dir() {
+        return refuse("is not a directory");
+    }
+    if found.uid() != owner {
+        return refuse("is not owned by the user");
+    }
+    if found.permissions().mode() & 0o7777 != 0o700 {
+        return refuse("does not have mode 0700");
+    }
+    Ok(dir)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dirs {
@@ -56,6 +89,44 @@ impl Dirs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_private_dir_is_created_or_checked() {
+        let runtime =
+            std::env::temp_dir().join(format!("athanor-unit-private-{}", std::process::id()));
+        fs::remove_dir_all(&runtime).ok();
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&runtime)
+            .expect("runtime");
+        let made = private_dir(&runtime, "d").expect("created");
+        assert_eq!(made, runtime.join("d"));
+        assert_eq!(
+            fs::metadata(&made).expect("made").permissions().mode() & 0o7777,
+            0o700
+        );
+        assert_eq!(
+            private_dir(&runtime, "d").expect("an existing one that passes"),
+            made
+        );
+
+        fs::set_permissions(&made, fs::Permissions::from_mode(0o755)).expect("chmod");
+        assert!(private_dir(&runtime, "d").is_err(), "mode 0755");
+        fs::remove_dir(&made).expect("rmdir");
+
+        let elsewhere = runtime.join("elsewhere");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&elsewhere)
+            .expect("elsewhere");
+        std::os::unix::fs::symlink(&elsewhere, &made).expect("symlink");
+        assert!(private_dir(&runtime, "d").is_err(), "a link to a directory");
+        fs::remove_file(&made).expect("rm");
+
+        fs::write(&made, b"").expect("file");
+        assert!(private_dir(&runtime, "d").is_err(), "a file");
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
 
     fn vars<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<OsString> + 'a {
         move |name| {
