@@ -205,7 +205,9 @@ pub enum Kind {
     /// is drawn with "zoom": scaled by one factor until it covers its rectangle in physical
     /// pixels, the overflow cut equally on both sides. It takes no input and adds nothing to its
     /// column's size, so a layer surface anchored on all four edges takes the size the
-    /// compositor configures. Add it with [`Ui::picture`].
+    /// compositor configures. It takes a size only as a child of a [`Kind::Column`] or a
+    /// [`Kind::Group`], the root's included: elsewhere it is 0 by 0 and not drawn. Add it with
+    /// [`Ui::picture`].
     #[non_exhaustive]
     Picture {
         /// The pixels, from [`crate::Image::from_rgba8`].
@@ -734,7 +736,9 @@ impl Ui {
     }
 
     /// Adds `image` as a picture that fills the rest of `parent`, named by `description` for
-    /// assistive technologies; an empty description marks a picture that only decorates. See
+    /// assistive technologies; an empty description marks a picture that only decorates.
+    /// `parent` is a column or a group, the root's included: the picture takes its parent's full
+    /// width and the rest of its height there, and has no size anywhere else. See
     /// [`Kind::Picture`].
     ///
     /// # Panics
