@@ -68,7 +68,7 @@ fn main() -> ExitCode {
     let confined = sandbox::ensure_single_threaded().and_then(|()| {
         sandbox::restrict(
             &[Path::new("/usr"), Path::new("/etc"), Path::new("/proc")],
-            &[std::fs::File::open(&state_dir)?],
+            &[athanor_unit::dirs::owned_dir(&state_dir)?],
         )
     });
     if let Err(err) = confined {
