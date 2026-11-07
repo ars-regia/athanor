@@ -62,19 +62,51 @@ pub struct Shown {
 pub struct Notices {
     level: Option<Level>,
     shown: Option<Shown>,
+    /// The level's notice was not shown: no server answered its raise.
+    owed: bool,
 }
 
 impl Notices {
-    /// The step for the level now wanted; `None` when the level did not change.
+    /// The step for the level now wanted; `None` when the level did not change and its notice
+    /// is not owed.
     pub fn update(&mut self, level: Option<Level>) -> Option<Step> {
-        if level == self.level {
+        if level == self.level && !self.owed {
             return None;
         }
         self.level = level;
+        self.owed = false;
         Some(Step {
             close: self.shown.take(),
             raise: level,
         })
+    }
+
+    /// The notification server's name changed owner, to `owner` or to none. A server that
+    /// leaves takes its notices with it; one that appears gets the current level's notice,
+    /// raised again, a resident one lost in a restart included.
+    pub fn server(&mut self, owner: Option<&str>) -> Option<Step> {
+        if self
+            .shown
+            .as_ref()
+            .is_some_and(|shown| Some(shown.server.as_str()) != owner)
+        {
+            self.shown = None;
+        }
+        let level = self.level?;
+        match owner {
+            None => {
+                self.owed = true;
+                None
+            }
+            Some(_) if self.shown.is_some() => None,
+            Some(_) => {
+                self.owed = false;
+                Some(Step {
+                    close: None,
+                    raise: Some(level),
+                })
+            }
+        }
     }
 
     /// `server`, the unique name asked, answered the raise for the current level with `id`.
@@ -83,9 +115,10 @@ impl Notices {
     }
 
     /// The raise was not answered: the level raises its notice again at the next change of
-    /// the device, as when it is entered.
+    /// the device or when a server appears. A raise that timed out may still have been shown,
+    /// so that retry can show it twice; its late id is never known, so it cannot be closed.
     pub fn failed(&mut self) {
-        self.level = None;
+        self.owed = true;
     }
 
     /// `sender` closed its notice `id`, or the person dismissed it.
@@ -283,6 +316,44 @@ mod tests {
                 raise: Some(Level::Low)
             }
         );
+    }
+
+    #[test]
+    fn a_server_that_appears_gets_the_current_levels_notice() {
+        let mut notices = Notices::default();
+        assert_eq!(
+            notices.server(Some(":1.5")),
+            None,
+            "no level, nothing to raise"
+        );
+        notices.update(Some(Level::Critical));
+        notices.failed();
+        let raise = Some(Step {
+            close: None,
+            raise: Some(Level::Critical),
+        });
+        assert_eq!(notices.server(Some(":1.5")), raise, "the owed notice");
+        notices.raised(":1.5".into(), 3);
+        // The server restarts: its resident notice is gone with it.
+        assert_eq!(notices.server(None), None);
+        assert!(!notices.is_shown(":1.5", 3));
+        assert_eq!(notices.server(Some(":1.9")), raise);
+        notices.raised(":1.9".into(), 1);
+        assert_eq!(notices.server(Some(":1.9")), None, "already shown there");
+        assert_eq!(notices.update(Some(Level::Critical)), None);
+        // Charging closes it at the server that shows it.
+        let shown = Shown {
+            server: ":1.9".into(),
+            id: 1,
+        };
+        assert_eq!(
+            notices.update(None),
+            Some(Step {
+                close: Some(shown),
+                raise: None
+            })
+        );
+        assert_eq!(notices.server(Some(":1.10")), None, "no level any more");
     }
 
     #[test]

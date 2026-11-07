@@ -21,7 +21,7 @@ use zbus::names::BusName;
 use zbus::zvariant::Value;
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
-use crate::battery::{self, Level, Notice, Notices, SETTINGS_ACTION, SETTINGS_PAGE};
+use crate::battery::{self, Level, Notice, Notices, Step, SETTINGS_ACTION, SETTINGS_PAGE};
 
 const SERVER: &str = "org.freedesktop.Notifications";
 const SERVER_PATH: &str = "/org/freedesktop/Notifications";
@@ -47,6 +47,15 @@ pub async fn run(
         .path(SERVER_PATH)?
         .build();
     let mut server = MessageStream::for_match_rule(rule, signals, None).await?;
+    // A server that appears gets the current notice again, as after a restart (SD14).
+    let owner = MatchRule::builder()
+        .msg_type(Type::Signal)
+        .sender("org.freedesktop.DBus")?
+        .interface("org.freedesktop.DBus")?
+        .member("NameOwnerChanged")?
+        .arg(0, SERVER)?
+        .build();
+    let mut owners = MessageStream::for_match_rule(owner, signals, None).await?;
     let mut upower = mirror::spawn(
         handle,
         system,
@@ -55,33 +64,64 @@ pub async fn run(
     );
     let mut notices = Notices::default();
     loop {
-        tokio::select! {
+        let step = tokio::select! {
             changed = upower.changed() => {
                 changed.map_err(|_| "the mirror of UPower ended")?;
-                let (level, device) = read(&upower);
-                if let Some(step) = notices.update(level) {
-                    if let Some(shown) = step.close {
-                        // Asked of the server that raised it: the id is that server's.
-                        let closed = call(query, &shown.server, SERVER_PATH, SERVER, "CloseNotification", &(shown.id,)).await;
-                        if let Err(err) = closed {
-                            tracing::warn!(%err, id = shown.id, "the battery notice was not closed");
-                        }
-                    }
-                    if let Some(level) = step.raise {
-                        let notice = battery::notice(level, device.as_ref(), catalog);
-                        match raise(query, &notice).await {
-                            Ok((server, id)) => notices.raised(server, id),
-                            Err(err) => {
-                                tracing::warn!(%err, ?level, "the battery notice was not shown; it is tried again at the next change");
-                                notices.failed();
-                            }
-                        }
+                notices.update(read(&upower).0)
+            }
+            message = owners.next() => {
+                let message = message.ok_or("the name owner signals ended")??;
+                match message.body().deserialize::<(String, String, String)>() {
+                    Ok((_, _, new)) => notices.server(Some(new.as_str()).filter(|new| !new.is_empty())),
+                    Err(err) => {
+                        tracing::warn!(%err, "a NameOwnerChanged signal does not parse");
+                        None
                     }
                 }
             }
             message = server.next() => {
                 let message = message.ok_or("the notification signals ended")??;
                 signal(&message, &mut notices, query).await;
+                None
+            }
+        };
+        if let Some(step) = step {
+            apply(step, &mut notices, &upower, query, catalog).await;
+        }
+    }
+}
+
+/// Closes the notice shown and raises the new one, with the device's charge for its text.
+async fn apply(
+    step: Step,
+    notices: &mut Notices,
+    upower: &watch::Receiver<Snapshot>,
+    query: &Connection,
+    catalog: &Catalog,
+) {
+    if let Some(shown) = step.close {
+        // Asked of the server that raised it: the id is that server's.
+        let closed = call(
+            query,
+            &shown.server,
+            SERVER_PATH,
+            SERVER,
+            "CloseNotification",
+            &(shown.id,),
+        )
+        .await;
+        if let Err(err) = closed {
+            tracing::warn!(%err, id = shown.id, "the battery notice was not closed");
+        }
+    }
+    if let Some(level) = step.raise {
+        let device = read(upower).1;
+        let notice = battery::notice(level, device.as_ref(), catalog);
+        match raise(query, &notice).await {
+            Ok((server, id)) => notices.raised(server, id),
+            Err(err) => {
+                tracing::warn!(%err, ?level, "the battery notice was not shown; it is raised again at the next change or when a server appears");
+                notices.failed();
             }
         }
     }
