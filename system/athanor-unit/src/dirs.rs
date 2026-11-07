@@ -47,6 +47,84 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<OwnedFd> {
     Ok(opened.into())
 }
 
+/// `path`, a directory a write grant names: opened once with O_PATH, without following a link
+/// in its last component, and checked on that descriptor: a directory owned by the process's
+/// user or by root (`/tmp`), never another user's. The descriptor is what the grant names
+/// (`sandbox::restrict`, `sandbox::restrict_writes`), so a link put at the path before the
+/// open is refused, and one swapped in after it widens nothing.
+pub fn owned_dir(path: &Path) -> io::Result<OwnedFd> {
+    let (opened, found) = not_a_link(path, OFlag::O_DIRECTORY)?;
+    if found.uid() != 0 && found.uid() != nix::unistd::geteuid().as_raw() {
+        return Err(refused(path, "is owned by another user"));
+    }
+    Ok(opened.into())
+}
+
+/// `path`, a node of the system's that a `WriteFile` grant names (`/dev/dri`, `/dev/null`):
+/// opened as `owned_dir` opens a directory, of any kind other than a link. Its owner is not
+/// checked: no user can put anything at those paths, and in a user namespace that does not map
+/// root (the shell rig's container, the greeter's sandbox) their owner reads as the overflow id.
+pub fn owned_node(path: &Path) -> io::Result<OwnedFd> {
+    not_a_link(path, OFlag::empty()).map(|(opened, _)| opened.into())
+}
+
+/// Each of `paths` that exists, opened by `open` (`owned_dir`, `owned_node`). One that fails its
+/// check is left out with a warning, so that a grant only narrows; a missing one is skipped, as
+/// Landlock has nothing to hold on to.
+pub fn existing(paths: &[&Path], open: fn(&Path) -> io::Result<OwnedFd>) -> Vec<OwnedFd> {
+    paths
+        .iter()
+        .filter_map(|path| match open(path) {
+            Ok(fd) => Some(fd),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "not granted: it fails the check");
+                None
+            }
+        })
+        .collect()
+}
+
+/// `private_dir` of each of `names` in `runtime`. One that fails is left out with a warning, so
+/// that a grant only narrows.
+pub fn private_dirs(runtime: &Path, names: &[&str]) -> Vec<OwnedFd> {
+    names
+        .iter()
+        .filter_map(|name| {
+            private_dir(runtime, name)
+                .map_err(
+                    |error| tracing::warn!(%error, dir = name, "not granted: it fails the check"),
+                )
+                .ok()
+        })
+        .collect()
+}
+
+fn refused(path: &Path, why: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("{} {why}", path.display()),
+    )
+}
+
+/// `path` opened with O_PATH, O_NOFOLLOW and `kind`, and what fstat says of it; refused when it
+/// is a link, or not a directory when `kind` holds O_DIRECTORY.
+fn not_a_link(path: &Path, kind: OFlag) -> io::Result<(fs::File, fs::Metadata)> {
+    // std adds O_CLOEXEC. With O_PATH and O_NOFOLLOW a link opens as itself: refused below.
+    let opened = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((OFlag::O_PATH | OFlag::O_NOFOLLOW | kind).bits())
+        .open(path)?;
+    let found = opened.metadata()?;
+    if found.file_type().is_symlink() {
+        return Err(refused(path, "is a link"));
+    }
+    if kind.contains(OFlag::O_DIRECTORY) && !found.is_dir() {
+        return Err(refused(path, "is not a directory"));
+    }
+    Ok((opened, found))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dirs {
     /// The unit's own runtime directory, `%t/<unit>`.
@@ -165,6 +243,52 @@ mod tests {
         .join()
         .expect("the confined thread");
         assert!(!runtime.join("elsewhere/file").exists());
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn an_owned_dir_is_a_directory_and_never_a_link() {
+        let runtime = runtime("owned");
+        let (dir, file, link) = (runtime.join("d"), runtime.join("f"), runtime.join("l"));
+        fs::create_dir(&dir).expect("mkdir");
+        fs::write(&file, b"").expect("file");
+        std::os::unix::fs::symlink(&dir, &link).expect("symlink");
+        owned_dir(&dir).expect("a directory of the user's");
+        assert!(owned_dir(&file).is_err(), "a file");
+        assert!(owned_dir(&link).is_err(), "a link to a directory");
+        owned_node(&file).expect("a node of any kind");
+        assert!(owned_node(&link).is_err(), "a link");
+        assert_eq!(
+            existing(&[&dir, &link, &runtime.join("missing")], owned_dir).len(),
+            1,
+            "the link is left out and the missing one skipped"
+        );
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn a_link_put_at_a_granted_path_does_not_widen_the_grant() {
+        let runtime = runtime("link-grant");
+        let (granted, elsewhere, cache) = (
+            runtime.join("granted"),
+            runtime.join("elsewhere"),
+            runtime.join("cache"),
+        );
+        fs::create_dir(&granted).expect("granted");
+        fs::create_dir(&elsewhere).expect("elsewhere");
+        // Another process of the user puts a link at a path the program grants, before the grant.
+        std::os::unix::fs::symlink(&elsewhere, &cache).expect("symlink");
+        let thread_runtime = runtime.clone();
+        std::thread::spawn(move || {
+            let write = existing(&[&thread_runtime.join("granted"), &cache], owned_dir);
+            sandbox::restrict_writes(&write, &[] as &[OwnedFd]).expect("confined");
+            fs::write(thread_runtime.join("granted/file"), b"x").expect("the checked directory");
+            let error = fs::write(cache.join("file"), b"x").expect_err("the link");
+            assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        })
+        .join()
+        .expect("the confined thread");
+        assert!(!elsewhere.join("file").exists());
         fs::remove_dir_all(&runtime).expect("cleanup");
     }
 

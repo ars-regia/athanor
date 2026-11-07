@@ -8,8 +8,9 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
 landlock = { workspace = true }
-# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window; open(2)'s flags for private_dir.
-nix = { workspace = true, features = ["fs", "time"] }
+# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window; open(2)'s flags for the checked
+# directories of `dirs` and geteuid(2) for their owner.
+nix = { workspace = true, features = ["fs", "time", "user"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # The `bus_caller` module: who a D-Bus caller is, asked of the bus and systemd (doc_session_daemons.md SD5).
