@@ -9,7 +9,7 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [dependencies]
 # The one COSMIC store the daemon reads, the Power page's (SD3); without its gtk feature.
 athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
-athanor-unit = { path = "../athanor-unit" }
+athanor-unit = { path = "../athanor-unit", features = ["bus-caller"] }
 libc = { workspace = true }
 futures-util = { workspace = true }
 gio = { workspace = true }
