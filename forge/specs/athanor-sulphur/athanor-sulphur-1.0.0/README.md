@@ -219,11 +219,12 @@ not offer, a scale outside 1 to 4, a position more than 2^24 from the origin, ad
 a monitor without it, and on the nested
 output another transform, since its transform rights the backend's frame, another mode,
 adaptive sync or a disable. Every head is checked before anything is applied, by `test` as by
-`apply`, and a step the GPU refuses halfway undoes the steps taken.
+`apply`, against what the backend can tell in advance; a monitor can still refuse a step at
+`apply`, which then fails, and the steps taken are undone.
 A disabled output leaves the space
 and its `wl_output` global goes, and its lock surface is forgotten; a layer surface, a lock
-surface, a full screen or a power control asked for on a client's stale `wl_output` of it is
-refused. The global it gets when enabled again may take the name its old one had, since the
+surface or a power control asked for on a client's stale `wl_output` of it is refused, and a
+full screen asked for on one goes to the window's own output. The global it gets when enabled again may take the name its old one had, since the
 Wayland server hands out the lowest free name. Enabled again while locked,
 it shows the background until the locker gives it a new one; while it is disabled its head
 still follows the modes its monitor offers. An applied configuration is sent

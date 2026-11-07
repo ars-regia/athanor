@@ -71,14 +71,16 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
   past 2^24 pixels.
 - Give the keyboard to a lock surface still shown when the output whose lock surface had it
   is disabled.
-- Answer a tested output configuration as an applied one: adaptive sync on an output without
-  it, and any step on the nested output, fail both.
+- Check a tested output configuration as an applied one, as far as the backend can tell
+  before applying it: adaptive sync on an output without it, and any step on the nested
+  output, fail both; a step a monitor refuses at apply still fails and undoes the others.
 - Confirm the lock only once every step of an output configuration is taken, not while
   they are taken.
 - Keep an output the power client turned off off when a refused configuration drives it
   again.
-- Refuse a layer surface, a lock surface, a full screen and a power control asked for on a
-  stale wl_output of an output no longer shown.
+- Refuse a layer surface, a lock surface and a power control asked for on a stale wl_output
+  of an output no longer shown, and give a full screen asked for on one the window's own
+  output.
 - Withdraw the global an output still has before it is offered again, so that no client
   sees two globals for one output.
 * Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
