@@ -354,11 +354,11 @@ async fn daemon(
 ) -> Result<(), Box<dyn StdError>> {
     let session = zbus::connection::Builder::session()?.build().await?;
     let session_query = zbus::connection::Builder::session()?.build().await?;
-    let system_query = zbus::connection::Builder::system()?
+    let system_query = athanor_unit::bus_caller::system_bus()?
         .method_timeout(LOCK_TIMEOUT)
         .build()
         .await?;
-    let system_watch = zbus::connection::Builder::system()?.build().await?;
+    let system_watch = athanor_unit::bus_caller::system_bus()?.build().await?;
     let (mut hold, mut ended) = screensaver::serve(
         &session,
         &session_query,

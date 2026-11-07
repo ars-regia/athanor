@@ -4,10 +4,9 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 
-use athanor_shelld::sender::BarUnit;
 use athanor_shelld::server::{self, Config};
 use athanor_unit::{crash_loop, journal, notify, sandbox};
 
@@ -64,13 +63,9 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     // Before any thread exists: the runtime below starts none, but zbus and tokio must be
-    // confined from their first instruction. /proc for the callers' cgroups (BR1).
-    let confined = sandbox::ensure_single_threaded().and_then(|()| {
-        sandbox::restrict(
-            &[Path::new("/usr"), Path::new("/etc"), Path::new("/proc")],
-            &[std::fs::File::open(&state_dir)?],
-        )
-    });
+    // confined from their first instruction.
+    let confined =
+        sandbox::ensure_single_threaded().and_then(|()| athanor_shelld::confine(&state_dir));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the daemon with Landlock");
         return ExitCode::FAILURE;
@@ -108,7 +103,7 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
         query,
         Config {
             state_dir,
-            bar: BarUnit::from_proc(),
+            system_address: None,
         },
     )
     .await

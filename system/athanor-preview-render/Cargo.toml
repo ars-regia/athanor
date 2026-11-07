@@ -3,10 +3,14 @@ name = "athanor-preview-render"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "Decodes one untrusted image or PDF from standard input into a bitmap, inside a sandboxed unit"
+description = "Decodes one untrusted image or PDF into a bitmap inside a sandboxed unit: from standard input for the launcher, from a file descriptor scaled to each output for the wallpaper"
 
 [dependencies]
+athanor-unit = { path = "../athanor-unit" }
+athanor-wallpaper = { path = "../athanor-wallpaper", default-features = false }
 cairo-rs = { workspace = true }
 glib = { workspace = true }
 glycin = { workspace = true }
+# recvmsg with SCM_RIGHTS for the wallpaper's request.
+nix = { workspace = true, features = ["socket", "uio"] }
 poppler-rs = { workspace = true }

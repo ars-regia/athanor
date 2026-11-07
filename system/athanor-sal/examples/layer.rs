@@ -10,13 +10,22 @@
 //! turn its first frame is drawn, before the driver reports it, printing
 //! `closed athanor-sal-closed before its drawn`; a surface reported drawn once closed ends the
 //! client. Prints `closed <namespace>` for each surface closed without the application asking.
+//!
+//! With `--motion`, one surface on the first output instead, which moves on its frame callbacks
+//! (Sal's requirement S3, doc_osd.md OD10; `toolkit_motion_check.py`): once its first frame is
+//! drawn it enters, from transparent and 12 px down, in 200 ms; then leaves, back to transparent
+//! and 12 px down, in 133 ms; then enters again with reduced motion, a fade of 100 ms in place.
+//! Prints `entered in <ms>`, `left in <ms>` and `entered reduced in <ms>` as each motion
+//! settles, timed from when it was asked for. One binary with the layer check's, so that the
+//! rig's release build links no more examples at once than its memory holds.
 
 use athanor_sal::driver::{
     self, Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
     SurfaceId,
 };
-use athanor_sal::{Event, Kind, Rect, Theme, Ui};
+use athanor_sal::{Curve, Event, Kind, Motion, Pose, Rect, Theme, Ui};
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 /// The namespace of the bars.
 const BAR: &str = "athanor-sal-layer";
@@ -24,6 +33,8 @@ const BAR: &str = "athanor-sal-layer";
 const OVERLAY: &str = "athanor-sal-overlay";
 /// The namespace of the surface the application closes.
 const CLOSED: &str = "athanor-sal-closed";
+/// The namespace of the surface of `--motion`.
+const MOTION: &str = "athanor-sal-motion";
 /// A width no buffer holds: `wl_shm` sizes are 16-bit.
 const TOO_WIDE: f32 = 100_000.0;
 
@@ -136,13 +147,84 @@ impl Application for Bars {
     }
 }
 
+/// Hidden: where the surface enters from and leaves to.
+const HIDDEN: Pose = Pose {
+    opacity: 0.0,
+    offset: (0.0, 12.0),
+};
+
+/// The motions of the run, in order: what each prints, where it starts and ends, how long it
+/// lasts, and whether it runs with reduced motion.
+const STEPS: [(&str, Pose, Pose, u64, bool); 3] = [
+    ("entered", HIDDEN, Pose::REST, 200, false),
+    ("left", Pose::REST, HIDDEN, 133, false),
+    ("entered reduced", HIDDEN, Pose::REST, 200, true),
+];
+
+#[derive(Default)]
+struct Moves {
+    /// Whether the surface was asked for.
+    opened: bool,
+    /// The step under way, and when it was asked for.
+    step: Option<(usize, Instant)>,
+}
+
+impl Moves {
+    fn begin(&mut self, shell: &mut Shell, surface: SurfaceId, step: usize) {
+        let Some(&(_, from, to, millis, reduced)) = STEPS.get(step) else {
+            return;
+        };
+        shell.set_reduced_motion(reduced);
+        let motion = Motion {
+            from,
+            to,
+            duration: Duration::from_millis(millis),
+            curve: Curve([0.2, 0.0, 0.0, 1.0]),
+            reduced: Duration::from_millis(100),
+        };
+        self.step = Some((step, Instant::now()));
+        if let Err(error) = shell.animate(surface, motion) {
+            shell.fail(error);
+        }
+    }
+}
+
+impl Application for Moves {
+    fn output(&mut self, _: &OutputInfo) -> Option<(Ui, LayerOptions)> {
+        if std::mem::replace(&mut self.opened, true) {
+            return None;
+        }
+        Some((button(MOTION), options(Layer::Top, MOTION)))
+    }
+
+    fn event(&mut self, _: &mut Shell, _: SurfaceId, _: Event) {}
+
+    fn drawn(&mut self, shell: &mut Shell, surface: SurfaceId) {
+        if self.step.is_none() {
+            self.begin(shell, surface, 0);
+        }
+    }
+
+    fn settled(&mut self, shell: &mut Shell, surface: SurfaceId) {
+        let Some((step, asked)) = self.step else {
+            return;
+        };
+        if shell.pose(surface) != Some(STEPS[step].2) {
+            return shell.fail(format!("{} settled away from its end pose", STEPS[step].0).into());
+        }
+        println!("{} in {}", STEPS[step].0, asked.elapsed().as_millis());
+        self.begin(shell, surface, step + 1);
+    }
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     let extra = match (args.next().as_deref(), args.next(), args.next()) {
         (None, _, _) => None,
         (Some("--extra"), Some(output), None) => Some(output),
+        (Some("--motion"), None, _) => return exit(driver::run(Moves::default())),
         _ => {
-            eprintln!("usage: athanor-sal-layer [--extra <output>]");
+            eprintln!("usage: athanor-sal-layer [--extra <output> | --motion]");
             return ExitCode::from(2);
         }
     };
@@ -151,7 +233,11 @@ fn main() -> ExitCode {
         extras: Vec::new(),
         closed_drawn: false,
     };
-    match driver::run(bars) {
+    exit(driver::run(bars))
+}
+
+fn exit(run: Result<(), athanor_sal::Error>) -> ExitCode {
+    match run {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("athanor-sal-layer: {error}");

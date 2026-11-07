@@ -59,6 +59,8 @@ pub struct Theme {
     pub island_padding: f32,
     /// The smallest width and height of an icon button.
     pub button_min: f32,
+    /// The part of a level beyond its full mark: Calmo's `warn` token, light variant.
+    pub warning: Rgba,
 }
 
 impl Default for Theme {
@@ -84,6 +86,7 @@ impl Default for Theme {
             island_radius: 10.0,
             island_padding: 4.0,
             button_min: 32.0,
+            warning: Rgba::rgb(0xa3, 0x6a, 0x00),
         }
     }
 }

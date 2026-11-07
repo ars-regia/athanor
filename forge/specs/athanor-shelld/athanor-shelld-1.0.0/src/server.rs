@@ -25,7 +25,9 @@ pub const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 pub struct Config {
     /// `$XDG_STATE_HOME/athanor/shelld`: the do-not-disturb switch.
     pub state_dir: PathBuf,
-    pub bar: BarUnit,
+    /// The address of the system bus the bar's admission asks (BR1); `None` is the system's
+    /// own. Not reachable at start, the private interface refuses every caller until it is.
+    pub system_address: Option<String>,
 }
 
 /// `query` builds the second connection, the one the watcher asks the bus through (issue #1035).
@@ -39,6 +41,7 @@ pub async fn start(
     })?;
     let state = Arc::new(Mutex::new(State::new(Store::new(dnd), config.state_dir)));
     let query = query.build().await?;
+    let bar = BarUnit::new(&query, config.system_address).await?;
     let conn = builder
         .serve_at(
             NOTIFICATIONS_PATH,
@@ -50,8 +53,7 @@ pub async fn start(
             PRIVATE_PATH,
             Private {
                 state,
-                bar: config.bar,
-                query: query.clone(),
+                bar,
             },
         )?
         .serve_at(WATCHER_PATH, Watcher::new(query))?

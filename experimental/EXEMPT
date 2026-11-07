@@ -4,3 +4,6 @@
 # Crates outside [workspace.members] need no name here, because the "shipped" check reads
 # members only.
 athanor-sessiond
+
+# Packaged with its unit in row W4 of doc_session_daemons.md SD22; remove the name then.
+athanor-wallpaper

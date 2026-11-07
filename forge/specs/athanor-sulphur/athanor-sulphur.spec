@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        23%{?dist}
+Release:        24%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,10 +55,16 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
 - The allow-list grants /usr/bin/athanor-idle in athanor-idle.service the output power
   manager and the layer shell, in place of cosmic-idle in cosmic-idle.scope
   (doc_session_daemons.md, SD22 step 1).
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+- Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:
+  the global is disabled, which sends global_remove, and destroyed only after the grace, so a
+  client that bound the old name before it read the removal is not given another output or
+  another interface.
 
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
 - Apply modes, positions, enabling and disabling and adaptive sync through

@@ -148,6 +148,16 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             }
             node
         }
+        // GTK's LevelBar: a level bar to AT-SPI, with a value and no action.
+        Kind::Level(level) => {
+            let mut node = Node::new(Role::Meter);
+            node.set_label(level.name.as_str());
+            node.set_numeric_value(level.value);
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(level.max);
+            node.set_orientation(Orientation::Horizontal);
+            node
+        }
         // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines.
         Kind::Field(field) | Kind::TextArea(field) => {
             let mut node = Node::new(if matches!(widget.kind, Kind::TextArea(_)) {
@@ -790,6 +800,44 @@ mod tests {
         let text = request(Action::SetValue, Some(ActionData::Value("3".into())));
         assert_eq!(ui.do_action(&text), None);
         assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_level_reads_as_gtks_and_takes_no_action() {
+        let mut ui = Ui::new("Values", Theme::default(), false);
+        let id = ui
+            .level(Ui::ROOT, "Volume", 120.0, 100.0, 150.0)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        let update = tree_update(&ui, 1.0);
+        let n = &update.nodes[id.index()].1;
+        assert_eq!((n.role(), n.label()), (Role::Meter, Some("Volume")));
+        assert_eq!(
+            (
+                n.numeric_value(),
+                n.min_numeric_value(),
+                n.max_numeric_value()
+            ),
+            (Some(120.0), Some(0.0), Some(150.0))
+        );
+        for action in [
+            Action::Increment,
+            Action::Decrement,
+            Action::SetValue,
+            Action::Focus,
+            Action::Click,
+        ] {
+            assert!(!n.supports_action(action), "{action:?}");
+            let request = ActionRequest {
+                action,
+                target_tree: TreeId::ROOT,
+                target_node: node_id(id),
+                data: Some(ActionData::NumericValue(10.0)),
+            };
+            assert_eq!(ui.do_action(&request), None, "{action:?}");
+            assert_eq!(ui.value(id), Some(120.0), "{action:?}");
+        }
+        assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
     }
 
     #[test]
