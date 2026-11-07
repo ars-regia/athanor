@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        8%{?dist}
+Release:        7%{?dist}
 Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later
@@ -49,11 +49,6 @@ install -D -m 0644 %{crate_dir}/athanor-portals.conf %{buildroot}%{_datadir}/xdg
 %{_datadir}/xdg-desktop-portal/athanor-portals.conf
 
 %changelog
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
-- The unit declares $XDG_RUNTIME_DIR/dconf with mode 0700, as every other unit that declares
-  it: at its default 0755, the backend's start turned the shared directory 0755, and the
-  daemons that grant it only while it is private refused it.
-
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - The backend is rewritten to serve Settings (doc_portal.md, PT5): the appearance from the
   GNOME colour-scheme, accent-color and high-contrast keys, or the computed accent of the
