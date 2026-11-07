@@ -145,6 +145,53 @@ class ClassifyTest(unittest.TestCase):
         self.assertFalse(changes.classify([])["docs_only"])
 
 
+MANIFEST = '[workspace]\nresolver = "2"\nmembers = ["system/a"]\n'
+LOCK = (
+    "version = 4\n\n"
+    '[[package]]\nname = "a"\nversion = "0.1.0"\ndependencies = ["libc"]\n\n'
+    '[[package]]\nname = "libc"\nversion = "0.2.0"\n'
+    'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+)
+NEW_MEMBER = '\n[[package]]\nname = "b"\nversion = "0.1.0"\ndependencies = ["libc"]\n'
+
+
+class OnlyAddsMembersTest(unittest.TestCase):
+    def test_a_new_member_only(self):
+        added = MANIFEST.replace('["system/a"]', '["system/a", "system/b"]')
+        self.assertTrue(changes.only_adds_members("Cargo.toml", MANIFEST, added))
+        self.assertTrue(changes.only_adds_members("Cargo.lock", LOCK, LOCK + NEW_MEMBER))
+
+    def test_anything_else_in_the_manifest(self):
+        for new in (
+            MANIFEST.replace('["system/a"]', "[]"),
+            MANIFEST.replace('"2"', '"3"'),
+            MANIFEST + '[workspace.dependencies]\nlibc = "0.2"\n',
+            MANIFEST + "[profile.release]\nlto = true\n",
+            "not toml [",
+        ):
+            with self.subTest(new=new):
+                self.assertFalse(changes.only_adds_members("Cargo.toml", MANIFEST, new))
+
+    def test_anything_else_in_the_lock(self):
+        external = '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "git+https://x"\n'
+        for new in (
+            LOCK + external,
+            LOCK.replace('"0.2.0"', '"0.2.1"'),
+            LOCK.replace('dependencies = ["libc"]', "dependencies = []"),
+            LOCK.replace("version = 4", "version = 3"),
+            "",
+        ):
+            with self.subTest(new=new):
+                self.assertFalse(changes.only_adds_members("Cargo.lock", LOCK, new))
+
+    def test_a_members_only_file_selects_the_audit_but_not_the_shell(self):
+        self.assertEqual(
+            changes.classify(["Cargo.toml", "Cargo.lock"], ["Cargo.toml", "Cargo.lock"]),
+            {**NONE, "rust_audit": True},
+        )
+        self.assertTrue(changes.classify(["Cargo.toml", "Cargo.lock"], ["Cargo.toml"])["shell"])
+
+
 class MainTest(unittest.TestCase):
     """The command against a real repository: a rename counts on both sides."""
 
@@ -201,6 +248,39 @@ class MainTest(unittest.TestCase):
             self.assertFalse(written[area], area)
         self.assertTrue(written["rust_audit"])
         self.assertFalse(written["docs_only"])
+
+    def test_a_new_workspace_member_does_not_select_the_shell(self):
+        (self.root / "Cargo.toml").write_text(MANIFEST)
+        (self.root / "Cargo.lock").write_text(LOCK)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "workspace")
+        (self.root / "Cargo.toml").write_text(MANIFEST.replace('"]', '", "system/b"]'))
+        (self.root / "Cargo.lock").write_text(LOCK + NEW_MEMBER)
+        (self.root / "system/b/src").mkdir(parents=True)
+        (self.root / "system/b/src/lib.rs").write_text("\n")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "member")
+        out = self.root / "out" / "changes.json"
+        changes.main("HEAD^1", str(out), cwd=self.root)
+        written = json.loads(out.read_text())
+        self.assertFalse(written["shell"])
+        self.assertTrue(written["rust_audit"])
+        # The same member with a new external package selects the shell.
+        (self.root / "Cargo.lock").write_text(
+            LOCK + NEW_MEMBER + '\n[[package]]\nname = "x"\nversion = "1.0.0"\nsource = "registry+y"\n'
+        )
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "external")
+        changes.main("HEAD~2", str(out), cwd=self.root)
+        self.assertTrue(json.loads(out.read_text())["shell"])
+
+    def test_an_added_root_manifest_selects_the_shell(self):
+        (self.root / "Cargo.toml").write_text(MANIFEST)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "workspace")
+        out = self.root / "out" / "changes.json"
+        changes.main("HEAD^1", str(out), cwd=self.root)
+        self.assertTrue(json.loads(out.read_text())["shell"])
 
     def test_a_path_git_would_quote_still_selects_its_area(self):
         # Without -z, git prints such a path quoted and escaped ("forge/specs/azoth/p\303\240...").
