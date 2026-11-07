@@ -3,48 +3,20 @@
 
 use std::env;
 use std::error::Error;
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use athanor_i18n::Catalog;
-use athanor_sessiond::{appearance, bus};
-use athanor_unit::dirs::Dirs;
+use athanor_sessiond::{appearance, bus, confine};
 use athanor_unit::{journal, notify, sandbox};
 use zbus::Connection;
 
 const DOMAIN: &str = "athanor-sessiond";
 
-/// `$XDG_STATE_HOME/athanor/crash-reports`, the one directory the daemon may write (SD17,
-/// amended 2026-10-06, #156), created if missing.
-fn crash_reports() -> Result<PathBuf, Box<dyn Error>> {
-    let absolute = |name: &str| {
-        env::var_os(name)
-            .map(PathBuf::from)
-            .filter(|dir| dir.is_absolute())
-    };
-    let state = absolute("XDG_STATE_HOME")
-        .or_else(|| absolute("HOME").map(|home| home.join(".local/state")))
-        .ok_or("neither XDG_STATE_HOME nor HOME is an absolute path")?;
-    let dir = state.join("athanor/crash-reports");
-    std::fs::create_dir_all(&dir)?;
-    Ok(dir)
-}
-
-/// Landlock while the process has one thread (SD17): reads beneath `/usr`, `/etc` and
-/// dconf's databases and invalidation file, writes only its crash reports, and no TCP.
-fn confine() -> Result<(), Box<dyn Error>> {
-    let dirs = Dirs::from_vars(DOMAIN, |name| env::var_os(name))
-        .ok_or("XDG_RUNTIME_DIR, or both XDG_CONFIG_HOME and HOME, is not an absolute path")?;
-    let write = crash_reports()?;
-    let dconf = dirs.config.join("dconf");
-    let invalidation = dirs.runtime.join("dconf");
+/// Landlock while the process has one thread (SD17), with the grants of `confine`.
+fn confine_self() -> Result<(), Box<dyn Error>> {
+    let grants = confine::daemon(|name| env::var_os(name))?;
     sandbox::ensure_single_threaded()?;
-    sandbox::restrict(
-        &[Path::new("/usr"), Path::new("/etc"), &dconf, &invalidation],
-        &write,
-    )?;
-    sandbox::deny_tcp()?;
-    Ok(())
+    grants.apply()
 }
 
 async fn serve(catalog: &Catalog) -> Result<(), Box<dyn Error>> {
@@ -68,7 +40,7 @@ fn main() -> ExitCode {
         tracing::warn!(path = %path.display(), ?err, "the catalog cannot be read; the notices are in English");
         Catalog::empty()
     });
-    if let Err(err) = confine() {
+    if let Err(err) = confine_self() {
         tracing::error!(%err, "refusing to run unconfined");
         return ExitCode::FAILURE;
     }

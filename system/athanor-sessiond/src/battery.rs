@@ -210,24 +210,53 @@ mod tests {
         let mut notices = Notices::default();
         assert_eq!(notices.update(None), None);
         let step = notices.update(Some(Level::Low)).expect("entered low");
-        assert_eq!(step, Step { close: None, raise: Some(Level::Low) });
+        assert_eq!(
+            step,
+            Step {
+                close: None,
+                raise: Some(Level::Low)
+            }
+        );
         notices.raised(":1.5".into(), 7);
         assert_eq!(notices.update(Some(Level::Low)), None, "shown once");
         // The person dismisses it: it stays dismissed while the level holds.
         notices.closed(":1.5", 7);
         assert_eq!(notices.update(Some(Level::Low)), None);
-        let step = notices.update(Some(Level::Critical)).expect("entered critical");
-        assert_eq!(step, Step { close: None, raise: Some(Level::Critical) });
+        let step = notices
+            .update(Some(Level::Critical))
+            .expect("entered critical");
+        assert_eq!(
+            step,
+            Step {
+                close: None,
+                raise: Some(Level::Critical)
+            }
+        );
         notices.raised(":1.5".into(), 8);
         assert!(notices.is_shown(":1.5", 8) && !notices.is_shown(":1.5", 7));
         // Charging: the critical notice closes and nothing replaces it.
         let step = notices.update(None).expect("charging");
-        let shown = Shown { server: ":1.5".into(), id: 8 };
-        assert_eq!(step, Step { close: Some(shown), raise: None });
+        let shown = Shown {
+            server: ":1.5".into(),
+            id: 8,
+        };
+        assert_eq!(
+            step,
+            Step {
+                close: Some(shown),
+                raise: None
+            }
+        );
         assert!(!notices.is_shown(":1.5", 8));
         // Discharging again below the level raises it again.
         let step = notices.update(Some(Level::Low)).expect("low again");
-        assert_eq!(step, Step { close: None, raise: Some(Level::Low) });
+        assert_eq!(
+            step,
+            Step {
+                close: None,
+                raise: Some(Level::Low)
+            }
+        );
     }
 
     #[test]
@@ -247,7 +276,13 @@ mod tests {
         assert!(notices.update(Some(Level::Low)).is_some());
         notices.failed();
         let step = notices.update(Some(Level::Low)).expect("tried again");
-        assert_eq!(step, Step { close: None, raise: Some(Level::Low) });
+        assert_eq!(
+            step,
+            Step {
+                close: None,
+                raise: Some(Level::Low)
+            }
+        );
     }
 
     #[test]
