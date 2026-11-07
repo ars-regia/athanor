@@ -391,6 +391,10 @@ pub enum Event {
         /// The widget under the pointer at the release, if any.
         to: Option<WidgetId>,
     },
+    /// Escape reached the surface and no menu took it: the application may close the surface,
+    /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
+    /// closes at Escape, and the surface gets no such event.
+    Escape,
 }
 
 /// A pointer button, as the driver maps it from the evdev codes.
@@ -466,7 +470,8 @@ pub enum Key {
     PageUp,
     /// Page Down: ten steps fewer on a slider.
     PageDown,
-    /// Escape: closes the open popup, which the driver handles.
+    /// Escape: closes the open menu, which the driver handles; with none open, the surface
+    /// hands the application [`Event::Escape`].
     Escape,
     /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
     Menu,
@@ -2000,8 +2005,12 @@ impl Ui {
     /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
-    /// and never leave it, as GTK's `TextView`.
+    /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
+    /// [`Event::Escape`].
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        if key == Key::Escape {
+            return Some(Event::Escape);
+        }
         let focused = self.focus;
         if let Some(id) = focused {
             let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
@@ -2731,6 +2740,22 @@ mod tests {
         assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(other)));
         ui.set_focus(None);
         assert_eq!(ui.key(Key::Menu), None);
+    }
+
+    /// Escape hands the application the surface's escape, whatever has the focus, a field
+    /// included, which keeps its text and its focus (requirement S5).
+    #[test]
+    fn escape_is_the_surfaces_whatever_has_the_focus() {
+        let (mut ui, app, _) = with_popup();
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        ui.set_focus(Some(app));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        assert_eq!(ui.field_text(field).as_deref(), Some("a"));
+        assert_eq!(ui.focus(), Some(field));
     }
 
     #[test]
