@@ -707,6 +707,7 @@ dependencies = [
 name = "athanor-sulphur"
 version = "1.0.0"
 dependencies = [
+ "athanor-edid",
  "athanor-unit",
  "bitflags 2.13.1",
  "calloop",
