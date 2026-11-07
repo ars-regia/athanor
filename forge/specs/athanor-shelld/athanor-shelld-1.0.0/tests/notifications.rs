@@ -6,7 +6,7 @@ use std::time::Duration;
 use athanor_shelld::server::{NOTIFICATIONS_NAME, NOTIFICATIONS_PATH, PRIVATE_PATH};
 use athanor_shelld::store::CAPACITY;
 use athanor_shelld::wire::WireNotification;
-use common::{Bus, APP_CGROUP, BAR_CGROUP};
+use common::{Bus, APP, BAR};
 use futures_util::StreamExt;
 use zbus::{Connection, Proxy};
 use zbus::zvariant::Value;
@@ -53,7 +53,7 @@ async fn notify(
 #[tokio::test]
 async fn capabilities_and_server_information_are_the_specifications() {
     let bus = Bus::start("caps");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let proxy = public(&bus.client().await).await;
     let caps: Vec<String> = proxy.call("GetCapabilities", &()).await.expect("caps");
     assert_eq!(caps, ["actions", "body", "icon-static", "persistence"]);
@@ -68,7 +68,7 @@ async fn capabilities_and_server_information_are_the_specifications() {
 #[tokio::test]
 async fn a_replace_keeps_the_id_and_an_unknown_one_gets_a_new_id() {
     let bus = Bus::start("ids");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let proxy = public(&bus.client().await).await;
     let first = notify(&proxy, 0, "a", "", &[], HashMap::new()).await;
     assert_eq!(
@@ -82,7 +82,7 @@ async fn a_replace_keeps_the_id_and_an_unknown_one_gets_a_new_id() {
 #[tokio::test]
 async fn close_notification_announces_reason_3_and_a_second_close_fails() {
     let bus = Bus::start("close");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let client = bus.client().await;
     let proxy = public(&client).await;
     let mut closed = proxy
@@ -111,7 +111,7 @@ async fn close_notification_announces_reason_3_and_a_second_close_fails() {
 #[tokio::test]
 async fn the_private_interface_refuses_a_process_outside_the_bar() {
     let bus = Bus::start("refuse");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let proxy = private(&bus.client().await).await;
     let err = proxy
         .call::<_, _, (bool, Vec<WireNotification>)>("List", &())
@@ -147,7 +147,7 @@ async fn the_private_interface_refuses_a_process_outside_the_bar() {
 #[tokio::test]
 async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
     let bus = Bus::start("bar");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     // The bar lists on start (BR1): only after that is its unique name the private signals'
@@ -216,7 +216,7 @@ async fn the_bar_lists_clean_text_and_hears_added_replaced_closed() {
 #[tokio::test]
 async fn private_signals_reach_only_the_bar_that_listed() {
     let bus = Bus::start("unicast");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     private
@@ -258,7 +258,7 @@ async fn private_signals_reach_only_the_bar_that_listed() {
 #[tokio::test]
 async fn no_private_signal_is_sent_before_any_bar_has_listed() {
     let bus = Bus::start("unlisted");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     // No List call yet: the daemon has no destination for the private interface's signals,
@@ -289,7 +289,7 @@ async fn no_private_signal_is_sent_before_any_bar_has_listed() {
 #[tokio::test]
 async fn an_action_sends_the_token_first_then_closes_unless_resident() {
     let bus = Bus::start("action");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     // A broadcast signal reaches only a connection with a match rule for it.
@@ -353,7 +353,7 @@ async fn an_action_sends_the_token_first_then_closes_unless_resident() {
 async fn do_not_disturb_persists_and_ends_popups_but_critical() {
     let bus = Bus::start("dnd");
     {
-        let _daemon = bus.daemon(BAR_CGROUP).await;
+        let _daemon = bus.daemon(BAR).await;
         let private = private(&bus.client().await).await;
         private
             .call::<_, _, ()>("SetDoNotDisturb", &(true,))
@@ -368,7 +368,7 @@ async fn do_not_disturb_persists_and_ends_popups_but_critical() {
         again.dir.join("state/do-not-disturb"),
     )
     .expect("copy");
-    let _daemon = again.daemon(BAR_CGROUP).await;
+    let _daemon = again.daemon(BAR).await;
     let client = again.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     let normal = notify(&public, 0, "n", "", &[], HashMap::new()).await;
@@ -397,7 +397,7 @@ async fn do_not_disturb_persists_and_ends_popups_but_critical() {
 #[tokio::test]
 async fn the_list_keeps_the_newest_hundred_and_says_so() {
     let bus = Bus::start("capacity");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     let mut closed = public
@@ -423,7 +423,7 @@ async fn the_list_keeps_the_newest_hundred_and_says_so() {
 #[tokio::test]
 async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
     let bus = Bus::start("images");
-    let _daemon = bus.daemon(BAR_CGROUP).await;
+    let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
     let good = Value::new((
@@ -491,13 +491,13 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
 #[tokio::test]
 async fn a_second_daemon_on_the_same_bus_fails_to_start() {
     let bus = Bus::start("taken");
-    let _daemon = bus.daemon(APP_CGROUP).await;
+    let _daemon = bus.daemon(APP).await;
     let second = athanor_shelld::server::start(
         bus.builder(),
         bus.builder(),
         athanor_shelld::server::Config {
             state_dir: bus.dir.join("state"),
-            bar: athanor_shelld::sender::BarUnit::from_proc(),
+            system: None,
         },
     )
     .await;
@@ -511,7 +511,7 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
 async fn a_query_the_bus_never_answers_refuses_the_call_instead_of_hanging() {
     let bus = Bus::start("silent-serving");
     let query_bus = Bus::start("silent-query");
-    let _daemon = bus.daemon_asking(BAR_CGROUP, &query_bus).await;
+    let _daemon = bus.daemon_asking(BAR, &query_bus).await;
     let proxy = private(&bus.client().await).await;
     query_bus.freeze();
     let err = tokio::time::timeout(

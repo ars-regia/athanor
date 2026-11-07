@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-shelld
 Version:        1.0.0
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
 License:        GPL-3.0-or-later
 
@@ -39,6 +39,11 @@ done
 /usr/share/dbus-1/services/org.kde.StatusNotifierWatcher.service
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-3
+- The bar's private interface admits the main process of athanor-bar.service as the user's
+  systemd, verified by the system's, tells it (issue #1047), no longer the caller's cgroup
+  read from /proc.
+
 * Wed Sep 30 2026 Athanor Forge <forge@athanor.os> - 1.0.0-2
 - Stage 2 switch (doc_bar.md, BR8): enabled for every user by
   /usr/lib/systemd/user-preset/80-athanor-shelld.preset under athanor-session.target, and

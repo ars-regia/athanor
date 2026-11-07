@@ -7,7 +7,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use athanor_shelld::sender::BarUnit;
 use athanor_shelld::server::{self, Config};
 use athanor_unit::{crash_loop, journal, notify, sandbox};
 
@@ -103,16 +102,21 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let _connection = match server::start(
-        builder,
-        query,
-        Config {
-            state_dir,
-            bar: BarUnit::from_proc(),
-        },
-    )
-    .await
-    {
+    // The bar's admission asks the system's systemd about the user's (BR1). Without the system
+    // bus the private interface refuses every caller; notifications and the tray still work.
+    let system: zbus::Result<_> =
+        async { zbus::connection::Builder::system()?.build().await }.await;
+    let system = match system {
+        Ok(system) => Some(system),
+        Err(err) => {
+            tracing::error!(
+                error = %err,
+                "no system bus: the private interface refuses every caller"
+            );
+            None
+        }
+    };
+    let _connection = match server::start(builder, query, Config { state_dir, system }).await {
         Ok(connection) => connection,
         Err(err) => {
             tracing::error!(error = %err, "cannot serve the notifications and the tray watcher");
