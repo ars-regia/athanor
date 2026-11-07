@@ -145,17 +145,37 @@ enum Last {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Follow {
     last: [Last; 3],
+    /// What the last read found for a key it skipped, `None` after a valid read: a key skipped
+    /// for the same reason at every event of the directory is one journal line, not one each.
+    skipping: [Option<Found>; 3],
 }
 
 impl Follow {
     /// From the read made at start, which only learns the last valid value of each key.
     pub fn start(store: &Store) -> Self {
-        let last = Field::ALL.map(|field| match found(field.read(store)) {
-            Found::Valid(value) => Last::Valid(value),
-            Found::Absent => Last::AbsentAtStart,
-            Found::Invalid => Last::InvalidAtStart,
-        });
-        Follow { last }
+        let start = Field::ALL.map(|field| found(field.read(store)));
+        Follow {
+            last: start.map(|what| match what {
+                Found::Valid(value) => Last::Valid(value),
+                Found::Absent => Last::AbsentAtStart,
+                Found::Invalid => Last::InvalidAtStart,
+            }),
+            skipping: start.map(|what| match what {
+                Found::Valid(_) => None,
+                skipped => Some(skipped),
+            }),
+        }
+    }
+
+    /// Records what a read found for `field`; true when it is a skip the journal has not been
+    /// told of since the key's last change of state.
+    fn note(&mut self, field: Field, what: Found) -> bool {
+        let now = match what {
+            Found::Valid(_) => None,
+            skipped => Some(skipped),
+        };
+        let before = std::mem::replace(&mut self.skipping[field.index()], now);
+        now.is_some() && now != before
     }
 
     /// After a change of the store: the value to write for each key that changed. An absent
@@ -163,8 +183,10 @@ impl Follow {
     pub fn changed(&mut self, store: &Store) -> Vec<(Field, u32)> {
         let mut out = Vec::new();
         for field in Field::ALL {
+            let what = found(field.read(store));
+            let tell = self.note(field, what);
             let last = &mut self.last[field.index()];
-            match found(field.read(store)) {
+            match what {
                 Found::Valid(value) => {
                     let copy = match *last {
                         Last::Valid(old) => old != value,
@@ -176,7 +198,8 @@ impl Follow {
                         out.push((field, seconds(field, value)));
                     }
                 }
-                other => skipped(field, other),
+                other if tell => skipped(field, other),
+                _ => {}
             }
         }
         out
@@ -325,6 +348,24 @@ mod tests {
             .expect("migrated");
         assert!(migrated.contains("<default>false</default>"));
         assert_eq!(SCHEMA.matches("<key ").count(), 4);
+    }
+
+    #[test]
+    fn a_skip_is_told_once_per_change_of_the_key_state() {
+        let mut follow = Follow::start(&blank(Key::Never));
+        let told = |follow: &mut Follow, key| {
+            let what = found(key);
+            follow.note(Field::BlankAfter, what)
+        };
+        assert!(told(&mut follow, Key::Unreadable));
+        assert!(!told(&mut follow, Key::Unparsable), "still invalid");
+        assert!(told(&mut follow, Key::Absent), "absent is another state");
+        assert!(!told(&mut follow, Key::Absent));
+        assert!(!told(&mut follow, Key::Never), "a valid read is no skip");
+        assert!(told(&mut follow, Key::Absent), "skipped again after a valid read");
+        // A key skipped at start is not told again while it stays so.
+        let mut follow = Follow::start(&blank(Key::Absent));
+        assert!(!told(&mut follow, Key::Absent));
     }
 
     #[test]
