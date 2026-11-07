@@ -7374,6 +7374,74 @@ fn sd23_a_configuration_disables_and_enables_an_output() {
     run.stop();
 }
 
+/// An output disabled and enabled again keeps its old global's name out of reuse for a while:
+/// a client that sent `bind` for the old name before it read `global_remove` is not answered
+/// with the new global, which may be another output, or another interface.
+#[test]
+fn sd23_a_withdrawn_output_name_is_not_reused_at_once() {
+    let mut run = Running::start(None);
+    let mut control_center = Local::control_center(&mut run);
+    let (manager, serial) = control_center.output_manager(&mut run);
+    let old = control_center.outputs_offered(&mut run)[1];
+
+    let disabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        if seen.name == "headless-1" {
+            config.disable_head(&seen.head);
+        } else {
+            config.enable_head(&seen.head, qh, ());
+        }
+    });
+    assert_eq!(disabled, "succeeded");
+    control_center.pump(&mut run, "the head is reported disabled", |client, _| {
+        client.output_serial != Some(serial) && client.heads.iter().any(|h| !h.enabled)
+    });
+    let serial = control_center.client.output_serial.expect("a serial");
+    let enabled = control_center.configure_each(&mut run, &manager, serial, |config, seen, qh| {
+        config.enable_head(&seen.head, qh, ());
+    });
+    assert_eq!(enabled, "succeeded");
+
+    let offered = control_center.outputs_offered(&mut run);
+    assert_eq!(offered.len(), 2, "a global again");
+    assert!(!offered.contains(&old), "the new global took the old name");
+
+    // The late bind is answered by the global it meant, and ends no client.
+    let qh = control_center.queue.handle();
+    let _late: wl_output::WlOutput = control_center.registry.bind(old, 4, &qh, ());
+    control_center.roundtrip(&mut run);
+    run.stop();
+}
+
+/// After the grace the withdrawn global is destroyed and its name is free again: the next
+/// global takes it (`wayland-backend` hands out the lowest free one).
+#[test]
+fn sd23_a_withdrawn_output_name_is_freed_after_the_grace() {
+    let mut run = Running::start(None);
+    run.state.output_grace = Duration::from_millis(50);
+    let mut client = Local::connect(&mut run, None);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("the second output");
+    let old = client.outputs_offered(&mut run)[1];
+    crate::state::withdraw_output(&run.state, &second);
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(200) {
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    }
+    crate::state::publish_output(&run.state.display_handle, &second);
+    assert!(
+        client.outputs_offered(&mut run).contains(&old),
+        "the name is free again"
+    );
+    run.stop();
+}
+
 /// A configuration that leaves no output enabled fails and changes nothing (SD23).
 #[test]
 fn sd23_a_configuration_with_no_output_enabled_fails() {

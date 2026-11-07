@@ -5,11 +5,11 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use zbus::fdo::{self, DBusProxy};
+use zbus::fdo;
 use zbus::message::Header;
 use zbus::names::OwnedUniqueName;
 use zbus::object_server::SignalEmitter;
@@ -19,7 +19,7 @@ use zbus::zvariant::{Signature, Type};
 use crate::dnd;
 use crate::hints::Hints;
 use crate::icon;
-use crate::sender::BarUnit;
+use crate::sender::{BarUnit, BAR};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
 use crate::store::{self, Content, Reason, Store, Urgency, Visual};
 use crate::wire::WireNotification;
@@ -295,16 +295,10 @@ impl Notifications {
     ) -> zbus::Result<()>;
 }
 
-/// Bound on the one question to the bus daemon that admits a caller.
-const ASK: Duration = Duration::from_secs(2);
-
 pub struct Private {
     pub state: Shared,
+    /// Asks on the query connections, never on the one this object is served on (issue #1035).
     pub bar: BarUnit,
-    /// The query connection: it serves nothing, subscribes to no signal and owns no name, so
-    /// the reply to the credentials call is never queued behind the calls this object is
-    /// answering (issue #1035).
-    pub query: Connection,
 }
 
 impl Private {
@@ -314,32 +308,15 @@ impl Private {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
-        let credentials = match tokio::time::timeout(ASK, async {
-            DBusProxy::new(&self.query)
-                .await?
-                .get_connection_credentials(sender.clone().into())
-                .await
-        })
-        .await
-        {
-            Ok(credentials) => credentials?,
-            Err(_) => {
-                tracing::warn!(%sender, "the bus did not give the caller's credentials in time: refused");
-                return Err(fdo::Error::AccessDenied(
-                    "the bus did not give the caller's credentials in time".into(),
-                ));
+        match self.bar.admit(sender.as_str()).await {
+            Ok(()) => Ok(sender.to_owned().into()),
+            Err(why) => {
+                tracing::warn!(%sender, "refused on the private interface: {why}");
+                Err(fdo::Error::AccessDenied(format!(
+                    "only {} may call this interface",
+                    BAR.unit
+                )))
             }
-        };
-        let pid = credentials.process_id().ok_or_else(|| {
-            fdo::Error::AccessDenied("the bus gave no process id for the caller".into())
-        })?;
-        if self.bar.admits(pid) {
-            Ok(sender.to_owned().into())
-        } else {
-            Err(fdo::Error::AccessDenied(format!(
-                "only {} may call this interface",
-                self.bar.unit()
-            )))
         }
     }
 }

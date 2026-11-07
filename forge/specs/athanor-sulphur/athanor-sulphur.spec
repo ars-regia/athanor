@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        24%{?dist}
+Release:        25%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,13 +55,19 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-25
 - Withdraw athanor_keyboard_group_manager_v1 from athanor-osd: step 1 of doc_osd.md OD17
   shows the volume and the microphone alone, and step 3 grants it with the layout's display
 
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
 - Grant athanor-osd the top and overlay layers of zwlr_layer_shell_v1,
   athanor_keyboard_group_manager_v1 and ext_workspace_manager_v1 (doc_osd.md OD12, K1)
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+- Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:
+  the global is disabled, which sends global_remove, and destroyed only after the grace, so a
+  client that bound the old name before it read the removal is not given another output or
+  another interface.
 
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
 - Apply modes, positions, enabling and disabling and adaptive sync through

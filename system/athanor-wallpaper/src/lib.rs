@@ -1,14 +1,23 @@
-//! The logic of `athanor-wallpaper` (doc_session_daemons.md, SD3, SD6, SD16): which image
-//! each output shows, the zoom geometry, the regular-file check and the one-time migration
-//! from cosmic-bg. It knows no display, no toolkit and no GSettings: the daemon reads the
-//! keys into a [`Settings`] and draws what this crate resolves.
+//! The logic of `athanor-wallpaper` (doc_session_daemons.md, SD3, SD6, SD16, SD17): which
+//! image each output shows, the zoom geometry and the scaling it draws, the regular-file
+//! check, the one-time migration from cosmic-bg, and what the daemon and its decoder say to
+//! each other. It knows no display, no toolkit and no GSettings: the daemon reads the keys
+//! into a [`Settings`] and draws what this crate resolves, and the decoder scales with it.
 
 mod file;
+// The migration reads cosmic-bg's store through the compositor client, which the decoder must
+// not link.
+#[cfg(feature = "daemon")]
 mod migrate;
+pub mod plan;
+pub mod protocol;
+mod scale;
 mod zoom;
 
 pub use file::{open, open_regular};
+#[cfg(feature = "daemon")]
 pub use migrate::migrate;
+pub use scale::write_zoomed;
 pub use zoom::{zoom, Crop};
 
 use std::collections::BTreeMap;

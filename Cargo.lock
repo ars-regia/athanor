@@ -645,9 +645,12 @@ dependencies = [
 name = "athanor-preview-render"
 version = "1.0.0"
 dependencies = [
+ "athanor-unit",
+ "athanor-wallpaper",
  "cairo-rs",
  "glib",
  "glycin",
+ "nix 0.29.0",
  "poppler-rs",
 ]
 
@@ -860,8 +863,13 @@ dependencies = [
 name = "athanor-wallpaper"
 version = "1.0.0"
 dependencies = [
+ "athanor-sal",
  "athanor-sulphur-client",
+ "athanor-unit",
+ "gio",
+ "glib",
  "libc",
+ "nix 0.29.0",
  "tracing",
 ]
 

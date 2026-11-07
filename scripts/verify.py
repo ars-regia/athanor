@@ -5118,6 +5118,71 @@ def check_zbus_replies():
 
 
 # --------------------------------------------------------------------------- #
+# landlock-proc: no Landlock read grant names /proc
+# --------------------------------------------------------------------------- #
+
+# A Landlock grant in Rust source: `athanor_unit::sandbox::restrict`, a crate's own copy, or a
+# rule built directly.
+LANDLOCK_GRANT = re.compile(r"\brestrict\s*\(|\bPathBeneath::new\b")
+# /proc itself, or the directory of this process or thread: a literal a grant can name.
+PROC_LITERAL = re.compile(r'"/proc(?:/(?:self|thread-self))?/?"')
+
+
+def crate_of(path, root):
+    """The directory of the nearest Cargo.toml above `path`, up to `root`, or None."""
+    for parent in Path(path).parents:
+        if (parent / "Cargo.toml").is_file():
+            return parent
+        if parent == root:
+            return None
+    return None
+
+
+def landlock_proc_problems(root):
+    """A crate that confines itself with Landlock names no /proc in its non-test sources. Landlock
+    grants a whole tree and cannot narrow /proc to one file of one process, so a read grant of
+    /proc reads the environ, cmdline and maps of every process of the user, where tokens live
+    (issue #1047). A caller's unit comes from the bus and systemd (athanor_unit::bus_caller);
+    a read of /proc before the ruleset, such as the thread count, names a deeper path and passes.
+
+    A source scan, not a type check: a crate with a grant call anywhere is scanned whole, since
+    its grants may be listed in one file and applied in another. Comments, code under
+    `#[cfg(test)]`, tests, benches and examples are skipped."""
+    root = Path(root)
+    problems = []
+    for base in RS_DIRS:
+        files = list(walk(root / base, ".rs"))
+        skip = test_module_files(files)
+        crates = {}
+        for path in sorted(files):
+            relative = path.relative_to(root).as_posix()
+            if is_test_file(path) or path in skip or vendored(relative):
+                continue
+            # Comment lines blanked, not dropped, so that line numbers hold.
+            code = "\n".join("" if line.lstrip().startswith("//") else line
+                             for line in without_test_items(read(path)).split("\n"))
+            crates.setdefault(crate_of(path, root), []).append((relative, code))
+        for sources in crates.values():
+            if not any(LANDLOCK_GRANT.search(code) for _, code in sources):
+                continue
+            for relative, code in sources:
+                for i, line in enumerate(code.split("\n"), 1):
+                    if PROC_LITERAL.search(line):
+                        problems.append(f"{relative}:{i}: a Landlock-confined crate names /proc; "
+                                        f"ask the bus and systemd for a caller's unit "
+                                        f"(athanor_unit::bus_caller), never grant /proc")
+    return problems
+
+
+@check("landlock-proc", "No Landlock read grant of a daemon names /proc (issue #1047)")
+def check_landlock_proc():
+    r = Result()
+    for problem in landlock_proc_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # agent-docs: the instructions agents read name things that exist
 # --------------------------------------------------------------------------- #
 

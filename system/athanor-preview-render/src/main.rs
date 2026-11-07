@@ -2,10 +2,24 @@
 //! ATPV1 format on standard output (doc_launcher.md, LA6, LA9). The launcher starts it in a
 //! transient unit with no network, no home, no runtime directory and no bus; inside it,
 //! glycin runs its loaders in bubblewrap. Usage: `athanor-preview-render image|pdf <side>`.
+//!
+//! `athanor-preview-render wallpaper` is the decoder of `athanor-wallpaper`
+//! (doc_session_daemons.md SD17, maintainer decision, 2026-11-07), started by its socket unit
+//! for each connection, the connection on standard input and output. It admits only the
+//! wallpaper daemon as its peer, receives the image file as a descriptor with the sizes of a
+//! request (`athanor_wallpaper::protocol`), and answers one frame of straight RGBA per size,
+//! scaled with zoom.
 
-use std::io::{self, Read, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Read, Write};
+use std::os::fd::{AsFd, OwnedFd};
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
+
+use athanor_wallpaper::protocol::{self, REQUEST_LEN};
+
+mod scm;
 
 const MAGIC: &[u8; 5] = b"ATPV1";
 /// Larger files are not previewed.
@@ -28,9 +42,18 @@ struct Picture {
 }
 
 fn main() -> ExitCode {
+    if std::env::args().skip(1).eq(["wallpaper"]) {
+        return match wallpaper() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("{err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let mut args = std::env::args().skip(1);
     let (Some(kind), Some(side)) = (args.next(), args.next().and_then(|side| side.parse::<u32>().ok())) else {
-        eprintln!("usage: athanor-preview-render image|pdf <side>");
+        eprintln!("usage: athanor-preview-render image|pdf <side> | wallpaper");
         return ExitCode::from(2);
     };
     let side = side.clamp(1, MAX_SIDE);
@@ -61,19 +84,126 @@ fn main() -> ExitCode {
 }
 
 fn image(input: Vec<u8>, side: u32) -> Result<Picture, String> {
+    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8Premultiplied).map_err(|err| err.to_string())?;
+    packed(frame.width(), frame.height(), frame.stride() as usize, frame.buf_slice(), side, |px| px)
+}
+
+/// Why a picture has no frame.
+#[derive(Debug)]
+enum Undecoded {
+    /// The picture's own: it is not a regular file, is too large, or is in a format no loader
+    /// reads. Asking again gives the same.
+    Picture(String),
+    /// Anything else: a loader that did not start, was killed or ran past its time. Asking
+    /// again may succeed. glycin 4 names no other kind of error to the caller, so a picture
+    /// a loader finds corrupt is here too, and is asked for again.
+    Fault(String),
+}
+
+impl std::fmt::Display for Undecoded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Picture(why) | Self::Fault(why) => f.write_str(why),
+        }
+    }
+}
+
+impl From<glycin::Error> for Undecoded {
+    fn from(err: glycin::Error) -> Self {
+        if err.unsupported_format().is_some() {
+            Self::Picture(err.to_string())
+        } else {
+            Self::Fault(err.to_string())
+        }
+    }
+}
+
+/// The first frame of an image, decoded by glycin's loaders in bubblewrap, in `format`.
+fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame, Undecoded> {
+    let selection = match format {
+        glycin::MemoryFormat::R8g8b8a8 => glycin::MemoryFormatSelection::R8g8b8a8,
+        _ => glycin::MemoryFormatSelection::R8g8b8a8Premultiplied,
+    };
     glib::MainContext::new().block_on(async move {
         let mut loader = glycin::Loader::new_vec(input);
         loader
             .sandbox_selector(glycin::SandboxSelector::Bwrap)
-            .accepted_memory_formats(glycin::MemoryFormatSelection::R8g8b8a8Premultiplied)
+            .accepted_memory_formats(selection)
             .limits(glycin::Limits::default().timeout(Duration::from_secs(3)).max_dimensions((MAX_DECODE, MAX_DECODE)));
-        let mut image = loader.load().await.map_err(|err| err.to_string())?;
-        let frame = image.next_frame().await.map_err(|err| err.to_string())?;
-        if frame.memory_format() != glycin::MemoryFormat::R8g8b8a8Premultiplied {
-            return Err("the loader returned another memory format".to_owned());
+        let mut image = loader.load().await?;
+        // glycin's own check of the limit tells it from no other error: this one does.
+        let details = image.details();
+        if details.width() > MAX_DECODE || details.height() > MAX_DECODE {
+            return Err(Undecoded::Picture(format!("a side is over {MAX_DECODE} pixels")));
         }
-        packed(frame.width(), frame.height(), frame.stride() as usize, frame.buf_slice(), side, |px| px)
+        let frame = image.next_frame().await?;
+        if frame.memory_format() != format {
+            return Err(Undecoded::Fault("the loader returned another memory format".to_owned()));
+        }
+        Ok(frame)
     })
+}
+
+/// One connection of the wallpaper's decoder: the peer admitted, the request and its file
+/// received, one frame written per size. Any failure ends the connection with no frame or
+/// with fewer frames than asked, which the daemon reads as a failed decode.
+fn wallpaper() -> Result<(), String> {
+    let connection = io::stdin().as_fd().try_clone_to_owned().map_err(|err| format!("the connection cannot be duplicated: {err}"))?;
+    athanor_unit::peer::admit_user_unit(connection.as_fd(), protocol::DAEMON_SLICE, protocol::DAEMON_UNIT, Path::new(protocol::DAEMON_EXE))
+        .map_err(|refused| format!("peer refused: {refused}"))?;
+    let (sizes, file) = request(connection)?;
+    let mut out = BufWriter::with_capacity(1 << 20, io::stdout().lock());
+    let frame = match picture(File::from(file)) {
+        Ok(frame) => frame,
+        Err(Undecoded::Picture(err)) => {
+            // The picture's fault, not the decoder's: told so, the daemon does not ask again.
+            out.write_all(&protocol::refusal()).and_then(|()| out.flush()).map_err(|err| err.to_string())?;
+            return Err(err);
+        }
+        // No frame: the daemon sees a fault and asks again.
+        Err(Undecoded::Fault(err)) => return Err(err),
+    };
+    let image = (frame.width(), frame.height());
+    for size in sizes {
+        out.write_all(&protocol::frame_header(size)).map_err(|err| err.to_string())?;
+        athanor_wallpaper::write_zoomed(frame.buf_slice(), frame.stride() as usize, image, size, &mut out).map_err(|err| err.to_string())?;
+    }
+    out.flush().map_err(|err| err.to_string())
+}
+
+/// The picture in `file`, which must be a regular file, decoded.
+fn picture(file: File) -> Result<glycin::Frame, Undecoded> {
+    let unread = |err| Undecoded::Fault(format!("the file cannot be read: {err}"));
+    let metadata = file.metadata().map_err(unread)?;
+    if !metadata.file_type().is_file() {
+        return Err(Undecoded::Picture("the descriptor is not a regular file".to_owned()));
+    }
+    let mut input = Vec::new();
+    file.take(MAX_INPUT + 1).read_to_end(&mut input).map_err(unread)?;
+    if input.len() as u64 > MAX_INPUT {
+        return Err(Undecoded::Picture(format!("the file is larger than {MAX_INPUT} bytes")));
+    }
+    decode(input, glycin::MemoryFormat::R8g8b8a8)
+}
+
+/// The request on `connection` and the one file descriptor that came with it.
+fn request(connection: OwnedFd) -> Result<(Vec<(u32, u32)>, OwnedFd), String> {
+    let mut bytes = [0u8; REQUEST_LEN];
+    let (mut read, mut files) = scm::receive(connection.as_fd(), &mut bytes).map_err(|err| format!("the request cannot be read: {err}"))?;
+    // The descriptor rides on the first byte; a stream may split the rest of the request.
+    let mut rest = File::from(connection);
+    while read > 0 && read < REQUEST_LEN {
+        match rest.read(&mut bytes[read..]) {
+            Ok(0) => break,
+            Ok(n) => read += n,
+            Err(err) => return Err(format!("the request cannot be read: {err}")),
+        }
+    }
+    let sizes = (read == REQUEST_LEN).then(|| protocol::parse_request(&bytes)).flatten().ok_or("the request is malformed")?;
+    match (files.pop(), files.is_empty()) {
+        (Some(file), true) => Ok((sizes, file)),
+        _ => Err("the request carries no file, or more than one".to_owned()),
+    }
 }
 
 fn pdf(input: Vec<u8>, side: u32) -> Result<Picture, String> {
@@ -195,6 +325,43 @@ mod tests {
         assert_eq!(fit(tiny, 1024).rgba, vec![9; 12], "a small picture is left alone");
     }
 
+    /// Sends `bytes` with `files` attached on one end of a pair and reads the request on the
+    /// other, as the decoder does.
+    fn sent(bytes: &[u8], files: &[&File]) -> Result<(Vec<(u32, u32)>, OwnedFd), String> {
+        use nix::sys::socket::{sendmsg, ControlMessage, MsgFlags};
+        use std::os::fd::AsRawFd;
+        let (ours, theirs) = std::os::unix::net::UnixStream::pair().expect("socket pair");
+        let raw: Vec<_> = files.iter().map(|file| file.as_raw_fd()).collect();
+        let rights = [ControlMessage::ScmRights(&raw)];
+        let control = if raw.is_empty() { &[][..] } else { &rights[..] };
+        sendmsg::<()>(ours.as_raw_fd(), &[io::IoSlice::new(bytes)], control, MsgFlags::empty(), None).expect("send");
+        drop(ours);
+        request(OwnedFd::from(theirs))
+    }
+
+    #[test]
+    fn a_request_brings_its_sizes_and_its_one_file() {
+        let file = File::open("/proc/self/exe").expect("a file");
+        let bytes = protocol::request(&[(4, 3), (2, 1)]).expect("valid");
+        let (sizes, received) = sent(&bytes, &[&file]).expect("received");
+        assert_eq!(sizes, vec![(4, 3), (2, 1)]);
+        let (a, b) = (file.metadata().expect("stat"), File::from(received).metadata().expect("stat"));
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!((a.dev(), a.ino()), (b.dev(), b.ino()), "the same file");
+    }
+
+    #[test]
+    fn a_request_without_one_file_or_with_bad_bytes_is_refused() {
+        let file = File::open("/proc/self/exe").expect("a file");
+        let bytes = protocol::request(&[(4, 3)]).expect("valid");
+        assert!(sent(&bytes, &[]).is_err(), "no file");
+        assert!(sent(&bytes, &[&file, &file]).is_err(), "two files");
+        assert!(sent(&bytes[..REQUEST_LEN - 1], &[&file]).is_err(), "short");
+        let mut bad = bytes;
+        bad[0] = b'X';
+        assert!(sent(&bad, &[&file]).is_err(), "magic");
+    }
+
     #[test]
     fn the_frame_carries_its_size() {
         let mut out = Vec::new();
@@ -202,5 +369,19 @@ mod tests {
         assert_eq!(&out[..5], b"ATPV1");
         assert_eq!(&out[5..13], [1, 0, 0, 0, 2, 0, 0, 0]);
         assert_eq!(out.len(), 13 + 8);
+    }
+
+    #[test]
+    fn only_a_regular_file_is_read() {
+        let device = File::open("/dev/null").expect("a device");
+        let refused = picture(device).err();
+        assert!(matches!(&refused, Some(Undecoded::Picture(why)) if why.contains("not a regular file")), "{refused:?}");
+    }
+
+    #[test]
+    fn a_loader_s_failure_is_a_fault_not_a_refusal() {
+        // A timeout, a spawn failure or a killed loader: none is an unsupported format.
+        let undecoded = Undecoded::from(glycin::Error::other("the loader was killed"));
+        assert!(matches!(undecoded, Undecoded::Fault(_)), "{undecoded:?}");
     }
 }
