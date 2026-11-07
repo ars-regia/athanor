@@ -3,7 +3,9 @@
 //! requests and drive these types.
 
 pub mod inhibitors;
+pub mod screensaver;
 pub mod sequence;
+pub mod store;
 pub mod timers;
 
 pub use inhibitors::{Inhibitor, Inhibitors, Kind, RemoveError};

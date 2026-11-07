@@ -7,3 +7,10 @@ description = "The logic of the idle daemon with no display and no bus: the time
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
+libc = { workspace = true }
+futures-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }

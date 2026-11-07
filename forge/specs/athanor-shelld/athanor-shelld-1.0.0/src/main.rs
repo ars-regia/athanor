@@ -96,8 +96,16 @@ async fn serve(state_dir: PathBuf) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let query = match zbus::connection::Builder::session() {
+        Ok(builder) => builder,
+        Err(err) => {
+            tracing::error!(error = %err, "no session bus");
+            return ExitCode::FAILURE;
+        }
+    };
     let _connection = match server::start(
         builder,
+        query,
         Config {
             state_dir,
             bar: BarUnit::from_proc(),

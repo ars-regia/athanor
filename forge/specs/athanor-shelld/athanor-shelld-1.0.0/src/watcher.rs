@@ -2,6 +2,8 @@
 //! an object path (the form of the Ayatana libraries); it leaves when the owner of its bus name
 //! disappears. The host is the bar. XEmbed is out of scope.
 
+use std::time::Duration;
+
 use futures_util::StreamExt;
 use zbus::fdo::{self, DBusProxy};
 use zbus::message::Header;
@@ -120,9 +122,45 @@ pub fn item(service: &str, sender: &str) -> Option<(String, String)> {
     }
 }
 
-#[derive(Default)]
+/// Bound on one question to the bus. A registration that cannot be checked in this time is
+/// refused.
+const ASK: Duration = Duration::from_secs(2);
+
 pub struct Watcher {
     registry: Registry,
+    /// The query connection: it serves no object, subscribes to no signal and owns no name, so
+    /// its one socket reader never waits on a stream that a handler is slow to drain. The
+    /// serving connection carries the NameOwnerChanged stream; awaiting a reply on it from a
+    /// handler can stall for good once 64 messages queue ahead of the reply (issue #1035).
+    query: Connection,
+}
+
+impl Watcher {
+    #[must_use]
+    pub fn new(query: Connection) -> Self {
+        Self {
+            registry: Registry::default(),
+            query,
+        }
+    }
+
+    /// `GetNameOwner` on the query connection, bounded by `ASK`; fails closed.
+    async fn name_owner(&self, name: BusName<'_>) -> fdo::Result<String> {
+        let proxy = DBusProxy::new(&self.query).await?;
+        match tokio::time::timeout(ASK, proxy.get_name_owner(name)).await {
+            Ok(owner) => owner.map(|owner| owner.to_string()),
+            Err(_) => Err(fdo::Error::TimedOut("the bus did not answer".into())),
+        }
+    }
+
+    /// `NameHasOwner` on the query connection, bounded by `ASK`.
+    async fn name_has_owner(&self, name: BusName<'_>) -> fdo::Result<bool> {
+        let proxy = DBusProxy::new(&self.query).await?;
+        match tokio::time::timeout(ASK, proxy.name_has_owner(name)).await {
+            Ok(owned) => owned,
+            Err(_) => Err(fdo::Error::TimedOut("the bus did not answer".into())),
+        }
+    }
 }
 
 /// Refuses a caller that names a bus name it does not own: a well-known name it does not
@@ -131,18 +169,21 @@ pub struct Watcher {
 /// name is resolved through the bus. Without this, any client could attribute an item or a
 /// host to a long-lived name it does not own and hold a slot forever, since that name's real
 /// owner never leaves.
-async fn owned_by(conn: &Connection, service: &str, sender: &str) -> fdo::Result<()> {
+async fn owned_by(watcher: &Watcher, service: &str, sender: &str) -> fdo::Result<()> {
     let name =
         BusName::try_from(service).map_err(|err| fdo::Error::InvalidArgs(err.to_string()))?;
     let owner = if service.starts_with(':') {
         service.to_owned()
     } else {
-        DBusProxy::new(conn)
-            .await?
-            .get_name_owner(name)
-            .await
-            .map_err(|err| fdo::Error::AccessDenied(format!("{service} has no owner: {err}")))?
-            .to_string()
+        match watcher.name_owner(name).await {
+            Ok(owner) => owner,
+            Err(err @ fdo::Error::TimedOut(_)) => return Err(err),
+            Err(err) => {
+                return Err(fdo::Error::AccessDenied(format!(
+                    "{service} has no owner: {err}"
+                )))
+            }
+        }
     };
     if owner == sender {
         Ok(())
@@ -159,7 +200,6 @@ impl Watcher {
         &mut self,
         service: &str,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
         let sender = header
@@ -171,7 +211,7 @@ impl Watcher {
             ))
         })?;
         if !service.starts_with('/') {
-            owned_by(conn, service, sender.as_str()).await?;
+            owned_by(self, service, sender.as_str()).await?;
         }
         match self.registry.add_item(id.clone(), name) {
             Added::New => {
@@ -182,8 +222,7 @@ impl Watcher {
                 // its eventual NameOwnerChanged. A failed check is not evidence the name is
                 // gone, so it is not treated as one.
                 if service.starts_with('/')
-                    && !DBusProxy::new(conn)
-                        .await?
+                    && !self
                         .name_has_owner(BusName::from(sender.to_owned()))
                         .await
                         .unwrap_or(true)
@@ -210,13 +249,12 @@ impl Watcher {
         &mut self,
         service: &str,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> fdo::Result<()> {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::InvalidArgs("a call with no sender".into()))?;
-        owned_by(conn, service, sender.as_str()).await?;
+        owned_by(self, service, sender.as_str()).await?;
         let had_host = self.registry.has_host();
         match self.registry.add_host(service.to_owned()) {
             Added::New => {

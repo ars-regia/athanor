@@ -50,6 +50,9 @@
   the change, a factual correction and no new target decision: PL44's sentence on today's
   `merge_group` run and the `changes.json` row of section 3.3 say that change detection selects
   no build on `merge_group`, as PL44 and M3 already require.
+  Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
+  change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
+  root `Cargo.toml` or `Cargo.lock` that only adds workspace members does not select `shell`.
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -227,7 +230,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`. On `merge_group` no build area is selected (PL44). Known gap: `deny.toml` belongs to no area yet (follow-up) |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`, except a root `Cargo.toml` that only adds workspace members and a root `Cargo.lock` that only adds packages of the workspace (no `source`): a new crate that no surface uses yet, while a surface that starts using it changes its own `Cargo.toml` (2026-11-07). On `merge_group` no build area is selected (PL44). Known gap: `deny.toml` belongs to no area yet (follow-up) |
 | `plan.json`                   | `build.yml` `plan`        | every build stage               | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |

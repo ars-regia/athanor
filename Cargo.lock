@@ -490,6 +490,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-edid"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
@@ -541,6 +548,15 @@ version = "1.0.0"
 [[package]]
 name = "athanor-idle"
 version = "1.0.0"
+dependencies = [
+ "futures-util",
+ "libc",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "zbus",
+]
 
 [[package]]
 name = "athanor-launcher"
@@ -691,6 +707,7 @@ dependencies = [
 name = "athanor-sulphur"
 version = "1.0.0"
 dependencies = [
+ "athanor-edid",
  "athanor-unit",
  "bitflags 2.13.1",
  "calloop",

@@ -3,6 +3,21 @@
 use crate::timers::Hold;
 use std::collections::BTreeMap;
 
+/// Bounds (proposed, revision 3): inhibitors per owner, inhibitors in the table, and bytes of
+/// an application id or a reason.
+pub const MAX_PER_OWNER: usize = 16;
+pub const MAX_ENTRIES: usize = 256;
+pub const MAX_TEXT: usize = 256;
+
+/// `s` cut to at most `max` bytes, at a character boundary.
+pub fn truncate(s: &str, max: usize) -> String {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_owned()
+}
+
 /// What an inhibitor removes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -92,6 +107,32 @@ impl Inhibitors {
         }
     }
 
+    /// The live inhibitors in cookie order, for `inhibitors.json` (SN7).
+    pub fn iter(&self) -> impl Iterator<Item = (u32, &Inhibitor)> {
+        self.table.iter().map(|(c, i)| (*c, i))
+    }
+
+    /// Puts back an inhibitor under its old cookie; new cookies continue above the highest
+    /// restored one (SN7). A cookie of 0 or one already live is refused.
+    pub fn restore(&mut self, cookie: u32, inhibitor: Inhibitor) -> bool {
+        if cookie == 0 || self.table.contains_key(&cookie) {
+            return false;
+        }
+        self.table.insert(cookie, inhibitor);
+        self.last = self.last.max(cookie);
+        true
+    }
+
+    /// Drops every inhibitor (the bus is gone: nothing can be followed any more).
+    pub fn clear(&mut self) {
+        self.table.clear();
+    }
+
+    /// How many inhibitors this owner holds.
+    pub fn count_owner(&self, owner: &str) -> usize {
+        self.table.values().filter(|i| i.owner == owner).count()
+    }
+
     pub fn len(&self) -> usize {
         self.table.len()
     }
@@ -112,6 +153,13 @@ mod tests {
             app_id: "org.example.App".into(),
             reason: "playing".into(),
         }
+    }
+
+    #[test]
+    fn truncate_cuts_at_a_character_boundary() {
+        assert_eq!(truncate("abcdef", 3), "abc");
+        assert_eq!(truncate("aé", 2), "a");
+        assert_eq!(truncate("ab", 9), "ab");
     }
 
     #[test]
