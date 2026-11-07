@@ -4,8 +4,6 @@
 //! alone, and no TCP. dconf's client opens its shared-memory flag, `$XDG_RUNTIME_DIR/dconf/user`,
 //! for writing; refused, it logs a critical line and reads the database again at every access.
 //!
-//! - `/proc`: the ScreenSaver interface reads a caller's `/proc/<pid>/cgroup` for its
-//!   application id (SD8); refused, every inhibitor would carry an empty one.
 //! - `/usr` and `/etc`: the libraries, GIO's modules, the GSettings schemas of the image,
 //!   dconf's profile and system databases, the locale.
 //! - The user's dconf database, `$XDG_CONFIG_HOME/dconf`, which GSettings reads directly; its
@@ -85,7 +83,7 @@ impl Grants {
             data_dirs = vec!["/usr/local/share".into(), "/usr/share".into()];
         }
 
-        let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into(), "/proc".into()];
+        let mut read: Vec<PathBuf> = vec!["/usr".into(), "/etc".into()];
         read.extend(config.iter().map(|c| c.join("dconf")));
         read.extend(list(&var, "GSETTINGS_SCHEMA_DIR"));
         read.extend(
@@ -148,7 +146,6 @@ mod tests {
             [
                 "/usr",
                 "/etc",
-                "/proc",
                 "/home/u/.config/dconf",
                 "/opt/schemas",
                 "/home/u/.local/share/glib-2.0/schemas",

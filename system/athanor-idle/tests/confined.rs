@@ -1,7 +1,8 @@
 //! The daemon's Landlock (SD17) on a real bus with real dconf: under the grants it computes,
 //! a write outside `$XDG_RUNTIME_DIR/athanor-idle` is refused, and what the daemon does still
 //! works: `inhibitors.json`, the read of the Power page's store, GSettings reads and writes
-//! through dconf, the Wayland socket and the session bus.
+//! through dconf, the Wayland socket, the session bus and the ScreenSaver interface, which
+//! asks the bus and systemd for a caller's unit and reads nothing under `/proc`.
 //!
 //! Landlock binds the thread that applies it, so the test runs itself again as a child with
 //! the environment of a session of its own and confines that child's test thread.
@@ -154,6 +155,13 @@ fn the_confined_daemon_writes_only_its_directory_and_still_works() {
     );
     // dconf's client keeps a shared-memory flag in `$XDG_RUNTIME_DIR/dconf`; refused, it says so.
     assert!(!stderr.contains("dconf will not work properly"), "{stderr}");
+    // The Inhibit of a caller outside any unit: one warning, with its reason, and an empty id.
+    let warned: Vec<&str> = stderr
+        .lines()
+        .filter(|l| l.contains("cannot tell the caller's unit"))
+        .collect();
+    assert_eq!(warned.len(), 1, "{stderr}");
+    eprintln!("{}", warned[0]);
     assert_eq!(
         session.gsettings(&["get", "org.athanor.desktop.idle", "blank-after"]),
         "uint32 42"
@@ -171,6 +179,7 @@ fn child() {
     };
     let runtime = base.join("runtime");
     // The Power page's store, beneath this session's XDG_CONFIG_HOME.
+    athanor_unit::journal::init();
     let store = user_dir().expect("the Power page's store");
     fs::create_dir_all(&store).expect("mkdir");
     fs::write(store.join("screen_off_time"), "Some(60000)").expect("store");
@@ -201,8 +210,11 @@ fn child() {
     let error = TcpStream::connect(tcp.local_addr().expect("addr")).expect_err("TCP");
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
 
-    // What the ScreenSaver interface reads for a caller's application id.
-    fs::read_to_string("/proc/self/cgroup").expect("/proc/<pid>/cgroup");
+    // /proc is not granted: nothing of another process, or of this one, is read there.
+    for path in ["/proc/self/environ", "/proc/self/cgroup"] {
+        let error = fs::read(path).expect_err("/proc is not granted");
+        assert_eq!(error.kind(), ErrorKind::PermissionDenied, "{path}");
+    }
     assert_eq!(read_in(&store).screen_off_time, Key::Millis(60000));
     UnixStream::connect(runtime.join("wayland-test")).expect("the Wayland socket");
 
@@ -243,5 +255,8 @@ fn child() {
             let _cookie: u32 = reply.body().deserialize().expect("a cookie");
             let saved = fs::read_to_string(dir.join("inhibitors.json")).expect("inhibitors.json");
             assert!(saved.contains("confined"), "{saved}");
+            // The private bus has no systemd to name the caller's unit: the id is empty, and
+            // the journal says why (the parent reads it).
+            assert!(saved.contains(r#""app_id":"""#), "{saved}");
         });
 }
