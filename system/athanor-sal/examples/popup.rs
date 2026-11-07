@@ -55,8 +55,7 @@ impl Application for Dock {
         print("button", ui.widget(button).rect);
         let (menu, first) = menu();
         print("item", menu.widget(first).rect);
-        let mut options = LayerOptions::default();
-        options.layer = Layer::Top;
+        let mut options = LayerOptions::new(Layer::Top);
         options.namespace = "athanor-sal-popup".into();
         options.anchor = Anchor::BOTTOM;
         options.keyboard = KeyboardInteractivity::OnDemand;

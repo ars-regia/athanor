@@ -797,6 +797,43 @@ class AllowList(unittest.TestCase):
         )
         self.assertEqual(self.problems(), [])
 
+    def test_a_toolkit_client_asks_for_the_layer_it_names(self):
+        # Sal's LayerOptions takes its layer and has no default one, so the layer a Sal client
+        # asks for is the one its own code names (maintainer decision, 2026-11-07).
+        self.write("system/athanor-sal/Cargo.toml", '[package]\nname = "athanor-sal"\n')
+        self.write(
+            "system/athanor-sal/src/lib.rs",
+            "pub struct LayerOptions { pub layer: Layer }\n"
+            "impl LayerOptions { pub fn new(layer: Layer) -> Self { Self { layer } } }\n",
+        )
+        dependency = '[dependencies]\nathanor-sal = { path = "../../../../system/athanor-sal" }\n'
+        self.package(
+            "athanor-wallpaper",
+            dependency,
+            {"src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Background); }\n"},
+        )
+        self.assertEqual(self.problems(), [])
+        self.package(
+            "athanor-wallpaper",
+            dependency,
+            {"src/main.rs": "use athanor_sal::LayerOptions;\nfn f() { LayerOptions::new(Layer::Top); }\n"},
+        )
+        out = self.problems()
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("top or overlay layer (forge/specs/athanor-wallpaper/", out[0])
+
+    def test_sal_names_no_top_or_overlay_layer_for_its_clients(self):
+        # The tree itself: a default layer of Sal's, or any top or overlay variant in its
+        # production code, would ask for that layer for every Sal client, the wallpaper's
+        # background surfaces included.
+        crate = ROOT / "system/athanor-wallpaper"
+        manifest = verify.tomllib.loads((crate / "Cargo.toml").read_text())
+        entry = verify.binaries(crate, manifest)["athanor-wallpaper"]
+        files = verify.target_files(crate, entry, set(), True, ROOT)
+        sal = (ROOT / "system/athanor-sal").resolve()
+        self.assertTrue(any(path.is_relative_to(sal) for path in files))
+        self.assertIsNone(verify.top_layer(files))
+
     def test_an_install_counts_however_it_is_written(self):
         written = {
             "into libexec": (
