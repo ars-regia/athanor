@@ -15,7 +15,7 @@ use crate::store;
 use crate::timers::Hold;
 use athanor_unit::bus_caller::{self, OnBus, Questions, Service};
 use futures_util::StreamExt;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt::Display;
 use std::future::Future;
 use std::path::PathBuf;
@@ -43,6 +43,9 @@ pub const PORTAL: Service<'static> = Service {
 };
 /// How long a question to the bus may take.
 const ASK: Duration = Duration::from_secs(2);
+/// How long the whole restore of `inhibitors.json` may take at start, every question
+/// included: what is not settled by then is dropped, and the blank and the lock start.
+const RESTORE: Duration = Duration::from_secs(3);
 
 /// The table, the file it is written to and the channel that tells the timers what it holds.
 struct State {
@@ -143,7 +146,7 @@ impl State {
     }
 
     fn check_query(&self) {
-        if self.query.is_closed() {
+        if self.query.is_closed() || self.system.is_closed() {
             self.query_gone.notify_one();
         }
     }
@@ -167,6 +170,80 @@ async fn bounded<T, E: Display>(
         Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("timed out".into()),
     }
+}
+
+/// Puts back the entries of `inhibitors.json` whose owners are on the bus, a suspend
+/// inhibitor only when its owner is admitted again as `InhibitSuspend` admits it. Each owner
+/// is asked once. Within [`RESTORE`] in all: the entries not settled by then are dropped.
+async fn restore(state: &State, entries: Vec<(u32, Inhibitor)>) {
+    let total = entries.len();
+    let mut settled = 0;
+    let within = tokio::time::timeout(RESTORE, async {
+        let mut present: HashMap<String, bool> = HashMap::new();
+        let mut admitted: HashMap<String, bool> = HashMap::new();
+        for (cookie, i) in entries {
+            if !is_unique_form(&i.owner) {
+                tracing::warn!(
+                    cookie,
+                    owner = i.owner,
+                    "owner is not a unique name, dropped"
+                );
+                settled += 1;
+                continue;
+            }
+            // An answer that does not come drops the entry: toward locking.
+            let here = match present.get(&i.owner) {
+                Some(&here) => here,
+                None => {
+                    let here = state.has_owner(&i.owner).await == Ok(true);
+                    present.insert(i.owner.clone(), here);
+                    here
+                }
+            };
+            let keep = here
+                && match (i.kind, admitted.get(&i.owner)) {
+                    (Kind::Screen, _) => true,
+                    (Kind::SuspendOnly, Some(&verdict)) => verdict,
+                    (Kind::SuspendOnly, None) => {
+                        let verdict = admit_portal(&state.questions(), &i.owner).await;
+                        if let Err(e) = &verdict {
+                            state.check_query();
+                            tracing::warn!(
+                                owner = i.owner,
+                                "suspend inhibitor refused at start: {e}"
+                            );
+                        }
+                        admitted.insert(i.owner.clone(), verdict.is_ok());
+                        verdict.is_ok()
+                    }
+                };
+            if keep && state.lock().restore(cookie, i.clone()) {
+                tracing::info!(cookie, app_id = i.app_id, "inhibitor restored");
+            } else {
+                tracing::info!(cookie, owner = i.owner, "inhibitor dropped at start");
+            }
+            settled += 1;
+        }
+    })
+    .await;
+    if within.is_err() {
+        tracing::warn!(
+            dropped = total - settled,
+            "the restore took longer than {RESTORE:?}: the entries not settled are dropped"
+        );
+    }
+}
+
+/// Ends every suspend inhibitor of `table` and says how many.
+fn drop_suspend(table: &mut Inhibitors) -> usize {
+    let held: Vec<(u32, String)> = table
+        .iter()
+        .filter(|(_, i)| i.kind == Kind::SuspendOnly)
+        .map(|(cookie, i)| (cookie, i.owner.clone()))
+        .collect();
+    held.iter()
+        .filter(|(cookie, owner)| table.remove(*cookie, Kind::SuspendOnly, owner).is_ok())
+        .count()
 }
 
 /// SD5's admission of `InhibitSuspend`: `peer` is the main process of [`PORTAL`], every step
@@ -449,37 +526,7 @@ pub async fn serve(
 
     let started = async {
         match store::load(&state.file) {
-            Ok(entries) => {
-                for (cookie, i) in entries {
-                    if !is_unique_form(&i.owner) {
-                        tracing::warn!(
-                            cookie,
-                            owner = i.owner,
-                            "owner is not a unique name, dropped"
-                        );
-                        continue;
-                    }
-                    // An answer that does not come drops the entry: toward locking.
-                    let present = state.has_owner(&i.owner).await == Ok(true);
-                    // A suspend inhibitor is admitted again, as InhibitSuspend admits it.
-                    if present && i.kind == Kind::SuspendOnly {
-                        if let Err(e) = admit_portal(&state.questions(), &i.owner).await {
-                            state.check_query();
-                            tracing::warn!(
-                                cookie,
-                                owner = i.owner,
-                                "suspend inhibitor refused at start: {e}"
-                            );
-                            continue;
-                        }
-                    }
-                    if present && state.lock().restore(cookie, i.clone()) {
-                        tracing::info!(cookie, app_id = i.app_id, "inhibitor restored");
-                    } else {
-                        tracing::info!(cookie, owner = i.owner, "inhibitor dropped at start");
-                    }
-                }
-            }
+            Ok(entries) => restore(&state, entries).await,
             Err(e) => tracing::warn!("{} unusable, starting empty: {e}", state.file.display()),
         }
         for path in PATHS {
@@ -497,7 +544,12 @@ pub async fn serve(
             .request_name_with_flags(IDLE_NAME, RequestNameFlags::DoNotQueue.into())
             .await
         {
-            tracing::error!("{IDLE_NAME} not owned, InhibitSuspend is unavailable: {e}");
+            // Nobody could end a suspend inhibitor any more: none is kept.
+            let dropped = drop_suspend(&mut state.lock());
+            tracing::error!(
+                dropped,
+                "{IDLE_NAME} not owned, InhibitSuspend is unavailable and the restored suspend inhibitors are dropped: {e}"
+            );
             conn.object_server().remove::<Idle1, _>(IDLE_PATH).await?;
         }
         Ok::<(), zbus::Error>(())
@@ -520,6 +572,7 @@ pub async fn serve(
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
+    use std::path::Path;
     use std::process::{Child, Command, Stdio};
     use std::time::Duration;
     use std::{env, fs};
@@ -934,6 +987,8 @@ mod tests {
     struct FakeSystemd {
         unit: String,
         path: &'static str,
+        /// How many times it was asked.
+        asked: Arc<std::sync::atomic::AtomicUsize>,
     }
 
     #[zbus::interface(name = "org.freedesktop.systemd1.Manager")]
@@ -943,6 +998,7 @@ mod tests {
             &self,
             _pidfd: zbus::zvariant::Fd<'_>,
         ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
+            self.asked.fetch_add(1, Ordering::SeqCst);
             (
                 zbus::zvariant::OwnedObjectPath::try_from(self.path).unwrap(),
                 self.unit.clone(),
@@ -1007,6 +1063,7 @@ mod tests {
         let manager = FakeSystemd {
             unit: PORTAL.unit.into(),
             path: UNIT_PATH,
+            asked: Arc::default(),
         };
         c.object_server()
             .at("/org/freedesktop/systemd1", manager)
@@ -1024,10 +1081,21 @@ mod tests {
     /// The system's systemd on `bus`, a stand-in for the system bus: it places every pidfd in
     /// `unit`, whose main process is `pid`.
     async fn fake_system(bus: &Bus, unit: &str, pid: u32) -> Connection {
+        fake_system_asked(bus, unit, pid).await.0
+    }
+
+    /// [`fake_system`], and how many times it is asked.
+    async fn fake_system_asked(
+        bus: &Bus,
+        unit: &str,
+        pid: u32,
+    ) -> (Connection, Arc<std::sync::atomic::AtomicUsize>) {
         let c = bus.connect().await;
+        let asked = Arc::default();
         let manager = FakeSystemd {
             unit: unit.into(),
             path: USER_PATH,
+            asked: Arc::clone(&asked),
         };
         c.object_server()
             .at("/org/freedesktop/systemd1", manager)
@@ -1038,7 +1106,7 @@ mod tests {
             .await
             .unwrap();
         c.request_name("org.freedesktop.systemd1").await.unwrap();
-        c
+        (c, asked)
     }
 
     /// `user@<uid>.service` of this process's user, who owns `bus`'s directory.
@@ -1224,6 +1292,162 @@ mod tests {
             let saved = fs::read_to_string(&file).unwrap();
             assert_eq!(saved.contains("playing"), admitted, "{saved}");
         }
+    }
+
+    /// A system's systemd that never answers.
+    struct SilentSystemd;
+
+    #[zbus::interface(name = "org.freedesktop.systemd1.Manager")]
+    impl SilentSystemd {
+        #[zbus(name = "GetUnitByPIDFD")]
+        async fn get_unit_by_pidfd(
+            &self,
+            _pidfd: zbus::zvariant::OwnedFd,
+        ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
+            std::future::pending().await
+        }
+    }
+
+    /// `inhibitors.json` with a suspend inhibitor for each `(cookie, owner)`.
+    fn suspend_file(file: &Path, entries: &[(u32, &str)]) {
+        let entries: Vec<String> = entries
+            .iter()
+            .map(|(cookie, owner)| {
+                format!(
+                    r#"{{"cookie":{cookie},"owner":"{owner}","app_id":"org.example.Player","kind":"suspend","reason":"playing"}}"#
+                )
+            })
+            .collect();
+        fs::write(
+            file,
+            format!(r#"{{"version":1,"inhibitors":[{}]}}"#, entries.join(",")),
+        )
+        .unwrap();
+    }
+
+    /// The system bus does not answer: the restore ends at its deadline, whatever the number
+    /// of owners to admit, and what it did not settle is dropped.
+    #[tokio::test]
+    async fn a_stalled_restore_ends_at_its_deadline() {
+        let bus = Bus::start("stalled");
+        let system = Bus::start("stalled-system");
+        let _systemd = fake_systemd(&bus, std::process::id()).await;
+        let silent = system.connect().await;
+        silent
+            .object_server()
+            .at("/org/freedesktop/systemd1", SilentSystemd)
+            .await
+            .unwrap();
+        silent
+            .request_name("org.freedesktop.systemd1")
+            .await
+            .unwrap();
+        let mut owners = Vec::new();
+        for _ in 0..4 {
+            owners.push(bus.connect().await);
+        }
+        let names: Vec<String> = owners
+            .iter()
+            .map(|c| c.unique_name().unwrap().to_string())
+            .collect();
+        let entries: Vec<(u32, &str)> = (1..).zip(names.iter().map(String::as_str)).collect();
+        let file = bus.dir.join("inhibitors.json");
+        suspend_file(&file, &entries);
+        let server = bus.connect().await;
+        let started = std::time::Instant::now();
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &system.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
+        let took = started.elapsed();
+        assert!(took < RESTORE + Duration::from_millis(1500), "{took:?}");
+        assert_eq!(*rx.borrow(), Hold::None);
+        assert!(!fs::read_to_string(&file).unwrap().contains("playing"));
+    }
+
+    /// Several suspend inhibitors of one owner: it is admitted once, and all of them are kept.
+    #[tokio::test]
+    async fn one_owner_is_admitted_once_at_start() {
+        let bus = Bus::start("once");
+        let system = Bus::start("once-system");
+        let pid = std::process::id();
+        let _systemd = fake_systemd(&bus, pid).await;
+        let (_system, asked) = fake_system_asked(&system, &user_service(&bus), pid).await;
+        let owner = bus.connect().await;
+        let name = owner.unique_name().unwrap().to_string();
+        let file = bus.dir.join("inhibitors.json");
+        suspend_file(&file, &[(7, &name), (8, &name), (9, &name)]);
+        let server = bus.connect().await;
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &system.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(*rx.borrow(), Hold::SuspendOnly);
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        let saved = fs::read_to_string(&file).unwrap();
+        for cookie in [7, 8, 9] {
+            assert!(saved.contains(&format!(r#""cookie":{cookie},"#)), "{saved}");
+        }
+    }
+
+    /// Without `os.athanor.Idle1` nobody could end a restored suspend inhibitor: none is kept.
+    #[tokio::test]
+    async fn without_its_name_idle1_keeps_no_restored_suspend_inhibitor() {
+        let bus = Bus::start("idle-name-restore");
+        let system = Bus::start("idle-name-restore-system");
+        let pid = std::process::id();
+        let _systemd = fake_systemd(&bus, pid).await;
+        let _system = fake_system(&system, &user_service(&bus), pid).await;
+        let squatter = bus.connect().await;
+        squatter.request_name(IDLE_NAME).await.unwrap();
+        let owner = bus.connect().await;
+        let file = bus.dir.join("inhibitors.json");
+        suspend_file(&file, &[(7, owner.unique_name().unwrap().as_str())]);
+        let server = bus.connect().await;
+        let (rx, _end) = serve(
+            &server,
+            &bus.connect().await,
+            &system.connect().await,
+            file.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(*rx.borrow(), Hold::None);
+        assert!(!fs::read_to_string(&file).unwrap().contains("playing"));
+    }
+
+    #[tokio::test]
+    async fn a_closed_system_connection_ends_the_daemon_view_of_the_bus() {
+        let bus = Bus::start("sysend");
+        let server = bus.connect().await;
+        let system = bus.connect().await;
+        let (mut rx, end) = serve(
+            &server,
+            &bus.connect().await,
+            &system,
+            bus.dir.join("i.json"),
+        )
+        .await
+        .unwrap();
+        let a = bus.connect().await;
+        call(&a, PATHS[0], "Inhibit", &("app", "r")).await.unwrap();
+        settle(&mut rx, Hold::All).await;
+        system.close().await.unwrap();
+        // The next refusal finds the system connection closed.
+        denied(idle(&a, "InhibitSuspend", &("org.example.App", "r")).await);
+        tokio::time::timeout(Duration::from_secs(10), end)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*rx.borrow(), Hold::None);
     }
 
     /// Another process holds `os.athanor.Idle1`: the daemon serves the rest, without it.
