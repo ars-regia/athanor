@@ -62,7 +62,7 @@ Status: **revision 3 (2026-11-06), approved by the maintainer with the pull requ
 
 ## 2. Interfaces and decisions
 
-**SD1. Four programs and a shared crate.** Four processes, as decided (section 6, decision 1).
+**SD1. Four programs and a shared crate.** Four processes, as decided (section 6, decision 1). *Amended (maintainer decision, 2026-11-07):* `athanor-wallpaper`'s pictures are decoded in a fifth, short-lived process, an instance of a socket-activated decoder unit per connection that runs `athanor-preview-render wallpaper` (SD17).
 
 | Program             | Unit                        | What it is                                                                                                                                               |
 | ------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -301,8 +301,10 @@ Status: **revision 3 (2026-11-06), approved by the maintainer with the pull requ
 - **Landlock at start** (`athanor_unit::sandbox`, after `ensure_single_threaded`), with `restrict` naming read trees and one write directory, and `deny_tcp`:
   - `athanor-idle`: reads only; writes nothing.
   - `athanor-wallpaper`: reads `/usr/share`, `$XDG_DATA_HOME/backgrounds`, the hearth and any path the schema names (so read access beneath `$HOME` and `/usr/share`); writes nothing. glycin's loaders run in their own sandbox.
+    - *Amended (maintainer decision, 2026-11-07):* it reads `/usr`, `/etc`, `$HOME` and the XDG configuration, data and schema directories, and writes only beneath `$XDG_RUNTIME_DIR/dconf`, which dconf's client opens for writing. It grants that directory only once it is checked to be the user's own directory, of mode 0700 and not a link (`private_dir`, pull request #1044), and refuses to start until then. It decodes nothing: it opens each picture as a regular file, passes the descriptor by `SCM_RIGHTS` over `$XDG_RUNTIME_DIR/athanor-wallpaper/decode` with the sizes it shows the picture at, and reads back the pixels already scaled with zoom. A decoder that does not answer within 5 s, or answers another frame than it asked for, shows the hearth.
   - `athanor-sessiond`: reads only; writes nothing. Mounting is udisks's work, not a write of this process. *Amended 2026-10-06 (maintainer decision A2-20, #156):* it writes its crash reports beneath `$XDG_STATE_HOME/athanor/crash-reports` and reads the user's journal for them (`doc_session.md` SN8).
   - `athanor-broker`: reads the XDG application and autostart directories and the policy; writes only beneath `$XDG_RUNTIME_DIR/athanor`, where it creates context sockets and proxy sockets.
+- **The wallpaper's decoder** *(maintainer decision, 2026-11-07)*. A static user unit, socket-activated with `Accept=yes`, runs `athanor-preview-render wallpaper` once per connection with the properties of `athanor-preview`'s image decode (`doc_launcher.md` LA9: the common set and the image branch); its `TasksMax=` is a fixed value, since a static unit cannot count the cores. The socket is of mode 0600 in a directory of mode 0700, with small `MaxConnections=` and `MaxConnectionsPerSource=`. The decoder admits only a peer whose control group is `athanor-wallpaper.service` in the user's `session.slice` and whose executable is `/usr/bin/athanor-wallpaper`, both read through the peer's `SO_PEERPIDFD` and trusted only when the pidfd is still alive after the reads; a peer with no pidfd, or any other peer, is refused and the instance exits. The check is `athanor_unit::peer`.
 - **The broker is the one process that may call `StartTransientUnit`** among the four; the others hold no unit-creating rights beyond what the user manager gives any process of the user.
 
 **SD18. Failures and restarts.**
@@ -372,7 +374,7 @@ The retirement order is therefore cosmic-idle (step 1), cosmic-bg (step 2), cosm
   | W1 | `athanor-wallpaper`'s library: the resolution of `"hearth"`, `per-output` and `same-on-all`, the zoom geometry, the regular-file check; `org.athanor.desktop.background` and SD16's migration | 2 | D0 |
   | W2 | Sal: the picture and the full-size layer surface (SD6), with tests | 2 | D0 |
   | W3 | the Sal client: one background surface per output, glycin, fractional scale, outputs that come and go | 2 | W1, W2 |
-  | W4 | the package, the unit, the end of cosmic-bg (step 2), the rig and its goldens | 2 | W3 |
+  | W4 | the package, the unit, the decoder's socket and unit (SD17, maintainer decision, 2026-11-07), the end of cosmic-bg (step 2), the rig and its goldens | 2 | W3 |
   | W5 | the Wallpaper page of Athanor's Settings writes `org.athanor.desktop.background` (SE13) | none | Athanor's Settings |
   | R1 | Sulphur's wlr-output-management: modes, position, enable and adaptive sync (SD23), with fixture tests | none | D0 |
   | R2 | the Displays page with keep or revert (SE12); cosmic-randr leaves with cosmic-settings (SE23) | none | Athanor's Settings, R1 |
@@ -488,7 +490,7 @@ Added in revision 3 (proposed, revision 3), on Sulphur's session unless the item
 
 Taken by the maintainer on 2026-10-05, each as recommended in revision 0.
 
-1. **Four processes:** `athanor-broker`, `athanor-idle`, `athanor-wallpaper` and `athanor-sessiond` (SD1). Reason: the two security functions, the broker that creates units and contexts and the daemon that triggers the automatic lock, stay small and alone, a fault in an image decoder or an automount cannot stop either, and `athanor-shelld` keeps the 16 MB budget the standard set (ST5). Rejected: the headless roles in shelld; idle and wallpaper in one client.
+1. **Four processes:** `athanor-broker`, `athanor-idle`, `athanor-wallpaper` and `athanor-sessiond` (SD1). Reason: the two security functions, the broker that creates units and contexts and the daemon that triggers the automatic lock, stay small and alone, a fault in an image decoder or an automount cannot stop either, and `athanor-shelld` keeps the 16 MB budget the standard set (ST5). Rejected: the headless roles in shelld; idle and wallpaper in one client. *Amended (maintainer decision, 2026-11-07):* the four are the long-running processes; `athanor-wallpaper` hands each picture to a decoder instance that lives for one connection (SD17), so a fault in a decoder stops neither the wallpaper nor the others.
 2. **The broker confines applications with systemd unit properties** (SD8, SD9): a private `$XDG_RUNTIME_DIR` with an allowlist, `xdg-dbus-proxy` in its own scope, no X11, `NoNewPrivileges`. Reason: systemd's own options close every path by which an application would bypass the bus filter, and remain visible in `systemctl show`; a filesystem sandbox can later choose bubblewrap on evidence. Rejected: bubblewrap per application now; the bus filter alone.
 3. **Any peer may inhibit idle** through `org.freedesktop.ScreenSaver`, each inhibitor logged by application id (SD5). Reason: an inhibitor only delays the automatic lock and is recorded, and restricting it breaks players without a measurable gain while the filesystem is not sandboxed. Rejected: only the portal, the shell and Wayland inhibitors.
 4. **The broker runs XDG autostart entries;** `athanor-session.target` drops `xdg-desktop-autostart.target` (SD10). Reason: one launch path, and no autostart entry on the main socket; keeping systemd's generator for some entries leaves BR2's autostart limit open for every entry Settings did not write.
