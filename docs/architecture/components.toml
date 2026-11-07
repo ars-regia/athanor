@@ -693,7 +693,7 @@ area = "shell"
 status = "specified"
 spec = "doc_session_daemons.md"
 item = "SD4"
-purpose = "The idle daemon's logic with no display: the timer choice, the inhibitor table and the blank, off, lock request sequence"
+purpose = "The idle daemon: the timer choice, the inhibitor table, the blank, off, lock request sequence, its Wayland and logind sides, and the follow of the Power page"
 
 [[component]]
 path = "system/athanor-trust-state"

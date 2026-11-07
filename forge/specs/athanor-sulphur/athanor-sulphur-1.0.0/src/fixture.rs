@@ -11318,3 +11318,7 @@ mod instance;
 
 #[cfg(test)]
 mod tiling;
+
+// SD4: athanor-idle's notifications, overlay and output power.
+#[cfg(test)]
+mod idle;

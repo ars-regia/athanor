@@ -33,6 +33,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 xcursor = { workspace = true }
 
 [dev-dependencies]
+# Its Wayland side is tested on the fixture (doc_session_daemons.md, SD22, I3).
+athanor-idle = { path = "../../../../system/athanor-idle" }
 wayland-client = { workspace = true }
 # The fixture binds the unstable protocols: tablet, pointer gestures, decoration, foreign.
 wayland-protocols = { workspace = true, features = ["unstable"] }
