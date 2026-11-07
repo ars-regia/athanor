@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # notifications-acceptance.sh [stage...]
 # Package 2b.3 of docs/architecture/doc_bar.md in the dev VM's real session, under both real
-# unit files and the real user manager: athanor-shelld admits athanor-bar.service's List,
+# unit files and the real user manager: athanor-shelld refuses athanor-bar.service's List when
+# the bar runs with drop-ins under ~/.config (stage refused-user-dropin, issue #1047),
 # the bar fetches the list again after a crash and shows what arrived meanwhile (item 9),
 # popups survive an output that comes and goes (BR6), and the bar stays within 64 MB holding
 # notifications (item 17). COSMIC owns the notification and tray names on the session bus,
@@ -29,7 +30,7 @@ BUS_UNIT=athanor-notifications-acceptance-bus
 DROP_IN=notifications-acceptance.conf
 PSS_LIMIT_KB=$((64 * 1024))
 HEAD2=/sys/class/drm/card1-Virtual-2/status
-STAGES=(deploy admitted away hotplug memory cleanup)
+STAGES=(deploy refused-user-dropin away hotplug memory cleanup)
 STAGE=
 CLEANED=0
 ACTIVE_BEFORE=()
@@ -151,24 +152,19 @@ stage_deploy() {
     bar cat > /dev/null || fail "systemctl --user cat athanor-bar.service found no unit"
 }
 
-# The real daemon admits the real unit: the rig cannot show this (plan ruling 10).
-# Since issue #1047 the daemon admits only the unit as the image ships it, verified through
-# systemd (doc_bar.md BR1), so this stage is refused on the private bus: the drop-ins under
-# ~/.config are outside /usr/lib/systemd/user, and the user manager is not on that bus to be
-# vouched for. Running the bar as the real unit needs the real session bus, which COSMIC owns.
-stage_admitted() {
+# A negative test (issue #1047): the daemon admits only the unit as the image ships it, so a
+# bar started with drop-ins under ~/.config/systemd/user, as this script's private bus needs,
+# must be refused AccessDenied on the private interface. Admitting it is the failure.
+stage_refused_user_dropin() {
     local since
     since=$(in_session date +%s)
     fresh_start
-    wait_until 15 bar_logged "$since" 'listed [0-9]+ notifications from athanor-shelld' ||
-        fail "no 'listed N notifications' in the bar's journal"
-    if bar_logged "$since" 'refused the bar'; then
-        fail "athanor-shelld refused athanor-bar.service's List"
+    wait_until 15 bar_logged "$since" "athanor-shelld refused the bar's List" ||
+        fail "the bar's journal has no refusal of its List: a bar with user drop-ins was not refused"
+    if bar_logged "$since" 'listed [0-9]+ notifications from athanor-shelld'; then
+        fail "athanor-shelld admitted a bar started with drop-ins under ~/.config/systemd/user"
     fi
-    notify "Sent by notifications-acceptance.sh" 0
-    sleep 3
-    [[ $(bar is-active) == active ]] || fail "the bar is not active: $(bar show -p Result --value)"
-    "$HERE/screenshot.sh" "$SHOTS/admitted.png" > /dev/null
+    "$HERE/screenshot.sh" "$SHOTS/refused-user-dropin.png" > /dev/null
 }
 
 # Item 9: a notification sent while no bar runs shows once the bar is back. The daemon
@@ -310,6 +306,6 @@ for unit in athanor-bar athanor-shelld; do
 done
 trap cleanup_on_exit EXIT
 for STAGE in "${run[@]}"; do
-    "stage_$STAGE"
+    "stage_${STAGE//-/_}"
     echo "PASS $STAGE"
 done
