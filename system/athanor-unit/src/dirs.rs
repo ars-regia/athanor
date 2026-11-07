@@ -28,6 +28,23 @@ impl AsFd for Checked {
     }
 }
 
+/// A node `owned_node` opened, whose owner it does not check: what a `WriteFile` grant names
+/// (`sandbox::restrict_writes`), never a directory grant, so it cannot widen one:
+///
+/// ```compile_fail
+/// fn grant(node: athanor_unit::dirs::CheckedNode) {
+///     let _ = athanor_unit::sandbox::restrict_writes(&[node], &[]);
+/// }
+/// ```
+#[derive(Debug)]
+pub struct CheckedNode(OwnedFd);
+
+impl AsFd for CheckedNode {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
 /// `runtime/name`, created with mode 0700 if missing, opened once without following a link and
 /// checked on that descriptor: a directory, owned by the owner of `runtime`, of mode 0700.
 /// Another process of the user could otherwise point a confined daemon's writes elsewhere. The
@@ -86,14 +103,14 @@ pub fn owned_dir(path: &Path) -> io::Result<Checked> {
 /// opened as `owned_dir` opens a directory, of any kind other than a link. Its owner is not
 /// checked: no user can put anything at those paths, and in a user namespace that does not map
 /// root (the shell rig's container, the greeter's sandbox) their owner reads as the overflow id.
-pub fn owned_node(path: &Path) -> io::Result<Checked> {
-    not_a_link(path, OFlag::empty()).map(|(opened, _)| Checked(opened.into()))
+pub fn owned_node(path: &Path) -> io::Result<CheckedNode> {
+    not_a_link(path, OFlag::empty()).map(|(opened, _)| CheckedNode(opened.into()))
 }
 
 /// Each of `paths` that exists, opened by `open` (`owned_dir`, `owned_node`). One that fails its
 /// check is left out with a warning, so that a grant only narrows; a missing one is skipped, as
 /// Landlock has nothing to hold on to.
-pub fn existing(paths: &[&Path], open: fn(&Path) -> io::Result<Checked>) -> Vec<Checked> {
+pub fn existing<T>(paths: &[&Path], open: fn(&Path) -> io::Result<T>) -> Vec<T> {
     paths
         .iter()
         .filter_map(|path| match open(path) {

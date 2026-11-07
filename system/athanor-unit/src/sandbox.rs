@@ -10,7 +10,7 @@ use std::error::Error;
 use std::os::fd::AsFd;
 use std::path::Path;
 
-use crate::dirs::Checked;
+use crate::dirs::{Checked, CheckedNode};
 use landlock::{
     Access, AccessFs, AccessNet, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
     RulesetAttr, RulesetCreatedAttr, ABI,
@@ -55,10 +55,14 @@ pub fn restrict(read: &[&Path], write: &[Checked]) -> Result<(), Box<dyn Error>>
 /// Reads stay open. Every write access beneath each directory `write` holds open; writing to
 /// existing files, and nothing else, beneath each of `write_file` (a device directory such as
 /// `/dev/dri`, or a node). No other write anywhere, truncation included (Landlock ABI 3). As for
-/// `restrict`, a grant is a `dirs::Checked` descriptor (`dirs::owned_dir`, `dirs::owned_node`,
-/// `dirs::private_dir`), not a path. A kernel that cannot enforce the ruleset is an error, not a
+/// `restrict`, a grant is a descriptor, not a path: a `dirs::Checked` (`dirs::owned_dir`,
+/// `dirs::private_dir`) for `write`, a `dirs::CheckedNode` (`dirs::owned_node`, whose owner is
+/// not checked) for `write_file`. A kernel that cannot enforce the ruleset is an error, not a
 /// best effort.
-pub fn restrict_writes(write: &[Checked], write_file: &[Checked]) -> Result<(), Box<dyn Error>> {
+pub fn restrict_writes(
+    write: &[Checked],
+    write_file: &[CheckedNode],
+) -> Result<(), Box<dyn Error>> {
     let writes = AccessFs::from_write(ABI::V3);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
