@@ -3,8 +3,8 @@
 # Items 9 to 15 and 17 to 19 of docs/architecture/doc_session.md section 5 (revision 4, SN13
 # step 6) on the dev VM with athanor-sulphur installed: the greeter's default session on
 # the own compositor, cosmic-comp's session as the second entry, the hand-offs of
-# athanor-sulphur-session to cosmic-comp's session, the supervisor of the locker and the
-# idle daemon in their scopes, and the cleanup at the end of a session. The sessions are a
+# athanor-sulphur-session to cosmic-comp's session, the supervisor of the locker in its
+# scope, the idle daemon's unit, and the cleanup at the end of a session. The sessions are a
 # test account's, signed in at the greeter through a throwaway uinput keyboard and read over
 # AT-SPI by greeter_probe.py, as greeter-acceptance.sh does; the account's password is its
 # name. The session menu is driven by the keyboard: from the password field, Tab reaches the
@@ -24,22 +24,22 @@
 #   default    items 9 and 10: the menu shows both entries, "Athanor" checked and cosmic-comp's
 #              with its line; a sign-in that leaves it alone starts the own compositor's
 #              session: the compositor, the gate, shelld, the bar, the dock, cosmic-osd,
-#              cosmic-settings-daemon and both component scopes active,
+#              cosmic-settings-daemon, the locker's scope and athanor-idle.service active,
 #              athanor-control-center-shortcut inactive with its condition unmet; xdpyinfo
 #              reaches the X server of DISPLAY; with lingering, the bar's logout brings the
 #              greeter back with the default checked and the end state of item 10 (the
 #              session's units inactive, its variables gone, ATHANOR_OWN_COMPOSITOR and
 #              XKB_DEFAULT_* included), no unit failed and no core dump since the sign-in
 #   cosmic     items 9 and 10: with cosmic-comp's entry checked, athanor-session starts,
-#              athanor-sulphur.service inactive, ATHANOR_OWN_COMPOSITOR unset, both scopes
-#              active, the shortcut unit run with its condition met; the lock and the idle
+#              athanor-sulphur.service inactive, ATHANOR_OWN_COMPOSITOR unset, the scope and
+#              athanor-idle.service active, the shortcut unit run with its condition met; the lock and the idle
 #              lock hold as in `lock`
 #   grants     item 10: with the compositor's debug log on, a line granting something to the
 #              bar, the dock, the launcher (Super), the control center (the bar's button),
-#              cosmic-greeter, cosmic-idle and cosmic-osd; no top or overlay surface closed
+#              cosmic-greeter, athanor-idle and cosmic-osd; no top or overlay surface closed
 #   lock       item 10: a GTK window holding an inhibitor through zwp_idle_inhibit_manager_v1,
 #              seen under WAYLAND_DEBUG=1, keeps the session unlocked past a one-minute idle
-#              time; once it closes, cosmic-idle locks within 90 s; `loginctl lock-session`
+#              time; once it closes, athanor-idle locks within 90 s; `loginctl lock-session`
 #              locks; the password unlocks each time
 #   dock       item 10 and question 11: a press on the dock's pinned, running entry, and
 #              Ctrl+Alt+Tab to the dock then Enter on it, each activate its window from under
@@ -74,12 +74,12 @@
 #              and a sign-in starts athanor-session, its cleanup passing over the absent unit;
 #              reboots to put /usr back
 #   boot       item 10: after a reboot, the first sign-in reaches the own compositor's session
-#              with both scopes active
+#              with the scope and athanor-idle.service active
 #   cleanup    removes the account and the probes; run only on request
 #
 # Not here: that the screen stays lit under the
 # inhibitor, which only the console shows (the stage reads the lock, not the output power);
-# the lines of cosmic-greeter, cosmic-idle and cosmic-osd against SN12's derivation run, and
+# the lines of cosmic-greeter, athanor-idle and cosmic-osd against SN12's derivation run, and
 # `verify.py allow-list`, which are read from the pull request and the tree; question 12's
 # lock on PrepareForSleep; item 16, which is the maintainer's. The dock's entry is pressed
 # through its AT-SPI action, as a click is handled, not with the pointer.
@@ -110,7 +110,8 @@ READER=/usr/bin/athanor-sulphur
 COMPOSITOR=athanor-sulphur.service
 GATE=athanor-desktop.service
 SHORTCUT=athanor-control-center-shortcut.service
-SCOPES=(cosmic-greeter-locker.scope cosmic-idle.scope)
+SCOPES=(cosmic-greeter-locker.scope)
+IDLE=athanor-idle.service
 DROP_IN=default-session-acceptance.conf
 WINDOW_UNIT=default-session-acceptance-window
 APP_A=os.athanor.SessionAcceptanceA
@@ -121,7 +122,7 @@ REMOVED=(WAYLAND_DISPLAY DISPLAY XDG_SESSION_TYPE XDG_SESSION_CLASS ATHANOR_OWN_
     XKB_DEFAULT_LAYOUT XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS)
 # The session's units, none of which is active once it ended (item 2).
 SESSION_UNITS=(athanor-session.target "$COMPOSITOR" "$GATE" athanor-shelld.service
-    athanor-bar.service athanor-dock.service "${SCOPES[@]}")
+    athanor-bar.service athanor-dock.service "${SCOPES[@]}" "$IDLE")
 # systemd-coredump's MESSAGE_ID for a core dump.
 COREDUMP_ID=fc2e22bc6ee647b6b90729ab34a250b1
 STAGE=
@@ -309,7 +310,7 @@ linger_on() {
     LINGER_SET=1
 }
 
-# cosmic-idle's screen-off time, in its RON form: None, or Some(<milliseconds>).
+# The Power page's screen-off time, which athanor-idle follows, in cosmic-settings' RON form: None, or Some(<milliseconds>).
 idle_set() { # idle_set VALUE
     printf '%s\n' "$1" | guest_ssh "sudo -u $USER_NAME tee $IDLE_DIR/screen_off_time > /dev/null"
 }
@@ -345,7 +346,7 @@ compositor_restarted() { # compositor_restarted BEFORE
 }
 
 # Signs in to the default and waits for a compositor this sign-in started, which a
-# compositor left running by a killed script is not, the session target and both scopes.
+# compositor left running by a killed script is not, the session target, the scope and athanor-idle.service.
 own_up() {
     local before=0 scope
     if user_up; then
@@ -356,7 +357,7 @@ own_up() {
         fail "no $COMPOSITOR started 60 s after the sign-in: $(in_session systemctl --user --failed --no-legend)"
     wait_until 60 is_active athanor-session.target ||
         fail "athanor-session.target is not active 60 s after the sign-in: $(in_session systemctl --user --failed --no-legend)"
-    for scope in "${SCOPES[@]}"; do
+    for scope in "${SCOPES[@]}" "$IDLE"; do
         wait_until 20 is_active "$scope" || fail "$scope is not active in the default session"
     done
 }
@@ -491,7 +492,7 @@ stage_account() {
     fi
     guest_ssh "sudo useradd -m -u $USER_UID -c $FULL_NAME -s /bin/bash $USER_NAME"
     guest_ssh "echo $USER_NAME:$USER_NAME | sudo chpasswd"
-    # cosmic-idle's compiled timers would blank, lock and suspend the guest in a long stage,
+    # athanor-idle's timers, which follow the Power page, would blank, lock and suspend the guest in a long stage,
     # as start.sh says for the VM's own user; `lock` sets the screen-off time it reads.
     guest_ssh "sudo -u $USER_NAME mkdir -p $IDLE_DIR && for key in screen_off_time suspend_on_ac_time suspend_on_battery_time; do
         printf None | sudo -u $USER_NAME tee $IDLE_DIR/\$key > /dev/null || exit 1; done"
@@ -539,7 +540,7 @@ stage_cosmic() {
     ! is_active "$COMPOSITOR" || fail "$COMPOSITOR is active in cosmic-comp's session"
     read_environment
     ! grep -q '^ATHANOR_OWN_COMPOSITOR=' <<< "$ENVIRONMENT" || fail "ATHANOR_OWN_COMPOSITOR is set in cosmic-comp's session"
-    for unit in "${SCOPES[@]}"; do
+    for unit in "${SCOPES[@]}" "$IDLE"; do
         wait_until 20 is_active "$unit" || fail "$unit is not active in cosmic-comp's session"
     done
     wait_until 20 in_session "systemctl --user show -p ConditionResult --value $SHORTCUT | grep -qx yes" ||
@@ -551,7 +552,7 @@ stage_cosmic() {
 }
 
 # The clients the allow-list grants something, by executable under /usr/bin.
-GRANTED=(athanor-bar athanor-dock athanor-launcher athanor-control-center cosmic-greeter cosmic-idle cosmic-osd)
+GRANTED=(athanor-bar athanor-dock athanor-launcher athanor-control-center cosmic-greeter athanor-idle cosmic-osd)
 GRANTS_LOG=''
 
 # Reads the compositor's journal since the sign-in into GRANTS_LOG and holds once each of
