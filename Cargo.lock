@@ -815,9 +815,9 @@ name = "athanor-update-notify"
 version = "1.0.0"
 dependencies = [
  "athanor-trust-state",
+ "athanor-unit",
  "chrono",
  "futures-util",
- "landlock",
  "tokio",
  "tracing",
  "tracing-subscriber",
