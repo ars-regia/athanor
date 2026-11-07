@@ -506,3 +506,20 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
         "the name is taken: the start must fail, not queue"
     );
 }
+
+#[tokio::test]
+async fn a_query_the_bus_never_answers_refuses_the_call_instead_of_hanging() {
+    let bus = Bus::start("silent-serving");
+    let query_bus = Bus::start("silent-query");
+    let _daemon = bus.daemon_asking(BAR_CGROUP, &query_bus).await;
+    let proxy = private(&bus.client().await).await;
+    query_bus.freeze();
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        proxy.call::<_, _, (bool, Vec<WireNotification>)>("List", &()),
+    )
+    .await
+    .expect("the call must be answered, not left waiting")
+    .expect_err("refused");
+    assert!(err.to_string().contains("AccessDenied"), "{err}");
+}

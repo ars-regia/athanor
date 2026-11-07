@@ -38,6 +38,7 @@ pub async fn start(
         zbus::Error::Failure(format!("cannot read the do-not-disturb switch: {err}"))
     })?;
     let state = Arc::new(Mutex::new(State::new(Store::new(dnd), config.state_dir)));
+    let query = query.build().await?;
     let conn = builder
         .serve_at(
             NOTIFICATIONS_PATH,
@@ -50,9 +51,10 @@ pub async fn start(
             Private {
                 state,
                 bar: config.bar,
+                query: query.clone(),
             },
         )?
-        .serve_at(WATCHER_PATH, Watcher::new(query.build().await?))?
+        .serve_at(WATCHER_PATH, Watcher::new(query))?
         .build()
         .await?;
     watcher::follow_owners(&conn).await?;

@@ -5,7 +5,7 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -295,22 +295,39 @@ impl Notifications {
     ) -> zbus::Result<()>;
 }
 
+/// Bound on the one question to the bus daemon that admits a caller.
+const ASK: Duration = Duration::from_secs(2);
+
 pub struct Private {
     pub state: Shared,
     pub bar: BarUnit,
+    /// The query connection: it serves nothing, subscribes to no signal and owns no name, so
+    /// the reply to the credentials call is never queued behind the calls this object is
+    /// answering (issue #1035).
+    pub query: Connection,
 }
 
 impl Private {
     /// The caller's unique name, once admitted: `list` records it as the private signals'
     /// destination.
-    async fn admit(&self, header: &Header<'_>, conn: &Connection) -> fdo::Result<OwnedUniqueName> {
+    async fn admit(&self, header: &Header<'_>) -> fdo::Result<OwnedUniqueName> {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
-        let credentials = DBusProxy::new(conn)
-            .await?
-            .get_connection_credentials(sender.clone().into())
-            .await?;
+        let credentials = match tokio::time::timeout(
+            ASK,
+            DBusProxy::new(&self.query).await?.get_connection_credentials(sender.clone().into()),
+        )
+        .await
+        {
+            Ok(credentials) => credentials?,
+            Err(_) => {
+                tracing::warn!(%sender, "the bus did not give the caller's credentials in time: refused");
+                return Err(fdo::Error::AccessDenied(
+                    "the bus did not give the caller's credentials in time".into(),
+                ));
+            }
+        };
         let pid = credentials.process_id().ok_or_else(|| {
             fdo::Error::AccessDenied("the bus gave no process id for the caller".into())
         })?;
@@ -333,9 +350,8 @@ impl Private {
     async fn list(
         &self,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<(bool, Vec<WireNotification>)> {
-        let sender = self.admit(&header, conn).await?;
+        let sender = self.admit(&header).await?;
         let mut state = lock(&self.state);
         state.bar_destination = Some(sender);
         let (now, dnd) = (state.now_ms(), state.store.dnd());
@@ -357,7 +373,7 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let reason = match reason {
             1 => Reason::Expired,
             2 => Reason::Dismissed,
@@ -384,7 +400,7 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let resident = {
             let state = lock(&self.state);
             let held = state
@@ -419,9 +435,8 @@ impl Private {
         &self,
         on: bool,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let mut state = lock(&self.state);
         dnd::save(&state.state_dir, on)
             .map_err(|err| fdo::Error::IOError(format!("cannot keep the switch: {err}")))?;
