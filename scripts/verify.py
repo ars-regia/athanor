@@ -4323,7 +4323,6 @@ SESSION_UNITS = {
     "athanor-desktop.service": ("step", False, "target"),
     "athanor-skel-sync.service": ("step", False, "target"),
     "athanor-appearance-reset.service": ("step", False, "preset"),
-    "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
     # The own compositor (SN15): athanor-sulphur-session starts it and waits on it, and its
@@ -4380,7 +4379,6 @@ SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
         "SN13 step 1 does not list it",
     ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
-    ("cosmic-bg.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("athanor-launcher.service", ACTIVATED_INSTALL):

@@ -1,13 +1,14 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        32%{?dist}
+Release:        33%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 Requires:       systemd
-Requires:       cosmic-bg
+# The wallpaper since SD22 step 2 (doc_session_daemons.md), in place of cosmic-bg.
+Requires:       athanor-wallpaper
 Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
@@ -40,11 +41,15 @@ install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-s
 /usr/lib/systemd/user/athanor-appearance-reset.service
 /usr/lib/systemd/user-preset/80-athanor-system-services.preset
 /usr/libexec/athanor-appearance-reset
-/usr/lib/systemd/user/cosmic-bg.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.1-33
+- cosmic-bg leaves (doc_session_daemons.md, SD22 step 2): cosmic-bg.service is no longer
+  shipped, athanor-session.target no longer wants it, and the package requires
+  athanor-wallpaper in place of cosmic-bg. athanor-wallpaper is enabled by its own preset.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.1-32
 - The readiness gate's ExecStop= unsets only the names of the display, WAYLAND_DISPLAY,
   DISPLAY, XDG_SESSION_TYPE and XDG_SESSION_CLASS, so the user manager keeps its LANG after
