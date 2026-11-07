@@ -494,6 +494,7 @@ async fn a_second_daemon_on_the_same_bus_fails_to_start() {
     let _daemon = bus.daemon(APP_CGROUP).await;
     let second = athanor_shelld::server::start(
         bus.builder(),
+        bus.builder(),
         athanor_shelld::server::Config {
             state_dir: bus.dir.join("state"),
             bar: athanor_shelld::sender::BarUnit::from_proc(),

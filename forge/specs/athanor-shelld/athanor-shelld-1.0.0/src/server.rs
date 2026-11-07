@@ -28,7 +28,12 @@ pub struct Config {
     pub bar: BarUnit,
 }
 
-pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Connection> {
+/// `query` builds the second connection, the one the watcher asks the bus through (issue #1035).
+pub async fn start(
+    builder: Builder<'_>,
+    query: Builder<'_>,
+    config: Config,
+) -> zbus::Result<Connection> {
     let dnd = dnd::load(&config.state_dir).map_err(|err| {
         zbus::Error::Failure(format!("cannot read the do-not-disturb switch: {err}"))
     })?;
@@ -47,7 +52,7 @@ pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Connect
                 bar: config.bar,
             },
         )?
-        .serve_at(WATCHER_PATH, Watcher::default())?
+        .serve_at(WATCHER_PATH, Watcher::new(query.build().await?))?
         .build()
         .await?;
     watcher::follow_owners(&conn).await?;

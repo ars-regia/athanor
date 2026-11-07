@@ -59,6 +59,7 @@ impl Bus {
         fs::create_dir_all(&state_dir).expect("state dir");
         server::start(
             self.builder(),
+            self.builder(),
             Config {
                 state_dir,
                 bar: BarUnit::with_proc_root(BAR_UNIT, proc_root),
