@@ -3,7 +3,8 @@
 //! [`logic::RATE_LIMIT`] calls a second from one sender are dropped, and each caller is logged
 //! once by its unique name and user. A method only hands its key
 //! to the core and returns: it awaits nothing, on any connection. The core's queue holds
-//! [`KEYS`] keys: past that, while the core is behind, a key is dropped, not held.
+//! [`KEYS`] keys: past that, while the core is behind, a key is dropped here.
+//! The core holds keys only until the audio state settles.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};

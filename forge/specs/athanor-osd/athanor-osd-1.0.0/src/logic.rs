@@ -25,8 +25,9 @@ pub const ANNOUNCE_AFTER: Duration = Duration::from_millis(300);
 /// yet (OD6, "each key acts on the state it sees").
 pub const PENDING_FOR: Duration = Duration::from_secs(1);
 /// How long a key waits for the audio model's first settled state before it acts on the state
-/// as it is (OD13). The unit restarts after 100 ms and the next key within 1 s of a kill shows
-/// its overlay (ST5), so the wait leaves about 400 ms for the start itself.
+/// as it is (OD13). The bound runs from the first key of a batch of held keys, not per restart.
+/// The unit restarts after 100 ms and the next key within 1 s of a kill shows its overlay
+/// (ST5), so the wait leaves about 400 ms for the start itself.
 pub const SETTLE_WAIT: Duration = Duration::from_millis(500);
 /// More calls than this within [`RATE_WINDOW`] from one sender are dropped (OD4).
 pub const RATE_LIMIT: u32 = 30;
@@ -733,9 +734,12 @@ mod tests {
             "no device: nothing"
         );
         assert!(core.held.is_empty());
-        // Past the wait a key is no longer held.
+        // The batch is over: a key that comes while the state is still unsettled starts a
+        // fresh hold of its own, with a fresh bound.
         let later = now + SETTLE_WAIT;
-        assert!(core.key(Key::VolumeUp, &state(40.0, false), later).len() > 1);
+        assert!(core.key(Key::VolumeUp, &unsettled, later).is_empty());
+        assert_eq!(core.held, [Key::VolumeUp]);
+        assert_eq!(core.deadline(), Some(later + SETTLE_WAIT));
     }
 
     #[test]
@@ -746,5 +750,42 @@ mod tests {
             core.key(Key::VolumeUp, &AudioState::default(), now);
         }
         assert_eq!(core.held.len(), bus::KEYS);
+    }
+
+    #[test]
+    fn held_keys_act_on_an_unsettled_state_that_has_a_device() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        let unsettled = AudioState {
+            settled: false,
+            ..state(40.0, false)
+        };
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        assert!(core.tick(&unsettled, now).is_empty(), "not yet");
+        let effects = core.tick(&unsettled, now + SETTLE_WAIT);
+        assert_eq!(commands(&effects), [45, 50].map(volume).to_vec());
+        assert!(core.held.is_empty());
+        assert_eq!(core.deadline(), core.hide_at.min(core.announce_at));
+    }
+
+    #[test]
+    fn a_key_after_the_state_settled_goes_after_the_held_ones() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        assert!(core
+            .key(Key::VolumeUp, &AudioState::default(), now)
+            .is_empty());
+        assert!(core
+            .key(Key::VolumeUp, &AudioState::default(), now)
+            .is_empty());
+        // The state settled, but `observe` has not run: the new key replays the held ones first.
+        let effects = core.key(Key::VolumeDown, &state(40.0, false), now);
+        assert_eq!(
+            commands(&effects),
+            [45, 50, 45].map(volume).to_vec(),
+            "two held ups, then the new down"
+        );
+        assert!(core.held.is_empty());
     }
 }
