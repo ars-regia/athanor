@@ -19,6 +19,7 @@ on:
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
       - "forge/specs/athanor-dock/**"
+      - "forge/specs/athanor-osd/**"
       - "system/athanor-search/**"
       - "system/athanor-preview/**"
       - "system/athanor-preview-render/**"
@@ -214,6 +215,8 @@ jobs:
         run: bash forge/test/shell/rig.sh toolkit-picture
       - name: Tooltip and menu popups of a layer surface
         run: bash forge/test/shell/rig.sh toolkit-popup
+      - name: A layer surface's motion on its frame callbacks
+        run: bash forge/test/shell/rig.sh toolkit-motion
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

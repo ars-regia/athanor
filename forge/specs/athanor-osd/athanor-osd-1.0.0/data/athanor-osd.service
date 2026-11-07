@@ -1,0 +1,49 @@
+[Unit]
+Description=Athanor on-screen display
+# D-Bus-activated, so no [Install] (doc_session.md, SN3). Its bus service file comes with the
+# retirement step of doc_osd.md (OD15, OD17 step 5): until then nothing starts it, and a key
+# never shows two overlays while cosmic-osd runs.
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+# The surface class of doc_session.md, SN6: past the limit it stays down until the next login.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+# Ready once it owns os.athanor.Osd1 (OD4).
+Type=dbus
+BusName=os.athanor.Osd1
+ExecStart=/usr/bin/athanor-osd
+Restart=on-failure
+# At once, so the next key within a second of a crash shows its overlay (ST5, doc_osd.md OD13).
+RestartSec=100ms
+Slice=session.slice
+# fontconfig's cache, inside the Landlock ruleset (OD12).
+Environment=XDG_CACHE_HOME=%C/athanor-osd
+CacheDirectory=athanor-osd
+# OD13 estimates 32 MB PSS at rest; MemoryHigh throttles well above it and MemoryMax caps a
+# font cache or an icon theme loaded at once, until ADR-0068's measurement sets the ceiling.
+MemoryHigh=48M
+MemoryMax=96M
+# "dconf" because the overlay reads the appearance and the reduced-motion preference through
+# GSettings, which maps dconf's shared-memory flag beneath %t/dconf read-write to learn that a
+# key changed, as xdg-desktop-portal-athanor.service explains. Landlock grants the same path.
+RuntimeDirectory=dconf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, D-Bus, the sound server and journald, all over Unix sockets.
+RestrictAddressFamilies=AF_UNIX

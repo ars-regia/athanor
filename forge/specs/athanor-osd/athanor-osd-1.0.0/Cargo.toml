@@ -1,0 +1,24 @@
+[package]
+name = "athanor-osd"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The Athanor on-screen display: the volume, mute and microphone keys, carried out and shown on a Sal layer surface"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+# doc_osd.md OD2: Sal, the models, the compositor client without GTK, the style without GTK,
+# the translations, the unit's confinement, Tokio and zbus. GLib's main context is the one the
+# compositor client already runs on (the toolkit dock's `glib`); no gtk4, gdk4 or
+# gtk4-layer-shell in the tree (`verify.py osd-no-gtk`).
+[dependencies]
+athanor-i18n = { path = "../../../../system/athanor-i18n" }
+athanor-sal = { path = "../../../../system/athanor-sal" }
+athanor-services = { path = "../../../../system/athanor-services" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["calloop"] }
+athanor-unit = { path = "../../../../system/athanor-unit" }
+glib = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+wayland-client = { workspace = true }
+zbus = { workspace = true }
