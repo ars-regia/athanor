@@ -490,6 +490,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-edid"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
