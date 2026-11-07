@@ -363,6 +363,15 @@ item = "UT1"
 purpose = "System image updates, trust state and the update notifier"
 
 [[component]]
+path = "forge/specs/athanor-wallpaper"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD22"
+purpose = "The wallpaper package: the daemon, its user unit and preset, and the decoder's socket and templated unit"
+
+[[component]]
 path = "forge/specs/athanor-xdg-desktop-portal-athanor"
 kind = "rpm spec"
 area = "shell"

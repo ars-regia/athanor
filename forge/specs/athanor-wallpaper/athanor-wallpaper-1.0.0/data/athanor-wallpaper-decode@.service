@@ -1,0 +1,44 @@
+[Unit]
+Description=Athanor wallpaper decoder, one connection
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_session_daemons.md
+# Static, started by athanor-wallpaper-decode.socket for each connection (doc_session_daemons.md,
+# SD17). The program admits only athanor-wallpaper.service's /usr/bin/athanor-wallpaper as its
+# peer, through SO_PEERPIDFD, decodes the one picture it is handed with glycin in bubblewrap and
+# answers the pixels scaled to each size asked.
+# Unloaded once it ends, failed or not, as the launcher's transient decodes are (--collect).
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/libexec/athanor-preview-render wallpaper
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+# The properties of athanor-preview's image decode (doc_launcher.md, LA9;
+# system/athanor-preview/src/render.rs, COMMON and Kind::Image), the common set first: nothing
+# of the user's, nothing of /run (the buses and every daemon socket live there,
+# $XDG_RUNTIME_DIR too), no network, no swap. The picture arrives as a descriptor.
+ProtectHome=yes
+# On ostree /home and /root are links to /var/home and /var/roothome.
+InaccessiblePaths=-/var/home -/var/roothome
+ProtectSystem=strict
+NoNewPrivileges=yes
+PrivateNetwork=yes
+PrivateIPC=yes
+TemporaryFileSystem=/tmp
+TemporaryFileSystem=/run
+RuntimeMaxSec=5
+MemoryMax=512M
+MemorySwapMax=0
+TimeoutStopSec=1
+# The image branch: glycin starts bubblewrap, which needs user namespaces, netlink and the
+# mount calls, and brings up its sandbox's loopback over rtnetlink.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallFilter=@system-service @mount @privileged
+# glycin and bubblewrap need connect(2), so sockets are hidden by path: the nix daemon's is
+# the one filesystem socket outside /run.
+InaccessiblePaths=-/nix/var/nix/daemon-socket -/var/nix/var/nix/daemon-socket
+# A fixed value, since a static unit cannot count the cores: the launcher's 32 + 4 per core at
+# 64 cores. The loaders' thread pool sizes itself by the cores; 44 was the smallest that worked
+# on 16 (render.rs).
+TasksMax=288

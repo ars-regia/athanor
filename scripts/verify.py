@@ -4311,6 +4311,7 @@ SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
     "athanor-update-notify.service": ("surface", False, "preset"),
@@ -4334,6 +4335,8 @@ SESSION_TARGET = "athanor-session.target"
 NOT_SESSION_UNITS = {
     "athanor-launcher-rates.service": "the launcher's exchange-rate job, started by its timer",
     "athanor-launcher-rates.timer": "the launcher's exchange-rate timer, under timers.target",
+    "athanor-wallpaper-decode.socket": "the wallpaper decoder's static socket, wanted by athanor-wallpaper.service (doc_session_daemons.md, SD17)",
+    "athanor-wallpaper-decode@.service": "the wallpaper decoder, one instance per connection to its socket",
 }
 # SN6's policy per class: each setting's required value, None where the unit must not set it.
 # A time span is compared in seconds. Restart= unset is Restart=no (systemd.service(5)).
