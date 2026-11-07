@@ -7,10 +7,15 @@
 //! vendor override. The reset goes through the dconf service on the bus.
 
 use std::fmt;
+use std::time::Duration;
 
 use gio::prelude::*;
 
 pub const INTERFACE: &str = "org.gnome.desktop.interface";
+
+/// How long the reset may take, dconf's service included, before the daemon gives up on it
+/// for this start. The thread that waits on dconf is left behind; nothing else waits for it.
+pub const RESET_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Each key, and the value cosmic-settings-daemon wrote into it.
 pub const COSMIC_VALUES: [(&str, &str); 3] = [
@@ -25,8 +30,17 @@ pub enum Error {
     NoSchema,
     /// The schema has no such key: GIO would abort on it.
     NoKey(&'static str),
-    /// The key still holds the daemon's value after the reset was written.
-    NotReset(&'static str),
+    /// The default backend is not dconf's, so a reset would change nothing the person sees.
+    NotDconf(String),
+    /// `failed` still holds the daemon's value after the reset was written; `done` were reset.
+    NotReset {
+        failed: &'static str,
+        done: Vec<&'static str>,
+    },
+    /// The reset did not end within [`RESET_TIMEOUT`].
+    TimedOut,
+    /// The thread of the reset was cancelled.
+    Stopped,
 }
 
 impl fmt::Display for Error {
@@ -34,15 +48,24 @@ impl fmt::Display for Error {
         match self {
             Error::NoSchema => write!(f, "the schema {INTERFACE} is not installed"),
             Error::NoKey(key) => write!(f, "the schema {INTERFACE} has no key {key}"),
-            Error::NotReset(key) => write!(f, "{key} still holds cosmic-settings-daemon's value"),
+            Error::NotDconf(backend) => {
+                write!(f, "the GSettings backend is {backend}, not dconf's")
+            }
+            Error::NotReset { failed, done } => write!(
+                f,
+                "{failed} still holds cosmic-settings-daemon's value; reset: {done:?}"
+            ),
+            Error::TimedOut => write!(f, "the reset did not end within {RESET_TIMEOUT:?}"),
+            Error::Stopped => write!(f, "the reset's thread was cancelled"),
         }
     }
 }
 
 impl std::error::Error for Error {}
 
-/// The GNOME interface settings on the default backend, dconf in a session.
+/// The GNOME interface settings on the default backend, which must be dconf's.
 pub fn open() -> Result<gio::Settings, Error> {
+    dconf(&gio::SettingsBackend::default())?;
     let schema = gio::SettingsSchemaSource::default()
         .and_then(|source| source.lookup(INTERFACE, true))
         .ok_or(Error::NoSchema)?;
@@ -51,6 +74,31 @@ pub fn open() -> Result<gio::Settings, Error> {
         None::<&gio::SettingsBackend>,
         None,
     ))
+}
+
+/// `backend` is dconf's: `GSETTINGS_BACKEND=memory` would make the reset a silent no-op.
+fn dconf(backend: &gio::SettingsBackend) -> Result<(), Error> {
+    match backend.type_().name() {
+        "DConfSettingsBackend" => Ok(()),
+        other => Err(Error::NotDconf(other.to_owned())),
+    }
+}
+
+/// [`open`] and [`reset`] on a blocking thread, given up after `limit`, so neither systemd's
+/// readiness nor the battery notices wait on dconf (maintainer decision, 2026-11-07).
+pub async fn reset_bounded(limit: Duration) -> Result<Vec<&'static str>, Error> {
+    bounded(limit, || open().and_then(|settings| reset(&settings))).await
+}
+
+async fn bounded<T: Send + 'static>(
+    limit: Duration,
+    job: impl FnOnce() -> Result<T, Error> + Send + 'static,
+) -> Result<T, Error> {
+    match tokio::time::timeout(limit, tokio::task::spawn_blocking(job)).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err(Error::Stopped),
+        Err(_) => Err(Error::TimedOut),
+    }
 }
 
 /// Resets each key of [`COSMIC_VALUES`] whose user value is the daemon's, waits for the
@@ -79,12 +127,15 @@ pub fn reset(settings: &gio::Settings) -> Result<Vec<&'static str>, Error> {
     // GSettings reports no failed write: one dconf refused leaves the old value in place,
     // which the second read finds.
     gio::Settings::sync();
-    match COSMIC_VALUES
-        .iter()
-        .find(|(key, cosmic)| reset.contains(key) && holds(key, cosmic))
-    {
-        Some((key, _)) => Err(Error::NotReset(key)),
-        None => Ok(reset),
+    let (failed, done): (Vec<&'static str>, Vec<&'static str>) =
+        reset.into_iter().partition(|key| {
+            COSMIC_VALUES
+                .iter()
+                .any(|(k, cosmic)| k == key && holds(key, cosmic))
+        });
+    match failed.first() {
+        Some(failed) => Err(Error::NotReset { failed, done }),
+        None => Ok(done),
     }
 }
 
@@ -124,6 +175,27 @@ mod tests {
         settings
             .set_value(key, &glib::Variant::from(value))
             .expect("writable");
+    }
+
+    #[test]
+    fn a_backend_other_than_dconf_is_refused() {
+        assert_eq!(
+            dconf(&gio::memory_settings_backend_new()),
+            Err(Error::NotDconf("GMemorySettingsBackend".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_reset_that_hangs_is_given_up_after_its_limit() {
+        let started = std::time::Instant::now();
+        let hung = bounded(Duration::from_millis(50), || {
+            std::thread::sleep(Duration::from_secs(2));
+            Ok(())
+        });
+        assert_eq!(hung.await, Err(Error::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(1), "not waited for");
+        let quick = bounded(Duration::from_secs(1), || Ok(vec!["icon-theme"]));
+        assert_eq!(quick.await, Ok(vec!["icon-theme"]));
     }
 
     #[test]

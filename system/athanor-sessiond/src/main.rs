@@ -1,5 +1,6 @@
-//! `athanor-sessiond` (`doc_session_daemons.md` SD1): confines itself, resets COSMIC's
-//! appearance values (SD16), then raises the battery notices (SD14) until the bus ends.
+//! `athanor-sessiond` (`doc_session_daemons.md` SD1): confines itself, tells systemd it is
+//! ready, then raises the battery notices (SD14) until the bus ends, and resets COSMIC's
+//! appearance values (SD16) beside them.
 
 use std::env;
 use std::error::Error;
@@ -18,11 +19,29 @@ fn confine_self(grants: &confine::Grants) -> Result<(), Box<dyn Error>> {
     grants.apply()
 }
 
+/// SD16's reset, given up after `appearance::RESET_TIMEOUT`. A failure is logged as an error
+/// and the daemon keeps running (maintainer decision, 2026-11-07).
+async fn reset_appearance() {
+    match appearance::reset_bounded(appearance::RESET_TIMEOUT).await {
+        Ok(keys) => {
+            for key in keys {
+                tracing::info!(
+                    key,
+                    "the key held cosmic-settings-daemon's value: reset to the default"
+                );
+            }
+        }
+        Err(err) => tracing::error!(%err, "the appearance values were not reset"),
+    }
+}
+
 async fn serve(catalog: &Catalog) -> Result<(), Box<dyn Error>> {
     let system = Connection::system().await?;
     // Signals on one connection, the calls the loop awaits on another (#1035).
     let signals = Connection::session().await?;
     let query = Connection::session().await?;
+    // Beside the notices, never before them: a hung dconf delays neither.
+    tokio::spawn(reset_appearance());
     bus::run(
         &tokio::runtime::Handle::current(),
         system,
@@ -50,19 +69,6 @@ fn main() -> ExitCode {
         tracing::error!(%err, "Landlock cannot be applied; refusing to run unconfined");
         return ExitCode::FAILURE;
     }
-    // A failed reset is logged and the daemon goes on: its battery notices do not wait on dconf.
-    match appearance::open().and_then(|settings| appearance::reset(&settings)) {
-        Ok(keys) => {
-            for key in keys {
-                tracing::info!(
-                    key,
-                    "the key held cosmic-settings-daemon's value: reset to the default"
-                );
-            }
-        }
-        Err(err) => tracing::error!(%err, "the appearance values were not reset"),
-    }
-    // Ready once the reset is written, so the bar and the dock read the defaults.
     if let Err(err) = notify::notify_ready() {
         tracing::warn!(%err, "systemd was not told the daemon is ready");
     }
@@ -76,7 +82,10 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match runtime.block_on(serve(&catalog)) {
+    let served = runtime.block_on(serve(&catalog));
+    // A reset still waiting on dconf must not hold the exit, as dropping the runtime would.
+    runtime.shutdown_background();
+    match served {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             tracing::error!(%err, "the battery notices stopped");
