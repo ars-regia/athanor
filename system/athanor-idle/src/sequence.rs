@@ -9,6 +9,7 @@
 //! - one `Sequence` lives as long as the daemon, so the `attempt` counter never restarts;
 //! - a timer for which the sequence emitted `Cancel` must never deliver its event late.
 
+use crate::timers::Hold;
 use std::time::Duration;
 
 /// The fade to opaque black (SD4, "Blank").
@@ -52,8 +53,10 @@ impl Hint {
 pub enum Event {
     /// `idled` of the blank notification; `reduced_motion` is `enable-animations` false.
     BlankIdled { hint: Hint, reduced_motion: bool },
-    /// `idled` of the suspend notification.
-    SuspendIdled,
+    /// `idled` of the suspend notification; `hold` is what the inhibitor table holds now. An
+    /// `idled` already queued when an inhibitor came, before the notification was removed,
+    /// suspends nothing (SD5).
+    SuspendIdled { hold: Hold },
     /// `resumed` of the blank notification.
     Resumed,
     /// The blank notification was destroyed without a `resumed` (an inhibitor appeared, or it
@@ -158,7 +161,8 @@ impl Sequence {
 
     pub fn handle(&mut self, event: Event) -> Vec<Action> {
         match event {
-            Event::SuspendIdled => vec![Action::Suspend],
+            Event::SuspendIdled { hold: Hold::None } => vec![Action::Suspend],
+            Event::SuspendIdled { .. } => Vec::new(),
             Event::BlankIdled {
                 hint,
                 reduced_motion,
@@ -506,12 +510,33 @@ mod tests {
         assert!(s.handle(BLANK).is_empty());
     }
 
+    const IDLE: Event = Event::SuspendIdled { hold: Hold::None };
+
+    #[test]
+    fn a_held_inhibitor_suspends_nothing_and_keeps_the_blank() {
+        let mut s = Sequence::new();
+        for hold in [Hold::SuspendOnly, Hold::All] {
+            assert!(
+                s.handle(Event::SuspendIdled { hold }).is_empty(),
+                "{hold:?}"
+            );
+        }
+        assert_eq!(s.handle(BLANK)[0], Action::ShowOverlay { fade: FADE });
+        assert!(s
+            .handle(Event::SuspendIdled {
+                hold: Hold::SuspendOnly
+            })
+            .is_empty());
+        assert_eq!(s.phase(), Phase::Fading);
+        assert_eq!(s.handle(IDLE), vec![Action::Suspend]);
+    }
+
     #[test]
     fn suspend_is_independent_of_the_blank() {
         let mut s = Sequence::new();
-        assert_eq!(s.handle(Event::SuspendIdled), vec![Action::Suspend]);
+        assert_eq!(s.handle(IDLE), vec![Action::Suspend]);
         s.handle(BLANK);
-        assert_eq!(s.handle(Event::SuspendIdled), vec![Action::Suspend]);
+        assert_eq!(s.handle(IDLE), vec![Action::Suspend]);
         assert_eq!(s.phase(), Phase::Fading);
     }
 
@@ -519,7 +544,7 @@ mod tests {
     fn suspend_while_off_with_the_lock_pending_leaves_the_lock_alone() {
         let mut s = Sequence::new();
         run(&mut s, &[BLANK, Event::FadeDone]);
-        assert_eq!(s.handle(Event::SuspendIdled), vec![Action::Suspend]);
+        assert_eq!(s.handle(IDLE), vec![Action::Suspend]);
         assert_eq!(s.phase(), Phase::Off);
         assert_eq!(s.handle(DUE), req(1));
     }

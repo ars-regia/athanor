@@ -48,6 +48,7 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
     ClientData, ClientId, DisconnectReason, GlobalId,
 };
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
@@ -81,7 +82,7 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
@@ -515,7 +516,9 @@ impl State {
         })
     }
 
-    /// Maps `output` to the right of the outputs already in the space.
+    /// Maps `output` to the right of the outputs already in the space, or at the origin when
+    /// that would take it past `REACH`, the farthest a configuration may place an output; there
+    /// it overlaps what is there, as outputs a configuration places may.
     pub fn map_output(&mut self, output: &Output) {
         let x = self
             .space
@@ -525,6 +528,11 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        let reach = crate::output_management::REACH;
+        let area = self.space.output_geometry(output);
+        if area.is_some_and(|area| area.loc.x + area.size.w > reach) {
+            self.space.map_output(output, (0, 0));
+        }
         if let Some(shown) = self.space.output_geometry(output) {
             let known = output.user_data().get_or_insert(KnownArea::default);
             known.0.set(shown);
@@ -533,11 +541,23 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and its windows join the first
-    /// output's active workspace, centred on that output when it does not show them.
+    /// The output `wl_output` names, while it is shown: a client may still name one disabled
+    /// or unplugged, whose global is gone, and none is then given.
+    pub fn shown_output(&self, wl_output: &WlOutput) -> Option<Output> {
+        Output::from_resource(wl_output).filter(|output| self.space.outputs().any(|o| o == output))
+    }
+
+    /// An output that goes: its layer surfaces are closed, its lock surface is forgotten, so
+    /// that it shows only the background if it comes back while locked, and its windows join
+    /// the first output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
         self.close_layers(output);
+        if let Some(lock) = &mut self.lock {
+            lock.forget_output(output);
+            // The keyboard leaves a lock surface the output took with it.
+            self.set_keyboard_focus(None);
+        }
         self.space.unmap_output(output);
         self.fit_to_outputs();
         self.workspaces_changed();
@@ -1496,16 +1516,34 @@ pub fn build_output(
     output
 }
 
-/// Offers `output` to the clients; the global is kept in its user data.
+/// Offers `output` to the clients; the global is kept in its user data. One it had still is
+/// withdrawn first, so that no client sees two globals for one output.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
+    let slot = output.user_data().get_or_insert(OutputGlobal::default);
+    if slot.0.borrow().is_some() {
+        tracing::warn!(output = output.name(), "an output was offered twice");
+        withdraw_output(dh, output);
+    }
     let global = output.create_global::<State>(dh);
-    output
-        .user_data()
-        .insert_if_missing(|| OutputGlobal(global));
+    *slot.0.borrow_mut() = Some(global);
 }
 
-/// The global of an output, kept in its user data: removed with the output.
-pub struct OutputGlobal(pub GlobalId);
+/// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a
+/// configuration gets a new one when it is enabled again (`publish_output`).
+pub fn withdraw_output(dh: &DisplayHandle, output: &Output) {
+    output.leave_all();
+    let global = output
+        .user_data()
+        .get::<OutputGlobal>()
+        .and_then(|slot| slot.0.borrow_mut().take());
+    if let Some(global) = global {
+        dh.remove_global::<State>(global);
+    }
+}
+
+/// The global of an output, kept in its user data while the output is offered.
+#[derive(Default)]
+pub struct OutputGlobal(RefCell<Option<GlobalId>>);
 
 /// Dispatches the clients' requests. The callback owns the display: it dispatches without the
 /// unsafe access a source holding it would need.

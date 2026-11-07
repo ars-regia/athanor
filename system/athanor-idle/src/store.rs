@@ -4,7 +4,7 @@ use crate::inhibitors::{truncate, Inhibitor, Inhibitors, Kind, MAX_ENTRIES, MAX_
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{fs, io};
 
 #[derive(Serialize, Deserialize)]
@@ -28,16 +28,6 @@ struct File {
     version: u32,
     inhibitors: Vec<Entry>,
 }
-
-/// `$XDG_RUNTIME_DIR/athanor-idle`, the directory of `inhibitors.json` and the one the daemon
-/// may write (SD17), created with mode 0700. One that exists already must be a directory, not
-/// a link, owned by the owner of `runtime` and of mode 0700, or it is refused: another process
-/// of the user could otherwise point the daemon's writes elsewhere.
-pub fn runtime_dir(runtime: &Path) -> io::Result<PathBuf> {
-    private_dir(runtime, "athanor-idle")
-}
-
-pub use athanor_unit::dirs::private_dir;
 
 /// The largest file read back (proposed, revision 3).
 const MAX_FILE: u64 = 64 * 1024;

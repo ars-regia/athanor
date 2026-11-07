@@ -40,6 +40,11 @@ impl Lock {
 }
 
 impl Lock {
+    /// `output` is gone or disabled: the surface the locker gave it is no longer shown there.
+    pub fn forget_output(&mut self, output: &Output) {
+        self.surfaces.retain(|(on, _)| on != output);
+    }
+
     /// Each lock surface takes the size of its output, after the outputs were laid out again.
     pub fn resize(&self, space: &smithay::desktop::Space<smithay::desktop::Window>) {
         for (output, surface) in self.surfaces.iter().filter(|(_, surface)| surface.alive()) {
@@ -104,9 +109,9 @@ impl SessionLockHandler for State {
     }
 
     /// Sized to the output, before Smithay sends the first configure; the first lock surface
-    /// takes the keyboard.
+    /// takes the keyboard. One for an output no longer shown is never configured nor focused.
     fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
-        let Some(output) = Output::from_resource(&output) else {
+        let Some(output) = self.shown_output(&output) else {
             return;
         };
         // Only the surfaces of the lock in force: a refused lock's are never shown.
