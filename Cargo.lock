@@ -606,6 +606,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-osd"
+version = "1.0.0"
+dependencies = [
+ "athanor-i18n",
+ "athanor-sal",
+ "athanor-services",
+ "athanor-style",
+ "athanor-sulphur-client",
+ "athanor-unit",
+ "glib",
+ "tokio",
+ "tracing",
+ "wayland-client",
+ "zbus",
+]
+
+[[package]]
 name = "athanor-portal"
 version = "1.0.0"
 
