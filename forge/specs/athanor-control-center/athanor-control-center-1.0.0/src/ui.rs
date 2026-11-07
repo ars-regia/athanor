@@ -61,7 +61,13 @@ pub fn start(
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
     let client = match Client::connect(&display) {
-        Ok(client) => Some(Rc::new(client)),
+        Ok(client) => {
+            // The focused window's output, where the panel opens.
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(Rc::new(client))
+        }
         Err(err) => {
             tracing::error!(error = %err, "no compositor client; the panel opens on the first output");
             None

@@ -38,7 +38,12 @@ fn main() -> ExitCode {
         .map_err(|err| err.to_string())
         .and_then(|connection| Client::connect_wayland(&connection).map_err(|err| err.to_string()));
     let client = match client {
-        Ok(client) => Some(client),
+        Ok(client) => {
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
         Err(err) => {
             // No windows to list and no secure launch (SH1, BR2): no dock surface at all.
             tracing::error!(error = %err, "no compositor client; the dock shows no surface");

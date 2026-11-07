@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        11%{?dist}
+Release:        12%{?dist}
 Summary:        The Athanor dock
 License:        GPL-3.0-or-later
 
@@ -51,10 +51,15 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-dock
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-dock.mo
 
 %changelog
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-12
 - Landlock grants the dock's writes by descriptors athanor_unit::dirs opened and checked
   (#1052): a directory that is a link or another user's is left out with a warning, and the
   launch directory and dconf are private_dir's, mode 0700.
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- Watch the windows at start: athanor-sulphur-client binds the window globals only for a
+  client that asks for them, and this one reads the running windows, in the GTK and the
+  toolkit dock.
 
 * Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Follow the rename of athanor-toolkit to athanor-sal (ADR-0134): its crate dependency and
