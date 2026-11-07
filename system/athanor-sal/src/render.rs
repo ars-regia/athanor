@@ -570,6 +570,37 @@ pub fn paint<C: Canvas>(
                 let edge = Circle::new(knob.center, knob.radius - 0.5);
                 ctx.stroke_path(&edge.to_path(0.1));
             }
+            // A track from 0 to max, filled with the accent up to the full mark and with the
+            // warning colour beyond it.
+            Kind::Level(level) => {
+                let at = |value: f64| {
+                    let along = (value / level.max) as f32 * r.w;
+                    if ui.rtl {
+                        r.x + r.w - along
+                    } else {
+                        r.x + along
+                    }
+                };
+                let (cy, thick) = (r.y + r.h / 2.0, 4.0);
+                let bar = |from: f64, to: f64| {
+                    let (from, to) = (at(from), at(to));
+                    let rect = crate::widget::Rect {
+                        x: from.min(to),
+                        y: cy - thick / 2.0,
+                        w: (to - from).abs(),
+                        h: thick,
+                    };
+                    rounded(rect, 0.0, thick / 2.0)
+                };
+                ctx.set_paint(color(t.border));
+                ctx.fill_path(&bar(0.0, level.max));
+                if level.value > level.full {
+                    ctx.set_paint(color(t.warning));
+                    ctx.fill_path(&bar(level.full, level.value));
+                }
+                ctx.set_paint(color(t.accent));
+                ctx.fill_path(&bar(0.0, level.value.min(level.full)));
+            }
             Kind::Field(field) | Kind::TextArea(field) => {
                 ctx.set_paint(color(t.on_accent));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
@@ -936,6 +967,38 @@ mod tests {
         assert_ne!(fill, t.surface.0);
         ui.pointer_leave();
         assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
+        Ok(())
+    }
+
+    #[test]
+    fn a_level_is_drawn_in_the_accent_and_in_warning_past_its_full_mark() -> Result<(), Error> {
+        for rtl in [false, true] {
+            let mut ui = crate::Ui::new("Level", crate::Theme::default(), rtl);
+            let id = ui.level(crate::Ui::ROOT, "Volume", 120.0, 100.0, 150.0);
+            let id = id.unwrap_or(crate::Ui::ROOT);
+            let pixmap = render(&mut ui, 1.0)?;
+            let (r, t) = (ui.widget(id).rect, ui.theme.clone());
+            // The colour at `value` along the track, from the start edge of reading.
+            let at = |value: f32| {
+                let along = value / 150.0 * r.w;
+                let x = if rtl { r.x + r.w - along } else { r.x + along };
+                let y = r.y + r.h / 2.0;
+                let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+                pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+            };
+            assert_eq!(at(50.0), t.accent.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(110.0), t.warning.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(135.0), t.border.0.to_vec(), "rtl {rtl}");
+            // At its full mark or under, no warning.
+            assert!(ui.set_level(id, 100.0));
+            let pixmap = render(&mut ui, 1.0)?;
+            let (y, stride) = ((r.y + r.h / 2.0) as usize, 4 * usize::from(pixmap.width()));
+            let row = &pixmap.data_as_u8_slice()[stride * y..][..stride];
+            assert!(
+                row.chunks(4).all(|p| p != t.warning.0),
+                "rtl {rtl}: no warning at 100 of 150"
+            );
+        }
         Ok(())
     }
 
