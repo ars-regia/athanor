@@ -4,6 +4,7 @@
 
 pub mod battery;
 pub mod bus;
+pub mod confine;
 pub mod follow;
 pub mod inhibitors;
 pub mod screensaver;

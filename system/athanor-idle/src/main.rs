@@ -13,13 +13,14 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use athanor_idle::battery::Battery;
+use athanor_idle::confine;
 use athanor_idle::wayland::{Display, Notice, Which};
 use athanor_idle::{
-    bus, choose, follow, screensaver, store, Action, Config, Event, Sequence, Timeouts, Timer,
+    bus, choose, follow, screensaver, Action, Config, Event, Sequence, Timeouts, Timer,
     LOCK_TIMEOUT,
 };
 use athanor_sulphur_client::idle as power_page;
-use athanor_unit::journal;
+use athanor_unit::{journal, sandbox};
 use futures_util::StreamExt;
 use gio::prelude::*;
 use tokio::io::Interest;
@@ -44,12 +45,30 @@ fn main() -> ExitCode {
         tracing::error!("no absolute XDG_RUNTIME_DIR");
         return ExitCode::FAILURE;
     };
+    // Before any GIO object and any thread: GLib's worker threads, zbus and Tokio are confined
+    // from their first instruction (SD17).
+    let confined = sandbox::ensure_single_threaded()
+        .and_then(|()| {
+            let (dir, grants) =
+                confine::daemon(&runtime, power_page::user_dir().as_deref(), |name| {
+                    std::env::var_os(name)
+                })?;
+            grants.apply()?;
+            Ok(dir)
+        });
+    let dir = match confined {
+        Ok(dir) => dir,
+        Err(error) => {
+            tracing::error!(%error, "refusing to run unconfined");
+            return ExitCode::FAILURE;
+        }
+    };
     let (changes, received) = mpsc::unbounded_channel();
     let Some(_watched) = watch(changes) else {
         return ExitCode::FAILURE;
     };
     std::thread::spawn(move || {
-        if let Err(error) = serve(runtime, received) {
+        if let Err(error) = serve(dir, received) {
             tracing::error!(%error, "athanor-idle stopped");
         }
         std::process::exit(1);
@@ -173,11 +192,11 @@ fn watch(changes: UnboundedSender<Prefs>) -> Option<Watched> {
     })
 }
 
-fn serve(runtime: PathBuf, received: UnboundedReceiver<Prefs>) -> Result<(), Box<dyn StdError>> {
+fn serve(dir: PathBuf, received: UnboundedReceiver<Prefs>) -> Result<(), Box<dyn StdError>> {
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
-        .block_on(daemon(runtime, received))
+        .block_on(daemon(dir, received))
 }
 
 /// Which slot of `Driver::deadlines` a timer has.
@@ -324,7 +343,7 @@ impl Driver {
 }
 
 async fn daemon(
-    runtime: PathBuf,
+    dir: PathBuf,
     mut received: UnboundedReceiver<Prefs>,
 ) -> Result<(), Box<dyn StdError>> {
     let session = zbus::connection::Builder::session()?.build().await?;
@@ -336,9 +355,6 @@ async fn daemon(
     let system_watch = zbus::connection::Builder::system()?.build().await?;
     let system = bus::System::new(system_query);
 
-    let dir = store::runtime_dir(&runtime).inspect_err(|error| {
-        tracing::error!(%error, "refusing to start: the runtime directory is not the daemon's");
-    })?;
     let (mut hold, mut ended) =
         screensaver::serve(&session, &session_query, dir.join("inhibitors.json")).await?;
 

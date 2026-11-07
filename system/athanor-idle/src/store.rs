@@ -34,7 +34,12 @@ struct File {
 /// a link, owned by the owner of `runtime` and of mode 0700, or it is refused: another process
 /// of the user could otherwise point the daemon's writes elsewhere.
 pub fn runtime_dir(runtime: &Path) -> io::Result<PathBuf> {
-    let dir = runtime.join("athanor-idle");
+    private_dir(runtime, "athanor-idle")
+}
+
+/// `runtime/name`, created with mode 0700, or checked as [`runtime_dir`] checks its own.
+pub fn private_dir(runtime: &Path, name: &str) -> io::Result<PathBuf> {
+    let dir = runtime.join(name);
     match fs::DirBuilder::new().mode(0o700).create(&dir) {
         Ok(()) => return Ok(dir),
         Err(e) if e.kind() != io::ErrorKind::AlreadyExists => return Err(e),
