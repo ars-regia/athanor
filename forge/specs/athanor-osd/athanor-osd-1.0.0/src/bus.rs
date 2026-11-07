@@ -2,13 +2,14 @@
 //! `ToggleMute` and `ToggleMicMute`. Any peer on the session bus may call; more than
 //! [`logic::RATE_LIMIT`] calls a second from one sender are dropped, and each caller is logged
 //! once by its unique name and user. A method only hands its key
-//! to the core and returns: it awaits nothing, on any connection.
+//! to the core and returns: it awaits nothing, on any connection. The core's queue holds
+//! [`KEYS`] keys: past that, while the core is behind, a key is dropped, not held.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use tokio::runtime::Handle;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{error::TrySendError, Sender};
 use zbus::fdo::DBusProxy;
 use zbus::message::Header;
 use zbus::names::OwnedUniqueName;
@@ -24,9 +25,13 @@ const ASK: Duration = Duration::from_secs(2);
 /// Callers checked once each; past this many the set starts again, so a peer that opens
 /// connection after connection cannot grow it.
 const CHECKED: usize = 256;
+/// The keys queued for the core at most.
+pub const KEYS: usize = 16;
 
 struct Osd {
-    keys: UnboundedSender<Key>,
+    keys: Sender<Key>,
+    /// The queue was full at the last key: the drop was logged.
+    full: bool,
     rate: Rate,
     /// Serves nothing, subscribes to nothing and owns no name: the caller checks ask the bus
     /// on it, so a reply is never awaited on the connection that serves (issue #1035).
@@ -78,9 +83,37 @@ impl Osd {
             self.runtime
                 .spawn(log_caller(self.query.clone(), sender));
         }
-        if self.keys.send(key).is_err() {
-            tracing::error!(?key, "the overlay's core stopped; the key is lost");
+        match queue(&self.keys, key, &mut self.full) {
+            Queued::Yes | Queued::Dropped { first: false } => {}
+            Queued::Dropped { first: true } => {
+                tracing::warn!(limit = KEYS, "the core is behind; keys are dropped until it catches up");
+            }
+            Queued::Closed => tracing::error!(?key, "the overlay's core stopped; the key is lost"),
         }
+    }
+}
+
+/// What became of a key offered to the core.
+#[derive(Debug, PartialEq, Eq)]
+enum Queued {
+    Yes,
+    /// The queue is full; `first` when the key before was queued.
+    Dropped { first: bool },
+    Closed,
+}
+
+/// Queues `key` without waiting, or drops it when the queue is full: a method never blocks
+/// the connection that serves, and a burst holds no more than the queue.
+fn queue(keys: &Sender<Key>, key: Key, full: &mut bool) -> Queued {
+    match keys.try_send(key) {
+        Ok(()) => {
+            *full = false;
+            Queued::Yes
+        }
+        Err(TrySendError::Full(_)) => Queued::Dropped {
+            first: !std::mem::replace(full, true),
+        },
+        Err(TrySendError::Closed(_)) => Queued::Closed,
     }
 }
 
@@ -113,10 +146,11 @@ async fn log_caller(query: Connection, sender: OwnedUniqueName) {
 /// Serves `os.athanor.Osd1` on the session bus and takes its name, which a second instance
 /// cannot (`zbus::Error::NameTaken`). The returned connections must live as long as the
 /// service.
-pub async fn serve(keys: UnboundedSender<Key>) -> zbus::Result<(Connection, Connection)> {
+pub async fn serve(keys: Sender<Key>) -> zbus::Result<(Connection, Connection)> {
     let query = connection::Builder::session()?.build().await?;
     let osd = Osd {
         keys,
+        full: false,
         rate: Rate::default(),
         query: query.clone(),
         runtime: Handle::current(),
@@ -129,4 +163,27 @@ pub async fn serve(keys: UnboundedSender<Key>) -> zbus::Result<(Connection, Conn
         .build()
         .await?;
     Ok((served, query))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_full_queue_drops_the_key_and_says_so_once() {
+        let (keys, mut rx) = tokio::sync::mpsc::channel(2);
+        let mut full = false;
+        let found: Vec<Queued> = (0..4)
+            .map(|_| queue(&keys, Key::VolumeUp, &mut full))
+            .collect();
+        assert_eq!(
+            found,
+            [Queued::Yes, Queued::Yes, Queued::Dropped { first: true }, Queued::Dropped { first: false }]
+        );
+        assert_eq!(rx.try_recv(), Ok(Key::VolumeUp));
+        assert_eq!(queue(&keys, Key::VolumeDown, &mut full), Queued::Yes);
+        assert_eq!(queue(&keys, Key::VolumeDown, &mut full), Queued::Dropped { first: true });
+        drop(rx);
+        assert_eq!(queue(&keys, Key::ToggleMute, &mut full), Queued::Closed);
+    }
 }

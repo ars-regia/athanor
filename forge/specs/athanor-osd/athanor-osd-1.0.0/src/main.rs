@@ -5,7 +5,10 @@
 //! Two threads of its own, both started after Landlock: Tokio's, which serves the bus and runs
 //! the audio model and the keys' core, and the toolkit's loop on the main thread, with GLib's
 //! main context in it. The core hands what to show to the main thread over a channel, which a
-//! task of GLib's context drains into the surfaces' queue.
+//! task of GLib's context drains into the surfaces' queue. Both of the overlay's channels are
+//! bounded: the bus drops a key the core's queue cannot hold (`bus::KEYS`), and the core waits
+//! for room in the surfaces' channel ([`VIEWS`]), so a stalled main thread holds the keys at
+//! the bus rather than a growing queue.
 
 mod surface;
 
@@ -31,6 +34,8 @@ use surface::{Input, Osd};
 /// CC5's opt-in to amplify above 100 %. It has no store yet (doc_control_center.md CC5), so
 /// the keys stop at 100 %.
 const AMPLIFY: bool = false;
+/// What the core may hand the surfaces ahead of the main thread: past it, the core waits.
+const VIEWS: usize = 16;
 
 fn main() -> ExitCode {
     journal::init();
@@ -57,16 +62,16 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let (views, mut view_rx) = mpsc::unbounded_channel::<Input>();
+    let (views, mut view_rx) = mpsc::channel::<Input>(VIEWS);
     runtime.spawn(async move {
         let (state, commands) = audio::spawn(&tokio::runtime::Handle::current());
-        let (keys, key_rx) = mpsc::unbounded_channel();
+        let (keys, key_rx) = mpsc::channel(bus::KEYS);
         // Held for the life of the service: dropping them releases the name.
         let _connections = match bus::serve(keys).await {
             Ok(connections) => connections,
             Err(error) => {
                 let error = format!("cannot serve {} on the session bus: {error}", bus::NAME);
-                if views.send(Input::Fail(error)).is_err() {
+                if views.send(Input::Fail(error)).await.is_err() {
                     tracing::error!("the overlay's loop ended before the bus failed");
                 }
                 return;
@@ -74,7 +79,7 @@ fn main() -> ExitCode {
         };
         drive(Core::new(AMPLIFY), key_rx, state, commands, &views).await;
         // Without its core the overlay would take no key: it ends, and systemd restarts it.
-        if views.send(Input::Fail("the keys' core stopped".into())).is_err() {
+        if views.send(Input::Fail("the keys' core stopped".into())).await.is_err() {
             tracing::error!("the overlay's loop ended before its core");
         }
     });
@@ -122,10 +127,10 @@ fn main() -> ExitCode {
 /// the timeout and the announcement. Ends when the bus, the model or the surfaces do.
 async fn drive(
     mut core: Core,
-    mut keys: mpsc::UnboundedReceiver<Key>,
+    mut keys: mpsc::Receiver<Key>,
     mut state: watch::Receiver<AudioState>,
     commands: mpsc::UnboundedSender<AudioCommand>,
-    views: &mpsc::UnboundedSender<Input>,
+    views: &mpsc::Sender<Input>,
 ) {
     loop {
         let deadline = core.deadline();
@@ -165,7 +170,7 @@ async fn drive(
                     }
                 }
                 Effect::View(view) => {
-                    if views.send(Input::View(view)).is_err() {
+                    if views.send(Input::View(view)).await.is_err() {
                         tracing::error!("the overlay's surfaces are gone");
                         return;
                     }
