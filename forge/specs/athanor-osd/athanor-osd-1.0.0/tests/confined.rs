@@ -20,7 +20,7 @@ const CHILD: &str = "ATHANOR_OSD_CONFINED_CHILD";
 fn the_confined_overlay_writes_only_its_directories_and_reads_no_proc() {
     let base = std::env::temp_dir().join(format!("athanor-osd-confined-{}", std::process::id()));
     fs::remove_dir_all(&base).ok();
-    for dir in ["home", "runtime"] {
+    for dir in ["home/.cache", "runtime"] {
         fs::create_dir_all(base.join(dir)).expect("mkdir");
     }
     fs::set_permissions(base.join("runtime"), fs::Permissions::from_mode(0o700)).expect("chmod");

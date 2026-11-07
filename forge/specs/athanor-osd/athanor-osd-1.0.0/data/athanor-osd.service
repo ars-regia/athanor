@@ -22,6 +22,8 @@ Slice=session.slice
 # fontconfig's cache, inside the Landlock ruleset (OD12).
 Environment=XDG_CACHE_HOME=%C/athanor-osd
 CacheDirectory=athanor-osd
+# Private, as the Landlock grant requires (athanor_unit::dirs::private_dir).
+CacheDirectoryMode=0700
 # OD13 estimates 32 MB PSS at rest; MemoryHigh throttles well above it and MemoryMax caps a
 # font cache or an icon theme loaded at once, until ADR-0068's measurement sets the ceiling.
 MemoryHigh=48M

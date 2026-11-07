@@ -9,10 +9,11 @@
 //! - read the user's fonts, icon themes and fontconfig configuration, the dconf database
 //!   GSettings reads for the appearance and the reduced-motion preference (T1), the schema
 //!   directories GLib reads besides `/usr`, and libpulse's `~/.config/pulse` (its cookie);
-//! - write beneath the cache, `$XDG_CACHE_HOME` (fontconfig's), and `$XDG_RUNTIME_DIR/dconf`,
-//!   whose shared-memory flag dconf's client opens for writing to learn of a change, when it
-//!   passes `dirs::private_dir`. Both are granted by the descriptor opened here, so a link
-//!   swapped in for either path afterwards widens nothing.
+//! - write beneath the cache, `$XDG_CACHE_HOME`, which the unit sets to its `CacheDirectory`
+//!   (fontconfig's cache), and beneath `$XDG_RUNTIME_DIR/dconf`, whose shared-memory flag
+//!   dconf's client opens for writing to learn of a change. Each is granted only when it passes
+//!   `dirs::private_dir` (not a link, a directory of the user, mode 0700), by the descriptor
+//!   that check opened, so a link swapped in for either path afterwards widens nothing.
 //!
 //! Nothing beneath `/proc` (maintainer decision, 2026-11-07): Landlock cannot narrow it to one
 //! process, and it would expose the environment of every process of the user.
@@ -22,7 +23,6 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::fs::{self, File};
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
@@ -36,13 +36,17 @@ pub struct Grants {
     pub write: Vec<OwnedFd>,
 }
 
-/// The overlay's grants: the cache, created if missing, and dconf's runtime directory when it
-/// passes `dirs::private_dir`. A directory that cannot be opened is not granted, and says so.
+/// The overlay's grants: the cache and dconf's runtime directory, each when it passes
+/// `dirs::private_dir`, which creates it if missing. One that fails is not granted, and says so.
 pub fn overlay(dirs: &Dirs, var: impl Fn(&str) -> Option<OsString>) -> Grants {
     let mut write = Vec::new();
-    match fs::create_dir_all(&dirs.cache).and_then(|()| File::open(&dirs.cache)) {
-        Ok(cache) => write.push(cache.into()),
-        Err(error) => tracing::warn!(%error, dir = %dirs.cache.display(), "the cache is not granted"),
+    let cache = match (dirs.cache.parent(), dirs.cache.file_name().and_then(|n| n.to_str())) {
+        (Some(parent), Some(name)) => dirs::private_dir(parent, name),
+        _ => Err(std::io::Error::other("the cache is the root directory")),
+    };
+    match cache {
+        Ok(cache) => write.push(cache),
+        Err(error) => tracing::warn!(%error, "the cache is not granted"),
     }
     match dirs::private_dir(&dirs.runtime, "dconf") {
         Ok(dconf) => write.push(dconf),
@@ -148,6 +152,35 @@ mod tests {
                 "/var/lib/flatpak/exports/share/glib-2.0/schemas",
             ]
         );
+    }
+
+    #[test]
+    fn a_cache_that_is_a_link_or_not_private_is_not_granted() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = std::env::temp_dir().join(format!("athanor-osd-cache-{}", std::process::id()));
+        std::fs::remove_dir_all(&base).ok();
+        for dir in ["cache", "elsewhere", "runtime"] {
+            std::fs::create_dir_all(base.join(dir)).expect("mkdir");
+        }
+        std::os::unix::fs::symlink(base.join("elsewhere"), base.join("cache/athanor-osd"))
+            .expect("link");
+        std::fs::create_dir(base.join("cache/open")).expect("mkdir");
+        std::fs::set_permissions(base.join("cache/open"), std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+        let granted = |cache: &str| {
+            let dirs = Dirs {
+                unit_runtime: base.join("runtime/athanor-osd"),
+                failures: base.join("runtime/athanor-osd/failures"),
+                config: base.join("config"),
+                cache: base.join(cache),
+                runtime: base.join("runtime"),
+            };
+            overlay(&dirs, env(&[])).write.len()
+        };
+        // dconf's directory alone, created private, then the cache too.
+        let found = [granted("cache/athanor-osd"), granted("cache/open"), granted("cache/new")];
+        std::fs::remove_dir_all(&base).ok();
+        assert_eq!(found, [1, 1, 2], "a link, mode 0755, created private");
     }
 
     #[test]
