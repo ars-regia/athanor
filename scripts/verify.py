@@ -3634,7 +3634,7 @@ PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*
 # Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
 # user namespace where the system's nodes are owned by nobody, and the chooser grants the
 # target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
-# moving them is a decision of its own (#1052). The list only shrinks.
+# moving them is their own change (#1059). The list only shrinks.
 LANDLOCK_PATH_PENDING = (
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
     "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
