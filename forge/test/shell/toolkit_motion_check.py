@@ -5,8 +5,8 @@ headless backend.
 
 Runs inside the rig. Starts sway, then `athanor-sal-layer --motion` with WAYLAND_DEBUG, whose surface
 enters in 200 ms, leaves in 133 ms and enters again with reduced motion, a 100 ms fade. Each
-motion must settle no sooner than its time and within LATE of it, at its end pose (the client
-fails otherwise), and the client must have asked for a frame callback on its surface for each
+motion must settle no sooner than one FRAME before its time and within LATE of it, at its end
+pose (the client fails otherwise), and the client must have asked for a frame callback on its surface for each
 step: at least STEPS of them over the run, where a surface drawn once asks for one or two.
 """
 
