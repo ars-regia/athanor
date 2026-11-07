@@ -7,7 +7,7 @@ description = "Decodes one untrusted image or PDF into a bitmap inside a sandbox
 
 [dependencies]
 athanor-unit = { path = "../athanor-unit" }
-athanor-wallpaper = { path = "../athanor-wallpaper" }
+athanor-wallpaper = { path = "../athanor-wallpaper", default-features = false }
 cairo-rs = { workspace = true }
 glib = { workspace = true }
 glycin = { workspace = true }

@@ -2,11 +2,35 @@
 name = "athanor-wallpaper"
 version = "1.0.0"
 edition = "2021"
-description = "The wallpaper's logic: which image each output shows, the zoom geometry, the regular-file check and the migration from cosmic-bg"
+description = "The wallpaper service: a Sal client with one background surface per output, and the logic its decoder shares"
 license = "GPL-3.0-or-later"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
+[features]
+default = ["daemon"]
+# The daemon, the binary. Without it the logic remains, which the decoder
+# (athanor-preview-render's `wallpaper` kind) shares with no toolkit in its tree.
+daemon = [
+  "dep:athanor-sal",
+  "dep:athanor-unit",
+  "dep:gio",
+  "dep:glib",
+  "dep:nix",
+  "athanor-sulphur-client/calloop",
+]
+
+[[bin]]
+name = "athanor-wallpaper"
+path = "src/main.rs"
+required-features = ["daemon"]
+
 [dependencies]
+athanor-sal = { path = "../athanor-sal", optional = true }
 athanor-sulphur-client = { path = "../athanor-sulphur-client", default-features = false }
+athanor-unit = { path = "../athanor-unit", optional = true }
+gio = { workspace = true, optional = true }
+glib = { workspace = true, optional = true }
 libc = { workspace = true }
+# sendmsg with SCM_RIGHTS for the decoder's request.
+nix = { workspace = true, optional = true, features = ["socket", "uio"] }
 tracing = { workspace = true }
