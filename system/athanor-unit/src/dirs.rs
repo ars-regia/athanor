@@ -462,9 +462,9 @@ mod tests {
         owned_dir(&real.join("d")).expect("the directory itself");
         owned_node(&real.join("f")).expect("the node itself");
         for (what, opened) in [
-            ("owned_dir", owned_dir(&hop.join("d"))),
-            ("owned_node", owned_node(&hop.join("f"))),
-            ("private_dir", private_dir(&hop, "d")),
+            ("owned_dir", owned_dir(&hop.join("d")).map(drop)),
+            ("owned_node", owned_node(&hop.join("f")).map(drop)),
+            ("private_dir", private_dir(&hop, "d").map(drop)),
         ] {
             let error = opened.expect_err(what);
             assert_eq!(
