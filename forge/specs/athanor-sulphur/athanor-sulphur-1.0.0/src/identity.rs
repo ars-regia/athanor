@@ -645,6 +645,7 @@ mod tests {
             ("athanor-control-center", false),
             ("athanor-dock", false),
             ("athanor-launcher", false),
+            ("athanor-osd", false),
         ] {
             let client = Identity {
                 executable: format!("/usr/bin/{name}").into(),
@@ -865,11 +866,7 @@ mod tests {
         (
             "athanor-osd",
             "athanor-osd.service",
-            &[
-                "zwlr_layer_shell_v1",
-                "athanor_keyboard_group_manager_v1",
-                "ext_workspace_manager_v1",
-            ],
+            &["zwlr_layer_shell_v1", "ext_workspace_manager_v1"],
         ),
         (
             "cosmic-greeter",
