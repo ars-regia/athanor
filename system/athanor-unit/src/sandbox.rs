@@ -1,11 +1,12 @@
 //! Landlock at start, as the greeter and the notifier do: first prove the process is
-//! single-threaded, then restrict. A headless unit names the trees it reads and the
-//! directories it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
+//! single-threaded, then restrict. A headless unit names the trees it reads and, by an open
+//! descriptor, the directories it writes (`restrict`). A GTK program cannot name what it reads (icon themes,
 //! fonts, the GL driver, glycin's loaders), so it restricts writes only (`restrict_writes`).
 //! Connecting to a bus socket is not a filesystem access Landlock mediates.
 //! A program that has no business on the network also calls `deny_tcp`.
 
 use std::error::Error;
+use std::os::fd::AsFd;
 use std::path::Path;
 
 use landlock::{
@@ -26,10 +27,11 @@ pub fn ensure_single_threaded() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Read-only beneath each of `read` that exists, read-write beneath each of `write`, which
-/// must exist, nothing else. A kernel that cannot enforce the ruleset is an error, not a best
-/// effort.
-pub fn restrict(read: &[&Path], write: &[&Path]) -> Result<(), Box<dyn Error>> {
+/// Read-only beneath each of `read` that exists, read-write beneath each directory `write`
+/// holds open, nothing else. A write grant is a descriptor, not a path, so the directory
+/// granted is the one the caller checked (`dirs::private_dir`), whatever the path names now.
+/// A kernel that cannot enforce the ruleset is an error, not a best effort.
+pub fn restrict(read: &[&Path], write: &[impl AsFd]) -> Result<(), Box<dyn Error>> {
     let all = AccessFs::from_all(ABI::V1);
     let mut ruleset = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
@@ -41,8 +43,8 @@ pub fn restrict(read: &[&Path], write: &[&Path]) -> Result<(), Box<dyn Error>> {
             AccessFs::from_read(ABI::V1),
         ))?;
     }
-    for path in write {
-        ruleset = ruleset.add_rule(PathBeneath::new(PathFd::new(path)?, all))?;
+    for dir in write {
+        ruleset = ruleset.add_rule(PathBeneath::new(dir.as_fd(), all))?;
     }
     ruleset.restrict_self()?;
     Ok(())
@@ -130,7 +132,9 @@ mod tests {
         }
         // Landlock confines the calling thread and its children: the test binary stays free.
         std::thread::spawn(move || {
-            restrict(&[&readable], &[&writable]).expect("Landlock must be enforced, not skipped");
+            let writable_dir = std::fs::File::open(&writable).expect("open");
+            restrict(&[&readable], &[writable_dir])
+                .expect("Landlock must be enforced, not skipped");
             assert!(std::fs::read(readable.join("file")).is_ok());
             assert_eq!(
                 std::fs::write(readable.join("new"), b"x")
