@@ -25,10 +25,10 @@ CARGO_DENY_SHA256=9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d
 # scripts/ci/tests/test_cosign_attest.py requires every workflow to use that commit: a bump of the
 # action moves the cosign of the releases, and the check must move with it (#705).
 # shellcheck disable=SC2034 # read by scripts/ci/tests/test_cosign_attest.py
-COSIGN_INSTALLER=6f9f17788090df1f26f669e9d70d6ae9567deba6
-COSIGN_VERSION=v3.0.6
+COSIGN_INSTALLER=756fe2d284c7292c4e9b62c8a28f1e5629c59532
+COSIGN_VERSION=v3.1.4
 COSIGN_URL=https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64
-COSIGN_SHA256=c956e5dfcac53d52bcf058360d579472f0c1d2d9b69f55209e256fe7783f4c74
+COSIGN_SHA256=424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
 REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0.0/registry_3.0.0_linux_amd64.tar.gz
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
 

@@ -83,7 +83,7 @@ def workflow(*jobs):
     return "name: Sign\non: push\njobs:\n" + "".join(jobs)
 
 
-INSTALLER = "sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6"
+INSTALLER = "sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532"
 IMAGE_SIGN = (
     'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
     " --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations"
@@ -193,13 +193,13 @@ class SigningTest(unittest.TestCase):
     def test_rule_2_a_third_party_action_in_a_signing_job_fails(self):
         job = SIGN_JOB.replace(
             f"      - uses: {UPLOAD}\n",
-            "      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6\n"
+            "      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532\n"
             f"      - uses: {UPLOAD}\n",
         )
         self.assertEqual(
             self.problems({"k.yml": workflow(job)}),
             [
-                "k.yml: signing job sign uses sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6"
+                "k.yml: signing job sign uses sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532"
                 + THIRD_PARTY
             ],
         )
