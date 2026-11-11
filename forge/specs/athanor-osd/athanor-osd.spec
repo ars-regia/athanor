@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-osd
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        The Athanor on-screen display
 License:        GPL-3.0-or-later
 
