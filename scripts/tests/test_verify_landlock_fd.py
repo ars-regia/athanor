@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
@@ -29,6 +30,7 @@ LANDLOCK = '[dependencies]\nlandlock = { workspace = true }\n'
 def problems(files):
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
         for name, text in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_text(text)
@@ -56,6 +58,11 @@ class LandlockFdTest(unittest.TestCase):
         found = problems({"fuzz/Cargo.toml": LANDLOCK,
                           "forge/tools/x/src/main.rs": "use landlock::PathFd;\n"})
         self.assertEqual(len(found), 2, found)
+
+    def test_a_git_ignored_tree_is_not_scanned(self):
+        self.assertEqual(problems({".gitignore": ".scratch/\n",
+                                   ".scratch/x/Cargo.toml": LANDLOCK,
+                                   ".scratch/x/src/main.rs": "use landlock::PathFd;\n"}), [])
 
     def test_an_alias_in_the_shared_sandbox_is_refused(self):
         code = "use landlock::{PathFd as Fd, AccessFs};\n"

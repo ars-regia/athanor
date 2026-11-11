@@ -3650,9 +3650,6 @@ LANDLOCK_PATH_PENDING = (
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
     "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
 )
-# The whole tree, not RS_DIRS: a crate under forge/tools or fuzz links landlock as well as one
-# under system.
-LANDLOCK_DIRS = (".",)
 LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
 
 
@@ -3674,39 +3671,46 @@ def landlock_fd_problems(root):
     the parent of a read grant. So a Landlock write grant is never built from a path."""
     root = Path(root)
     problems = []
-    for base in LANDLOCK_DIRS:
-        for path in sorted(walk(root / base, "Cargo.toml")):
-            relative = path.relative_to(root).as_posix()
-            if path.name != "Cargo.toml" or relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+    # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
+    # as well as one under system, and git-ignored trees (.scratch, worktrees) are not the code.
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
+    if listed.returncode:
+        return [f"cannot list the repository files: {listed.stderr.strip()}"]
+    files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
+    for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
+        path = root / relative
+        if relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+            continue
+        try:
+            manifest = tomllib.loads(read(path))
+        except tomllib.TOMLDecodeError as err:
+            problems.append(f"{relative}: not valid TOML: {err}")
+            continue
+        for table in landlock_dependencies(manifest):
+            problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
+                            f"athanor_unit::sandbox, whose grants are dirs::Checked")
+    for relative in (name for name in files if name.endswith(".rs")):
+        path = root / relative
+        if relative in LANDLOCK_PATH_PENDING:
+            continue
+        text = read(path)
+        allowed = []
+        if relative == LANDLOCK_SANDBOX:
+            allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
+            allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
+                        if not re.search(r"\bPathFd\s+as\b", match.group())]
+        for match in PATH_FD.finditer(text):
+            if any(start <= match.start() < end for start, end in allowed):
                 continue
-            try:
-                manifest = tomllib.loads(read(path))
-            except tomllib.TOMLDecodeError as err:
-                problems.append(f"{relative}: not valid TOML: {err}")
-                continue
-            for table in landlock_dependencies(manifest):
-                problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
-                                f"athanor_unit::sandbox, whose grants are dirs::Checked")
-        for path in sorted(walk(root / base, ".rs")):
-            relative = path.relative_to(root).as_posix()
-            if relative in LANDLOCK_PATH_PENDING:
-                continue
-            text = read(path)
-            allowed = []
+            line = text.count("\n", 0, match.start()) + 1
             if relative == LANDLOCK_SANDBOX:
-                allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
-                allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
-                            if not re.search(r"\bPathFd\s+as\b", match.group())]
-            for match in PATH_FD.finditer(text):
-                if any(start <= match.start() < end for start, end in allowed):
-                    continue
-                line = text.count("\n", 0, match.start()) + 1
-                if relative == LANDLOCK_SANDBOX:
-                    problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
-                                    f"grant; a write grant is a dirs::Checked descriptor")
-                else:
-                    problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
-                                    f"links; grant by an athanor_unit::dirs::Checked descriptor")
+                problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
+                                f"grant; a write grant is a dirs::Checked descriptor")
+            else:
+                problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
+                                f"links; grant by an athanor_unit::dirs::Checked descriptor")
     return problems
 
 
