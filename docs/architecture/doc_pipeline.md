@@ -183,7 +183,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | `release.yml`    | `workflow_dispatch` only, from `build.yml` on `iso-v0` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence; its last job dispatches `accept.yml` (PL56) |
 | `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
-| `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
+| `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks; *amended on 2026-11-11 by the maintainer:* and Smithay, weekly); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
 | `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green, no NVIDIA lock moves and the kernel closes no Fedora security advisory (PL55), and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
 | `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard |
 
@@ -278,7 +278,7 @@ flowchart LR
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
 ```
 
-### 3.5 Today's 32 workflows
+### 3.5 Today's 33 workflows
 
 | Workflow                         | Target                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -312,6 +312,7 @@ flowchart LR
 | `rust-security-audit.yml`        | deleted: `cargo deny` in `just check` (ADR-0075), the daily rescan in `maintenance.yml`            |
 | `shell-layout-outputs.yml`       | merged into `maintenance.yml` (weekly)                                                             |
 | `shell-surfaces.yml`             | merged into `pr.yml`, selected by change detection, the bar built once (PL45)                      |
+| `smithay-bump.yml`               | merged into `bots.yml`                                                                             |
 | `spec-build-check.yml`           | merged into `pr.yml`, selected by change detection                                                 |
 | `system-image-check.yml`         | merged into `pr.yml`, selected by change detection                                                 |
 

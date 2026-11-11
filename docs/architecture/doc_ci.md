@@ -365,6 +365,14 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Scripts:** `scripts/ci/release_candidate.py`, `scripts/ci/schema.py`, `system/trusted-run.sh`, `system/sign-images.sh`, `system/verify-images.sh`, `system/kernel-artifacts.sh`, `system/tag-images.sh`.
 - **Health:** `gh run list --workflow release.yml --branch iso-v0 --limit 5`.
 
+### CI34 Smithay Bump
+
+- **File:** `smithay-bump.yml`. **Purpose:** moves Sulphur's Smithay pin to the head of Smithay's master, which publishes no release, and opens a PR, never auto-merged; one at a time, so while a PR with the label `smithay-bump` is open the run opens nothing (maintainer decision of 2026-11-11).
+- **Triggers:** cron `17 6 * * 1`; dispatch; push of its file. **Outputs:** PR, artifact `smithay-bump`.
+- **Secrets, variables:** `BOT_APP_PRIVATE_KEY`, `BOT_APP_CLIENT_ID`. **Environment:** `bots`. **Runner:** hosted. **Concurrency:** `smithay-bump`, no cancel.
+- **Scripts:** `scripts/bump/smithay.sh`, `forge/specs/azoth/open_bump_pr.sh`.
+- **Health:** `gh run list --workflow smithay-bump.yml --branch iso-v0 --limit 5`.
+
 ## 3. Known broken workflows
 
 | Id | Workflow | Cause | Evidence |
@@ -397,8 +405,8 @@ Every name below is described in the secrets inventory, `docs/operations/secrets
 | `GITHUB_TOKEN` | automatic token | GitHub | CI1, CI3-CI9, CI10-CI13, CI20, CI25, CI26, CI30, CI32 |
 | `KERNEL_BUMP_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY`; the rename to `BOT_PR_TOKEN` of [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md) is void | repository | none |
 | `SPECS_UPDATE_TOKEN` | secret (PAT), retired 2026-10-09 and replaced by `BOT_APP_PRIVATE_KEY` | repository | none |
-| `BOT_APP_PRIVATE_KEY` | secret (private key of the bots GitHub App) | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32 |
-| `BOT_APP_CLIENT_ID` | variable, no default | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32 |
+| `BOT_APP_PRIVATE_KEY` | secret (private key of the bots GitHub App) | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32, CI34 |
+| `BOT_APP_CLIENT_ID` | variable, no default | environment `bots` | CI9, CI17, CI19, CI20, CI30, CI32, CI34 |
 | `FORGE_PAT` | secret (PAT, delete:packages) | repository | CI21 |
 | `SECUREBOOT_SIGNING_KEY` | secret | environments `signing-kernel` and `signing` | CI1 |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD` | secret | environments `signing-images` and `signing` | CI1 |

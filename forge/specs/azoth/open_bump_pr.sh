@@ -6,9 +6,10 @@
 # OUT_DIR holds `title` and `body.md`, which bump.py writes only when something moved. Nothing
 # there, or the PR of this very move still open: nothing is done. An open PR with LABEL for
 # another NVR is stale, since the move has gone past it: the script fails naming it and both
-# NVRs, so that a review never merges an outdated move. Otherwise PATH is committed on a new
-# branch BRANCH_PREFIX-<last word of the title, the new NVR>, pushed, and a PR with LABEL is
-# opened against BASE (default: the current branch; give it on a detached HEAD). A branch of
+# NVRs, so that a review never merges an outdated move. Otherwise PATH, one path or several
+# separated by spaces, is committed on a new branch BRANCH_PREFIX-<last word of the title,
+# the new NVR>, pushed, and a PR with LABEL is opened against BASE (default: the current
+# branch; give it on a detached HEAD). A branch of
 # that name already on the remote, left by a run that failed after the push, stops the script
 # naming it: remove it, or open its PR by hand. The PR is never merged here. LABEL must be on
 # the repository, declared with its colour in .github/settings/labels.json: the script checks
@@ -16,8 +17,9 @@
 # to $GITHUB_STEP_SUMMARY when it is set, else to stdout.
 set -euo pipefail
 
-(($# >= 4 && $# <= 5)) || { sed -n '2,16p' "$0" >&2; exit 2; }
-label=$1 prefix=$2 path=$3 out=$4
+(($# >= 4 && $# <= 5)) || { sed -n '2,17p' "$0" >&2; exit 2; }
+label=$1 prefix=$2 out=$4
+read -ra paths <<< "$3"
 base=${5:-$(git rev-parse --abbrev-ref HEAD)}
 [[ $base != HEAD ]] || { echo "open_bump_pr.sh: detached HEAD: give BASE" >&2; exit 2; }
 summary=${GITHUB_STEP_SUMMARY:-/dev/stdout}
@@ -50,7 +52,7 @@ if ! gh api "repos/{owner}/{repo}/labels/${label}" --silent; then
     echo "open_bump_pr.sh: the label ${label} is not on the repository: declare it in .github/settings/labels.json and apply the settings" >&2
     exit 1
 fi
-git add -- "$path"
+git add -- "${paths[@]}"
 git config user.name "${BUMP_GIT_NAME:-athanor-bump}"
 git config user.email "${BUMP_GIT_EMAIL:-kernel@athanor.os}"
 git checkout -q -b "$branch"

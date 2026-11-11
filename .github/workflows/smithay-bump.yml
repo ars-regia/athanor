@@ -1,0 +1,64 @@
+name: Smithay Bump
+
+# Moves Sulphur's Smithay pin to the head of Smithay's master (scripts/bump/smithay.sh), which
+# publishes no release. One pull request at a time: while one with the label smithay-bump is
+# open, the run opens nothing. The PR is never auto-merged: the build and a review decide, and
+# a master that changed the API is fixed on the PR's branch. `schedule` only works from the
+# default branch; by hand on any branch; and on a push of this file, which is also how GitHub
+# registers the workflow outside the default branch.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [iso-v0]
+    paths:
+      - .github/workflows/smithay-bump.yml
+
+concurrency:
+  group: smithay-bump
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: bots
+    steps:
+      # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
+      # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.BOT_APP_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Run scripts/bump/smithay.sh
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: scripts/bump/smithay.sh "$RUNNER_TEMP/bump"
+
+      - name: Branch, commit, PR (never auto-merged)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: forge/specs/azoth/open_bump_pr.sh smithay-bump bump/smithay "Cargo.lock forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/Cargo.toml" "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+
+      - name: Upload what the bump wrote
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: smithay-bump
+          path: ${{ runner.temp }}/bump
+          if-no-files-found: ignore
