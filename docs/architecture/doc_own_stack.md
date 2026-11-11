@@ -601,7 +601,8 @@ with its reason: the window's border and shadow, the title bar, the headings, th
 the accent, the background, the font, the padding, the dark variant, the right-to-left row height
 (42 px against GTK's 30, from Parley's locale fallback font) and the window's placement (T1 results,
 task 4). Before the dock moves, this document gains the tier measurement, the live blur and the
-dock's window geometry (ADR-0124). *Amended 2026-11-11:* decision 35 gives all three.
+dock's window geometry (ADR-0124). *Amended 2026-11-11:* decision 35 gives the geometry, the blur and the tier's protocol. It
+leaves the tier's thresholds to spike VL-S5, with M0 until then.
 
 ## 5. The first two milestones
 
@@ -1237,13 +1238,14 @@ compositor and that the own compositor did not yet offer:
         touch, focuses on it, keeps it to the lock surface and maps it to its output. The rules:
         - a touch reaches the surface under the finger;
         - a touch-down gives the keyboard focus by the rule of a click;
-        - while the session is locked, a touch off the lock surface is refused, the touches
-          held at lock time are cancelled, and the release of a touch held before still goes
-          through;
+        - while the session is locked, a touch off the lock surface is refused. The touches
+          held at lock time get `wl_touch.cancel`, and their later release is swallowed;
         - each touchscreen maps to its own output, with that output's transform, never to the
           first output;
         - a move, a resize or a drag starts from a touch serial as from a pointer one;
-        - injected touch follows OS4's rule for virtual input;
+        - injected touch comes only through libei (wave 2c) and follows its rule: no input
+          while the session is locked;
+      - `ext_background_effect_manager_v1`, standard, moved here from wave 2c by decision 35;
       - `xdg_system_bell_v1`, standard. The compositor honours a bell only from the client of the
         window with the keyboard focus, at most one a second, and never while the session is
         locked. That window's focus outline (decision 31) blinks once: it is hidden for 250 ms
@@ -1321,12 +1323,19 @@ compositor and that the own compositor did not yet offer:
     - **Intellihide's geometry.** A new private global, `athanor_dock_overlap_v1`, is privileged
       by a grant of its own on the dock's allow-list line. The dock names its layer surface. The
       compositor sends `overlapped` with true when a mapped, not minimised window of the current
-      workspace on that surface's output intersects the surface's rectangle, and with false
-      when none does. The dock learns no window's place, size or identity. Decision 32 stands:
-      the dock still gets no window places;
+      workspace on that surface's output intersects the dock's shown rectangle, and with false
+      when none does. The shown rectangle is the one the dock occupies when it is not hidden,
+      and it holds while the dock is hidden, so hiding does not change the answer. While
+      intellihide is on, the dock sets no exclusive zone. While the session is locked, the
+      compositor sends nothing, and on unlock it sends the current answer. The dock learns at
+      most whether the rectangle it asks for is covered, and when that changes. Moving or
+      resizing its surface lets it probe further, bounded by its grant: the dock is trusted
+      by its allow-list line. Decision 32 stands, and the dock gets no window places;
     - **Live blur, tier M2.** `ext_background_effect_manager_v1` moves from wave 2c to wave 2a,
-      standard. The compositor blurs what lies under the region the surface sets, with
-      `material.blur` and `material.saturate`. The client never reads the blurred pixels, so the
+      standard. On an output in tier M2, the compositor blurs what lies under the region the
+      surface sets, with `material.blur` and `material.saturate`. On an output in M0 or M1,
+      software rendering included, it draws the region unblurred, so a client cannot force a
+      blur per frame on an output that cannot afford it. The client never reads the blurred pixels, so the
       blur shows a confined client nothing it could not see without it. Under cosmic-comp M2 is
       never chosen (`doc_visual_language.md`);
     - **The tier.** The compositor measures the time it takes to render each output. A second
@@ -1340,8 +1349,11 @@ compositor and that the own compositor did not yet offer:
     - the full geometry of every window through `athanor_toplevel_state_v1`, which shows the shell
       where every window is;
     - a private blur protocol, which is more code, and no application could use it;
-    - the toolkit measuring its own frames, which cannot see the cost of the blur the compositor
-      draws.
+    - the toolkit measuring its own frames under the own compositor, which cannot see the cost
+      of the blur the compositor draws.
+
+    Whether a client-side measurement may offer M1 under cosmic-comp stays with spike VL-S5
+    (`doc_visual_language.md`). Until then the toolkit draws M0 there.
 
 ## 8. Risks
 
