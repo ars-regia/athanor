@@ -1,5 +1,6 @@
 """Test of scripts/bump/smithay.sh against a stub gh and cargo (python3 -B -m unittest discover -s scripts/tests -p test_bump_smithay.py)."""
 
+import json
 import os
 import pathlib
 import subprocess
@@ -12,17 +13,26 @@ URL = "https://github.com/Smithay/smithay"
 OLD = "0" * 39 + "1"
 NEW = "a" * 39 + "2"
 
-# gh answers master's head with $STUB_MASTER, the open bump pull requests with $STUB_PRS and
-# the comparison with one commit line; cargo rewrites the lock as `cargo update` would.
+# gh answers master's head with $STUB_MASTER, the open bump pull requests with $STUB_PRS, the
+# comparison's status with $STUB_STATUS and its commits by running the script's own --jq filter,
+# the last argument, over $STUB_COMMITS; cargo rewrites the lock as `cargo update` would.
 STUB_GH = """#!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
 case "$*" in
 "api repos/Smithay/smithay/commits/master"*) echo "$STUB_MASTER" ;;
 "pr list"*) printf '%s' "$STUB_PRS" ;;
-"api repos/Smithay/smithay/compare/"*) echo "abc input: fix the grab for @someone in #12" ;;
+"api repos/Smithay/smithay/compare/"*"--jq .status") echo "$STUB_STATUS" ;;
+*"repos/Smithay/smithay/compare/"*) printf '%s' "$STUB_COMMITS" | jq -r "${@: -1}" ;;
 *) exit 9 ;;
 esac
 """
+
+
+def commits(*messages):
+    return json.dumps(
+        {"commits": [{"sha": f"abc{i}" + "0" * 37, "commit": {"message": m}} for i, m in enumerate(messages)]}
+    )
+
 STUB_CARGO = """#!/usr/bin/env bash
 echo "cargo $*" >> "$STUB_LOG"
 sed -i "s/$STUB_OLD/$STUB_MASTER/g" "$(git rev-parse --show-toplevel)/Cargo.lock"
@@ -58,6 +68,8 @@ class BumpSmithay(unittest.TestCase):
             "PATH": f"{stub}:{os.environ['PATH']}",
             "STUB_LOG": str(self.log),
             "STUB_OLD": OLD,
+            "STUB_STATUS": "ahead",
+            "STUB_COMMITS": commits("input: fix the grab for @someone in #12\n\nThe body."),
         }
 
     def tearDown(self):
@@ -88,7 +100,25 @@ class BumpSmithay(unittest.TestCase):
         )
         body = (self.out / "body.md").read_text()
         self.assertIn(f"{URL}/compare/{OLD}...{NEW}", body)
-        self.assertIn("```text\nabc input: fix the grab for @someone in #12\n```", body)
+        self.assertIn("```text\nabc000000 input: fix the grab for @someone in #12\n```", body)
+        self.assertIn(f"api --paginate repos/Smithay/smithay/compare/{OLD}...{NEW}", self.calls())
+
+    def test_a_carriage_return_cannot_close_the_fence(self):
+        self.env["STUB_COMMITS"] = commits("x\r```\r@user", "second")
+        result = self.run_script(NEW)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        body = (self.out / "body.md").read_text()
+        self.assertNotIn("\r", body)
+        self.assertIn("```text\nabc000000 x ``` @user\nabc100000 second\n```\n", body)
+
+    def test_a_pin_master_does_not_descend_from_fails(self):
+        for status in ("behind", "diverged"):
+            self.env["STUB_STATUS"] = status
+            result = self.run_script(NEW)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn(f"master is {status} of the pin", result.stderr)
+            self.assertEqual((self.work / MANIFEST).read_text(), manifest(OLD))
+            self.assertFalse((self.out / "title").exists())
 
     def test_pin_at_master_writes_nothing(self):
         result = self.run_script(OLD)

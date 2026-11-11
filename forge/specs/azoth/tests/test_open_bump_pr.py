@@ -146,6 +146,12 @@ class OpenBumpPr(unittest.TestCase):
         ).stdout.split()
         self.assertEqual(sorted(files), ["lock", "spec"])
 
+    def test_a_path_list_without_a_path_fails_before_gh(self):
+        result = self.run_script([], paths=" ")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("PATH names no path", result.stderr)
+        self.assertEqual(self.calls(), "")
+
     def test_nothing_moved_opens_nothing(self):
         (self.out / "title").unlink()
         result = self.run_script([(7, f"{PREFIX}-1.8.1-1.fc43")])

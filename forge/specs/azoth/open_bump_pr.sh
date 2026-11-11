@@ -20,6 +20,7 @@ set -euo pipefail
 (($# >= 4 && $# <= 5)) || { sed -n '2,17p' "$0" >&2; exit 2; }
 label=$1 prefix=$2 out=$4
 read -ra paths <<< "$3"
+((${#paths[@]})) || { echo "open_bump_pr.sh: PATH names no path" >&2; exit 2; }
 base=${5:-$(git rev-parse --abbrev-ref HEAD)}
 [[ $base != HEAD ]] || { echo "open_bump_pr.sh: detached HEAD: give BASE" >&2; exit 2; }
 summary=${GITHUB_STEP_SUMMARY:-/dev/stdout}

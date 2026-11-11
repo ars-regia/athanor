@@ -451,6 +451,15 @@ item = "CI31"
 purpose = "cargo-fuzz targets and the committed corpus of the parsers that read untrusted input"
 
 [[component]]
+path = "scripts/bump"
+kind = "script tool"
+area = "build-ci"
+status = "specified"
+spec = "doc_ci.md"
+item = "CI34"
+purpose = "Bump scripts of the bump bots: Smithay's git pin for Sulphur"
+
+[[component]]
 path = "scripts/ci"
 kind = "script tool"
 area = "build-ci"

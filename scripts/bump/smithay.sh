@@ -7,11 +7,12 @@
 # revision in Sulphur's Cargo.toml and refreshes Cargo.lock through cargo. It writes
 # OUT_DIR/title and OUT_DIR/body.md, which open_bump_pr.sh turns into a pull request, only when
 # master has moved and no pull request with the label smithay-bump is open: one bump at a time,
-# fixed on its own branch when master changed the API, and the next one after its merge.
+# fixed on its own branch when master changed the API, and the next one after its merge. A pin
+# that master does not descend from (a force push, a commit off master) fails: never a move back.
 # Needs git, cargo and an authenticated gh.
 set -euo pipefail
 (($# == 1)) || {
-    sed -n '2,10p' "$0" >&2
+    sed -n '2,12p' "$0" >&2
     exit 2
 }
 out=$1
@@ -39,6 +40,12 @@ if [[ -n $open ]]; then
     echo "the Smithay bump #${open//$'\n'/, #} is open: the next one opens after it is merged or closed"
     exit 0
 fi
+compare=repos/Smithay/smithay/compare/${old}...${new}
+status=$(gh api "$compare" --jq .status)
+[[ $status == ahead ]] || {
+    echo "smithay.sh: master is ${status} of the pin ${old:0:12}, not ahead: not moving it" >&2
+    exit 1
+}
 sed -i "s/rev = \"${old}\"/rev = \"${new}\"/" "$root/$manifest"
 cargo update --manifest-path "$root/Cargo.toml" -p smithay -p smithay-drm-extras
 grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/Cargo.lock" ||
@@ -46,8 +53,8 @@ grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/Cargo.lock" ||
         echo "smithay.sh: Cargo.lock does not take Smithay at ${new} after cargo update" >&2
         exit 1
     }
-commits=$(gh api "repos/Smithay/smithay/compare/${old}...${new}" \
-    --jq '.commits[] | "\(.sha[:9]) \(.commit.message | split("\n")[0])"')
+commits=$(gh api --paginate "$compare" \
+    --jq '.commits[] | "\(.sha[:9]) \(.commit.message | split("\n")[0] | gsub("\r"; " "))"')
 echo "chore(sulphur): bump Smithay to ${new:0:12}" > "$out/title"
 cat > "$out/body.md" << EOF
 Moves Sulphur's Smithay pin from \`${old:0:12}\` to \`${new:0:12}\`, the head of Smithay's master
