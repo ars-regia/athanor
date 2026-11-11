@@ -116,7 +116,7 @@ into a swapchain buffer copies what lies under a surface, and the blur reads tha
 `probe` and `probe-copy` runs were made in pairs, without sampling the clock. Over the five
 pairs, the copy changed the whole output's blur over the scene, at the median, by −0.45, +0.10,
 +0.28, −0.37 and +0.29 ms, and the dock's by −0.20 to +0.12 ms. That spread, about ±0.4 ms, is
-the noise of runs at different clocks, and it is larger than the copy's cost at 1920 × 1080: the
+noise, probably of runs at different clocks (inferred), and it is larger than the copy's cost at 1920 × 1080: the
 pairs do not resolve that cost. At 2560 × 1440 one pair gave the copy 1.15 ms for the whole
 output, which one pair does not tell from the same noise. The tiers of section 4 are read from
 the `probe-copy` figures themselves, which include the copy whatever it costs.
@@ -145,7 +145,7 @@ tier.
    choice by measured frame time rather than by brand.
 3. **The time must be measured under load, and a short probe is enough.** An integrated GPU's
    clock follows its load (section 1). From an idle GPU, the proposed probe of about 90 rounds
-   reads 6 to 17 % above a run of 330 rounds: the clock rises within its warm-up, and what is
+   without the copy reads 6 to 17 % above a run of 330 rounds: the clock rises within its warm-up, and what is
    left of the difference overstates the cost (section 2.2).
 4. **M2's memory is about VL13's estimate plus the levels.** VL13 counts one more buffer per
    output, about 8 MB at 1920 × 1080 in RGBA (8.3 MB): the backdrop, copied into a texture the
