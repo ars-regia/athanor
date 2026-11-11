@@ -60,7 +60,7 @@ futures-util = "0.3.30"
 libc = "0.2.189"
 
 # D-Bus & Inter-Process Communication
-zbus = { version = "5.18.0", features = ["tokio"] }
+zbus = { version = "6.2.1", features = ["tokio"] }
 
 # GUI, Display & Wayland Ecosystem
 gtk4 = { version = "0.11.4", features = ["v4_18"] }
