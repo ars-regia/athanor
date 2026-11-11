@@ -20,7 +20,7 @@ RestartMaxDelaySec=30s
 Slice=session.slice
 
 # GSettings maps dconf's shared-memory flag beneath %t/dconf read-write to learn that a key
-# changed, as athanor-idle.service explains; Landlock grants the same path (SD17). Private,
+# changed (SD17, system/athanor-sessiond/src/confine.rs); Landlock grants the same path. Private,
 # as the grant requires (athanor_unit::dirs::private_dir), and kept at a stop, since dconf's
 # other clients share it.
 RuntimeDirectory=dconf
