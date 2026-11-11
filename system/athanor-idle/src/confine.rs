@@ -19,7 +19,6 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
 use athanor_unit::{dirs, sandbox};
@@ -29,7 +28,7 @@ use athanor_unit::{dirs, sandbox};
 #[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<OwnedFd>,
+    pub write: Vec<dirs::Checked>,
 }
 
 /// `name` as an absolute path, or `None`.
@@ -71,7 +70,7 @@ impl Grants {
     /// From the environment as `var` reads it, the Power page's store `power_page` and the
     /// write directories `write`.
     pub fn new(
-        write: Vec<OwnedFd>,
+        write: Vec<dirs::Checked>,
         power_page: Option<&Path>,
         var: impl Fn(&str) -> Option<OsString>,
     ) -> Grants {

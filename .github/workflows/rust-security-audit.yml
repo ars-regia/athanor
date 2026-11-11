@@ -25,10 +25,8 @@ on:
       - "forge/scripts/retry.sh"
       - "scripts/ci/security-audit.sh"
       - ".github/workflows/rust-security-audit.yml"
-  # The advisory database changes without a commit: the weekly run catches an advisory
-  # published against a lockfile nobody touched.
-  schedule:
-    - cron: "17 4 * * 1"
+  # The advisory database changes without a commit: maintenance.yml calls this workflow every
+  # day, and its alert job opens a ci-alert issue when the run fails (PL51).
 
 # Called from pr.yml the group is the caller's "Pull Request-<ref>", apart from "pr-<number>".
 concurrency:

@@ -14,7 +14,7 @@ pub const DEVICE_WRITES: [&str; 2] = ["/dev/dri", "/dev/null"];
 #[cfg(test)]
 mod tests {
     use super::DEVICE_WRITES;
-    use athanor_unit::sandbox;
+    use athanor_unit::{dirs, sandbox};
     use gtk4::gio;
     use std::path::Path;
 
@@ -24,7 +24,9 @@ mod tests {
         let dir = std::env::temp_dir();
         let started = std::thread::spawn(move || {
             let devices: Vec<&Path> = DEVICE_WRITES.iter().map(Path::new).collect();
-            sandbox::restrict_writes(&[dir.as_path()], &devices).map_err(|err| err.to_string())?;
+            let devices = dirs::existing(&devices, dirs::owned_node);
+            let write = dirs::existing(&[dir.as_path()], dirs::owned_dir);
+            sandbox::restrict_writes(&write, &devices).map_err(|err| err.to_string())?;
             let flags = gio::SubprocessFlags::STDOUT_SILENCE | gio::SubprocessFlags::STDERR_SILENCE;
             gio::Subprocess::newv(&[std::ffi::OsStr::new("true")], flags).map(drop).map_err(|err| err.to_string())
         })

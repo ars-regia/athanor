@@ -12,8 +12,6 @@ mod ui;
 
 use std::cell::RefCell;
 use std::env;
-use std::fs::DirBuilder;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -24,7 +22,7 @@ use athanor_services::Runtime;
 use athanor_control_center::{grants, launch_dir, parse_mode, Mode, RFKILL};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
-use athanor_unit::{crash_loop, journal, sandbox};
+use athanor_unit::{crash_loop, dirs, journal, sandbox};
 use gtk4::prelude::*;
 use gtk4::{glib, Application};
 
@@ -113,10 +111,6 @@ fn main() -> glib::ExitCode {
         tracing::warn!(error = %err, dir = %state.display(), "cannot create the state directory");
     }
     // Before GTK starts a thread. Reads stay open (CC2); writes only where `grants` says.
-    let launch = launch_dir(&dirs);
-    if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch) {
-        tracing::warn!(error = %err, dir = %launch.display(), "cannot create the directory of the launch sockets");
-    }
     // The unit's ConfigurationDirectory= creates it; a run outside it needs it here.
     let theme_dirs = theme::theme_dirs();
     for dir in &theme_dirs {
@@ -126,16 +120,23 @@ fn main() -> glib::ExitCode {
     }
     let rfkill_present = Path::new(RFKILL).exists();
     let granted = grants(&dirs, &state, &theme_dirs, rfkill_present);
-    let write: Vec<&std::path::Path> = granted
+    // Each is granted by the descriptor its check opened. The launch directory, made the way
+    // launch() makes it, and dconf's are private to the user (`dirs::private_dir`).
+    let private = [launch_dir(&dirs), dirs.runtime.join("dconf")];
+    let names: Vec<&str> = private
+        .iter()
+        .filter_map(|dir| dir.file_name().and_then(|name| name.to_str()))
+        .collect();
+    let mut write = dirs::private_dirs(&dirs.runtime, &names);
+    let checked: Vec<&Path> = granted
         .write
         .iter()
-        .map(std::path::PathBuf::as_path)
+        .filter(|dir| !private.contains(dir))
+        .map(PathBuf::as_path)
         .collect();
-    let devices: Vec<&std::path::Path> = granted
-        .devices
-        .iter()
-        .map(std::path::PathBuf::as_path)
-        .collect();
+    write.extend(dirs::existing(&checked, dirs::owned_dir));
+    let devices: Vec<&Path> = granted.devices.iter().map(PathBuf::as_path).collect();
+    let devices = dirs::existing(&devices, dirs::owned_node);
     let confined = sandbox::ensure_single_threaded()
         .and_then(|()| sandbox::restrict_writes(&write, &devices))
         .and_then(|()| sandbox::deny_tcp());

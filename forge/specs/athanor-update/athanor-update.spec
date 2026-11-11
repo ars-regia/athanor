@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        16%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -76,6 +76,11 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- athanor-update-notify confines itself with athanor_unit's Landlock ruleset (#1052) and
+  grants its state directory by a descriptor of dirs::owned_dir: a state directory that is a
+  link or another user's stops the notifier.
+
 * Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - The fetch of a signature or attestation attachment is bounded (#658). It reads the
   manifest first, up to 1 MiB, and does not copy an object whose manifest has a member cosign

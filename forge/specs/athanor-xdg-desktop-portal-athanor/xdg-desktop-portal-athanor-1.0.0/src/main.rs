@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::{Arc, RwLock};
 
-use athanor_unit::{journal, sandbox};
+use athanor_unit::{dirs, journal, sandbox};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 const BUS_NAME: &str = "org.freedesktop.impl.portal.desktop.athanor";
@@ -60,11 +60,12 @@ fn main() -> ExitCode {
 }
 
 /// Before any thread starts. Reads stay open (PT3); the only write is dconf's shared-memory
-/// flag beneath `$XDG_RUNTIME_DIR/dconf`, which GSettings maps to learn that a value changed.
-/// No TCP. The chooser's and the screenshots' grants of PT3 join with the first window.
+/// flag beneath `$XDG_RUNTIME_DIR/dconf`, which GSettings maps to learn that a value changed,
+/// granted by the descriptor `dirs::private_dir` checked. No TCP. The chooser's and the
+/// screenshots' grants of PT3 join with the first window.
 fn confine(runtime: &Path) -> Result<(), Box<dyn StdError>> {
     sandbox::ensure_single_threaded()?;
-    sandbox::restrict_writes(&[&runtime.join("dconf")], &[])?;
+    sandbox::restrict_writes(&[dirs::private_dir(runtime, "dconf")?], &[])?;
     sandbox::deny_tcp()
 }
 

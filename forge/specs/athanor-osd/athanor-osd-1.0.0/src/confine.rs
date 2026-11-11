@@ -23,17 +23,16 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use athanor_unit::dirs::{self, Dirs};
+use athanor_unit::dirs::{self, Checked, Dirs};
 use athanor_unit::sandbox;
 
 /// What the overlay reads and the directories it writes, held open.
 #[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<OwnedFd>,
+    pub write: Vec<Checked>,
 }
 
 /// The overlay's grants: the cache and dconf's runtime directory, each when it passes
@@ -81,7 +80,7 @@ fn list(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Vec<PathBuf> {
 
 impl Grants {
     /// From the environment as `var` reads it and the write directories `write`.
-    pub fn new(write: Vec<OwnedFd>, var: impl Fn(&str) -> Option<OsString>) -> Grants {
+    pub fn new(write: Vec<Checked>, var: impl Fn(&str) -> Option<OsString>) -> Grants {
         let home = absolute(&var, "HOME");
         let config =
             absolute(&var, "XDG_CONFIG_HOME").or_else(|| home.as_ref().map(|h| h.join(".config")));

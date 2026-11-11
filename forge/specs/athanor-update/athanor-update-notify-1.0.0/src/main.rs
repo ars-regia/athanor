@@ -148,8 +148,9 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt().with_writer(std::io::stderr).without_time().init();
     // The sandbox comes first, while the process has one thread; the runtime is single-threaded too.
     let confined = sandbox::state_dir().and_then(|dir| {
-        sandbox::ensure_single_threaded()?;
-        sandbox::restrict(&[Path::new("/usr"), Path::new("/run/athanor-update")], &dir)?;
+        let grant = athanor_unit::dirs::owned_dir(&dir)?;
+        athanor_unit::sandbox::ensure_single_threaded()?;
+        athanor_unit::sandbox::restrict(&[Path::new("/usr"), Path::new("/run/athanor-update")], &[grant])?;
         Ok(dir)
     });
     let state_dir = match confined {

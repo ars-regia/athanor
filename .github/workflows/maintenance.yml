@@ -1,7 +1,8 @@
 # Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
-# drift check of PL52, the daily check of the evidence copies off GitHub (#401) and the
-# daily check that :stable was promoted (#405); the other
-# maintenance jobs move here with PB12.
+# drift check of PL52, the daily check of the evidence copies off GitHub (#401), the
+# daily check that :stable was promoted (#405) and the daily rescan of the Rust advisories;
+# the other maintenance jobs move here with PB12. A failed or cancelled scheduled job opens
+# or updates its ci-alert issue (PL51).
 name: Maintenance
 
 on:
@@ -95,3 +96,31 @@ jobs:
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
           EVIDENCE_REGISTRY: ${{ vars.EVIDENCE_REGISTRY }}
         run: python3 scripts/ci/stable_promotions.py
+
+  # The advisory database changes without a commit: an advisory or a yanked crate published
+  # against a lockfile nobody touched turns every Rust pull request red at once. The daily run
+  # finds it before they do; on 2026-11-09 a weekly run failed and no one was told.
+  rust-advisories:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust-security-audit.yml
+
+  alert:
+    # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
+    # success closes it. A job of its own on a GitHub runner, after the others whatever their
+    # result.
+    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/alert
+        with:
+          needs: ${{ toJSON(needs) }}
