@@ -1,7 +1,8 @@
+# repo-input: system/athanor-idle
 %global debug_package %{nil}
 Name:           athanor-idle
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        The Athanor idle daemon: blank, lock and suspend after inactivity
 License:        GPL-3.0-or-later
 
