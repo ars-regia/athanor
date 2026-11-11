@@ -94,7 +94,7 @@ AREAS = {
         ".github/workflows/shell-surfaces.yml",
     ),
     # What clippy and the cargo-deny advisories read, and the builder image they run in. The
-    # job pulls the published builder, so a builder change is audited again by the weekly run
+    # job pulls the published builder, so a builder change is audited again by the daily run
     # once the new image is out. rust-security-audit.yml's push filter repeats this area.
     "rust_audit": (
         "*.rs",

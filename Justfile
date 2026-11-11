@@ -185,7 +185,7 @@ check-rust:
 # The dependency policy of deny.toml over every lockfile that resolves a shipped binary:
 # licences, bans and sources. Advisories are not here: they depend on a database that changes
 # without a commit, so rust-security-audit.yml runs them (scripts/ci/security-audit.sh) on the pull
-# requests and iso-v0 pushes that change a Rust input, and weekly. The recovery kiosk
+# requests and iso-v0 pushes that change a Rust input, and daily. The recovery kiosk
 # is excluded from the root workspace but still inherits its
 # [workspace.dependencies], so cargo cannot resolve it on its own and cargo-deny cannot
 # read it; it joins this list when it gets a workspace of its own. The calmo theme tool

@@ -315,6 +315,15 @@ item = "AI8"
 purpose = "Semantic index stub, not shipped; AI8 replaces it with a real index"
 
 [[component]]
+path = "forge/specs/athanor-sessiond"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD22"
+purpose = "The session services' package: the binary, its guard unit and preset"
+
+[[component]]
 path = "forge/specs/athanor-shelld"
 kind = "rpm spec"
 area = "shell"
