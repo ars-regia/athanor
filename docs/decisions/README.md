@@ -202,7 +202,8 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0132 | 0132 | [The own compositor becomes the default session before its full acceptance](0132-own-compositor-default-before-full-acceptance.md) | amended by ADR-0135 | shell, security, process |
 | ADR-0133 | 0133 | [The own compositor takes the magnifier, the colour filters and the keyboard aids](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md) | accepted | accessibility, shell |
 | ADR-0134 | 0134 | [The pillars of Athanor take alchemical names; every other package keeps a descriptive one](0134-alchemical-names-for-the-pillars.md) | accepted | shell, update, security, process |
-| ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138 | process, docs, shell, security |
+| ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138, ADR-0139 | process, docs, shell, security |
 | ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
 | ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | accepted | process, build |
 | ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | accepted | shell, security, process, docs |
+| ADR-0139 | 0139 | [Pull requests that change only documents do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
