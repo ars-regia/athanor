@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        33%{?dist}
+Release:        34%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -13,12 +13,12 @@ Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
 Requires:       wayland-utils
-# athanor-appearance-reset reads and resets the GNOME appearance keys.
-Requires:       dconf bash
+# The reset of COSMIC's appearance values since SD22 step 3 (doc_session_daemons.md).
+Requires:       athanor-sessiond
 
 %description
-Provides the session target, the COSMIC desktop units it gathers, skeleton synchronization
-and the reset of the appearance values cosmic-settings-daemon wrote, for Athanor OS.
+Provides the session target, the COSMIC desktop units it gathers and skeleton
+synchronization, for Athanor OS.
 
 %prep
 # Nothing to prep
@@ -30,25 +30,25 @@ and the reset of the appearance values cosmic-settings-daemon wrote, for Athanor
 mkdir -p %{buildroot}/usr/share/athanor-system-services
 mkdir -p %{buildroot}/usr/lib/systemd/user
 cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
-install -D -m 0755 %{_sourcedir}/usr/libexec/athanor-appearance-reset %{buildroot}/usr/libexec/athanor-appearance-reset
-install -D -m 0644 %{_sourcedir}/usr/lib/systemd/user-preset/80-athanor-system-services.preset %{buildroot}/usr/lib/systemd/user-preset/80-athanor-system-services.preset
 
 %files
 %dir /usr/share/athanor-system-services
 /usr/lib/systemd/user/athanor-session.target
 /usr/lib/systemd/user/athanor-desktop.service
 /usr/lib/systemd/user/athanor-skel-sync.service
-/usr/lib/systemd/user/athanor-appearance-reset.service
-/usr/lib/systemd/user-preset/80-athanor-system-services.preset
-/usr/libexec/athanor-appearance-reset
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
-* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.1-33
+* Wed Nov 11 2026 Athanor Forge <forge@athanor.os> - 1.0.1-34
 - cosmic-bg leaves (doc_session_daemons.md, SD22 step 2): cosmic-bg.service is no longer
   shipped, athanor-session.target no longer wants it, and the package requires
   athanor-wallpaper in place of cosmic-bg. athanor-wallpaper is enabled by its own preset.
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.1-33
+- athanor-appearance-reset.service, its script and its preset leave (doc_session_daemons.md,
+  SD22 step 3): athanor-sessiond resets COSMIC's appearance values at each of its starts, and
+  the package requires it in place of dconf and bash.
 
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.0.1-32
 - The readiness gate's ExecStop= unsets only the names of the display, WAYLAND_DISPLAY,
