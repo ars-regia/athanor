@@ -3642,6 +3642,14 @@ LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
 PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
 LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
+# In sandbox.rs, outside its tests: a rule's descriptor is `<name>.as_fd()` of a parameter; a
+# public function takes its grants only as these types, so a write grant is a dirs::Checked or
+# a dirs::CheckedNode; and nothing there opens a descriptor or builds rules from paths.
+PATH_BENEATH = re.compile(r"PathBeneath::new\(")
+PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
+SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
+SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
+SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
 # Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
 # user namespace where the system's nodes are owned by nobody, and the chooser grants the
 # target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
@@ -3663,6 +3671,30 @@ def landlock_dependencies(manifest):
     return [table for table, deps in tables.items()
             if any(name == "landlock" or (isinstance(dep, dict) and dep.get("package") == "landlock")
                    for name, dep in deps.items())]
+
+
+def sandbox_grant_problems(relative, code, read_grants):
+    """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
+    other than a dirs::Checked or dirs::CheckedNode."""
+    found = []
+    line = lambda pos: code.count("\n", 0, pos) + 1
+    for match in PATH_BENEATH.finditer(code):
+        if any(start <= match.start() < end for start, end in read_grants):
+            continue
+        # One built on PathFd is the PathFd finding below; this one is any other descriptor.
+        if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(r"\s*PathFd\b", code[match.end():]):
+            found.append(f"{relative}:{line(match.start())}: a rule whose descriptor is not "
+                         f"`<parameter>.as_fd()`; a write grant is a dirs::Checked descriptor")
+    for match in SANDBOX_PUB_FN.finditer(code):
+        for parameter in filter(None, (p.strip() for p in match.group(2).split(","))):
+            kind = re.sub(r"\s+", "", parameter.partition(":")[2])
+            if kind not in SANDBOX_PARAMETERS:
+                found.append(f"{relative}:{line(match.start())}: {match.group(1)} takes "
+                             f"`{parameter}`; a grant is one of {', '.join(sorted(SANDBOX_PARAMETERS))}")
+    for match in SANDBOX_OPENS.finditer(code):
+        found.append(f"{relative}:{line(match.start())}: {match.group(1)} opens a descriptor or "
+                     f"builds rules from paths; grants come from athanor_unit::dirs")
+    return found
 
 
 def landlock_fd_problems(root):
@@ -3701,6 +3733,8 @@ def landlock_fd_problems(root):
             allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
             allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
                         if not re.search(r"\bPathFd\s+as\b", match.group())]
+        if relative == LANDLOCK_SANDBOX:
+            problems += sandbox_grant_problems(relative, text.split("#[cfg(test)]", 1)[0], allowed)
         for match in PATH_FD.finditer(text):
             if any(start <= match.start() < end for start, end in allowed):
                 continue

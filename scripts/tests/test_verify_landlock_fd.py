@@ -47,6 +47,23 @@ class LandlockFdTest(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("sandbox.rs:11: PathFd other than the parent of a read grant", found[0])
 
+    def test_the_real_sandbox_passes(self):
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
+        self.assertEqual(problems({verify.LANDLOCK_SANDBOX: real}), [])
+
+    def test_a_restrict_that_takes_any_descriptor_is_refused(self):
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
+        code = real.replace("write: &[Checked])", "write: &[impl AsFd])", 1)
+        self.assertNotEqual(code, real)
+        found = problems({verify.LANDLOCK_SANDBOX: code})
+        self.assertTrue(any("restrict takes `write: &[impl AsFd]`" in p for p in found), found)
+
+    def test_a_grant_opened_in_the_sandbox_is_refused(self):
+        for grant in ("PathBeneath::new(std::fs::File::open(p)?, writes)",
+                      "landlock::path_beneath_rules(paths, writes)"):
+            found = problems({verify.LANDLOCK_SANDBOX: READ_GRANT + f"    ruleset.add_rules({grant})?;\n"})
+            self.assertTrue(found, grant)
+
     def test_a_read_grant_widened_with_writes_is_refused(self):
         code = READ_GRANT.replace("AccessFs::from_read(ABI::V1),",
                                   "AccessFs::from_read(ABI::V1) | AccessFs::from_write(ABI::V3),")
