@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        16%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 
@@ -43,6 +43,10 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-greeter
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-greeter-ui.mo
 
 %changelog
+* Wed Nov 11 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
+- Link rusqlite 0.41.1 and libsqlite3-sys 0.39.1 (RUSTSEC-2026-0459); still the
+  system sqlite-libs, no bundled copy.
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-15
 - Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
   binaries, user unit, session script and data directory.
