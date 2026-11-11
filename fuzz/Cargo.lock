@@ -232,7 +232,7 @@ version = "1.0.0"
 name = "athanor-layout"
 version = "1.0.0"
 dependencies = [
- "toml 0.8.23",
+ "toml 1.1.7+spec-1.1.0",
  "tracing",
 ]
 
