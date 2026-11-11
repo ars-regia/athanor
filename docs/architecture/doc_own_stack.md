@@ -602,7 +602,8 @@ the accent, the background, the font, the padding, the dark variant, the right-t
 (42 px against GTK's 30, from Parley's locale fallback font) and the window's placement (T1 results,
 task 4). Before the dock moves, this document gains the tier measurement, the live blur and the
 dock's window geometry (ADR-0124). *Amended 2026-11-11:* decision 35 gives the geometry, the blur and the tier's protocol. It
-leaves the tier's thresholds to spike VL-S5, with M0 until then.
+leaves the tier's thresholds to spike VL-S5, with M0 until then; revision 4 of
+`doc_visual_language.md` records them (VL13).
 
 ## 5. The first two milestones
 
@@ -1347,6 +1348,10 @@ compositor and that the own compositor did not yet offer:
       without a measurement. A measurement that fails or does not finish is M0. Spike VL-S5,
       run on the laptop and the desktop, sets the measurement window and the thresholds. Until
       its results are recorded here, every output is M0, so the dock moves in M0.
+      *Amended on 2026-11-11, with revision 4 of `doc_visual_language.md` (VL13):* the spike's
+      results are recorded there. The compositor measures each output with VL13's probe and
+      its live check, applies VL13's thresholds, and sends the result. An output is M0 until
+      its probe has run.
 
     Not taken:
     - the full geometry of every window through `athanor_toplevel_state_v1`, which shows the shell
@@ -1356,7 +1361,9 @@ compositor and that the own compositor did not yet offer:
       of the blur the compositor draws.
 
     Whether a client-side measurement may offer M1 under cosmic-comp stays with spike VL-S5
-    (`doc_visual_language.md`). Until then the toolkit draws M0 there.
+    (`doc_visual_language.md`). Until then the toolkit draws M0 there. *Amended on 2026-11-11,
+    with revision 4 of `doc_visual_language.md` (VL13):* under cosmic-comp the toolkit may offer
+    M1 on its own measurement, as VL13 says, and never M2.
 
 ## 8. Risks
 
