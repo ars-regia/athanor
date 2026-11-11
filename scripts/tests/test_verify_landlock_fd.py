@@ -45,6 +45,18 @@ class LandlockFdTest(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("sandbox.rs:11: PathFd other than the parent of a read grant", found[0])
 
+    def test_a_read_grant_widened_with_writes_is_refused(self):
+        code = READ_GRANT.replace("AccessFs::from_read(ABI::V1),",
+                                  "AccessFs::from_read(ABI::V1) | AccessFs::from_write(ABI::V3),")
+        found = problems({verify.LANDLOCK_SANDBOX: code})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("PathFd other than the parent of a read grant", found[0])
+
+    def test_a_crate_outside_system_and_forge_specs_is_scanned(self):
+        found = problems({"fuzz/Cargo.toml": LANDLOCK,
+                          "forge/tools/x/src/main.rs": "use landlock::PathFd;\n"})
+        self.assertEqual(len(found), 2, found)
+
     def test_an_alias_in_the_shared_sandbox_is_refused(self):
         code = "use landlock::{PathFd as Fd, AccessFs};\n"
         self.assertEqual(len(problems({verify.LANDLOCK_SANDBOX: code})), 1)

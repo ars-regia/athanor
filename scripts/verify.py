@@ -3640,7 +3640,7 @@ def check_gpu_grants():
 LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
 LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
-PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\(")
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
 LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
 # Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
 # user namespace where the system's nodes are owned by nobody, and the chooser grants the
@@ -3650,6 +3650,9 @@ LANDLOCK_PATH_PENDING = (
     "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
     "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
 )
+# The whole tree, not RS_DIRS: a crate under forge/tools or fuzz links landlock as well as one
+# under system.
+LANDLOCK_DIRS = (".",)
 LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
 
 
@@ -3671,7 +3674,7 @@ def landlock_fd_problems(root):
     the parent of a read grant. So a Landlock write grant is never built from a path."""
     root = Path(root)
     problems = []
-    for base in RS_DIRS:
+    for base in LANDLOCK_DIRS:
         for path in sorted(walk(root / base, "Cargo.toml")):
             relative = path.relative_to(root).as_posix()
             if path.name != "Cargo.toml" or relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
