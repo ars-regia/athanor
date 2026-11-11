@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::net::{TcpListener, TcpStream};
+use std::os::fd::AsFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -191,7 +192,7 @@ fn child() {
     let [checked] = grants.write.as_slice() else {
         panic!("{grants:?}")
     };
-    let checked = fs::File::from(checked.try_clone().expect("dup"))
+    let checked = fs::File::from(checked.as_fd().try_clone_to_owned().expect("dup"))
         .metadata()
         .expect("fstat");
     assert_eq!((checked.dev(), checked.ino()), (dconf.dev(), dconf.ino()));

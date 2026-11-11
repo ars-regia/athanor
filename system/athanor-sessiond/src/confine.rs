@@ -16,10 +16,9 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use athanor_unit::dirs::private_dir;
+use athanor_unit::dirs::{private_dir, Checked};
 use athanor_unit::sandbox;
 
 /// What the daemon reads and the directories it writes, held open as `private_dir` checked
@@ -27,7 +26,7 @@ use athanor_unit::sandbox;
 #[derive(Debug)]
 pub struct Grants {
     pub read: Vec<PathBuf>,
-    pub write: Vec<OwnedFd>,
+    pub write: Vec<Checked>,
 }
 
 /// The grants from the environment as `var` reads it. `$XDG_RUNTIME_DIR/dconf` is granted when
@@ -66,11 +65,12 @@ impl Grants {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::AsFd;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     /// The device and inode `fd` names.
-    fn identity(fd: &OwnedFd) -> (u64, u64) {
-        let meta = std::fs::File::from(fd.try_clone().expect("dup"))
+    fn identity(fd: &Checked) -> (u64, u64) {
+        let meta = std::fs::File::from(fd.as_fd().try_clone_to_owned().expect("dup"))
             .metadata()
             .expect("fstat");
         (meta.dev(), meta.ino())

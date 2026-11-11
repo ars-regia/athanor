@@ -11,15 +11,13 @@ mod ui;
 
 use std::cell::RefCell;
 use std::env;
-use std::fs::DirBuilder;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::Path;
 use std::rc::Rc;
 
 use athanor_sulphur_client::shortcuts::{self, Binding};
 use athanor_layout::loader;
 use athanor_unit::dirs::Dirs;
-use athanor_unit::{crash_loop, journal, sandbox};
+use athanor_unit::{crash_loop, dirs, journal, sandbox};
 use gtk4::prelude::*;
 use gtk4::{glib, Application};
 
@@ -104,25 +102,25 @@ fn main() -> glib::ExitCode {
         Ok(Some(Binding::UserChoice)) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
         Err(err) => tracing::warn!(error = %err, "Super is not bound to the launcher; it still opens from the bar"),
     }
-    let launch_dir = dirs.runtime.join("athanor");
-    if let Err(err) = DirBuilder::new().recursive(true).mode(0o700).create(&launch_dir) {
-        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
-    }
-    let dconf_dir = dirs.runtime.join("dconf");
     // Before GTK starts a thread (LA9). Writes: the launch sockets, the unit's runtime
     // directory, dconf, the cache (which holds qalc's per-run configuration directory), usage
     // and /tmp; reads stay open, because the preview reads files. The launch directory is also
     // where the window capture buffers live. No TCP for the launcher or for qalc and the
-    // preview's systemd-run.
-    let write = [
-        launch_dir.as_path(),
-        dirs.unit_runtime.as_path(),
-        dconf_dir.as_path(),
-        dirs.cache.as_path(),
-        usage_dir.as_path(),
-        Path::new("/tmp"),
-    ];
+    // preview's systemd-run. Each is granted by the descriptor its check opened: the launch
+    // directory, made the way launch() makes it, and dconf's are private to the user
+    // (`dirs::private_dir`).
+    let mut write = dirs::private_dirs(&dirs.runtime, &["athanor", "dconf"]);
+    write.extend(dirs::existing(
+        &[
+            dirs.unit_runtime.as_path(),
+            dirs.cache.as_path(),
+            usage_dir.as_path(),
+            Path::new("/tmp"),
+        ],
+        dirs::owned_dir,
+    ));
     let devices: Vec<&Path> = athanor_launcher::DEVICE_WRITES.iter().map(Path::new).collect();
+    let devices = dirs::existing(&devices, dirs::owned_node);
     let confined = sandbox::ensure_single_threaded()
         .and_then(|()| sandbox::restrict_writes(&write, &devices))
         .and_then(|()| sandbox::deny_tcp());

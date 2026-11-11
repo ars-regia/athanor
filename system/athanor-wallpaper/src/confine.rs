@@ -18,10 +18,10 @@
 
 use std::error::Error;
 use std::ffi::OsString;
-use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use athanor_unit::{dirs, sandbox};
+use athanor_unit::dirs::{self, Checked};
+use athanor_unit::sandbox;
 
 /// `name` as an absolute path, or `None`.
 fn absolute(var: &impl Fn(&str) -> Option<OsString>, name: &str) -> Option<PathBuf> {
@@ -62,7 +62,7 @@ pub fn reads(var: impl Fn(&str) -> Option<OsString>) -> Vec<PathBuf> {
 /// The directories the daemon may write, held open as `dirs::private_dir` checked them:
 /// dconf's, `runtime/dconf`, when it passes, else none. The grant names the descriptor, so a
 /// link swapped in for the path afterwards widens nothing.
-pub fn writes(runtime: &Path) -> Vec<OwnedFd> {
+pub fn writes(runtime: &Path) -> Vec<Checked> {
     match dirs::private_dir(runtime, "dconf") {
         Ok(dconf) => vec![dconf],
         Err(error) => {
@@ -74,7 +74,7 @@ pub fn writes(runtime: &Path) -> Vec<OwnedFd> {
 
 /// Restricts the calling thread and those it starts afterwards to reading `read` and writing
 /// beneath `write`, with no TCP. The caller has proved the process single-threaded.
-pub fn apply(read: &[PathBuf], write: &[OwnedFd]) -> Result<(), Box<dyn Error>> {
+pub fn apply(read: &[PathBuf], write: &[Checked]) -> Result<(), Box<dyn Error>> {
     let read: Vec<&Path> = read.iter().map(PathBuf::as_path).collect();
     sandbox::restrict(&read, write)?;
     sandbox::deny_tcp()
