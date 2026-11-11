@@ -58,6 +58,14 @@ class LandlockFdTest(unittest.TestCase):
         found = problems({verify.LANDLOCK_SANDBOX: code})
         self.assertTrue(any("restrict takes `write: &[impl AsFd]`" in p for p in found), found)
 
+    def test_code_around_the_tests_module_is_still_read(self):
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
+        for code in ("// #[cfg(test)]\n" + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
+                     "#[cfg(test)]\nuse std::fs::File;\n" + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
+                     real + "\npub fn widen(write: &[impl AsFd]) {}\n"):
+            found = problems({verify.LANDLOCK_SANDBOX: code})
+            self.assertTrue(any("&[impl AsFd]" in p for p in found), found)
+
     def test_a_grant_opened_in_the_sandbox_is_refused(self):
         for grant in ("PathBeneath::new(std::fs::File::open(p)?, writes)",
                       "landlock::path_beneath_rules(paths, writes)"):

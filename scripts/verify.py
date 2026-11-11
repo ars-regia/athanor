@@ -3642,7 +3642,7 @@ LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
 PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
 LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
-# In sandbox.rs, outside its tests: a rule's descriptor is `<name>.as_fd()` of a parameter; a
+# In sandbox.rs, outside its tests module: a rule's descriptor is `<name>.as_fd()`; a
 # public function takes its grants only as these types, so a write grant is a dirs::Checked or
 # a dirs::CheckedNode; and nothing there opens a descriptor or builds rules from paths.
 PATH_BENEATH = re.compile(r"PathBeneath::new\(")
@@ -3673,6 +3673,21 @@ def landlock_dependencies(manifest):
                    for name, dep in deps.items())]
 
 
+def without_tests_module(text):
+    """text without its `#[cfg(test)] mod tests { ... }`, matched at the start of a line and cut
+    at its closing brace, so code before or after it is still read. A module whose braces do not
+    balance leaves the whole text, which the tests' own descriptors then fail: closed, not open."""
+    match = re.search(r"^#\[cfg\(test\)\]\s*mod\s+tests\s*\{", text, re.M)
+    if not match:
+        return text
+    depth = 0
+    for pos in range(match.end() - 1, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[pos], 0)
+        if depth == 0:
+            return text[:match.start()] + "\n" * text.count("\n", match.start(), pos + 1) + text[pos + 1:]
+    return text
+
+
 def sandbox_grant_problems(relative, code, read_grants):
     """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
     other than a dirs::Checked or dirs::CheckedNode."""
@@ -3684,7 +3699,7 @@ def sandbox_grant_problems(relative, code, read_grants):
         # One built on PathFd is the PathFd finding below; this one is any other descriptor.
         if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(r"\s*PathFd\b", code[match.end():]):
             found.append(f"{relative}:{line(match.start())}: a rule whose descriptor is not "
-                         f"`<parameter>.as_fd()`; a write grant is a dirs::Checked descriptor")
+                         f"`<name>.as_fd()`; a write grant is a dirs::Checked descriptor")
     for match in SANDBOX_PUB_FN.finditer(code):
         for parameter in filter(None, (p.strip() for p in match.group(2).split(","))):
             kind = re.sub(r"\s+", "", parameter.partition(":")[2])
@@ -3734,7 +3749,7 @@ def landlock_fd_problems(root):
             allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
                         if not re.search(r"\bPathFd\s+as\b", match.group())]
         if relative == LANDLOCK_SANDBOX:
-            problems += sandbox_grant_problems(relative, text.split("#[cfg(test)]", 1)[0], allowed)
+            problems += sandbox_grant_problems(relative, without_tests_module(text), allowed)
         for match in PATH_FD.finditer(text):
             if any(start <= match.start() < end for start, end in allowed):
                 continue
