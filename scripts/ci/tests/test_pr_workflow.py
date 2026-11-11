@@ -93,6 +93,9 @@ class RustAuditTest(unittest.TestCase):
         alert = jobs["alert"]
         self.assertEqual(set(alert["needs"]), set(jobs) - {"alert"})
         self.assertIn("always()", alert["if"])
+        self.assertIn("github.event_name == 'schedule'", alert["if"])
+        writers = {n for n, j in jobs.items() if j.get("permissions", {}).get("issues") == "write"}
+        self.assertEqual(writers, {"alert"})
 
     def test_push_filter_matches_the_rust_audit_area(self):
         push = yaml.safe_load(AUDIT.read_text())[True]["push"]
