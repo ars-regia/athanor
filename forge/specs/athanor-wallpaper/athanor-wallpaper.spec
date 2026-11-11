@@ -1,7 +1,8 @@
+# repo-input: system/athanor-wallpaper
 %global debug_package %{nil}
 Name:           athanor-wallpaper
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        The Athanor wallpaper: one background surface per output, drawn with Sal
 License:        GPL-3.0-or-later
 
