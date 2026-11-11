@@ -39,8 +39,8 @@ def modified(name, removed, added, **kw):
 SPEC_FILES = [
     modified(
         "forge/specs/athanor-demo/athanor-demo.spec",
-        ["Version:        1.6.0", "Release:        2%{?dist}"],
-        ["Version:        1.7.1", "Release:        1%{?dist}"],
+        ["Version:        1.6.0", "Release:        2%{?athanor_content}%{?dist}"],
+        ["Version:        1.7.1", "Release:        1%{?athanor_content}%{?dist}"],
     ),
     modified(
         "forge/specs/athanor-demo/SOURCES/sources.sha256",
@@ -191,6 +191,8 @@ class BotMergeTest(unittest.TestCase):
     def test_spec_macro_in_version_or_release_stays(self):
         for bad in (
             "+Release:        1%(id>/tmp/x)",
+            "+Release:        1%{?athanor_content}%(id>/tmp/x)%{?dist}",
+            "+Release:        1%{?dist}",
             '+Version:        1.7.1%{lua:os.execute("id")}',
         ):
             self.assertEqual(self.spec(files=self.with_line(SPEC_FILES, 0, bad)), [])

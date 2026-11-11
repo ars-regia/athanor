@@ -12,12 +12,16 @@ chk = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(chk)
 
 SPECS = {
-    "recovery": "Name: athanor-recovery\nVersion: 1.0.0\nRelease: 6%{?dist}\n",
-    "config": "Name: athanor-system-config\nVersion: 1.0.0\nRelease: %{?autorelease}%{!?autorelease:50.fc43}\n",
+    "athanor-recovery": "Name: athanor-recovery\nVersion: 1.0.0\nRelease: 6%{?athanor_content}%{?dist}\n",
+    "config": "Name: athanor-system-config\nVersion: 1.0.0\nRelease: %{?autorelease}%{!?autorelease:50.fc43%{?athanor_content}}\n",
+    "athanor-unhashed": "Name: athanor-unhashed\nVersion: 1.0.0\nRelease: 1%{?athanor_content}%{?dist}\n",
     "comp": "%global fedora_release 1.fc43\nName: cosmic-comp\nVersion: 1.8.0\nRelease: %{fedora_release}.athanor1\n",
     "bat": "Name: bat\nVersion: 0.26.1\nRelease: 1%{?dist}\n",
     "exotic": "Name: athanor-exotic\nVersion: 1^%(date)\nRelease: 1%{?dist}\n",
 }
+
+# The DAG's {package: hash}: athanor-recovery's directory is found by its prefix.
+HASHES = {"recovery": "0123456789" + "a" * 54, "config": "fedcba9876" + "b" * 54}
 
 
 class CheckTest(unittest.TestCase):
@@ -28,7 +32,7 @@ class CheckTest(unittest.TestCase):
             p = pathlib.Path(tmp.name, d)
             p.mkdir()
             (p / f"{d}.spec").write_text(text)
-        self.specs = chk.load_specs(tmp.name)
+        self.specs = chk.load_specs(tmp.name, HASHES)
 
     def check(self, *lines):
         return chk.check(list(lines), self.specs)
@@ -36,17 +40,29 @@ class CheckTest(unittest.TestCase):
     def test_matching_packages_pass(self):
         self.assertEqual(
             self.check(
-                "athanor-recovery 1.0.0-6 athanor-recovery-1.0.0-6.src.rpm",
-                "athanor-system-config 1.0.0-50.fc43 athanor-system-config-1.0.0-50.fc43.src.rpm",
+                "athanor-recovery 1.0.0-6.h0123456789 athanor-recovery-1.0.0-6.h0123456789.src.rpm",
+                "athanor-system-config 1.0.0-50.fc43.hfedcba9876 athanor-system-config-1.0.0-50.fc43.hfedcba9876.src.rpm",
                 "cosmic-comp 1.8.0-1.fc43.athanor1 cosmic-comp-1.8.0-1.fc43.athanor1.src.rpm",
             ),
             [],
         )
 
     def test_a_stale_release_fails(self):
-        (p,) = self.check("athanor-recovery 1.0.0-5 athanor-recovery-1.0.0-5.src.rpm")
-        self.assertIn("1.0.0-5 is installed", p)
-        self.assertIn("1.0.0-6", p)
+        (p,) = self.check("athanor-recovery 1.0.0-5.h0123456789 athanor-recovery-1.0.0-5.h0123456789.src.rpm")
+        self.assertIn("1.0.0-5.h0123456789 is installed", p)
+        self.assertIn("1.0.0-6.h0123456789", p)
+
+    def test_another_content_hash_fails(self):
+        # a stale per-package image of the same number: built from other inputs
+        (p,) = self.check("athanor-recovery 1.0.0-6.h9999999999 athanor-recovery-1.0.0-6.h9999999999.src.rpm")
+        self.assertIn("1.0.0-6.h0123456789", p)
+
+    def test_a_build_without_the_hash_fails(self):
+        self.assertEqual(len(self.check("athanor-recovery 1.0.0-6 athanor-recovery-1.0.0-6.src.rpm")), 1)
+
+    def test_a_spec_without_a_hash_fails_loudly(self):
+        (p,) = self.check("athanor-unhashed 1.0.0-1 athanor-unhashed-1.0.0-1.src.rpm")
+        self.assertIn("no content hash", p)
 
     def test_the_spec_is_found_by_source_rpm_not_by_package_name(self):
         # a subpackage, and a spec whose directory and prefix differ from its Name

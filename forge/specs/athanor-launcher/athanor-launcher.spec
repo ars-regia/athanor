@@ -1,7 +1,8 @@
+# repo-input: system/athanor-preview-render
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
@@ -67,6 +68,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-launche
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-launcher.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
+- Landlock grants the launcher's writes by descriptors athanor_unit::dirs opened and
+  checked (#1052): a directory that is a link or another user's is left out with a warning,
+  and the launch directory and dconf are private_dir's, mode 0700.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-9
 - Watch the windows at start: athanor-sulphur-client binds the window globals only for a
   client that asks for them, and this one reads the open windows among the results, their

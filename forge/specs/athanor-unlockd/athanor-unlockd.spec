@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-unlockd
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        The session lock's PAM helper, run as root once per connection
 License:        GPL-3.0-or-later
 
