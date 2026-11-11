@@ -410,9 +410,7 @@ def idle_problems(root):
     # an empty file, which it ignores; the first directory's entry shadows the later ones.
     wants = [root / d / "athanor-session.target.wants" / IDLE for d in ("etc/systemd/user", USER_UNITS[0])]
     link = next((p for p in wants if os.path.lexists(p)), None)
-    if link is None or (
-        os.readlink(link) == "/dev/null" if link.is_symlink() else link.stat().st_size == 0
-    ):
+    if link is None or is_masked(link.parent, IDLE):
         found.append(f"{IDLE} is not wanted by athanor-session.target: nothing locks an idle session")
     # Matched on the Name= line, spaces around = allowed, as the Containerfile's grep does: an unrelated file the bus
     # would skip as malformed is not this check's to fail.

@@ -277,6 +277,18 @@ class ImageSession(unittest.TestCase):
         mask.symlink_to("/dev/null")
         self.assertProblem("athanor-idle.service is not wanted by athanor-session.target")
 
+    def test_an_idle_wants_link_masked_by_a_relative_link_fails(self):
+        mask = self.root / IDLE_WANTS / "athanor-idle.service"
+        mask.unlink()
+        mask.symlink_to("../../../../dev/null")
+        self.assertProblem("athanor-idle.service is not wanted by athanor-session.target")
+
+    def test_a_dangling_idle_wants_link_passes(self):
+        link = self.root / IDLE_WANTS / "athanor-idle.service"
+        link.unlink()
+        link.symlink_to("/usr/lib/systemd/user/athanor-idle.service")
+        self.assertEqual(mod.problems(self.root), [])
+
     def test_a_spaced_second_screensaver_activation_fails(self):
         self.write("usr/local/share/dbus-1/services/org.example.Idle.service",
                    "[D-BUS Service]\nName = org.freedesktop.ScreenSaver\nExec=/usr/bin/other\n")
