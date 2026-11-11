@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:76.fc43}
+Release:        %{?autorelease}%{!?autorelease:76.fc43%{?athanor_content}}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

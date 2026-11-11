@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        7%{?athanor_content}%{?dist}
 Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later

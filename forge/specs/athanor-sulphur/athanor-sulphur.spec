@@ -5,7 +5,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        23%{?dist}
+Release:        23%{?athanor_content}%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}

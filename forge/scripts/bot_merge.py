@@ -16,7 +16,7 @@ the script does not merge, or one the queue removes, waits for a person.
 spec   — branch chore/update-specs-zero-trust (forge-util-update-specs.yml); only modified
          *.spec and SOURCES/sources.sha256 of the packages forge/upstream-watch.json lists
          (read from the checkout, the base branch); only Version
-         lines (numeric), Release lines (N%{?dist}) and manifest entries; every Version keeps
+         lines (numeric), Release lines (N%{?athanor_content}%{?dist}) and manifest entries; every Version keeps
          its leftmost non-zero component (1.6.0 -> 1.7.1 merges, 1.9 -> 2.0 and 0.3 -> 0.4 do
          not).
 system — branch bump/system-* with label system-bump (kernel-bump.yml, system group); only
@@ -63,7 +63,7 @@ CHECK_WORKFLOWS = {
 SPECS_JOB = "specs / Spec gate"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
-RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
+RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?athanor_content\}%\{\?dist\}")
 MANIFEST = re.compile(rf"{HEX64}  {NAME}")
 LOCK_ENTRY = re.compile(rf"{HEX64}  (https://\S+)")
 FROM = re.compile(rf"FROM ([^\s@]+)@sha256:{HEX64} AS (\S+)")

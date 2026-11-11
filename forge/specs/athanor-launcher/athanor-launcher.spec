@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0
-Release:        9%{?dist}
+Release:        9%{?athanor_content}%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 

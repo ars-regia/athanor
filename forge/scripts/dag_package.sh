@@ -63,9 +63,16 @@ step_build() {
   if [ -d "specs/athanor-${pkg_clean}" ]; then spec_dir="specs/athanor-${pkg_clean}"; elif [ -d "specs/${pkg_clean}" ]; then spec_dir="specs/${pkg_clean}"; fi
   if [ -z "$spec_dir" ]; then echo "DEBUG: PKG_NAME='$PKG_NAME' PKG_CLEAN='$pkg_clean'"; ls -la specs/; fi
   if [ -n "$spec_dir" ]; then
+    # The check step's hash, whose first ten hex digits the Release carries: the version-release
+    # of the RPM changes with what it was built from, and is never raised by hand.
+    if [[ ! ${CONTENT_HASH:-} =~ ^[0-9a-f]{64}$ ]]; then
+      echo "dag_package.sh: CONTENT_HASH is not a content hash: '${CONTENT_HASH:-}'" >&2
+      exit 1
+    fi
     echo "📦 Compiling Custom Spec: $spec_dir"
     # Fetch with network, then build with --network=none (forge golden rule 4).
     bash "$here/run_spec_build.sh" "${BUILDER_IMAGE,,}" "$spec_dir" \
+      -e ATHANOR_CONTENT=".h${CONTENT_HASH:0:10}" \
       -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
       -v "${GITHUB_WORKSPACE}/.sccache:/root/.cache/sccache"
   else

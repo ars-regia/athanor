@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-tweaks
 Version:        1.0.0
-Release:        12%{?dist}
+Release:        12%{?athanor_content}%{?dist}
 Summary:        Athanor OS athanor-system-tweaks
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

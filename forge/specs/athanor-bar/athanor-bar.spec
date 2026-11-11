@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        23%{?dist}
+Release:        23%{?athanor_content}%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 

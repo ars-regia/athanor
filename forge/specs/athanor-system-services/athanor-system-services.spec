@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        32%{?dist}
+Release:        32%{?athanor_content}%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

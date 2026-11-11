@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        15%{?athanor_content}%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
