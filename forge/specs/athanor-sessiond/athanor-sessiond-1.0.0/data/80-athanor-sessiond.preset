@@ -1,0 +1,2 @@
+# doc_session_daemons.md, SD22 step 3: the session services start with every user's session.
+enable athanor-sessiond.service

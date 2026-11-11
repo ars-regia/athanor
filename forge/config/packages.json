@@ -22,6 +22,7 @@
     "cliphist",
     "backup",
     "update",
+    "sessiond",
     "xdg-desktop-portal-athanor",
     "tetragon",
     "keylime",
@@ -67,6 +68,7 @@
     "system-config",
     "backup",
     "update",
+    "sessiond",
     "recovery",
     "xdg-desktop-portal-athanor",
     "unlockd"
