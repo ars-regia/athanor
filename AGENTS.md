@@ -61,8 +61,8 @@ hours: never use it as a check.
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in
   passing.
-- **At most ten open pull requests** (ADR-0135, which raised the limit of five); one that
-  changes only files under `docs/` does not count (ADR-0139). With ten open, finish before
+- **At most ten open pull requests** (ADR-0135, which raised the limit of five); one whose
+  diff has every path under `docs/` does not count (ADR-0139). With ten open, finish before
   starting: a new pull request waits until one is merged or closed, and reviewers' findings on
   open ones are closed before new work begins. A branch without an open pull request is
   merged, archived as a tag `archive/<branch>`, or deleted.

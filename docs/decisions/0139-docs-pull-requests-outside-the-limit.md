@@ -24,22 +24,26 @@ others.
 
 Decided by the maintainer on 2026-11-11.
 
-1. **A pull request whose changed files are all under `docs/` does not count against the limit**
-   of ADR-0135 decision 1. This covers specification revisions, decision records, operations
-   documents, plans and spike reports. A pull request that also changes one file outside `docs/`
-   counts.
-2. **The rest of the rule holds for every pull request**, documents included: reviewers' findings on
+1. **A pull request whose diff has every path under `docs/`, the old and the new path of a rename
+   or a deletion included, does not count against the limit** of ADR-0135 decision 1. This covers
+   specification revisions, decision records, operations documents, plans and spike reports. A
+   pull request with one path outside `docs/` counts, a Markdown file such as `AGENTS.md` or a
+   `README.md` outside `docs/` included.
+2. **A pull request that gains a path outside `docs/` counts from the push that adds it.** If the
+   count then exceeds ten, no new pull request opens until it is back below ten.
+3. **The rest of the rule holds for every pull request**, documents included: reviewers' findings on
    open pull requests are closed before new work begins, every merge goes through its card and
    approval, and a branch without an open pull request is merged, archived as a tag
    `archive/<branch>`, or deleted.
 
 This amends ADR-0135 decision 1.
 
-Not taken:
-- keeping the limit for documents, which makes code wait on the specification it implements, and
-  the specification wait on the code;
-- a separate limit for documents, which adds a second count for no gain the review does not already
-  give.
+## Alternatives rejected
+
+- Keeping the limit for documents, which makes code wait on the specification it implements, and
+  the specification wait on the code.
+- A separate limit for documents. The review and approval rules already apply to them unchanged;
+  what a document costs is a slot, not a check, and a second count would only bring the slot back.
 
 ## Consequences
 
