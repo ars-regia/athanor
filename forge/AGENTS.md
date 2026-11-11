@@ -8,8 +8,13 @@ system is specified in `docs/architecture/doc_build_system.md` and package devel
 - **The four golden rules** (development guide, section 2): no dynamic downloads in a spec,
   no `%pre` or `%post` that writes under `/usr` or `/etc`, no disabled security
   (`gpgcheck=0`, weakened hardening flags), no network during the build.
-- **A payload change bumps the spec.** Any change to what a package installs raises
-  `Release` and adds a `%changelog` entry in the spec's existing style.
+- **Never raise `Release` by hand** in a spec whose `Release` carries `%{?athanor_content}`.
+  A DAG build appends `.h` and ten hex digits of the package's content hash
+  (`doc_build_system.md`, section 5), so every payload change has its own version-release; no
+  `%changelog` entry is needed either. The specs in `RELEASE_BY_HAND` of `scripts/verify.py`
+  follow an upstream or kernel release instead: there a payload change raises `Release` and
+  adds a `%changelog` entry in the spec's existing style. `verify.py specs` holds every other
+  spec to the macro.
 - **Declare every runtime need** as `Requires:` or in `config/packages.json`. The image
   installs with `install_weak_deps=False`, so a `Recommends:` is not installed.
 - **Enable units with a preset** under `/usr/lib/systemd/system-preset/` and the

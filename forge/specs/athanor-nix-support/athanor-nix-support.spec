@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-nix-support
 Version:        1.0.0
-Release:        13%{?dist}
+Release:        13%{?athanor_content}%{?dist}
 Summary:        Athanor OS athanor-nix-support
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

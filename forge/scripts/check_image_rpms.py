@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 """Fail when an RPM installed in the system image does not match its spec in the checkout.
 
-Usage: rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{SOURCERPM}\\n' | check_image_rpms.py SPECS_DIR
-system/check-image-rpms.sh runs it inside a built image.
+Usage: rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE} %{SOURCERPM}\\n' | check_image_rpms.py SPECS_DIR HASHES
+system/check-image-rpms.sh runs it inside a built image; HASHES is the {package: content hash}
+map of `dag_orchestrator.py --write-hashes` for the same checkout.
 
 The source RPM of each installed package names the spec it was built from (Name: of
 SPECS_DIR/*/*.spec). Two defects fail the check:
@@ -13,10 +14,14 @@ Everything else (Fedora's own packages, the Azoth kernel) is not ours to compare
 
 The expected version-release is parsed from the spec, strictly: the forge builder has no dist
 macro, so %{?dist} is empty; %global macros are substituted; the autorelease fallback is taken
-(the builder has no rpmautospec). Any other macro fails loudly, and only for the specs of
-installed packages, so an unrelated exotic spec cannot break a build.
+(the builder has no rpmautospec); %{?athanor_content} is `.h` and the first ten hex digits of
+the package's content hash, which the DAG build defines (doc_build_system.md, section 5), so a
+package built from other inputs fails even when its spec kept the same number. Any other macro
+fails loudly, and only for the specs of installed packages, so an unrelated exotic spec cannot
+break a build.
 """
 
+import json
 import pathlib
 import re
 import sys
@@ -31,6 +36,8 @@ def expand(text, macros, where):
         text = text[len(AUTORELEASE) : -1]
 
     def sub(m):
+        if m.group(2) == "athanor_content" and m.group(2) not in macros:
+            raise ValueError(f"{where}: no content hash for its directory in the hashes")
         if m.group(2) not in macros:
             raise ValueError(f"{where}: macro {m.group(0)} is not supported")
         return macros[m.group(2)]
@@ -42,9 +49,11 @@ def expand(text, macros, where):
     return text
 
 
-def read_spec(path):
+def read_spec(path, content_hash=None):
     """(name, version, release) of a spec, version and release still unexpanded."""
     macros, tags = {}, {}
+    if content_hash:
+        macros["athanor_content"] = ".h" + content_hash[:10]
     for line in pathlib.Path(path).read_text().splitlines():
         m = re.match(r"%(?:global|define)\s+(\w+)\s+(.*\S)", line)
         if m:
@@ -57,10 +66,23 @@ def read_spec(path):
     return name, lambda: expand(tags["Version"], macros, where) + "-" + expand(tags["Release"], macros, where)
 
 
-def load_specs(specs_dir):
+def spec_hashes(specs_dir, hashes):
+    """{spec directory name: content hash}: a package's directory is athanor-<package>, else
+    <package>, as dag_orchestrator.spec_dir_for has it."""
+    found = {}
+    for pkg, h in hashes.items():
+        for d in (f"athanor-{pkg}", pkg):
+            if pathlib.Path(specs_dir, d).is_dir():
+                found[d] = h
+                break
+    return found
+
+
+def load_specs(specs_dir, hashes):
     specs = {}
+    by_dir = spec_hashes(specs_dir, hashes)
     for path in sorted(pathlib.Path(specs_dir).glob("*/*.spec")):
-        name, nvr = read_spec(path)
+        name, nvr = read_spec(path, by_dir.get(path.parent.name))
         if name in specs:
             raise ValueError(f"{path}: spec {name} is also in {specs[name][0]}")
         specs[name] = (path, nvr)
@@ -94,7 +116,11 @@ def main():
     if not lines:
         print("no installed package on stdin", file=sys.stderr)
         return 2
-    problems = check(lines, load_specs(sys.argv[1]))
+    if len(sys.argv) != 3:
+        print("usage: check_image_rpms.py SPECS_DIR HASHES", file=sys.stderr)
+        return 2
+    hashes = json.loads(pathlib.Path(sys.argv[2]).read_text())
+    problems = check(lines, load_specs(sys.argv[1], hashes))
     for p in problems:
         print(p, file=sys.stderr)
     return 1 if problems else 0
