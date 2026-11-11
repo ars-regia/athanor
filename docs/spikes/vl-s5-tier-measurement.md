@@ -108,32 +108,36 @@ uploading the textures and drawing.
 | UHD 620, 1920 × 1080, `probe-copy` | 8 | 1.95 to 2.91 | 2.34 to 3.54 | 5.18 to 7.66 | 1.21 to 1.29 s |
 | UHD 620, 2560 × 1440, `probe-copy` | 1 | 4.39 | 4.88 | 10.46 | not timed |
 
-Wall time is given for the first five runs at 1920 × 1080 and for three of the `probe-copy` runs.
+Wall time was taken in the first five `probe` runs at 1920 × 1080, in two of the three at
+2560 × 1440, in the MX150's run, and in three of the `probe-copy` runs at 1920 × 1080.
 `probe-copy` is the same probe with the copy of the backdrop: before each blur, the region is
 copied out of the scene into a texture of its own with one textured draw, as a compositor drawing
 into a swapchain buffer copies what lies under a surface, and the blur reads that texture. Five
-`probe` and `probe-copy` runs were made in pairs. In three pairs the two scenes ran at about the
-same speed, and the copy added 0.10, 0.28 and 0.29 ms to the whole output's blur over the scene,
-at the median, and −0.03 to 0.12 ms to the dock's. In the other two the `probe-copy` scene ran at
-1.9 ms against 2.7 ms, at a higher clock, so those pairs do not compare. At 2560 × 1440 one pair
-gave the copy 1.14 ms for the whole output and none for the dock.
+`probe` and `probe-copy` runs were made in pairs, without sampling the clock. Over the five
+pairs, the copy changed the whole output's blur over the scene, at the median, by −0.45, +0.10,
++0.28, −0.37 and +0.29 ms, and the dock's by −0.20 to +0.12 ms. That spread, about ±0.4 ms, is
+the noise of runs at different clocks, and it is larger than the copy's cost at 1920 × 1080: the
+pairs do not resolve that cost. At 2560 × 1440 one pair gave the copy 1.15 ms for the whole
+output, which one pair does not tell from the same noise. The tiers of section 4 are read from
+the `probe-copy` figures themselves, which include the copy whatever it costs.
 
 During three `probe-copy` runs at 1920 × 1080 the i915 clock was sampled about every 60 ms,
-from 0.2 s before the process started. It read 300 MHz until 66 to 71 ms into the process and at
-least 567 MHz from 126 to 183 ms. From then it read between 567 and 917 MHz; the last sample of
-two runs, taken as the process ended, read 300 MHz. The first five `probe` runs were sampled
-about every 50 ms with the same rise, without a recorded start. The probe's figures are up to
-about 18 % above the long run at 1920 × 1080 (`full-3` median 6.94 against 5.88 ms, p95 7.56
-against 6.55 ms): a short probe overstates the cost, which errs towards a lower tier.
+from 0.2 s before the process started. It read 300 MHz until 66 to 126 ms into the process and
+at least 567 MHz from 126 to 183 ms. From then it read between 567 and 917 MHz; the last sample
+of two runs, taken at or just after the end of the process, read 300 MHz. The first five `probe` runs were sampled
+about every 50 ms with the same rise, without a recorded start. Compared like for like, without
+the copy, the `probe` runs' `full-3` medians are 6.24 to 6.89 ms against 5.88 ms in the long run
+at 1920 × 1080, 6 to 17 % above: a short probe overstates the cost, which errs towards a lower
+tier.
 
 ## 3. Findings
 
 1. **On the old integrated GPU, M2 is affordable for the dock and close to the limit for a
    full-screen surface.** On the UHD 620 at 1080p and 60 Hz, a frame lasts 16.67 ms. The dock's
    live blur costs about 0.6 ms of it. A full-screen live blur costs about 3.4 ms, a fifth of the
-   frame. At 1440p it costs about 4.5 ms. The copy of the backdrop adds 0.1 to 0.3 ms to the
-   full-screen blur at 1080p, about 1.1 ms at 1440p, and nothing measurable to the dock's
-   (section 2.2).
+   frame. At 1440p it costs about 4.5 ms. The copy of the backdrop costs less at 1080p than the
+   runs of section 2.2 resolve, about ±0.4 ms; the probe that includes it keeps the UHD 620 in
+   M2 at 1080p (section 4).
 2. **The GPU's kind does not predict its frame time.** Under nouveau, the MX150 draws the bare
    scene in 11.2 ms, 4.6 times slower than the integrated GPU beside it. The scene alone takes
    two thirds of a 60 Hz frame. The probable cause, not measured, is that nouveau does not
@@ -141,8 +145,8 @@ against 6.55 ms): a short probe overstates the cost, which errs towards a lower 
    choice by measured frame time rather than by brand.
 3. **The time must be measured under load, and a short probe is enough.** An integrated GPU's
    clock follows its load (section 1). From an idle GPU, the proposed probe of about 90 rounds
-   reads up to about 18 % above a run of 330 rounds: the clock rises within its warm-up, and
-   what is left of the difference overstates the cost (section 2.2).
+   reads 6 to 17 % above a run of 330 rounds: the clock rises within its warm-up, and what is
+   left of the difference overstates the cost (section 2.2).
 4. **M2's memory is about VL13's estimate plus the levels.** VL13 counts one more buffer per
    output, about 8 MB at 1920 × 1080 in RGBA (8.3 MB): the backdrop, copied into a texture the
    blur can sample. The long runs blur a scene that is already a texture and do not copy it;
@@ -170,7 +174,9 @@ the maintainer's approval are needed before they are implemented.
   region copied out and blurred, then the scene with the whole output copied out and blurred,
   as `probe-copy` does. Each is timed from its first GL call until its sync point signals, as in
   section 1. The probe never blocks the compositor's event loop: it draws in a GL context of its
-  own, on a thread of its own, and no frame waits on it.
+  own, on a thread of its own. It still shares the GPU with the frames drawn meanwhile on any
+  output of that GPU, and slows them for as long as it runs, 1.2 s on the UHD 620 and up to
+  its 3 s deadline (section 5).
 - **When, and for how long:** at each output enable, mode change and GPU change, before M2 or
   M1 is first offered on that output. The probe draws 30 rounds of warm-up and 60 measured
   rounds. It took 1.1 to 1.3 s on the UHD 620 at 1080p and 1.7 s at 1440p (section 2.2). Its
@@ -197,7 +203,11 @@ the maintainer's approval are needed before they are implemented.
   median of its last 120 damaged frames is compared with T/2. When the median exceeds T/2, the
   output falls to M1 and stays there until the next enable, mode change or GPU change, whose
   probe gives it its tier again. No probe runs on a timer, so an output whose real frames cost
-  more than its probe cannot move between M1 and M2 over and over. A real frame can be timed
+  more than its probe cannot move between M1 and M2 over and over. Frames drawn while a probe
+  runs on the same GPU are not counted, so another output's probe cannot move it. A transient
+  load, a game or a video, can: the output then stays in M1 until its next enable, mode change
+  or GPU change. That cost is accepted for a tier that cannot flap; a way back to M2 within a
+  mode would need a revision of its own. A real frame can be timed
   through the swapchain element's sync point. `udev.rs` waits on it today only when the plane cannot take the fence; otherwise KMS
   takes it as IN_FENCE_FD. The proposal is to export it as a fence fd as well, polled in the
   event loop without blocking. No such code exists yet.
@@ -216,7 +226,8 @@ the maintainer's approval are needed before they are implemented.
   copy otherwise, with a blit or by drawing the scene straight into a texture; the probe times
   whichever it uses. The copy's memory is calculated (finding 4), not measured.
 - **A probe beside live frames.** Every probe ran alone. A probe drawn while the output draws
-  its frames shares the GPU with them, which slows both for about a second.
+  its frames shares the GPU with them, which slows both for as long as the probe runs, up to its
+  3 s deadline. How much it slows them was not measured.
 - **Scan-out.** The probe ran off screen. KMS commits, the cursor plane and direct scan-out were
   not measured, nor what a translucent full-screen surface costs by preventing direct scan-out.
 - **A real session's scene.** The scene is synthetic, full damage every frame. A real session
