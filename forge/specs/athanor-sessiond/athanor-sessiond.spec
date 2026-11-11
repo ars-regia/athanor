@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-sessiond
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        The Athanor session services: the reset of COSMIC's appearance values
 License:        GPL-3.0-or-later
 
