@@ -17,3 +17,8 @@ updates:
     groups:
       cargo:
         update-types: ["minor", "patch"]
+    ignore:
+      # accesskit_unix 0.24.1 requires accesskit_atspi_common 0.21.1, past the patched copy under
+      # system/athanor-sal/vendor/ (#638); it moves when that copy's PATCHES.md entry goes.
+      - dependency-name: "accesskit_unix"
+        versions: [">=0.24.1"]
