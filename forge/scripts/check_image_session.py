@@ -107,6 +107,14 @@ DESKTOPS = ("athanor", "cosmic")  # XDG_CURRENT_DESKTOP=Athanor:COSMIC, lowercas
 HOME_DIRS = ("/home", "/root", "/run/user")
 PORTALS_DIR = "usr/share/xdg-desktop-portal/portals"
 DBUS_SERVICES = "usr/share/dbus-1/services"
+# The session bus's activation directories an image can fill: XDG_DATA_DIRS, with the directory
+# 60-athanor-cosmic-defaults.conf prepends, then the standard one (dbus-daemon(1)). The user's
+# XDG_DATA_HOME is not in the image.
+SESSION_SERVICE_DIRS = (
+    "usr/share/athanor/cosmic-defaults/dbus-1/services",
+    "usr/local/share/dbus-1/services",
+    DBUS_SERVICES,
+)
 FILE_CHOOSER = "org.freedesktop.impl.portal.FileChooser"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 SCHEMA_DIR = "/usr/share/glib-2.0/schemas"
@@ -401,15 +409,15 @@ def idle_problems(root):
     wants = [root / d / "athanor-session.target.wants" / IDLE for d in ("etc/systemd/user", USER_UNITS[0])]
     if not any(os.path.lexists(p) for p in wants):
         found.append(f"{IDLE} is not wanted by athanor-session.target: nothing locks an idle session")
-    owners = []
-    for service in sorted((root / DBUS_SERVICES).glob("*.service")):
-        try:
-            entry = ini(service).get("D-BUS Service", {})
-        except configparser.Error as e:
-            found.append(f"/{service.relative_to(root)} is unreadable ({e.__class__.__name__})")
-            continue
-        if entry.get("Name") == IDLE_BUS_NAME:
-            owners.append(service)
+    # Matched on the Name= line, as the Containerfile's grep -lx does: an unrelated file the bus
+    # would skip as malformed is not this check's to fail.
+    owners = [
+        service
+        for d in SESSION_SERVICE_DIRS
+        for service in sorted((root / d).glob("*.service"))
+        if f"Name={IDLE_BUS_NAME}"
+        in (line.strip() for line in service.read_bytes().decode(errors="replace").splitlines())
+    ]
     expected = root / DBUS_SERVICES / f"{IDLE_BUS_NAME}.service"
     if owners != [expected]:
         listed = ", ".join(f"/{p.relative_to(root)}" for p in owners) or "no file"

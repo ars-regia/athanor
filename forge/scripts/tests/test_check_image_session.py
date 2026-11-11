@@ -295,6 +295,16 @@ class ImageSession(unittest.TestCase):
                    "[D-BUS Service]\nName=org.freedesktop.ScreenSaver\nExec=/usr/bin/other\n")
         self.assertProblem("org.freedesktop.ScreenSaver is activated by")
 
+    def test_a_screensaver_activation_in_usr_local_fails(self):
+        self.write("usr/local/share/dbus-1/services/org.freedesktop.ScreenSaver.service",
+                   "[D-BUS Service]\nName=org.freedesktop.ScreenSaver\nExec=/usr/bin/other\n")
+        self.assertProblem("org.freedesktop.ScreenSaver is activated by")
+
+    def test_an_unrelated_malformed_activation_file_passes(self):
+        (self.root / DBUS_SERVICES).mkdir(parents=True, exist_ok=True)
+        (self.root / DBUS_SERVICES / "org.example.Broken.service").write_bytes(b"[D-BUS Service\nName=\xff\n")
+        self.assertEqual(mod.problems(self.root), [])
+
     def test_a_missing_screensaver_activation_fails(self):
         (self.root / SCREENSAVER).unlink()
         self.assertProblem("org.freedesktop.ScreenSaver is activated by no file")
