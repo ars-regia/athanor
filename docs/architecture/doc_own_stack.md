@@ -1324,8 +1324,11 @@ compositor and that the own compositor did not yet offer:
       by a grant of its own on the dock's allow-list line. The dock names its layer surface. The
       compositor sends `overlapped` with true when a mapped, not minimised window of the current
       workspace on that surface's output intersects the dock's shown rectangle, and with false
-      when none does. The shown rectangle is the one the dock occupies when it is not hidden,
-      and it holds while the dock is hidden, so hiding does not change the answer. While
+      when none does. The dock sends its shown rectangle, the one it occupies when it is not
+      hidden, in its output's logical coordinates with a `set_rectangle` request. It sends the
+      rectangle again when its size, its position or the output's scale changes. The
+      compositor answers on that rectangle, whatever the surface's current geometry, so hiding
+      does not change the answer. While
       intellihide is on, the dock sets no exclusive zone. While the session is locked, the
       compositor sends nothing, and on unlock it sends the current answer. The dock learns at
       most whether the rectangle it asks for is covered, and when that changes. Moving or
