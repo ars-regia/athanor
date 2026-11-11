@@ -2,7 +2,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-recovery
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        10%{?athanor_content}%{?dist}
 Summary:        Text console shown when the desktop does not start
 
 License:        GPL-3.0-or-later

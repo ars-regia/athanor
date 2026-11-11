@@ -87,12 +87,12 @@ class StopComponentScopes(unittest.TestCase):
         s = Scratch(self)
         s.stub(
             "systemctl",
-            'case "$*" in *"is-active --quiet cosmic-idle.scope") exit 0 ;; *is-active*) exit 3 ;; esac',
+            'case "$*" in *"is-active --quiet cosmic-greeter-locker.scope") exit 0 ;; *is-active*) exit 3 ;; esac',
         )
         result = s.components("stop_component_scopes")
         self.assertEqual(result.returncode, 0, result.stderr)
         stops = [c for c in s.calls() if " stop " in c]
-        self.assertEqual(stops, ["systemctl --user stop cosmic-idle.scope"])
+        self.assertEqual(stops, ["systemctl --user stop cosmic-greeter-locker.scope"])
 
     def test_a_scope_that_stays_active_fails_the_call(self):
         s = Scratch(self)
@@ -116,7 +116,7 @@ class StopComponentScopes(unittest.TestCase):
 
 
 class Supervisor(unittest.TestCase):
-    def test_with_target_it_waits_takes_the_display_and_starts_both_scopes(self):
+    def test_with_target_it_waits_takes_the_display_and_starts_the_scope(self):
         s = Scratch(self)
         s.stub(
             "systemctl",
@@ -134,17 +134,13 @@ class Supervisor(unittest.TestCase):
             "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter",
             runs,
         )
-        self.assertIn(
-            "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle",
-            runs,
-        )
         self.assertEqual(
             set((s.work / "display").read_text().splitlines()),
             {"WAYLAND_DISPLAY=wayland-7"},
         )
         # The anchor gone, both scopes are stopped without waiting on a job.
         self.assertIn(
-            "systemctl --user stop --no-block cosmic-greeter-locker.scope cosmic-idle.scope",
+            "systemctl --user stop --no-block cosmic-greeter-locker.scope",
             s.calls(),
         )
 
@@ -195,9 +191,9 @@ class Supervisor(unittest.TestCase):
             delays[:7], ["sleep 1"] * 4 + ["sleep 2", "sleep 4", "sleep 8"]
         )
 
-    def test_on_term_it_stops_both_scopes_and_exits_143(self):
+    def test_on_term_it_stops_the_scope_and_exits_143(self):
         # `loginctl terminate-session` sends TERM to the session's processes, and a scope lies
-        # outside the session's own scope: the supervisor stops both before it exits.
+        # outside the session's own scope: the supervisor stops it before it exits.
         s = Scratch(self)
         s.stub(
             "systemctl",
@@ -220,13 +216,13 @@ class Supervisor(unittest.TestCase):
         )
         self.addCleanup(supervisor.kill)
         deadline = time.monotonic() + 5
-        while sum(c.startswith("systemd-run") for c in s.calls()) < 2:
-            self.assertLess(time.monotonic(), deadline, "both components started")
+        while not any(c.startswith("systemd-run") for c in s.calls()):
+            self.assertLess(time.monotonic(), deadline, "the component started")
             time.sleep(0.05)
         supervisor.terminate()
         self.assertEqual(supervisor.wait(timeout=5), 143)
         self.assertIn(
-            "systemctl --user stop --no-block cosmic-greeter-locker.scope cosmic-idle.scope",
+            "systemctl --user stop --no-block cosmic-greeter-locker.scope",
             s.calls(),
         )
 
@@ -268,7 +264,7 @@ class SessionCleanup(unittest.TestCase):
     def test_what_the_own_compositor_left_is_cleared_where_it_is_installed(self):
         calls = self.run_session(compositor_installed=True)
         self.assertIn("systemctl --user stop athanor-sulphur.service", calls)
-        self.assertIn("systemctl --user is-active --quiet cosmic-idle.scope", calls)
+        self.assertIn("systemctl --user is-active --quiet cosmic-greeter-locker.scope", calls)
         self.assertIn(
             "systemctl --user unset-environment ATHANOR_OWN_COMPOSITOR XKB_DEFAULT_LAYOUT"
             " XKB_DEFAULT_VARIANT XKB_DEFAULT_OPTIONS",

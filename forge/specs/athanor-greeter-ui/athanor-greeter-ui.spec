@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-greeter-ui
 Version:        1.0.0
-Release:        16%{?dist}
+Release:        16%{?athanor_content}%{?dist}
 Summary:        The Athanor greeter
 License:        GPL-3.0-only
 

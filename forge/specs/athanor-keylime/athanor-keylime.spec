@@ -1,6 +1,6 @@
 Name:           athanor-keylime
 Version:        1.0
-Release:        5%{?dist}
+Release:        5%{?athanor_content}%{?dist}
 Summary:        Athanor OS Keylime Agent Configuration
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

@@ -1,6 +1,6 @@
 Name:           athanor-semantic-db
 Version:        1.0.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        Athanor OS Core Component - athanor-semantic-db
 
 License:        GPL-3.0-or-later

@@ -1,11 +1,19 @@
 version: 2
 updates:
+  # One pull request a week per ecosystem: the minor and patch moves of each go together, and a
+  # major move, which may break the build, keeps a pull request of its own.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      actions:
+        update-types: ["minor", "patch"]
 
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+    groups:
+      cargo:
+        update-types: ["minor", "patch"]

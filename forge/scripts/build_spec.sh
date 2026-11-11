@@ -64,10 +64,17 @@ fetch() {
 build() {
     export RUSTC_WRAPPER=sccache
     sccache --start-server
+    # The DAG passes ATHANOR_CONTENT, `.h` and the first ten hex digits of the package's
+    # content hash, which the specs append to their Release (doc_build_system.md, section 5).
+    # A pull-request check builds without it.
+    local define=()
+    if [[ -n ${ATHANOR_CONTENT:-} ]]; then
+        define=(--define "athanor_content $ATHANOR_CONTENT")
+    fi
     if in_place; then
-        (cd /workspace && rpmbuild -bb --nodeps --build-in-place "/workspace/forge/$SPEC_DIR"/*.spec)
+        (cd /workspace && rpmbuild -bb --nodeps "${define[@]}" --build-in-place "/workspace/forge/$SPEC_DIR"/*.spec)
     else
-        rpmbuild -bb --nodeps "$SPEC_DIR"/*.spec
+        rpmbuild -bb --nodeps "${define[@]}" "$SPEC_DIR"/*.spec
     fi
     check_sonames ~/rpmbuild/RPMS/*/*.rpm
     mkdir -p /workspace/forge/RPMS

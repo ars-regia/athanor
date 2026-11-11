@@ -159,7 +159,7 @@ pub const RFKILL: &str = "/dev/rfkill";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_unit::sandbox;
+    use athanor_unit::{dirs, sandbox};
     use std::ffi::OsString;
 
     #[test]
@@ -325,26 +325,33 @@ mod tests {
     }
 
     /// The ruleset the grants build is enforceable and confines a thread: a write outside the
-    /// grants is refused, one inside them is not. A thread of its own, since Landlock stays.
+    /// grants is refused, one inside them is not, and a link put at a granted path is not
+    /// followed. A thread of its own, since Landlock stays.
     #[test]
     fn the_ruleset_confines_writes_to_its_grants() {
         let root = std::env::temp_dir().join(format!("athanor-cc-landlock-{}", std::process::id()));
-        let (inside, outside) = (root.join("state"), root.join("elsewhere"));
+        let (inside, outside, link) = (
+            root.join("state"),
+            root.join("elsewhere"),
+            root.join("cache"),
+        );
         std::fs::create_dir_all(&inside).expect("test directory");
         std::fs::create_dir_all(&outside).expect("test directory");
+        std::os::unix::fs::symlink(&outside, &link).expect("a link at a granted path");
         let result = std::thread::spawn({
             let (inside, outside) = (inside.clone(), outside.clone());
             move || {
                 let grants = Grants {
-                    write: vec![inside.clone()],
+                    write: vec![inside.clone(), link],
                     devices: Vec::new(),
                 };
                 let write: Vec<&Path> = grants.write.iter().map(PathBuf::as_path).collect();
+                let write = dirs::existing(&write, dirs::owned_dir);
                 sandbox::restrict_writes(&write, &[]).map_err(|err| err.to_string())?;
                 std::fs::write(inside.join("ok"), "x").map_err(|err| format!("inside: {err}"))?;
                 match std::fs::write(outside.join("no"), "x") {
                     Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
-                    other => Err(format!("outside: {other:?}")),
+                    other => Err(format!("outside, through the link: {other:?}")),
                 }
             }
         })

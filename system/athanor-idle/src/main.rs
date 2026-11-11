@@ -20,11 +20,14 @@ use athanor_idle::{
     LOCK_TIMEOUT,
 };
 use athanor_sulphur_client::idle as power_page;
-use athanor_unit::{journal, sandbox};
+use athanor_unit::{journal, notify, sandbox};
 use futures_util::StreamExt;
 use gio::prelude::*;
 use tokio::io::Interest;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+/// The run after which the manager is told the daemon is healthy (doc_session.md, SN6).
+const HEALTHY_RUN: std::time::Duration = std::time::Duration::from_secs(60);
 
 const SCHEMA: &str = "org.athanor.desktop.idle";
 const INTERFACE: &str = "org.gnome.desktop.interface";
@@ -71,6 +74,10 @@ fn main() -> ExitCode {
         }
         std::process::exit(1);
     });
+    // A guard that has run healthily resets its restart back-off (doc_session.md, SN6).
+    if let Err(error) = notify::spawn_restart_reset(HEALTHY_RUN) {
+        tracing::warn!(%error, "cannot arm RESTART_RESET=1");
+    }
     glib::MainLoop::new(None, false).run();
     ExitCode::SUCCESS
 }

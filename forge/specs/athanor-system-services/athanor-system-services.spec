@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        34%{?dist}
+Release:        33%{?athanor_content}%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -40,11 +40,6 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/cosmic-osd.service
 
 %changelog
-* Wed Nov 11 2026 Athanor Forge <forge@athanor.os> - 1.0.1-34
-- cosmic-bg leaves (doc_session_daemons.md, SD22 step 2): cosmic-bg.service is no longer
-  shipped, athanor-session.target no longer wants it, and the package requires
-  athanor-wallpaper in place of cosmic-bg. athanor-wallpaper is enabled by its own preset.
-
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.1-33
 - athanor-appearance-reset.service, its script and its preset leave (doc_session_daemons.md,
   SD22 step 3): athanor-sessiond resets COSMIC's appearance values at each of its starts, and

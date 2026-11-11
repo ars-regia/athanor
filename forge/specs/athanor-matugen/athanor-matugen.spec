@@ -1,6 +1,6 @@
 Name:           athanor-matugen
 Version:        4.2.0
-Release:        1%{?dist}
+Release:        1%{?athanor_content}%{?dist}
 Summary:        Material Design 3 color generation tool
 
 License:        GPL-2.0-or-later

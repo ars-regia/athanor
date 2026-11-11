@@ -88,8 +88,10 @@ not the builds.
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
    the package's entry in `config/packages.json` (the lists that name it) and every other
    input `dag_orchestrator.py --inputs` reports: the Cargo path dependencies of its crates,
-   the repo paths the spec declares with `# repo-input: <path>` (a unit test fails when a
-   spec names a repo path it did not declare; it sees literal paths only), the workspace
+   the repo paths the spec declares with `# repo-input: <path>` and the Cargo path
+   dependencies of the crates under them (a unit test fails when a spec names a repo path
+   it did not declare, it sees literal paths only, and another when an in-place build's
+   `cargo -p <crate>` names a crate outside every input), the workspace
    `Cargo.toml`, `Cargo.lock` and `.cargo/config.toml` for an in-place cargo build, the
    build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
    asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the
@@ -114,6 +116,21 @@ not the builds.
    `CARGO_NET_OFFLINE=true` and `GOPROXY=off`. Specs without `Source` build the checkout
    in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
    package.
+
+   The spec of each of the forge's own packages, except the four that follow an upstream or
+   kernel release (`RELEASE_BY_HAND` in `scripts/verify.py`: `cosmic-comp`, `greenboot-rs`,
+   `polkit` and `azoth-microvm`, which still raise their release by hand), writes its release as
+   `Release: <N>%{?athanor_content}%{?dist}`, and the DAG's build defines `athanor_content`
+   as `.h` and the first ten hex digits of the content hash of step 1: the RPM of
+   `athanor-sulphur` is `1.0.0-23.h<hash>`. N is the number the spec had when the scheme
+   began and is never raised again by hand, so two pull requests that change one package
+   no longer collide on its release. A spec built without the macro, as a pull request's
+   Spec Build Check builds it, gets `<N>` alone. The order between two such releases with
+   the same N is arbitrary, and is not needed: the system image installs each package
+   from one tier image, built from one checkout, and an installed system changes through
+   a new bootc image, never by upgrading one RPM. `system/check-image-rpms.sh` recomputes
+   the hashes of the checkout (`dag_orchestrator.py --write-hashes`), and a package of the
+   image whose hash differs from its spec's fails the build, as a stale number did.
 3. **Publication.** The RPMs go into a `FROM scratch` image,
    `<registry>/<owner>/athanor-forge-<package>`, tagged `:latest` and `:hash-<hash>`, with the
    hash in the `tier.content.sha256` label. The registry host is the `REGISTRY_HOST`

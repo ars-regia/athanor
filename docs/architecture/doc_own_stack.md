@@ -173,7 +173,9 @@ register, one approved entry at a time.
 **OS3. A new compositor on Smithay** (ADR-0121). A program of the shell, packaged like the others
 under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revision, as niri and
 cosmic-comp take it, added to `deny.toml` with its exact URL; moving the revision is its own pull
-request, as a cosmic-comp rebase is today (CO3). The GLES renderer draws; pixman draws in tests.
+request, as a cosmic-comp rebase is today (CO3). *Amended 2026-11-11 by the maintainer:*
+`smithay-bump.yml` opens that pull request weekly at the head of Smithay's master, one at a time,
+so that each move stays small (CI34). The GLES renderer draws; pixman draws in tests.
 X11 applications run through xwayland-satellite, a separate process the compositor starts when an
 X11 client connects, so that no X11 code runs inside the compositor. cosmic-comp is read, not
 copied, because it is `GPL-3.0-only`. Code may be ported from niri (`GPL-3.0-or-later`) and from

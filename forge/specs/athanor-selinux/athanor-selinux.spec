@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-selinux
 Version:        1.0
-Release:        14%{?dist}
+Release:        14%{?athanor_content}%{?dist}
 Summary:        Custom SELinux policies for Athanor OS
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
