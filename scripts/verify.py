@@ -3647,6 +3647,147 @@ def check_gpu_grants():
     return r
 
 
+# landlock::PathFd opens a path following links, and a ruleset can name any descriptor: a
+# write grant built from either widens to wherever a link put at the path points (#1052).
+# athanor_unit::sandbox takes its write grants as dirs::Checked, which only athanor_unit::dirs
+# builds. This check holds the rest: no crate but athanor-unit and the pending ones depends on
+# the landlock crate, so every other one confines through athanor_unit::sandbox; no Rust file
+# outside those crates' rulesets names PathFd, under any name a `use ... as` gives it; and in
+# athanor_unit's sandbox.rs, PathFd appears only in its import and as the parent of a read grant.
+LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
+LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
+PATH_FD = re.compile(r"\bPathFd\b")
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
+LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
+# In sandbox.rs, outside its tests module: a rule's descriptor is `<name>.as_fd()`; a
+# public function takes its grants only as these types, so a write grant is a dirs::Checked or
+# a dirs::CheckedNode; and nothing there opens a descriptor or builds rules from paths.
+PATH_BENEATH = re.compile(r"PathBeneath::new\(")
+PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
+SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
+SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
+SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
+# Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
+# user namespace where the system's nodes are owned by nobody, and the chooser grants the
+# target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
+# moving them is their own change (#1059). The list only shrinks.
+LANDLOCK_PATH_PENDING = (
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
+    "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
+)
+LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
+
+
+def landlock_dependencies(manifest):
+    """The dependency tables of a Cargo manifest that name the landlock crate, by its own
+    name or as the `package` of a renamed one."""
+    tables = {name: manifest.get(name, {}) for name in ("dependencies", "dev-dependencies", "build-dependencies")}
+    for target, spec in manifest.get("target", {}).items():
+        for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            tables[f"target.{target}.{name}"] = spec.get(name, {})
+    return [table for table, deps in tables.items()
+            if any(name == "landlock" or (isinstance(dep, dict) and dep.get("package") == "landlock")
+                   for name, dep in deps.items())]
+
+
+def without_tests_module(text):
+    """text without its `#[cfg(test)] mod tests { ... }`, matched at the start of a line and cut
+    at its closing brace, so code before or after it is still read. A module whose braces do not
+    balance leaves the whole text, which the tests' own descriptors then fail: closed, not open."""
+    match = re.search(r"^#\[cfg\(test\)\]\s*mod\s+tests\s*\{", text, re.M)
+    if not match:
+        return text
+    depth = 0
+    for pos in range(match.end() - 1, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[pos], 0)
+        if depth == 0:
+            return text[:match.start()] + "\n" * text.count("\n", match.start(), pos + 1) + text[pos + 1:]
+    return text
+
+
+def sandbox_grant_problems(relative, code, read_grants):
+    """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
+    other than a dirs::Checked or dirs::CheckedNode."""
+    found = []
+    line = lambda pos: code.count("\n", 0, pos) + 1
+    for match in PATH_BENEATH.finditer(code):
+        if any(start <= match.start() < end for start, end in read_grants):
+            continue
+        # One built on PathFd is the PathFd finding below; this one is any other descriptor.
+        if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(r"\s*PathFd\b", code[match.end():]):
+            found.append(f"{relative}:{line(match.start())}: a rule whose descriptor is not "
+                         f"`<name>.as_fd()`; a write grant is a dirs::Checked descriptor")
+    for match in SANDBOX_PUB_FN.finditer(code):
+        for parameter in filter(None, (p.strip() for p in match.group(2).split(","))):
+            kind = re.sub(r"\s+", "", parameter.partition(":")[2])
+            if kind not in SANDBOX_PARAMETERS:
+                found.append(f"{relative}:{line(match.start())}: {match.group(1)} takes "
+                             f"`{parameter}`; a grant is one of {', '.join(sorted(SANDBOX_PARAMETERS))}")
+    for match in SANDBOX_OPENS.finditer(code):
+        found.append(f"{relative}:{line(match.start())}: {match.group(1)} opens a descriptor or "
+                     f"builds rules from paths; grants come from athanor_unit::dirs")
+    return found
+
+
+def landlock_fd_problems(root):
+    """No crate but athanor-unit and the pending ones depends on landlock; no Rust file but
+    their rulesets names PathFd; athanor_unit's sandbox.rs names it only in its import and as
+    the parent of a read grant. So a Landlock write grant is never built from a path."""
+    root = Path(root)
+    problems = []
+    # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
+    # as well as one under system, and git-ignored trees (.scratch, worktrees) are not the code.
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
+    if listed.returncode:
+        return [f"cannot list the repository files: {listed.stderr.strip()}"]
+    files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
+    for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
+        path = root / relative
+        if relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+            continue
+        try:
+            manifest = tomllib.loads(read(path))
+        except tomllib.TOMLDecodeError as err:
+            problems.append(f"{relative}: not valid TOML: {err}")
+            continue
+        for table in landlock_dependencies(manifest):
+            problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
+                            f"athanor_unit::sandbox, whose grants are dirs::Checked")
+    for relative in (name for name in files if name.endswith(".rs")):
+        path = root / relative
+        if relative in LANDLOCK_PATH_PENDING:
+            continue
+        text = read(path)
+        allowed = []
+        if relative == LANDLOCK_SANDBOX:
+            allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
+            allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
+                        if not re.search(r"\bPathFd\s+as\b", match.group())]
+        if relative == LANDLOCK_SANDBOX:
+            problems += sandbox_grant_problems(relative, without_tests_module(text), allowed)
+        for match in PATH_FD.finditer(text):
+            if any(start <= match.start() < end for start, end in allowed):
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            if relative == LANDLOCK_SANDBOX:
+                problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
+                                f"grant; a write grant is a dirs::Checked descriptor")
+            else:
+                problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
+                                f"links; grant by an athanor_unit::dirs::Checked descriptor")
+    return problems
+
+
+@check("landlock-fd", "Landlock write grants go by a checked descriptor, never by path (#1052)")
+def check_landlock_fd():
+    r = Result()
+    for problem in landlock_fd_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
 # Where the pipeline names its images.

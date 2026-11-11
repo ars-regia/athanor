@@ -8,8 +8,6 @@ mod ui;
 
 use std::cell::RefCell;
 use std::env;
-use std::fs::DirBuilder;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -20,7 +18,7 @@ use athanor_layout::user::write_target;
 use athanor_services::battery::BACKLIGHT_ROOT;
 use athanor_services::Runtime;
 use athanor_unit::dirs::Dirs;
-use athanor_unit::{crash_loop, journal, sandbox};
+use athanor_unit::{crash_loop, dirs, journal, sandbox};
 use gtk4::prelude::*;
 use gtk4::{glib, Application};
 
@@ -137,24 +135,15 @@ fn main() -> glib::ExitCode {
             tracing::warn!(error = %err, dir = %dir.display(), "cannot create the COSMIC theme directory");
         }
     }
-    // The parent of the launch sockets (BR2.2), made the way launch() makes it.
-    let launch_dir = dirs.runtime.join("athanor");
-    if let Err(err) = DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&launch_dir)
-    {
-        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
-    }
-    let dconf_dir = dirs.runtime.join("dconf");
     // Before GTK starts a thread. Writes only (athanor-unit::sandbox): the launch sockets, the
     // bar's own runtime directory and dconf, never the rest of the runtime directory (the
     // compositor's and the bus's sockets); the caches, the favourites, the COSMIC theme
-    // keys, the first-session layout and marker, /tmp, and the DRM nodes.
-    let write: Vec<&Path> = [
-        launch_dir.as_path(),
+    // keys, the first-session layout and marker, /tmp, and the DRM nodes. Each is granted by
+    // the descriptor its check opened: the parent of the launch sockets (BR2.2), made the way
+    // launch() makes it, and dconf's are private to the user (`dirs::private_dir`).
+    let mut write = dirs::private_dirs(&dirs.runtime, &["athanor", "dconf"]);
+    let checked: Vec<&Path> = [
         dirs.unit_runtime.as_path(),
-        dconf_dir.as_path(),
         dirs.cache.as_path(),
         favorites_dir.as_path(),
         Path::new("/tmp"),
@@ -163,8 +152,10 @@ fn main() -> glib::ExitCode {
     .chain(cosmic_dirs.iter().map(PathBuf::as_path))
     .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
-    let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
+    write.extend(dirs::existing(&checked, dirs::owned_dir));
+    let devices = dirs::existing(&[Path::new("/dev/dri")], dirs::owned_node);
+    let confined =
+        sandbox::ensure_single_threaded().and_then(|()| sandbox::restrict_writes(&write, &devices));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the bar with Landlock; refusing to run unconfined");
         return glib::ExitCode::FAILURE;

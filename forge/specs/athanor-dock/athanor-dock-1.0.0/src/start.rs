@@ -4,15 +4,13 @@
 //! toolkit dock share it, so their inputs and their confinement stay one.
 
 use std::env;
-use std::fs::DirBuilder;
-use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 use athanor_layout::favorites;
 use athanor_layout::loader::{Paths, Source, VENDOR_DIR};
 use athanor_layout::user::write_target;
 use athanor_unit::dirs::Dirs;
-use athanor_unit::{crash_loop, journal, sandbox};
+use athanor_unit::{crash_loop, dirs, journal, sandbox};
 
 use crate::i18n;
 
@@ -92,29 +90,24 @@ pub fn prepare() -> Prepared {
     if let Err(err) = std::fs::create_dir_all(&favorites_dir) {
         tracing::warn!(error = %err, dir = %favorites_dir.display(), "cannot create the favourites directory");
     }
-    // The parent of the launch sockets (BR2.2), made the way launch() makes it.
-    let launch_dir = dirs.runtime.join("athanor");
-    if let Err(err) = DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&launch_dir)
-    {
-        tracing::warn!(error = %err, dir = %launch_dir.display(), "cannot create the directory of the launch sockets");
-    }
-    let dconf_dir = dirs.runtime.join("dconf");
     // Writes only (athanor-unit::sandbox): the launch sockets, the dock's own runtime
     // directory and dconf, never the rest of the runtime directory (the compositor's and
-    // the bus's sockets); the cache, the favourites, /tmp, and the DRM nodes.
-    let write: [&Path; 6] = [
-        launch_dir.as_path(),
-        dirs.unit_runtime.as_path(),
-        dconf_dir.as_path(),
-        dirs.cache.as_path(),
-        favorites_dir.as_path(),
-        Path::new("/tmp"),
-    ];
-    let confined = sandbox::ensure_single_threaded()
-        .and_then(|()| sandbox::restrict_writes(&write, &[Path::new("/dev/dri")]));
+    // the bus's sockets); the cache, the favourites, /tmp, and the DRM nodes. Each is granted
+    // by the descriptor its check opened: the parent of the launch sockets (BR2.2), made the
+    // way launch() makes it, and dconf's are private to the user (`dirs::private_dir`).
+    let mut write = dirs::private_dirs(&dirs.runtime, &["athanor", "dconf"]);
+    write.extend(dirs::existing(
+        &[
+            dirs.unit_runtime.as_path(),
+            dirs.cache.as_path(),
+            favorites_dir.as_path(),
+            Path::new("/tmp"),
+        ],
+        dirs::owned_dir,
+    ));
+    let devices = dirs::existing(&[Path::new("/dev/dri")], dirs::owned_node);
+    let confined =
+        sandbox::ensure_single_threaded().and_then(|()| sandbox::restrict_writes(&write, &devices));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the dock with Landlock; refusing to run unconfined");
         return Prepared::Exit(false);

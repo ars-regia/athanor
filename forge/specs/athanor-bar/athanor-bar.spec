@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        23%{?athanor_content}%{?dist}
+Release:        24%{?athanor_content}%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+- Landlock grants the bar's writes by descriptors athanor_unit::dirs opened and checked
+  (#1052): a directory that is a link or another user's is left out with a warning, and the
+  launch directory and dconf are private_dir's, mode 0700.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
 - Watch the windows at start: athanor-sulphur-client binds the window globals only for a
   client that asks for them, and this one reads the window list and the windows of the
