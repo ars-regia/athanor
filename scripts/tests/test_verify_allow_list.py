@@ -233,13 +233,38 @@ class AllowList(unittest.TestCase):
             "athanor-dock",
             '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n',
             {
-                "src/main.rs": "use athanor_sulphur_client::connect;\nfn main() { connect(); }\n"
+                "src/main.rs": "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&d); }\n"
             },
         )
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("ext_foreign_toplevel_list_v1", out[0])
         self.assertIn("/usr/bin/athanor-dock", out[0])
+
+    def test_the_connection_counts_only_for_a_target_that_connects(self):
+        # connection.rs binds its globals when a client connects: athanor-idle uses the
+        # crate's `idle` module alone and binds none of them (maintainer decision, 2026-11-07).
+        self.client()
+        dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
+        self.package(
+            "athanor-idle",
+            dependency,
+            {"src/main.rs": "use athanor_sulphur_client::idle;\nfn main() { idle::read_user(); }\n"},
+        )
+        self.lines("/usr/bin/athanor-idle athanor-idle.service zwlr_layer_shell_v1\n")
+        self.assertEqual(self.problems(), [])
+        # An alias of Client still names it, so the binds still count.
+        for source in (
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect(&display); }\n",
+            "use athanor_sulphur_client::Client;\nfn main() { Client::connect_wayland(&connection); }\n",
+            "use athanor_sulphur_client::Client as Compositor;\nfn main() { Compositor::connect(&display); }\n",
+        ):
+            with self.subTest(source):
+                self.package("athanor-idle", dependency, {"src/main.rs": source})
+                out = self.problems()
+                self.assertEqual(len(out), 1, out)
+                self.assertIn("/usr/bin/athanor-idle", out[0])
+                self.assertIn("ext_foreign_toplevel_list_v1", out[0])
 
     def test_a_disabled_optional_dependency_is_not_followed(self):
         self.write(
@@ -480,7 +505,7 @@ class AllowList(unittest.TestCase):
     def test_a_line_grants_every_privileged_global_the_target_binds(self):
         self.client()
         dependency = '[dependencies]\nathanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }\n'
-        dock = "use athanor_sulphur_client::connect;\nfn f() { w.set_layer(Layer::Top); }\n"
+        dock = "use athanor_sulphur_client::Client;\nfn f() { Client::connect(&d); w.set_layer(Layer::Top); }\n"
         launcher = "use athanor_sulphur_client::Client;\nfn f() { client.capture(id); }\n"
         cases = {
             # What the client binds at connect, missing from the line.
@@ -629,13 +654,12 @@ class AllowList(unittest.TestCase):
         self.assertIn("/usr/bin/athanor-greeter-ui", out[0])
         self.assertIn("installed by no spec", out[0])
 
-    def test_the_upstream_clients_are_the_locker_idle_daemon_osd_and_randr(self):
+    def test_the_upstream_clients_are_the_locker_osd_and_randr(self):
         # doc_session.md revision 4, SN12 and SN15; cosmic-randr, doc_own_stack.md OS4.
         self.assertEqual(
             verify.UPSTREAM,
             {
                 "/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-                "/usr/bin/cosmic-idle": "cosmic-idle.scope",
                 "/usr/bin/cosmic-osd": "cosmic-osd.service",
                 "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service",
             },
