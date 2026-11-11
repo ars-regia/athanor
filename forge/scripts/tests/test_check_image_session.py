@@ -271,6 +271,17 @@ class ImageSession(unittest.TestCase):
         (self.root / IDLE_WANTS / "athanor-idle.service").unlink()
         self.assertProblem("athanor-idle.service is not wanted by athanor-session.target")
 
+    def test_an_idle_wants_link_masked_in_etc_fails(self):
+        mask = self.root / IDLE_WANTS / "athanor-idle.service"
+        mask.unlink()
+        mask.symlink_to("/dev/null")
+        self.assertProblem("athanor-idle.service is not wanted by athanor-session.target")
+
+    def test_a_spaced_second_screensaver_activation_fails(self):
+        self.write("usr/local/share/dbus-1/services/org.example.Idle.service",
+                   "[D-BUS Service]\nName = org.freedesktop.ScreenSaver\nExec=/usr/bin/other\n")
+        self.assertProblem("org.freedesktop.ScreenSaver is activated by")
+
     def test_a_missing_idle_unit_fails(self):
         (self.root / IDLE_UNIT).unlink()
         found = mod.problems(self.root)

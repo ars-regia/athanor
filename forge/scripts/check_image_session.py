@@ -406,17 +406,26 @@ def idle_problems(root):
     """athanor-idle is the session's only idle lock: its unit must run as shipped, be wanted by
     athanor-session.target, and be the one activation of org.freedesktop.ScreenSaver."""
     found = user_unit_problems(root, IDLE, "the idle daemon")
+    # systemd loads a wants link by its name, whatever it points to, except a link to /dev/null or
+    # an empty file, which it ignores; the first directory's entry shadows the later ones.
     wants = [root / d / "athanor-session.target.wants" / IDLE for d in ("etc/systemd/user", USER_UNITS[0])]
-    if not any(os.path.lexists(p) for p in wants):
+    link = next((p for p in wants if os.path.lexists(p)), None)
+    if link is None or (
+        os.readlink(link) == "/dev/null" if link.is_symlink() else link.stat().st_size == 0
+    ):
         found.append(f"{IDLE} is not wanted by athanor-session.target: nothing locks an idle session")
-    # Matched on the Name= line, as the Containerfile's grep -lx does: an unrelated file the bus
+    # Matched on the Name= line, spaces around = allowed, as the Containerfile's grep does: an unrelated file the bus
     # would skip as malformed is not this check's to fail.
     owners = [
         service
         for d in SESSION_SERVICE_DIRS
         for service in sorted((root / d).glob("*.service"))
-        if f"Name={IDLE_BUS_NAME}"
-        in (line.strip() for line in service.read_bytes().decode(errors="replace").splitlines())
+        if any(
+            key.strip() == "Name" and sep and value.strip() == IDLE_BUS_NAME
+            for key, sep, value in (
+                line.partition("=") for line in service.read_bytes().decode(errors="replace").splitlines()
+            )
+        )
     ]
     expected = root / DBUS_SERVICES / f"{IDLE_BUS_NAME}.service"
     if owners != [expected]:
