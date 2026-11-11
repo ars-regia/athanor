@@ -32,6 +32,11 @@ COMPOSITOR_SESSION_SOURCE = (
 )
 LAUNCHER_SOURCE = SOURCES / "athanor-system-config/SOURCES/usr/bin/athanor-desktop"
 USER_UNIT_SOURCES = SOURCES / "athanor-system-services/SOURCES/usr/lib/systemd/user"
+IDLE_SOURCES = SOURCES / "athanor-idle/athanor-idle-1.0.0/data"
+IDLE_UNIT = "usr/lib/systemd/user/athanor-idle.service"
+IDLE_ETC_DROPINS = "etc/systemd/user/athanor-idle.service.d"
+IDLE_WANTS = "etc/systemd/user/athanor-session.target.wants"
+SCREENSAVER = "usr/share/dbus-1/services/org.freedesktop.ScreenSaver.service"
 FAILLOCK_DROPIN_SOURCE = (
     SOURCES / "polkit/SOURCES/polkit-agent-helper-service-faillock.conf"
 )
@@ -117,6 +122,9 @@ class ImageSession(unittest.TestCase):
         self.write(
             SESSION_TARGET, (USER_UNIT_SOURCES / "athanor-session.target").read_text()
         )
+        self.write(IDLE_UNIT, (IDLE_SOURCES / "athanor-idle.service").read_text())
+        self.enable("athanor-idle.service", IDLE_WANTS)
+        self.write(SCREENSAVER, (IDLE_SOURCES / "org.freedesktop.ScreenSaver.service").read_text())
         self.write(
             SETTINGS_DAEMON_UNIT,
             (USER_UNIT_SOURCES / "cosmic-settings-daemon.service").read_text(),
@@ -259,6 +267,42 @@ class ImageSession(unittest.TestCase):
         (self.root / "usr/lib/pam.d/cosmic-greeter").unlink()
         self.assertProblem("PAM service cosmic-greeter is missing")
 
+    def test_an_idle_daemon_the_session_does_not_want_fails(self):
+        (self.root / IDLE_WANTS / "athanor-idle.service").unlink()
+        self.assertProblem("athanor-idle.service is not wanted by athanor-session.target")
+
+    def test_a_missing_idle_unit_fails(self):
+        (self.root / IDLE_UNIT).unlink()
+        found = mod.problems(self.root)
+        self.assertTrue(any("athanor-idle.service is missing" in p for p in found), found)
+
+    def test_a_masked_idle_daemon_fails(self):
+        (self.root / "etc/systemd/user").mkdir(parents=True, exist_ok=True)
+        (self.root / "etc/systemd/user/athanor-idle.service").symlink_to("/dev/null")
+        found = mod.problems(self.root)
+        self.assertTrue(any("masks or replaces the idle daemon's unit" in p for p in found), found)
+
+    def test_a_drop_in_that_replaces_the_idle_daemon_fails(self):
+        self.write(f"{IDLE_ETC_DROPINS}/50-x.conf", "[Service]\nExecStart=\nExecStart=/bin/true\n")
+        self.assertProblem("overrides the idle daemon's ExecStart")
+
+    def test_a_drop_in_that_lifts_the_idle_daemons_no_new_privileges_fails(self):
+        self.write(f"{IDLE_ETC_DROPINS}/50-x.conf", "[Service]\nNoNewPrivileges=no\n")
+        self.assertProblem("athanor-idle.service with its drop-ins does not set NoNewPrivileges=true")
+
+    def test_a_second_screensaver_activation_fails(self):
+        self.write("usr/share/dbus-1/services/org.example.Idle.service",
+                   "[D-BUS Service]\nName=org.freedesktop.ScreenSaver\nExec=/usr/bin/other\n")
+        self.assertProblem("org.freedesktop.ScreenSaver is activated by")
+
+    def test_a_missing_screensaver_activation_fails(self):
+        (self.root / SCREENSAVER).unlink()
+        self.assertProblem("org.freedesktop.ScreenSaver is activated by no file")
+
+    def test_a_screensaver_activation_that_starts_another_unit_fails(self):
+        self.edit(SCREENSAVER, "SystemdService=athanor-idle.service", "SystemdService=cosmic-osd.service")
+        self.assertProblem("does not start athanor-idle.service")
+
     def test_a_missing_agent_unit_fails(self):
         (self.root / AGENT_UNIT).unlink()
         self.assertProblem("/usr/lib/systemd/user/cosmic-osd.service is missing")
@@ -308,7 +352,7 @@ class ImageSession(unittest.TestCase):
 
     def test_a_masked_agent_fails(self):
         mask = self.root / "etc/systemd/user/cosmic-osd.service"
-        mask.parent.mkdir(parents=True)
+        mask.parent.mkdir(parents=True, exist_ok=True)
         mask.symlink_to("/dev/null")
         self.assertProblem("masks or replaces")
 
