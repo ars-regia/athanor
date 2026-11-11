@@ -1,10 +1,11 @@
 //! Spike VL-S5 (doc_visual_language.md, VL13): what a frame and tier M2's live blur cost on
 //! this machine's GPU, measured rather than estimated.
 //!
-//! Usage: athanor-sulphur-tier-bench [RENDER_NODE] [WIDTH HEIGHT] [FRAMES] [probe]
+//! Usage: athanor-sulphur-tier-bench [RENDER_NODE] [WIDTH HEIGHT] [FRAMES] [probe|probe-copy]
 //!
 //! With `probe`, only `scene`, `dock-3` and `full-3` are drawn: the probe that the report
-//! proposes, timed as a compositor would run it.
+//! proposes, timed as a compositor would run it. With `probe-copy`, each blur first copies its
+//! region out of the scene into a texture of its own, as a compositor copies its backdrop.
 //!
 //! On the render node (default /dev/dri/renderD128), off screen, it draws a scene the size of
 //! an output: a wallpaper and three translucent windows, every frame whole, as a frame with
@@ -100,6 +101,9 @@ struct Blur {
     up: GlesTexProgram,
     /// Level k is the region's size halved k + 1 times; the last up pass draws on the scene.
     levels: Vec<GlesTexture>,
+    /// With `probe-copy`: the region copied out of the scene before the blur reads it, as a
+    /// compositor drawing into a swapchain buffer must copy its backdrop.
+    backdrop: Option<GlesTexture>,
 }
 
 fn main() -> Result<(), Error> {
@@ -143,7 +147,8 @@ fn main() -> Result<(), Error> {
     println!("node {node}, {width}x{height}, {frames} frames per case");
     let mut cases: Vec<(String, Option<(Rectangle<i32, Physical>, usize)>)> =
         vec![("scene".into(), None)];
-    let probe = args.get(4).is_some_and(|a| a == "probe");
+    let copy = args.get(4).is_some_and(|a| a == "probe-copy");
+    let probe = copy || args.get(4).is_some_and(|a| a == "probe");
     let passes: &[usize] = if probe { &[3] } else { &[2, 3, 4] };
     for &passes in passes {
         cases.push((format!("dock-{passes}"), Some((dock, passes))));
@@ -158,6 +163,15 @@ fn main() -> Result<(), Error> {
                     down: down.clone(),
                     up: up.clone(),
                     levels: levels(renderer, region.size, passes)?,
+                    backdrop: if copy {
+                        Some(Offscreen::<GlesTexture>::create_buffer(
+                            renderer,
+                            FORMAT,
+                            Size::<i32, Buffer>::from((region.size.w, region.size.h)),
+                        )?)
+                    } else {
+                        None
+                    },
                 },
             )),
             None => None,
@@ -297,6 +311,29 @@ fn blurred(
         (region.size.w, region.size.h).into(),
     );
     let mut src_size = tsize;
+    if let Some(backdrop) = &mut blur.backdrop {
+        let bsize = backdrop.size();
+        let copied = backdrop.clone();
+        let dst = Rectangle::<i32, Physical>::from_size((bsize.w, bsize.h).into());
+        let mut fb = renderer.bind(backdrop)?;
+        let mut frame = renderer.render(&mut fb, dst.size, Transform::Normal)?;
+        let damage = [dst];
+        frame.render_texture_from_to(
+            &source,
+            src.to_f64(),
+            dst,
+            &damage,
+            &[],
+            Transform::Normal,
+            1.0,
+            None,
+            &[],
+        )?;
+        let _ = frame.finish()?;
+        source = copied;
+        src = Rectangle::from_size(bsize);
+        src_size = bsize;
+    }
     // Down.
     for k in 0..blur.levels.len() {
         let level_size = blur.levels[k].size();
