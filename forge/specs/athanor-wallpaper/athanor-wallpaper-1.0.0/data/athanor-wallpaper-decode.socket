@@ -11,12 +11,9 @@ DirectoryMode=0700
 RemoveOnStop=yes
 # One instance of athanor-wallpaper-decode@.service per connection.
 Accept=yes
-# Twice athanor_wallpaper::protocol::MAX_CONNECTIONS, the most decodes the daemon runs at once:
-# the daemon frees a slot when its 18 s deadline fires, and the instance it abandoned may live
-# up to RuntimeMaxSec= and TimeoutStopSec= longer, so an equal limit would refuse the next
-# connection the daemon has room for.
-MaxConnections=8
-MaxConnectionsPerSource=8
+# athanor_wallpaper::protocol::MAX_CONNECTIONS, the most decodes the daemon runs at once.
+MaxConnections=4
+MaxConnectionsPerSource=4
 # With the default limit, 200 connections in 2 s would put the socket in failed and leave
 # every output without its picture until the next login; MaxConnections already bounds them.
 TriggerLimitIntervalSec=0
