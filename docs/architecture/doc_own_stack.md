@@ -59,6 +59,9 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   approved by the maintainer with #977.
 - Amended on 2026-11-11: decision 33, with OS17; decision 34, with section 6, step 5 and
   section 8; decision 35, with OS17 and OS20.
+- Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
+  cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
+  `doc_visual_language.md` (VL13), proposed with #1077.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
