@@ -35,9 +35,10 @@ const MAX_SIDE: u32 = 1024;
 const MAX_DECODE: u32 = 6144;
 /// How long the preview's loader may run.
 const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
-/// The wallpaper's largest decode, an 8K output and a picture of 100 MP and more; the decoder's
-/// unit has the memory for it (`MemoryMax=1G`, measured at 651M for 12000 × 8000), the
-/// launcher's 512M does not.
+/// The wallpaper's longest side, for an 8K output (maintainer decision, 2026-11-07). The bound is
+/// on the side, not the area: the decoder's unit (`MemoryMax=1G`) was measured at 651M for
+/// 12000 × 8000 (96 MP), and past about 150 MP a decode may be killed for memory, which the
+/// daemon reads as a fault and answers with the hearth. The launcher's 512M has room for neither.
 const WALLPAPER_MAX_DECODE: u32 = 16384;
 /// How long the wallpaper's loader may run: a 100 MP picture takes about 3 s on the reference
 /// laptop (maintainer decision, 2026-11-07).
