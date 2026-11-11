@@ -1,7 +1,10 @@
 //! Spike VL-S5 (doc_visual_language.md, VL13): what a frame and tier M2's live blur cost on
 //! this machine's GPU, measured rather than estimated.
 //!
-//! Usage: athanor-sulphur-tier-bench [RENDER_NODE] [WIDTH HEIGHT] [FRAMES]
+//! Usage: athanor-sulphur-tier-bench [RENDER_NODE] [WIDTH HEIGHT] [FRAMES] [probe]
+//!
+//! With `probe`, only `scene`, `dock-3` and `full-3` are drawn: the probe that the report
+//! proposes, timed as a compositor would run it.
 //!
 //! On the render node (default /dev/dri/renderD128), off screen, it draws a scene the size of
 //! an output: a wallpaper and three translucent windows, every frame whole, as a frame with
@@ -140,7 +143,9 @@ fn main() -> Result<(), Error> {
     println!("node {node}, {width}x{height}, {frames} frames per case");
     let mut cases: Vec<(String, Option<(Rectangle<i32, Physical>, usize)>)> =
         vec![("scene".into(), None)];
-    for passes in [2, 3, 4] {
+    let probe = args.get(4).is_some_and(|a| a == "probe");
+    let passes: &[usize] = if probe { &[3] } else { &[2, 3, 4] };
+    for &passes in passes {
         cases.push((format!("dock-{passes}"), Some((dock, passes))));
         cases.push((format!("full-{passes}"), Some((full, passes))));
     }
