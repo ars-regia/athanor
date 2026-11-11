@@ -1331,8 +1331,8 @@ compositor and that the own compositor did not yet offer:
       does not change the answer. While
       intellihide is on, the dock sets no exclusive zone. While the session is locked, the
       compositor sends nothing, and on unlock it sends the current answer. The dock learns at
-      most whether the rectangle it asks for is covered, and when that changes. Moving or
-      resizing its surface lets it probe further, bounded by its grant: the dock is trusted
+      most whether the rectangle it asks for is covered, and when that changes. Changing the
+      rectangle it sends lets it probe further, bounded by its grant: the dock is trusted
       by its allow-list line. Decision 32 stands, and the dock gets no window places;
     - **Live blur, tier M2.** `ext_background_effect_manager_v1` moves from wave 2c to wave 2a,
       standard. On an output in tier M2, the compositor blurs what lies under the region the
