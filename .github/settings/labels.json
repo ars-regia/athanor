@@ -110,6 +110,11 @@
     "name": "rust"
   },
   {
+    "color": "006B75",
+    "description": "Opened by a bump bot",
+    "name": "smithay-bump"
+  },
+  {
     "color": "1D76DB",
     "description": "PR opened by the system group of the bump bot (kernel-bump.yml)",
     "name": "system-bump"
