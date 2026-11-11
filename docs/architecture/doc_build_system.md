@@ -88,8 +88,10 @@ not the builds.
 1. **Idempotency.** `check_idempotency.sh` hashes the spec directory, `config/rpmmacros`,
    the package's entry in `config/packages.json` (the lists that name it) and every other
    input `dag_orchestrator.py --inputs` reports: the Cargo path dependencies of its crates,
-   the repo paths the spec declares with `# repo-input: <path>` (a unit test fails when a
-   spec names a repo path it did not declare; it sees literal paths only), the workspace
+   the repo paths the spec declares with `# repo-input: <path>` and the Cargo path
+   dependencies of the crates under them (a unit test fails when a spec names a repo path
+   it did not declare, it sees literal paths only, and another when an in-place build's
+   `cargo -p <crate>` names a crate outside every input), the workspace
    `Cargo.toml`, `Cargo.lock` and `.cargo/config.toml` for an in-place cargo build, the
    build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
    asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the

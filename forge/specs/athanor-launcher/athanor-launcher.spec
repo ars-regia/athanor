@@ -1,3 +1,4 @@
+# repo-input: system/athanor-preview-render
 %global debug_package %{nil}
 Name:           athanor-launcher
 Version:        1.0.0

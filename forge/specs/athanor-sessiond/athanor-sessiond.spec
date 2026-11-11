@@ -1,3 +1,4 @@
+# repo-input: system/athanor-sessiond
 %global debug_package %{nil}
 Name:           athanor-sessiond
 Version:        1.0.0
