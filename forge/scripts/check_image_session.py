@@ -418,7 +418,8 @@ def idle_problems(root):
         service
         for d in SESSION_SERVICE_DIRS
         for service in sorted((root / d).glob("*.service"))
-        if any(
+        if service.is_file()  # a dangling link is skipped, as the bus skips it
+        and any(
             key.strip() == "Name" and sep and value.strip() == IDLE_BUS_NAME
             for key, sep, value in (
                 line.partition("=") for line in service.read_bytes().decode(errors="replace").splitlines()

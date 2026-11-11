@@ -328,6 +328,10 @@ class ImageSession(unittest.TestCase):
         (self.root / DBUS_SERVICES / "org.example.Broken.service").write_bytes(b"[D-BUS Service\nName=\xff\n")
         self.assertEqual(mod.problems(self.root), [])
 
+    def test_a_dangling_activation_link_passes(self):
+        (self.root / DBUS_SERVICES / "org.example.Gone.service").symlink_to("/nonexistent")
+        self.assertEqual(mod.problems(self.root), [])
+
     def test_a_missing_screensaver_activation_fails(self):
         (self.root / SCREENSAVER).unlink()
         self.assertProblem("org.freedesktop.ScreenSaver is activated by no file")
