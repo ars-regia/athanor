@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        10%{?dist}
+Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 

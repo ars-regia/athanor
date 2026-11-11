@@ -2,7 +2,7 @@
 # lock-acceptance.sh [stage...]
 # The session lock and the polkit agent of release 0.9 (ADR-0115,
 # docs/spikes/lock-and-polkit-agent-0-9.md) in the dev VM's real session: cosmic-greeter's
-# locker, cosmic-idle and cosmic-osd's agent on polkit 127's socket helper, as the image ships
+# locker, athanor-idle and cosmic-osd's agent on polkit 127's socket helper, as the image ships
 # them. Keys reach the compositor through a throwaway uinput keyboard (keyboard_type.py); the
 # password is the dev VM's, the user's name (README.md). With no argument it runs every stage
 # in order; with arguments, only those, in the order given. Prints PASS <stage> or
@@ -21,7 +21,7 @@
 #   crash      the locker killed with SIGKILL while locked: the session stays locked and
 #              athanor-desktop starts a new locker, which the next stage unlocks
 #   unlock     the password unlocks it
-#   idle       cosmic-idle locks after a 5 s idle time (the user's setting is restored after)
+#   idle       athanor-idle locks after a 5 s idle time (the user's setting is restored after)
 #   polkit     the login left the user's pam_faillock tally, /run/faillock/$USER, and with it
 #              present `pkexec true` from the session succeeds once the password is typed into
 #              the agent. Fails on images built before #445 merged: polkit-agent-helper@.service

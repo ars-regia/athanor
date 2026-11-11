@@ -2536,7 +2536,6 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # must keep one line, for the unit it runs in, and a spec that comes to install one ends its
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
 UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
             "/usr/bin/cosmic-osd": "cosmic-osd.service",
             "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
@@ -2563,7 +2562,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate.
+# every name of them in the crate. connection.rs binds the rest when a client connects, so it
+# counts for a target only when code outside the crate names `Client`, the one type that
+# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
+# does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2580,7 +2582,10 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/windows.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
@@ -3374,6 +3379,16 @@ def manifest_spec_problems(root=None):
     return problems
 
 
+# Specs whose Release does not carry %{?athanor_content}: they follow an upstream release or the
+# kernel's, and still raise Release by hand on a payload change (forge/AGENTS.md).
+RELEASE_BY_HAND = {
+    "forge/specs/azoth/microvm/azoth-microvm.spec",
+    "forge/specs/cosmic-comp/cosmic-comp.spec",
+    "forge/specs/greenboot-rs/greenboot-rs.spec",
+    "forge/specs/polkit/polkit.spec",
+}
+
+
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
@@ -3420,6 +3435,13 @@ def check_specs():
 
     for spec in walk(ROOT, ".spec"):
         text = read(spec)
+        release = re.search(r"^Release:[ \t]*(\S+)", text, re.M)
+        by_hand = rel(spec) in RELEASE_BY_HAND
+        if rel(spec).startswith("forge/specs/") and release and by_hand == ("%{?athanor_content}" in release.group(1)):
+            r.fail(f"{rel(spec)}: Release {release.group(1)} " + (
+                "carries %{?athanor_content}: drop the spec from RELEASE_BY_HAND" if by_hand else
+                "lacks %{?athanor_content}: write <N>%{?athanor_content}%{?dist}, or list the spec in "
+                "RELEASE_BY_HAND and raise its Release by hand (forge/AGENTS.md)"))
         sec = sections(text)
         prep = sec.get("prep", "")
         # senza %setup/%autosetup rpmbuild non entra in una sottodirectory:
@@ -4452,6 +4474,7 @@ SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-idle.service": ("guard", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
     # Started by nothing until its bus service file comes with doc_osd.md's retirement step

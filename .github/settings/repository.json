@@ -28,6 +28,6 @@
   "squash_merge_commit_title": "COMMIT_OR_PR_TITLE",
   "topics": [],
   "visibility": "public",
-  "vulnerability_alerts": false,
+  "vulnerability_alerts": true,
   "web_commit_signoff_required": false
 }

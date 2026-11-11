@@ -12,11 +12,13 @@
 /usr/bin/athanor-dock athanor-dock.service zwlr_layer_shell_v1 ext_foreign_toplevel_list_v1 ext_workspace_manager_v1 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1
 /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 zwlr_output_manager_v1 ext_workspace_manager_v1 ext_foreign_toplevel_list_v1 athanor_toplevel_manager_v1
 /usr/bin/athanor-osd athanor-osd.service zwlr_layer_shell_v1 ext_workspace_manager_v1
+# The idle daemon (doc_session_daemons.md, SD22 step 1): the output power manager for the blank
+# and the overlay layer for its fade.
+/usr/bin/athanor-idle athanor-idle.service zwlr_output_power_manager_v1 zwlr_layer_shell_v1
 # Upstream clients no spec of the tree installs and no crate of the tree builds
-# (doc_session.md, SN12 and SN15): the locker, the idle daemon (its fade on the overlay
-# layer) and the polkit agent. The locker alone is granted the session lock.
+# (doc_session.md, SN12 and SN15): the locker and the polkit agent. The locker alone is granted
+# the session lock.
 /usr/bin/cosmic-greeter cosmic-greeter-locker.scope ext_session_lock_manager_v1
-/usr/bin/cosmic-idle cosmic-idle.scope zwlr_output_power_manager_v1 zwlr_layer_shell_v1
 /usr/bin/cosmic-osd cosmic-osd.service zwlr_layer_shell_v1
 # Settings waits at start-up on cosmic-randr, which waits for this global (#880); the launcher
 # starts Settings and each of its pages in a unit of its own. The line leaves with cosmic-settings.

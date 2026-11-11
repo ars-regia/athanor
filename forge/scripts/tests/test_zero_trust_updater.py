@@ -16,7 +16,7 @@ spec.loader.exec_module(updater)
 
 SPEC = """Name:           athanor-demo
 Version:        1.3.0
-Release:        2%{?dist}
+Release:        2%{?athanor_content}%{?dist}
 Source0:        https://github.com/demo/demo/releases/download/v%{version}/demo-v%{version}-amd64.tar.gz
 """
 
@@ -48,7 +48,7 @@ class UpdaterTest(unittest.TestCase):
         self.run_updater("v1.7.1")
         text = self.spec.read_text()
         self.assertIn("Version:        1.7.1\n", text)
-        self.assertIn("Release:        1%{?dist}\n", text)
+        self.assertIn("Release:        1%{?athanor_content}%{?dist}\n", text)
         self.assertEqual(
             text.splitlines()[3], SPEC.splitlines()[3]
         )  # Source0 untouched

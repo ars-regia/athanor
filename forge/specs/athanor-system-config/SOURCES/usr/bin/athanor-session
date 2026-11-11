@@ -13,7 +13,7 @@ set -eu
 systemctl --user stop athanor-session.target
 systemctl --user reset-failed
 # A session on the own compositor killed before its exit handler ran leaves its compositor,
-# the scopes of the locker and the idle daemon, and its variables (doc_session.md, SN15).
+# the scope of the locker, and its variables (doc_session.md, SN15).
 # The compositor's unit is stopped only where its package is installed: stopping a unit that
 # is not loaded fails, and would end this session.
 if [ -e /usr/lib/systemd/user/athanor-sulphur.service ]; then
@@ -33,7 +33,7 @@ export XDG_SESSION_TYPE=wayland
 
 # Athanor's defaults for COSMIC come from a data directory ahead of /usr/share (see
 # /usr/lib/environment.d/60-athanor-cosmic-defaults.conf, which covers the user
-# manager). cosmic-comp, and the locker and idle daemon athanor-desktop starts, are
+# manager). cosmic-comp, and the locker athanor-desktop starts, are
 # children of this script, not of the user manager, so they need it from here.
 export XDG_DATA_DIRS="/usr/share/athanor/cosmic-defaults:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 

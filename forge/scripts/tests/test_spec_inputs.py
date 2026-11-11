@@ -6,7 +6,9 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import tempfile
+import tomllib
 import unittest
 from unittest import mock
 
@@ -64,6 +66,14 @@ class InputsTest(FixtureTest):
         with self.assertRaises(SystemExit):
             dag.package_inputs("dock")
 
+    def test_the_path_dependencies_of_a_declared_crate_are_inputs(self):
+        (self.root / "system/style/Cargo.toml").write_text(
+            '[package]\nname = "style"\n\n[dependencies]\nother = { path = "../other" }\n'
+        )
+        (self.root / "system/other/Cargo.toml").write_text('[package]\nname = "other"\n')
+        self.write_spec("%build\ncargo build -p style\n", declare=["system/style"])
+        self.assertIn("../system/other", dag.package_inputs("dock"))
+
 
 class UndeclaredReferenceTest(FixtureTest):
     def test_a_repo_path_the_spec_reads_without_declaring_it_is_reported(self):
@@ -87,7 +97,7 @@ class UndeclaredReferenceTest(FixtureTest):
 
 
 class RealSpecsTest(unittest.TestCase):
-    def test_no_spec_of_the_dag_reads_a_repo_path_it_did_not_declare(self):
+    def setUp(self):
         cwd = os.getcwd()
         os.chdir(FORGE)
         self.addCleanup(os.chdir, cwd)
@@ -96,9 +106,37 @@ class RealSpecsTest(unittest.TestCase):
         self.addCleanup(patcher.stop)
         with open("config/packages.json") as f:
             manifest = json.load(f)
-        packages = sorted(set(manifest["custom_packages"]) - dag.EXTERNAL_PACKAGES)
-        found = {p: dag.undeclared_repo_references(p) for p in packages}
+        self.packages = sorted(set(manifest["custom_packages"]) - dag.EXTERNAL_PACKAGES)
+
+    def test_no_spec_of_the_dag_reads_a_repo_path_it_did_not_declare(self):
+        found = {p: dag.undeclared_repo_references(p) for p in self.packages}
         self.assertEqual({}, {p: r for p, r in found.items() if r})
+
+    def test_every_crate_an_in_place_build_names_is_an_input(self):
+        # A crate outside its spec directory is no input unless the spec declares it: a change
+        # to it would leave the content hash, and so the Release, as they were.
+        with open("../Cargo.toml", "rb") as f:
+            members = tomllib.load(f)["workspace"]["members"]
+        crates = {}
+        for member in members:
+            with open(os.path.join("..", member, "Cargo.toml"), "rb") as f:
+                crates[tomllib.load(f)["package"]["name"]] = os.path.relpath(os.path.join("..", member))
+        missing = {}
+        for pkg in self.packages:
+            spec_dir = dag.spec_dir_for(pkg)
+            if not (dag.builds_in_place(spec_dir) and dag.uses_cargo(spec_dir)):
+                continue
+            lines = list(dag.spec_lines(spec_dir))
+            name = next(line.split(":", 1)[1].strip() for line in lines if line.startswith("Name:"))
+            inputs = dag.package_inputs(pkg)
+            for line in lines:
+                if not re.match(r"\s*cargo\s", line):
+                    continue
+                for crate in re.findall(r"(?:-p|--package)[ =](\S+)", line):
+                    directory = crates[crate.replace("%{name}", name)]
+                    if not any(directory == i or directory.startswith(i + os.sep) for i in inputs):
+                        missing.setdefault(pkg, []).append(directory)
+        self.assertEqual({}, missing)
 
 
 if __name__ == "__main__":

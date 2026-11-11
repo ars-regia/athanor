@@ -5,7 +5,7 @@
 
 Name:           athanor-dart-sass
 Version:        1.77.8
-Release:        2%{?dist}
+Release:        2%{?athanor_content}%{?dist}
 Summary:        Dart-Sass precompiled binary for Athanor OS dynamic theming
 License:        MIT
 URL:            https://github.com/sass/dart-sass

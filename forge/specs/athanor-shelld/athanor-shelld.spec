@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-shelld
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        5%{?athanor_content}%{?dist}
 Summary:        The Athanor shell's daemon: desktop notifications and the tray watcher
 License:        GPL-3.0-or-later
 

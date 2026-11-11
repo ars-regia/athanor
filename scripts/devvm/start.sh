@@ -58,11 +58,11 @@ done
 guest_ssh -q true || die "no SSH on 127.0.0.1:$SSH_PORT after 6 minutes"
 echo "up: ssh.sh, or ssh -p $SSH_PORT $GUEST_USER@127.0.0.1"
 
-# cosmic-idle's compiled timers blank and lock the session after 15 minutes and suspend the
+# athanor-idle's timers blank and lock the session after 15 minutes and suspend the
 # guest after 30, which hides the shell from the checks or stops SSH mid-run (#558); QEMU's
 # system_wakeup does not bring the guest back. The guest user's own keys turn the three
-# timers off, as on the maintainer's desktop (doc_lock_and_prompts.md), and cosmic-idle
-# reads them as they change.
+# timers off, as on the maintainer's desktop (doc_lock_and_prompts.md), and athanor-idle
+# follows them as they change (doc_session_daemons.md, SD3).
 # shellcheck disable=SC2016 # expanded by the guest's shell
 guest_ssh 'dir=${XDG_CONFIG_HOME:-$HOME/.config}/cosmic/com.system76.CosmicIdle/v1 &&
   mkdir -p "$dir" && for key in screen_off_time suspend_on_ac_time suspend_on_battery_time; do

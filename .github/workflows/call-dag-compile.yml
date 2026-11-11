@@ -85,6 +85,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           PKG_NAME: ${{ matrix.package }}
+          CONTENT_HASH: ${{ steps.check.outputs.hash }}
           SCCACHE_CACHE_SIZE: 10G
         run: bash scripts/dag_package.sh build
 

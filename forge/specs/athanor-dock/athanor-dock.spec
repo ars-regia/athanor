@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-dock
 Version:        1.0.0
-Release:        12%{?dist}
+Release:        12%{?athanor_content}%{?dist}
 Summary:        The Athanor dock
 License:        GPL-3.0-or-later
 
