@@ -30,7 +30,7 @@
     "name": "bug"
   },
   {
-    "color": "b60205",
+    "color": "B60205",
     "description": "A scheduled workflow job failed (PL51)",
     "name": "ci-alert"
   },
