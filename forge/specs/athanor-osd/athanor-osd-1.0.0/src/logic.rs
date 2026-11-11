@@ -142,6 +142,8 @@ pub struct Core {
     held: Vec<Key>,
     /// When the first held key stops waiting for the model.
     hold_until: Option<Instant>,
+    /// The wait ended with the model still unsettled: no key waits again until it settles.
+    gave_up: bool,
 }
 
 impl Core {
@@ -156,6 +158,7 @@ impl Core {
             announce_at: None,
             held: Vec::new(),
             hold_until: None,
+            gave_up: false,
         }
     }
 
@@ -196,9 +199,18 @@ impl Core {
         })
     }
 
-    /// Whether keys wait for the model: it has not settled and [`SETTLE_WAIT`] has not ended.
+    /// Whether keys wait for the model: it has not settled and [`SETTLE_WAIT`], counted from
+    /// the first key held, has not ended. Once it has, no key waits until the model settles.
     fn holding(&mut self, state: &AudioState, now: Instant) -> bool {
-        !state.settled && now < *self.hold_until.get_or_insert(now + SETTLE_WAIT)
+        if state.settled {
+            self.gave_up = false;
+            return false;
+        }
+        if !self.gave_up && now < *self.hold_until.get_or_insert(now + SETTLE_WAIT) {
+            return true;
+        }
+        self.gave_up = true;
+        false
     }
 
     /// Replays the held keys, in order, against `state`.
@@ -291,6 +303,9 @@ impl Core {
             self.output = None;
             self.input = None;
         }
+        if state.settled {
+            self.gave_up = false;
+        }
         let mut effects = if state.settled {
             self.release(state, now)
         } else {
@@ -333,6 +348,7 @@ impl Core {
                 keys = self.held.len(),
                 "the audio state did not settle in time; the held keys act on it as it is"
             );
+            self.gave_up = true;
             effects = self.release(state, now);
         }
         if self.announce_at.is_some_and(|at| at <= now) {
@@ -734,12 +750,31 @@ mod tests {
             "no device: nothing"
         );
         assert!(core.held.is_empty());
-        // The batch is over: a key that comes while the state is still unsettled starts a
-        // fresh hold of its own, with a fresh bound.
+        // The wait is over: a key that comes while the state is still unsettled does not
+        // start a new one, until the model settles.
         let later = now + SETTLE_WAIT;
         assert!(core.key(Key::VolumeUp, &unsettled, later).is_empty());
+        assert!(core.held.is_empty());
+        assert_eq!(core.deadline(), None);
+    }
+
+    #[test]
+    fn later_keys_do_not_extend_the_wait_from_the_first_key_held() {
+        let now = Instant::now();
+        let mut core = Core::new(false);
+        let unsettled = AudioState::default();
+        assert!(core.key(Key::VolumeUp, &unsettled, now).is_empty());
+        let mid = now + SETTLE_WAIT / 2;
+        assert!(core.key(Key::VolumeUp, &unsettled, mid).is_empty());
+        assert_eq!(core.deadline(), Some(now + SETTLE_WAIT));
+        // The first key's bound passed: this key acts on the state as it is, and holds none.
+        let end = now + SETTLE_WAIT;
+        assert!(core.key(Key::VolumeUp, &unsettled, end).is_empty());
+        assert!(core.held.is_empty());
+        // Once the model settles, a later gap waits again.
+        core.observe(&state(40.0, false), end);
+        assert!(core.key(Key::VolumeUp, &unsettled, end).is_empty());
         assert_eq!(core.held, [Key::VolumeUp]);
-        assert_eq!(core.deadline(), Some(later + SETTLE_WAIT));
     }
 
     #[test]
