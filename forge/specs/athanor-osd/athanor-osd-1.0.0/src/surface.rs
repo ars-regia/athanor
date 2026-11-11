@@ -3,7 +3,7 @@
 //! the accessibility tree; shown, it takes the overlay layer at the bottom of the output of the
 //! active workspace, rises in and fades out, and names itself with its content as a status.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -101,8 +101,8 @@ pub struct Osd {
     /// The output of the workspace activated last.
     active: Option<String>,
     step: Option<Step>,
-    /// Whether the timer that draws the step runs.
-    ticking: Rc<Cell<bool>>,
+    /// The timer that draws the step, while one runs: at most one exists.
+    timer: Option<glib::SourceId>,
 }
 
 impl Osd {
@@ -141,7 +141,7 @@ impl Osd {
             surfaces: HashMap::new(),
             active: None,
             step: None,
-            ticking: Rc::new(Cell::new(false)),
+            timer: None,
         }
     }
 
@@ -366,23 +366,20 @@ impl Osd {
             to,
             start: Instant::now(),
         });
-        if !self.ticking.replace(true) {
+        if self.timer.is_none() {
             // ponytail: a GLib timer, not the surface's frame callbacks, which Sal does not
             // offer an application; a widget motion in Sal replaces it.
-            let ticking = self.ticking.clone();
-            glib::timeout_add_local(FRAME, move || {
-                if ticking.get() {
-                    glib::ControlFlow::Continue
-                } else {
-                    glib::ControlFlow::Break
-                }
-            });
+            self.timer = Some(glib::timeout_add_local(FRAME, || {
+                glib::ControlFlow::Continue
+            }));
         }
     }
 
     fn draw_step(&mut self, shell: &mut Shell) {
         let Some(step) = &self.step else {
-            self.ticking.set(false);
+            if let Some(timer) = self.timer.take() {
+                timer.remove();
+            }
             return;
         };
         let Some((_, widgets)) = self.surfaces.get(&step.surface).and_then(|s| s.shown) else {
