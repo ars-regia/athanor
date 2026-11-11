@@ -115,7 +115,9 @@ not the builds.
    in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
    package.
 
-   The spec of each of the forge's own packages writes its release as
+   The spec of each of the forge's own packages, except the four that follow an upstream or
+   kernel release (`RELEASE_BY_HAND` in `scripts/verify.py`: `cosmic-comp`, `greenboot-rs`,
+   `polkit` and `azoth-microvm`, which still raise their release by hand), writes its release as
    `Release: <N>%{?athanor_content}%{?dist}`, and the DAG's build defines `athanor_content`
    as `.h` and the first ten hex digits of the content hash of step 1: the RPM of
    `athanor-sulphur` is `1.0.0-23.h<hash>`. N is the number the spec had when the scheme

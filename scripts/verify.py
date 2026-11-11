@@ -3374,6 +3374,16 @@ def manifest_spec_problems(root=None):
     return problems
 
 
+# Specs whose Release does not carry %{?athanor_content}: they follow an upstream release or the
+# kernel's, and still raise Release by hand on a payload change (forge/AGENTS.md).
+RELEASE_BY_HAND = {
+    "forge/specs/azoth/microvm/azoth-microvm.spec",
+    "forge/specs/cosmic-comp/cosmic-comp.spec",
+    "forge/specs/greenboot-rs/greenboot-rs.spec",
+    "forge/specs/polkit/polkit.spec",
+}
+
+
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
@@ -3420,6 +3430,13 @@ def check_specs():
 
     for spec in walk(ROOT, ".spec"):
         text = read(spec)
+        release = re.search(r"^Release:[ \t]*(\S+)", text, re.M)
+        by_hand = rel(spec) in RELEASE_BY_HAND
+        if rel(spec).startswith("forge/specs/") and release and by_hand == ("%{?athanor_content}" in release.group(1)):
+            r.fail(f"{rel(spec)}: Release {release.group(1)} " + (
+                "carries %{?athanor_content}: drop the spec from RELEASE_BY_HAND" if by_hand else
+                "lacks %{?athanor_content}: write <N>%{?athanor_content}%{?dist}, or list the spec in "
+                "RELEASE_BY_HAND and raise its Release by hand (forge/AGENTS.md)"))
         sec = sections(text)
         prep = sec.get("prep", "")
         # senza %setup/%autosetup rpmbuild non entra in una sottodirectory:
