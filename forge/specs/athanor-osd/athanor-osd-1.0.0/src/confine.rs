@@ -37,12 +37,20 @@ pub struct Grants {
 }
 
 /// The overlay's grants: the cache and dconf's runtime directory, each when it passes
-/// `dirs::private_dir`, which creates it if missing. One that fails is not granted, and says so.
+/// `dirs::private_dir`, which creates it if missing. One that fails is not granted, and says so;
+/// the cache is granted only as a directory named `athanor-osd`, never the shared `~/.cache`.
 pub fn overlay(dirs: &Dirs, var: impl Fn(&str) -> Option<OsString>) -> Grants {
     let mut write = Vec::new();
-    let cache = match (dirs.cache.parent(), dirs.cache.file_name().and_then(|n| n.to_str())) {
-        (Some(parent), Some(name)) => dirs::private_dir(parent, name),
-        _ => Err(std::io::Error::other("the cache is the root directory")),
+    // The unit sets `XDG_CACHE_HOME` to its own `athanor-osd` directory. Anywhere else the
+    // cache is the user's `~/.cache`, which is not granted whole.
+    let cache = match (
+        dirs.cache.parent(),
+        dirs.cache.file_name().and_then(|n| n.to_str()),
+    ) {
+        (Some(parent), Some(name @ "athanor-osd")) => dirs::private_dir(parent, name),
+        _ => Err(std::io::Error::other(
+            "the cache is not an `athanor-osd` directory",
+        )),
     };
     match cache {
         Ok(cache) => write.push(cache),
@@ -159,14 +167,17 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let base = std::env::temp_dir().join(format!("athanor-osd-cache-{}", std::process::id()));
         std::fs::remove_dir_all(&base).ok();
-        for dir in ["cache", "elsewhere", "runtime"] {
+        for dir in ["cache", "open", "new", "elsewhere", "runtime"] {
             std::fs::create_dir_all(base.join(dir)).expect("mkdir");
         }
         std::os::unix::fs::symlink(base.join("elsewhere"), base.join("cache/athanor-osd"))
             .expect("link");
-        std::fs::create_dir(base.join("cache/open")).expect("mkdir");
-        std::fs::set_permissions(base.join("cache/open"), std::fs::Permissions::from_mode(0o755))
-            .expect("chmod");
+        std::fs::create_dir(base.join("open/athanor-osd")).expect("mkdir");
+        std::fs::set_permissions(
+            base.join("open/athanor-osd"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
         let granted = |cache: &str| {
             let dirs = Dirs {
                 unit_runtime: base.join("runtime/athanor-osd"),
@@ -178,9 +189,14 @@ mod tests {
             overlay(&dirs, env(&[])).write.len()
         };
         // dconf's directory alone, created private, then the cache too.
-        let found = [granted("cache/athanor-osd"), granted("cache/open"), granted("cache/new")];
+        let found = [
+            granted("cache/athanor-osd"),
+            granted("open/athanor-osd"),
+            granted("new/athanor-osd"),
+            granted("cache"),
+        ];
         std::fs::remove_dir_all(&base).ok();
-        assert_eq!(found, [1, 1, 2], "a link, mode 0755, created private");
+        assert_eq!(found, [1, 1, 2, 1], "a link, mode 0755, created private, not named for the unit");
     }
 
     #[test]
