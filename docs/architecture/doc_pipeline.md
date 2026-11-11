@@ -39,6 +39,9 @@
   runner, rather than as the last step of each job, since a job whose self-hosted runner is
   lost never runs its last step (Kernel Weekly, 2026-11-01). Only `kernel-weekly.yml` carries
   that job today; the other scheduled workflows gain it with PB2.
+  Also amended 2026-11-11, approved by the maintainer with the pull request that makes the change:
+  `maintenance.yml` carries PL51's alert job too, and runs the daily rescan of the Rust advisories
+  that `rust-security-audit.yml` ran weekly.
   Also amended 2026-11-05 (#437, [ADR-0136](../decisions/0136-one-release-approval-per-promotion.md)),
   approved by the maintainer with the pull request that makes the change: PL32 and PL35 name
   the last step of the `promote` job of `promote-stable.yml`, not an `iso` job, as the writer
@@ -1141,9 +1144,9 @@ no job restores is removed, and the
 runs the `alert` composite action on a GitHub-hosted runner once every other job has ended,
 whatever its result, so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
-it on the next success. No scheduled failure stays silent. Today only `kernel-weekly.yml`
-ends with that job; the other scheduled workflows gain it with PB2 (section 12), and until
-then their failures raise no issue.
+it on the next success. No scheduled failure stays silent. Today `kernel-weekly.yml` and
+`maintenance.yml` end with that job; the other scheduled workflows gain it with PB2 (section
+12), and until then their failures raise no issue.
 
 **PL52. Settings drift is detected daily.** `scripts/github-settings/ghsettings.py diff`,
 which exists, is tested (`scripts/tests/test_ghsettings.py`) and exits 1 on drift, compares

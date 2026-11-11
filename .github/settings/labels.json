@@ -30,6 +30,11 @@
     "name": "bug"
   },
   {
+    "color": "B60205",
+    "description": "A scheduled workflow job failed (PL51)",
+    "name": "ci-alert"
+  },
+  {
     "color": "006B75",
     "description": "Opened by a bump bot",
     "name": "cosmic-comp-bump"

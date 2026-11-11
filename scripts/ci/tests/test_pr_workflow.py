@@ -10,6 +10,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 PR = ROOT / ".github" / "workflows" / "pr.yml"
 SHELL = ROOT / ".github" / "workflows" / "shell-surfaces.yml"
 AUDIT = ROOT / ".github" / "workflows" / "rust-security-audit.yml"
+MAINTENANCE = ROOT / ".github" / "workflows" / "maintenance.yml"
 
 spec = importlib.util.spec_from_file_location("changes", ROOT / "scripts/ci/changes.py")
 changes = importlib.util.module_from_spec(spec)
@@ -82,9 +83,19 @@ class RustAuditTest(unittest.TestCase):
 
     def test_no_pull_request_trigger_of_its_own(self):
         triggers = yaml.safe_load(AUDIT.read_text())[True]
-        self.assertEqual(set(triggers), {"workflow_call", "schedule", "push"})
+        self.assertEqual(set(triggers), {"workflow_call", "push"})
         job = yaml.safe_load(PR.read_text())["jobs"]["rust_audit"]
         self.assertEqual(job["uses"], "./.github/workflows/rust-security-audit.yml")
+
+    def test_maintenance_runs_it_daily_and_alerts(self):
+        jobs = yaml.safe_load(MAINTENANCE.read_text())["jobs"]
+        self.assertEqual(jobs["rust-advisories"]["uses"], "./.github/workflows/rust-security-audit.yml")
+        alert = jobs["alert"]
+        self.assertEqual(set(alert["needs"]), set(jobs) - {"alert"})
+        self.assertIn("always()", alert["if"])
+        self.assertIn("github.event_name == 'schedule'", alert["if"])
+        writers = {n for n, j in jobs.items() if j.get("permissions", {}).get("issues") == "write"}
+        self.assertEqual(writers, {"alert"})
 
     def test_push_filter_matches_the_rust_audit_area(self):
         push = yaml.safe_load(AUDIT.read_text())[True]["push"]
