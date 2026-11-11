@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use zbus::message::Header;
-use zbus::{interface, Connection};
 use zbus::{ObjectPath, OwnedObjectPath, OwnedVariant};
+use zbus::{interface, Connection};
 
 pub const BUS_NAME: &str = "os.athanor.Update1";
 pub const OBJECT_PATH: &str = "/os/athanor/Update1";
@@ -79,42 +79,13 @@ struct Logind<'a>(&'a Connection);
 
 impl Logind<'_> {
     /// A query to logind, bounded by `ASK`. Never a state-changing call: see `Power::reboot`.
-    async fn call<B: serde::Serialize + zbus::DynamicType>(
-        &self,
-        method: &str,
-        body: &B,
-    ) -> zbus::Result<zbus::Message> {
-        within(
-            ASK,
-            self.0.call_method(
-                Some(LOGIND),
-                "/org/freedesktop/login1",
-                Some("org.freedesktop.login1.Manager"),
-                method,
-                body,
-            ),
-        )
-        .await
+    async fn call<B: serde::Serialize + zbus::DynamicType>(&self, method: &str, body: &B) -> zbus::Result<zbus::Message> {
+        within(ASK, self.0.call_method(Some(LOGIND), "/org/freedesktop/login1", Some("org.freedesktop.login1.Manager"), method, body)).await
     }
 
     /// A property of one of logind's objects, read with `org.freedesktop.DBus.Properties.Get`.
-    async fn property<T: TryFrom<OwnedVariant, Error = zbus::Error>>(
-        &self,
-        path: &ObjectPath<'_>,
-        interface: &str,
-        name: &str,
-    ) -> zbus::Result<T> {
-        let reply = within(
-            ASK,
-            self.0.call_method(
-                Some(LOGIND),
-                path,
-                Some("org.freedesktop.DBus.Properties"),
-                "Get",
-                &(interface, name),
-            ),
-        )
-        .await?;
+    async fn property<T: TryFrom<OwnedVariant, Error = zbus::Error>>(&self, path: &ObjectPath<'_>, interface: &str, name: &str) -> zbus::Result<T> {
+        let reply = within(ASK, self.0.call_method(Some(LOGIND), path, Some("org.freedesktop.DBus.Properties"), "Get", &(interface, name))).await?;
         T::try_from(reply.body().deserialize::<OwnedVariant>()?)
     }
 }
@@ -418,17 +389,7 @@ impl Update1 {
 pub async fn run() -> zbus::Result<()> {
     let activity = Arc::new(Activity::default());
     let query = zbus::connection::Builder::system().build().await?;
-    let conn = zbus::connection::Builder::system()
-        .name(BUS_NAME)
-        .serve_at(
-            OBJECT_PATH,
-            Update1 {
-                activity: Arc::clone(&activity),
-                query,
-            },
-        )
-        .build()
-        .await?;
+    let conn = zbus::connection::Builder::system().name(BUS_NAME).serve_at(OBJECT_PATH, Update1 { activity: Arc::clone(&activity), query }).build().await?;
     let started = Instant::now();
     loop {
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -550,10 +511,7 @@ mod tests {
         let bus = crate::goback::tests::Bus::start(name);
         let mut service = None;
         if let Some(logind) = logind {
-            let builder = bus
-                .builder()
-                .name("org.freedesktop.login1")
-                .serve_at("/org/freedesktop/login1", logind);
+            let builder = bus.builder().name("org.freedesktop.login1").serve_at("/org/freedesktop/login1", logind);
             service = Some(builder.build().await.expect("logind"));
         }
         let client = bus.builder().build().await.expect("client");
@@ -646,20 +604,13 @@ mod tests {
     /// credentials of the caller's unique name, as the service makes it.
     async fn count(name: &str, seats: Seats) -> bool {
         let bus = crate::goback::tests::Bus::start(name);
-        let mut builder = bus
-            .builder()
-            .name(LOGIND)
-            .serve_at("/org/freedesktop/login1", seats.clone());
+        let mut builder = bus.builder().name(LOGIND).serve_at("/org/freedesktop/login1", seats.clone());
         for (id, _, class) in &seats.sessions {
             if let Some(class) = class {
                 builder = builder.serve_at(session_path(id), SessionObject(class));
             }
         }
-        let logind = builder
-            .serve_at(USER_PATH, UserObject(seats.display))
-            .build()
-            .await
-            .expect("logind");
+        let logind = builder.serve_at(USER_PATH, UserObject(seats.display)).build().await.expect("logind");
         let client = bus.builder().build().await.expect("client");
         let sender = client.unique_name().expect("unique name").to_string();
         let open = Sender::new(&client, sender).await.others_open().await;
@@ -742,10 +693,7 @@ mod tests {
             let bus = crate::goback::tests::Bus::start(name);
             let mut service = None;
             if broken {
-                let builder = bus
-                    .builder()
-                    .name("org.freedesktop.PolicyKit1")
-                    .serve_at("/org/freedesktop/PolicyKit1/Authority", BrokenPolkit);
+                let builder = bus.builder().name("org.freedesktop.PolicyKit1").serve_at("/org/freedesktop/PolicyKit1/Authority", BrokenPolkit);
                 service = Some(builder.build().await.expect("polkit"));
             }
             let client = bus.builder().build().await.expect("client");
@@ -775,13 +723,7 @@ mod tests {
     #[tokio::test]
     async fn a_polkit_that_never_answers_refuses_the_request() {
         let bus = crate::goback::tests::Bus::start("polkit-silent");
-        let _polkit = bus
-            .builder()
-            .name("org.freedesktop.PolicyKit1")
-            .serve_at("/org/freedesktop/PolicyKit1/Authority", SilentPolkit)
-            .build()
-            .await
-            .expect("polkit");
+        let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").serve_at("/org/freedesktop/PolicyKit1/Authority", SilentPolkit).build().await.expect("polkit");
         let client = bus.builder().build().await.expect("client");
         let sender = client.unique_name().expect("unique name").to_string();
         let refused = polkit_within(&client, &sender, requests::ACTION_APPLY, Duration::from_millis(300)).await;
@@ -811,26 +753,9 @@ mod tests {
     async fn each_request_asks_polkit_for_its_own_action_with_a_prompt() {
         let bus = crate::goback::tests::Bus::start("polkit-actions");
         let polkit = RecordingPolkit::default();
-        let _polkit = bus
-            .builder()
-            .name("org.freedesktop.PolicyKit1")
-            .serve_at("/org/freedesktop/PolicyKit1/Authority", polkit.clone())
-            .build()
-            .await
-            .expect("polkit");
+        let _polkit = bus.builder().name("org.freedesktop.PolicyKit1").serve_at("/org/freedesktop/PolicyKit1/Authority", polkit.clone()).build().await.expect("polkit");
         let query = bus.builder().build().await.expect("query");
-        let service = bus
-            .builder()
-            .serve_at(
-                OBJECT_PATH,
-                Update1 {
-                    activity: Arc::new(Activity::default()),
-                    query,
-                },
-            )
-            .build()
-            .await
-            .expect("service");
+        let service = bus.builder().serve_at(OBJECT_PATH, Update1 { activity: Arc::new(Activity::default()), query }).build().await.expect("service");
         let client = bus.builder().build().await.expect("client");
         let destination = service.unique_name().expect("unique name").to_owned();
         let not_authorized = |reply: zbus::Result<zbus::Message>| matches!(reply, Err(zbus::Error::MethodError(name, _, _)) if name.as_str() == "os.athanor.Update1.Error.NotAuthorized");

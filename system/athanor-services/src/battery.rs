@@ -499,10 +499,7 @@ mod tests {
             ("Percentage", Variant::from(50u32)),
         ]);
         assert_eq!(battery(&wrong), None);
-        assert_eq!(
-            profiles(&device(&[("Profiles", Variant::from(3u32))])),
-            None
-        );
+        assert_eq!(profiles(&device(&[("Profiles", Variant::from(3u32))])), None);
     }
 
     #[test]

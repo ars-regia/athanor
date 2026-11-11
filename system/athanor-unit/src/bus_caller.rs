@@ -377,10 +377,7 @@ mod tests {
     #[test]
     fn the_system_bus_is_the_fixed_socket_whatever_the_environment_says() {
         // Edition 2021: `set_var` is safe. Nothing else in this crate's tests reads this variable.
-        std::env::set_var(
-            "DBUS_SYSTEM_BUS_ADDRESS",
-            "unix:path=/nonexistent/bogus_bus",
-        );
+        std::env::set_var("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/nonexistent/bogus_bus");
         let builder = format!("{:?}", system_bus());
         assert!(builder.contains("/run/dbus/system_bus_socket"), "{builder}");
         assert!(!builder.contains("bogus_bus"), "{builder}");

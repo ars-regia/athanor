@@ -120,12 +120,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn only_the_owner_of_the_frontend_name_is_the_frontend() {
         let bus = Bus::start("owner");
-        let frontend = bus
-            .builder()
-            .name(FRONTEND)
-            .build()
-            .await
-            .expect("frontend");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
         let other = bus.builder().build().await.expect("other");
         let frontend_id = frontend.unique_name().expect("unique name").clone();
         let other_id = other.unique_name().expect("unique name").clone();
@@ -184,12 +179,7 @@ pub(crate) mod tests {
     async fn a_method_answers_the_frontend_and_refuses_a_stranger() {
         let bus = Bus::start("method");
         let _portal = portal(&bus).await;
-        let frontend = bus
-            .builder()
-            .name(FRONTEND)
-            .build()
-            .await
-            .expect("frontend");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
         let stranger = bus.builder().build().await.expect("stranger");
 
         let refused = read(&stranger, "org.freedesktop.appearance", "color-scheme")
@@ -226,19 +216,9 @@ pub(crate) mod tests {
     async fn a_setting_that_is_not_served_is_not_found() {
         let bus = Bus::start("missing");
         let _portal = portal(&bus).await;
-        let frontend = bus
-            .builder()
-            .name(FRONTEND)
-            .build()
-            .await
-            .expect("frontend");
-        for (namespace, key) in [
-            ("org.freedesktop.appearance", "missing"),
-            ("org.example", "color-scheme"),
-        ] {
-            let missing = read(&frontend, namespace, key)
-                .await
-                .expect_err("not served");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
+        for (namespace, key) in [("org.freedesktop.appearance", "missing"), ("org.example", "color-scheme")] {
+            let missing = read(&frontend, namespace, key).await.expect_err("not served");
             assert!(
                 matches!(&missing, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.portal.Error.NotFound"),
                 "{missing}"

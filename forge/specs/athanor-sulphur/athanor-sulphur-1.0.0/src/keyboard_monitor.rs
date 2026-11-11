@@ -553,9 +553,9 @@ impl Interface {
     }
 
     /// A key pressed or released, sent to the one client it is for. Declared so that the
-    /// interface's introspection lists it; `keyboard-monitor-signals` sends it through the
-    /// blocking connection with the same member and arguments (`emit_signal`), so this
-    /// asynchronous form goes unused.
+    /// interface's introspection lists it; `keyboard-monitor-signals` sends it in a
+    /// `zbus::block_on` call with the same member and arguments (`emit_signal`), so this
+    /// form goes unused.
     #[allow(dead_code)]
     #[zbus(signal)]
     async fn key_event(

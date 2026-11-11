@@ -49,7 +49,13 @@ pub async fn start(
                 state: Arc::clone(&state),
             },
         )
-        .serve_at(PRIVATE_PATH, Private { state, bar })
+        .serve_at(
+            PRIVATE_PATH,
+            Private {
+                state,
+                bar,
+            },
+        )
         .serve_at(WATCHER_PATH, Watcher::new(query))
         .build()
         .await?;

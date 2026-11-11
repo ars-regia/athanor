@@ -37,15 +37,8 @@ async fn send(session: &Connection, notice: &Notice) -> zbus::Result<(u32, Strin
         }
     };
     // The owner is read before the call, so the id returned is tied to the server asked.
-    let owner = zbus::fdo::DBusProxy::new(session)
-        .await?
-        .get_name_owner(zbus::names::BusName::try_from(SERVER)?)
-        .await?
-        .to_string();
-    let hints: HashMap<&str, Variant<'_>> = HashMap::from([
-        ("urgency", Variant::U8(1)),
-        ("resident", Variant::Bool(true)),
-    ]);
+    let owner = zbus::fdo::DBusProxy::new(session).await?.get_name_owner(zbus::names::BusName::try_from(SERVER)?).await?.to_string();
+    let hints: HashMap<&str, Variant<'_>> = HashMap::from([("urgency", Variant::U8(1)), ("resident", Variant::Bool(true))]);
     let reply = session
         .call_method(Some(SERVER), SERVER_PATH, Some(SERVER), "Notify", &("Athanor", 0u32, "software-update-available-symbolic", summary, body.as_str(), actions, hints, 0i32))
         .await?;
@@ -78,12 +71,7 @@ async fn request(system: &Connection, request: Request) {
 
 async fn run(state_dir: &Path) -> zbus::Result<()> {
     let (session, system) = (Connection::session().await?, Connection::system().await?);
-    let rule = MatchRule::builder()
-        .msg_type(zbus::message::Type::Signal)
-        .interface(SERVER)
-        .member("ActionInvoked")
-        .path(SERVER_PATH)
-        .build()?;
+    let rule = MatchRule::builder().msg_type(zbus::message::Type::Signal).interface(SERVER).member("ActionInvoked").path(SERVER_PATH).build()?;
     let mut invoked = MessageStream::for_match_rule(rule, &session, None).await?;
     let mut notices = Notices::new(notices::announced(state_dir));
     let mut poll = tokio::time::interval(POLL);

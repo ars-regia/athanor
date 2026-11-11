@@ -36,10 +36,7 @@ impl PolkitSubject {
         let name: String = name.into();
         let mut details = HashMap::new();
         insert(&mut details, "name", Variant::from(name));
-        Self {
-            kind: "system-bus-name".to_string(),
-            details,
-        }
+        Self { kind: "system-bus-name".to_string(), details }
     }
 
     /// Subject for a caller identified by PID. `start-time` is mandatory on the wire; `0`
