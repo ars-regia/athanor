@@ -1,13 +1,13 @@
 ---
 id: ADR-0139
-title: "Pull requests that change only documents do not count against the open pull request limit"
+title: "Pull requests that change only files under docs/ do not count against the open pull request limit"
 date: 2026-11-11
 status: accepted
 issues: []
 areas: [process, docs]
 ---
 
-# 0139. Pull requests that change only documents do not count against the open pull request limit
+# 0139. Pull requests that change only files under docs/ do not count against the open pull request limit
 
 **Accepted** by the maintainer on 2026-11-11, in conversation.
 
