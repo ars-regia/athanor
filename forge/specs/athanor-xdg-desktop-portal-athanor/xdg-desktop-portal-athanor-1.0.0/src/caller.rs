@@ -66,7 +66,7 @@ pub(crate) mod tests {
     use std::{env, fs, path::PathBuf, process};
 
     use zbus::connection::Builder;
-    use zbus::zvariant::OwnedValue;
+    use zbus::OwnedVariant;
 
     use super::*;
     use crate::settings::{Portal, Store};
@@ -104,7 +104,7 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn builder(&self) -> Builder<'static> {
-            Builder::address(self.address.as_str()).expect("address")
+            Builder::address(self.address.as_str())
         }
     }
 
@@ -120,7 +120,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn only_the_owner_of_the_frontend_name_is_the_frontend() {
         let bus = Bus::start("owner");
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+        let frontend = bus
+            .builder()
+            .name(FRONTEND)
+            .build()
+            .await
+            .expect("frontend");
         let other = bus.builder().build().await.expect("other");
         let frontend_id = frontend.unique_name().expect("unique name").clone();
         let other_id = other.unique_name().expect("unique name").clone();
@@ -163,9 +168,7 @@ pub(crate) mod tests {
         );
         bus.builder()
             .name(PORTAL_NAME)
-            .expect("name")
             .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store)), query))
-            .expect("serve")
             .build()
             .await
             .expect("portal")
@@ -181,14 +184,19 @@ pub(crate) mod tests {
     async fn a_method_answers_the_frontend_and_refuses_a_stranger() {
         let bus = Bus::start("method");
         let _portal = portal(&bus).await;
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+        let frontend = bus
+            .builder()
+            .name(FRONTEND)
+            .build()
+            .await
+            .expect("frontend");
         let stranger = bus.builder().build().await.expect("stranger");
 
         let refused = read(&stranger, "org.freedesktop.appearance", "color-scheme")
             .await
             .expect_err("a stranger must be refused");
         assert!(
-            matches!(&refused, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied"),
+            matches!(&refused, zbus::Error::FDO(err) if matches!(**err, zbus::fdo::Error::AccessDenied(_))),
             "{refused}"
         );
         let refused = stranger
@@ -200,14 +208,14 @@ pub(crate) mod tests {
         let reply = read(&frontend, "org.freedesktop.appearance", "color-scheme")
             .await
             .expect("the frontend is answered");
-        let value: OwnedValue = reply.body().deserialize().expect("a variant");
+        let value: OwnedVariant = reply.body().deserialize().expect("a variant");
         assert_eq!(u32::try_from(value).expect("a u32"), 1);
 
         let reply = frontend
             .call_method(Some(PORTAL_NAME), PATH, Some(SETTINGS), "ReadAll", &(vec!["org.freedesktop.*"],))
             .await
             .expect("the frontend is answered");
-        let all: HashMap<String, HashMap<String, OwnedValue>> =
+        let all: HashMap<String, HashMap<String, OwnedVariant>> =
             reply.body().deserialize().expect("a{sa{sv}}");
         assert_eq!(all.len(), 1);
         assert!(all["org.freedesktop.appearance"].contains_key("color-scheme"));
@@ -218,9 +226,19 @@ pub(crate) mod tests {
     async fn a_setting_that_is_not_served_is_not_found() {
         let bus = Bus::start("missing");
         let _portal = portal(&bus).await;
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
-        for (namespace, key) in [("org.freedesktop.appearance", "missing"), ("org.example", "color-scheme")] {
-            let missing = read(&frontend, namespace, key).await.expect_err("not served");
+        let frontend = bus
+            .builder()
+            .name(FRONTEND)
+            .build()
+            .await
+            .expect("frontend");
+        for (namespace, key) in [
+            ("org.freedesktop.appearance", "missing"),
+            ("org.example", "color-scheme"),
+        ] {
+            let missing = read(&frontend, namespace, key)
+                .await
+                .expect_err("not served");
             assert!(
                 matches!(&missing, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.portal.Error.NotFound"),
                 "{missing}"

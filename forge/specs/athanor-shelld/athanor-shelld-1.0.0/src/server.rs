@@ -48,20 +48,14 @@ pub async fn start(
             Notifications {
                 state: Arc::clone(&state),
             },
-        )?
-        .serve_at(
-            PRIVATE_PATH,
-            Private {
-                state,
-                bar,
-            },
-        )?
-        .serve_at(WATCHER_PATH, Watcher::new(query))?
+        )
+        .serve_at(PRIVATE_PATH, Private { state, bar })
+        .serve_at(WATCHER_PATH, Watcher::new(query))
         .build()
         .await?;
     watcher::follow_owners(&conn).await?;
     for name in [NOTIFICATIONS_NAME, WATCHER_NAME] {
-        conn.request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
+        conn.request_name_with_flags(name, RequestNameFlags::DO_NOT_QUEUE)
             .await?;
     }
     Ok(conn)

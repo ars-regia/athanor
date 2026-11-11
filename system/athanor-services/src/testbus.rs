@@ -14,8 +14,8 @@ use tokio::sync::watch;
 use zbus::connection::Builder;
 use zbus::fdo::ObjectManager;
 use zbus::object_server::SignalEmitter;
-use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::Connection;
+use zbus::{ObjectPath, OwnedObjectPath, OwnedVariant, Variant};
 
 use crate::mirror::Snapshot;
 use crate::props::Objects;
@@ -76,7 +76,7 @@ impl TestBus {
     }
 
     pub fn builder(&self) -> Builder<'static> {
-        Builder::address(self.address.as_str()).expect("address")
+        Builder::address(self.address.as_str())
     }
 
     pub async fn client(&self) -> Connection {
@@ -106,9 +106,7 @@ pub async fn serve(bus: &TestBus, name: &str) -> Connection {
     let server = bus
         .builder()
         .serve_at(ROOT, ObjectManager)
-        .expect("object manager")
         .name(name.to_owned())
-        .expect("name")
         .build();
     connect("server", server).await
 }
@@ -118,9 +116,7 @@ pub async fn serve_stalled(bus: &TestBus, name: &str) -> Connection {
     let server = bus
         .builder()
         .serve_at(ROOT, Stalled)
-        .expect("stalled object manager")
         .name(name.to_owned())
-        .expect("name")
         .build();
     connect("server", server).await
 }
@@ -142,7 +138,7 @@ struct Stalled;
 impl Stalled {
     async fn get_managed_objects(
         &self,
-    ) -> HashMap<OwnedObjectPath, BTreeMap<String, BTreeMap<String, OwnedValue>>> {
+    ) -> HashMap<OwnedObjectPath, BTreeMap<String, BTreeMap<String, OwnedVariant>>> {
         std::future::pending().await
     }
 }
@@ -150,45 +146,46 @@ impl Stalled {
 /// An object of the test service. Its properties are values, so a test can give one the
 /// wrong type.
 struct TestObject {
-    name: OwnedValue,
-    level: OwnedValue,
+    name: OwnedVariant,
+    level: OwnedVariant,
 }
 
 #[zbus::interface(name = "os.athanor.Test1")]
 impl TestObject {
     #[zbus(property)]
-    fn name(&self) -> zbus::fdo::Result<OwnedValue> {
-        Ok(self.name.try_clone().map_err(zbus::Error::from)?)
+    fn name(&self) -> zbus::fdo::Result<OwnedVariant> {
+        Ok(self.name.try_clone()?)
     }
 
     #[zbus(property)]
-    fn level(&self) -> zbus::fdo::Result<OwnedValue> {
-        Ok(self.level.try_clone().map_err(zbus::Error::from)?)
+    fn level(&self) -> zbus::fdo::Result<OwnedVariant> {
+        Ok(self.level.try_clone()?)
     }
 }
 
-fn owned(value: Value<'_>) -> OwnedValue {
+fn owned(value: Variant<'_>) -> OwnedVariant {
     value.try_to_owned().expect("owned value")
 }
 
 /// Adds an object with `Name: s` and `Level: u`; the object manager announces it.
 pub async fn add_object(server: &Connection, path: &str, name: &str, level: u32) {
     let object = TestObject {
-        name: owned(Value::from(name)),
-        level: owned(Value::from(level)),
+        name: owned(Variant::from(name)),
+        level: owned(Variant::from(level)),
     };
     assert!(server
         .object_server()
         .at(path.to_owned(), object)
         .await
-        .expect("add"));
+        .expect("add")
+        .is_none());
 }
 
 /// Adds an object whose `property` (`Name` or `Level`) holds `value`, of whatever type.
-pub async fn add_object_raw(server: &Connection, path: &str, property: &str, value: Value<'_>) {
+pub async fn add_object_raw(server: &Connection, path: &str, property: &str, value: Variant<'_>) {
     let mut object = TestObject {
-        name: owned(Value::from("")),
-        level: owned(Value::from(0u32)),
+        name: owned(Variant::from("")),
+        level: owned(Variant::from(0u32)),
     };
     match property {
         "Name" => object.name = owned(value),
@@ -199,7 +196,8 @@ pub async fn add_object_raw(server: &Connection, path: &str, property: &str, val
         .object_server()
         .at(path.to_owned(), object)
         .await
-        .expect("add"));
+        .expect("add")
+        .is_none());
 }
 
 /// Sets `Level` and emits `PropertiesChanged`.
@@ -209,7 +207,7 @@ pub async fn set_level(server: &Connection, path: &str, level: u32) {
         .interface::<_, TestObject>(path.to_owned())
         .await
         .expect("object");
-    object.get_mut().await.level = owned(Value::from(level));
+    object.get_mut().await.level = owned(Variant::from(level));
     object
         .get()
         .await
@@ -231,7 +229,7 @@ pub async fn remove_object(server: &Connection, path: &str) {
 /// `GetManagedObjects` hangs still announces its objects.
 pub async fn announce(server: &Connection, path: &str, level: u32) {
     let emitter = SignalEmitter::new(server, ROOT).expect("emitter");
-    let props = BTreeMap::from([("Level".to_owned(), owned(Value::from(level)))]);
+    let props = BTreeMap::from([("Level".to_owned(), owned(Variant::from(level)))]);
     let interfaces = BTreeMap::from([(INTERFACE.to_owned(), props)]);
     emitter
         .emit(

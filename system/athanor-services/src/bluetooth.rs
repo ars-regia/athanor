@@ -33,8 +33,8 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, watch, Notify};
 use tokio::time::timeout;
 use zbus::message::Header;
-use zbus::zvariant::{ObjectPath, Value};
 use zbus::{Connection, DBusError, Proxy};
+use zbus::{ObjectPath, Variant};
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
 use crate::props::{self, Objects, Props, PROPERTIES};
@@ -793,7 +793,7 @@ impl Drop for ExitGuard {
             let Some(adapter) = adapter.filter(|_| !guest) else { return };
             let set = async {
                 let proxy = Proxy::new(&connection, BLUEZ, adapter.as_str(), PROPERTIES).await?;
-                let body = (ADAPTER, "Pairable", Value::from(false));
+                let body = (ADAPTER, "Pairable", Variant::from(false));
                 no_answer(timeout(TIMEOUT, proxy.call_method("Set", &body)).await)
             };
             if let Err(err) = set.await {
@@ -845,7 +845,7 @@ impl Context {
         on: bool,
     ) -> zbus::Result<()> {
         let proxy = Proxy::new(&self.connection, BLUEZ, path, PROPERTIES).await?;
-        let body = (interface, property, Value::from(on));
+        let body = (interface, property, Variant::from(on));
         no_answer(timeout(TIMEOUT, proxy.call_method("Set", &body)).await).map(|_| ())
     }
 
@@ -954,8 +954,8 @@ mod tests {
 
     use tokio::runtime::Handle;
     use zbus::message::Header;
-    use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
     use zbus::{Connection, Proxy};
+    use zbus::{ObjectPath, OwnedObjectPath, OwnedVariant, Variant};
 
     use super::*;
     use crate::testbus::{self, TestBus};
@@ -964,11 +964,11 @@ mod tests {
     const HEADSET: &str = "/org/bluez/hci0/dev_1";
     const PHONE: &str = "/org/bluez/hci0/dev_2";
 
-    fn owned(value: Value<'_>) -> OwnedValue {
+    fn owned(value: Variant<'_>) -> OwnedVariant {
         value.try_to_owned().expect("owned value")
     }
 
-    fn add(objects: &mut Objects, path: &str, interface: &str, entries: Vec<(&str, Value<'_>)>) {
+    fn add(objects: &mut Objects, path: &str, interface: &str, entries: Vec<(&str, Variant<'_>)>) {
         let props: Props = entries
             .into_iter()
             .map(|(name, value)| (name.to_owned(), owned(value)))
@@ -979,10 +979,10 @@ mod tests {
             .insert(interface.to_owned(), props);
     }
 
-    fn add_device(objects: &mut Objects, path: &str, mut entries: Vec<(&str, Value<'_>)>) {
+    fn add_device(objects: &mut Objects, path: &str, mut entries: Vec<(&str, Variant<'_>)>) {
         entries.push((
             "Adapter",
-            Value::from(ObjectPath::try_from(ADAPTER_PATH).expect("path")),
+            Variant::from(ObjectPath::try_from(ADAPTER_PATH).expect("path")),
         ));
         add(objects, path, DEVICE, entries);
     }
@@ -994,43 +994,43 @@ mod tests {
             ADAPTER_PATH,
             ADAPTER,
             vec![
-                ("Powered", Value::from(true)),
-                ("Discovering", Value::from(discovering)),
-                ("Pairable", Value::from(true)),
+                ("Powered", Variant::from(true)),
+                ("Discovering", Variant::from(discovering)),
+                ("Pairable", Variant::from(true)),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_1",
             vec![
-                ("Alias", Value::from("Keyboard")),
-                ("Paired", Value::from(true)),
-                ("Icon", Value::from("input-keyboard")),
+                ("Alias", Variant::from("Keyboard")),
+                ("Paired", Variant::from(true)),
+                ("Icon", Variant::from("input-keyboard")),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_2",
             vec![
-                ("Alias", Value::from("Headphones")),
-                ("Paired", Value::from(true)),
-                ("Connected", Value::from(true)),
-                ("Icon", Value::from("audio-headset")),
+                ("Alias", Variant::from("Headphones")),
+                ("Paired", Variant::from(true)),
+                ("Connected", Variant::from(true)),
+                ("Icon", Variant::from("audio-headset")),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_3",
             vec![
-                ("Alias", Value::from("AA-BB")),
-                ("Name", Value::from("Phone")),
-                ("Icon", Value::from("phone")),
+                ("Alias", Variant::from("AA-BB")),
+                ("Name", Variant::from("Phone")),
+                ("Icon", Variant::from("phone")),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_4",
-            vec![("Alias", Value::from("CC-DD"))],
+            vec![("Alias", Variant::from("CC-DD"))],
         );
         objects
     }
@@ -1062,17 +1062,17 @@ mod tests {
             &mut objects,
             "/org/bluez/hci0/dev_5",
             vec![
-                ("Alias", Value::from(long)),
-                ("Paired", Value::from(true)),
-                ("Icon", Value::from("../../etc/passwd")),
+                ("Alias", Variant::from(long)),
+                ("Paired", Variant::from(true)),
+                ("Icon", Variant::from("../../etc/passwd")),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_6",
             vec![
-                ("Alias", Value::from("\u{1b}\u{7}")),
-                ("Paired", Value::from(true)),
+                ("Alias", Variant::from("\u{1b}\u{7}")),
+                ("Paired", Variant::from(true)),
             ],
         );
         let paired = state(&objects).unwrap().paired;
@@ -1094,11 +1094,11 @@ mod tests {
             "/org/bluez/hci1/dev_9",
             DEVICE,
             vec![
-                ("Alias", Value::from("Other")),
-                ("Paired", Value::from(true)),
+                ("Alias", Variant::from("Other")),
+                ("Paired", Variant::from(true)),
                 (
                     "Adapter",
-                    Value::from(ObjectPath::try_from("/org/bluez/hci1").unwrap()),
+                    Variant::from(ObjectPath::try_from("/org/bluez/hci1").unwrap()),
                 ),
             ],
         );
@@ -1117,14 +1117,17 @@ mod tests {
             ADAPTER_PATH,
             ADAPTER,
             vec![
-                ("Powered", Value::from("yes")),
-                ("Discovering", Value::from(3u32)),
+                ("Powered", Variant::from("yes")),
+                ("Discovering", Variant::from(3u32)),
             ],
         );
         add_device(
             &mut objects,
             "/org/bluez/hci0/dev_7",
-            vec![("Alias", Value::from(7u32)), ("Paired", Value::from("no"))],
+            vec![
+                ("Alias", Variant::from(7u32)),
+                ("Paired", Variant::from("no")),
+            ],
         );
         let state = state(&objects).unwrap();
         assert!(!state.powered && !state.discovering && !state.pairable);
@@ -1262,6 +1265,7 @@ mod tests {
             let seen = match &result {
                 Ok(_) => "ok".to_owned(),
                 Err(zbus::Error::MethodError(name, _, _)) => name.to_string(),
+                Err(zbus::Error::FDO(err)) => zbus::DBusError::name(&**err).to_string(),
                 Err(err) => err.to_string(),
             };
             self.log.lock().unwrap().agent_results.push(seen);
@@ -1333,9 +1337,7 @@ mod tests {
         let build = bus
             .builder()
             .serve_at("/", zbus::fdo::ObjectManager)
-            .expect("object manager")
             .serve_at("/org/bluez", FakeAgentManager { log: log.clone() })
-            .expect("agent manager")
             .serve_at(
                 ADAPTER_PATH,
                 FakeAdapter {
@@ -1345,13 +1347,9 @@ mod tests {
                     log: log.clone(),
                 },
             )
-            .expect("adapter")
             .serve_at(HEADSET, device(HEADSET, "Headset", true))
-            .expect("headset")
             .serve_at(PHONE, device(PHONE, "Phone", false))
-            .expect("phone")
             .name(BLUEZ)
-            .expect("name")
             .build();
         tokio::time::timeout(testbus::WAIT, build)
             .await
@@ -1461,6 +1459,7 @@ mod tests {
         match result {
             Ok(_) => "ok".to_owned(),
             Err(zbus::Error::MethodError(name, _, _)) => name.to_string(),
+            Err(zbus::Error::FDO(err)) => zbus::DBusError::name(&*err).to_string(),
             Err(err) => err.to_string(),
         }
     }

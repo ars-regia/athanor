@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::timeout;
 use zbus::message::Header;
 use zbus::proxy::MethodFlags;
-use zbus::zvariant::{Array, ObjectPath, Value};
+use zbus::{Array, ObjectPath, Variant};
 use zbus::{Connection, DBusError, Message, Proxy};
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
@@ -357,7 +357,7 @@ pub fn icon(state: &NetworkState) -> &'static str {
 }
 
 /// `a{sa{sv}}`: the settings of a connection.
-pub type Settings<'a> = HashMap<&'a str, HashMap<&'a str, Value<'a>>>;
+pub type Settings<'a> = HashMap<&'a str, HashMap<&'a str, Variant<'a>>>;
 
 /// The settings of a network to join. The password, when there is one, goes to
 /// NetworkManager inside these settings and nowhere else.
@@ -366,23 +366,26 @@ pub fn wifi_settings<'a>(network: &'a Network, password: Option<&'a str>) -> Set
     settings.insert(
         "connection",
         HashMap::from([
-            ("type", Value::from("802-11-wireless")),
-            ("id", Value::from(network.label.as_str())),
+            ("type", Variant::from("802-11-wireless")),
+            ("id", Variant::from(network.label.as_str())),
         ]),
     );
     settings.insert(
         "802-11-wireless",
         HashMap::from([
-            ("ssid", Value::from(Array::from(network.ssid.clone()))),
-            ("mode", Value::from("infrastructure")),
+            ("ssid", Variant::from(Array::from(network.ssid.clone()))),
+            ("mode", Variant::from("infrastructure")),
         ]),
     );
     if let (Security::Personal { sae }, Some(password)) = (network.security, password) {
         settings.insert(
             SECURITY_SETTING,
             HashMap::from([
-                ("key-mgmt", Value::from(if sae { "sae" } else { "wpa-psk" })),
-                ("psk", Value::from(password)),
+                (
+                    "key-mgmt",
+                    Variant::from(if sae { "sae" } else { "wpa-psk" }),
+                ),
+                ("psk", Variant::from(password)),
             ]),
         );
     }
@@ -516,7 +519,7 @@ impl SecretsRequest {
 
 /// The reply of `GetSecrets`, `a{sa{sv}}`: the password and nothing else.
 pub fn secrets_reply(password: &str) -> Option<BTreeMap<String, Props>> {
-    let psk = Value::from(password).try_to_owned().ok()?;
+    let psk = Variant::from(password).try_to_owned().ok()?;
     Some(BTreeMap::from([(
         SECURITY_SETTING.to_owned(),
         Props::from([("psk".to_owned(), psk)]),
@@ -1100,11 +1103,11 @@ async fn read_info(connection: &Connection, owner: &str, path: &str) -> Option<C
 
 impl Context {
     async fn set_manager(&self, property: &str, on: bool) -> zbus::Result<()> {
-        let args = (NM, property, Value::from(on));
+        let args = (NM, property, Variant::from(on));
         let call = async {
             Proxy::new(&self.connection, NM, NM_PATH, props::PROPERTIES)
                 .await?
-                .call_with_flags::<_, _, ()>("Set", MethodFlags::AllowInteractiveAuth.into(), &args)
+                .call_with_flags::<_, _, ()>("Set", MethodFlags::ALLOW_INTERACTIVE_AUTH, &args)
                 .await
         };
         no_answer(timeout(TIMEOUT, call).await).map(|_| ())
@@ -1140,7 +1143,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                     .await?
                     .call_with_flags::<_, _, ()>(
                         "AddAndActivateConnection",
-                        MethodFlags::AllowInteractiveAuth.into(),
+                        MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
                     )
                     .await
@@ -1159,7 +1162,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                     .await?
                     .call_with_flags::<_, _, ()>(
                         "ActivateConnection",
-                        MethodFlags::AllowInteractiveAuth.into(),
+                        MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
                     )
                     .await
@@ -1173,7 +1176,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                     .await?
                     .call_with_flags::<_, _, ()>(
                         "DeactivateConnection",
-                        MethodFlags::AllowInteractiveAuth.into(),
+                        MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
                     )
                     .await
@@ -1211,18 +1214,18 @@ mod tests {
 
     use tokio::runtime::Handle;
     use zbus::message::Header;
-    use zbus::zvariant::{Array, ObjectPath, OwnedObjectPath, OwnedValue, Value};
+    use zbus::{Array, ObjectPath, OwnedObjectPath, OwnedVariant, Variant};
     use zbus::{Connection, Message, Proxy};
 
     use super::*;
     use crate::testbus::{self, TestBus};
 
-    fn owned(value: Value<'_>) -> OwnedValue {
+    fn owned(value: Variant<'_>) -> OwnedVariant {
         value.try_to_owned().expect("owned value")
     }
 
-    fn ops(paths: &[&str]) -> Value<'static> {
-        Value::from(Array::from(
+    fn ops(paths: &[&str]) -> Variant<'static> {
+        Variant::from(Array::from(
             paths
                 .iter()
                 .map(|path| ObjectPath::try_from(path.to_string()).expect("path"))
@@ -1230,22 +1233,22 @@ mod tests {
         ))
     }
 
-    fn bytes(data: &[u8]) -> Value<'static> {
-        Value::from(Array::from(data.to_vec()))
+    fn bytes(data: &[u8]) -> Variant<'static> {
+        Variant::from(Array::from(data.to_vec()))
     }
 
-    fn op(path: &str) -> Value<'static> {
-        Value::from(ObjectPath::try_from(path.to_string()).expect("path"))
+    fn op(path: &str) -> Variant<'static> {
+        Variant::from(ObjectPath::try_from(path.to_string()).expect("path"))
     }
 
-    fn map(pairs: Vec<(&str, Value<'_>)>) -> Props {
+    fn map(pairs: Vec<(&str, Variant<'_>)>) -> Props {
         pairs
             .into_iter()
             .map(|(name, value)| (name.to_owned(), owned(value)))
             .collect()
     }
 
-    fn add(objects: &mut Objects, path: &str, interface: &str, pairs: Vec<(&str, Value<'_>)>) {
+    fn add(objects: &mut Objects, path: &str, interface: &str, pairs: Vec<(&str, Variant<'_>)>) {
         objects
             .entry(path.to_owned())
             .or_default()
@@ -1259,10 +1262,10 @@ mod tests {
             ACCESS_POINT,
             vec![
                 ("Ssid", bytes(ssid)),
-                ("Strength", Value::from(strength)),
-                ("Flags", Value::from(u32::from(rsn != 0))),
-                ("WpaFlags", Value::from(0u32)),
-                ("RsnFlags", Value::from(rsn)),
+                ("Strength", Variant::from(strength)),
+                ("Flags", Variant::from(u32::from(rsn != 0))),
+                ("WpaFlags", Variant::from(0u32)),
+                ("RsnFlags", Variant::from(rsn)),
             ],
         );
     }
@@ -1275,8 +1278,8 @@ mod tests {
             NM_PATH,
             NM,
             vec![
-                ("WirelessEnabled", Value::from(wireless)),
-                ("WwanEnabled", Value::from(false)),
+                ("WirelessEnabled", Variant::from(wireless)),
+                ("WwanEnabled", Variant::from(false)),
                 ("Devices", ops(&["/d/eth0", "/d/wlan0"])),
                 ("ActiveConnections", ops(active)),
             ],
@@ -1286,8 +1289,8 @@ mod tests {
             "/d/eth0",
             DEVICE,
             vec![
-                ("DeviceType", Value::from(1u32)),
-                ("State", Value::from(100u32)),
+                ("DeviceType", Variant::from(1u32)),
+                ("State", Variant::from(100u32)),
             ],
         );
         add(
@@ -1295,8 +1298,8 @@ mod tests {
             "/d/wlan0",
             DEVICE,
             vec![
-                ("DeviceType", Value::from(2u32)),
-                ("State", Value::from(30u32)),
+                ("DeviceType", Variant::from(2u32)),
+                ("State", Variant::from(30u32)),
             ],
         );
         add(
@@ -1331,7 +1334,7 @@ mod tests {
             &mut objects,
             "/active/1",
             ACTIVE,
-            vec![("Connection", op("/s/1")), ("State", Value::from(2u32))],
+            vec![("Connection", op("/s/1")), ("State", Variant::from(2u32))],
         );
         let connections = BTreeMap::from([("/s/1".to_owned(), saved(b"Home"))]);
         let state = state(&objects, &connections).unwrap();
@@ -1444,7 +1447,7 @@ mod tests {
             &mut objects,
             "/active/9",
             ACTIVE,
-            vec![("Connection", op("/s/9")), ("State", Value::from(1u32))],
+            vec![("Connection", op("/s/9")), ("State", Variant::from(1u32))],
         );
         let connections = BTreeMap::from([
             (
@@ -1486,8 +1489,8 @@ mod tests {
             NM_PATH,
             NM,
             vec![
-                ("WirelessEnabled", Value::from("yes")),
-                ("Devices", Value::from(7u32)),
+                ("WirelessEnabled", Variant::from("yes")),
+                ("Devices", Variant::from(7u32)),
             ],
         );
         add(
@@ -1495,8 +1498,8 @@ mod tests {
             "/ap/1",
             ACCESS_POINT,
             vec![
-                ("Ssid", Value::from("text")),
-                ("Strength", Value::from("x")),
+                ("Ssid", Variant::from("text")),
+                ("Strength", Variant::from("x")),
             ],
         );
         let state = state(&objects, &BTreeMap::new()).unwrap();
@@ -1507,7 +1510,7 @@ mod tests {
             &mut objects,
             "/ap/1",
             ACCESS_POINT,
-            vec![("Ssid", Value::from("text"))],
+            vec![("Ssid", Variant::from("text"))],
         );
         let wifi = state_wifi(&objects);
         assert!(wifi.networks.is_empty());
@@ -1577,8 +1580,8 @@ mod tests {
             (
                 "connection".to_owned(),
                 map(vec![
-                    ("id", Value::from("Home")),
-                    ("type", Value::from("802-11-wireless")),
+                    ("id", Variant::from("Home")),
+                    ("type", Variant::from("802-11-wireless")),
                 ]),
             ),
             (
@@ -1587,7 +1590,7 @@ mod tests {
             ),
             (
                 SECURITY_SETTING.to_owned(),
-                map(vec![("key-mgmt", Value::from(key_mgmt))]),
+                map(vec![("key-mgmt", Variant::from(key_mgmt))]),
             ),
         ]);
         secrets_request(&settings, "/s/1", setting, flags)
@@ -1626,11 +1629,11 @@ mod tests {
         let settings = BTreeMap::from([
             (
                 "connection".to_owned(),
-                map(vec![("id", Value::from("Home"))]),
+                map(vec![("id", Variant::from("Home"))]),
             ),
             (
                 "802-11-wireless".to_owned(),
-                map(vec![("ssid", Value::from("Home"))]),
+                map(vec![("ssid", Variant::from("Home"))]),
             ),
         ]);
         assert_eq!(
@@ -1688,7 +1691,7 @@ mod tests {
         let interactive = header
             .primary()
             .flags()
-            .contains(zbus::message::Flags::AllowInteractiveAuth);
+            .contains(zbus::message::Flags::ALLOW_INTERACTIVE_AUTH);
         let mut log = log.lock().unwrap();
         if interactive {
             &mut log.interactive
@@ -1708,7 +1711,7 @@ mod tests {
     impl FakeManager {
         fn add_and_activate_connection(
             &self,
-            connection: HashMap<String, HashMap<String, OwnedValue>>,
+            connection: HashMap<String, HashMap<String, OwnedVariant>>,
             device: ObjectPath<'_>,
             specific: ObjectPath<'_>,
             #[zbus(header)] header: Header<'_>,
@@ -1716,7 +1719,7 @@ mod tests {
             flag(&self.log, &header, "AddAndActivateConnection");
             let wireless = connection.get("802-11-wireless");
             let security = connection.get(SECURITY_SETTING);
-            let text = |props: Option<&HashMap<String, OwnedValue>>, key: &str| {
+            let text = |props: Option<&HashMap<String, OwnedVariant>>, key: &str| {
                 props
                     .and_then(|props| props.get(key))
                     .and_then(|value| String::try_from(value.try_clone().ok()?).ok())
@@ -1861,7 +1864,9 @@ mod tests {
 
     #[zbus::interface(name = "org.freedesktop.NetworkManager.Settings.Connection")]
     impl FakeSettings {
-        fn get_settings(&self) -> zbus::fdo::Result<HashMap<String, HashMap<String, OwnedValue>>> {
+        fn get_settings(
+            &self,
+        ) -> zbus::fdo::Result<HashMap<String, HashMap<String, OwnedVariant>>> {
             *self
                 .log
                 .lock()
@@ -1876,8 +1881,8 @@ mod tests {
                 (
                     "connection".to_owned(),
                     HashMap::from([
-                        ("id".to_owned(), owned(Value::from("Home"))),
-                        ("type".to_owned(), owned(Value::from("802-11-wireless"))),
+                        ("id".to_owned(), owned(Variant::from("Home"))),
+                        ("type".to_owned(), owned(Variant::from("802-11-wireless"))),
                     ]),
                 ),
                 (
@@ -1918,7 +1923,6 @@ mod tests {
         let build = bus
             .builder()
             .serve_at("/org/freedesktop", zbus::fdo::ObjectManager)
-            .expect("object manager")
             .serve_at(
                 NM_PATH,
                 FakeManager {
@@ -1927,9 +1931,7 @@ mod tests {
                     log: log.clone(),
                 },
             )
-            .expect("manager")
             .serve_at(AGENT_MANAGER_PATH, FakeAgentManager { log: log.clone() })
-            .expect("agent manager")
             .serve_at(
                 ETH,
                 FakeDevice {
@@ -1937,11 +1939,8 @@ mod tests {
                     state: 100,
                 },
             )
-            .expect("eth")
             .serve_at(WLAN, FakeDevice { kind: 2, state: 30 })
-            .expect("wlan")
             .serve_at(WLAN, FakeWireless)
-            .expect("wireless")
             .serve_at(
                 AP_HOME,
                 FakeAccessPoint {
@@ -1949,7 +1948,6 @@ mod tests {
                     strength: 40,
                 },
             )
-            .expect("home")
             .serve_at(
                 AP_LAB,
                 FakeAccessPoint {
@@ -1957,7 +1955,6 @@ mod tests {
                     strength: 90,
                 },
             )
-            .expect("lab")
             .serve_at(
                 SAVED,
                 FakeSettings {
@@ -1966,7 +1963,6 @@ mod tests {
                     log: log.clone(),
                 },
             )
-            .expect("saved")
             .serve_at(
                 BROKEN,
                 FakeSettings {
@@ -1975,9 +1971,7 @@ mod tests {
                     log: log.clone(),
                 },
             )
-            .expect("broken")
             .name(NM)
-            .expect("name")
             .build();
         tokio::time::timeout(testbus::WAIT, build)
             .await
@@ -2069,18 +2063,18 @@ mod tests {
         );
         tokio::spawn(async move {
             let proxy = Proxy::new(&caller, name, AGENT_PATH, AGENT_IFACE).await?;
-            let settings: HashMap<&str, HashMap<&str, Value>> = HashMap::from([
+            let settings: HashMap<&str, HashMap<&str, Variant>> = HashMap::from([
                 (
                     "connection",
                     HashMap::from([
-                        ("id", Value::from("Home")),
-                        ("type", Value::from("802-11-wireless")),
+                        ("id", Variant::from("Home")),
+                        ("type", Variant::from("802-11-wireless")),
                     ]),
                 ),
                 ("802-11-wireless", HashMap::from([("ssid", bytes(b"Home"))])),
                 (
                     SECURITY_SETTING,
-                    HashMap::from([("key-mgmt", Value::from("wpa-psk"))]),
+                    HashMap::from([("key-mgmt", Variant::from("wpa-psk"))]),
                 ),
             ]);
             let path = ObjectPath::try_from(SAVED)?;
@@ -2098,6 +2092,7 @@ mod tests {
         match result {
             Ok(_) => "ok".to_owned(),
             Err(zbus::Error::MethodError(name, _, _)) => name.to_string(),
+            Err(zbus::Error::FDO(err)) => zbus::DBusError::name(&**err).to_string(),
             Err(err) => err.to_string(),
         }
     }
@@ -2109,7 +2104,7 @@ mod tests {
             .await
             .expect("proxy");
         let path = ObjectPath::try_from(SAVED).expect("path");
-        let empty: HashMap<&str, HashMap<&str, Value>> = HashMap::new();
+        let empty: HashMap<&str, HashMap<&str, Variant>> = HashMap::new();
         let result = match method {
             "CancelGetSecrets" => proxy.call_method(method, &(path, SECURITY_SETTING)).await,
             _ => proxy.call_method(method, &(empty, path)).await,

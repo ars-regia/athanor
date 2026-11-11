@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::Arc;
 use std::time::Duration;
-use zbus::zvariant::Value;
+use zbus::Variant;
 
 /// A method of the session bus without arguments, and how a key's request for it is queued.
 #[derive(Debug, PartialEq)]
@@ -230,15 +230,15 @@ fn unit_name(name: &str, pid: u32, n: u64) -> String {
 /// with the vector as is, by the user manager, which starts no shell, and the program gains no
 /// privilege. With `Type=exec` a program that cannot be executed fails its unit, which the user
 /// manager's journal records; the call's reply only says the job was queued.
-fn transient_properties(argv: &[&str]) -> Vec<(&'static str, Value<'static>)> {
+fn transient_properties(argv: &[&str]) -> Vec<(&'static str, Variant<'static>)> {
     let args: Vec<String> = argv.iter().map(|arg| arg.to_string()).collect();
     let program = args.first().cloned().unwrap_or_default();
     vec![
-        ("ExecStart", Value::from(vec![(program, args, false)])),
-        ("Type", Value::from("exec")),
-        ("NoNewPrivileges", Value::from(true)),
-        ("CollectMode", Value::from("inactive-or-failed")),
-        ("Slice", Value::from("app.slice")),
+        ("ExecStart", Variant::from(vec![(program, args, false)])),
+        ("Type", Variant::from("exec")),
+        ("NoNewPrivileges", Variant::from(true)),
+        ("CollectMode", Variant::from("inactive-or-failed")),
+        ("Slice", Variant::from("app.slice")),
     ]
 }
 
@@ -254,7 +254,7 @@ trait Bus {
 /// The session bus, connected at the first call and again after an error.
 #[derive(Default)]
 struct SessionBus {
-    connection: Option<zbus::blocking::Connection>,
+    connection: Option<zbus::Connection>,
 }
 
 impl SessionBus {
@@ -262,7 +262,7 @@ impl SessionBus {
     /// before the next job, when the call failed for another reason than an error reply.
     fn send(
         &mut self,
-        send: impl FnOnce(&zbus::blocking::Connection) -> zbus::Result<zbus::Message>,
+        send: impl FnOnce(&zbus::Connection) -> zbus::Result<zbus::Message>,
     ) -> zbus::Result<()> {
         let connection = self
             .connection
@@ -273,7 +273,7 @@ impl SessionBus {
                 self.connection = Some(connection);
                 Ok(())
             }
-            Err(error @ zbus::Error::MethodError(..)) => {
+            Err(error @ (zbus::Error::MethodError(..) | zbus::Error::FDO(..))) => {
                 self.connection = Some(connection);
                 Err(error)
             }
@@ -287,8 +287,11 @@ impl Bus for SessionBus {
         if self.connection.is_some() {
             return true;
         }
-        let opened = zbus::blocking::connection::Builder::session()
-            .and_then(|builder| builder.method_timeout(CALL_TIMEOUT).build());
+        let opened = zbus::block_on(
+            zbus::connection::Builder::session()
+                .method_timeout(CALL_TIMEOUT)
+                .build(),
+        );
         match opened {
             Ok(connection) => {
                 self.connection = Some(connection);
@@ -303,13 +306,13 @@ impl Bus for SessionBus {
 
     fn call(&mut self, call: &Call) {
         let sent = self.send(|connection| {
-            connection.call_method(
+            zbus::block_on(connection.call_method(
                 Some(call.destination),
                 call.path,
                 Some(call.interface),
                 call.method,
                 &(),
-            )
+            ))
         });
         if let Err(error) = sent {
             tracing::warn!(
@@ -322,16 +325,16 @@ impl Bus for SessionBus {
     }
 
     fn run(&mut self, unit: &str, command: &Command) {
-        let auxiliary: Vec<(&str, Vec<(&str, Value)>)> = Vec::new();
+        let auxiliary: Vec<(&str, Vec<(&str, Variant)>)> = Vec::new();
         let body = (unit, "fail", transient_properties(command.argv), auxiliary);
         let sent = self.send(|connection| {
-            connection.call_method(
+            zbus::block_on(connection.call_method(
                 Some(SYSTEMD),
                 SYSTEMD_PATH,
                 Some(MANAGER),
                 "StartTransientUnit",
                 &body,
-            )
+            ))
         });
         match sent {
             Ok(()) => tracing::debug!(unit, "the user manager queued a key's command"),
@@ -644,12 +647,12 @@ mod tests {
                 [
                     (
                         "ExecStart",
-                        Value::from(vec![(argv[0].clone(), argv.clone(), false)])
+                        Variant::from(vec![(argv[0].clone(), argv.clone(), false)])
                     ),
-                    ("Type", Value::from("exec")),
-                    ("NoNewPrivileges", Value::from(true)),
-                    ("CollectMode", Value::from("inactive-or-failed")),
-                    ("Slice", Value::from("app.slice")),
+                    ("Type", Variant::from("exec")),
+                    ("NoNewPrivileges", Variant::from(true)),
+                    ("CollectMode", Variant::from("inactive-or-failed")),
+                    ("Slice", Variant::from("app.slice")),
                 ]
             );
             assert!(

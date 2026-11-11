@@ -737,6 +737,7 @@ dependencies = [
  "athanor-unit",
  "bitflags 2.13.2",
  "calloop",
+ "futures-util",
  "libc",
  "nix 0.29.0",
  "smithay",

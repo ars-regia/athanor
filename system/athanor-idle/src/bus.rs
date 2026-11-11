@@ -11,8 +11,8 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use zbus::fdo::PropertiesProxy;
 use zbus::proxy::CacheProperties;
-use zbus::zvariant::OwnedObjectPath;
 use zbus::Connection;
+use zbus::OwnedObjectPath;
 
 use crate::Hint;
 
@@ -74,7 +74,7 @@ trait Notifications {
         summary: &str,
         body: &str,
         actions: &[&str],
-        hints: std::collections::HashMap<&str, zbus::zvariant::Value<'_>>,
+        hints: std::collections::HashMap<&str, zbus::Variant<'_>>,
         expire_timeout: i32,
     ) -> zbus::Result<u32>;
 }
@@ -107,7 +107,7 @@ impl System {
         let manager = self.manager().await?;
         let user = within(ASK, manager.get_user_by_pid(std::process::id())).await?;
         let user = UserProxy::builder(&self.query)
-            .path(user)?
+            .path(user)
             .cache_properties(CacheProperties::No)
             .build()
             .await?;
@@ -126,7 +126,7 @@ impl System {
         let read = async {
             let (_, path) = self.display().await?;
             let session = SessionProxy::builder(&self.query)
-                .path(path)?
+                .path(path)
                 .cache_properties(CacheProperties::No)
                 .build()
                 .await?;
@@ -179,8 +179,8 @@ pub async fn upower_changes(
     watch: &Connection,
 ) -> zbus::Result<impl futures_util::Stream<Item = ()> + Unpin + 'static> {
     let properties = PropertiesProxy::builder(watch)
-        .destination("org.freedesktop.UPower")?
-        .path("/org/freedesktop/UPower")?
+        .destination("org.freedesktop.UPower")
+        .path("/org/freedesktop/UPower")
         .cache_properties(CacheProperties::No)
         .build()
         .await?;

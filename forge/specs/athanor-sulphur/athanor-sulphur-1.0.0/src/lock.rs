@@ -300,17 +300,21 @@ impl State {
 /// `org.freedesktop.login1.Session.Lock` on the compositor's own session (`session/auto` is the
 /// session of the caller), which is what `loginctl lock-session` calls.
 fn lock_session() -> Result<(), zbus::Error> {
-    zbus::blocking::connection::Builder::system()?
-        .method_timeout(LOCK_TIMEOUT)
-        .build()?
-        .call_method(
-            Some("org.freedesktop.login1"),
-            "/org/freedesktop/login1/session/auto",
-            Some("org.freedesktop.login1.Session"),
-            "Lock",
-            &(),
-        )?;
-    Ok(())
+    zbus::block_on(async {
+        zbus::connection::Builder::system()
+            .method_timeout(LOCK_TIMEOUT)
+            .build()
+            .await?
+            .call_method(
+                Some("org.freedesktop.login1"),
+                "/org/freedesktop/login1/session/auto",
+                Some("org.freedesktop.login1.Session"),
+                "Lock",
+                &(),
+            )
+            .await?;
+        Ok(())
+    })
 }
 
 #[cfg(test)]
