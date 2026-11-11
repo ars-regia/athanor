@@ -63,7 +63,7 @@ jobs:
           # The merge commit and its first parent, the base: check-plan reads the diff between them.
           fetch-depth: 2
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
 
       - name: Kernel artifacts and the check plan (system/kernel-artifacts.sh)
         id: plan
@@ -91,12 +91,12 @@ jobs:
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@cc0becac701cf642c8f0a6613bbdaf5dc36b259e # v9
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-artifacts
           path: kernel-artifacts
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
 
       - name: Login to GHCR
         # system/Containerfile binds the athanor-forge-tier{0..3}-repo images of the project registry and

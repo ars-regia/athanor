@@ -28,13 +28,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Kernel artifacts verified by the Orchestrator
         # fetch_repo_rpms.sh pulls azoth by the digest in this file (doc_build_ordering.md, O4).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-artifacts
           path: kernel-artifacts
       - name: Package hashes verified by the Orchestrator
         # fetch_repo_rpms.sh pulls every package image by its hash tag from this file.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: dag-hashes
           path: forge/dag-state
@@ -112,13 +112,13 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Kernel artifacts verified by the Orchestrator
         # build-image.sh builds from the kernel and module digests in this file (O4).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-artifacts
           path: kernel-artifacts
       - name: Tier digests published earlier in this run
         # build-image.sh installs the tier repositories by these digests, never by tag (UD28).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: tier-digests
           path: tier-digests
