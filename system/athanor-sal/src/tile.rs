@@ -29,8 +29,9 @@ pub struct Tile {
     pub image: Image,
     /// Whether the tile is on.
     pub active: bool,
-    /// The second line, laid out by the last layout.
-    pub(crate) second: Option<Layout<Brush>>,
+    /// The second line, laid out by the last layout; boxed, so that a tile does not make every
+    /// widget as large as a layout.
+    pub(crate) second: Option<Box<Layout<Brush>>>,
 }
 
 impl Ui {
@@ -100,7 +101,7 @@ pub(crate) fn measure(
     let w = 2.0 * pad + DISC + gap + first.width().max(second.width());
     let h = (2.0 * pad + first.height() + second.height()).max(HEIGHT);
     *title = Some(first);
-    tile.second = Some(second);
+    tile.second = Some(Box::new(second));
     (w, h)
 }
 
