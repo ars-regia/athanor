@@ -196,6 +196,24 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     .to_path(0.1)
 }
 
+/// Draws `image` in the middle of `r`, fitted to a square of `side` logical pixels with its
+/// aspect ratio kept.
+fn draw_icon<C: Canvas>(
+    ctx: &mut C,
+    resources: &mut C::Resources,
+    image: &crate::icon::Image,
+    r: crate::widget::Rect,
+    side: f32,
+) {
+    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+    let side = f64::from(side);
+    let fit = (side / w).min(side / h);
+    let (w, h) = (w * fit, h * fit);
+    let x = f64::from(r.center_x()) - w / 2.0;
+    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+}
+
 fn draw_text<C: Canvas>(
     ctx: &mut C,
     resources: &mut C::Resources,
@@ -560,6 +578,36 @@ pub fn paint<C: Canvas>(
                     );
                     draw_text(ctx, resources, layout, at, ink)?;
                 }
+            }
+            // A tile: the controls' fill, its icon's disc in the accent only while it is on
+            // (VL10), and the title over the second line after the disc.
+            Kind::Tile(tile) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, crate::tile::RADIUS));
+                let disc = crate::tile::disc(r, t.padding, ui.rtl);
+                let (disc_fill, ink) = if tile.active {
+                    (t.accent, t.on_accent)
+                } else {
+                    (mix(t.surface, t.text, 2.0 * HOVER), t.text)
+                };
+                let centre = (f64::from(disc.center_x()), f64::from(disc.y + disc.h / 2.0));
+                ctx.set_paint(color(disc_fill));
+                ctx.fill_path(&Circle::new(centre, f64::from(disc.w / 2.0)).to_path(0.1));
+                draw_icon(ctx, resources, &tile.image.tinted(ink), disc, crate::tile::GLYPH);
+                if let (Some(first), Some(second)) = (&widget.text, &tile.second) {
+                    let top = r.y + (r.h - first.height() - second.height()) / 2.0;
+                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, first.width());
+                    draw_text(ctx, resources, first, (x, top), t.text)?;
+                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, second.width());
+                    draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
+                }
+            }
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
             }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;

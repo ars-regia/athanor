@@ -118,6 +118,27 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // A tile: a toggle button, as GTK's ToggleButton, pressed while on, and described by its
+        // second line, as the GTK panel's tiles are.
+        Kind::Tile(crate::tile::Tile {
+            title: label,
+            subtitle,
+            active,
+            ..
+        }) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(label.as_str());
+            if !subtitle.is_empty() {
+                node.set_description(subtitle.as_str());
+            }
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
         // A check box or a switch with a toggled state, named by its label.
         Kind::Check { label, active } | Kind::Switch { label, active } => {
             let role = if matches!(widget.kind, Kind::Switch { .. }) {
