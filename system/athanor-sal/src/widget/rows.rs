@@ -110,7 +110,8 @@ impl Ui {
 
     /// The slot of a removed widget for one added under `parent`, the lowest: any serves, since
     /// drawing and the pointer follow the order of the tree, not of the arena ([`Ui::ids`]).
-    /// `None` when there is none, or when `parent` names no widget, for [`Ui::add`] to panic on.
+    /// Never `parent`'s own, which [`Ui::add`] refuses to add under while it is free. `None`
+    /// when there is none, or when `parent` names no widget, for [`Ui::add`] to panic on.
     pub(super) fn reuse(&mut self, parent: WidgetId) -> Option<WidgetId> {
         if parent.index() >= self.widgets.len() {
             return None;
@@ -425,6 +426,28 @@ mod tests {
             "{clips:?}"
         );
         assert!(clips.iter().any(|c| matches!(c, Clip::Unselect)), "{clips:?}");
+    }
+
+    #[test]
+    fn nothing_is_added_under_a_removed_widget_not_even_in_its_own_slot() {
+        let (mut ui, [_, _, list, heading], _) = results(2, false);
+        let size = ui.len();
+        ui.remove_children(list);
+        // The heading's slot is the lowest free one: an icon loaded late for it comes back.
+        let Ok(icon) = Image::from_rgba8(1, 1, vec![0, 0, 0, 255]) else {
+            panic!("a 1 by 1 image");
+        };
+        assert_eq!(ui.image(heading, icon, 28.0, ""), heading, "refused");
+        assert_eq!(ui.add(heading, Kind::Label("Late".into())), heading);
+        assert!(ui.widget(heading).children.is_empty());
+        assert_eq!(ui.widget(heading).parent, None, "never its own parent");
+        assert!(!ui.is_visible(heading) && ui.is_sensitive(heading));
+        ui.layout();
+        // The rows added since fill the slots, the heading's first.
+        let row = ui.list_row(list, "File");
+        assert_eq!(row, heading);
+        assert_eq!(ui.widget(row).parent, Some(list));
+        assert_eq!(ui.len(), size, "the tree does not grow");
     }
 
     #[test]

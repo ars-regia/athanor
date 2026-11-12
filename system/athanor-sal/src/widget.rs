@@ -629,11 +629,19 @@ impl Ui {
 
     /// Adds `kind` as the last child of `parent`.
     ///
+    /// Under a widget that [`Ui::remove_children`] removed, as an icon loaded late for a row
+    /// removed since, nothing is added: the refusal is logged, and the id returned is `parent`'s,
+    /// a removed slot that a later `add` may fill, under which nothing is added either.
+    ///
     /// # Panics
     ///
     /// When `parent` names no widget of this `Ui`, or when the `Ui` already holds 2³² widgets,
     /// as many as a `WidgetId` can name.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
+        if self.free.contains(&parent) {
+            eprintln!("athanor-sal: nothing added under {parent:?}, a removed widget");
+            return parent;
+        }
         if let Some(id) = self.reuse(parent) {
             self.widgets[parent].children.push(id);
             self.widgets[id] = Widget::new(kind, Some(parent));
