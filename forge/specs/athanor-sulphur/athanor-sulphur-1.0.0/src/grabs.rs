@@ -286,7 +286,7 @@ impl TouchGrab<State> for MoveGrab<TouchStart> {
         self.unframed = true;
         if event.slot == self.start.slot {
             self.drop_at(data, self.now);
-            handle.unset_grab(self, data);
+            crate::touch::end_touch_grab(self, data, handle);
         }
     }
 
@@ -451,7 +451,7 @@ impl TouchGrab<State> for ResizeGrab<TouchStart> {
         handle.up(data, event);
         self.unframed = true;
         if event.slot == self.start.slot {
-            handle.unset_grab(self, data);
+            crate::touch::end_touch_grab(self, data, handle);
         }
     }
 
@@ -527,7 +527,7 @@ impl State {
                     == Some(window)
             });
             if grabbed == Some(true) {
-                touch.unset_grab(self);
+                self.end_window_touch_grab(&touch);
             }
         }
         if let Some(pointer) = self.seat.get_pointer() {

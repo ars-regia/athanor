@@ -421,6 +421,136 @@ fn a_touchscreen_removed_cancels_the_touches_of_every_device() {
     run.stop();
 }
 
+/// Two fingers on a window and the first lifted: its serial no longer moves or resizes the
+/// window, as no finger would drive the grab nor end it, and after the last finger a new touch
+/// reaches the window.
+#[test]
+fn a_lifted_finger_starts_no_move() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut local, toplevel, _) = window_at(&mut run, (300, 200));
+    let seat = local.seat.clone().expect("a seat");
+
+    down(&mut run, 0, (320.0, 210.0).into());
+    down(&mut run, 1, (340.0, 220.0).into());
+    up(&mut run, 0);
+    local.pump(&mut run, "the touches", |client, _| {
+        client.touch.downs.len() == 2 && client.touch.ups.len() == 1
+    });
+    let serial = local.client.touch.downs[0].3;
+    toplevel._move(&seat, serial);
+    toplevel.resize(&seat, serial, xdg_toplevel::ResizeEdge::BottomRight);
+    local.roundtrip(&mut run);
+    assert!(
+        !touch_grab_is::<MoveGrab<TouchStart>>(&run)
+            && !touch_grab_is::<ResizeGrab<TouchStart>>(&run),
+        "the lifted finger's serial is refused"
+    );
+
+    up(&mut run, 1);
+    assert!(
+        !run.state.seat.get_touch().expect("a touch").is_grabbed(),
+        "the seat lets go with the last finger"
+    );
+    down(&mut run, 0, (320.0, 210.0).into());
+    up(&mut run, 0);
+    local.pump(&mut run, "a new touch", |client, _| {
+        client.touch.downs.len() == 3
+    });
+    run.stop();
+}
+
+/// The client that holds the keyboard.
+fn keyboard_client(run: &Running) -> Option<ClientId> {
+    keyboard_focus(run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id())
+}
+
+/// A move whose finger is lifted while another finger is held: the seat goes back to the
+/// fingers' grab, so a new finger on another window is no first touch, takes no focus and starts
+/// no move, and the seat lets go with the last finger.
+#[test]
+fn a_touch_move_ended_with_a_finger_held_keeps_the_fingers() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, toplevel, _) = window_at(&mut run, (300, 200));
+    let (mut y, y_toplevel, _) = window_at(&mut run, (700, 200));
+    let seat = x.seat.clone().expect("a seat");
+    let y_seat = y.seat.clone().expect("a seat");
+
+    down(&mut run, 0, (320.0, 210.0).into());
+    down(&mut run, 1, (340.0, 220.0).into());
+    x.pump(&mut run, "the touches", |client, _| {
+        client.touch.downs.len() == 2
+    });
+    toplevel._move(&seat, x.client.touch.downs[0].3);
+    x.roundtrip(&mut run);
+    assert!(touch_grab_is::<MoveGrab<TouchStart>>(&run), "the move");
+    up(&mut run, 0);
+    assert!(
+        touch_grab_is::<crate::touch::Fingers>(&run),
+        "the finger held keeps the fingers' grab"
+    );
+
+    down(&mut run, 2, (720.0, 210.0).into());
+    y.pump(&mut run, "the new finger", |client, _| {
+        !client.touch.downs.is_empty()
+    });
+    assert_eq!(keyboard_client(&run), x.id, "the new finger takes no focus");
+    y_toplevel._move(&y_seat, y.client.touch.downs[0].3);
+    y.roundtrip(&mut run);
+    assert!(
+        !touch_grab_is::<MoveGrab<TouchStart>>(&run),
+        "nor starts a move"
+    );
+
+    up(&mut run, 1);
+    up(&mut run, 2);
+    assert!(
+        !run.state.seat.get_touch().expect("a touch").is_grabbed(),
+        "the seat lets go with the last finger"
+    );
+    down(&mut run, 0, (720.0, 210.0).into());
+    assert_eq!(
+        keyboard_client(&run),
+        y.id,
+        "a touch after them is a first touch"
+    );
+    up(&mut run, 0);
+    run.stop();
+}
+
+/// A window that leaves its touch move, here by being maximised, while the finger is held: the
+/// seat goes back to the fingers' grab, and lets go at the finger's release.
+#[test]
+fn a_window_leaving_its_touch_move_keeps_the_fingers() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, toplevel, _) = window_at(&mut run, (300, 200));
+    let seat = x.seat.clone().expect("a seat");
+
+    down(&mut run, 0, (320.0, 210.0).into());
+    x.pump(&mut run, "the touch", |client, _| {
+        !client.touch.downs.is_empty()
+    });
+    toplevel._move(&seat, x.client.touch.downs[0].3);
+    x.roundtrip(&mut run);
+    assert!(touch_grab_is::<MoveGrab<TouchStart>>(&run), "the move");
+    toplevel.set_maximized();
+    x.roundtrip(&mut run);
+    assert!(
+        touch_grab_is::<crate::touch::Fingers>(&run),
+        "the finger held keeps the fingers' grab"
+    );
+    up(&mut run, 0);
+    assert!(
+        !run.state.seat.get_touch().expect("a touch").is_grabbed(),
+        "the seat lets go at its release"
+    );
+    run.stop();
+}
+
 /// Two touchscreens each report their finger on their own slot 0, one on each output over the
 /// window of another client: the seat tells the fingers apart, so each client is sent its own
 /// down, motion and release, under its own touch point, and the seat lets go of both.

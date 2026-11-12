@@ -15,7 +15,7 @@ use smithay::backend::input::{
     TouchSlot,
 };
 use smithay::input::touch::{
-    DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent, TouchGrab,
+    DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent, TouchGrab, TouchHandle,
     TouchInnerHandle, UpEvent,
 };
 use smithay::output::Output;
@@ -290,15 +290,44 @@ fn output_name<D: 'static>(device: &D) -> Option<String> {
 /// The seat's grab while a finger is down (`SeatHandler::touch_down_grab`): each finger goes to
 /// the surface under it, where Smithay's own grab sends every finger after the first to the
 /// first's surface. It holds the first down's serial, which a move, a resize or a drag names,
-/// and ends with the last finger.
+/// until that finger is lifted (`end_touch_grab`), and ends with the last finger held.
 pub struct Fingers {
     start: GrabStartData<State>,
-    down: usize,
 }
 
 impl Fingers {
     pub fn new(start: GrabStartData<State>) -> Self {
-        Self { start, down: 1 }
+        Self { start }
+    }
+}
+
+/// Ends the seat's touch grab `grab`, whose own finger is lifted. While other fingers are held
+/// the seat goes back to their grab, so that a new finger is not taken as a first touch, under a
+/// serial no client was sent, so that no move, resize or drag starts from the finger lifted;
+/// with none held, to Smithay's default grab.
+pub(crate) fn end_touch_grab(
+    grab: &mut dyn TouchGrab<State>,
+    data: &mut State,
+    handle: &mut TouchInnerHandle<'_, State>,
+) {
+    let start = grab.start_data().clone();
+    if data.touches.held.is_empty() {
+        handle.unset_grab(grab, data);
+    } else {
+        handle.set_grab(grab, data, SERIAL_COUNTER.next_serial(), Fingers { start });
+    }
+}
+
+impl State {
+    /// `end_touch_grab` from outside the grab, for a window that leaves its move or resize.
+    pub(crate) fn end_window_touch_grab(&mut self, touch: &TouchHandle<State>) {
+        match touch
+            .grab_start_data()
+            .filter(|_| !self.touches.held.is_empty())
+        {
+            Some(start) => touch.set_grab(self, Fingers { start }, SERIAL_COUNTER.next_serial()),
+            None => touch.unset_grab(self),
+        }
     }
 }
 
@@ -311,14 +340,12 @@ impl TouchGrab<State> for Fingers {
         event: &DownEvent,
     ) {
         handle.down(data, focus, event);
-        self.down = self.down.saturating_add(1);
     }
 
     fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
         handle.up(data, event);
-        self.down = self.down.saturating_sub(1);
-        if self.down == 0 {
-            handle.unset_grab(self, data);
+        if data.touches.held.is_empty() || event.slot == self.start.slot {
+            end_touch_grab(self, data, handle);
         }
     }
 
