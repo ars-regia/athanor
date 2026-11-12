@@ -789,21 +789,22 @@ compositor-globals)
     for capability in pointer keyboard; do
         grep -Eq "capabilities:.*\b$capability\b" "$out/compositor-globals.txt" || missing+=("wl_seat $capability")
     done
-    for interface in ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1 \
-        ext_foreign_toplevel_image_capture_source_manager_v1 ext_output_image_capture_source_manager_v1 \
-        ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1 \
-        zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
-        zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
-        athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1 \
-        zwlr_data_control_manager_v1 athanor_workspace_tiling_manager_v1 athanor_dock_overlap_manager_v1 \
-        athanor_material_manager_v1; do
+    privileged=(ext_foreign_toplevel_list_v1 ext_image_copy_capture_manager_v1
+        ext_foreign_toplevel_image_capture_source_manager_v1 ext_output_image_capture_source_manager_v1
+        ext_session_lock_manager_v1 ext_workspace_manager_v1 zwlr_output_manager_v1
+        zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1
+        zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1
+        athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1
+        zwlr_data_control_manager_v1 athanor_workspace_tiling_manager_v1 athanor_dock_overlap_manager_v1
+        athanor_material_manager_v1)
+    for interface in "${privileged[@]}"; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
         echo "compositor-globals: missing ${missing[*]}; see $out/compositor-globals.txt" >&2
         exit 1
     fi
-    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the 18 privileged ones"
+    echo "compositor-globals: the ${#standard[@]} standard globals, $dmabuf, a seat with pointer and keyboard, and none of the ${#privileged[@]} privileged ones"
     ;;
 compositor-soak)
     # doc_own_stack.md, C1 task 2: the headless backend under two clients drawing without pause;
