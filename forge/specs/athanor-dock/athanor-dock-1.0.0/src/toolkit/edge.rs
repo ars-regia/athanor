@@ -13,8 +13,7 @@ pub const NAMESPACE: &str = "athanor-dock";
 /// without a dock keeps an empty surface that takes no input: cosmic-comp closes the
 /// connection of a client that unmaps a layer surface and maps it again (`ui/surface.rs`).
 pub fn layer(placement: Option<Placement>, depth: i32) -> LayerOptions {
-    let mut options = LayerOptions::default();
-    options.layer = Layer::Top;
+    let mut options = LayerOptions::new(Layer::Top);
     options.namespace = NAMESPACE.to_owned();
     options.anchor = Edges::BOTTOM;
     options.keyboard = KeyboardInteractivity::OnDemand;

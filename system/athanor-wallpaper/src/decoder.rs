@@ -16,8 +16,9 @@ use nix::sys::socket::{
 };
 
 /// How long one decode may take, the connection and every frame included: the decoder's unit
-/// ends it after `RuntimeMaxSec=5` too.
-pub const DEADLINE: Duration = Duration::from_secs(5);
+/// ends it after `RuntimeMaxSec=18` too, the time measured for the 8 sizes of a request's
+/// maximum with a margin (maintainer decision, 2026-11-07).
+pub const DEADLINE: Duration = Duration::from_secs(18);
 
 /// The pixels of each size asked, in the order asked: straight RGBA8, rows packed.
 pub type Frames = Vec<((u32, u32), Vec<u8>)>;

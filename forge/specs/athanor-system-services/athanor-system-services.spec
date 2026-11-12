@@ -7,7 +7,8 @@ License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
 BuildArch:      noarch
 Requires:       systemd
-Requires:       cosmic-bg
+# The wallpaper since SD22 step 2 (doc_session_daemons.md), in place of cosmic-bg.
+Requires:       athanor-wallpaper
 Requires:       cosmic-settings-daemon cosmic-osd
 # The shell of the session since the switch of stage 2; the session is not usable without it.
 Requires:       athanor-bar athanor-dock athanor-shelld
@@ -35,7 +36,6 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/athanor-session.target
 /usr/lib/systemd/user/athanor-desktop.service
 /usr/lib/systemd/user/athanor-skel-sync.service
-/usr/lib/systemd/user/cosmic-bg.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
 

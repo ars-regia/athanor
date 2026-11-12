@@ -15,7 +15,7 @@ FROM registry.fedoraproject.org/fedora@sha256:0b52d7c65426cdb567000481d0d1b05604
 
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       cosmic-comp cosmic-panel cosmic-applets cosmic-settings cosmic-settings-daemon \
-      cosmic-randr cosmic-bg cosmic-icon-theme adwaita-icon-theme hicolor-icon-theme \
+      cosmic-randr cosmic-icon-theme adwaita-icon-theme hicolor-icon-theme \
       mesa-dri-drivers mesa-libEGL mesa-libGL mesa-libgbm libxkbcommon \
       sway grim wayland-utils ImageMagick libfaketime \
       dbus-daemon dbus-tools at-spi2-core \

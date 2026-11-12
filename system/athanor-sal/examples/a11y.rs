@@ -27,8 +27,7 @@ struct Osd {
 }
 
 fn options(namespace: &str, anchor: Anchor, keyboard: KeyboardInteractivity) -> LayerOptions {
-    let mut options = LayerOptions::default();
-    options.layer = Layer::Overlay;
+    let mut options = LayerOptions::new(Layer::Overlay);
     options.namespace = namespace.into();
     options.anchor = anchor;
     options.keyboard = keyboard;

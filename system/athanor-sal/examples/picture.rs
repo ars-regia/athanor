@@ -30,8 +30,7 @@ impl Application for Pictures {
         theme.margin = 0.0;
         let mut ui = Ui::new(PICTURE, theme, false);
         ui.picture(Ui::ROOT, self.0.clone(), "");
-        let mut options = LayerOptions::default();
-        options.layer = Layer::Background;
+        let mut options = LayerOptions::new(Layer::Background);
         options.namespace = PICTURE.into();
         options.anchor = Anchor::all();
         options.exclusive_zone = -1;
