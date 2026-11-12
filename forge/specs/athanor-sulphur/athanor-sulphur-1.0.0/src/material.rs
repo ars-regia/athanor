@@ -572,40 +572,31 @@ impl State {
 
     /// Starts the probe of the first output waiting on each GPU that no probe runs on: one
     /// probe at a time on a GPU, so that they do not slow each other. An output waiting on a
-    /// wedged GPU, whose probe is past its deadline, is M0.
+    /// wedged GPU, whose probe is past its deadline, stays M0 until that probe's thread ends,
+    /// and is probed then.
     fn start_probes(&mut self) {
         loop {
             let busy = &self.materials.busy;
-            let Some((index, output, gpu, wedged)) = self
-                .materials
-                .records
-                .iter()
-                .enumerate()
-                .find_map(|(index, record)| {
-                    let (Measure::Waiting, Some(gpu)) = (&record.measure, &record.signature.1)
-                    else {
-                        return None;
-                    };
-                    let wedged = match busy.iter().find(|(on, _, _)| on == gpu) {
-                        None => false,
-                        Some((_, _, true)) => true,
-                        Some(_) => return None,
-                    };
-                    Some((index, record.output.clone(), gpu.clone(), wedged))
-                })
+            let Some((index, output, gpu)) =
+                self.materials
+                    .records
+                    .iter()
+                    .enumerate()
+                    .find_map(
+                        |(index, record)| match (&record.measure, &record.signature.1) {
+                            (Measure::Waiting, Some(gpu))
+                                if !busy.iter().any(|(on, _, _)| on == gpu) =>
+                            {
+                                Some((index, record.output.clone(), gpu.clone()))
+                            }
+                            _ => None,
+                        },
+                    )
             else {
                 return;
             };
             // Either the GPU is busy now or the record has settled: the loop ends.
-            let measure = if wedged {
-                tracing::warn!(
-                    output = output.name(),
-                    "the GPU's last probe did not end by its deadline: tier M0"
-                );
-                Measure::settled(Tier::M0)
-            } else {
-                self.probe(&output, gpu)
-            };
+            let measure = self.probe(&output, gpu);
             if let Some(record) = self.materials.records.get_mut(index) {
                 record.measure = measure;
             }
@@ -705,14 +696,13 @@ impl State {
     }
 
     /// A probe's deadline: its output, if it still waits for it, is M0, and its GPU is wedged
-    /// until the probe's thread ends.
+    /// until the probe's thread ends; the late probe no longer holds the live check.
     fn material_expired(&mut self, generation: u64) {
         for (_, running, late) in &mut self.materials.busy {
             if *running == generation {
                 *late = true;
             }
         }
-        self.start_probes();
         let Some(record) = self.materials.records.iter_mut().find(|record| {
             matches!(record.measure, Measure::Probing { generation: running, .. } if running == generation)
         }) else {

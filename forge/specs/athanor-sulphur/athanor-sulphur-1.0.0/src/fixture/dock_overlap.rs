@@ -464,6 +464,14 @@ fn d35_the_probe_region_is_the_live_docks_latest() {
         rectangle(top),
         "the most recent"
     );
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        run.state.dock_rectangle(&first),
+        rectangle(top),
+        "a hidden dock's: an unmapped layer surface stays in the layer map"
+    );
     run.stop();
 }
 

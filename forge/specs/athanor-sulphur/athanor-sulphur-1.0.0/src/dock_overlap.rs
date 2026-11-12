@@ -177,6 +177,7 @@ impl State {
     /// VL13's probe blurs as the dock's. Only a layer surface of `output` counts, not one
     /// destroyed or closed, and of its objects the most recent.
     pub(crate) fn dock_rectangle(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
+        // A hidden dock, its buffer detached, stays in the layer map: its rectangle counts.
         let map = layer_map_for_output(output);
         self.dock_overlaps
             .iter()

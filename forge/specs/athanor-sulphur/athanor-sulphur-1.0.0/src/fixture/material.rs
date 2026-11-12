@@ -232,9 +232,9 @@ fn d35_a_mode_change_supersedes_the_running_probe() {
 }
 
 /// A probe not finished by its deadline is M0 by the deadline's timer, while its thread still
-/// runs. Its GPU is wedged until the thread ends: the output waiting on it is M0 at once, and
-/// the late probe holds no frame from the live check. When the thread ends its result is sent
-/// to no one, and the GPU probes again: a mode change of the second output gives its tier.
+/// runs. Its GPU is wedged until the thread ends: the output waiting on it stays M0, unprobed,
+/// and the late probe holds no frame from the live check. When the thread ends its result is
+/// sent to no one, and the waiting output is probed.
 #[test]
 fn d35_a_probe_past_its_deadline_wedges_its_gpu() {
     let mut run = Running::start(None);
@@ -252,10 +252,7 @@ fn d35_a_probe_past_its_deadline_wedges_its_gpu() {
     let (first, second) = (output(&run, 0), output(&run, 1));
     run.until("the deadline", |state| state.materials.settled(&first));
     assert!(run.state.materials.wedged(), "the late probe still runs");
-    assert!(
-        run.state.materials.settled(&second),
-        "the second, on the wedged GPU, is M0"
-    );
+    assert_eq!(run.state.materials.tier_of(Some(&second)), Tier::M0);
     assert!(
         !run.state.materials.probing(),
         "the late probe holds no frame"
@@ -266,14 +263,6 @@ fn d35_a_probe_past_its_deadline_wedges_its_gpu() {
         "no probe on the wedged GPU"
     );
     release.send(()).expect("the first probe holds");
-    run.until("the late thread ends", |state| !state.materials.wedged());
-    let mode = smithay::output::Mode {
-        size: (1024, 768).into(),
-        refresh: 60_000,
-    };
-    second.change_current_state(Some(mode), None, None, None);
-    run.state.arrange_outputs();
-    run.state.refresh_materials();
     shell.pump(&mut run, "the second's probe", |_, state| {
         state.materials.probes() == 2 && !state.materials.probing()
     });
@@ -283,7 +272,7 @@ fn d35_a_probe_past_its_deadline_wedges_its_gpu() {
     assert_eq!(
         run.state.materials.tier_of(Some(&second)),
         Tier::M2,
-        "probed again"
+        "probed once the late thread ended"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     run.stop();
