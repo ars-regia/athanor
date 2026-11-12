@@ -140,7 +140,7 @@ next to its other ones.
  
 --- a/arch/x86/kernel/module.c
 +++ b/arch/x86/kernel/module.c
-@@ -298,7 +298,14 @@
+@@ -296,7 +296,14 @@
  	}
  	if (ibt_endbr) {
  		void *iseg = (void *)ibt_endbr->sh_addr;
@@ -154,8 +154,8 @@ next to its other ones.
 +		if (ret)
 +			return ret;
  	}
- 	if (locks) {
- 		void *lseg = (void *)locks->sh_addr;
+ 
+ 	if (orc && orc_ip)
 --- a/arch/um/kernel/um_arch.c
 +++ b/arch/um/kernel/um_arch.c
 @@ -434,6 +434,11 @@

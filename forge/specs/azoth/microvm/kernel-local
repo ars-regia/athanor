@@ -58,6 +58,9 @@ CONFIG_INTEL_TDX_GUEST=y
 CONFIG_SERIAL_8250=y
 CONFIG_SERIAL_8250_CONSOLE=y
 
+# No ACS override, as in the main kernel: the CachyOS 7.3 tree turns it on by default.
+# CONFIG_PCI_ACS_OVERRIDE is not set
+
 # No physical drivers: out with what defconfig turns on for real machines.
 # CONFIG_DRM is not set
 # CONFIG_SOUND is not set
