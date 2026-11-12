@@ -349,6 +349,30 @@ mod tests {
     }
 
     #[test]
+    fn a_scroll_past_the_rows_that_replace_its_content_comes_back_within_them() {
+        let (mut ui, [_, scroll, list, _], rows) = results(60, false);
+        let offset = |ui: &Ui| match ui.widget(scroll).kind {
+            Kind::Scroll { offset, .. } => offset,
+            _ => f32::NAN,
+        };
+        ui.select_row(rows[49]);
+        assert!(offset(&ui) > 0.0, "the row scrolled into view");
+        ui.remove_children(list);
+        let row = ui.list_row(list, "File");
+        ui.list_row(list, "Other");
+        // Drawing lays out first, and the layout clamps the offset to the content left.
+        ui.layout();
+        assert_eq!(offset(&ui), 0.0, "two rows fit the viewport");
+        let (r, view) = (ui.widget(row).rect, ui.widget(scroll).rect);
+        assert!(r.y >= view.y && r.bottom() <= view.bottom(), "the first row shows");
+        let update = tree_update(&ui, 1.0);
+        let Some((_, node)) = update.nodes.iter().find(|(n, _)| *n == node_id(scroll)) else {
+            panic!("the scroll has no node");
+        };
+        assert_eq!((node.scroll_y(), node.scroll_y_max()), (Some(0.0), Some(0.0)));
+    }
+
+    #[test]
     fn the_title_bar_stays_when_the_roots_children_go() {
         let mut ui = Ui::new("Window", Theme::default(), false);
         ui.add_title_bar();
