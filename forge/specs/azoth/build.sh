@@ -298,8 +298,9 @@ cachyos_tree() { # cachyos_tree: sets CACHYOS to the git tree of the CachyOS tre
   GIT_INDEX_FILE=$idx git --git-dir="$WORK/a/.git" -C "$WORK/b" add -Af -- .
   CACHYOS=$(GIT_INDEX_FILE=$idx g write-tree)
 }
-plain_path() { # plain_path PATH: a lock is one line per path, so a path with a control character stops the build
-  [[ $1 != *[[:cntrl:]]* ]] || die "CachyOS changes a path with a control character: ${1@Q}"
+plain_path() { # plain_path PATH: a lock holds one line of printable ASCII per path, so any other path stops the build
+  local LC_ALL=C
+  [[ $1 =~ ^[[:print:]]+$ ]] || die "CachyOS changes a path that is not printable ASCII: ${1@Q}"
 }
 cachyos_files() { # cachyos_files TREE: every file CachyOS changes against vanilla, as STATUS  PATH
   g diff-tree -r --no-renames -z --name-status "$VANILLA" "$1" \
@@ -409,6 +410,7 @@ if [[ $STAGE == refresh ]]; then
   # The locks are written together, once every step before has passed: copied next to their
   # place first, then renamed, so a failed copy leaves the committed set whole.
   locks=(derived.config cachyos-protected.sha256 cachyos-files.list)
+  for f in "${locks[@]}"; do rm -f "$HERE/.$f.new"; done   # left by a refresh that failed here
   for f in "${locks[@]}"; do cp "$OUT/$f" "$HERE/.$f.new"; done
   for f in "${locks[@]}"; do mv "$HERE/.$f.new" "$HERE/$f"; done
   step "refresh done: review the diff of derived.config, cachyos-protected.sha256 and cachyos-files.list, and the copies in $OUT/refreshed (none if nothing needed a refresh)"

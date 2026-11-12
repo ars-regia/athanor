@@ -159,6 +159,9 @@ def build_sh_part(pattern):
     match = re.search(pattern, (AZOTH / "build.sh").read_text(), re.M | re.S)
     if not match:
         raise AssertionError(f"build.sh has no {pattern!r}")
+    # A lazy match that ran past its own end into the next function would test other text.
+    if len(re.findall(r"^\w+\(\) \{", match.group(0), re.M)) > 1:
+        raise AssertionError(f"{pattern!r} matches more than one function of build.sh")
     return match.group(0)
 
 
@@ -229,7 +232,23 @@ class LockFunctions(unittest.TestCase):
             (b / "mm/a\n100644 x  mm").write_text("forged\n")
             r = self.run_locks(tmp)
             self.assertEqual(r.returncode, 1, r.stdout)
-            self.assertIn("build.sh: CachyOS changes a path with a control character", r.stderr)
+            self.assertIn("build.sh: CachyOS changes a path that is not printable ASCII", r.stderr)
+
+    def test_a_path_not_in_ascii_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b = self.trees(pathlib.Path(tmp))
+            (b / "mm/caf\u00e9.c").write_text("utf-8 name\n")
+            r = self.run_locks(tmp)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("build.sh: CachyOS changes a path that is not printable ASCII", r.stderr)
+
+    def test_a_failing_add_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b = self.trees(pathlib.Path(tmp))
+            shutil.rmtree(b)
+            r = self.run_locks(tmp)
+            self.assertNotEqual(r.returncode, 0, r.stdout)
+            self.assertNotIn("-- files", r.stdout)
 
 if __name__ == "__main__":
     unittest.main()

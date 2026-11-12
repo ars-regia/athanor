@@ -616,7 +616,7 @@ what was read, and `prep`, which `microvm` and `build` run first, checks them:
   `arch/x86/coco/`, `arch/x86/pci/` and `arch/x86/realmode/`: the code that enforces isolation, the compiler's hardening flags and the
   x86 mitigations. A file new to the list, with another mode or hash, or gone from it stops
   prep with `refresh needed`, naming it. The variants are held to these two lists as well,
-  since they change only the config. A path with a control character, or listed twice, stops
+  since they change only the config. A path that is not printable ASCII, or listed twice, stops
   the build: each lock holds one line per path.
 
 `build.sh --stage refresh` rewrites the three files in place, together, once the patches and
