@@ -12249,3 +12249,7 @@ mod tiling;
 // SD4: athanor-idle's notifications, overlay and output power.
 #[cfg(test)]
 mod idle;
+
+// Decision 33, wave 2a: the standard globals.
+#[cfg(test)]
+mod wave2a;

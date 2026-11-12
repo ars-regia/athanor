@@ -126,6 +126,9 @@ both selections without the focus, are privileged and granted to no client yet (
 `wp-security-context-v1` tags the clients a sandbox connects: they
 see the standard globals, primary selection among them, and no privileged one, data control
 included, nor the security context manager.
+Decision 33's wave 2a adds standard globals, which a confined client sees as any other:
+`wl_fixes`, and `wp_alpha_modifier_v1`, whose alpha Smithay applies to the client's own surfaces
+and never to the border and outline drawn around its window.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than

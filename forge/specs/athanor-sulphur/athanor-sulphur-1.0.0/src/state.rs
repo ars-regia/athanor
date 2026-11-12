@@ -372,6 +372,10 @@ impl State {
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
         crate::foreign::global(&dh);
+        // Decision 33, wave 2a. Smithay applies a surface's alpha multiplier to that surface's
+        // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
+        smithay::wayland::fixes::FixesState::new::<Self>(&dh);
+        smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());

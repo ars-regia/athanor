@@ -3,11 +3,18 @@
 
 use super::*;
 use crate::focus_theme;
+use crate::marks::Stacked;
 use smithay::backend::renderer::element::{Element, Id};
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::desktop::PopupManager;
 use smithay::utils::{Rectangle, Scale};
 use wayland_client::protocol::wl_subcompositor;
+use wayland_protocols::wp::alpha_modifier::v1::client::{
+    wp_alpha_modifier_surface_v1, wp_alpha_modifier_v1,
+};
+
+delegate_noop!(Client: wp_alpha_modifier_v1::WpAlphaModifierV1);
+delegate_noop!(Client: wp_alpha_modifier_surface_v1::WpAlphaModifierSurfaceV1);
 
 /// The factory accent, which the outline takes before a theme is read, as wide as
 /// `focus_theme::FACTORY_WIDTH`.
@@ -804,6 +811,65 @@ fn a_half_covered_pixel_is_not_opaque() {
         element.opaque_regions(Scale::from(1.5)).to_vec(),
         [Rectangle::new((0, 0).into(), (300, 76).into())]
     );
+    run.stop();
+}
+
+/// wp_alpha_modifier_v1 (decision 33): a confined client that makes its window transparent
+/// leaves the border and the outline opaque. The frame shows it, and so do the elements every
+/// output is drawn from, those a DRM plane scans out included (`udev.rs`).
+#[test]
+fn a_window_s_alpha_leaves_its_marks_opaque() {
+    let mut run = Running::start(None);
+    clear_the_fixture(&mut run);
+    let (mut local, _toplevel) = confined(&mut run);
+    let manager: wp_alpha_modifier_v1::WpAlphaModifierV1 = local.bind(1);
+    let (surface, _) = local.window.clone().expect("a window");
+    let modifier = manager.get_surface(&surface, &local.queue.handle(), ());
+    modifier.set_multiplier(0);
+    // An opaque white buffer with an alpha channel: Smithay's Pixman renderer copies one
+    // without it, ignoring the alpha it is drawn at.
+    let shm: wl_shm::WlShm = local.bind(1);
+    let mut file = unlinked().expect("buffer file");
+    let pixels = usize::try_from(WIDTH * HEIGHT).expect("size");
+    file.write_all(&WHITE.repeat(pixels)).expect("pixels");
+    let qh = local.queue.handle();
+    let pool = shm.create_pool(file.as_fd(), WIDTH * HEIGHT * 4, &qh, ());
+    let format = wl_shm::Format::Argb8888;
+    let buffer = pool.create_buffer(0, WIDTH, HEIGHT, WIDTH * 4, format, &qh, ());
+    pool.destroy();
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, WIDTH, HEIGHT);
+    surface.commit();
+    local.roundtrip(&mut run);
+    let (x, y) = AT;
+    let middle = y + HEIGHT / 2;
+    let shown = frame(&mut run);
+    assert!(
+        background(&at(&shown, x + WIDTH / 2, middle)),
+        "the window is transparent"
+    );
+    assert_eq!(at(&shown, x - 2, middle), WHITE, "the border's white line");
+    assert_eq!(at(&shown, x - BORDER, middle), BLACK, "the border's outer line");
+    assert_eq!(at(&shown, x - BORDER - 1, middle), ACCENT, "the outline");
+
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    let id = Id::from_wayland_resource(window.toplevel().expect("a toplevel").wl_surface());
+    let mut renderer = PixmanRenderer::new().expect("a renderer");
+    let marks = run.state.marks();
+    let elements = crate::marks::stack(&mut renderer, &run.state.space, &output, &marks);
+    let own = elements
+        .iter()
+        .find(|element| element.id() == &id)
+        .expect("the window's surface");
+    assert!(own.alpha() < 1.0, "the client's alpha is applied");
+    let drawn: Vec<f32> = elements
+        .iter()
+        .filter(|element| !matches!(element, Stacked::Surface(_)))
+        .map(Element::alpha)
+        .collect();
+    assert!(!drawn.is_empty(), "the marks are drawn");
+    assert!(drawn.iter().all(|alpha| *alpha == 1.0), "{drawn:?}");
     run.stop();
 }
 
