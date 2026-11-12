@@ -266,18 +266,23 @@ fn retry(e: &io::Error) -> bool {
     )
 }
 
-/// The requests of `clips` that an application made outside a key or a click: a copy is
-/// refused, and logged, since only the serial of the input it answers can offer it, and the
-/// clipboard is never replaced at a later, unrelated input. The others are kept.
+/// The requests of `clips` that an application made outside a key or a click: a copy or a cut
+/// is refused, and logged, since only the serial of the input it answers can offer it, and the
+/// clipboard is never replaced at a later, unrelated input; a refused cut leaves its text in
+/// place. The others are kept.
 fn outside_input(clips: Vec<Clip>) -> Vec<Clip> {
     clips
         .into_iter()
-        .filter(|clip| {
-            let copy = matches!(clip, Clip::Copy(_));
-            if copy {
+        .filter(|clip| match clip {
+            Clip::Copy(_) => {
                 eprintln!("athanor-sal: nothing copied: Ui::copy outside a key or a click");
+                false
             }
-            !copy
+            Clip::Cut(..) => {
+                eprintln!("athanor-sal: nothing cut: a cut outside a key or a click");
+                false
+            }
+            Clip::Paste(_) | Clip::PastePrimary(_) | Clip::Select(_) | Clip::Unselect => true,
         })
         .collect()
 }
@@ -588,10 +593,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_copy_outside_a_key_or_a_click_is_refused_and_the_rest_kept() {
+    fn a_copy_or_a_cut_outside_a_key_or_a_click_is_refused_and_the_rest_kept() {
         let clips = vec![
             Clip::Copy("late".into()),
             Clip::Unselect,
+            Clip::Cut(WidgetId(2), "cut".into()),
             Clip::Paste(WidgetId(3)),
             Clip::Copy("later".into()),
         ];
