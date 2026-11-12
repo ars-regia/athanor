@@ -137,6 +137,9 @@ pub enum Kind {
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
     /// it with [`Ui::slider`], which keeps its range valid.
     Slider(Slider),
+    /// A raised button that shows only an icon and turns on and off by itself, as a mute
+    /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
+    IconToggle(crate::icon_toggle::IconToggle),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
     /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
@@ -385,6 +388,7 @@ impl Widget {
                     | Kind::Toggle { .. }
                     | Kind::Check { .. }
                     | Kind::Switch { .. }
+                    | Kind::IconToggle(_)
                     | Kind::Slider(_)
                     | Kind::Field(_)
                     | Kind::TextArea(_)
@@ -842,6 +846,7 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
         )
     }
 
@@ -865,7 +870,11 @@ impl Ui {
             | Kind::Switch {
                 active: ref mut now,
                 ..
-            } => {
+            }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle {
+                active: ref mut now,
+                ..
+            }) => {
                 if *now == active {
                     return None;
                 }
@@ -917,6 +926,7 @@ impl Ui {
             | Kind::Check { label: t, .. }
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
@@ -1568,6 +1578,11 @@ impl Ui {
             Kind::Picture { .. } => (0.0, 0.0),
             // GTK's box: the padding outside the minimum, across the line of text only.
             Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
+            // A raised button: the padding on every side, and at least the smallest button.
+            Kind::IconToggle(toggle) => {
+                let side = (toggle.size + pad).max(button_min);
+                (side, side)
+            }
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
                 let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
@@ -1814,7 +1829,9 @@ impl Ui {
         match self.widgets[id].kind {
             Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
-            Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
+            Kind::Check { ref mut active, .. }
+            | Kind::Switch { ref mut active, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { ref mut active, .. }) => {
                 *active = !*active;
                 Some(Event::Toggled(id))
             }
