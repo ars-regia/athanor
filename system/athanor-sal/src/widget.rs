@@ -1750,8 +1750,11 @@ impl Ui {
                     {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
-                    // An island and a picture take the rest of their column's height too.
-                    if matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. }) {
+                    // An island and a picture take the rest of their column's height too,
+                    // unless aligned along it.
+                    if along == crate::Align::Fill
+                        && matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. })
+                    {
                         let rest = outer.bottom() - edge - cy;
                         let r = &mut self.widgets[c].rect;
                         r.h = r.h.max(rest);

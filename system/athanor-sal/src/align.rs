@@ -86,6 +86,25 @@ mod tests {
     }
 
     #[test]
+    fn an_island_aligned_along_the_root_keeps_its_own_height() {
+        let mut ui = Ui::new("Align", theme(), false);
+        (ui.min_width, ui.min_height) = (400.0, 300.0);
+        let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+        ui.add(island, Kind::Button("Wi-Fi".into()));
+        ui.layout();
+        assert_eq!(ui.widget(island).rect.h, 280.0, "an island fills by default");
+        for along in [Align::Start, Align::End] {
+            ui.set_align(island, [Align::End, along]);
+            ui.layout();
+            let r = ui.widget(island).rect;
+            assert!(r.h < 280.0, "{along:?}: its own height");
+            assert_eq!(r.x + r.w, 390.0, "{along:?}");
+            let y = if along == Align::End { 290.0 - r.h } else { 10.0 };
+            assert_eq!(r.y, y, "{along:?}");
+        }
+    }
+
+    #[test]
     fn a_nested_column_places_its_child_at_its_end_and_the_rest_in_order() {
         for rtl in [false, true] {
             let mut ui = Ui::new("Align", theme(), rtl);
