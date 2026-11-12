@@ -2335,6 +2335,19 @@ impl Ui {
             // Up and down cycle through a menu's items, as in GTK's menus.
             (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
             (Key::Down, Some(menu)) => focus::cycle(self, menu, false),
+            // Home and End go to the first and the last item, Page Up and Page Down a viewport
+            // up or down a scrolled menu, without wrapping, as in GTK's menus.
+            (key @ (Key::Home | Key::End | Key::PageUp | Key::PageDown), Some(menu)) => {
+                let items = focus::items(self, menu);
+                let last = items.len().saturating_sub(1);
+                let at = self.focus.and_then(|f| items.iter().position(|&i| i == f));
+                let to = match key {
+                    Key::Home => 0,
+                    Key::End => last,
+                    _ => self.page(menu, &items, at.unwrap_or(0), key == Key::PageDown),
+                };
+                items.get(to).copied()
+            }
             (Key::Tab, _) => focus::step(self, false),
             (Key::BackTab, _) => focus::step(self, true),
             (key @ (Key::Left | Key::Right | Key::Up | Key::Down), _) => focus::arrow(self, &key),
@@ -2832,6 +2845,35 @@ mod tests {
             assert_eq!(walk(Key::Up), Some(second), "rtl {rtl}");
             assert_eq!(walk(Key::Left), Some(second), "rtl {rtl}: no item beside");
         }
+    }
+
+    #[test]
+    fn home_end_and_the_page_keys_walk_a_long_menu_as_gtks_do() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(Ui::ROOT, "Media player", &names, 0);
+        let Some((mut popup, items)) = ui.drop_down_menu(players, Some(300.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        popup.layout();
+        let items: Vec<WidgetId> = items.into_iter().map(|(item, _)| item).collect();
+        popup.set_focus(Some(items[0]));
+        let mut walk = |key: Key| {
+            assert_eq!(popup.key(key), None);
+            popup.layout();
+            popup.focus().and_then(|f| items.iter().position(|&i| i == f))
+        };
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::Home), Some(0));
+        let Some(down) = walk(Key::PageDown) else {
+            unreachable!("the focus stays in the menu");
+        };
+        assert!(down > 1 && down < 39, "a viewport down, not one item and not the end: {down}");
+        assert_eq!(walk(Key::PageUp), Some(0), "and back up");
+        assert_eq!(walk(Key::PageUp), Some(0), "no wrap at the top");
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::PageDown), Some(39), "no wrap at the end");
     }
 
     #[test]
