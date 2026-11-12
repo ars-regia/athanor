@@ -393,8 +393,8 @@ pub fn paint<C: Canvas>(
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
             }
             // A row with its text at the start edge: tinted with the accent when selected, and
-            // toward the text under the pointer.
-            Kind::ListRow(_) => {
+            // toward the text under the pointer. A heading is neither.
+            Kind::ListRow(_) | Kind::ListHeading(_) => {
                 let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
                 let fill = if selected {
                     Some(mix(t.on_accent, t.accent, SELECTED))

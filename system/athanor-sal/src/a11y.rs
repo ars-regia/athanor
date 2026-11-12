@@ -198,7 +198,15 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // As GTK's row that is neither selectable nor activatable: an option with no name, no
+        // selected state and no action, its text a label inside it.
+        Kind::ListHeading(_) => Node::new(Role::ListBoxOption),
     };
+    // The selected row of a list stands for the widget while it has the focus: a field that
+    // moves the selection of the list under it, as a combo box's entry.
+    if let Some(row) = ui.active_descendant(id) {
+        node.set_active_descendant(node_id(row));
+    }
     let sensitive = ui.is_sensitive(id);
     // A list is focusable as GTK's ListBox is, while it has a row to take the focus.
     if (widget.is_focusable() || list_stop(ui, id).is_some()) && sensitive {
@@ -217,7 +225,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if let Kind::ListRow(_) = widget.kind {
+    if has_row_label(ui, id) {
         children.push(row_label_id(id));
     }
     if id == Ui::ROOT && ui.announcement.is_some() {
@@ -267,13 +275,27 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
 /// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
 /// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
 fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let Kind::ListRow(text) = &ui.widget(id).kind else {
+    if !has_row_label(ui, id) {
+        return None;
+    }
+    let (Kind::ListRow(text) | Kind::ListHeading(text)) = &ui.widget(id).kind else {
         return None;
     };
     let mut label = Node::new(Role::Label);
     label.set_value(text.as_str());
     label.set_bounds(bounds(ui, id, scale));
     Some((row_label_id(id), label))
+}
+
+/// Whether row or heading `id` holds its text as a label: a row that shows widgets of its own
+/// has them in its place.
+fn has_row_label(ui: &Ui, id: WidgetId) -> bool {
+    let widget = ui.widget(id);
+    match widget.kind {
+        Kind::ListHeading(_) => true,
+        Kind::ListRow(_) => ui.visible_children(id).is_empty(),
+        _ => false,
+    }
 }
 
 /// Byte `index` of field `id`'s `text`, split in `lines` as its runs, as a run and a character

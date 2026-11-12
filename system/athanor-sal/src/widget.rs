@@ -6,6 +6,8 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
+mod rows;
+
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
 /// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
@@ -177,8 +179,15 @@ pub enum Kind {
         selected: Option<WidgetId>,
     },
     /// A row of a [`Kind::List`], with its text at the start edge. The pointer chooses it; the
-    /// keyboard reaches it only through its list.
+    /// keyboard reaches it only through its list. A row may hold widgets of its own, added under
+    /// it as under any parent: an image and a group of labels, say. They are then laid side by
+    /// side from the start edge with the theme's gap, each centred across the row, and its text
+    /// is not drawn: it is only the name assistive technologies read.
     ListRow(String),
+    /// A heading among the rows of a [`Kind::List`], with its text at the start edge, as a GTK
+    /// row that is neither selectable nor activatable: the keyboard and the pointer pass over
+    /// it. Add it with [`Ui::list_heading`].
+    ListHeading(String),
     /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
     /// does: the title centred and the window's buttons at the end edge. See [`Ui::add_title_bar`].
     TitleBar,
@@ -572,6 +581,11 @@ pub struct Ui {
     pub(crate) announcement: Option<String>,
     /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
     pub(crate) pose: crate::motion::Pose,
+    /// The slots of the widgets [`Ui::remove_children`] removed, which [`Ui::add`] fills again.
+    free: std::collections::BTreeSet<WidgetId>,
+    /// The widgets whose active descendant is the selected row of a list, by the widget: see
+    /// [`Ui::set_active_descendant`].
+    pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
 }
 
 impl Ui {
@@ -595,6 +609,8 @@ impl Ui {
             offered: None,
             announcement: None,
             pose: crate::motion::Pose::REST,
+            free: std::collections::BTreeSet::new(),
+            descendants: Vec::new(),
         }
     }
 
@@ -615,6 +631,11 @@ impl Ui {
     /// When `parent` names no widget of this `Ui`, or when the `Ui` already holds 2³² widgets,
     /// as many as a `WidgetId` can name.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
+        if let Some(id) = self.reuse(parent) {
+            self.widgets[parent].children.push(id);
+            self.widgets[id] = Widget::new(kind, Some(parent));
+            return id;
+        }
         let next = self.widgets.len();
         assert!(next <= u32::MAX as usize, "a Ui holds at most 2^32 widgets");
         let id = WidgetId(next as u32);
@@ -912,6 +933,7 @@ impl Ui {
             | Kind::Button(t)
             | Kind::MenuItem(t)
             | Kind::ListRow(t)
+            | Kind::ListHeading(t)
             | Kind::Tooltip(t)
             | Kind::Toggle { label: t, .. }
             | Kind::Check { label: t, .. }
@@ -1616,10 +1638,17 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
+            // Its widgets side by side, inside the padding a row of text has.
+            Kind::ListRow(_) if !sizes.is_empty() => {
+                widget.text = None;
+                let w = sizes.iter().map(|s| s.0).sum::<f32>() + spacing;
+                (w + 2.0 * pad, sizes.iter().map(|s| s.1).fold(0.0, f32::max) + pad)
+            }
             Kind::Button(text)
             | Kind::Toggle { label: text, .. }
             | Kind::MenuItem(text)
-            | Kind::ListRow(text) => {
+            | Kind::ListRow(text)
+            | Kind::ListHeading(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
@@ -1687,6 +1716,23 @@ impl Ui {
                     self.widgets[c].rect.w = outer.w;
                     self.place(c, x, cy);
                     cy += self.widgets[c].rect.h;
+                }
+            }
+            // A row's widgets from the start edge, inside its padding, centred across it.
+            Kind::ListRow(_) => {
+                let pad = self.theme.padding;
+                let mut cx = if self.rtl { x + outer.w - pad } else { x + pad };
+                for c in children {
+                    let r = self.widgets[c].rect;
+                    let cy = y + (outer.h - r.h) / 2.0;
+                    if self.rtl {
+                        cx -= r.w;
+                        self.place(c, cx, cy);
+                        cx -= gap;
+                    } else {
+                        self.place(c, cx, cy);
+                        cx += r.w + gap;
+                    }
                 }
             }
             Kind::TitleBar => {
@@ -2239,9 +2285,9 @@ impl Ui {
             }
         }
         if let Some((list, id)) = focused.and_then(|id| Some((self.list_of(id)?, id))) {
-            // The arrows skip an insensitive row, as GTK's ListBox does.
+            // The arrows skip an insensitive row and a heading, as GTK's ListBox does.
             let mut rows = self.visible_children(list);
-            rows.retain(|&r| self.widgets[r].sensitive);
+            rows.retain(|&r| self.widgets[r].is_focusable());
             let at = rows.iter().position(|&r| r == id).unwrap_or(0);
             let last = rows.len().saturating_sub(1);
             let to = match key {
