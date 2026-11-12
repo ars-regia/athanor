@@ -6,6 +6,8 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
+pub(crate) mod wheel;
+
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
 /// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
@@ -457,6 +459,22 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
+    /// The middle button was pressed on a widget that is not a field or a text area, which
+    /// paste the primary selection instead: a tray's item asks for its secondary activation.
+    /// It neither focuses nor activates the widget.
+    MiddleClick(WidgetId),
+    /// The wheel turned over a widget where no scroll took it, in 120ths of a step as
+    /// `wl_pointer`'s `axis_value120`, as GTK's scroll controller with discrete steps. See
+    /// [`Ui::pointer_wheel`].
+    #[non_exhaustive]
+    Wheel {
+        /// The focusable widget under the pointer.
+        widget: WidgetId,
+        /// To the right when positive.
+        dx: i32,
+        /// Down when positive.
+        dy: i32,
+    },
 }
 
 /// A pointer button, as the driver maps it from the evdev codes.
@@ -1929,7 +1947,9 @@ impl Ui {
                 let field = |id: &WidgetId| {
                     matches!(self.widgets[*id].kind, Kind::Field(_) | Kind::TextArea(_))
                 };
-                let id = id.filter(field)?;
+                let Some(id) = id.filter(field) else {
+                    return id.map(Event::MiddleClick);
+                };
                 self.set_focus(Some(id));
                 self.point_in_field(id, x, y, false);
                 self.clips.push(Clip::PastePrimary(id));
@@ -3989,9 +4009,10 @@ mod tests {
         assert_eq!(ui.take_clips(), [Clip::PastePrimary(name)]);
         ui.paste(name, "x");
         assert_eq!(ui.field_text(name).as_deref(), Some("abcx"));
-        // Elsewhere it does nothing.
+        // Elsewhere it pastes nothing, and raises the widget's own middle click.
         let o = ui.widget(other).rect;
-        assert_eq!(ui.pointer_press(o.x + 1.0, o.y + 1.0, PointerButton::Middle), None);
+        let pressed = ui.pointer_press(o.x + 1.0, o.y + 1.0, PointerButton::Middle);
+        assert_eq!(pressed, Some(Event::MiddleClick(other)));
         assert_eq!(ui.focus(), Some(name));
         assert!(ui.take_clips().is_empty());
     }
