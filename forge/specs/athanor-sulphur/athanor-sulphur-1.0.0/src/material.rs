@@ -17,11 +17,13 @@ use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::channel;
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
-use smithay::reexports::calloop::{Interest, Mode as Trigger, PostAction};
+use smithay::reexports::calloop::{Interest, Mode as Trigger, PostAction, RegistrationToken};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New};
-use smithay::utils::Rectangle;
+use smithay::utils::{Physical, Rectangle, Size};
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// The server side of the description, laid out as `wayland-protocols` lays out its own.
@@ -58,6 +60,23 @@ pub mod protocol {
 const DEADLINE: Duration = Duration::from_secs(3);
 /// The live check's window: the last damaged frames of an output in M2 (VL13).
 const LIVE_FRAMES: usize = 120;
+
+/// A GPU, by the path of its render node: its probes run one at a time.
+type Gpu = PathBuf;
+/// What a probe's thread sends when it ends: its GPU, its generation and its result.
+type Outcome = (Gpu, u64, Result<Probed, String>);
+/// A probe: of the scene, on the render node at the path, ended by the deadline.
+pub(crate) type Prober =
+    Arc<dyn Fn(&Path, &probe::Scene, Instant) -> Result<Probed, String> + Send + Sync>;
+
+/// In tests, a GPU that is not there: its path, the probe that stands for it, and the probes'
+/// deadline.
+#[cfg(test)]
+pub(crate) struct Fake {
+    pub gpu: Gpu,
+    pub prober: Prober,
+    pub deadline: Duration,
+}
 
 /// The material tiers of VL13.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -110,6 +129,8 @@ pub fn tier(probed: Option<Probed>, interval: Duration) -> Tier {
 /// An output's measurement.
 #[derive(Debug)]
 enum Measure {
+    /// Waiting for its GPU, on which another output's probe runs: M0 meanwhile.
+    Waiting,
     /// The probe of `generation` runs, until `deadline`: the output is M0 meanwhile.
     Probing { generation: u64, deadline: Instant },
     /// The tier, and, in M2, the times of the last damaged frames.
@@ -129,7 +150,7 @@ impl Measure {
 
     fn tier(&self) -> Tier {
         match self {
-            Self::Probing { .. } => Tier::M0,
+            Self::Waiting | Self::Probing { .. } => Tier::M0,
             Self::Settled { tier, .. } => *tier,
         }
     }
@@ -218,7 +239,7 @@ fn median(times: &VecDeque<Duration>) -> Duration {
 
 /// What a measurement holds for: the output's mode and the GPU that draws it. A change of
 /// either, or a disable, starts the measurement again.
-type Signature = (Option<Mode>, Option<DrmNode>);
+type Signature = (Option<Mode>, Option<Gpu>);
 
 struct Record {
     output: Output,
@@ -226,20 +247,27 @@ struct Record {
     /// The output's frame interval T.
     interval: Duration,
     measure: Measure,
+    /// The watch on the fence of the frame being timed: one at a time.
+    timing: Option<RegistrationToken>,
 }
 
 /// The outputs' measurements and the tier objects, in `State::materials`.
 #[derive(Default)]
 pub struct Materials {
     records: Vec<Record>,
-    objects: Vec<(AthanorMaterialV1, Option<Output>)>,
+    /// The tier objects, their output and the tier last sent to each.
+    objects: Vec<(AthanorMaterialV1, Option<Output>, Tier)>,
     generation: u64,
-    /// Where the probes' threads send their results.
-    results: Option<channel::Sender<(u64, Result<Probed, String>)>>,
+    /// Where the probes' threads send their outcomes.
+    results: Option<channel::Sender<Outcome>>,
+    /// The GPUs a probe's thread runs on, until it has sent its outcome.
+    busy: Vec<Gpu>,
+    #[cfg(test)]
+    pub(crate) fake: Option<Fake>,
 }
 
 impl Materials {
-    fn tier_of(&self, output: Option<&Output>) -> Tier {
+    pub(crate) fn tier_of(&self, output: Option<&Output>) -> Tier {
         output
             .and_then(|output| self.records.iter().find(|record| record.output == *output))
             .map_or(Tier::M0, |record| record.measure.tier())
@@ -251,21 +279,56 @@ impl Materials {
         self.generation
     }
 
-    /// Whether a probe runs.
-    pub(crate) fn probing(&self) -> bool {
-        self.records
-            .iter()
-            .any(|record| matches!(record.measure, Measure::Probing { .. }))
+    /// Whether `output`'s measurement has settled.
+    #[cfg(test)]
+    pub(crate) fn settled(&self, output: &Output) -> bool {
+        self.records.iter().any(|record| {
+            record.output == *output && matches!(record.measure, Measure::Settled { .. })
+        })
     }
 
-    /// Sends each object of `output` its tier.
-    fn send(&self, output: &Output) {
+    /// The watch on the fence of `output`'s frame being timed.
+    fn timing(&mut self, output: &Output) -> Option<&mut Option<RegistrationToken>> {
+        self.records
+            .iter_mut()
+            .find(|record| record.output == *output)
+            .map(|record| &mut record.timing)
+    }
+
+    /// Whether a probe's thread runs.
+    pub(crate) fn probing(&self) -> bool {
+        !self.busy.is_empty()
+    }
+
+    /// Sends each object of `output` its tier, when it changed.
+    fn send(&mut self, output: &Output) {
         let tier = self.tier_of(Some(output));
-        for (object, of) in &self.objects {
-            if of.as_ref() == Some(output) {
+        for (object, of, sent) in &mut self.objects {
+            if of.as_ref() == Some(output) && *sent != tier {
                 object.tier(tier.into());
+                *sent = tier;
             }
         }
+    }
+
+    /// The probe: VL13's, or in tests the fake's.
+    fn prober(&self) -> Prober {
+        #[cfg(test)]
+        if let Some(fake) = &self.fake {
+            return fake.prober.clone();
+        }
+        Arc::new(|path: &Path, scene: &probe::Scene, deadline: Instant| {
+            probe::run(path, scene, deadline).map_err(|error| error.to_string())
+        })
+    }
+
+    /// How long a probe may take: VL13's `DEADLINE`, or in tests the fake's.
+    fn deadline(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(fake) = &self.fake {
+            return fake.deadline;
+        }
+        DEADLINE
     }
 }
 
@@ -310,8 +373,9 @@ impl smithay::wayland::Dispatch2<AthanorMaterialManagerV1, State> for MaterialTi
                 let object = data_init.init(id, MaterialTiers);
                 // An output already withdrawn is M0, and stays so.
                 let output = Output::from_resource(&output);
-                object.tier(state.materials.tier_of(output.as_ref()).into());
-                state.materials.objects.push((object, output));
+                let tier = state.materials.tier_of(output.as_ref());
+                object.tier(tier.into());
+                state.materials.objects.push((object, output, tier));
             }
             Request::Destroy => {}
         }
@@ -332,15 +396,15 @@ impl smithay::wayland::Dispatch2<AthanorMaterialV1, State> for MaterialTiers {
     }
 
     fn destroyed(&self, state: &mut State, _client: ClientId, object: &AthanorMaterialV1) {
-        state.materials.objects.retain(|(of, _)| of != object);
+        state.materials.objects.retain(|(of, _, _)| of != object);
     }
 }
 
 impl State {
-    /// Starts a probe for each output shown whose mode or GPU changed, or which was just
-    /// enabled, and forgets the outputs no longer shown. Called after every frame.
+    /// Measures again each output shown whose mode or GPU changed, or which was just enabled,
+    /// and forgets the outputs no longer shown, which are M0. Called after every frame.
     pub(crate) fn refresh_materials(&mut self) {
-        let node = self.render_node();
+        let gpu = self.material_gpu();
         let shown: Vec<Output> = self
             .space
             .outputs()
@@ -351,10 +415,15 @@ impl State {
         let records = std::mem::take(&mut self.materials.records);
         for record in records {
             if shown.contains(&record.output)
-                && record.signature == (record.output.current_mode(), node)
+                && record.signature.0 == record.output.current_mode()
+                && record.signature.1 == gpu
             {
                 self.materials.records.push(record);
             } else {
+                // A probe of the record that runs still ends; its result is for no record.
+                if let Some(token) = record.timing {
+                    self.loop_handle.remove(token);
+                }
                 changed.push(record.output);
             }
         }
@@ -365,10 +434,11 @@ impl State {
                 .iter()
                 .any(|record| record.output == output)
             {
-                self.measure(&output, node);
+                self.measure(&output, gpu.clone());
                 changed.push(output);
             }
         }
+        self.start_probes();
         for output in changed {
             self.materials.send(&output);
         }
@@ -416,17 +486,33 @@ impl State {
             self.material_frame(output, started.elapsed());
             return;
         }
+        // One frame of an output is timed at a time: a fence that never signals holds one
+        // watch, until the output's measurement starts again.
+        if !matches!(self.materials.timing(output), Some(None)) {
+            return;
+        }
         let Some(fence) = sync.export() else {
             return;
         };
-        let output = output.clone();
+        let watched = output.clone();
         let source = Generic::new(fence, Interest::READ, Trigger::OneShot);
+        // ponytail: timed when the loop runs the callback, which adds the loop's latency to
+        // the frame and errs towards M1; the sync file's own signal time (SYNC_IOC_FILE_INFO)
+        // would remove it.
         let inserted = self.loop_handle.insert_source(source, move |_, _, state| {
-            state.material_frame(&output, started.elapsed());
+            if let Some(token) = state.materials.timing(&watched) {
+                *token = None;
+            }
+            state.material_frame(&watched, started.elapsed());
             Ok(PostAction::Remove)
         });
-        if let Err(error) = inserted {
-            tracing::warn!(%error, "a frame's fence could not be watched");
+        match inserted {
+            Ok(token) => {
+                if let Some(slot) = self.materials.timing(output) {
+                    *slot = Some(token);
+                }
+            }
+            Err(error) => tracing::warn!(%error, "a frame's fence could not be watched"),
         }
     }
 
@@ -440,30 +526,76 @@ impl State {
         }
     }
 
-    /// Starts the measurement of `output`: M0 in software, a probe on its GPU otherwise.
-    fn measure(&mut self, output: &Output, node: Option<DrmNode>) {
+    /// The GPU that draws the outputs, by its render node's path; none in software, or
+    /// nested.
+    fn material_gpu(&self) -> Option<Gpu> {
+        #[cfg(test)]
+        if let Some(fake) = &self.materials.fake {
+            return Some(fake.gpu.clone());
+        }
+        self.render_node().and_then(|node| node.dev_path())
+    }
+
+    /// Starts the measurement of `output`: M0 in software, a probe on its GPU otherwise, which
+    /// waits for the GPU's probe that runs.
+    fn measure(&mut self, output: &Output, gpu: Option<Gpu>) {
         let mode = output.current_mode();
         let refresh = mode.map_or(60_000, |mode| mode.refresh).max(1);
         let interval = Duration::from_secs_f64(1_000.0 / f64::from(refresh));
-        let measure = match node {
-            None => Measure::settled(Tier::M0),
-            Some(node) => self.probe(output, node),
+        let measure = if gpu.is_some() {
+            Measure::Waiting
+        } else {
+            if let Some(node) = self.render_node() {
+                tracing::warn!(%node, "the render node has no path: tier M0");
+            }
+            Measure::settled(Tier::M0)
         };
         self.materials.records.push(Record {
             output: output.clone(),
-            signature: (mode, node),
+            signature: (mode, gpu),
             interval,
             measure,
+            timing: None,
         });
     }
 
-    /// Starts a probe of `output` on `node`, and the timer of its deadline.
-    fn probe(&mut self, output: &Output, node: DrmNode) -> Measure {
+    /// Starts the probe of the first output waiting on each GPU that no probe runs on: one
+    /// probe at a time on a GPU, so that they do not slow each other.
+    fn start_probes(&mut self) {
+        loop {
+            let busy = &self.materials.busy;
+            let Some((index, output, gpu)) =
+                self.materials
+                    .records
+                    .iter()
+                    .enumerate()
+                    .find_map(
+                        |(index, record)| match (&record.measure, &record.signature.1) {
+                            (Measure::Waiting, Some(gpu)) if !busy.contains(gpu) => {
+                                Some((index, record.output.clone(), gpu.clone()))
+                            }
+                            _ => None,
+                        },
+                    )
+            else {
+                return;
+            };
+            // Either the GPU is busy now or the record has settled: the loop ends.
+            let measure = self.probe(&output, gpu);
+            if let Some(record) = self.materials.records.get_mut(index) {
+                record.measure = measure;
+            }
+        }
+    }
+
+    /// Starts a probe of `output` on `gpu`, and the timer of its deadline, by which its thread
+    /// ends.
+    fn probe(&mut self, output: &Output, gpu: Gpu) -> Measure {
         let Some(scene) = self.scene_of(output) else {
-            return Measure::settled(Tier::M0);
-        };
-        let Some(path) = node.dev_path() else {
-            tracing::warn!(%node, "the render node has no path: tier M0");
+            tracing::warn!(
+                output = output.name(),
+                "the output has no area to probe: tier M0"
+            );
             return Measure::settled(Tier::M0);
         };
         let Some(results) = self.material_results() else {
@@ -471,11 +603,14 @@ impl State {
         };
         self.materials.generation += 1;
         let generation = self.materials.generation;
+        let deadline = Instant::now() + self.materials.deadline();
+        let prober = self.materials.prober();
+        let on = gpu.clone();
         let spawned = std::thread::Builder::new()
             .name("material-probe".into())
             .spawn(move || {
-                let result = probe::run(&path, &scene).map_err(|error| error.to_string());
-                if results.send((generation, result)).is_err() {
+                let result = prober(&on, &scene, deadline);
+                if results.send((on, generation, result)).is_err() {
                     tracing::debug!("the material probe ended after the event loop");
                 }
             });
@@ -483,7 +618,8 @@ impl State {
             tracing::warn!(%error, "the material probe could not be started: tier M0");
             return Measure::settled(Tier::M0);
         }
-        let timer = Timer::from_duration(DEADLINE);
+        self.materials.busy.push(gpu);
+        let timer = Timer::from_deadline(deadline);
         let armed = self.loop_handle.insert_source(timer, move |_, _, state| {
             state.material_expired(generation);
             TimeoutAction::Drop
@@ -494,19 +630,19 @@ impl State {
         }
         Measure::Probing {
             generation,
-            deadline: Instant::now() + DEADLINE,
+            deadline,
         }
     }
 
     /// The channel the probes send their results to, made with the first probe.
-    fn material_results(&mut self) -> Option<channel::Sender<(u64, Result<Probed, String>)>> {
+    fn material_results(&mut self) -> Option<channel::Sender<Outcome>> {
         if let Some(results) = &self.materials.results {
             return Some(results.clone());
         }
         let (results, received) = channel::channel();
         let inserted = self.loop_handle.insert_source(received, |event, _, state| {
-            if let channel::Event::Msg((generation, result)) = event {
-                state.material_probed(generation, result);
+            if let channel::Event::Msg((gpu, generation, result)) = event {
+                state.material_probed(gpu, generation, result);
             }
         });
         if let Err(error) = inserted {
@@ -517,18 +653,28 @@ impl State {
         Some(results)
     }
 
-    fn material_probed(&mut self, generation: u64, result: Result<Probed, String>) {
+    /// A probe's thread has ended on `gpu`: its result settles its output, unless a new
+    /// measurement superseded it, and the next probe waiting on the GPU starts.
+    fn material_probed(&mut self, gpu: Gpu, generation: u64, result: Result<Probed, String>) {
         let now = Instant::now();
-        let Some(record) = self.materials.records.iter_mut().find(|record| {
-            matches!(record.measure, Measure::Probing { generation: running, .. } if running == generation)
-        }) else {
-            return;
-        };
-        record
-            .measure
-            .probed(generation, result, now, record.interval);
-        let output = record.output.clone();
-        self.materials.send(&output);
+        self.materials.busy.retain(|busy| *busy != gpu);
+        let settled = self
+            .materials
+            .records
+            .iter_mut()
+            .find(|record| {
+                matches!(record.measure, Measure::Probing { generation: running, .. } if running == generation)
+            })
+            .map(|record| {
+                record
+                    .measure
+                    .probed(generation, result, now, record.interval);
+                record.output.clone()
+            });
+        if let Some(output) = settled {
+            self.materials.send(&output);
+        }
+        self.start_probes();
     }
 
     fn material_expired(&mut self, generation: u64) {
@@ -543,8 +689,7 @@ impl State {
     }
 
     /// What the probe draws for `output`, in its physical pixels: its size, the windows of its
-    /// current workspace, and the dock's region, the rectangle the dock sent or, without a
-    /// dock, spike VL-S5's 1280 x 96 at the bottom.
+    /// current workspace, and the dock's region (`dock_region`).
     fn scene_of(&self, output: &Output) -> Option<probe::Scene> {
         let size = output.current_mode()?.size;
         let area = self.space.output_geometry(output)?;
@@ -561,24 +706,44 @@ impl State {
                     .to_physical_precise_round(scale)
             })
             .collect();
-        let dock = self
-            .dock_rectangle(output)
-            .map(|rectangle| rectangle.to_physical_precise_round(scale))
-            .unwrap_or_else(|| {
-                let (width, height) = (1280.min(size.w), 96.min(size.h));
-                Rectangle::new(
-                    ((size.w - width) / 2, size.h - height).into(),
-                    (width, height).into(),
-                )
-            })
-            .intersection(Rectangle::from_size(size))
-            .filter(|dock| dock.size.w > 0 && dock.size.h > 0)?;
+        let dock = dock_region(
+            size,
+            self.dock_rectangle(output)
+                .map(|rectangle| rectangle.to_physical_precise_round(scale)),
+        )?;
         Some(probe::Scene {
             size,
             windows,
             dock,
         })
     }
+}
+
+/// The region the probe blurs as the dock's, on an output of `size`: the dock's rectangle on
+/// the output or, without a dock or when its rectangle lies off the output, as after a mode
+/// change, spike VL-S5's 1280 x 96 at the bottom; none when the output has no area.
+fn dock_region(
+    size: Size<i32, Physical>,
+    rectangle: Option<Rectangle<i32, Physical>>,
+) -> Option<Rectangle<i32, Physical>> {
+    let usable = |region: &Rectangle<i32, Physical>| region.size.w > 0 && region.size.h > 0;
+    let on = rectangle.and_then(|rectangle| rectangle.intersection(Rectangle::from_size(size)));
+    if let Some(on) = on.filter(usable) {
+        return Some(on);
+    }
+    if rectangle.is_some() {
+        tracing::warn!(
+            ?rectangle,
+            ?size,
+            "the dock's rectangle is off the output: the probe blurs the default region"
+        );
+    }
+    let (width, height) = (1280.min(size.w), 96.min(size.h));
+    Some(Rectangle::new(
+        ((size.w - width) / 2, size.h - height).into(),
+        (width, height).into(),
+    ))
+    .filter(usable)
 }
 
 /// The probe: off screen, in a GL context of its own, on the probe's thread.
@@ -588,6 +753,7 @@ pub mod probe {
     use smithay::backend::allocator::gbm::GbmDevice;
     use smithay::backend::allocator::Fourcc;
     use smithay::backend::drm::{DrmDeviceFd, DrmNode};
+    use smithay::backend::egl::fence::EGLFence;
     use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
     use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
     use smithay::backend::renderer::multigpu::{ApiDevice, GpuManager};
@@ -613,9 +779,8 @@ pub mod probe {
 
     /// Draws `WARM_UP` rounds and then `ROUNDS` measured ones of the three cases, taking turns,
     /// each timed from its first GL call to its sync point, and gives each case's 95th
-    /// percentile; past `super::DEADLINE` it gives up.
-    pub fn run(path: &Path, scene: &Scene) -> Result<Probed, Error> {
-        let started = Instant::now();
+    /// percentile; at `deadline` it gives up, a wait included.
+    pub fn run(path: &Path, scene: &Scene, deadline: Instant) -> Result<Probed, Error> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         let fd = DrmDeviceFd::new(DeviceFd::from(OwnedFd::from(file)));
         let node = DrmNode::from_file(&fd)?;
@@ -640,7 +805,7 @@ pub mod probe {
         let mut times = [Vec::new(), Vec::new(), Vec::new()];
         for round in 0..WARM_UP + ROUNDS {
             for (case, times) in times.iter_mut().enumerate() {
-                if started.elapsed() > super::DEADLINE {
+                if Instant::now() > deadline {
                     return Err("the probe is past its deadline".into());
                 }
                 let drawn = Instant::now();
@@ -650,7 +815,7 @@ pub mod probe {
                 } else if case == 2 {
                     sync = full.blur(renderer, &mut target, whole)?;
                 }
-                sync.wait()?;
+                wait(&sync, deadline)?;
                 if round >= WARM_UP {
                     times.push(drawn.elapsed());
                 }
@@ -658,6 +823,23 @@ pub mod probe {
         }
         let [scene, dock, full] = times.map(|mut times| p95(&mut times));
         Ok(Probed { scene, dock, full })
+    }
+
+    /// Waits for `sync` until `deadline` at most. A frame of the GLES renderer ends on an EGL
+    /// fence, or with glFinish and no fence.
+    fn wait(sync: &SyncPoint, deadline: Instant) -> Result<(), Error> {
+        let reached = match sync.get::<EGLFence>() {
+            Some(fence) => fence.client_wait(
+                Some(deadline.saturating_duration_since(Instant::now())),
+                false,
+            )?,
+            None => sync.is_reached(),
+        };
+        if reached {
+            Ok(())
+        } else {
+            Err("the probe's frame did not finish by its deadline".into())
+        }
     }
 
     /// The 95th percentile of `times`.
@@ -786,6 +968,47 @@ mod tests {
         assert_eq!(tier(uhd, AT_120), Tier::M1);
     }
 
+    /// The probe's dock region: the dock's rectangle, clipped to the output; the default
+    /// region without a dock or when its rectangle lies off the output, as after a mode change
+    /// from 2560 x 1440 to 1920 x 1080, or has no area; none on an output without area.
+    #[test]
+    fn vl13_a_dock_rectangle_off_the_output_gives_the_default_region() {
+        let size = Size::<i32, Physical>::from((1920, 1080));
+        let at = |x, y, w, h| {
+            Some(Rectangle::<i32, Physical>::new(
+                (x, y).into(),
+                (w, h).into(),
+            ))
+        };
+        let default = at(320, 984, 1280, 96);
+        assert_eq!(dock_region(size, None), default, "no dock");
+        assert_eq!(
+            dock_region(size, at(0, 1016, 1920, 64)),
+            at(0, 1016, 1920, 64)
+        );
+        assert_eq!(
+            dock_region(size, at(1800, 1016, 1920, 64)),
+            at(1800, 1016, 120, 64),
+            "clipped"
+        );
+        assert_eq!(
+            dock_region(size, at(0, 1376, 2560, 64)),
+            default,
+            "the old mode's"
+        );
+        assert_eq!(dock_region(size, at(0, 1016, 0, 64)), default, "no area");
+        assert_eq!(
+            dock_region(size, at(i32::MAX, i32::MAX, i32::MAX, i32::MAX)),
+            default,
+            "far off"
+        );
+        assert_eq!(
+            dock_region(Size::from((0, 0)), None),
+            None,
+            "an output without area"
+        );
+    }
+
     /// Software rendering is M0, without a measurement.
     #[test]
     fn vl13_software_rendering_is_m0() {
@@ -851,7 +1074,11 @@ mod tests {
         for _ in 0..LIVE_FRAMES / 2 - 1 {
             measure.frame(half + EPSILON, AT_60);
         }
-        assert_eq!(measure.tier(), Tier::M2, "fewer than half the window over T/2");
+        assert_eq!(
+            measure.tier(),
+            Tier::M2,
+            "fewer than half the window over T/2"
+        );
         measure.frame(half + EPSILON, AT_60);
         assert_eq!(measure.tier(), Tier::M1, "the median over T/2");
         for _ in 0..LIVE_FRAMES * 2 {
@@ -870,10 +1097,7 @@ mod tests {
     /// frame time, not by the GPU's brand.
     #[test]
     fn vl13_no_code_reads_the_gpu_vendor_or_name() {
-        let sources = [
-            include_str!("material.rs"),
-            include_str!("blur.rs"),
-        ];
+        let sources = [include_str!("material.rs"), include_str!("blur.rs")];
         let forbidden = [
             concat!("GL_", "VENDOR"),
             concat!("GL_", "RENDERER"),
