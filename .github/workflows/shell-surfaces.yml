@@ -430,21 +430,78 @@ jobs:
             .scratch/shell-rig/dock-*.png
 
   control-center:
-    name: Control center build, tests on a display and link order
+    name: Control center build, tests on a display, link order, accessibility and Orca
     needs: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the control center, with athanor-services and athanor-controls, and check the DT_NEEDED order
         run: bash forge/test/shell/rig.sh build-control-center
+      - name: Seal the binary
+        run: bash forge/test/shell/rig.sh seal-bin athanor-control-center
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shell-rig-control-center-bin
+          path: |
+            .scratch/shell-rig/bin/athanor-control-center
+            .scratch/shell-rig/bin/SEALED
+          if-no-files-found: error
+          retention-days: 1
+      - name: Accessibility trees of the panel and its pages
+        run: bash forge/test/shell/rig.sh atspi control-center
+      - name: Accessibility trees of the panel and its pages in Italian
+        run: bash forge/test/shell/rig.sh atspi control-center it
+      - name: Accessibility trees in every appearance and text scale (AX17)
+        run: bash forge/test/shell/rig.sh atspi control-center --matrix
+      - name: Orca's speech on the panel and its pages against the transcript
+        run: bash forge/test/shell/rig.sh orca control-center
+      - name: Orca's speech on the panel and its pages in Italian against the transcript
+        run: bash forge/test/shell/rig.sh orca control-center it
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: shell-rig-control-center
-          path: .scratch/shell-rig/*.log
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/atspi-control-center-*.json
+            .scratch/shell-rig/orca-*.txt
+
+  control-center-scenes:
+    name: Control center scene ${{ matrix.scene }} (12 cases) against the goldens
+    needs: control-center
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        scene:
+          [
+            control-center,
+            control-center-network,
+            control-center-bluetooth,
+            control-center-audio,
+            control-center-battery,
+          ]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: shell-rig-control-center-bin
+          path: .scratch/shell-rig/bin
+      - name: Verify the binary of the build job
+        run: bash forge/test/shell/rig.sh verify-bin athanor-control-center
+      - name: Cases against the goldens
+        run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: shell-rig-${{ matrix.scene }}
+          path: |
+            .scratch/shell-rig/*.log
+            .scratch/shell-rig/${{ matrix.scene }}-*.png
 
   launcher:
     name: Launcher build, layer-surface guard, end to end, accessibility and surface cases

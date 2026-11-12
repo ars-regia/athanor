@@ -111,8 +111,8 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(len(found), len({tag for _, tag in found}))
         layout = [tag for surface, tag in found if surface == "layout"]
         self.assertEqual((len(layout), sum("-2o-" in tag for tag in layout)), (27, 6))
-        self.assertEqual(len(found) - len(layout), 17 * 12)
-        self.assertEqual(len(found), 231)
+        self.assertEqual(len(found) - len(layout), 22 * 12)
+        self.assertEqual(len(found), 291)
         # No cosmic component has a case (open question 1).
         self.assertFalse([s for s in wanted if s.startswith("cosmic")])
 
