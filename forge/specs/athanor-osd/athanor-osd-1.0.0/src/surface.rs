@@ -488,12 +488,7 @@ const HIDDEN: Pose = Pose {
 /// above everything, with its fill [`MARGIN`] from the edge; or 1×1 on the background layer.
 /// Never the keyboard, never the pointer, and no exclusive zone.
 fn options(shown: bool) -> LayerOptions {
-    let mut options = LayerOptions::default();
-    options.layer = if shown {
-        Layer::Overlay
-    } else {
-        Layer::Background
-    };
+    let mut options = LayerOptions::new(if shown { Layer::Overlay } else { Layer::Background });
     options.namespace = NAMESPACE.to_owned();
     options.anchor = Anchor::BOTTOM;
     options.margin = [0, 0, if shown { MARGIN - RISE as i32 } else { 0 }, 0];
