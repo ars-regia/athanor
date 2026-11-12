@@ -66,7 +66,7 @@ FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo@${TIER3_DIGEST} AS tier3-repo
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py). The two RPMs
 # built here carry SOURCE_DATE_EPOCH as their build time and file times, which the rpm database of
 # the NVIDIA variants records.
-FROM registry.fedoraproject.org/fedora:43@sha256:cd9d25651b6c27cfc2d65883e1162e42dfd57f53cbdbcdc891fd99cbb38915ed AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:43@sha256:82c7965e18e041960c0037538b116c52fbba55dfe6e7c7ff3afe82ee587eb006 AS nvidia-rpms
 ARG KERNEL_REGISTRY
 ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
