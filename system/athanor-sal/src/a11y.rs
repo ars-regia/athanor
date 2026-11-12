@@ -448,6 +448,22 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 }
 
 impl Ui {
+    /// [`Ui::do_action`] for a request sent while the tree last published gave its target's
+    /// slot `generation`: refused, and logged, once [`Ui::remove_children`] freed the slot since,
+    /// as the widget there is no longer the one the assistive technology acted on.
+    pub(crate) fn do_published_action(
+        &mut self,
+        request: &ActionRequest,
+        generation: u64,
+    ) -> Option<Event> {
+        let slot = u32::try_from(request.target_node.0).ok().map(WidgetId)?;
+        if self.generation(slot) != generation {
+            eprintln!("athanor-sal: no action on {slot:?}: its widget was removed");
+            return None;
+        }
+        self.do_action(request)
+    }
+
     /// Carries out an assistive technology's request on the widget it names, unless it is
     /// hidden or insensitive.
     pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
@@ -627,6 +643,34 @@ mod tests {
         };
         assert_eq!(ui.do_action(&click), Some(Event::Toggled(switch)));
         assert!(ui.is_active(switch));
+    }
+
+    #[test]
+    fn a_request_for_a_removed_widget_never_reaches_the_one_in_its_slot() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.add(column, Kind::Button("Old".into()));
+        ui.layout();
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(old),
+            data: None,
+        };
+        let published = ui.generation(old);
+        // The request waits in the channel while the application replaces the button.
+        ui.remove_children(column);
+        let new = ui.add(column, Kind::Button("New".into()));
+        ui.layout();
+        assert_eq!(new, old, "the slot is reused");
+        assert_eq!(ui.do_published_action(&click, published), None);
+        assert_ne!(ui.focus(), Some(new));
+        // A request sent once the tree published the new button acts on it.
+        let published = ui.generation(new);
+        assert_eq!(
+            ui.do_published_action(&click, published),
+            Some(Event::Clicked(new))
+        );
     }
 
     #[test]

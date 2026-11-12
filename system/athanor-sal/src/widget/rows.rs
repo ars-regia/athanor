@@ -4,6 +4,7 @@
 //! active descendant for assistive technologies.
 
 use super::{Clip, Event, Kind, Ui, Widget, WidgetId};
+use std::collections::BTreeMap;
 
 impl Ui {
     /// Adds a heading showing `text` at the end of the list `list`, over the rows that follow
@@ -106,6 +107,11 @@ impl Ui {
     /// names the same widget while its generation stays the one read when it was kept.
     pub(crate) fn generation(&self, id: WidgetId) -> u64 {
         self.generations.get(&id).copied().unwrap_or(0)
+    }
+
+    /// The generation of every slot [`Ui::remove_children`] freed: a slot missing has 0.
+    pub(crate) fn generations(&self) -> &BTreeMap<WidgetId, u64> {
+        &self.generations
     }
 
     /// The slot of a removed widget for one added under `parent`, the lowest: any serves, since

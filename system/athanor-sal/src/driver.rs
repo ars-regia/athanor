@@ -72,6 +72,7 @@ use smithay_client_toolkit::{
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -348,11 +349,11 @@ fn run_on(
     event_loop
         .handle()
         .insert_source(receiver, |event, _, app: &mut App| {
-            if let channel::Event::Msg((id, request)) = event {
+            if let channel::Event::Msg((id, generation, request)) = event {
                 let event = app
                     .shell
                     .get_mut(id)
-                    .and_then(|surface| surface.ui.do_action(&request));
+                    .and_then(|surface| surface.ui.do_published_action(&request, generation));
                 app.changed(id, event);
             }
         })
@@ -536,7 +537,7 @@ pub struct Shell {
     layer_shell: Option<LayerShell>,
     fractional_scale: Option<WpFractionalScaleManagerV1>,
     viewporter: Option<WpViewporter>,
-    actions: Sender<(SurfaceId, ActionRequest)>,
+    actions: Sender<Request>,
     next: u64,
     surfaces: Vec<Surface>,
     /// The popup open, at most one.
@@ -693,7 +694,10 @@ impl Shell {
                 if let Ok(mut initial) = surface.initial.lock() {
                     *initial = Some(tree);
                 }
-                let mut a11y = adapter(id, &surface.initial, &actions);
+                if let Ok(mut published) = surface.published.lock() {
+                    published.clone_from(surface.ui.generations());
+                }
+                let mut a11y = adapter(id, &surface.initial, &surface.published, &actions);
                 a11y.update_window_focus_state(surface.window_focused);
                 surface.a11y = Some(a11y);
                 surface.dirty = true;
@@ -1028,7 +1032,8 @@ impl Shell {
         };
         // The first tree comes from the last update drawn.
         let initial = Arc::new(Mutex::new(Some(tree_update(&ui, 1.0))));
-        let a11y = Some(adapter(id, &initial, &self.actions));
+        let published = Arc::new(Mutex::new(ui.generations().clone()));
+        let a11y = Some(adapter(id, &initial, &published, &self.actions));
         // A layer surface asks for its widgets' size before the first configure.
         let size = match &shown {
             Shown::Layer(surface) => {
@@ -1050,6 +1055,7 @@ impl Shell {
             ui,
             a11y,
             initial,
+            published,
             window_focused: false,
             scale: 1.0,
             size,
@@ -1281,6 +1287,9 @@ struct Surface {
     a11y: Option<accesskit_unix::Adapter>,
     /// The tree the adapter activates with; `None` once the surface left the tree.
     initial: Arc<Mutex<Option<TreeUpdate>>>,
+    /// The generation of each slot in the tree last published, which the adapter sends with an
+    /// action request on it: one for a widget removed since is refused.
+    published: Published,
     /// The adapter's window is the focused one, which a new adapter takes over.
     window_focused: bool,
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
@@ -1437,19 +1446,31 @@ impl Surface {
                 a11y.update_if_active(|| update);
             }
         }
+        // After the tree: a request sent in between carries the old generation, and is refused.
+        if let Ok(mut published) = self.published.lock() {
+            published.clone_from(self.ui.generations());
+        }
     }
 }
 
+/// The generation of each widget slot in a surface's tree as last published.
+type Published = Arc<Mutex<BTreeMap<WidgetId, u64>>>;
+
+/// An action request of an assistive technology: its surface, the generation its target's slot
+/// had in the tree last published, and the request.
+type Request = (SurfaceId, u64, ActionRequest);
+
 /// The accessibility adapter of surface `id`, whose first tree is `initial`'s and whose actions
-/// travel on `actions` to the event loop.
+/// travel on `actions` to the event loop, with their target's generation in `published`.
 fn adapter(
     id: SurfaceId,
     initial: &Arc<Mutex<Option<TreeUpdate>>>,
-    actions: &Sender<(SurfaceId, ActionRequest)>,
+    published: &Published,
+    actions: &Sender<Request>,
 ) -> accesskit_unix::Adapter {
     accesskit_unix::Adapter::new(
         Activation(Arc::clone(initial)),
-        Actions(id, actions.clone()),
+        Actions(id, Arc::clone(published), actions.clone()),
         Deactivation,
     )
 }
@@ -1464,13 +1485,21 @@ impl ActivationHandler for Activation {
     }
 }
 
-struct Actions(SurfaceId, Sender<(SurfaceId, ActionRequest)>);
+struct Actions(SurfaceId, Published, Sender<Request>);
 
 impl ActionHandler for Actions {
     fn do_action(&mut self, request: ActionRequest) {
+        let Ok(published) = self.1.lock() else {
+            return;
+        };
+        let generation = u32::try_from(request.target_node.0)
+            .ok()
+            .and_then(|slot| published.get(&WidgetId(slot)).copied())
+            .unwrap_or(0);
+        drop(published);
         // The receiver lives as long as the event loop; once it is gone the driver is ending
         // and there is nothing left to act on.
-        let _ = self.1.send((self.0, request));
+        let _ = self.2.send((self.0, generation, request));
     }
 }
 
