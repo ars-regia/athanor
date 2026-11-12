@@ -583,6 +583,8 @@ pub struct Ui {
     pub(crate) pose: crate::motion::Pose,
     /// The slots of the widgets [`Ui::remove_children`] removed, which [`Ui::add`] fills again.
     free: std::collections::BTreeSet<WidgetId>,
+    /// How many times each slot [`Ui::remove_children`] freed was freed: see [`Ui::generation`].
+    generations: std::collections::BTreeMap<WidgetId, u64>,
     /// The widgets whose active descendant is the selected row of a list, by the widget: see
     /// [`Ui::set_active_descendant`].
     pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
@@ -610,6 +612,7 @@ impl Ui {
             announcement: None,
             pose: crate::motion::Pose::REST,
             free: std::collections::BTreeSet::new(),
+            generations: std::collections::BTreeMap::new(),
             descendants: Vec::new(),
         }
     }

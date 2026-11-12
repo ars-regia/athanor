@@ -1704,7 +1704,7 @@ struct App {
     /// opens there.
     pressed_at: Option<(f32, f32)>,
     /// When the tooltip of the widget under the pointer, or focused, shows.
-    tooltip: Tooltip<(SurfaceId, WidgetId)>,
+    tooltip: Tooltip<(SurfaceId, WidgetId, u64)>,
     /// An error raised inside a callback, returned by [`run`].
     error: Option<Error>,
 }
@@ -1800,7 +1800,7 @@ impl App {
         let event = self
             .shell
             .get_mut(open.parent)
-            .and_then(|parent| parent.ui.field_edit(open.anchor, key));
+            .and_then(|parent| parent.ui.field_edit(open.anchor_in(&parent.ui)?, key));
         self.changed(open.parent, event);
     }
 
@@ -1952,9 +1952,10 @@ impl App {
         }
     }
 
-    /// The widget with a tooltip under the pointer, or newly focused, is now `target`: the
-    /// tooltip shown hides, and the target's shows after GTK's delay.
-    fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId)>) {
+    /// The widget with a tooltip under the pointer, or newly focused, is now `target`, with the
+    /// generation of its slot ([`Ui::generation`]): the tooltip shown hides, and the target's
+    /// shows after GTK's delay, if the widget is still the one in the slot.
+    fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId, u64)>) {
         let (hide, wait) = self.tooltip.point(target, Instant::now());
         if hide {
             self.close_tooltip();
@@ -1980,13 +1981,15 @@ impl App {
         if self.shell.popup.is_some_and(|p| p.menu) {
             return;
         }
-        let Some((id, widget)) = self.tooltip.due(generation) else {
+        let Some((id, widget, slot)) = self.tooltip.due(generation) else {
             return;
         };
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
-        let text = (widget.index() < ui.len() && ui.is_visible(widget))
+        let text = (widget.index() < ui.len()
+            && ui.generation(widget) == slot
+            && ui.is_visible(widget))
             .then(|| ui.tooltip(widget))
             .flatten();
         let Some(text) = text else {
@@ -2012,10 +2015,11 @@ impl App {
         let event = surface.ui.pointer_motion(x, y);
         let hovered = surface.ui.hovered();
         let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
+        let target = target.map(|w| (id, w, surface.ui.generation(w)));
         if event.is_some() || hovered != before || selecting {
             self.changed(id, event);
         }
-        self.point_tooltip(target.map(|w| (id, w)));
+        self.point_tooltip(target);
     }
 
     /// A button pressed on `id`. A press outside the open menu closes it and goes no further,
@@ -2168,10 +2172,11 @@ impl App {
         let event = surface.ui.key(key);
         let after = surface.ui.focus();
         let tip = after.filter(|&w| surface.ui.tooltip(w).is_some());
+        let tip = tip.map(|w| (id, w, surface.ui.generation(w)));
         self.changed(id, event);
         // The keyboard focus shows its widget's tooltip as the pointer does.
         if after != before {
-            self.point_tooltip(tip.map(|w| (id, w)));
+            self.point_tooltip(tip);
         }
     }
 }

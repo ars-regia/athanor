@@ -83,6 +83,12 @@ impl Ui {
             self.offered = None;
             self.clips.push(Clip::Unselect);
         }
+        // Served after the event, a cut or a paste of a removed field would reach the widget
+        // that takes its slot.
+        self.clips.retain(|clip| match clip {
+            Clip::Cut(id, _) | Clip::Paste(id) | Clip::PastePrimary(id) => !is_gone(*id),
+            Clip::Copy(_) | Clip::Select(_) | Clip::Unselect => true,
+        });
         self.descendants
             .retain(|&(owner, list)| !is_gone(owner) && !is_gone(list));
         for &id in &gone {
@@ -90,7 +96,16 @@ impl Ui {
             dead.visible = false;
             self.widgets[id] = dead;
             self.free.insert(id);
+            let generation = self.generations.entry(id).or_default();
+            *generation = generation.wrapping_add(1);
         }
+    }
+
+    /// How many times the slot of `id` was freed by [`Ui::remove_children`]. An id kept across
+    /// events, as the driver keeps a paste's field, a tooltip's widget or a menu's button,
+    /// names the same widget while its generation stays the one read when it was kept.
+    pub(crate) fn generation(&self, id: WidgetId) -> u64 {
+        self.generations.get(&id).copied().unwrap_or(0)
     }
 
     /// The slot of a removed widget for one added under `parent`, the lowest: any serves, since
@@ -384,6 +399,32 @@ mod tests {
             let r = ui.widget(widget).rect;
             assert_eq!(ui.hit(r.x + 1.0, r.y + 1.0), Some(widget));
         }
+    }
+
+    #[test]
+    fn a_removed_field_leaves_no_cut_or_paste_for_the_widget_in_its_slot() {
+        let mut ui = Ui::new("Form", Theme::default(), false);
+        let form = ui.add(Ui::ROOT, Kind::Column);
+        let field = ui.field(form, "Name", "abc");
+        ui.layout();
+        ui.set_focus(Some(field));
+        for key in [Key::SelectAll, Key::Cut, Key::Paste] {
+            ui.key(key);
+        }
+        let before = ui.generation(field);
+        ui.remove_children(form);
+        let next = ui.field(form, "Place", "");
+        assert_eq!(next, field, "the slot is reused");
+        assert_ne!(ui.generation(next), before, "and names another widget");
+        let clips = ui.take_clips();
+        assert!(
+            !clips.iter().any(|c| matches!(
+                c,
+                Clip::Cut(..) | Clip::Paste(_) | Clip::PastePrimary(_)
+            )),
+            "{clips:?}"
+        );
+        assert!(clips.iter().any(|c| matches!(c, Clip::Unselect)), "{clips:?}");
     }
 
     #[test]

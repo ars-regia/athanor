@@ -358,6 +358,9 @@ impl App {
     /// Reads the clipboard's text, or the primary selection's, into `widget` of `id`, as the
     /// event loop finds it readable. An empty clipboard, or one without text, pastes nothing.
     fn paste(&mut self, id: SurfaceId, widget: WidgetId, primary: bool) {
+        let Some(generation) = self.shell.ui(id).map(|ui| ui.generation(widget)) else {
+            return;
+        };
         let clipboards = &self.clipboards;
         let pipe = if primary {
             let offer = clipboards.primary_device.as_ref();
@@ -388,18 +391,23 @@ impl App {
             |app| &mut app.clipboards.pending,
             pipe,
             PASTE_TIMEOUT,
-            move |app, text| app.pasted(id, widget, &text),
+            move |app, text| app.pasted(id, (widget, generation), &text),
         );
         if let Err(error) = read {
             eprintln!("athanor-sal: nothing pasted: {error}");
         }
     }
 
-    /// Puts the text read from a clipboard into `widget` of `id`.
-    fn pasted(&mut self, id: SurfaceId, widget: WidgetId, text: &str) {
+    /// Puts the text read from a clipboard into `widget` of `id`, unless the widget was removed
+    /// while the text was read: its slot's generation is no longer `generation`.
+    fn pasted(&mut self, id: SurfaceId, (widget, generation): (WidgetId, u64), text: &str) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
+        if surface.ui.generation(widget) != generation {
+            eprintln!("athanor-sal: nothing pasted: its field was removed");
+            return;
+        }
         if let Some(event) = surface.ui.paste(widget, text) {
             self.changed(id, Some(event));
         }
