@@ -605,6 +605,9 @@ pub struct Widget {
     /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
     /// shown a cell.
     pub(crate) slots: usize,
+    /// The width the last measure gave it, which an inline adds a fill share to: placing it
+    /// again, as a scroll does, starts from this and never from the last placement.
+    pub(crate) natural_w: f32,
 }
 
 impl Widget {
@@ -627,6 +630,7 @@ impl Widget {
             ink: None,
             fill: false,
             slots: 0,
+            natural_w: 0.0,
         }
     }
 
@@ -2162,6 +2166,7 @@ impl Ui {
         let w = w.max(widget.min_w);
         widget.rect.w = w;
         widget.rect.h = h;
+        widget.natural_w = w;
         (w, h)
     }
 
@@ -2183,19 +2188,17 @@ impl Ui {
             Kind::Inline { padding } => self.place_inline(id, x, y, padding),
             Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
-                let n = children.len().max(self.widgets[id].slots).max(1) as f32;
+                let cells = children.len().max(self.widgets[id].slots).max(1);
+                let n = cells as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
-                let mut cx = if self.rtl { x + outer.w } else { x };
-                for c in children {
-                    self.widgets[c].rect.w = w;
-                    if self.rtl {
-                        cx -= w;
-                        self.place(c, cx, y);
-                        cx -= gap;
-                    } else {
-                        self.place(c, cx, y);
-                        cx += w + gap;
-                    }
+                for (at, c) in children.into_iter().enumerate() {
+                    // Each cell from its own offset, and the last one of a full row ends on the
+                    // row's far edge, so that no float residue builds up along the row.
+                    let start = at as f32 * (w + gap);
+                    let end = if at + 1 == cells { outer.w } else { start + w };
+                    let (cx, cw) = strip::mirrored(x, outer.w, start, end, self.rtl);
+                    self.widgets[c].rect.w = cw;
+                    self.place(c, cx, y);
                 }
             }
             Kind::Menu | Kind::List { .. } | Kind::Scroll { .. } => {
