@@ -174,6 +174,18 @@ check-rust:
     # runs this same command, so a drifted fuzz/Cargo.lock stops the weekly fuzz job unless it fails here,
     # first, before the rig build.
     cargo metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml >/dev/null
+    # A [patch.crates-io] entry that no crate resolves to drops its fix with only a warning: a lock
+    # that moves past the patched version (accesskit_unix 0.24.1 in #1084) fails here.
+    for manifest in Cargo.toml system/athanor-sal/gallery/Cargo.toml; do
+        warnings=$(cargo metadata --locked --format-version 1 --manifest-path "$manifest" 2>&1 >/dev/null) || {
+            printf '%s\n' "$warnings" >&2
+            exit 1
+        }
+        if grep 'was not used in the crate graph' <<<"$warnings"; then
+            echo "check-rust: $manifest resolves past a [patch.crates-io] entry" >&2
+            exit 1
+        fi
+    done
     bash forge/test/shell/rig.sh build-image
     # The calculator's test runs the real qalc of the rig and may not skip here.
     export ATHANOR_REQUIRE_QALC=1
