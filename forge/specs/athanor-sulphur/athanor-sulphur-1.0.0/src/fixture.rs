@@ -188,6 +188,36 @@ mod athanor_workspace_tiling {
     );
 }
 
+/// The client side of athanor-dock-overlap-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_dock_overlap {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+    );
+}
+
 /// The client side of athanor-a11y-v1.
 #[allow(
     dead_code,
@@ -365,6 +395,8 @@ struct Client {
     /// The `state` events of every athanor_workspace_tiling_v1 object, in order, `None` for
     /// `removed`.
     tilings: Vec<(ObjectId, Option<u32>)>,
+    /// The `overlapped` events of every athanor_dock_overlap_v1 object, in order.
+    overlaps: Vec<(ObjectId, u32)>,
 }
 
 /// An event of a zwlr_output_power_v1 object.
@@ -605,6 +637,24 @@ delegate_noop!(
 delegate_noop!(
     Client: athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::AthanorWorkspaceTilingManagerV1
 );
+
+delegate_noop!(
+    Client: athanor_dock_overlap::athanor_dock_overlap_manager_v1::AthanorDockOverlapManagerV1
+);
+
+impl Dispatch<athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1,
+        event: athanor_dock_overlap::athanor_dock_overlap_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_dock_overlap::athanor_dock_overlap_v1::Event::Overlapped { overlapped } = event;
+        client.overlaps.push((object.id(), overlapped));
+    }
+}
 
 impl Dispatch<athanor_workspace_tiling::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1, ()>
     for Client
@@ -1260,7 +1310,8 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
     athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 \
-    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1\n\
+    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1 \
+    athanor_dock_overlap_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
     zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
 
@@ -5753,6 +5804,10 @@ mod marks;
 // OS12: `xdg_toplevel.set_fullscreen`.
 #[cfg(test)]
 mod full_screen;
+
+// Decision 35: the dock's intellihide (athanor-dock-overlap-v1, `dock_overlap.rs`).
+#[cfg(test)]
+mod dock_overlap;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {

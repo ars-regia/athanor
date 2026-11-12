@@ -46,6 +46,9 @@ pub enum Privilege {
     KeyboardGroup,
     /// `athanor_workspace_tiling_manager_v1`: whether each workspace is tiled, read and set.
     WorkspaceTiling,
+    /// `athanor_dock_overlap_manager_v1`: whether a window covers the dock's rectangle, the
+    /// dock's (doc_own_stack.md decision 35).
+    DockOverlap,
     /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
     /// keyboard aids configured (doc_accessibility.md AX10, AX11).
     A11y,
@@ -62,7 +65,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 20] = [
+    const ALL: [(Self, &'static str); 21] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -91,6 +94,7 @@ impl Privilege {
             Self::WorkspaceTiling,
             "athanor_workspace_tiling_manager_v1",
         ),
+        (Self::DockOverlap, "athanor_dock_overlap_manager_v1"),
         (Self::TrustedPrompt, MARK),
     ];
 
@@ -850,6 +854,7 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
+                "athanor_dock_overlap_manager_v1",
             ],
         ),
         (

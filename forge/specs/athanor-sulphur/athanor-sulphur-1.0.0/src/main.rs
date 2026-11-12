@@ -14,6 +14,7 @@ mod clipboard;
 mod constraints;
 mod cursor;
 mod decoration;
+mod dock_overlap;
 mod focus_theme;
 mod foreign;
 mod gestures;

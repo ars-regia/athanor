@@ -1,4 +1,5 @@
 athanor_a11y_manager_v1
+athanor_dock_overlap_manager_v1
 athanor_keyboard_group_manager_v1
 athanor_toplevel_actions_v1
 athanor_toplevel_manager_v1

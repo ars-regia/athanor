@@ -2,6 +2,7 @@
 # repo-input: system/athanor-sulphur-client/protocols/athanor-keyboard-group-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-workspace-tiling-v1.xml
+# repo-input: system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0

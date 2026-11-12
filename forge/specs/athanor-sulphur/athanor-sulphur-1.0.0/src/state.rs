@@ -248,6 +248,8 @@ pub struct State {
     pub lifted: Option<Window>,
     /// The live objects of athanor-workspace-tiling-v1, those of a workspace gone excepted.
     pub workspace_tilings: Vec<AthanorWorkspaceTilingV1>,
+    /// The live objects of athanor-dock-overlap-v1 (decision 35).
+    pub dock_overlaps: Vec<crate::dock_overlap::Overlap>,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -358,6 +360,7 @@ impl State {
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
         crate::workspace_tiling::global(&dh);
+        crate::dock_overlap::global(&dh);
         crate::a11y::global(&dh);
         crate::output_management::global(&dh);
         crate::output_power::global(&dh);
@@ -451,6 +454,7 @@ impl State {
             tilings: Vec::new(),
             lifted: None,
             workspace_tilings: Vec::new(),
+            dock_overlaps: Vec::new(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,

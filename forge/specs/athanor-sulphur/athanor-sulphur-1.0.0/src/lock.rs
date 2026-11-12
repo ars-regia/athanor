@@ -101,6 +101,8 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        // Decision 35: nothing was sent while locked; the current answer is sent now.
+        self.resend_dock_overlaps();
         self.aids_drop_pending();
         self.aids_quiet_changed();
         self.focus_top();
