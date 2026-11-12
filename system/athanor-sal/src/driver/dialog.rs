@@ -60,6 +60,19 @@ impl Dialogs {
         self.open.iter().any(|&(_, parent)| parent == id)
     }
 
+    /// `id` and the dialogs open on it, and theirs, each dialog before the surface it was opened
+    /// on: the order in which they close when `id` is lost.
+    pub(super) fn closing_order(&self, id: SurfaceId) -> Vec<SurfaceId> {
+        let mut order: Vec<SurfaceId> = self
+            .open
+            .iter()
+            .filter(|&&(_, parent)| parent == id)
+            .flat_map(|&(dialog, _)| self.closing_order(dialog))
+            .collect();
+        order.push(id);
+        order
+    }
+
     /// Forgets `id`, a dialog or a parent; returns the dialogs open on it, which close with it.
     pub(super) fn closed(&mut self, id: SurfaceId) -> Vec<SurfaceId> {
         let children = self
@@ -126,6 +139,19 @@ mod tests {
         assert_eq!(buttons, [WindowButton::Close]);
         let mut window = Ui::new("A window", Theme::default(), false);
         assert_eq!(window.key(Key::Escape), Some(Event::Escape));
+        // A field composing with the input method keeps Escape for it.
+        let mut form = Ui::new("A form", Theme::default(), false);
+        form.set_dialog();
+        let field = form.field(Ui::ROOT, "Name", "");
+        form.layout();
+        form.set_focus(Some(field));
+        form.compose("ka", None);
+        assert_eq!(form.key(Key::Escape), None);
+        form.commit("か");
+        assert_eq!(
+            form.key(Key::Escape),
+            Some(Event::Window(WindowButton::Close))
+        );
         let mut alert = Ui::new("Replace?", Theme::default(), false);
         alert.root_role = RootRole::AlertDialog;
         alert.set_dialog();
@@ -149,6 +175,43 @@ mod tests {
         assert!(!dialogs.blocked(dialog));
         assert!(dialogs.closed(dialog).is_empty());
         assert!(!dialogs.blocked(window) && !dialogs.is_dialog(dialog));
+    }
+
+    /// Every way a dialog closes leaves its parent taking input again: its own close (the
+    /// application's, or its loss), and its parent's.
+    #[test]
+    fn every_close_unblocks_the_parent() {
+        let (window, dialog) = (SurfaceId(0), SurfaceId(1));
+        let mut dialogs = Dialogs::default();
+        // Shell::close of the dialog, and the loss of the dialog alone, forget the dialog.
+        dialogs.opened(dialog, window);
+        assert_eq!(dialogs.closing_order(dialog), [dialog]);
+        assert!(dialogs.closed(dialog).is_empty());
+        assert!(!dialogs.blocked(window));
+        // The parent's close or loss closes the dialog with it.
+        dialogs.opened(dialog, window);
+        for id in dialogs.closing_order(window) {
+            dialogs.closed(id);
+        }
+        assert!(!dialogs.blocked(window) && !dialogs.is_dialog(dialog));
+    }
+
+    #[test]
+    fn a_lost_window_closes_its_dialogs_first_innermost_first() {
+        let (window, first, nested, second) =
+            (SurfaceId(0), SurfaceId(1), SurfaceId(2), SurfaceId(3));
+        let other = SurfaceId(4);
+        let mut dialogs = Dialogs::default();
+        dialogs.opened(first, window);
+        dialogs.opened(nested, first);
+        dialogs.opened(second, window);
+        dialogs.opened(SurfaceId(5), other);
+        assert_eq!(
+            dialogs.closing_order(window),
+            [nested, first, second, window]
+        );
+        assert_eq!(dialogs.closing_order(first), [nested, first]);
+        assert_eq!(dialogs.closing_order(other), [SurfaceId(5), other]);
     }
 
     #[test]

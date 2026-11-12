@@ -364,6 +364,7 @@ fn run_on(
         reduced_motion: false,
         settled: Vec::new(),
         dialogs: dialog::Dialogs::bind(&globals, &qh),
+        blocking: Vec::new(),
     };
     let mut app = App {
         application: Box::new(application),
@@ -429,6 +430,7 @@ fn run_on(
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
         app.closed_by_application();
+        app.blocked_by_dialogs();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
             return Err(error);
@@ -535,6 +537,9 @@ pub struct Shell {
     settled: Vec<SurfaceId>,
     /// The modal dialogs open, each on its window.
     dialogs: dialog::Dialogs,
+    /// The windows a dialog opened on since the driver last ended the pointer's press and hover
+    /// on them.
+    blocking: Vec<SurfaceId>,
 }
 
 impl Shell {
@@ -786,13 +791,22 @@ impl Shell {
         let (wl, fractional) = self.new_surface();
         let window = self.window(wl, &ui, &app_id)?;
         window.set_parent(Some(&parent_window));
-        let modal = self.dialogs.set_modal(window.xdg_toplevel(), &self.qh);
         let id = self.adopt(ui, Shown::Window(window), fractional, None, (false, false))?;
-        if let Some(surface) = self.get_mut(id) {
+        // Made once the surface is taken, so that no refusal leaves it behind its toplevel:
+        // the surface destroys it before the toplevel when it closes.
+        if let Some(surface) = self.surfaces.iter_mut().find(|s| s.id == id) {
             surface.app_id = app_id;
-            surface.modal = modal;
+            if let Shown::Window(window) = &surface.shown {
+                surface.modal = self.dialogs.set_modal(window.xdg_toplevel(), &self.qh);
+            }
         }
         self.dialogs.opened(id, parent);
+        // The parent's menu or tooltip closes, since the parent takes no input, and the
+        // pointer's press and hover on it end at the end of the turn.
+        if self.popup.is_some_and(|p| p.parent == parent) {
+            self.close_popup();
+        }
+        self.blocking.push(parent);
         Ok(id)
     }
 
@@ -870,6 +884,9 @@ impl Shell {
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
         if matches!(from.shown, Shown::Popup(_)) {
             return Err(format!("no popup of the popup {parent:?}: one is open at a time").into());
+        }
+        if self.dialogs.blocked(parent) {
+            return Err(format!("no popup of {parent:?}: a dialog blocks it").into());
         }
         if anchor.index() >= from.ui.len() {
             return Err(format!("no widget {anchor:?} on {parent:?}").into());
@@ -1950,11 +1967,34 @@ impl App {
         }
     }
 
-    /// Closes `id`, which the application did not ask to close, and tells it.
+    /// Ends the pointer's press and hover on each window a dialog opened on in this turn, as if
+    /// the pointer left it: the release it waits for is the dialog's, and a drag under way ends
+    /// over no widget.
+    fn blocked_by_dialogs(&mut self) {
+        for parent in std::mem::take(&mut self.shell.blocking) {
+            let Some(surface) = self.shell.get_mut(parent) else {
+                continue;
+            };
+            let event = surface.ui.pointer_leave();
+            self.changed(parent, event);
+        }
+    }
+
+    /// Closes `id`, which the application did not ask to close, and tells it: the dialogs open
+    /// on it first, each before the surface it was opened on. One the application closes from
+    /// Application::closed is closed at its asking, and it is not told of it.
     fn lost(&mut self, id: SurfaceId) {
-        self.outputs.closed(id);
-        self.close(id);
-        self.application.closed(&mut self.shell, id);
+        let order = self.shell.dialogs.closing_order(id);
+        each_open(
+            self,
+            order,
+            |app, surface| app.shell.surfaces.iter().any(|s| s.id == surface),
+            |app, surface| {
+                app.outputs.closed(surface);
+                app.close(surface);
+                app.application.closed(&mut app.shell, surface);
+            },
+        );
     }
 
     /// Moves the accessibility adapters' window focus to the surface that takes the keys, after

@@ -2216,10 +2216,12 @@ impl Ui {
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
     /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
-    /// [`Event::Escape`], and in a dialog's widgets the window's Close.
+    /// [`Event::Escape`], and in a dialog's widgets the window's Close, but while a focused field
+    /// shows the input method's preedit: the input method's to cancel, as GTK's input method
+    /// filters keys before a dialog's bindings.
     pub fn key(&mut self, key: Key) -> Option<Event> {
         if key == Key::Escape && self.modal {
-            return Some(Event::Window(WindowButton::Close));
+            return (!self.composing()).then_some(Event::Window(WindowButton::Close));
         }
         if key == Key::Escape {
             return Some(Event::Escape);
@@ -2402,6 +2404,17 @@ impl Ui {
             self.set_focus(next);
         }
         None
+    }
+
+    /// Whether the focused field shows the input method's preedit.
+    fn composing(&self) -> bool {
+        let Some(id) = self.focus else {
+            return false;
+        };
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.is_composing(),
+            _ => false,
+        }
     }
 
     /// Shows the input method's preedit in the focused field, scrolled to its caret.
