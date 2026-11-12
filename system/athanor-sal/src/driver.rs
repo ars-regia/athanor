@@ -1615,19 +1615,21 @@ impl Ime {
     }
 }
 
-/// A focused field the input method writes to: its surface, its widget, and its content hint.
-type ImeField = (SurfaceId, WidgetId, ContentHint);
+/// A focused field the input method writes to: its surface, its widget, the generation of the
+/// widget's slot, and its content hint. A field removed and another focused in its slot is
+/// another field, enabled again with its own cursor rectangle.
+type ImeField = (SurfaceId, WidgetId, u64, ContentHint);
 
-/// The focused field of `ui` the input method writes to: its widget, its rectangle, and its
-/// content hint, multi-line for a text area.
-fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
+/// The focused field of `ui` the input method writes to: its widget, the generation of its slot,
+/// its rectangle, and its content hint, multi-line for a text area.
+fn ime_field(ui: &Ui) -> Option<(WidgetId, u64, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
     let hint = match widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
         _ => ContentHint::None,
     };
-    Some((id, widget.rect, hint))
+    Some((id, ui.generation(id), widget.rect, hint))
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -1890,10 +1892,11 @@ impl App {
             .ime
             .entered
             .and_then(|surface| Some((surface, ime_field(self.shell.ui(surface)?)?)));
-        if !self.ime.change(field.map(|(surface, (id, _, hint))| (surface, id, hint))) {
+        let enabled = field.map(|(surface, (id, slot, _, hint))| (surface, id, slot, hint));
+        if !self.ime.change(enabled) {
             return;
         }
-        if let Some((_, (_, r, hint))) = field {
+        if let Some((_, (_, _, r, hint))) = field {
             text_input.enable();
             text_input.set_content_type(hint, ContentPurpose::Normal);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
@@ -3103,12 +3106,12 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1), 0, ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
         assert!(ime.change(None));
         ime.entered = Some(b);
-        let field = Some((b, WidgetId(1), ContentHint::None));
+        let field = Some((b, WidgetId(1), 0, ContentHint::None));
         assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
         assert!(!ime.change(field));
@@ -3118,10 +3121,30 @@ mod tests {
     fn every_change_of_the_focused_field_enables_the_text_input_again() {
         let a = SurfaceId(1);
         let mut ime = Ime::default();
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1), 0, ContentHint::None))));
         // Another field of the same hint, on the same surface.
-        assert!(ime.change(Some((a, WidgetId(2), ContentHint::None))));
-        assert!(!ime.change(Some((a, WidgetId(2), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(2), 0, ContentHint::None))));
+        assert!(!ime.change(Some((a, WidgetId(2), 0, ContentHint::None))));
+    }
+
+    #[test]
+    fn a_field_focused_in_a_removed_fields_slot_enables_the_text_input_again() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.field(column, "Old", "");
+        ui.layout();
+        ui.set_focus(Some(old));
+        let a = SurfaceId(1);
+        let field = |ui: &Ui| ime_field(ui).map(|(id, slot, _, hint)| (a, id, slot, hint));
+        let mut ime = Ime::default();
+        assert!(ime.change(field(&ui)));
+        ui.remove_children(column);
+        let new = ui.field(column, "New", "");
+        ui.layout();
+        ui.set_focus(Some(new));
+        assert_eq!(new, old, "the slot is reused");
+        assert!(ime.change(field(&ui)), "the removed field's cursor rectangle stays");
+        assert!(!ime.change(field(&ui)));
     }
 
     #[test]
@@ -3161,7 +3184,7 @@ mod tests {
         let name = ui.field(Ui::ROOT, "Name", "");
         let notes = ui.text_area(Ui::ROOT, "Notes", "", 3);
         ui.layout();
-        let hint = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, hint));
+        let hint = |ui: &Ui| ime_field(ui).map(|(id, _, _, hint)| (id, hint));
         ui.set_focus(Some(name));
         assert_eq!(hint(&ui), Some((name, ContentHint::None)));
         ui.set_focus(Some(notes));
