@@ -6,7 +6,7 @@ use smithay::reexports::wayland_protocols_misc::server_decoration::server::__int
     ORG_KDE_KWIN_SERVER_DECORATION_INTERFACE, ORG_KDE_KWIN_SERVER_DECORATION_MANAGER_INTERFACE,
 };
 use smithay::wayland::compositor::{get_children, with_states};
-use crate::handlers::MAX_HELD_COMMITS;
+use crate::handlers::{MAX_HELD_COMMITS, MAX_RETAINED_COMMITS};
 use crate::pacing::MAX_TIMED_WAIT;
 use crate::toplevel_icon::{ToplevelIcon, MAX_ICON_BUFFERS};
 use smithay::wayland::fifo::FifoBarrierCachedState;
@@ -894,8 +894,8 @@ fn an_orphaned_subsurface_s_commits_count_for_it_alone() {
 }
 
 /// The commits a destroyed subsurface kept leave the bound with it, even while the compositor still
-/// holds the surface: subsurfaces destroyed one after another, together past the bound, leave
-/// their client connected and its window's commits applied.
+/// holds the surface: subsurfaces destroyed one after another, together past the client's bound
+/// on kept commits, leave their client connected and its window's commits applied.
 #[test]
 fn commits_kept_by_destroyed_subsurfaces_leave_the_bound_with_them() {
     let mut run = Running::start(None);
@@ -909,8 +909,9 @@ fn commits_kept_by_destroyed_subsurfaces_leave_the_bound_with_them() {
     let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
     let shm: wl_shm::WlShm = local.bind(1);
     let qh = local.queue.handle();
+    let destroyed = MAX_RETAINED_COMMITS / KEPT + 2;
     let mut held = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..destroyed {
         let child = compositor.create_surface(&qh, ());
         let subsurface = subcompositor.get_subsurface(&child, &surface, &qh, ());
         for _ in 0..KEPT {
@@ -923,12 +924,51 @@ fn commits_kept_by_destroyed_subsurfaces_leave_the_bound_with_them() {
     }
     local.roundtrip(&mut run);
     assert!(served.is_alive(), "destroyed subsurfaces past the bound together");
-    assert!(held.len() >= 3, "the compositor holds each destroyed subsurface");
+    assert!(held.len() >= destroyed, "the compositor holds each destroyed subsurface");
     let (buffer, _file) = local.buffer(&shm, WIDTH + 13, HEIGHT, [0, 0, 255, 255]);
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
     local.pump(&mut run, "the window's commit is applied", |_, state| {
         applied_width(state, &id) == Some(WIDTH + 13)
+    });
+    run.stop();
+}
+
+/// The commits all of a client's synchronised subsurfaces keep count together too: subsurfaces
+/// each under `MAX_HELD_COMMITS`, together one bound's worth short of `MAX_RETAINED_COMMITS`,
+/// leave their client connected, and one more past it has the client disconnected.
+#[test]
+fn many_subsurfaces_keeping_commits_together_past_the_client_bound_are_disconnected() {
+    const EACH: usize = MAX_HELD_COMMITS - 4;
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let qh = local.queue.handle();
+    let mut children = Vec::new();
+    for _ in 0..=MAX_RETAINED_COMMITS / EACH {
+        let child = compositor.create_surface(&qh, ());
+        let subsurface = subcompositor.get_subsurface(&child, &surface, &qh, ());
+        children.push((child, subsurface));
+    }
+    let (last, _) = children.pop().expect("a last subsurface");
+    for (child, _) in &children {
+        for _ in 0..EACH {
+            child.commit();
+        }
+    }
+    local.roundtrip(&mut run);
+    assert!(served.is_alive(), "the subsurfaces' commits under the client's bound");
+    for _ in 0..EACH {
+        last.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the client past its bound on kept commits is disconnected", |_| {
+        !served.is_alive()
     });
     run.stop();
 }

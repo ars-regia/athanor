@@ -141,8 +141,9 @@ then, for at most a second; the compositor answers that manager itself, and a ti
 not a time is the timer's `invalid_timestamp` error. Every commit a client has queued, on a fence,
 a timestamp, a barrier or an earlier commit of its surface, counts against one bound of 64, past
 which the client is disconnected; the commits a synchronised subsurface keeps for its parent's next
-commit count against the same bound per subsurface, and leave it with the subsurface. A destroyed
-surface's timestamps are released at once, so that a parent's commit carrying them goes on.
+commit count against the same bound per subsurface, and against a bound of 1024 for all of a
+client's subsurfaces together, and leave both with the subsurface. A destroyed surface's
+timestamps are released at once, so that a parent's commit carrying them goes on.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than

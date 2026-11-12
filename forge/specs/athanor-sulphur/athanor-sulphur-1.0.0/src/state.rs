@@ -519,6 +519,7 @@ impl State {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
@@ -533,6 +534,7 @@ impl State {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
             queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: true,
             grants: Vec::new(),
@@ -1651,6 +1653,8 @@ pub struct ClientState {
     pub compositor_state: CompositorClientState,
     /// How many of its commits are queued and not yet applied (`State::queue_commit`).
     pub queued: Arc<AtomicUsize>,
+    /// How many commits its synchronised subsurfaces keep, all together (`State::queue_commit`).
+    pub retained: Arc<AtomicUsize>,
     gone: channel::Sender<ClientId>,
     /// Whether it is confined: it connected through a security context, as a sandboxed
     /// application does, or through xwayland-satellite's socket.

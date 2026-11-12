@@ -55,7 +55,7 @@ use smithay::wayland::xdg_activation::{
 };
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -71,6 +71,16 @@ const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 /// descriptors or main-thread time (`queue_commit`, `hold_slot`). The same number bounds, per
 /// surface, the commits a synchronised subsurface keeps for its parent's next commit (`Retained`).
 pub const MAX_HELD_COMMITS: usize = 64;
+
+/// How many commits all of one client's synchronised subsurfaces may keep together, each a copy of
+/// its surface's state held until its parent's next commit (`Retained`). The per-surface bound
+/// alone multiplies by a number of surfaces nothing bounds: a client creating subsurfaces by the
+/// thousand and committing each 64 times would have the compositor keep millions of copies from a
+/// few megabytes of requests. A client commits its synchronised subsurfaces, then their parent,
+/// once a frame, so each keeps one or two commits at a time: 1024 lets sixteen subsurfaces reach
+/// `MAX_HELD_COMMITS` at once, or several hundred keep a frame or two each, while it holds the
+/// copies a flooding client makes to about a thousand, a few megabytes at most.
+pub const MAX_RETAINED_COMMITS: usize = 1024;
 
 /// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
 /// commits. wayland-server sends no `wl_display.error` on `Client::kill`, and `post_error` reads
@@ -88,21 +98,59 @@ pub struct HeldCommit {
     timed: bool,
 }
 
-/// Counts one commit from the moment it is committed until Smithay applies it or drops it: a
-/// blocker that never blocks, put on each commit, and dropped with the transaction that carries
-/// it. It counts in its client's `ClientState::queued` when the commit goes to the client's queue,
-/// and in its surface's `Retained` when the surface is a synchronised subsurface.
+/// Counts one commit in its client's `ClientState::queued` from the moment it is committed until
+/// Smithay applies it or drops it: a blocker that never blocks, put on each commit that goes to
+/// the client's queue, and dropped with the transaction that carries it.
 struct Queued(Arc<AtomicUsize>);
+
+/// The same for a commit of a synchronised subsurface, counted in the surface's `Retained`.
+struct Kept(Arc<Retained>);
 
 /// How many commits a synchronised subsurface keeps, each with its own copy of the surface's
 /// state, until a commit of its parent takes them (Smithay 62ec78d, `PrivateSurfaceData::commit`
 /// and `CachedState::commit`). They are the surface's, not the client's queue: they stay after a
 /// `set_desync` until the surface's next commit, and with a destroyed `wl_subsurface`, which
 /// leaves the surface synchronised and without a parent, until the surface has a parent again or
-/// is destroyed. Counted per surface, they never add up across surfaces, and a destroyed surface
-/// takes them out of every bound with it, whatever still holds it.
-#[derive(Default)]
-struct Retained(Arc<AtomicUsize>);
+/// is destroyed. They count per surface against `MAX_HELD_COMMITS`, and with every other
+/// synchronised subsurface's of their client against `MAX_RETAINED_COMMITS`; a destroyed surface
+/// takes them out of the client's count at once, whatever still holds it. Both are only changed on
+/// the compositor's thread, where Smithay drops blockers and calls destruction hooks.
+struct Retained {
+    /// The commits the surface keeps.
+    kept: AtomicUsize,
+    /// Its client's `ClientState::retained`.
+    client: Arc<AtomicUsize>,
+    /// Whether the surface is destroyed, its commits out of `client`.
+    destroyed: AtomicBool,
+}
+
+impl Retained {
+    /// Counts one more commit kept, and returns how many the surface and its client keep.
+    fn keep(&self) -> (usize, usize) {
+        let kept = self.kept.fetch_add(1, Ordering::Relaxed) + 1;
+        if self.destroyed.load(Ordering::Relaxed) {
+            return (kept, 0);
+        }
+        (kept, self.client.fetch_add(1, Ordering::Relaxed) + 1)
+    }
+
+    /// Counts one commit applied or dropped.
+    fn release(&self) {
+        self.kept.fetch_sub(1, Ordering::Relaxed);
+        if !self.destroyed.load(Ordering::Relaxed) {
+            self.client.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Takes the surface's commits out of its client's count, once, when the surface is
+    /// destroyed.
+    fn destroy(&self) {
+        if !self.destroyed.swap(true, Ordering::Relaxed) {
+            self.client
+                .fetch_sub(self.kept.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+}
 
 impl Blocker for Queued {
     fn state(&self) -> BlockerState {
@@ -113,6 +161,18 @@ impl Blocker for Queued {
 impl Drop for Queued {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl Blocker for Kept {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Kept {
+    fn drop(&mut self) {
+        self.0.release();
     }
 }
 
@@ -197,6 +257,11 @@ impl CompositorHandler for State {
             }
         });
         add_destruction_hook::<Self, _>(surface, |state, surface| {
+            if let Some(retained) =
+                with_states(surface, |states| states.data_map.get::<Arc<Retained>>().cloned())
+            {
+                retained.destroy();
+            }
             state.release_held_of(surface);
             state.fifo_surfaces.remove(&surface.id());
         });
@@ -370,7 +435,8 @@ impl State {
 
     /// Counts the commit `surface` is making, until it is applied or dropped, and whether it goes
     /// on: past `MAX_HELD_COMMITS` its client is disconnected instead. A synchronised
-    /// subsurface's commit counts in the subsurface's `Retained`, any other in its client's queued
+    /// subsurface's commit counts in the subsurface's `Retained`, and its client is also
+    /// disconnected past `MAX_RETAINED_COMMITS` of them; any other counts in its client's queued
     /// commits. The commits of a surface destroyed since stay in the queue until Smithay next
     /// looks at it and drops them, so a client at the bound has its queue looked at before it is
     /// judged.
@@ -378,24 +444,33 @@ impl State {
         let Some(client) = surface.client() else {
             return true;
         };
+        let Some((queued, retained_by_client)) = client
+            .get_data::<ClientState>()
+            .map(|data| (data.queued.clone(), data.retained.clone()))
+        else {
+            return true;
+        };
         if is_sync_subsurface(surface) {
             let retained = with_states(surface, |states| {
-                states.data_map.get_or_insert_threadsafe(Retained::default).0.clone()
+                states
+                    .data_map
+                    .get_or_insert_threadsafe(|| {
+                        Arc::new(Retained {
+                            kept: AtomicUsize::new(0),
+                            client: retained_by_client,
+                            destroyed: AtomicBool::new(false),
+                        })
+                    })
+                    .clone()
             });
-            let kept = retained.fetch_add(1, Ordering::Relaxed) + 1;
-            add_blocker(surface, Queued(retained));
-            if kept > MAX_HELD_COMMITS {
-                self.flooded(&client, "kept by a synchronised subsurface");
+            let (kept, kept_by_client) = retained.keep();
+            add_blocker(surface, Kept(retained));
+            if kept > MAX_HELD_COMMITS || kept_by_client > MAX_RETAINED_COMMITS {
+                self.flooded(&client, "kept by synchronised subsurfaces");
                 return false;
             }
             return true;
         }
-        let Some(queued) = client
-            .get_data::<ClientState>()
-            .map(|data| data.queued.clone())
-        else {
-            return true;
-        };
         let mut waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
         add_blocker(surface, Queued(queued.clone()));
         if waiting > MAX_HELD_COMMITS {
@@ -411,7 +486,7 @@ impl State {
         true
     }
 
-    /// Disconnects `client`, which has more than `MAX_HELD_COMMITS` commits `how`.
+    /// Disconnects `client`, which has more than its bound of commits `how`.
     fn flooded(&self, client: &Client, how: &str) {
         let id = client.id();
         tracing::warn!(?id, how, "a client has too many commits waiting: disconnected");
