@@ -1066,9 +1066,21 @@ ci_stage_seed() { # UD18 2
 }
 
 # What the check saw, for a failure of UD18 3: the guest and its journal are gone after the run.
+# Beyond the client's state, it records whether the check ran in the window (the unit's result
+# and start), the unit's journal of the whole boot, and whether the guest itself pulls :stable
+# through the mirror drop-in, so that a 'network' failure names the mirror, the route or the run.
 check_seen() { # check_seen JOURNAL
-  printf "update '%s', last_error '%s' from '%s'; the check's journal:\n%s" \
-    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "$1"
+  local unit boot pull status
+  unit=$(guest_ssh systemctl show -p Result,ExecMainStatus,ExecMainStartTimestamp athanor-update-check.service 2>&1) ||
+    unit+=" (systemctl show exited $?)"
+  boot=$(guest_ssh sudo journalctl -q -b -o short-iso -n 40 -u athanor-update-check.service 2>&1) ||
+    boot+=" (journalctl exited $?)"
+  status=0
+  pull=$(guest_ssh sudo timeout 90 skopeo inspect --raw "docker://$ATHANOR_UPDATE_REPOSITORY:stable" 2>&1 > /dev/null) || status=$?
+  ((status != 0)) || pull="the guest pulls $ATHANOR_UPDATE_REPOSITORY:stable"
+  ((status == 0)) || pull="skopeo inspect of $ATHANOR_UPDATE_REPOSITORY:stable on the guest exited $status: $pull"
+  printf "update '%s', last_error '%s' from '%s'; the unit: %s; %s; the check's journal:\n%s\nthe unit's journal of this boot:\n%s" \
+    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "${unit//$'\n'/, }" "$pull" "$1" "$boot"
 }
 
 ci_stage_upgrade() { # UD18 3 and 4
