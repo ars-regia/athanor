@@ -12,6 +12,7 @@ pub mod driver;
 pub(crate) mod focus;
 #[cfg(feature = "gpu")]
 pub(crate) mod gpu;
+mod drop_down;
 mod icon;
 mod motion;
 mod popup;
@@ -21,6 +22,7 @@ mod theme;
 mod widget;
 
 pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
+pub use drop_down::DropDown;
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use motion::{Curve, Motion, Pose};
 pub use render::Error;

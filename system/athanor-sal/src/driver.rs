@@ -384,7 +384,7 @@ fn run_on(
         modifiers: Modifiers::default(),
         // Optional: without them, a field copies and pastes nothing.
         clipboards: clipboard::Clipboards::bind(&globals, &qh),
-        field_menu: None,
+        own_menu: None,
         pressed_at: None,
         tooltip: Tooltip::default(),
         error: None,
@@ -1651,6 +1651,14 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
     }
 }
 
+/// What an item of a menu the driver opened does.
+enum Choice {
+    /// A field's context menu: the edit of this key.
+    Edit(Key),
+    /// A drop-down's items: choose the one at this index.
+    Item(usize),
+}
+
 struct App {
     application: Box<dyn Application>,
     shell: Shell,
@@ -1679,8 +1687,9 @@ struct App {
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
     clipboards: clipboard::Clipboards,
-    /// The context menu open on a field: its popup, and the key each of its items does.
-    field_menu: Option<(SurfaceId, Vec<(WidgetId, Key)>)>,
+    /// The menu the driver opened, a field's context menu or a drop-down's items: its popup,
+    /// and what each of its items does.
+    own_menu: Option<(SurfaceId, Vec<(WidgetId, Choice)>)>,
     /// Where a button is being pressed, while its press is handled: a field's context menu
     /// opens there.
     pressed_at: Option<(f32, f32)>,
@@ -1728,12 +1737,18 @@ impl App {
             Some(Event::ContextMenu(widget)) if surface.ui.field_text(widget).is_some() => {
                 self.open_field_menu(id, widget);
             }
-            Some(Event::Clicked(item)) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {
-                self.field_edit(item);
+            // A drop-down opens its own items, as a menu the driver does too.
+            Some(Event::Clicked(widget)) if surface.ui.chosen(widget).is_some() => {
+                self.open_drop_down(id, widget);
             }
-            // The field's menu is the driver's: the application never opened it, and gets none
-            // of its events, such as a context-menu event of an item at a press of the Menu key.
-            Some(_) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {}
+            Some(Event::Clicked(item) | Event::Toggled(item))
+                if self.own_menu.as_ref().is_some_and(|m| m.0 == id) =>
+            {
+                self.menu_chosen(item);
+            }
+            // The driver's menus are its own: the application never opened them, and gets none
+            // of their events, such as a context-menu event of an item at a press of the Menu key.
+            Some(_) if self.own_menu.as_ref().is_some_and(|m| m.0 == id) => {}
             Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
@@ -1759,19 +1774,41 @@ impl App {
             .shell
             .show_popup(id, widget, self.pressed_at, menu, Side::Bottom, true)
         {
-            Ok(surface) => self.field_menu = Some((surface, items)),
+            Ok(surface) => {
+                let items = items.into_iter().map(|(item, key)| (item, Choice::Edit(key)));
+                self.own_menu = Some((surface, items.collect()));
+            }
             Err(error) => eprintln!("athanor-sal: no context menu for the field: {error}"),
         }
     }
 
-    /// Does what `item` of the open field menu says in its field, once the menu has closed and
-    /// the focus returned to the field, with the serial of the click or the key that chose it.
-    fn field_edit(&mut self, item: WidgetId) {
-        let (Some((surface, items)), Some(open)) = (self.field_menu.take(), self.shell.popup)
+    /// Opens the items of drop-down `widget` of `id` in a menu under it, with the focus on the
+    /// chosen one, as GTK's DropDown does.
+    fn open_drop_down(&mut self, id: SurfaceId, widget: WidgetId) {
+        let Some((menu, items)) = self.shell.ui(id).and_then(|ui| ui.drop_down_menu(widget)) else {
+            return;
+        };
+        let chosen = items.iter().find(|&&(item, _)| menu.is_active(item)).map(|&(item, _)| item);
+        match self.shell.show_popup(id, widget, None, menu, Side::Bottom, true) {
+            Ok(surface) => {
+                if let Some(ui) = self.shell.ui_mut(surface) {
+                    ui.set_focus(chosen);
+                }
+                let items = items.into_iter().map(|(item, index)| (item, Choice::Item(index)));
+                self.own_menu = Some((surface, items.collect()));
+            }
+            Err(error) => eprintln!("athanor-sal: no menu for the drop-down: {error}"),
+        }
+    }
+
+    /// Does what `item` of the driver's open menu says, once the menu has closed and the focus
+    /// returned to its widget: edits the field, or chooses in the drop-down.
+    fn menu_chosen(&mut self, item: WidgetId) {
+        let (Some((surface, items)), Some(open)) = (self.own_menu.take(), self.shell.popup)
         else {
             return;
         };
-        let Some((_, key)) = items.into_iter().find(|&(i, _)| i == item) else {
+        let Some((_, choice)) = items.into_iter().find(|&(i, _)| i == item) else {
             return;
         };
         if open.surface != surface {
@@ -1781,7 +1818,10 @@ impl App {
         let event = self
             .shell
             .get_mut(open.parent)
-            .and_then(|parent| parent.ui.field_edit(open.anchor, key));
+            .and_then(|parent| match choice {
+                Choice::Edit(key) => parent.ui.field_edit(open.anchor, key),
+                Choice::Item(index) => parent.ui.choose(open.anchor, index),
+            });
         self.changed(open.parent, event);
     }
 
