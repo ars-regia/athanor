@@ -385,7 +385,7 @@ GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
 # is for. The names that are down go into the answer, so a dead session says what died.
 SESSION_UNITS = (
     b"athanor-session.target athanor-bar.service athanor-dock.service athanor-shelld.service"
-    b" cosmic-bg.service"
+    b" athanor-wallpaper.service"
 )
 SESSION_PROBE = (
     b"for i in $(seq 60); do"
@@ -407,7 +407,7 @@ SESSION_DIAGNOSTICS = (
     b"loginctl list-sessions --no-pager",
     b"systemctl --user list-units --failed --no-pager",
     b"systemctl --user status athanor-session.target athanor-desktop.service"
-    b" athanor-bar.service athanor-dock.service athanor-shelld.service cosmic-bg.service"
+    b" athanor-bar.service athanor-dock.service athanor-shelld.service athanor-wallpaper.service"
     b" --no-pager -l | head -60",
     # The compositor's own words, and the greeter's before them, under the tags the
     # session scripts log them with.

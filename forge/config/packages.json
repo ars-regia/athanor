@@ -15,6 +15,7 @@
     "layout-chooser",
     "shelld",
     "idle",
+    "wallpaper",
     "bar",
     "dock",
     "launcher",
@@ -60,6 +61,7 @@
     "layout-chooser",
     "shelld",
     "idle",
+    "wallpaper",
     "bar",
     "dock",
     "launcher",
@@ -117,7 +119,6 @@
   "upstream_desktop": [
     "cosmic-app-library",
     "cosmic-workspaces",
-    "cosmic-bg",
     "cosmic-launcher",
     "pop-launcher",
     "cosmic-osd",
