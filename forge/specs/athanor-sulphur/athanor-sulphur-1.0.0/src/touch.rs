@@ -206,53 +206,30 @@ impl State {
         self.touches.released.clear();
     }
 
-    /// A touchscreen went away with fingers on it: their release never comes, so each one's
-    /// client is sent `wl_touch.cancel` and its slot is free again. The touch points of other
-    /// devices are framed first, so that the cancel takes only the device's own.
+    /// A touchscreen went away with fingers on it: their release never comes. `wl_touch.cancel`
+    /// ends every touch point of a client, and Smithay cancels a seat's touch points only all at
+    /// once, so the removal cancels every touch held, the other devices' included, as the lock
+    /// does (`cancel_touches`): no touch point is left half held, and a finger still down on
+    /// another device reaches no one until it is lifted and put down again.
     pub(crate) fn touch_device_gone(&mut self, device: &str) {
-        let gone: Vec<_> = self
-            .touches
-            .held
-            .keys()
-            .filter(|(of, _)| of == device)
-            .cloned()
-            .collect();
-        if gone.is_empty() {
-            return;
+        if self.touches.held.keys().any(|(of, _)| of == device) {
+            self.cancel_touches();
         }
-        let Some(touch) = self.seat.get_touch() else {
-            return;
-        };
-        self.touch_frame();
-        let time = InputTime::now();
-        for key in gone {
-            if let Some((slot, location)) = self.touches.held.remove(&key) {
-                touch.motion(
-                    self,
-                    None,
-                    &MotionEvent {
-                        slot,
-                        location,
-                        time,
-                    },
-                );
-            }
-        }
-        touch.cancel(self);
     }
 
     /// Cancels every touch held: its surface is sent `wl_touch.cancel`, and its later motion and
     /// release reach no one. A move or resize from a touch ends. Smithay cancels only the touch
     /// points with an event since the last frame, so each is first given a motion where it
-    /// already is, which the cancel tells its client to discard.
+    /// already is, which the cancel tells its client to discard. The events before the cancel
+    /// are framed first, so that a release just before it keeps its frame. The grab is ended
+    /// before the motions, so that a window grab, which keeps its finger's motion, passes them.
     pub(crate) fn cancel_touches(&mut self) {
         let Some(touch) = self.seat.get_touch() else {
             return;
         };
+        self.touch_frame();
         touch.unset_grab(self);
         let held = std::mem::take(&mut self.touches.held);
-        self.touches.released.clear();
-        self.touches.unframed = false;
         if held.is_empty() {
             return;
         }

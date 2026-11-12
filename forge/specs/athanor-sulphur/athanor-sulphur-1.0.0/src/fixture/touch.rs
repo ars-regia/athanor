@@ -236,8 +236,9 @@ fn a_touchscreen_removed_cancels_its_touches() {
     run.stop();
 }
 
-/// Two fingers on a window: a move named by the first finger's serial is granted, as the grab of
-/// the seat is the first finger's, and follows that finger.
+/// Two fingers on a window: a move named by the second finger's serial is refused, and one named
+/// by the first finger's serial is granted, as the grab of the seat is the first finger's, and
+/// follows that finger.
 #[test]
 fn a_move_from_the_first_of_two_fingers() {
     let mut run = Running::start(None);
@@ -251,6 +252,12 @@ fn a_move_from_the_first_of_two_fingers() {
     local.pump(&mut run, "the touches", |client, _| {
         client.touch.downs.len() == 2
     });
+    toplevel._move(&seat, local.client.touch.downs[1].3);
+    local.roundtrip(&mut run);
+    assert!(
+        !touch_grab_is::<MoveGrab<TouchStart>>(&run),
+        "the second finger's serial is refused"
+    );
     let serial = local.client.touch.downs[0].3;
     toplevel._move(&seat, serial);
     local.roundtrip(&mut run);
@@ -266,6 +273,151 @@ fn a_move_from_the_first_of_two_fingers() {
     );
     up(&mut run, 1);
     up(&mut run, 0);
+    run.stop();
+}
+
+/// A release and then a cancel before the release's frame, as when the session locks or libinput
+/// cancels in between: the release is still framed.
+#[test]
+fn a_release_before_a_cancel_keeps_its_frame() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, _, _) = window_at(&mut run, (300, 200));
+    down(&mut run, 0, (320.0, 210.0).into());
+    x.roundtrip(&mut run);
+    let frames = x.client.touch.frames;
+
+    run.state.touch_up(SCREEN, slot(0), InputTime::now());
+    run.state.cancel_touches();
+    x.roundtrip(&mut run);
+    assert_eq!(x.client.touch.ups.len(), 1, "X's finger is lifted");
+    assert_eq!(
+        x.client.touch.frames,
+        frames + 1,
+        "X is sent the frame of its release"
+    );
+    assert_eq!(x.client.touch.cancels, 0, "and nothing is left to cancel");
+    run.stop();
+}
+
+/// A touchscreen removed while its finger moves a window: the move ends, the window's client is
+/// sent `cancel`, and a device of the same name touches the window again on the same slot.
+#[test]
+fn a_touchscreen_removed_during_a_touch_move_cancels_it() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, toplevel, _) = window_at(&mut run, (300, 200));
+    let id = x.id.clone().expect("an id");
+    let seat = x.seat.clone().expect("a seat");
+    let now = InputTime::now;
+
+    run.state
+        .touch_down("event2", slot(0), (320.0, 210.0).into(), now());
+    run.state.touch_frame();
+    x.pump(&mut run, "the touch", |client, _| {
+        !client.touch.downs.is_empty()
+    });
+    toplevel._move(&seat, x.client.touch.downs[0].3);
+    x.roundtrip(&mut run);
+    assert!(touch_grab_is::<MoveGrab<TouchStart>>(&run), "the move");
+    run.state
+        .touch_motion("event2", slot(0), (370.0, 230.0).into(), now());
+    run.state.touch_frame();
+
+    run.state.touch_device_gone("event2");
+    x.roundtrip(&mut run);
+    assert_eq!(x.client.touch.cancels, 1, "the window's touch is cancelled");
+    let touch = run.state.seat.get_touch().expect("a touch");
+    assert!(!touch.is_grabbed(), "the move ends");
+    assert_eq!(location_of(&run, &id), Point::from((350, 220)));
+
+    run.state
+        .touch_down("event2", slot(0), (380.0, 230.0).into(), now());
+    run.state.touch_frame();
+    run.state.touch_up("event2", slot(0), now());
+    run.state.touch_frame();
+    x.roundtrip(&mut run);
+    assert_eq!(x.client.touch.downs.len(), 2, "the same slot touches again");
+    assert_eq!(x.client.touch.ups.len(), 1, "and lifts");
+    assert!(!touch.is_grabbed(), "the seat lets go");
+    run.stop();
+}
+
+/// A finger of one touchscreen on a window and a finger of another on a second window, the first
+/// finger moving its window, and the second touchscreen is removed. `wl_touch.cancel` ends every touch point of a client, so the
+/// seat cancels every touch held: both windows are sent `cancel`, the move ends, and the finger
+/// left on the first touchscreen reaches no one until it is put down again, when it is a first
+/// touch with its own serial.
+#[test]
+fn a_touchscreen_removed_cancels_the_touches_of_every_device() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, toplevel, _) = window_at(&mut run, (300, 200));
+    let (mut y, _, _) = window_at(&mut run, (700, 200));
+    let id = x.id.clone().expect("an id");
+    let seat = x.seat.clone().expect("a seat");
+    let now = InputTime::now;
+
+    run.state
+        .touch_down("event1", slot(0), (320.0, 210.0).into(), now());
+    run.state.touch_frame();
+    run.state
+        .touch_down("event2", slot(0), (720.0, 210.0).into(), now());
+    run.state.touch_frame();
+    x.pump(&mut run, "the touch", |client, _| {
+        !client.touch.downs.is_empty()
+    });
+    y.pump(&mut run, "the second touch", |client, _| {
+        !client.touch.downs.is_empty()
+    });
+    toplevel._move(&seat, x.client.touch.downs[0].3);
+    x.roundtrip(&mut run);
+    assert!(touch_grab_is::<MoveGrab<TouchStart>>(&run), "the move");
+
+    run.state.touch_device_gone("event2");
+    x.roundtrip(&mut run);
+    y.roundtrip(&mut run);
+    assert_eq!(
+        (x.client.touch.cancels, y.client.touch.cancels),
+        (1, 1),
+        "both windows' touches are cancelled"
+    );
+    let touch = run.state.seat.get_touch().expect("a touch");
+    assert!(!touch.is_grabbed(), "the move ends");
+    let seen = |x: &Local| (x.client.touch.motions.len(), x.client.touch.ups.len());
+    let cancelled = seen(&x);
+
+    run.state
+        .touch_motion("event1", slot(0), (370.0, 230.0).into(), now());
+    run.state.touch_frame();
+    run.state.touch_up("event1", slot(0), now());
+    run.state.touch_frame();
+    x.roundtrip(&mut run);
+    assert_eq!(
+        location_of(&run, &id),
+        Point::from((300, 200)),
+        "the finger left moves nothing"
+    );
+    assert_eq!(
+        (seen(&x), x.client.touch.ups.len()),
+        (cancelled, 0),
+        "and its motion and release reach no one"
+    );
+
+    run.state
+        .touch_down("event1", slot(0), (320.0, 210.0).into(), now());
+    run.state.touch_frame();
+    x.pump(&mut run, "a new touch", |client, _| {
+        client.touch.downs.len() == 2
+    });
+    toplevel._move(&seat, x.client.touch.downs[1].3);
+    x.roundtrip(&mut run);
+    assert!(
+        touch_grab_is::<MoveGrab<TouchStart>>(&run),
+        "a new touch is a first touch, whose serial moves the window"
+    );
+    run.state.touch_up("event1", slot(0), now());
+    run.state.touch_frame();
     run.stop();
 }
 
