@@ -6,17 +6,34 @@
 
 use crate::widget::{Event, Kind, Rect, Ui, WidgetId};
 
-/// A drop-down: see [`Ui::drop_down`].
+/// A drop-down: see [`Ui::drop_down`]. Its fields are closed to applications so that the chosen
+/// index always names one of its items, or is 0 without items: only [`Ui::drop_down`] and
+/// [`Ui::set_drop_down`] make or change one.
 pub struct DropDown {
     /// Its name for assistive technologies.
-    pub name: String,
+    pub(crate) name: String,
     /// What it offers, in order.
-    pub items: Vec<String>,
+    pub(crate) items: Vec<String>,
     /// The index of the chosen item; 0 when there is none.
-    pub selected: usize,
+    pub(crate) selected: usize,
 }
 
 impl DropDown {
+    /// Its name for assistive technologies.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// What it offers, in order.
+    pub fn items(&self) -> &[String] {
+        &self.items
+    }
+
+    /// The index of the chosen item; 0 when there is none.
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
     /// The chosen item's text, empty when there is none.
     pub fn chosen_text(&self) -> &str {
         self.items.get(self.selected).map_or("", String::as_str)
