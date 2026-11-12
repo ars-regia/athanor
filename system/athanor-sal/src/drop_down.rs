@@ -136,7 +136,10 @@ impl Ui {
     /// Chooses the item at `index` of drop-down `id`, as its menu does: [`Event::Changed`] when
     /// the choice changed, `None` when it did not or `index` is past the end.
     pub(crate) fn choose(&mut self, id: WidgetId, index: usize) -> Option<Event> {
-        let Kind::DropDown(drop) = &mut self.widgets.get_mut(id.index())?.kind else {
+        if id.index() >= self.widgets.len() {
+            return None;
+        }
+        let Kind::DropDown(drop) = &mut self.widgets[id].kind else {
             return None;
         };
         if index >= drop.items.len() || index == drop.selected {
