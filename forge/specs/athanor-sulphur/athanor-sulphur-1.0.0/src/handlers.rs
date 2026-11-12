@@ -44,6 +44,7 @@ use smithay::wayland::selection::data_device::{
 };
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::shell::xdg::dialog::{ToplevelDialogHint, XdgDialogHandler};
 use smithay::wayland::shell::xdg::{
     Configure, PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
     XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
@@ -101,7 +102,8 @@ pub(crate) fn shown(window: &Window) -> bool {
 
 /// Whether `window` floats on a tiled workspace (D5, cosmic-comp's `layout::is_dialog`): it has
 /// a parent, or a minimum and a maximum size that are set and the same. The modal hint of
-/// xdg-dialog-v1, the reference's third case, reaches no window here: the global is not served.
+/// xdg-dialog-v1, the reference's third case, is not read here: decision 33 gives it the click of
+/// `focus_clicked` only.
 pub(crate) fn floats(window: &Window) -> bool {
     let Some(toplevel) = window.toplevel() else {
         return false;
@@ -540,6 +542,45 @@ impl State {
                 self.space.raise_element(above, false);
             }
         }
+    }
+
+    /// A click on `window`: it is raised with its dialogs, and the keyboard goes to its modal
+    /// dialog, if one is shown, else to it (decision 33). The dialog was above it, and stays.
+    pub(crate) fn focus_clicked(&mut self, window: &Window) {
+        let Some(dialog) = self.modal_of(window) else {
+            return self.focus(window);
+        };
+        self.space.raise_element(window, false);
+        for kept in self.subtree(window) {
+            self.space.raise_element(&kept, false);
+        }
+        self.focus(&dialog);
+    }
+
+    /// The topmost shown child of `window` with xdg-dialog-v1's modal hint, and down the chain
+    /// that one's own; none when `window` has no modal child shown.
+    fn modal_of(&self, window: &Window) -> Option<Window> {
+        let mut found = None;
+        let mut at = window.clone();
+        // A loop of parents ends: each step takes another window.
+        for _ in 0..self.space.elements().count() {
+            let Some(parent) = at.toplevel().map(|t| t.wl_surface().clone()) else {
+                break;
+            };
+            let child = self.space.elements().rev().find(|kept| {
+                shown(kept)
+                    && kept.toplevel().is_some_and(|t| {
+                        t.parent().as_ref() == Some(&parent)
+                            && dialog_hint(t) == ToplevelDialogHint::Modal
+                    })
+            });
+            let Some(child) = child.cloned() else {
+                break;
+            };
+            found = Some(child.clone());
+            at = child;
+        }
+        found
     }
 
     /// The window of `window`'s parent, mapped, minimised or on an inactive workspace.
@@ -1366,6 +1407,22 @@ impl XdgActivationHandler for State {
         }
     }
 }
+
+/// The hint xdg-dialog-v1 gives `toplevel`; `Unknown` without one.
+fn dialog_hint(toplevel: &ToplevelSurface) -> ToplevelDialogHint {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .map(|role| role.dialog_hint)
+            .unwrap_or_default()
+    })
+}
+
+/// xdg_wm_dialog_v1 (decision 33, standard): the modal hint is read at a click
+/// (`State::focus_clicked`); a window with a parent stays above it whatever its hint.
+impl XdgDialogHandler for State {}
 
 /// The title and the app id `toplevel` has set, empty when it has set none.
 fn names(toplevel: &ToplevelSurface) -> (String, String) {

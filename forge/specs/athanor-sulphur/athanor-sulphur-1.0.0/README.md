@@ -127,6 +127,25 @@ both selections without the focus, are privileged and granted to no client yet (
 see the standard globals, primary selection among them, and no privileged one, data control
 included, nor the security context manager.
 
+Decision 33 of `doc_own_stack.md`, wave 2a, adds standard globals. With `xdg_wm_dialog_v1` a
+window with a parent stays above it whatever its hint, and a click on a parent whose modal
+dialog is shown raises the parent with its dialogs and gives the keyboard to the dialog, the
+last of a chain of modal dialogs (`State::focus_clicked`, `src/fixture/parented.rs`).
+`wp_pointer_warp_v1` moves the pointer only within the surface that has both the pointer's
+focus, since the enter whose serial the warp names, and the keyboard: to a point on that
+surface, and in the confined area under a confinement; never under a pointer lock, which keeps
+the pointer still, nor while the session is locked. Ctrl+Alt+Tab's suspension of decision 30
+refuses it, as it deactivates a pointer lock, until the user clicks or keys back to the client
+(`src/constraints.rs`, `src/fixture/constraints.rs`).
+`xdg_system_bell_v1` shows a bell on the focus outline of decision 31, and sounds nothing: from
+the client of the window with the keyboard, at most one a second and never while the session
+is locked, the outline is hidden for 250 ms and drawn again, with no transition, or, under
+reduced motion (`doc_accessibility.md` AX9), drawn at twice its width for 500 ms. A bell is
+dropped wherever decision 31 draws no outline: from any other client, without a surface, on a
+maximised or full-screen window, with `active_hint` off or at a theme width of 0. Reduced
+motion is open: the compositor has no source for it yet, so the flag (`Bell::reduced_motion`)
+is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse

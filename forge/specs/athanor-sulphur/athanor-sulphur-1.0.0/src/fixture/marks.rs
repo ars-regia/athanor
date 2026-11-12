@@ -1,13 +1,16 @@
 //! Decision 31 (`marks.rs`, `focus_theme.rs`): the focus outline and the border of confined
-//! windows, and cosmic-comp's divider (#918), read from the frame.
+//! windows, and cosmic-comp's divider (#918), read from the frame; and decision 33's bell on
+//! the outline (`bell.rs`).
 
 use super::*;
+use crate::bell::{BLINK, GAP, WIDEN};
 use crate::focus_theme;
 use smithay::backend::renderer::element::{Element, Id};
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::desktop::PopupManager;
 use smithay::utils::{Rectangle, Scale};
 use wayland_client::protocol::wl_subcompositor;
+use wayland_protocols::xdg::system_bell::v1::client::xdg_system_bell_v1::XdgSystemBellV1;
 
 /// The factory accent, which the outline takes before a theme is read, as wide as
 /// `focus_theme::FACTORY_WIDTH`.
@@ -816,4 +819,201 @@ fn settled(run: &mut Running, what: &str, done: impl Fn(&[u8]) -> bool) {
             .dispatch(Some(Duration::from_millis(5)), &mut run.state)
             .expect("dispatch");
     }
+}
+
+// The bell of xdg_system_bell_v1 on the focus outline (decision 33, `bell.rs`).
+
+delegate_noop!(Client: XdgSystemBellV1);
+
+/// Rings the bell from `local`, on its window's surface or, with `on_window` false, on none.
+fn ring(run: &mut Running, local: &mut Local, on_window: bool) {
+    let bells: XdgSystemBellV1 = local.bind(1);
+    let surface = local.window.clone().map(|(surface, _)| surface);
+    bells.ring(surface.as_ref().filter(|_| on_window));
+    local.roundtrip(run);
+}
+
+/// A new client's window at `AT`, with the keyboard and outlined.
+fn belled(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
+    clear_the_fixture(run);
+    let mut local = Local::connect(run, None);
+    let toplevel = local.toplevel(run);
+    focused_at(run, &local, AT);
+    assert!(outlined(&frame(run)), "outlined before the bell");
+    (local, toplevel)
+}
+
+/// The outline's first column, on the left of the window at `AT`.
+fn outlined(shown: &[u8]) -> bool {
+    at(shown, AT.0 - 1, AT.1 + HEIGHT / 2) == ACCENT
+}
+
+/// The column the outline reaches only at twice its width.
+fn widened(shown: &[u8]) -> bool {
+    at(shown, AT.0 - 2 * OUTLINE, AT.1 + HEIGHT / 2) == ACCENT
+}
+
+/// Whether the outline's first column shows the background: hidden, not blended.
+fn hidden(shown: &[u8]) -> bool {
+    background(&at(shown, AT.0 - 1, AT.1 + HEIGHT / 2))
+}
+
+/// A bell blinks the outline once: hidden, with no blend, for at least `BLINK`, then drawn
+/// again at its width.
+#[test]
+fn a_bell_blinks_the_outline_once() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let rung = Instant::now();
+    ring(&mut run, &mut local, true);
+    assert!(hidden(&frame(&mut run)), "hidden");
+    settled(&mut run, "drawn again", |shown| {
+        outlined(shown) || {
+            assert!(hidden(shown), "hidden or drawn, nothing between");
+            false
+        }
+    });
+    assert!(rung.elapsed() >= BLINK, "hidden for {BLINK:?}");
+    assert!(!widened(&frame(&mut run)), "at its width");
+    run.stop();
+}
+
+/// Under reduced motion the outline does not blink: it is drawn at twice its width for at
+/// least `WIDEN`, then at its width.
+#[test]
+fn under_reduced_motion_a_bell_widens_the_outline() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    run.state.bell.reduced_motion = true;
+    let rung = Instant::now();
+    ring(&mut run, &mut local, true);
+    let shown = frame(&mut run);
+    assert!(outlined(&shown) && widened(&shown), "twice as wide");
+    settled(&mut run, "back to its width", |shown| {
+        assert!(outlined(shown), "never hidden");
+        !widened(shown)
+    });
+    assert!(rung.elapsed() >= WIDEN, "widened for {WIDEN:?}");
+    run.stop();
+}
+
+/// A second bell within `GAP` of an honoured one is dropped; one after it blinks.
+#[test]
+fn a_bell_is_honoured_at_most_once_a_second() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    ring(&mut run, &mut local, true);
+    settled(&mut run, "drawn again", outlined);
+    ring(&mut run, &mut local, true);
+    assert!(outlined(&frame(&mut run)), "a second bell within the second is dropped");
+    let rung = run.state.bell.rung.expect("an honoured bell");
+    run.state.bell.rung = Some(rung.checked_sub(GAP).expect("an earlier instant"));
+    ring(&mut run, &mut local, true);
+    assert!(hidden(&frame(&mut run)), "one after it blinks");
+    run.stop();
+}
+
+/// A bell from a client other than the focused window's is dropped, and does not count
+/// towards the second.
+#[test]
+fn a_bell_from_another_client_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let apart = window_of(&run, other.id.as_ref().expect("an id"));
+    run.state.space.map_element(apart, (900, 600), false);
+    focused_at(&mut run, &local, AT);
+    ring(&mut run, &mut other, true);
+    assert!(outlined(&frame(&mut run)), "no blink");
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    ring(&mut run, &mut local, true);
+    assert!(!outlined(&frame(&mut run)), "the focused client's bell blinks");
+    run.stop();
+}
+
+/// A bell without a surface is dropped, from the focused window's client too.
+#[test]
+fn a_bell_without_a_surface_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    ring(&mut run, &mut local, false);
+    assert!(outlined(&frame(&mut run)), "no blink");
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+}
+
+/// While the session is locked a bell is dropped, even from a client the keyboard went back to.
+#[test]
+fn a_bell_is_dropped_while_the_session_is_locked() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    let _locker = lock_the_session(&mut run);
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let surface = window.toplevel().map(|t| t.wl_surface().clone());
+    keyboard.set_focus(&mut run.state, surface, SERIAL_COUNTER.next_serial());
+    assert_eq!(run.state.focused_window(), Some(window), "the window has the keyboard");
+    ring(&mut run, &mut local, true);
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+}
+
+/// On a maximised window, which has no outline, a bell is dropped.
+#[test]
+fn a_bell_on_a_maximised_window_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, toplevel) = belled(&mut run);
+    local.roundtrip(&mut run);
+    local.client.configure = None;
+    toplevel.set_maximized();
+    local.redraw(&mut run);
+    focused_at(&mut run, &local, AT);
+    ring(&mut run, &mut local, true);
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+}
+
+/// On a full-screen window, which has no outline, a bell is dropped.
+#[test]
+fn a_bell_on_a_full_screen_window_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, toplevel) = belled(&mut run);
+    local.roundtrip(&mut run);
+    local.client.configure = None;
+    toplevel.set_fullscreen(None);
+    local.redraw(&mut run);
+    ring(&mut run, &mut local, true);
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+}
+
+/// With COSMIC's `active_hint` off, which draws no outline, a bell is dropped.
+#[test]
+fn a_bell_with_the_outline_off_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    run.state.focus_theme.enabled = false;
+    ring(&mut run, &mut local, true);
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+}
+
+/// At a theme width of 0, which draws no outline, a bell is dropped.
+#[test]
+fn a_bell_at_an_outline_width_of_zero_is_dropped() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let dir = std::env::temp_dir().join(format!("athanor-bell-{}", std::process::id()));
+    drop(std::fs::remove_dir_all(&dir));
+    let theme = dir.join(focus_theme::DARK).join("v2");
+    std::fs::create_dir_all(&theme).expect("the theme");
+    let handle = run.state.loop_handle.clone();
+    focus_theme::follow(&mut run.state, &handle, dir.clone());
+    std::fs::write(theme.join("active_hint"), "0").expect("a width");
+    settled(&mut run, "no outline", hidden);
+    ring(&mut run, &mut local, true);
+    assert!(run.state.bell.rung.is_none(), "not honoured");
+    run.stop();
+    std::fs::remove_dir_all(dir).expect("the directory");
 }

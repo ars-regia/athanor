@@ -34,6 +34,7 @@ use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
 use smithay::wayland::shell::wlr_layer::Layer;
+use smithay::wayland::shell::xdg::ToplevelSurface;
 use std::cell::RefCell;
 
 /// The window radius of `doc_visual_language.md`, the corners a mark follows.
@@ -915,6 +916,25 @@ where
     )
 }
 
+/// Whether `toplevel` is full screen, and whether it is maximised, as its client last
+/// committed.
+fn committed(toplevel: &ToplevelSurface) -> (bool, bool) {
+    toplevel.with_committed_state(|state| {
+        state.map_or((false, false), |state| {
+            (
+                state.states.contains(xdg_toplevel::State::Fullscreen),
+                state.states.contains(xdg_toplevel::State::Maximized),
+            )
+        })
+    })
+}
+
+/// Whether `toplevel` may have the focus outline: neither full screen nor maximised.
+pub(crate) fn marked(toplevel: &ToplevelSurface) -> bool {
+    let (full_screen, maximised) = committed(toplevel);
+    !full_screen && !maximised
+}
+
 /// `window` as it stands in the stack, front to back: its popups, each with a border when its
 /// client is confined, the window's own marks, and its surface tree.
 fn window_elements<R>(
@@ -934,14 +954,7 @@ fn window_elements<R>(
     let surface = toplevel.wl_surface();
     let offset = window.geometry().loc;
     let drawn_at = located.loc - offset;
-    let (full_screen, maximised) = toplevel.with_committed_state(|state| {
-        state.map_or((false, false), |state| {
-            (
-                state.states.contains(xdg_toplevel::State::Fullscreen),
-                state.states.contains(xdg_toplevel::State::Maximized),
-            )
-        })
-    });
+    let (full_screen, maximised) = committed(toplevel);
     let cut = if full_screen {
         place.output
     } else {
