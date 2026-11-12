@@ -4,7 +4,7 @@
 //! the chosen one checked. The driver opens the menu and does the choice: the application learns
 //! of it through [`crate::Event::Changed`].
 
-use crate::widget::{Event, Kind, Ui, WidgetId};
+use crate::widget::{Event, Kind, Rect, Ui, WidgetId};
 
 /// A drop-down: see [`Ui::drop_down`].
 pub struct DropDown {
@@ -25,6 +25,18 @@ impl DropDown {
 
 /// The side of the square a drop-down's arrow is drawn in, against the theme's font size.
 pub(crate) const ARROW: f32 = 0.75;
+
+/// Where a drop-down drawn in `r` puts its text, `text_w` wide, and its arrow, `arrow` wide:
+/// the left edge of each. The text sits at the start edge and the arrow at the end one, both
+/// `padding` in, so in right to left the text is at the right whatever the drop-down's width.
+pub(crate) fn spots(r: Rect, text_w: f32, arrow: f32, padding: f32, rtl: bool) -> (f32, f32) {
+    let (left, right) = (r.x + padding, r.x + r.w - padding);
+    if rtl {
+        (right - text_w, left)
+    } else {
+        (left, right - arrow)
+    }
+}
 
 impl Ui {
     /// Adds a drop-down named `name`, offering `items` with the one at `selected` chosen, or the
@@ -194,6 +206,24 @@ mod tests {
                 (Role::MenuItemRadio, Some(Toggled::False)),
                 (Role::MenuItemRadio, Some(Toggled::True))
             ]
+        );
+    }
+
+    #[test]
+    fn the_text_sits_at_the_start_edge_and_the_arrow_at_the_end_one() {
+        use crate::widget::Rect;
+        let r = Rect {
+            x: 10.0,
+            y: 0.0,
+            w: 200.0,
+            h: 30.0,
+        };
+        // A drop-down wider than its 50-pixel text and its 12-pixel arrow.
+        assert_eq!(super::spots(r, 50.0, 12.0, 8.0, false), (18.0, 190.0));
+        assert_eq!(
+            super::spots(r, 50.0, 12.0, 8.0, true),
+            (152.0, 18.0),
+            "the text at the right, the arrow at the left"
         );
     }
 

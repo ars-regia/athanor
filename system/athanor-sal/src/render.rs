@@ -582,17 +582,9 @@ pub fn paint<C: Canvas>(
                 ctx.set_paint(color(fill));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
                 let arrow = t.font_size * crate::drop_down::ARROW;
-                let ax = if ui.rtl {
-                    r.x + t.padding
-                } else {
-                    r.x + r.w - t.padding - arrow
-                };
+                let text_w = widget.text.as_ref().map_or(0.0, |layout| layout.width());
+                let (x, ax) = crate::drop_down::spots(r, text_w, arrow, t.padding, ui.rtl);
                 if let Some(layout) = &widget.text {
-                    let x = if ui.rtl {
-                        ax + arrow + t.gap
-                    } else {
-                        r.x + t.padding
-                    };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
                     draw_text(ctx, resources, layout, at, t.text)?;
                 }
