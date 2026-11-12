@@ -5,6 +5,7 @@
 //! AT-SPI per surface.
 
 mod clipboard;
+mod dialog;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
 use crate::motion::{Motion, Pose, Running};
@@ -322,6 +323,9 @@ fn run_on(
         .handle()
         .insert_source(receiver, |event, _, app: &mut App| {
             if let channel::Event::Msg((id, request)) = event {
+                if app.shell.dialogs.blocked(id) {
+                    return;
+                }
                 let event = app
                     .shell
                     .get_mut(id)
@@ -359,6 +363,7 @@ fn run_on(
         closing: Vec::new(),
         reduced_motion: false,
         settled: Vec::new(),
+        dialogs: dialog::Dialogs::bind(&globals, &qh),
     };
     let mut app = App {
         application: Box::new(application),
@@ -528,6 +533,8 @@ pub struct Shell {
     reduced_motion: bool,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
     settled: Vec<SurfaceId>,
+    /// The modal dialogs open, each on its window.
+    dialogs: dialog::Dialogs,
 }
 
 impl Shell {
@@ -755,6 +762,54 @@ impl Shell {
         }
     }
 
+    /// Opens `ui` as a modal dialog of the window `parent`, as GTK's modal windows: a window of
+    /// the parent's application id, its child, modal through `xdg_wm_dialog_v1` when the
+    /// compositor offers it. Its root reads as a modal dialog (an alert dialog keeps its role),
+    /// its title bar has only Close, and while it is open the parent takes no input: neither the
+    /// pointer, nor the keyboard, nor the input method, nor an assistive technology's action.
+    /// Escape, its Close button and the compositor's request to close it reach the application
+    /// as [`Event::Window`] with [`WindowButton::Close`], which closes the run for any other
+    /// window: the application answers it, at least with [`Shell::close`]. It closes with its
+    /// parent. It is drawn at its first configure; a parent that is not an open window is
+    /// refused.
+    pub fn open_dialog(&mut self, parent: SurfaceId, mut ui: Ui) -> Result<SurfaceId, Error> {
+        let Some(Surface {
+            shown: Shown::Window(parent_window),
+            app_id,
+            ..
+        }) = self.surfaces.iter().find(|s| s.id == parent)
+        else {
+            return Err(format!("no window {parent:?} to open a dialog on").into());
+        };
+        let (parent_window, app_id) = (parent_window.clone(), app_id.clone());
+        ui.set_dialog();
+        let (wl, fractional) = self.new_surface();
+        let window = self.window(wl, &ui, &app_id)?;
+        window.set_parent(Some(&parent_window));
+        let modal = self.dialogs.set_modal(window.xdg_toplevel(), &self.qh);
+        let id = self.adopt(ui, Shown::Window(window), fractional, None, (false, false))?;
+        if let Some(surface) = self.get_mut(id) {
+            surface.app_id = app_id;
+            surface.modal = modal;
+        }
+        self.dialogs.opened(id, parent);
+        Ok(id)
+    }
+
+    /// An xdg-toplevel for `ui`, which draws its own title bar, as GTK does, so that assistive
+    /// technologies find the title and the window's buttons in its tree; a compositor that
+    /// insists on drawing them says so in the first configure.
+    fn window(&self, wl: wl_surface::WlSurface, ui: &Ui, app_id: &str) -> Result<Window, Error> {
+        let xdg_shell = self
+            .xdg_shell
+            .as_ref()
+            .ok_or("the compositor does not offer xdg_wm_base")?;
+        let window = xdg_shell.create_window(wl, WindowDecorations::RequestClient, &self.qh);
+        window.set_title(ui.title.as_str());
+        window.set_app_id(app_id);
+        Ok(window)
+    }
+
     fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
         self.surfaces.iter_mut().find(|s| s.id == id)
     }
@@ -928,18 +983,11 @@ impl Shell {
         let mut input_region = None;
         let mut stretch = (false, false);
         let mut placed = None;
+        let mut window_app_id = String::new();
         let shown = match role {
             Role::Window { app_id } => {
-                let xdg_shell = self
-                    .xdg_shell
-                    .as_ref()
-                    .ok_or("the compositor does not offer xdg_wm_base")?;
-                // The window draws its own title bar, as GTK does, so assistive technologies
-                // find the title and the window's buttons in its tree; a compositor that insists
-                // on drawing them says so in the first configure.
-                let window = xdg_shell.create_window(wl, WindowDecorations::RequestClient, qh);
-                window.set_title(ui.title.as_str());
-                window.set_app_id(app_id);
+                let window = self.window(wl, &ui, &app_id)?;
+                window_app_id = app_id;
                 Shown::Window(window)
             }
             Role::Layer(options) => {
@@ -966,6 +1014,7 @@ impl Shell {
         if let Some(surface) = self.get_mut(id) {
             surface.layer = placed;
             surface.output = output.cloned();
+            surface.app_id = window_app_id;
         }
         Ok(id)
     }
@@ -1032,6 +1081,8 @@ impl Shell {
             redraw: false,
             dirty: false,
             motion: None,
+            app_id: String::new(),
+            modal: None,
         });
         if input_region.is_some() {
             self.set_input_region(id, input_region.as_deref())?;
@@ -1045,6 +1096,11 @@ impl Shell {
     /// Closes the surface `id`, and the popup open from it first. Closing a menu returns the focus
     /// to its widget.
     fn remove(&mut self, id: SurfaceId) {
+        // The dialogs open on it close with it, and the application ends what they held.
+        for dialog in self.dialogs.closed(id) {
+            self.remove(dialog);
+            self.closing.push(dialog);
+        }
         if let Some(open) = self.popup.filter(|p| p.surface == id || p.parent == id) {
             self.popup = None;
             self.surfaces.retain(|s| s.id != open.surface);
@@ -1278,6 +1334,10 @@ struct Surface {
     dirty: bool,
     /// The motion under way, which each frame callback advances.
     motion: Option<Running>,
+    /// A window's application id, which its dialogs take.
+    app_id: String,
+    /// A dialog's `xdg_dialog_v1`, when the compositor offers the global.
+    modal: Option<dialog::XdgDialogV1>,
 }
 
 impl Drop for Surface {
@@ -1285,6 +1345,10 @@ impl Drop for Surface {
         // Every close drops the surface: at the application's asking, the compositor's, or with
         // its output.
         self.withdraw();
+        // Before the toplevel, which the fields drop after this.
+        if let Some(modal) = self.modal.take() {
+            modal.destroy();
+        }
         // Before the wl_surface, which the fields drop after this.
         if let Some((scale, viewport)) = self.fractional.take() {
             scale.destroy();
@@ -1709,6 +1773,7 @@ impl App {
     /// Hands an event of `id`'s widgets to the application, then redraws what changed and
     /// updates the accessibility trees.
     fn update(&mut self, id: SurfaceId, event: Option<Event>) {
+        let dialog = self.shell.dialogs.is_dialog(id);
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
@@ -1720,7 +1785,8 @@ impl App {
                     window.set_minimized();
                 }
             }
-            Some(Event::Window(WindowButton::Close)) => {
+            // A dialog's Close is the application's to answer.
+            Some(Event::Window(WindowButton::Close)) if !dialog => {
                 self.shell.exit = true;
                 return;
             }
@@ -2040,7 +2106,7 @@ impl App {
     /// answers an older state sends no new state; the next one that answers the latest does.
     fn text_input_done(&mut self, serial: u32) {
         let (Pending { preedit, commit }, current) = self.ime.done(serial);
-        let Some(id) = self.ime.entered else {
+        let Some(id) = self.ime.entered.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return;
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -2132,7 +2198,7 @@ impl App {
             Some(open) if open.menu => Some(open.surface),
             _ => self.keyboard_focus,
         };
-        let Some(id) = target else {
+        let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return;
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -2304,8 +2370,14 @@ impl LayerShellHandler for App {
 }
 
 impl WindowHandler for App {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.shell.exit = true;
+    /// Ends the run, but for a dialog, whose application is asked as at its Close button.
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
+        match self.shell.find(window.wl_surface()).map(|s| s.id) {
+            Some(id) if self.shell.dialogs.is_dialog(id) => {
+                self.update(id, Some(Event::Window(WindowButton::Close)));
+            }
+            _ => self.shell.exit = true,
+        }
     }
 
     fn configure(
@@ -2536,7 +2608,11 @@ impl PointerHandler for App {
                 PointerEventKind::Leave { .. } => self.point_tooltip(None),
                 _ => {}
             }
-            if let Some(surface) = self.shell.find(&event.surface) {
+            // A parent a dialog blocks takes nothing but the pointer leaving it.
+            let leaving = matches!(event.kind, PointerEventKind::Leave { .. });
+            let open = self.shell.find(&event.surface).map(|s| s.id);
+            let blocked = !leaving && open.is_some_and(|id| self.shell.dialogs.blocked(id));
+            if let Some(surface) = self.shell.find(&event.surface).filter(|_| !blocked) {
                 let id = surface.id;
                 let at = (event.position.0 as f32, event.position.1 as f32);
                 match event.kind {

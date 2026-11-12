@@ -568,6 +568,8 @@ pub enum RootRole {
     /// A dialog that asks for an answer before the work goes on: ARIA's `alertdialog`, AT-SPI's
     /// alert.
     AlertDialog,
+    /// A dialog, as GTK's modal windows: ARIA's `dialog`, AT-SPI's dialog.
+    Dialog,
 }
 
 /// One window's widgets, theme, reading direction and keyboard focus.
@@ -590,6 +592,8 @@ pub struct Ui {
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
+    /// A modal dialog's widgets: see [`Ui::set_dialog`].
+    pub(crate) modal: bool,
     size: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
@@ -618,6 +622,7 @@ impl Ui {
             focus: None,
             text: TextContext::default(),
             title_bar: None,
+            modal: false,
             size: (0.0, 0.0),
             hover: None,
             press: None,
@@ -824,9 +829,23 @@ impl Ui {
         root.pop();
         root.insert(0, bar);
         self.add(bar, Kind::Label(self.title.clone()));
-        self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
+        if !self.modal {
+            self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        }
         self.add(bar, Kind::WindowButton(WindowButton::Close));
         self.title_bar = Some(bar);
+    }
+
+    /// Makes these widgets a modal dialog's, as [`crate::Shell::open_dialog`] does: the root
+    /// reads as a modal dialog, an alert dialog's role kept, the title bar has only Close, and
+    /// Escape is [`Event::Window`] with [`WindowButton::Close`], as GTK's dialogs close at
+    /// Escape.
+    pub(crate) fn set_dialog(&mut self) {
+        self.modal = true;
+        if self.root_role == RootRole::Window {
+            self.root_role = RootRole::Dialog;
+        }
     }
 
     /// Whether the point, in logical pixels, is on the title bar: where a press moves the window.
@@ -2197,8 +2216,11 @@ impl Ui {
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
     /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
-    /// [`Event::Escape`].
+    /// [`Event::Escape`], and in a dialog's widgets the window's Close.
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        if key == Key::Escape && self.modal {
+            return Some(Event::Window(WindowButton::Close));
+        }
         if key == Key::Escape {
             return Some(Event::Escape);
         }
