@@ -8,6 +8,7 @@
 extern crate self as athanor_sal;
 
 pub(crate) mod a11y;
+mod align;
 pub mod driver;
 pub(crate) mod focus;
 #[cfg(feature = "gpu")]
@@ -20,6 +21,7 @@ pub(crate) mod text;
 mod theme;
 mod widget;
 
+pub use align::Align;
 pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use motion::{Curve, Motion, Pose};

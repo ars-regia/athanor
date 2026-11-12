@@ -356,6 +356,8 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
+    /// Where it sits in its column, across it and along it: see [`Ui::set_align`].
+    pub(crate) align: [crate::Align; 2],
 }
 
 impl Widget {
@@ -372,6 +374,7 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
+            align: [crate::Align::Fill; 2],
         }
     }
 
@@ -1720,8 +1723,18 @@ impl Ui {
                     cy += self.widgets[bar].rect.h;
                     children = &children[1..];
                 }
+                // The widgets at the bottom follow one another up to the column's end.
+                let bottom: Vec<WidgetId> = children
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.widgets[c].align[1] == crate::Align::End)
+                    .collect();
+                let tail = bottom.iter().map(|&c| self.widgets[c].rect.h + gap).sum::<f32>();
+                let mut end_y = (outer.bottom() - edge - (tail - gap).max(0.0)).max(cy);
                 for &c in children {
-                    if matches!(
+                    let [across, along] = self.widgets[c].align;
+                    if across == crate::Align::Fill
+                        && matches!(
                         self.widgets[c].kind,
                         Kind::Row
                             | Kind::Group(_)
@@ -1733,7 +1746,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) {
+                    )
+                    {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     // An island and a picture take the rest of their column's height too.
@@ -1743,13 +1757,20 @@ impl Ui {
                         r.h = r.h.max(rest);
                     }
                     let r = self.widgets[c].rect;
-                    let cx = if self.rtl {
+                    // The end edge is the left one in right to left.
+                    let at_right = self.rtl != (across == crate::Align::End);
+                    let cx = if at_right {
                         x + outer.w - edge - r.w
                     } else {
                         x + edge
                     };
-                    self.place(c, cx, cy);
-                    cy += r.h + gap;
+                    if along == crate::Align::End {
+                        self.place(c, cx, end_y);
+                        end_y += r.h + gap;
+                    } else {
+                        self.place(c, cx, cy);
+                        cy += r.h + gap;
+                    }
                 }
             }
             Kind::Island { vertical, margin } => {
