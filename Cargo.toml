@@ -7,6 +7,7 @@ members = [
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "system/athanor-controls",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
+  "forge/specs/athanor-osd/athanor-osd-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
   "forge/specs/athanor-control-center/athanor-control-center-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
@@ -92,7 +93,7 @@ libpulse-binding = "2.30"
 # Serialization & Error Handling
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-toml = "0.8"
+toml = "1.1"
 thiserror = "2.0.19"
 anyhow = "1.0.99"
 

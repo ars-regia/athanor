@@ -77,6 +77,7 @@ AREAS = {
         "forge/specs/athanor-shelld/",
         "forge/specs/athanor-bar/",
         "forge/specs/athanor-dock/",
+        "forge/specs/athanor-osd/",
         "system/athanor-search/",
         "system/athanor-preview/",
         "system/athanor-preview-render/",

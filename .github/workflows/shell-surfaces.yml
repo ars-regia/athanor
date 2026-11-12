@@ -19,6 +19,7 @@ on:
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
       - "forge/specs/athanor-dock/**"
+      - "forge/specs/athanor-osd/**"
       - "system/athanor-search/**"
       - "system/athanor-preview/**"
       - "system/athanor-preview-render/**"
@@ -99,7 +100,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the layout crates
         run: bash forge/test/shell/rig.sh build-layout
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shell-rig-bin
           path: .scratch/shell-rig/bin
@@ -252,7 +253,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shell-rig-bin
           path: .scratch/shell-rig/bin
@@ -345,7 +346,7 @@ jobs:
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shell-rig-bin
           path: .scratch/shell-rig/bin

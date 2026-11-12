@@ -4500,6 +4500,9 @@ SESSION_UNITS = {
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
+    # Started by nothing until its bus service file comes with doc_osd.md's retirement step
+    # (OD15, OD17 step 5).
+    "athanor-osd.service": ("surface", True, "activated"),
     "athanor-update-notify.service": ("surface", False, "preset"),
     "athanor-sessiond.service": ("guard", False, "preset"),
     # SN6 names no class for the Super+C oneshot (doc_control_center.md, CC9); it runs once
