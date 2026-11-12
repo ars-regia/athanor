@@ -594,6 +594,8 @@ pub fn paint<C: Canvas>(
                 };
                 ctx.set_paint(color(fill));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
+            }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
