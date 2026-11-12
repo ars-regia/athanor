@@ -835,10 +835,18 @@ impl Ui {
         &self.widgets[id]
     }
 
-    /// Every widget of the tree, in the order they were added: the root first.
+    /// Every widget of the tree in the order of the tree: the root first, a parent before its
+    /// children, and each widget's subtree before its next sibling. The order the widgets are
+    /// drawn and found under the pointer in, whichever slots of the arena they hold; the slots
+    /// [`Ui::remove_children`] freed are not in it.
     pub(crate) fn ids(&self) -> impl Iterator<Item = WidgetId> {
-        // `add` keeps every index within a u32.
-        (0..self.widgets.len()).map(|i| WidgetId(i as u32))
+        let mut order = Vec::with_capacity(self.widgets.len());
+        let mut stack = vec![Self::ROOT];
+        while let Some(id) = stack.pop() {
+            order.push(id);
+            stack.extend(self.widgets[id].children.iter().rev());
+        }
+        order.into_iter()
     }
 
     /// The number of widgets in the tree, the root included.

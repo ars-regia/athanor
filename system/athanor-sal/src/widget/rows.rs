@@ -3,8 +3,6 @@
 //! in the field, the rows removed to fill the list anew, and the selected row as the field's
 //! active descendant for assistive technologies.
 
-use std::ops::Bound;
-
 use super::{Clip, Event, Kind, Ui, Widget, WidgetId};
 
 impl Ui {
@@ -95,17 +93,14 @@ impl Ui {
         }
     }
 
-    /// The slot of a removed widget for one added under `parent`: the first after `parent`'s,
-    /// since a parent comes before its children in the arena, which drawing relies on. `None`
-    /// when there is none, or when `parent` names no widget, for [`Ui::add`] to panic on.
+    /// The slot of a removed widget for one added under `parent`, the lowest: any serves, since
+    /// drawing and the pointer follow the order of the tree, not of the arena ([`Ui::ids`]).
+    /// `None` when there is none, or when `parent` names no widget, for [`Ui::add`] to panic on.
     pub(super) fn reuse(&mut self, parent: WidgetId) -> Option<WidgetId> {
         if parent.index() >= self.widgets.len() {
             return None;
         }
-        let after = (Bound::Excluded(parent), Bound::Unbounded);
-        let id = self.free.range(after).next().copied()?;
-        self.free.remove(&id);
-        Some(id)
+        self.free.pop_first()
     }
 
     /// Makes the selected row of `list` the active descendant of `owner` for assistive
@@ -322,11 +317,7 @@ mod tests {
             let Ok(icon) = Image::from_rgba8(1, 1, vec![0, 0, 0, 255]) else {
                 panic!("a 1 by 1 image");
             };
-            let image = ui.image(row, icon, 28.0, "");
-            assert!(
-                row > list && image > row,
-                "a parent comes before its children"
-            );
+            ui.image(row, icon, 28.0, "");
             ui.list_row(list, "Other");
             ui.layout();
             ui.select_row(row);
@@ -370,6 +361,29 @@ mod tests {
             panic!("the scroll has no node");
         };
         assert_eq!((node.scroll_y(), node.scroll_y_max()), (Some(0.0), Some(0.0)));
+    }
+
+    #[test]
+    fn rows_refilled_past_a_later_sibling_draw_and_take_the_pointer_in_the_order_of_the_tree() {
+        let (mut ui, [field, scroll, list, _], _) = results(2, false);
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.remove_children(list);
+        // Four rows in the three slots freed, and the fourth past the button in the arena.
+        let rows: Vec<_> = (1..=4)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        assert!(rows[3] > after, "a slot past the button");
+        ui.layout();
+        let order: Vec<_> = ui.ids().collect();
+        let mut tree = vec![Ui::ROOT, field, scroll, list];
+        tree.extend(&rows);
+        tree.push(after);
+        assert_eq!(order, tree, "the order of the tree, without the freed slots");
+        // The pointer finds the first row and the button below the scroll where they are drawn.
+        for widget in [rows[0], after] {
+            let r = ui.widget(widget).rect;
+            assert_eq!(ui.hit(r.x + 1.0, r.y + 1.0), Some(widget));
+        }
     }
 
     #[test]
