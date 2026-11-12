@@ -836,6 +836,52 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
             assert cmdline in proc.stdout, "a missing karg must print the command line"
 
 
+def test_session_probe_skips_only_absent_units(tmp: pathlib.Path) -> None:
+    """The probe typed on the serial console of the upgrade case runs on the published
+    :stable image, which does not ship a unit added since: a unit systemd cannot find is
+    named under `absent:` and does not kill the session, while the candidate's probe (the
+    one the SSH stages and the fresh install ask) still fails on it, and a unit that exists
+    and is inactive is down in both."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "session-probe"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    fakes = {
+        "sleep": "exit 0",
+        "loginctl": 'case "$1" in list-sessions) echo "c7 1000 collaudo seat0";;'
+        ' show-session) echo wayland;; esac',
+        "systemctl": 'shift; [ "$1" = -q ] && { shift; shift; case " $FAKE_DOWN $FAKE_GONE " in'
+        ' *" $1 "*) exit 3;; esac; exit 0; }; case " $FAKE_GONE " in *" ${5} "*)'
+        " echo not-found;; *) echo loaded;; esac",
+    }
+    for name, body in fakes.items():
+        (work / "bin" / name).write_text("#!/bin/sh\n" + body + "\n")
+        (work / "bin" / name).chmod(0o755)
+
+    def answer(probe: bytes, down: str, gone: str) -> str:
+        (work / "probe.sh").write_bytes(probe + b"\n")
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")],
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}",
+                 "FAKE_DOWN": down, "FAKE_GONE": gone},
+            capture_output=True, text=True, timeout=60,
+        )
+        return proc.stdout.strip()
+
+    wall = "athanor-wallpaper.service"
+    bar = "athanor-bar.service"
+    held, strict = console.SESSION_PROBE_HELD, console.SESSION_PROBE
+    assert answer(held, "", "") == "SESSION_ALIVE c7"
+    assert answer(held, "", wall) == f"SESSION_ALIVE c7 absent: {wall}"
+    assert answer(strict, "", wall) == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(held, wall, "") == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(strict, wall, "") == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(held, bar, wall) == f"SESSION_DEAD c7 down: {bar} absent: {wall}"
+    assert answer(strict, "", "") == "SESSION_ALIVE c7"
+
+
 def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
     """An installed system that follows :latest, or follows :stable without the signature
     policy, passes every other check; the verdict must fail it (UD2)."""
@@ -1444,6 +1490,7 @@ def main() -> int:
             test_karg_unreadable_fails,
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
+            test_session_probe_skips_only_absent_units,
             test_origin_missing_or_wrong_fails,
             test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
