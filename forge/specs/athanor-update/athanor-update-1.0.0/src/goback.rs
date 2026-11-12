@@ -136,13 +136,7 @@ pub(crate) mod tests {
 
     async fn ask(name: &str, service: Fake) -> Result<String, String> {
         let bus = Bus::start(name);
-        let _service = bus
-            .builder()
-            .name(BUS_NAME)
-            .serve_at(OBJECT_PATH, service)
-            .build()
-            .await
-            .expect("service");
+        let _service = bus.builder().name(BUS_NAME).serve_at(OBJECT_PATH, service).build().await.expect("service");
         let client = bus.builder().build().await.expect("client");
         run(&client).await
     }
