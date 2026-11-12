@@ -372,6 +372,7 @@ impl State {
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
         crate::foreign::global(&dh);
+        smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());

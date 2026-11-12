@@ -1,11 +1,16 @@
 //! The fixture's tests of a dialog with a parent (`follow_parent`): a toplevel whose parent is
 //! set through xdg-foreign or `xdg_toplevel.set_parent` is stacked above the parent, and takes
-//! the keyboard when the parent's client holds it.
+//! the keyboard when the parent's client holds it. A click on a parent with a modal dialog of
+//! xdg-dialog-v1 gives the keyboard to the dialog (decision 33, `focus_clicked`).
 
 use super::*;
+use wayland_protocols::xdg::dialog::v1::client::{xdg_dialog_v1, xdg_wm_dialog_v1};
 use wayland_protocols::xdg::foreign::zv2::client::{
     zxdg_exporter_v2, zxdg_imported_v2, zxdg_importer_v2,
 };
+
+delegate_noop!(Client: xdg_wm_dialog_v1::XdgWmDialogV1);
+delegate_noop!(Client: xdg_dialog_v1::XdgDialogV1);
 
 /// A toplevel of `Local::create`.
 pub(super) struct Created {
@@ -391,5 +396,120 @@ fn a_revoked_handle_sets_no_parent() {
     assert_eq!(window.toplevel().and_then(|t| t.parent()), None, "no parent");
     assert!(keyboard_on(&run, &parent), "the parent keeps the keyboard");
     assert!(level(&run, &window) < level(&run, &parent), "beneath it");
+    run.stop();
+}
+
+/// A child of `parent`, with the dialog object of xdg-dialog-v1, modal when `modal`.
+fn dialog_of(
+    run: &mut Running,
+    owner: &mut Local,
+    parent: &xdg_toplevel::XdgToplevel,
+    modal: bool,
+) -> (Created, xdg_dialog_v1::XdgDialogV1, smithay::desktop::Window) {
+    let dialogs: xdg_wm_dialog_v1::XdgWmDialogV1 = owner.bind(1);
+    let created = owner.create(run);
+    created.toplevel.set_parent(Some(parent));
+    let dialog = dialogs.get_xdg_dialog(&created.toplevel, &owner.queue.handle(), ());
+    if modal {
+        dialog.set_modal();
+    }
+    let window = owner.map(run, &created);
+    (created, dialog, window)
+}
+
+/// Puts the parent, its dialog and the window typed into apart, the dialog over part of the
+/// parent, so that a click can land on the parent alone; the point it lands on.
+fn apart(
+    run: &mut Running,
+    parent: &smithay::desktop::Window,
+    dialog: &smithay::desktop::Window,
+    typed: &smithay::desktop::Window,
+) -> Point<f64, Logical> {
+    run.state.space.relocate_element(parent, (100, 300));
+    run.state.space.relocate_element(dialog, (200, 350));
+    run.state.space.relocate_element(typed, (700, 300));
+    let at = Point::from((110.0, 310.0));
+    let parent_surface = parent.toplevel().map(|t| t.wl_surface().clone());
+    assert_eq!(
+        run.state.surface_under(at).map(|(surface, _)| surface),
+        parent_surface,
+        "the point is on the parent"
+    );
+    at
+}
+
+/// A click on the parent of a modal dialog raises the parent with the dialog above it and
+/// gives the keyboard to the dialog; a focus of the parent by other means keeps it above.
+#[test]
+fn a_click_on_the_parent_gives_the_keyboard_to_its_modal_dialog() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _other) = scene(&mut run);
+    let (_created, _dialog, window) = dialog_of(&mut run, &mut owner, &toplevel, true);
+    let (_typing, typed) = focused_window(&mut run);
+    let at = apart(&mut run, &parent, &window, &typed);
+    press(&mut run, at);
+    release(&mut run);
+    assert!(keyboard_on(&run, &window), "the dialog has the keyboard");
+    assert!(
+        level(&run, &typed) < level(&run, &parent) && level(&run, &parent) < level(&run, &window),
+        "the parent is raised, its dialog above it"
+    );
+    run.state.focus(&typed);
+    run.state.focus(&parent);
+    assert!(level(&run, &parent) < level(&run, &window), "still above the parent");
+    run.stop();
+}
+
+/// A click on the parent of a dialog that is not modal gives the keyboard to the parent, and
+/// the dialog stays above it.
+#[test]
+fn a_click_on_the_parent_of_a_dialog_that_is_not_modal_keeps_the_keyboard() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _other) = scene(&mut run);
+    let (_created, _dialog, window) = dialog_of(&mut run, &mut owner, &toplevel, false);
+    let (_typing, typed) = focused_window(&mut run);
+    let at = apart(&mut run, &parent, &window, &typed);
+    press(&mut run, at);
+    release(&mut run);
+    assert!(keyboard_on(&run, &parent), "the parent has the keyboard");
+    assert!(level(&run, &parent) < level(&run, &window), "the dialog above it");
+    run.stop();
+}
+
+/// A dialog whose modal hint is taken back is a dialog like any other: the click gives the
+/// keyboard to the parent.
+#[test]
+fn a_dialog_no_longer_modal_leaves_the_keyboard_to_its_parent() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _other) = scene(&mut run);
+    let (_created, dialog, window) = dialog_of(&mut run, &mut owner, &toplevel, true);
+    dialog.unset_modal();
+    owner.roundtrip(&mut run);
+    let (_typing, typed) = focused_window(&mut run);
+    let at = apart(&mut run, &parent, &window, &typed);
+    press(&mut run, at);
+    release(&mut run);
+    assert!(keyboard_on(&run, &parent), "the parent has the keyboard");
+    run.stop();
+}
+
+/// A modal dialog of a modal dialog: the click on the first parent gives the keyboard to the
+/// last of the chain.
+#[test]
+fn a_click_goes_down_a_chain_of_modal_dialogs() {
+    let mut run = Running::start(None);
+    let (mut owner, toplevel, _surface, parent, _other) = scene(&mut run);
+    let (first, _one, window) = dialog_of(&mut run, &mut owner, &toplevel, true);
+    let (_second, _two, last) = dialog_of(&mut run, &mut owner, &first.toplevel, true);
+    let (_typing, typed) = focused_window(&mut run);
+    let at = apart(&mut run, &parent, &window, &typed);
+    run.state.space.relocate_element(&last, (300, 400));
+    press(&mut run, at);
+    release(&mut run);
+    assert!(keyboard_on(&run, &last), "the last dialog has the keyboard");
+    assert!(
+        level(&run, &parent) < level(&run, &window) && level(&run, &window) < level(&run, &last),
+        "in order above the parent"
+    );
     run.stop();
 }

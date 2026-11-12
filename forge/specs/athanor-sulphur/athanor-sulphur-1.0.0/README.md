@@ -127,6 +127,11 @@ both selections without the focus, are privileged and granted to no client yet (
 see the standard globals, primary selection among them, and no privileged one, data control
 included, nor the security context manager.
 
+Decision 33 of `doc_own_stack.md`, wave 2a, adds standard globals. With `xdg_wm_dialog_v1` a
+window with a parent stays above it whatever its hint, and a click on a parent whose modal
+dialog is shown raises the parent with its dialogs and gives the keyboard to the dialog, the
+last of a chain of modal dialogs (`State::focus_clicked`, `src/fixture/parented.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse

@@ -23,6 +23,7 @@ zwp_pointer_gestures_v1 standard
 zxdg_decoration_manager_v1 standard
 zxdg_exporter_v2 standard
 zxdg_importer_v2 standard
+xdg_wm_dialog_v1 standard
 wp_fractional_scale_manager_v1 standard
 wp_presentation standard
 wp_cursor_shape_manager_v1 standard
