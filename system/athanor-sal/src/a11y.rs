@@ -45,7 +45,12 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_label(ui.title.as_str());
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+        Kind::Column
+        | Kind::Row
+        | Kind::TitleBar
+        | Kind::Island { .. }
+        | Kind::Inline { .. }
+        | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
         Kind::Group(name) => {
