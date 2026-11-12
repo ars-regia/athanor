@@ -2559,11 +2559,24 @@ impl PointerHandler for App {
                         self.changed(id, event);
                     }
                     // wl_pointer's axis values are in surface coordinates: logical pixels.
-                    PointerEventKind::Axis { vertical, .. } => {
+                    PointerEventKind::Axis {
+                        horizontal,
+                        vertical,
+                        ..
+                    } => {
                         let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+                        // A turn no scroll took goes to the widget under the pointer.
+                        let event = if moved {
+                            None
+                        } else {
+                            let steps = crate::widget::wheel::steps;
+                            let dx = steps(horizontal.value120, horizontal.discrete);
+                            let dy = steps(vertical.value120, vertical.discrete);
+                            surface.ui.pointer_wheel(at.0, at.1, dx, dy)
+                        };
                         self.hide_tooltip();
-                        if moved {
-                            self.changed(id, None);
+                        if moved || event.is_some() {
+                            self.changed(id, event);
                         }
                     }
                     _ => {}
