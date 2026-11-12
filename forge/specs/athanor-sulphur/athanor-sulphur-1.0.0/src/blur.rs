@@ -186,13 +186,17 @@ impl Blur {
         &self.backdrop
     }
 
-    /// Blurs `rect` of the backdrop in place: down through the levels, up back, and the last
-    /// pass, with the saturation, drawn back over `rect`.
+    /// Blurs `rect` of the backdrop in place, as far as it lies in the backdrop: down through the
+    /// levels, up back, and the last pass, with the saturation, drawn back over that part, which
+    /// is the part the passes read.
     pub fn in_place(
         &mut self,
         renderer: &mut GlesRenderer,
         rect: Rectangle<i32, Buffer>,
     ) -> Result<(), Error> {
+        let rect = rect
+            .intersection(Rectangle::from_size(self.backdrop.size()))
+            .ok_or("the region lies outside the blur's buffers")?;
         let last = self.passes(renderer, rect)?;
         let to = Rectangle::<i32, Physical>::new(
             (rect.loc.x, rect.loc.y).into(),

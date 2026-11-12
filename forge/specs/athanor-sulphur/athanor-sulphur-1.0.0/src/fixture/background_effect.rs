@@ -571,3 +571,42 @@ fn d35_a_capture_leaves_the_screens_blur_as_it_was() {
     );
     run.stop();
 }
+
+/// Under the magnifier, a region whose box reaches past the output is copied, blurred and drawn
+/// only where it is on the output, and nothing of it is stretched: the edge between the stripes
+/// and the window's black bottom left stays where the magnifier puts it.
+#[test]
+#[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
+fn d35_under_the_magnifier_a_region_past_the_output_is_not_stretched() {
+    let (mut run, mut scene, _first) = on_m2();
+    let region = scene.region();
+    scene.set(&mut run, Some(&region));
+    // About the window's top left, the subsurface's box reaches past the output's bottom.
+    run.state.pointer_to(
+        Point::from((f64::from(AT.0), f64::from(AT.1))),
+        InputTime::now(),
+    );
+    run.state.zoom_step(true);
+    run.state.zoom_step(true);
+    let level = run.state.a11y.level;
+    let shot = frame(&mut run);
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    let magnified = |at: i32, of: i32| f64::from(at) + f64::from(of) * level;
+    let bottom = magnified(AT.1, CHILD_AT.1 + CHILD.1);
+    assert!(
+        bottom > f64::from(height),
+        "the box reaches past the output: {bottom}"
+    );
+    // A column of the window's left half, under the region and clear of the hole.
+    let x = magnified(AT.0, 100) as i32;
+    let edge = magnified(AT.1, PARENT.1 / 2);
+    let from = magnified(AT.1, CHILD_AT.1 + 20) as i32;
+    let crossing = (from..height)
+        .find(|&y| pixel(&shot, width, x, y)[0] < 64)
+        .expect("the edge under the region");
+    assert!(
+        (f64::from(crossing) - edge).abs() <= 3.0,
+        "the edge is at {crossing}, not at {edge}: the blur is stretched"
+    );
+    run.stop();
+}
