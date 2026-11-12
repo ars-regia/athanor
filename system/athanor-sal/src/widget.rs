@@ -431,6 +431,10 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
+    /// The primary button was pressed outside every island of a surface that has one: on its
+    /// transparent part, where a panel drawn on a surface over the whole output closes, as the
+    /// control center does (doc_control_center.md CC9).
+    PressedOutside,
 }
 
 /// A pointer button, as the driver maps it from the evdev codes.
@@ -1511,6 +1515,16 @@ impl Ui {
         })
     }
 
+    /// Whether the point is outside every shown island, on a `Ui` that shows one.
+    fn outside_islands(&self, x: f32, y: f32) -> bool {
+        let mut fills = self
+            .ids()
+            .filter(|&id| self.is_visible(id))
+            .filter_map(|id| self.island_fill(id))
+            .peekable();
+        fills.peek().is_some() && fills.all(|fill| !fill.contains(x, y))
+    }
+
     /// The window's size in logical pixels, after [`Ui::layout`].
     pub fn size(&self) -> (f32, f32) {
         self.size
@@ -1906,6 +1920,9 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
+                if id.is_none() && self.outside_islands(x, y) {
+                    return Some(Event::PressedOutside);
+                }
                 // A field puts its caret at the press; a slider takes its value from it, and
                 // from the drag that follows.
                 let id = id.filter(|&id| !self.point_in_field(id, x, y, false))?;
@@ -3843,6 +3860,39 @@ mod tests {
             assert_eq!(selected(&ui, name), None, "rtl {rtl}");
             assert_eq!(ui.field_text(name).as_deref(), Some("abcdef"));
         }
+    }
+
+
+    #[test]
+    fn a_press_outside_the_islands_is_reported_and_one_inside_is_not() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.min_width = 400.0;
+        ui.min_height = 300.0;
+        let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+        ui.add(island, Kind::Label("Wi-Fi".into()));
+        let button = ui.add(island, Kind::Button("Settings".into()));
+        ui.layout();
+        let fill = ui.island_fill(island).unwrap_or_default();
+        let inside = (fill.x + 1.0, fill.y + 1.0);
+        assert!(fill.contains(inside.0, inside.1) && !fill.contains(1.0, 1.0));
+        assert_eq!(
+            ui.pointer_press(1.0, 1.0, PointerButton::Primary),
+            Some(Event::PressedOutside)
+        );
+        ui.pointer_release(1.0, 1.0, PointerButton::Primary);
+        assert_eq!(ui.pointer_press(inside.0, inside.1, PointerButton::Primary), None);
+        ui.pointer_release(inside.0, inside.1, PointerButton::Primary);
+        let r = ui.widget(button).rect;
+        assert_eq!(
+            ui.click(r.x + 1.0, r.y + 1.0),
+            Some(Event::Clicked(button))
+        );
+        // Without an island, nothing is outside.
+        let mut plain = Ui::new("t", Theme::default(), false);
+        plain.min_width = 100.0;
+        plain.add(Ui::ROOT, Kind::Label("x".into()));
+        plain.layout();
+        assert_eq!(plain.pointer_press(90.0, 1.0, PointerButton::Primary), None);
     }
 
     #[test]
