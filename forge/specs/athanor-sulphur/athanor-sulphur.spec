@@ -61,6 +61,10 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 - Serve wp_pointer_warp_v1 (decision 33): a warp moves the pointer only within the surface
   that has both the pointer focus and the keyboard focus, and never while Ctrl+Alt+Tab has
   suspended its client.
+- Serve xdg_system_bell_v1 (decision 33): a bell from the client of the focused window, at
+  most one a second and never while the session is locked, blinks that window's focus
+  outline once, or widens it for half a second under reduced motion; a bell where no outline
+  is drawn is dropped.
 
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
 - Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:

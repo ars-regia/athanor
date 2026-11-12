@@ -232,6 +232,8 @@ pub struct State {
     pub inhibitors: HashMap<WlSurface, usize>,
     /// The keyboard-shortcuts inhibitors and the clients Ctrl+Alt+Tab suspended (`constraints`).
     pub input_hold: crate::constraints::Held,
+    /// xdg_system_bell_v1's bells, shown on the focus outline (decision 33).
+    pub bell: crate::bell::Bell,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -373,6 +375,7 @@ impl State {
         crate::decoration::global(&dh);
         crate::foreign::global(&dh);
         smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
+        crate::bell::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -445,6 +448,7 @@ impl State {
             idle_notifier_state,
             inhibitors: HashMap::new(),
             input_hold,
+            bell: crate::bell::Bell::default(),
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
@@ -1683,11 +1687,18 @@ pub fn unconfined(client: &Client) -> bool {
 }
 
 impl State {
-    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31).
+    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31), with the bell of
+    /// decision 33 on the focused window's outline.
     pub fn marks(&self) -> Marks {
+        let focused = self.focused_window();
+        let outline = self.focus_theme.outline();
+        let outline = match &focused {
+            Some(window) => self.bell.outline(window, outline),
+            None => outline,
+        };
         Marks {
-            focused: self.focused_window(),
-            outline: self.focus_theme.outline(),
+            focused,
+            outline,
             edge: self.focus_theme.edge(),
         }
     }

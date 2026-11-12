@@ -8,6 +8,7 @@
 
 mod a11y;
 mod aids;
+mod bell;
 mod bindings;
 mod capture;
 mod clipboard;

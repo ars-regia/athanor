@@ -136,6 +136,14 @@ focus, since the enter whose serial the warp names, and the keyboard: to a point
 surface, and in the confined area under a confinement. Ctrl+Alt+Tab's suspension of decision 30
 refuses it, as it deactivates a pointer lock, until the user clicks or keys back to the client
 (`src/constraints.rs`, `src/fixture/constraints.rs`).
+`xdg_system_bell_v1` shows a bell on the focus outline of decision 31, and sounds nothing: from
+the client of the window with the keyboard, at most one a second and never while the session
+is locked, the outline is hidden for 250 ms and drawn again, with no transition, or, under
+reduced motion (`doc_accessibility.md` AX9), drawn at twice its width for 500 ms. A bell is
+dropped wherever decision 31 draws no outline: from any other client, without a surface, on a
+maximised or full-screen window, with `active_hint` off or at a theme width of 0. Nothing sets
+reduced motion in the compositor yet: the flag (`Bell::reduced_motion`) is read, and the
+fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
