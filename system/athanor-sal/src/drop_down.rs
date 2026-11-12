@@ -99,8 +99,8 @@ impl Ui {
 
     /// The menu drop-down `id` opens: its items as radios, the chosen one checked, each with
     /// the index it chooses. A menu taller than `max_height`, the height of the output, holds
-    /// its items in a scroll that fits it. `None` for a drop-down without items, or a widget
-    /// that is not one.
+    /// its items in a scroll that fits it, never shorter than one item. `None` for a drop-down
+    /// without items, or a widget that is not one.
     pub(crate) fn drop_down_menu(
         &self,
         id: WidgetId,
@@ -126,9 +126,12 @@ impl Ui {
         };
         let (mut menu, items) = build(None);
         let (_, height) = menu.layout();
-        match max_height.filter(|&max| height > max) {
-            // The root's margin stays around the scroll.
-            Some(max) => Some(build(Some(max - 2.0 * self.theme.margin))),
+        // The root's margin stays around the scroll, which shows one item at least however short
+        // the bound; a bound of 0 or less, or not finite, is none.
+        let margins = 2.0 * self.theme.margin;
+        let item = items.first().map_or(0.0, |&(first, _)| menu.widget(first).rect.h);
+        match max_height.filter(|&max| max.is_finite() && max > 0.0 && height > max) {
+            Some(max) => Some(build(Some((max - margins).max(item)))),
             None => Some((menu, items)),
         }
     }
@@ -260,6 +263,29 @@ mod tests {
             Some(true),
             "the focused item is scrolled into view"
         );
+    }
+
+    #[test]
+    fn a_bound_of_nothing_is_none_and_a_tiny_one_still_shows_an_item() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(Ui::ROOT, "Media player", &names, 0);
+        for none in [0.0, -5.0, f32::NAN] {
+            let Some((menu, _)) = ui.drop_down_menu(players, Some(none)) else {
+                unreachable!("a drop-down with items opens a menu");
+            };
+            let first = menu.widget(Ui::ROOT).children[0];
+            assert!(matches!(menu.widget(first).kind, Kind::Menu), "{none}: no scroll");
+        }
+        let Some((mut menu, items)) = ui.drop_down_menu(players, Some(1.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        menu.layout();
+        let scroll = menu.widget(Ui::ROOT).children[0];
+        let (view, item) = (menu.widget(scroll).rect.h, menu.widget(items[0].0).rect.h);
+        assert!(item > 0.0);
+        assert!(view >= item, "a viewport of {view} shows an item {item} high");
     }
 
     #[test]

@@ -1087,6 +1087,18 @@ impl Shell {
     }
 }
 
+/// The height a drop-down's menu may take, in logical pixels: that of `output`, the output of
+/// the drop-down's surface; when it is not known, as for a window or a layer surface the
+/// compositor placed, that of the shortest of `outputs`, which the menu fits on whichever it
+/// opens on; and without any, the surface's own height `own`. Heights of 0 are not known ones.
+fn menu_max_height(output: Option<f32>, outputs: &[f32], own: u32) -> Option<f32> {
+    let known = |h: &f32| *h > 0.0;
+    output
+        .filter(known)
+        .or_else(|| outputs.iter().copied().filter(known).reduce(f32::min))
+        .or_else(|| (own > 0).then_some(own as f32))
+}
+
 /// Calls `lost` on the surface `next` finds in `state` until it finds none, so that one `lost`
 /// closed along the way is not lost after: `lost` closes the surface it is given.
 fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl FnMut(&mut T, S)) {
@@ -1832,13 +1844,14 @@ impl App {
     /// Opens the items of drop-down `widget` of `id` in a menu under it, with the focus on the
     /// chosen one, as GTK's DropDown does.
     fn open_drop_down(&mut self, id: SurfaceId, widget: WidgetId) {
-        // As high as the drop-down's output, or its own surface when the output is not known.
         let max_height = self.shell.surfaces.iter().find(|s| s.id == id).and_then(|from| {
+            let height = |info: &OutputInfo| info.logical_size.map(|(_, h)| h as f32);
             let output = from.output.as_ref().and_then(|output| {
                 let (_, info) = self.shell.outputs.iter().find(|(o, _)| o == output)?;
-                info.logical_size.map(|(_, h)| h as f32)
+                height(info)
             });
-            output.or_else(|| (from.size.1 > 0).then_some(from.size.1 as f32))
+            let outputs: Vec<f32> = self.shell.outputs.iter().filter_map(|(_, i)| height(i)).collect();
+            menu_max_height(output, &outputs, from.size.1)
         });
         let Some((menu, items)) = self
             .shell
@@ -2737,6 +2750,19 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drop_down_menu_is_bounded_by_its_output_else_the_shortest_one() {
+        assert_eq!(menu_max_height(Some(1080.0), &[720.0, 1080.0], 40), Some(1080.0), "its own");
+        assert_eq!(
+            menu_max_height(None, &[1440.0, 720.0, 1080.0], 40),
+            Some(720.0),
+            "a window, or a layer surface the compositor placed"
+        );
+        assert_eq!(menu_max_height(Some(0.0), &[0.0, 900.0], 40), Some(900.0), "0 is unknown");
+        assert_eq!(menu_max_height(None, &[], 40), Some(40.0), "no output: the surface");
+        assert_eq!(menu_max_height(None, &[0.0], 0), None, "nothing known");
+    }
 
     /// The path of a choice in a drop-down's menu, as the driver runs it: the item activated in
     /// the menu, its event routed, then the item's index chosen in the drop-down.
