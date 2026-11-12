@@ -607,8 +607,6 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
                 }
             }
-                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
-            }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
