@@ -431,9 +431,9 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
-    /// The primary button was pressed outside every island of a surface that has one: on its
-    /// transparent part, where a panel drawn on a surface over the whole output closes, as the
-    /// control center does (doc_control_center.md CC9).
+    /// The primary button was pressed on the root itself, outside every child of it: on the
+    /// transparent part of a surface over the whole output, where a panel drawn on it closes,
+    /// as the control center does (doc_control_center.md CC9). A popup never raises it.
     PressedOutside,
 }
 
@@ -561,6 +561,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// Whether the driver shows it in a popup, where a press outside the root's children is
+    /// still on the menu and raises no [`Event::PressedOutside`].
+    pub(crate) popup: bool,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
@@ -589,6 +592,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            popup: false,
             focus: None,
             text: TextContext::default(),
             title_bar: None,
@@ -1515,14 +1519,14 @@ impl Ui {
         })
     }
 
-    /// Whether the point is outside every shown island, on a `Ui` that shows one.
-    fn outside_islands(&self, x: f32, y: f32) -> bool {
-        let mut fills = self
-            .ids()
-            .filter(|&id| self.is_visible(id))
-            .filter_map(|id| self.island_fill(id))
-            .peekable();
-        fills.peek().is_some() && fills.all(|fill| !fill.contains(x, y))
+    /// Whether the point is on the root outside every shown child of it, outside a popup.
+    fn outside_children(&self, x: f32, y: f32) -> bool {
+        !self.popup
+            && self.widgets[Self::ROOT]
+                .children
+                .iter()
+                .filter(|&&c| self.is_visible(c))
+                .all(|&c| !self.widgets[c].rect.contains(x, y))
     }
 
     /// The window's size in logical pixels, after [`Ui::layout`].
@@ -1920,7 +1924,7 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
-                if id.is_none() && self.outside_islands(x, y) {
+                if id.is_none() && self.outside_children(x, y) {
                     return Some(Event::PressedOutside);
                 }
                 // A field puts its caret at the press; a slider takes its value from it, and
@@ -3864,35 +3868,39 @@ mod tests {
 
 
     #[test]
-    fn a_press_outside_the_islands_is_reported_and_one_inside_is_not() {
+    fn a_press_on_the_root_outside_its_children_is_reported_and_one_inside_is_not() {
         let mut ui = Ui::new("t", Theme::default(), false);
         ui.min_width = 400.0;
         ui.min_height = 300.0;
-        let island = ui.island(Ui::ROOT, true, [0.0; 4]);
-        ui.add(island, Kind::Label("Wi-Fi".into()));
-        let button = ui.add(island, Kind::Button("Settings".into()));
+        let panel = ui.add(Ui::ROOT, Kind::Group("Panel".into()));
+        ui.add(panel, Kind::Label("Wi-Fi".into()));
+        let button = ui.add(panel, Kind::Button("Settings".into()));
         ui.layout();
-        let fill = ui.island_fill(island).unwrap_or_default();
-        let inside = (fill.x + 1.0, fill.y + 1.0);
-        assert!(fill.contains(inside.0, inside.1) && !fill.contains(1.0, 1.0));
+        let p = ui.widget(panel).rect;
+        let (inside, outside) = ((p.x + 1.0, p.y + 1.0), (p.x + 1.0, p.y + p.h + 10.0));
+        assert!(ui.hit(inside.0, inside.1).is_none(), "on the group, not on a widget");
+        assert!(outside.1 < 300.0 && !p.contains(outside.0, outside.1));
+        for (at, raised) in [(inside, None), (outside, Some(Event::PressedOutside))] {
+            assert_eq!(ui.pointer_press(at.0, at.1, PointerButton::Primary), raised);
+            ui.pointer_release(at.0, at.1, PointerButton::Primary);
+        }
         assert_eq!(
-            ui.pointer_press(1.0, 1.0, PointerButton::Primary),
-            Some(Event::PressedOutside)
+            ui.pointer_press(outside.0, outside.1, PointerButton::Secondary),
+            None,
+            "only the primary button"
         );
-        ui.pointer_release(1.0, 1.0, PointerButton::Primary);
-        assert_eq!(ui.pointer_press(inside.0, inside.1, PointerButton::Primary), None);
-        ui.pointer_release(inside.0, inside.1, PointerButton::Primary);
+        ui.pointer_release(outside.0, outside.1, PointerButton::Secondary);
         let r = ui.widget(button).rect;
-        assert_eq!(
-            ui.click(r.x + 1.0, r.y + 1.0),
-            Some(Event::Clicked(button))
-        );
-        // Without an island, nothing is outside.
-        let mut plain = Ui::new("t", Theme::default(), false);
-        plain.min_width = 100.0;
-        plain.add(Ui::ROOT, Kind::Label("x".into()));
-        plain.layout();
-        assert_eq!(plain.pointer_press(90.0, 1.0, PointerButton::Primary), None);
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
+        // A popup's menu takes the press, wherever it falls in it.
+        let mut menu = Ui::new("t", Theme::default(), false);
+        menu.popup = true;
+        menu.min_width = 200.0;
+        menu.min_height = 200.0;
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        menu.add(list, Kind::Button("Spotify".into()));
+        menu.layout();
+        assert_eq!(menu.pointer_press(199.0, 199.0, PointerButton::Primary), None);
     }
 
     #[test]
