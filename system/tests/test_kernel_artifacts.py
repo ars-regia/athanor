@@ -994,6 +994,25 @@ class CheckPlan(Repo):
         self.assertEqual(r.returncode, 1)
         self.assertIn("own pull request", r.stderr)
 
+    def test_kernel_pin_bump_with_its_patches_and_configuration_skips_every_build(self):
+        self.state("kernel-missing")
+        r = self.plan({
+            **self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"),
+            "forge/specs/azoth/patches/0002-module.patch": "p\n",
+            "forge/specs/azoth/patches/refreshed/sched/0001-bore.patch": "r\n",
+            "forge/specs/azoth/patches.list": "l\n",
+            "forge/specs/azoth/kernel-local": "# CONFIG_X is not set\n",
+            "forge/specs/azoth/microvm/kernel-local": "# CONFIG_X is not set\n",
+        })
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("", "false"))
+
+    def test_kernel_patches_without_a_kernel_pin_bump_fail(self):
+        self.state("kernel-missing")
+        r = self.plan({"forge/specs/azoth/kernel-local": "# CONFIG_X is not set\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
     def test_a_missing_legacy_branch_alone_checks_the_default_and_nvidia_images(self):
         self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT, missing="legacy")
         r = self.plan({"system/x": "1\n"})
