@@ -1973,6 +1973,14 @@ impl Ui {
         }
     }
 
+    /// Puts `text` on the clipboard, as Ctrl+C in a field puts its selection: the driver offers
+    /// it once the application has handled the key or the event it was called for, with that
+    /// key's or that click's serial, which the compositor asks for. Called elsewhere, it waits
+    /// for the next key or event of this window.
+    pub fn copy(&mut self, text: &str) {
+        self.clips.push(Clip::Copy(text.to_owned()));
+    }
+
     /// What the fields asked of the clipboards since the last call, in order, ending with
     /// [`Clip::Unselect`] once the selection offered last is no longer its field's, as a GTK
     /// entry gives up the primary selection it owns when its selection ends.
@@ -4442,5 +4450,13 @@ mod tests {
         ui.set_focus(Some(field));
         ui.commit("b");
         assert_eq!(text(&ui, field), "ba");
+    }
+
+    #[test]
+    fn the_application_copies_text_to_the_clipboard() {
+        let mut ui = Ui::new("Copy", Theme::default(), false);
+        ui.copy("42");
+        assert_eq!(ui.take_clips(), [Clip::Copy("42".into())]);
+        assert!(ui.take_clips().is_empty(), "offered once");
     }
 }
