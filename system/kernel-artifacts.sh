@@ -123,8 +123,7 @@ KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha
 # (build-inputs.py) and a pin bump may have to follow the new tree in them (a refreshed or
 # rebased patch, an option the tree introduces). Kernel Build on the pull request builds and
 # boots them, so check-plan accepts them next to the pins when the kernel is not published.
-KERNEL_TREE_FILES=(forge/specs/azoth/patches.list 'forge/specs/azoth/patches/*' forge/specs/azoth/kernel-local forge/specs/azoth/microvm/kernel-local
-  forge/specs/azoth/derived.config forge/specs/azoth/cachyos-protected.sha256 forge/specs/azoth/cachyos-files.list)
+KERNEL_TREE_FILES=(forge/specs/azoth/patches.list 'forge/specs/azoth/patches/*' forge/specs/azoth/kernel-local forge/specs/azoth/microvm/kernel-local)
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
