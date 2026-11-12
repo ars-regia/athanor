@@ -1651,6 +1651,44 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
     }
 }
 
+/// Where an event of a surface's widgets goes, other than a window button's.
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// A field opens its own context menu, whose items the driver does.
+    FieldMenu(WidgetId),
+    /// A drop-down opens its own items, as a menu the driver does too.
+    DropDown(WidgetId),
+    /// An item of the driver's own menu was activated: a menu item, a check or a radio.
+    Chosen(WidgetId),
+    /// The driver keeps it: the application never opened its menus, and gets none of their
+    /// events, such as a context-menu event of an item at a press of the Menu key, nor the click
+    /// of a drop-down with nothing to offer.
+    Kept,
+    /// The application's.
+    Application(Event),
+}
+
+/// Where `event` of `ui` goes; `own` when `ui` is a menu the driver opened.
+fn route(ui: &Ui, event: Event, own: bool) -> Route {
+    let drop_down = |widget: WidgetId| {
+        ui.widgets
+            .get(widget.index())
+            .is_some_and(|w| matches!(w.kind, Kind::DropDown(_)))
+    };
+    match event {
+        Event::Clicked(item) | Event::Toggled(item) | Event::Selected(item) if own => {
+            Route::Chosen(item)
+        }
+        _ if own => Route::Kept,
+        Event::ContextMenu(widget) if ui.field_text(widget).is_some() => Route::FieldMenu(widget),
+        Event::Clicked(widget) if drop_down(widget) => match ui.chosen(widget) {
+            Some(_) => Route::DropDown(widget),
+            None => Route::Kept,
+        },
+        event => Route::Application(event),
+    }
+}
+
 /// What an item of a menu the driver opened does.
 enum Choice {
     /// A field's context menu: the edit of this key.
@@ -1733,23 +1771,16 @@ impl App {
                 self.shell.exit = true;
                 return;
             }
-            // A field opens its own context menu, whose items the driver does.
-            Some(Event::ContextMenu(widget)) if surface.ui.field_text(widget).is_some() => {
-                self.open_field_menu(id, widget);
+            Some(event) => {
+                let own = self.own_menu.as_ref().is_some_and(|m| m.0 == id);
+                match route(&surface.ui, event, own) {
+                    Route::FieldMenu(widget) => self.open_field_menu(id, widget),
+                    Route::DropDown(widget) => self.open_drop_down(id, widget),
+                    Route::Chosen(item) => self.menu_chosen(item),
+                    Route::Kept => {}
+                    Route::Application(event) => self.application.event(&mut self.shell, id, event),
+                }
             }
-            // A drop-down opens its own items, as a menu the driver does too.
-            Some(Event::Clicked(widget)) if surface.ui.chosen(widget).is_some() => {
-                self.open_drop_down(id, widget);
-            }
-            Some(Event::Clicked(item) | Event::Toggled(item))
-                if self.own_menu.as_ref().is_some_and(|m| m.0 == id) =>
-            {
-                self.menu_chosen(item);
-            }
-            // The driver's menus are its own: the application never opened them, and gets none
-            // of their events, such as a context-menu event of an item at a press of the Menu key.
-            Some(_) if self.own_menu.as_ref().is_some_and(|m| m.0 == id) => {}
-            Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
         if let Err(error) = self.shell.draw_dirty() {
@@ -2678,6 +2709,43 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The path of a choice in a drop-down's menu, as the driver runs it: the item activated in
+    /// the menu, its event routed, then the item's index chosen in the drop-down.
+    #[test]
+    fn an_item_activated_in_a_drop_down_menu_chooses_it_and_a_cancel_chooses_nothing() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Firefox", "Spotify"], 0);
+        let empty = ui.drop_down(Ui::ROOT, "Nothing", &[], 0);
+        let opened = ui.activate(players).map(|event| route(&ui, event, false));
+        assert_eq!(opened, Some(Route::DropDown(players)));
+        let kept = ui.activate(empty).map(|event| route(&ui, event, false));
+        assert_eq!(kept, Some(Route::Kept), "an empty drop-down opens nothing");
+        let Some((mut menu, items)) = ui.drop_down_menu(players) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        let (spotify, index) = items[1];
+        let routed = menu.activate(spotify).map(|event| route(&menu, event, true));
+        assert_eq!(routed, Some(Route::Chosen(spotify)));
+        open.closed(&mut ui);
+        assert_eq!(ui.choose(players, index), Some(Event::Changed(players)));
+        assert_eq!(ui.chosen(players), Some(1));
+        // Escape, or a press outside, closes the menu and chooses nothing.
+        let Some((mut menu, _)) = ui.drop_down_menu(players) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        assert!(open.dismissed_by(Dismiss::Escape) && open.dismissed_by(Dismiss::Press(0)));
+        assert!(!open.dismissed_by(Dismiss::Press(1)), "a press in the menu");
+        open.closed(&mut ui);
+        assert_eq!(ui.chosen(players), Some(1));
+        assert_eq!(route(&menu, Event::Escape, true), Route::Kept);
+        assert_eq!(
+            route(&ui, Event::Escape, false),
+            Route::Application(Event::Escape)
+        );
+    }
 
     #[test]
     fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
