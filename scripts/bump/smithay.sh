@@ -9,10 +9,11 @@
 # master has moved and no pull request with the label smithay-bump is open: one bump at a time,
 # fixed on its own branch when master changed the API, and the next one after its merge. A pin
 # that master does not descend from (a force push, a commit off master) fails: never a move back.
+# A "Held before" row in Sulphur's README holds the bump while master contains that commit.
 # Needs git, cargo and an authenticated gh.
 set -euo pipefail
 (($# == 1)) || {
-    sed -n '2,12p' "$0" >&2
+    sed -n '2,13p' "$0" >&2
     exit 2
 }
 out=$1
@@ -46,6 +47,16 @@ status=$(gh api "$compare" --jq .status)
     echo "smithay.sh: master is ${status} of the pin ${old:0:12}, not ahead: not moving it" >&2
     exit 1
 }
+readme=${manifest%/Cargo.toml}/README.md
+hold=
+[[ -f $root/$readme ]] && hold=$(sed -nE 's/^\| Held before \| .([0-9a-f]{40}). \|$/\1/p' "$root/$readme")
+if [[ -n $hold ]]; then
+    held=$(gh api "repos/Smithay/smithay/compare/${hold}...${new}" --jq .status)
+    if [[ $held == ahead || $held == identical ]]; then
+        echo "the Smithay bump is held before ${hold:0:12} (${readme}), which master contains: nothing to move"
+        exit 0
+    fi
+fi
 sed -i "s/rev = \"${old}\"/rev = \"${new}\"/" "$root/$manifest"
 cargo update --manifest-path "$root/Cargo.toml" -p smithay -p smithay-drm-extras
 grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/Cargo.lock" ||
