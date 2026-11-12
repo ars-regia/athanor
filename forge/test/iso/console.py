@@ -394,7 +394,7 @@ def session_probe(skip_absent: bool) -> bytes:
     for the image the upgrade case starts from, which cannot ship a unit added since it
     was published; a unit that exists and is inactive or failed is down either way."""
     absent = (
-        b' if [ "$(systemctl --user show -p LoadState --value "$u" 2>/dev/null)" = not-found ];'
+        b' if [ "$u" != athanor-session.target ] && [ "$(systemctl --user show -p LoadState --value "$u")" = not-found ];'
         b' then gone="$gone $u"; else down="$down $u"; fi;'
         if skip_absent
         else b' down="$down $u";'

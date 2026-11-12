@@ -563,6 +563,10 @@ def wait_for_phase(run: pathlib.Path, name: str, timeout: float = 30) -> None:
     raise AssertionError(f"the console never noted {name}")
 
 
+# The bytes the console typed up to the session question, for the cases that ask which one.
+SESSION_TYPED: list[bytes] = []
+
+
 def play_first_boot(server: socket.socket, run: pathlib.Path) -> socket.socket:
     """Play the guest from GRUB to the settings question: the installer finishes, the
     installed system offers its serial login, and each question gets its answer. Returns
@@ -591,7 +595,7 @@ def play_first_boot(server: socket.socket, run: pathlib.Path) -> socket.socket:
 
     # It types the password on the keyboard, one key at a time, then asks whether
     # the session came up.
-    typed_until(conn, b"SESSION_%s", 60)
+    SESSION_TYPED[:] = [typed_until(conn, b"SESSION_%s", 60)]
     conn.sendall(b"SESSION_ALIVE c7\r\n")
 
     # It starts Settings inside that session and asks whether it stayed up. The rest of
@@ -672,6 +676,10 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     ):
         assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
     assert "idle-timeout" not in phases, "it should not have waited out the idle window"
+    import console
+
+    assert console.SESSION_PROBE in SESSION_TYPED[0], "the strict probe is asked without HOLD"
+    assert console.SESSION_PROBE_HELD not in SESSION_TYPED[0]
 
 
 def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
@@ -735,6 +743,10 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         server.close()
         monitor.close()
 
+    import console
+
+    assert console.SESSION_PROBE_HELD in SESSION_TYPED[0], "the held probe is asked under HOLD"
+    assert console.SESSION_PROBE not in SESSION_TYPED[0]
     assert typed.split() == [b"exit"], f"typed after Settings answered: {typed!r}"
     phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
     for expected in ("settings-alive", "ready", "secure-boot-refused", "console-closed"):
@@ -880,6 +892,10 @@ def test_session_probe_skips_only_absent_units(tmp: pathlib.Path) -> None:
     assert answer(strict, wall, "") == f"SESSION_DEAD c7 down: {wall}"
     assert answer(held, bar, wall) == f"SESSION_DEAD c7 down: {bar} absent: {wall}"
     assert answer(strict, "", "") == "SESSION_ALIVE c7"
+    target = "athanor-session.target"
+    for probe in (held, strict):
+        assert answer(probe, "", target) == f"SESSION_DEAD c7 down: {target}", probe
+    assert b"2>/dev/null)\" = not-found" not in held, "a real error of show must not be hidden"
 
 
 def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
