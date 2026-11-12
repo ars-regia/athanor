@@ -1984,10 +1984,13 @@ impl Ui {
         }
     }
 
-    /// Puts `text` on the clipboard, as Ctrl+C in a field puts its selection: the driver offers
-    /// it once the application has handled the key or the event it was called for, with that
-    /// key's or that click's serial, which the compositor asks for. Called elsewhere, it waits
-    /// for the next key or event of this window.
+    /// Puts `text` on the clipboard, as Ctrl+C in a field puts its selection. Call it on the
+    /// `Ui` of the surface whose key or click the application is handling, in
+    /// [`crate::Application::key`] or [`crate::Application::event`]: the driver offers the text
+    /// once the application returns, with the serial of that key or click, which the compositor
+    /// asks for. Called at any other time, as from [`crate::Application::turn`] or for an event
+    /// no key or button caused, nothing is copied and the driver logs it, at the latest when
+    /// that turn of the event loop ends: the copy never waits for a later, unrelated input.
     pub fn copy(&mut self, text: &str) {
         self.clips.push(Clip::Copy(text.to_owned()));
     }

@@ -266,13 +266,50 @@ fn retry(e: &io::Error) -> bool {
     )
 }
 
+/// The requests of `clips` that an application made outside a key or a click: a copy is
+/// refused, and logged, since only the serial of the input it answers can offer it, and the
+/// clipboard is never replaced at a later, unrelated input. The others are kept.
+fn outside_input(clips: Vec<Clip>) -> Vec<Clip> {
+    clips
+        .into_iter()
+        .filter(|clip| {
+            let copy = matches!(clip, Clip::Copy(_));
+            if copy {
+                eprintln!("athanor-sal: nothing copied: Ui::copy outside a key or a click");
+            }
+            !copy
+        })
+        .collect()
+}
+
 impl App {
-    /// Serves what the widgets of `id` asked of the clipboards.
+    /// Serves what the widgets of `id` asked of the clipboards while a key or a click of `id`
+    /// was handled.
     pub(super) fn clips(&mut self, id: SurfaceId) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        for clip in surface.ui.take_clips() {
+        let clips = surface.ui.take_clips();
+        self.serve(id, clips);
+    }
+
+    /// Serves what the widgets of every surface asked of the clipboards since their last
+    /// event, at the end of a turn of the event loop, once no input is being handled: the
+    /// copies are refused ([`outside_input`]), and nothing waits for a later input.
+    pub(super) fn clips_outside_input(&mut self) {
+        let ids: Vec<SurfaceId> = self.shell.surfaces().collect();
+        for id in ids {
+            let Some(surface) = self.shell.get_mut(id) else {
+                continue;
+            };
+            let clips = outside_input(surface.ui.take_clips());
+            self.serve(id, clips);
+        }
+    }
+
+    /// Serves `clips`, which the widgets of `id` asked for, in order.
+    fn serve(&mut self, id: SurfaceId, clips: Vec<Clip>) {
+        for clip in clips {
             match clip {
                 Clip::Copy(text) => {
                     self.copy(text);
@@ -549,6 +586,20 @@ impl PrimarySelectionSourceHandler for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_outside_a_key_or_a_click_is_refused_and_the_rest_kept() {
+        let clips = vec![
+            Clip::Copy("late".into()),
+            Clip::Unselect,
+            Clip::Paste(WidgetId(3)),
+            Clip::Copy("later".into()),
+        ];
+        assert_eq!(
+            outside_input(clips),
+            [Clip::Unselect, Clip::Paste(WidgetId(3))]
+        );
+    }
 
     #[test]
     fn the_best_type_of_text_is_read() {

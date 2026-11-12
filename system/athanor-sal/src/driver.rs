@@ -442,6 +442,9 @@ fn run_on(
             },
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
+        // What the application asked of the clipboards outside an input handler is served now,
+        // a copy refused, and never at a later key or click.
+        app.clips_outside_input();
         app.closed_by_application();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
