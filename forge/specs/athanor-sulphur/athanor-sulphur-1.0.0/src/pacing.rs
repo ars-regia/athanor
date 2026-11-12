@@ -11,21 +11,29 @@
 //!
 //! A commit that carries a timestamp is held until that time on the presentation clock, then
 //! applied (`State::hold_until`); one more than `MAX_TIMED_WAIT` ahead is applied after that
-//! wait, and a timestamp that is not a time disconnects its client. Every commit a client has
-//! waiting, on a barrier, a timestamp or an earlier commit, counts against `MAX_HELD_COMMITS`.
+//! wait. The compositor answers the commit-timing manager itself, so that a timestamp that is
+//! not a time is the timer's `invalid_timestamp` error when it is set: Smithay's timer, at
+//! 62ec78d, keeps any value and posts no such error. Every commit a client has waiting, on a
+//! barrier, a timestamp or an earlier commit, counts against `MAX_HELD_COMMITS`.
 
 use crate::state::State;
 use smithay::output::Output;
 use smithay::reexports::rustix::time::Timespec;
-use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
+use smithay::reexports::wayland_protocols::wp::commit_timing::v1::server::{
+    wp_commit_timer_v1::{self, WpCommitTimerV1},
+    wp_commit_timing_manager_v1::{self, WpCommitTimingManagerV1},
+};
+use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
-use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
+use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource, Weak};
 use smithay::utils::{Monotonic, Time};
 use smithay::wayland::commit_timing::{
-    CommitTimerBarrierStateUserData, CommitTimerStateUserData, CommitTimingManagerState, Timestamp,
+    CommitTimerBarrierStateUserData, CommitTimerStateUserData, Timestamp,
 };
 use smithay::wayland::compositor::{with_states, CompositorHandler};
 use smithay::wayland::fifo::{FifoBarrierCachedState, FifoManagerState};
+use smithay::wayland::{Dispatch2, GlobalDispatch2};
+use std::cell::Cell;
 use std::time::Duration;
 
 /// The longest a commit waits for its timestamp. The protocol bounds no timestamp; a client
@@ -34,17 +42,12 @@ use std::time::Duration;
 /// longer.
 pub const MAX_TIMED_WAIT: Duration = Duration::from_secs(1);
 
-/// `wp_commit_timer_v1.error.invalid_timestamp`, the reason recorded for a client closed for a
-/// timestamp that is not a time. Smithay keeps the timer object to itself, so the error cannot
-/// be posted on it: the client is killed with the code, as `NO_MEMORY` is.
-const INVALID_TIMESTAMP: u32 = 0;
-
 /// Offers both globals to every client. Smithay holds a FIFO commit on its barrier itself; the
-/// timestamps are the compositor's to hold, so that a commit is applied at its time whether or
-/// not an output draws then.
+/// timestamps are the compositor's to check and hold, so that a commit is applied at its time
+/// whether or not an output draws then.
 pub fn globals(dh: &DisplayHandle) {
     FifoManagerState::new::<State>(dh);
-    CommitTimingManagerState::unmanaged::<State>(dh);
+    dh.create_global::<State, WpCommitTimingManagerV1, _>(1, TimingManagers);
 }
 
 /// Signals every barrier of `surface` whose timestamp is `now` or earlier.
@@ -58,11 +61,18 @@ pub fn timestamps_due(surface: &WlSurface, now: Time<Monotonic>) {
     });
 }
 
-/// Whether `timestamp` is a time: seconds not negative, nanoseconds under a second. Smithay
-/// stores the request's fields as they come.
-fn valid(timestamp: Timestamp) -> bool {
-    let time = Timespec::from(Time::<Monotonic>::from(timestamp));
-    time.tv_sec >= 0 && (0..1_000_000_000).contains(&time.tv_nsec)
+/// The time `set_timestamp` names, or nothing when it is not one: seconds past what the
+/// presentation clock counts, or nanoseconds of a second or more.
+fn timestamp(tv_sec_hi: u32, tv_sec_lo: u32, tv_nsec: u32) -> Option<Timestamp> {
+    let tv_sec = i64::try_from((u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo)).ok()?;
+    if tv_nsec >= 1_000_000_000 {
+        return None;
+    }
+    let time = Timespec {
+        tv_sec,
+        tv_nsec: tv_nsec.into(),
+    };
+    Some(Timestamp::from(Time::<Monotonic>::from(time)))
 }
 
 impl State {
@@ -78,12 +88,6 @@ impl State {
         let Some(timestamp) = timestamp else {
             return;
         };
-        if !valid(timestamp) {
-            if let Some(client) = surface.client() {
-                self.invalid_timestamp(&client, timestamp);
-            }
-            return;
-        }
         let now = self.clock.now();
         let timestamp = timestamp.min(Timestamp::from(now + MAX_TIMED_WAIT));
         // ponytail: the commit is applied at its timestamp, so it shows at the first refresh
@@ -102,26 +106,9 @@ impl State {
         });
     }
 
-    fn invalid_timestamp(&self, client: &Client, timestamp: Timestamp) {
-        let id = client.id();
-        tracing::warn!(
-            ?id,
-            ?timestamp,
-            "a client's commit timestamp is not a time: disconnected"
-        );
-        client.kill(
-            &self.display_handle,
-            ProtocolError {
-                code: INVALID_TIMESTAMP,
-                object_id: 0,
-                object_interface: "wp_commit_timer_v1".into(),
-                message: format!("invalid timestamp {timestamp:?}"),
-            },
-        );
-    }
-
     /// After a commit of `surface` is applied: remembers the surface while its content has a
-    /// FIFO barrier to clear; `commit` has asked for the frame that clears it.
+    /// FIFO barrier to clear, until a frame clears it or the surface is destroyed; `commit` has
+    /// asked for the frame that clears it.
     pub(crate) fn fifo_committed(&mut self, surface: &WlSurface) {
         let barrier = with_states(surface, |states| {
             states
@@ -181,6 +168,116 @@ impl State {
         for client in cleared {
             self.client_compositor_state(&client)
                 .blocker_cleared(self, &dh);
+        }
+    }
+}
+
+/// The user data of the commit-timing manager's global and of every manager.
+pub struct TimingManagers;
+
+/// The user data of a commit timer: its surface.
+pub struct CommitTimer(Weak<WlSurface>);
+
+/// Whether a surface has a commit timer: the protocol gives it one at a time.
+#[derive(Default)]
+struct Timed(Cell<bool>);
+
+impl GlobalDispatch2<WpCommitTimingManagerV1, State> for TimingManagers {
+    fn bind(
+        &self,
+        _state: &mut State,
+        _dh: &DisplayHandle,
+        _client: &Client,
+        resource: New<WpCommitTimingManagerV1>,
+        data_init: &mut DataInit<'_, State>,
+    ) {
+        data_init.init(resource, TimingManagers);
+    }
+}
+
+impl Dispatch2<WpCommitTimingManagerV1, State> for TimingManagers {
+    fn request(
+        &self,
+        _state: &mut State,
+        _client: &Client,
+        manager: &WpCommitTimingManagerV1,
+        request: wp_commit_timing_manager_v1::Request,
+        _dh: &DisplayHandle,
+        data_init: &mut DataInit<'_, State>,
+    ) {
+        let wp_commit_timing_manager_v1::Request::GetTimer { id, surface } = request else {
+            return;
+        };
+        let taken = with_states(&surface, |states| {
+            states.data_map.get_or_insert(Timed::default).0.replace(true)
+        });
+        if taken {
+            manager.post_error(
+                wp_commit_timing_manager_v1::Error::CommitTimerExists,
+                "the surface has a commit timer already",
+            );
+            return;
+        }
+        data_init.init(id, CommitTimer(surface.downgrade()));
+    }
+}
+
+impl Dispatch2<WpCommitTimerV1, State> for CommitTimer {
+    fn request(
+        &self,
+        _state: &mut State,
+        _client: &Client,
+        timer: &WpCommitTimerV1,
+        request: wp_commit_timer_v1::Request,
+        _dh: &DisplayHandle,
+        _data_init: &mut DataInit<'_, State>,
+    ) {
+        use wp_commit_timer_v1::Error;
+        let wp_commit_timer_v1::Request::SetTimestamp {
+            tv_sec_hi,
+            tv_sec_lo,
+            tv_nsec,
+        } = request
+        else {
+            return;
+        };
+        let Ok(surface) = self.0.upgrade() else {
+            timer.post_error(Error::SurfaceDestroyed, "the timer's surface is destroyed");
+            return;
+        };
+        let Some(timestamp) = timestamp(tv_sec_hi, tv_sec_lo, tv_nsec) else {
+            timer.post_error(
+                Error::InvalidTimestamp,
+                format!("{tv_sec_hi}:{tv_sec_lo} s and {tv_nsec} ns is not a time"),
+            );
+            return;
+        };
+        let exists = with_states(&surface, |states| {
+            let mut pending = states
+                .data_map
+                .get_or_insert(CommitTimerStateUserData::default)
+                .borrow_mut();
+            let exists = pending.timestamp.is_some();
+            if !exists {
+                pending.timestamp = Some(timestamp);
+            }
+            exists
+        });
+        if exists {
+            timer.post_error(
+                Error::TimestampExists,
+                "the commit has a timestamp already",
+            );
+        }
+    }
+
+    fn destroyed(&self, _state: &mut State, _client: ClientId, _timer: &WpCommitTimerV1) {
+        if let Ok(surface) = self.0.upgrade() {
+            with_states(&surface, |states| {
+                if let Some(timed) = states.data_map.get::<Timed>() {
+                    timed.0.set(false);
+                }
+            });
         }
     }
 }

@@ -132,13 +132,17 @@ and never to the border and outline drawn around its window.
 `org_kde_kwin_server_decoration_manager` answers client-side to every request, as xdg-decoration
 does (`src/decoration.rs`), and each toplevel keeps the icon `xdg_toplevel_icon_manager_v1` sets,
 not yet forwarded to the shell; the compositor answers that manager itself, so that a change to an
-icon already set is refused before it reaches Smithay (`src/toplevel_icon.rs`).
+icon already set, a buffer at a scale under 1 and a buffer past the sixteenth of an icon are
+refused before they reach Smithay (`src/toplevel_icon.rs`).
 `wp_fifo_manager_v1` and `wp_commit_timing_manager_v1` pace commits (`src/pacing.rs`): a FIFO
 commit waits for a frame of the output that shows its surface, or of any output when none does,
 and the commit that sets a barrier asks for that frame. A commit with a timestamp is held until
-then, for at most a second; a timestamp that is not a time disconnects the client. Every commit a
-client has waiting, on a fence, a timestamp, a barrier or an earlier commit of its surface, counts
-against one bound of 64, past which the client is disconnected.
+then, for at most a second; the compositor answers that manager itself, and a timestamp that is
+not a time is the timer's `invalid_timestamp` error. Every commit a client has waiting, on a fence,
+a timestamp, a barrier, an earlier commit of its surface or the next commit of a synchronised
+subsurface's parent, counts against one bound of 64, past which the client is disconnected. A
+destroyed surface's timestamps are released at once, so that a parent's commit carrying them goes
+on.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than

@@ -6,7 +6,10 @@
 //! `immutable` for a request on an icon already set and then goes on into a debug assertion,
 //! which ends a debug build. Each icon here wraps Smithay's: a request on an icon already set
 //! is refused and goes no further; any other goes on to Smithay's, which checks the buffer and
-//! raises `no_buffer` when it is destroyed before the icon.
+//! raises `no_buffer` when it is destroyed before the icon. A buffer at a scale under 1, or one
+//! past `MAX_ICON_BUFFERS` on the same icon, is refused with `invalid_buffer` before Smithay's
+//! sees it: Smithay keeps every buffer it is given, with a destruction hook on each, and scans
+//! them all at each one added.
 
 use crate::state::State;
 use smithay::reexports::wayland_protocols::xdg::toplevel_icon::v1::server::{
@@ -21,6 +24,10 @@ use smithay::wayland::shm::with_buffer_contents;
 use smithay::wayland::xdg_toplevel_icon::XdgToplevelIconUserData;
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+
+/// How many buffers one icon may be given. An icon has a buffer per scale and size the client
+/// draws it at, a handful.
+pub const MAX_ICON_BUFFERS: usize = 16;
 
 /// The user data of the manager's global and of every manager.
 pub struct IconManagers;
@@ -54,6 +61,7 @@ pub struct Icon {
 #[derive(Default)]
 struct Held {
     set: bool,
+    added: usize,
     icon: ToplevelIcon,
 }
 
@@ -139,6 +147,19 @@ impl Dispatch2<XdgToplevelIconV1, State> for Icon {
                     "the icon was set on a toplevel and cannot change",
                 );
                 return;
+            }
+            if let Request::AddBuffer { scale, .. } = &request {
+                if *scale < 1 || held.added >= MAX_ICON_BUFFERS {
+                    resource.post_error(
+                        xdg_toplevel_icon_v1::Error::InvalidBuffer,
+                        format!(
+                            "a buffer needs a scale of 1 or more, and an icon takes at most \
+                             {MAX_ICON_BUFFERS}"
+                        ),
+                    );
+                    return;
+                }
+                held.added += 1;
             }
             match &request {
                 Request::SetName { icon_name } => held.icon.name = Some(icon_name.clone()),

@@ -8,9 +8,9 @@ use smithay::reexports::wayland_protocols_misc::server_decoration::server::__int
 use smithay::wayland::compositor::with_states;
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::pacing::MAX_TIMED_WAIT;
-use crate::toplevel_icon::ToplevelIcon;
+use crate::toplevel_icon::{ToplevelIcon, MAX_ICON_BUFFERS};
 use smithay::wayland::fifo::FifoBarrierCachedState;
-use wayland_client::protocol::wl_fixes;
+use wayland_client::protocol::{wl_fixes, wl_subcompositor};
 use wayland_protocols::wp::commit_timing::v1::client::{
     wp_commit_timer_v1, wp_commit_timing_manager_v1,
 };
@@ -499,26 +499,68 @@ fn a_commit_timed_far_ahead_is_applied_after_the_longest_wait() {
     run.stop();
 }
 
-/// A timestamp whose nanoseconds are a second or more is no time: the client is disconnected
-/// with `invalid_timestamp`, and the compositor goes on.
+/// A timestamp that is not a time, with nanoseconds of a second or more or seconds past what
+/// the clock counts, is the timer's `invalid_timestamp` error, which disconnects its client and
+/// leaves the compositor running.
 #[test]
-fn an_invalid_timestamp_disconnects_its_client() {
+fn an_invalid_timestamp_is_the_timer_s_error() {
     let mut run = Running::start(None);
-    let context = sandbox(&run);
-    let mut local = Local::connect(&mut run, Some(context));
-    local.toplevel(&mut run);
-    let served = served_surface(&run, &local);
-    let (surface, _) = local.window.clone().expect("a window");
-    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
-    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
-    timer.set_timestamp(0, 1, 1_000_000_000);
-    surface.commit();
-    local.connection.flush().expect("flush");
-    run.until("the client is disconnected", |state| {
-        !served.is_alive() && state.held.is_empty()
-    });
+    for (tv_sec_hi, tv_nsec) in [(0, 1_000_000_000), (0x8000_0000, 0)] {
+        let context = sandbox(&run);
+        let mut local = Local::connect(&mut run, Some(context));
+        local.toplevel(&mut run);
+        let (surface, _) = local.window.clone().expect("a window");
+        let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+        let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+        timer.set_timestamp(tv_sec_hi, 1, tv_nsec);
+        surface.commit();
+        let error = error_of(&mut run, &mut local);
+        assert_eq!(error.object_interface, "wp_commit_timer_v1", "{tv_sec_hi}");
+        assert_eq!(
+            error.code,
+            wp_commit_timer_v1::Error::InvalidTimestamp as u32,
+            "{tv_sec_hi}"
+        );
+    }
     let mut other = Local::connect(&mut run, None);
     other.toplevel(&mut run);
+    run.stop();
+}
+
+/// A surface has one commit timer at a time, and a commit one timestamp: a second is the
+/// manager's `commit_timer_exists` error or the timer's `timestamp_exists`.
+#[test]
+fn a_second_timer_or_timestamp_is_an_error() {
+    let mut run = Running::start(None);
+    for case in ["timer", "timestamp"] {
+        let context = sandbox(&run);
+        let mut local = Local::connect(&mut run, Some(context));
+        local.toplevel(&mut run);
+        let (surface, _) = local.window.clone().expect("a window");
+        let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+        let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+        let (interface, code) = match case {
+            "timer" => {
+                manager.get_timer(&surface, &local.queue.handle(), ());
+                (
+                    "wp_commit_timing_manager_v1",
+                    wp_commit_timing_manager_v1::Error::CommitTimerExists as u32,
+                )
+            }
+            _ => {
+                let due = Duration::from(run.state.clock.now());
+                time(&timer, due);
+                time(&timer, due);
+                (
+                    "wp_commit_timer_v1",
+                    wp_commit_timer_v1::Error::TimestampExists as u32,
+                )
+            }
+        };
+        let error = error_of(&mut run, &mut local);
+        assert_eq!(error.object_interface, interface, "{case}");
+        assert_eq!(error.code, code, "{case}");
+    }
     run.stop();
 }
 
@@ -592,5 +634,183 @@ fn changing_an_icon_after_set_icon_is_an_error() {
     }
     let mut other = Local::connect(&mut run, None);
     other.toplevel(&mut run);
+    run.stop();
+}
+
+/// A buffer at a scale under 1, and one past `MAX_ICON_BUFFERS` on an icon, are the
+/// `invalid_buffer` error, which disconnects the client and leaves the compositor running.
+#[test]
+fn an_icon_refuses_a_scale_under_one_and_too_many_buffers() {
+    let mut run = Running::start(None);
+    for case in ["scale", "count"] {
+        let context = sandbox(&run);
+        let mut local = Local::connect(&mut run, Some(context));
+        let manager: xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1 = local.bind(1);
+        let shm: wl_shm::WlShm = local.bind(1);
+        let (buffer, _) = local.buffer(&shm, 16, 16, [0, 0, 255, 255]);
+        let icon = manager.create_icon(&local.queue.handle(), ());
+        if case == "scale" {
+            icon.add_buffer(&buffer, 0);
+        } else {
+            for scale in 1..=MAX_ICON_BUFFERS {
+                icon.add_buffer(&buffer, i32::try_from(scale).expect("a scale"));
+            }
+            local.roundtrip(&mut run);
+            assert!(
+                local.connection.protocol_error().is_none(),
+                "{MAX_ICON_BUFFERS} buffers are taken"
+            );
+            icon.add_buffer(&buffer, 1);
+        }
+        let error = error_of(&mut run, &mut local);
+        assert_eq!(error.object_interface, "xdg_toplevel_icon_v1", "{case}");
+        assert_eq!(
+            error.code,
+            xdg_toplevel_icon_v1::Error::InvalidBuffer as u32,
+            "{case}"
+        );
+    }
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    run.stop();
+}
+
+/// A synchronised subsurface's commits wait for its parent's next commit, and count against the
+/// bound: a client committing one past `MAX_HELD_COMMITS` times under a parent that never
+/// commits is disconnected.
+#[test]
+fn a_client_committing_too_often_under_a_parent_that_never_commits_is_disconnected() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let qh = local.queue.handle();
+    let child = compositor.create_surface(&qh, ());
+    let _subsurface = subcompositor.get_subsurface(&child, &surface, &qh, ());
+    for _ in 0..MAX_HELD_COMMITS + 2 {
+        child.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the client past the bound is disconnected", |_| {
+        !served.is_alive()
+    });
+    run.stop();
+}
+
+/// A synchronised subsurface destroyed while its parent's commit waits on the subsurface's
+/// timestamp releases that commit at once, rather than leave the parent waiting.
+#[test]
+fn a_parent_waiting_on_a_destroyed_subsurface_s_timestamp_is_applied() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 3, HEIGHT, [0, 0, 255, 255]);
+    let child = compositor.create_surface(&qh, ());
+    let subsurface = subcompositor.get_subsurface(&child, &surface, &qh, ());
+    let timer = manager.get_timer(&child, &qh, ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    time(&timer, due);
+    child.commit();
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.held.len(), 1, "the subsurface's timed commit is held");
+    assert_ne!(
+        applied_width(&run.state, &id),
+        Some(WIDTH + 3),
+        "the parent waits on it"
+    );
+    let destroyed = Instant::now();
+    timer.destroy();
+    subsurface.destroy();
+    child.destroy();
+    local.pump(&mut run, "the parent's commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + 3)
+    });
+    assert!(
+        destroyed.elapsed() < MAX_TIMED_WAIT,
+        "applied in {:?}",
+        destroyed.elapsed()
+    );
+    assert!(run.state.held.is_empty(), "nothing is left held");
+    run.stop();
+}
+
+/// A surface destroyed with a FIFO barrier to clear is forgotten with it, not at the next frame,
+/// which an output that is off or paused does not draw.
+#[test]
+fn a_destroyed_fifo_surface_is_forgotten_at_once() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let manager: wp_fifo_manager_v1::WpFifoManagerV1 = local.bind(1);
+    let qh = local.queue.handle();
+    local.roundtrip(&mut run);
+    for _ in 0..20 {
+        let surface = compositor.create_surface(&qh, ());
+        let fifo = manager.get_fifo(&surface, &qh, ());
+        fifo.set_barrier();
+        surface.commit();
+        fifo.destroy();
+        surface.destroy();
+        local.connection.flush().expect("flush");
+        run.event_loop
+            .dispatch(Some(Duration::ZERO), &mut run.state)
+            .expect("dispatch");
+        assert!(
+            run.state
+                .fifo_surfaces
+                .values()
+                .all(|surface| surface.is_alive()),
+            "a destroyed surface is remembered"
+        );
+    }
+    run.stop();
+}
+
+/// The commits of a destroyed surface leave the bound with it: a client at `MAX_HELD_COMMITS`
+/// that destroys the surface they wait on and commits another goes on.
+#[test]
+fn commits_of_a_destroyed_surface_leave_the_bound_with_it() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (window, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 11, HEIGHT, [0, 0, 255, 255]);
+    let surface = compositor.create_surface(&qh, ());
+    let timer = manager.get_timer(&surface, &qh, ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    time(&timer, due);
+    for _ in 0..MAX_HELD_COMMITS {
+        surface.commit();
+    }
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.held.len(), 1, "the timed commit is held");
+    timer.destroy();
+    surface.destroy();
+    window.attach(Some(&buffer), 0, 0);
+    window.commit();
+    local.pump(&mut run, "the window's commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + 11)
+    });
     run.stop();
 }

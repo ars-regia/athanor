@@ -63,8 +63,8 @@ use std::time::Duration;
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 
 /// How many commits one client may have waiting to be applied, whatever they wait on: a fence, a
-/// `wp_commit_timer_v1` timestamp, a FIFO barrier, or an earlier commit of the same surface
-/// that waits. Smithay queues them per client without a bound and walks the whole queue at each
+/// `wp_commit_timer_v1` timestamp, a FIFO barrier, an earlier commit of the same surface that
+/// waits, or the next commit of a synchronised subsurface's parent. Smithay queues them per client without a bound and walks the whole queue at each
 /// commit; a held commit also takes an event source, a fence's with a file descriptor, and pins
 /// its buffer. A client keeps a few frames in flight per surface, and one that queues more is
 /// flooding the compositor, which disconnects it rather than run out of memory, file
@@ -77,18 +77,20 @@ pub const MAX_HELD_COMMITS: usize = 64;
 /// no such error: the client sees its socket close, and the reason reaches `disconnected`.
 const NO_MEMORY: u32 = 2;
 
-/// A commit held on a fence or a timestamp: its client and surface, and the event source that
-/// waits.
+/// A commit held on a fence or a timestamp: its client and surface, the event source that
+/// waits, and whether it waits on a timestamp.
 pub struct HeldCommit {
-    client: ClientId,
+    client: Client,
     surface: ObjectId,
     seq: u64,
     token: RegistrationToken,
+    timed: bool,
 }
 
 /// Counts one commit in its client's `ClientState::queued` from the moment it is committed until
-/// Smithay applies it or drops it: a blocker that never blocks, put on each commit that is a
-/// transaction of its own, and dropped with that transaction.
+/// Smithay applies it or drops it: a blocker that never blocks, put on each commit, and dropped
+/// with the transaction that carries it. A synchronised subsurface's commits stay in its pending
+/// transaction, which its parent's next commit takes into its own.
 struct Queued(Arc<AtomicUsize>);
 
 impl Blocker for Queued {
@@ -184,7 +186,8 @@ impl CompositorHandler for State {
             }
         });
         add_destruction_hook::<Self, _>(surface, |state, surface| {
-            state.release_held_of(&surface.id());
+            state.release_held_of(surface);
+            state.fifo_surfaces.remove(&surface.id());
         });
     }
 
@@ -312,13 +315,14 @@ impl State {
         let Some((client, seq)) = self.hold_slot(surface) else {
             return;
         };
-        let id = client.id();
+        let owner = client.clone();
         let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
             state.unhold(&client, seq);
             Ok(())
         };
         let token = self.loop_handle.insert_source(source, unblock);
-        self.held_on(surface, blocker, id, seq, token.map_err(|error| error.error));
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, blocker, owner, seq, token, false);
     }
 
     /// Holds the pending commit of `surface`, which carries a `wp_commit_timer_v1` timestamp,
@@ -337,7 +341,7 @@ impl State {
         let Some(barrier) = register() else {
             return;
         };
-        let id = client.id();
+        let owner = client.clone();
         let weak = surface.downgrade();
         let unblock = move |_, _: &mut (), state: &mut State| {
             if let Ok(surface) = weak.upgrade() {
@@ -349,17 +353,17 @@ impl State {
         let token = self
             .loop_handle
             .insert_source(Timer::from_duration(wait), unblock);
-        self.held_on(surface, barrier, id, seq, token.map_err(|error| error.error));
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, barrier, owner, seq, token, true);
     }
 
     /// Counts the commit `surface` is making among its client's queued commits, until it is
     /// applied or dropped, and whether it goes on: a client past `MAX_HELD_COMMITS` is
-    /// disconnected instead. A commit of a synchronised subsurface is not queued, but merged into
-    /// its parent's next commit, and is not counted.
+    /// disconnected instead. A commit of a synchronised subsurface counts too: each keeps its
+    /// state in the subsurface until its parent's next commit. The commits of a surface destroyed
+    /// since stay counted until Smithay next looks at the queue and drops them, so a client at the
+    /// bound has its queue looked at before it is judged.
     fn queue_commit(&mut self, surface: &WlSurface) -> bool {
-        if is_sync_subsurface(surface) {
-            return true;
-        }
         let Some(client) = surface.client() else {
             return true;
         };
@@ -369,8 +373,14 @@ impl State {
         else {
             return true;
         };
-        let waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
-        add_blocker(surface, Queued(queued));
+        let mut waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
+        add_blocker(surface, Queued(queued.clone()));
+        if waiting > MAX_HELD_COMMITS {
+            let dh = self.display_handle.clone();
+            self.client_compositor_state(&client)
+                .blocker_cleared(self, &dh);
+            waiting = queued.load(Ordering::Relaxed);
+        }
         if waiting > MAX_HELD_COMMITS {
             self.flooded(&client, "queued");
             return false;
@@ -398,7 +408,8 @@ impl State {
     fn hold_slot(&mut self, surface: &WlSurface) -> Option<(Client, u64)> {
         let client = surface.client()?;
         let id = client.id();
-        if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
+        let held = self.held.iter().filter(|held| held.client.id() == id);
+        if held.count() >= MAX_HELD_COMMITS {
             self.flooded(&client, "held");
             return None;
         }
@@ -412,9 +423,10 @@ impl State {
         &mut self,
         surface: &WlSurface,
         blocker: B,
-        client: ClientId,
+        client: Client,
         seq: u64,
         token: Result<RegistrationToken, smithay::reexports::calloop::Error>,
+        timed: bool,
     ) {
         match token {
             Ok(token) => {
@@ -423,6 +435,7 @@ impl State {
                     surface: surface.id(),
                     seq,
                     token,
+                    timed,
                 });
                 add_blocker(surface, blocker);
             }
@@ -440,24 +453,43 @@ impl State {
 
     /// Drops the commits `client` holds on fences and timestamps, with their event sources.
     pub fn release_held(&mut self, client: &ClientId) {
-        self.release_held_where(|held| &held.client == client);
-    }
-
-    /// Drops the commits a destroyed surface holds, with their event sources: Smithay drops
-    /// the commits themselves, and a far timestamp or a fence that never signals would
-    /// otherwise keep its client's places until it disconnects.
-    fn release_held_of(&mut self, surface: &ObjectId) {
-        self.release_held_where(|held| &held.surface == surface);
-    }
-
-    fn release_held_where(&mut self, gone: impl Fn(&HeldCommit) -> bool) {
         let loop_handle = &self.loop_handle;
         self.held.retain(|held| {
-            let keep = !gone(held);
+            let keep = held.client.id() != *client;
             if !keep {
                 loop_handle.remove(held.token);
             }
             keep
+        });
+    }
+
+    /// When `surface` is destroyed: signals at once the timestamps its held commits wait on,
+    /// frees their timers and places, and tries its client's commits once the destruction is
+    /// over. A synchronised subsurface's timed commit waits inside its parent's commit, which
+    /// stays while the parent lives: a timer dropped unsignalled would hold that commit, and the
+    /// parent's after it, until the client goes. A commit held on a fence keeps its event source,
+    /// which releases it when the fence signals, and goes with its client.
+    fn release_held_of(&mut self, surface: &WlSurface) {
+        let id = surface.id();
+        let mut client = None;
+        let loop_handle = &self.loop_handle;
+        self.held.retain(|held| {
+            let keep = !held.timed || held.surface != id;
+            if !keep {
+                loop_handle.remove(held.token);
+                client = Some(held.client.clone());
+            }
+            keep
+        });
+        let Some(client) = client else {
+            return;
+        };
+        crate::pacing::timestamps_due(surface, self.clock.now() + crate::pacing::MAX_TIMED_WAIT);
+        self.loop_handle.insert_idle(move |state| {
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
         });
     }
 
