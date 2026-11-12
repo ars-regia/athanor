@@ -769,6 +769,9 @@ compositor-globals)
         zxdg_importer_v2)
     # Decision 30's three.
     standard+=(zwp_pointer_constraints_v1 zwp_relative_pointer_manager_v1 zwp_keyboard_shortcuts_inhibit_manager_v1)
+    # Decision 33, wave 2a.
+    standard+=(wl_fixes wp_alpha_modifier_v1 wp_fifo_manager_v1 wp_commit_timing_manager_v1
+        org_kde_kwin_server_decoration_manager xdg_toplevel_icon_manager_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
@@ -791,7 +794,8 @@ compositor-globals)
         zwlr_output_power_manager_v1 zwp_virtual_keyboard_manager_v1 zwlr_virtual_pointer_manager_v1 \
         zwp_input_method_manager_v2 athanor_toplevel_manager_v1 athanor_toplevel_actions_v1 \
         athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 ext_data_control_manager_v1 \
-        zwlr_data_control_manager_v1 athanor_workspace_tiling_manager_v1; do
+        zwlr_data_control_manager_v1 athanor_workspace_tiling_manager_v1 athanor_dock_overlap_manager_v1 \
+        athanor_material_manager_v1; do
         ! grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("refusal of $interface")
     done
     if [ "${#missing[@]}" != 0 ]; then
