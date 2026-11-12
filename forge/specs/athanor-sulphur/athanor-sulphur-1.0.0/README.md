@@ -152,7 +152,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1`, `athanor_dock_overlap_manager_v1`, `athanor_material_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -169,7 +169,21 @@ on windows: the control center is granted the first, the bar, the dock and the l
 `athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
 keyboard's layout group: the bar alone is granted it, for its input-source switch.
 `athanor_workspace_tiling_manager_v1` reads and sets whether each workspace is tiled (OS12): the
-bar alone is granted it, for its tiling switch. The layouts, options and repeat come from
+bar alone is granted it, for its tiling switch.
+`athanor_dock_overlap_manager_v1` (`athanor-dock-overlap-v1.xml`, decision 35) tells the dock
+whether a mapped, not minimised window of the current workspace of its layer surface's output
+intersects the rectangle the dock sent, in that output's logical coordinates, whatever the
+surface's own geometry, and when that changes; nothing while the session is locked, and the
+current answer at unlock. It tells nothing else about windows: the dock alone is granted it.
+`athanor_material_manager_v1` (`athanor-material-v1.xml`, decision 35) sends each output's
+material tier, M0, M1 or M2, to the shell surfaces granted it on their lines: the bar, the
+launcher, the dock, the control center and the OSD. At each enable, mode change and GPU change
+of an output a probe draws off screen on the output's GPU, on a thread and in a GL context of
+its own (`material.rs`, `blur.rs`), and VL13's thresholds turn its 95th percentiles into the
+tier; while an output is in M2 its damaged frames are timed to their sync points, and a median
+over half the frame interval moves it to M1 until its next probe. Software rendering is M0
+without a probe; a probe that fails or misses its 3 s deadline is M0, and so is an output until
+its probe has run. The layouts, options and repeat come from
 cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
 before the first client and again after each change of it (an inotify watch of its directory
 and of every ancestor of it, along each link on the way), so one file drives the

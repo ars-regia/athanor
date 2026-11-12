@@ -35,6 +35,7 @@ use smithay::backend::renderer::element::{Kind, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::GpuManager;
+use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
@@ -538,6 +539,11 @@ pub fn start(
 }
 
 impl Drm {
+    /// The GPU's render node, which draws.
+    pub fn render_node(&self) -> DrmNode {
+        self.render_node
+    }
+
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> Result<(), Error> {
         gles(&mut self.gpus, &self.render_node)?.import_dmabuf(dmabuf, None)?;
         Ok(())
@@ -1491,7 +1497,7 @@ impl State {
                 return;
             }
         };
-        let (rendered, states) = match drawn {
+        let (rendered, states, sync) = match drawn {
             Ok(drawn) => drawn,
             Err(error) => {
                 self.draw_failed(crtc, error, period);
@@ -1500,6 +1506,9 @@ impl State {
         };
         if let Some(stats) = &mut self.frame_stats {
             stats.drew(started.elapsed());
+        }
+        if let (true, Some(sync)) = (rendered, sync) {
+            self.time_frame(&output, started, sync);
         }
         self.frame_done(&output, &states, false, frame_target, period);
         if rendered {
@@ -1544,6 +1553,8 @@ impl State {
         self.serve_captures();
         self.space.refresh();
         self.send_toplevel_states();
+        self.send_dock_overlaps();
+        self.refresh_materials();
         self.popups.cleanup();
         self.flush();
     }
@@ -1778,7 +1789,7 @@ fn render(
     )>,
     cursor: &mut Cursor,
     look: Look,
-) -> Result<(bool, RenderElementStates), SwapBuffersError> {
+) -> Result<(bool, RenderElementStates, Option<SyncPoint>), SwapBuffersError> {
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
     let mut elements: Vec<Element> = Vec::new();
@@ -1865,8 +1876,13 @@ fn render(
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
         }
     }
+    // The live check of VL13 times the frame to this sync point (`State::time_frame`).
+    let sync = match &result.primary_element {
+        PrimaryPlaneElement::Swapchain(element) => Some(element.sync.clone()),
+        _ => None,
+    };
     // Under the colour pass the frame is one element: the states are those of what it shows.
-    Ok((!result.is_empty, filtered.unwrap_or(result.states)))
+    Ok((!result.is_empty, filtered.unwrap_or(result.states), sync))
 }
 
 #[cfg(test)]
