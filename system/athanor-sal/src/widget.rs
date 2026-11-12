@@ -599,6 +599,12 @@ pub struct Widget {
     pub(crate) min_w: f32,
     /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
+    /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
+    /// [`Ui::set_fill`].
+    pub(crate) fill: bool,
+    /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
+    /// shown a cell.
+    pub(crate) slots: usize,
 }
 
 impl Widget {
@@ -619,6 +625,8 @@ impl Widget {
             wrap: None,
             min_w: 0.0,
             ink: None,
+            fill: false,
+            slots: 0,
         }
     }
 
@@ -1979,6 +1987,7 @@ impl Ui {
         let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
+        let slots = self.widgets[id].slots;
         let between = match self.widgets[id].kind {
             Kind::Column => section_gap,
             _ => gap,
@@ -2074,7 +2083,8 @@ impl Ui {
             }
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
-                let w = widest * sizes.len() as f32 + spacing;
+                let cells = sizes.len().max(slots);
+                let w = widest * cells as f32 + gap * cells.saturating_sub(1) as f32;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
@@ -2173,7 +2183,7 @@ impl Ui {
             Kind::Inline { padding } => self.place_inline(id, x, y, padding),
             Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
-                let n = children.len().max(1) as f32;
+                let n = children.len().max(self.widgets[id].slots).max(1) as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
                 let mut cx = if self.rtl { x + outer.w } else { x };
                 for c in children {
@@ -2297,7 +2307,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) || self.widgets[c].wrap.is_some())
+                    ) || self.widgets[c].wrap.is_some()
+                        || self.inline_fills(c))
                     {
                         // Never below its least width (Ui::set_min_width), as GTK's width-request.
                         self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
