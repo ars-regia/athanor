@@ -232,26 +232,49 @@ fn d35_a_mode_change_supersedes_the_running_probe() {
 }
 
 /// A probe not finished by its deadline is M0 by the deadline's timer, while its thread still
-/// runs; its late result is sent to no one, and the next probe on the GPU, in time, gives its
-/// output's tier.
+/// runs. Its GPU is wedged until the thread ends: the output waiting on it is M0 at once, and
+/// the late probe holds no frame from the live check. When the thread ends its result is sent
+/// to no one, and the GPU probes again: a mode change of the second output gives its tier.
 #[test]
-fn d35_a_probe_not_finished_by_its_deadline_is_m0() {
+fn d35_a_probe_past_its_deadline_wedges_its_gpu() {
     let mut run = Running::start(None);
     let mut shell = Local::connect(&mut run, None);
     let object = shell.tier(&mut run);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counted = calls.clone();
     let (release, released) = held();
     on_a_fake_gpu(&mut run, Duration::from_millis(100), move |_, _, _| {
-        wait(&released)?;
+        if counted.fetch_add(1, Ordering::SeqCst) == 0 {
+            wait(&released)?;
+        }
         Ok(times(Tier::M2))
     });
     let (first, second) = (output(&run, 0), output(&run, 1));
     run.until("the deadline", |state| state.materials.settled(&first));
-    assert!(run.state.materials.probing(), "the late probe still runs");
-    assert!(!run.state.materials.settled(&second), "the second waits");
-    assert_eq!(run.state.materials.probes(), 1, "its probe not started yet");
+    assert!(run.state.materials.wedged(), "the late probe still runs");
+    assert!(
+        run.state.materials.settled(&second),
+        "the second, on the wedged GPU, is M0"
+    );
+    assert!(
+        !run.state.materials.probing(),
+        "the late probe holds no frame"
+    );
+    assert_eq!(
+        run.state.materials.probes(),
+        1,
+        "no probe on the wedged GPU"
+    );
     release.send(()).expect("the first probe holds");
-    release.send(()).expect("for the second");
-    shell.pump(&mut run, "both probes", |_, state| {
+    run.until("the late thread ends", |state| !state.materials.wedged());
+    let mode = smithay::output::Mode {
+        size: (1024, 768).into(),
+        refresh: 60_000,
+    };
+    second.change_current_state(Some(mode), None, None, None);
+    run.state.arrange_outputs();
+    run.state.refresh_materials();
+    shell.pump(&mut run, "the second's probe", |_, state| {
         state.materials.probes() == 2 && !state.materials.probing()
     });
     shell.roundtrip(&mut run);
@@ -260,8 +283,9 @@ fn d35_a_probe_not_finished_by_its_deadline_is_m0() {
     assert_eq!(
         run.state.materials.tier_of(Some(&second)),
         Tier::M2,
-        "in time"
+        "probed again"
     );
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
     run.stop();
 }
 

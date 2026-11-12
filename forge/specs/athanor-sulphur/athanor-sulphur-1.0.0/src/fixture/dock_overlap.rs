@@ -44,6 +44,20 @@ impl Local {
         self.dock_layer(run, output, anchor).0
     }
 
+    /// The second output, bound.
+    fn second_output(&mut self) -> wl_output::WlOutput {
+        let name = self
+            .client
+            .globals
+            .iter()
+            .filter(|(_, interface, _)| interface == "wl_output")
+            .nth(1)
+            .map(|(name, _, _)| *name)
+            .expect("a second wl_output");
+        let qh = self.queue.handle();
+        self.registry.bind(name, 4, &qh, ())
+    }
+
     /// `dock`, with its layer surface.
     fn dock_layer(
         &mut self,
@@ -240,16 +254,7 @@ fn d35_the_rectangle_is_on_the_surfaces_output() {
         .expect("a second output");
     let area = run.state.space.output_geometry(&second).expect("placed");
     let mut dock = Local::connect(&mut run, None);
-    let name = dock
-        .client
-        .globals
-        .iter()
-        .filter(|(_, interface, _)| interface == "wl_output")
-        .nth(1)
-        .map(|(name, _, _)| *name)
-        .expect("a second wl_output");
-    let qh = dock.queue.handle();
-    let output: wl_output::WlOutput = dock.registry.bind(name, 4, &qh, ());
+    let output = dock.second_output();
     let surface = dock.dock(
         &mut run,
         Some(&output),
@@ -348,16 +353,7 @@ fn d35_a_hostile_rectangle_intersects_nothing() {
         .expect("a second output");
     let area = run.state.space.output_geometry(&second).expect("placed");
     let mut dock = Local::connect(&mut run, None);
-    let name = dock
-        .client
-        .globals
-        .iter()
-        .filter(|(_, interface, _)| interface == "wl_output")
-        .nth(1)
-        .map(|(name, _, _)| *name)
-        .expect("a second wl_output");
-    let qh = dock.queue.handle();
-    let output: wl_output::WlOutput = dock.registry.bind(name, 4, &qh, ());
+    let output = dock.second_output();
     let surface = dock.dock(
         &mut run,
         Some(&output),
@@ -430,5 +426,68 @@ fn d35_two_overlap_objects_of_one_surface_answer_apart() {
     dock.heard_overlaps(&mut run, &high, &[0]);
     dock.frames(&mut run, 3);
     assert_eq!(dock.overlaps_of(&low), [1], "each on its own");
+    run.stop();
+}
+
+/// The region VL13's probe blurs as the dock's is the most recent rectangle of a dock surface
+/// on the output: not that of a destroyed layer surface, nor an older object's.
+#[test]
+fn d35_the_probe_region_is_the_live_docks_latest() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let first = output_at(&run, 0);
+    let rectangle = |(x, y, width, height): (i32, i32, i32, i32)| {
+        Some(smithay::utils::Rectangle::new(
+            (x, y).into(),
+            (width, height).into(),
+        ))
+    };
+    let mut dock = Local::connect(&mut run, None);
+    let (old, layer) = dock.dock_layer(&mut run, None, zwlr_layer_surface_v1::Anchor::Bottom);
+    let _gone = dock.overlap(&mut run, &old, SHOWN);
+    dock.roundtrip(&mut run);
+    assert_eq!(run.state.dock_rectangle(&first), rectangle(SHOWN));
+    layer.destroy();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        run.state.dock_rectangle(&first),
+        None,
+        "a destroyed layer surface's"
+    );
+    let surface = dock.dock(&mut run, None, zwlr_layer_surface_v1::Anchor::Bottom);
+    let top = (0, 0, OUTPUTS[0].width, DOCK);
+    let _older = dock.overlap(&mut run, &surface, SHOWN);
+    let _newer = dock.overlap(&mut run, &surface, top);
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        run.state.dock_rectangle(&first),
+        rectangle(top),
+        "the most recent"
+    );
+    run.stop();
+}
+
+/// An overlap object lets go of its output when the output leaves the space.
+#[test]
+fn d35_an_overlap_object_lets_go_of_a_gone_output() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let second = output_at(&run, 1);
+    let mut dock = Local::connect(&mut run, None);
+    let output = dock.second_output();
+    let surface = dock.dock(
+        &mut run,
+        Some(&output),
+        zwlr_layer_surface_v1::Anchor::Bottom,
+    );
+    let object = dock.overlap(&mut run, &surface, SHOWN);
+    dock.heard_overlaps(&mut run, &object, &[0]);
+    assert!(run.state.dock_overlap_holds(&second));
+    run.state.remove_output(&second);
+    run.state.send_dock_overlaps();
+    assert!(
+        !run.state.dock_overlap_holds(&second),
+        "the output is let go"
+    );
     run.stop();
 }

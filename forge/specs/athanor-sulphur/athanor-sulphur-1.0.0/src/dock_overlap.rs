@@ -57,7 +57,8 @@ pub struct Overlap {
     surface: WlSurface,
     /// The rectangle last set, in its output's logical coordinates; none before the first.
     rectangle: Option<Rectangle<i32, Logical>>,
-    /// The output the surface was last seen on: a hidden dock that unmaps keeps its output.
+    /// The output the surface was last seen on: a hidden dock that unmaps keeps its output,
+    /// while the output is in the space.
     output: Option<Output>,
     /// The answer last sent; none before the first.
     sent: Option<bool>,
@@ -173,12 +174,26 @@ impl State {
     }
 
     /// The rectangle the dock last set on `output`, in its logical coordinates: the region
-    /// VL13's probe blurs as the dock's.
+    /// VL13's probe blurs as the dock's. Only a layer surface of `output` counts, not one
+    /// destroyed or closed, and of its objects the most recent.
     pub(crate) fn dock_rectangle(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
+        let map = layer_map_for_output(output);
         self.dock_overlaps
             .iter()
-            .filter(|overlap| overlap.output.as_ref() == Some(output))
+            .rev()
+            .filter(|overlap| {
+                map.layer_for_surface(&overlap.surface, WindowSurfaceType::TOPLEVEL)
+                    .is_some()
+            })
             .find_map(|overlap| overlap.rectangle)
+    }
+
+    /// Whether an overlap object still holds `output`.
+    #[cfg(test)]
+    pub(crate) fn dock_overlap_holds(&self, output: &Output) -> bool {
+        self.dock_overlaps
+            .iter()
+            .any(|overlap| overlap.output.as_ref() == Some(output))
     }
 
     fn answer_dock_overlaps(&mut self, again: bool) {
@@ -193,6 +208,13 @@ impl State {
                     .is_some()
             }) {
                 overlap.output = Some(output.clone());
+            } else if overlap
+                .output
+                .as_ref()
+                .is_some_and(|output| !self.space.outputs().any(|shown| shown == output))
+            {
+                // Its output is gone: the object holds it no longer, and nothing covers it.
+                overlap.output = None;
             }
             let Some(rectangle) = overlap.rectangle else {
                 continue;

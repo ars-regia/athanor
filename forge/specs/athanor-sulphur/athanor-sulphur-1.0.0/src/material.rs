@@ -260,8 +260,11 @@ pub struct Materials {
     generation: u64,
     /// Where the probes' threads send their outcomes.
     results: Option<channel::Sender<Outcome>>,
-    /// The GPUs a probe's thread runs on, until it has sent its outcome.
-    busy: Vec<Gpu>,
+    /// The GPUs a probe's thread runs on, until it has sent its outcome: with the probe's
+    /// generation and whether it is past its deadline, the GPU then wedged.
+    busy: Vec<(Gpu, u64, bool)>,
+    /// The render node that draws and its path, read once (`cached_path`).
+    path: Option<(DrmNode, PathBuf)>,
     #[cfg(test)]
     pub(crate) fake: Option<Fake>,
 }
@@ -277,6 +280,12 @@ impl Materials {
     #[cfg(test)]
     pub(crate) fn probes(&self) -> u64 {
         self.generation
+    }
+
+    /// Whether a GPU is wedged: its probe past its deadline, its thread still running.
+    #[cfg(test)]
+    pub(crate) fn wedged(&self) -> bool {
+        self.busy.iter().any(|(_, _, late)| *late)
     }
 
     /// Whether `output`'s measurement has settled.
@@ -295,9 +304,10 @@ impl Materials {
             .map(|record| &mut record.timing)
     }
 
-    /// Whether a probe's thread runs.
+    /// Whether a probe's thread runs within its deadline: one past it no longer holds the
+    /// live check.
     pub(crate) fn probing(&self) -> bool {
-        !self.busy.is_empty()
+        self.busy.iter().any(|(_, _, late)| !late)
     }
 
     /// Sends each object of `output` its tier, when it changed.
@@ -527,13 +537,14 @@ impl State {
     }
 
     /// The GPU that draws the outputs, by its render node's path; none in software, or
-    /// nested.
-    fn material_gpu(&self) -> Option<Gpu> {
+    /// nested. Called after every frame, the path is read once per render node.
+    fn material_gpu(&mut self) -> Option<Gpu> {
         #[cfg(test)]
         if let Some(fake) = &self.materials.fake {
             return Some(fake.gpu.clone());
         }
-        self.render_node().and_then(|node| node.dev_path())
+        let node = self.render_node()?;
+        cached_path(&mut self.materials.path, node, |node| node.dev_path())
     }
 
     /// Starts the measurement of `output`: M0 in software, a probe on its GPU otherwise, which
@@ -560,31 +571,45 @@ impl State {
     }
 
     /// Starts the probe of the first output waiting on each GPU that no probe runs on: one
-    /// probe at a time on a GPU, so that they do not slow each other.
+    /// probe at a time on a GPU, so that they do not slow each other. An output waiting on a
+    /// wedged GPU, whose probe is past its deadline, is M0.
     fn start_probes(&mut self) {
         loop {
             let busy = &self.materials.busy;
-            let Some((index, output, gpu)) =
-                self.materials
-                    .records
-                    .iter()
-                    .enumerate()
-                    .find_map(
-                        |(index, record)| match (&record.measure, &record.signature.1) {
-                            (Measure::Waiting, Some(gpu)) if !busy.contains(gpu) => {
-                                Some((index, record.output.clone(), gpu.clone()))
-                            }
-                            _ => None,
-                        },
-                    )
+            let Some((index, output, gpu, wedged)) = self
+                .materials
+                .records
+                .iter()
+                .enumerate()
+                .find_map(|(index, record)| {
+                    let (Measure::Waiting, Some(gpu)) = (&record.measure, &record.signature.1)
+                    else {
+                        return None;
+                    };
+                    let wedged = match busy.iter().find(|(on, _, _)| on == gpu) {
+                        None => false,
+                        Some((_, _, true)) => true,
+                        Some(_) => return None,
+                    };
+                    Some((index, record.output.clone(), gpu.clone(), wedged))
+                })
             else {
                 return;
             };
             // Either the GPU is busy now or the record has settled: the loop ends.
-            let measure = self.probe(&output, gpu);
+            let measure = if wedged {
+                tracing::warn!(
+                    output = output.name(),
+                    "the GPU's last probe did not end by its deadline: tier M0"
+                );
+                Measure::settled(Tier::M0)
+            } else {
+                self.probe(&output, gpu)
+            };
             if let Some(record) = self.materials.records.get_mut(index) {
                 record.measure = measure;
             }
+            self.materials.send(&output);
         }
     }
 
@@ -618,7 +643,7 @@ impl State {
             tracing::warn!(%error, "the material probe could not be started: tier M0");
             return Measure::settled(Tier::M0);
         }
-        self.materials.busy.push(gpu);
+        self.materials.busy.push((gpu, generation, false));
         let timer = Timer::from_deadline(deadline);
         let armed = self.loop_handle.insert_source(timer, move |_, _, state| {
             state.material_expired(generation);
@@ -657,7 +682,9 @@ impl State {
     /// measurement superseded it, and the next probe waiting on the GPU starts.
     fn material_probed(&mut self, gpu: Gpu, generation: u64, result: Result<Probed, String>) {
         let now = Instant::now();
-        self.materials.busy.retain(|busy| *busy != gpu);
+        self.materials
+            .busy
+            .retain(|(on, running, _)| (on, *running) != (&gpu, generation));
         let settled = self
             .materials
             .records
@@ -677,7 +704,15 @@ impl State {
         self.start_probes();
     }
 
+    /// A probe's deadline: its output, if it still waits for it, is M0, and its GPU is wedged
+    /// until the probe's thread ends.
     fn material_expired(&mut self, generation: u64) {
+        for (_, running, late) in &mut self.materials.busy {
+            if *running == generation {
+                *late = true;
+            }
+        }
+        self.start_probes();
         let Some(record) = self.materials.records.iter_mut().find(|record| {
             matches!(record.measure, Measure::Probing { generation: running, .. } if running == generation)
         }) else {
@@ -717,6 +752,23 @@ impl State {
             dock,
         })
     }
+}
+
+/// The path of `node`, from `cache` when it holds `node`'s; read otherwise, and kept when it
+/// is read. A read that fails, as a transient sysfs error, is not kept: it is tried again.
+fn cached_path<K: PartialEq + Copy>(
+    cache: &mut Option<(K, PathBuf)>,
+    node: K,
+    read: impl FnOnce(K) -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some((cached, path)) = cache {
+        if *cached == node {
+            return Some(path.clone());
+        }
+    }
+    let path = read(node)?;
+    *cache = Some((node, path.clone()));
+    Some(path)
 }
 
 /// The region the probe blurs as the dock's, on an output of `size`: the dock's rectangle on
@@ -971,6 +1023,33 @@ mod tests {
     /// The probe's dock region: the dock's rectangle, clipped to the output; the default
     /// region without a dock or when its rectangle lies off the output, as after a mode change
     /// from 2560 x 1440 to 1920 x 1080, or has no area; none on an output without area.
+    /// The render node's path is read once: kept through a failed read, read again for
+    /// another node; a failed read is not kept.
+    #[test]
+    fn vl13_the_render_nodes_path_is_read_once() {
+        let (path, other) = (
+            PathBuf::from("/dev/dri/renderD128"),
+            PathBuf::from("/dev/dri/renderD129"),
+        );
+        let mut cache = None;
+        assert_eq!(cached_path(&mut cache, 1, |_| None), None, "a failed read");
+        assert_eq!(cache, None, "is not kept");
+        assert_eq!(
+            cached_path(&mut cache, 1, |_| Some(path.clone())),
+            Some(path.clone())
+        );
+        assert_eq!(
+            cached_path(&mut cache, 1, |_| None),
+            Some(path),
+            "kept through a failed read"
+        );
+        assert_eq!(
+            cached_path(&mut cache, 2, |_| Some(other.clone())),
+            Some(other),
+            "another node is read"
+        );
+    }
+
     #[test]
     fn vl13_a_dock_rectangle_off_the_output_gives_the_default_region() {
         let size = Size::<i32, Physical>::from((1920, 1080));
