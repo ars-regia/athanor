@@ -1,0 +1,2 @@
+class = "security"
+advisories = ["FEDORA-2026-1028a81d8a"]
