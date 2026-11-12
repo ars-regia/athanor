@@ -239,6 +239,14 @@ pub trait Application {
     /// results, say, or Ctrl+Enter, which [`Key::Enter`] with `modifiers.ctrl` tells from Enter.
     /// The keys of an open menu come to the menu's surface. Escape on a popup that Escape
     /// dismisses closes it first, without this call. The default takes no key.
+    ///
+    /// Only the keys a [`Key`] names come here: Tab and Shift+Tab, the arrows, Home, End,
+    /// Page Up, Page Down, Enter, Backspace, Delete, Escape, Menu and Shift+F10, Ctrl+A, Ctrl+C,
+    /// Ctrl+X and Ctrl+V, and a key that types text, which comes as [`Key::Text`] whatever the
+    /// modifiers held, Alt or Super included. Shift with Left or Right comes as
+    /// [`Key::SelectLeft`] or [`Key::SelectRight`]. The other keys reach neither this call nor
+    /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
+    /// keys that type nothing, such as Insert.
     fn key(
         &mut self,
         _shell: &mut Shell,
