@@ -126,6 +126,24 @@ both selections without the focus, are privileged and granted to no client yet (
 `wp-security-context-v1` tags the clients a sandbox connects: they
 see the standard globals, primary selection among them, and no privileged one, data control
 included, nor the security context manager.
+Decision 33's wave 2a adds standard globals, which a confined client sees as any other:
+`wl_fixes`, and `wp_alpha_modifier_v1`, whose alpha Smithay applies to the client's own surfaces
+and never to the border and outline drawn around its window.
+`org_kde_kwin_server_decoration_manager` answers client-side to every request, as xdg-decoration
+does (`src/decoration.rs`), and each toplevel keeps the icon `xdg_toplevel_icon_manager_v1` sets,
+not yet forwarded to the shell; the compositor answers that manager itself, so that a change to an
+icon already set, a buffer at a scale under 1 and a buffer past the sixteenth of an icon are
+refused before they reach Smithay (`src/toplevel_icon.rs`).
+`wp_fifo_manager_v1` and `wp_commit_timing_manager_v1` pace commits (`src/pacing.rs`): a FIFO
+commit waits for a frame of the output that shows its surface, or of any output when none does,
+and the commit that sets a barrier asks for that frame. A commit with a timestamp is held until
+then, for at most a second; the compositor answers that manager itself, and a timestamp that is
+not a time is the timer's `invalid_timestamp` error. Every commit a client has queued, on a fence,
+a timestamp, a barrier or an earlier commit of its surface, counts against one bound of 64, past
+which the client is disconnected; the commits a synchronised subsurface keeps for its parent's next
+commit count against the same bound per subsurface, and against a bound of 1024 for all of a
+client's subsurfaces together, and leave both with the subsurface. A destroyed surface's
+timestamps are released at once, so that a parent's commit carrying them goes on.
 
 Decision 33 of `doc_own_stack.md`, wave 2a, adds standard globals. With `xdg_wm_dialog_v1` a
 window with a parent stays above it whatever its hint, and a click on a parent whose modal
