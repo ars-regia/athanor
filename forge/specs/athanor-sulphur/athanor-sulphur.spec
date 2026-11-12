@@ -58,6 +58,9 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 * Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
 - Serve xdg_wm_dialog_v1 (doc_own_stack.md decision 33): a click on the parent of a shown
   modal dialog gives the keyboard to the dialog, which stays above its parent.
+- Serve wp_pointer_warp_v1 (decision 33): a warp moves the pointer only within the surface
+  that has both the pointer focus and the keyboard focus, and never while Ctrl+Alt+Tab has
+  suspended its client.
 
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
 - Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:

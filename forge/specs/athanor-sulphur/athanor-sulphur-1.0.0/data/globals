@@ -36,6 +36,7 @@ zwp_primary_selection_device_manager_v1 standard
 zwp_pointer_constraints_v1 standard
 zwp_relative_pointer_manager_v1 standard
 zwp_keyboard_shortcuts_inhibit_manager_v1 standard
+wp_pointer_warp_v1 standard
 # On a render node only, and linux-drm-syncobj-v1 only on one that can wait on a syncobj.
 zwp_linux_dmabuf_v1 standard
 wp_linux_drm_syncobj_manager_v1 standard

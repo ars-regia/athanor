@@ -131,6 +131,11 @@ Decision 33 of `doc_own_stack.md`, wave 2a, adds standard globals. With `xdg_wm_
 window with a parent stays above it whatever its hint, and a click on a parent whose modal
 dialog is shown raises the parent with its dialogs and gives the keyboard to the dialog, the
 last of a chain of modal dialogs (`State::focus_clicked`, `src/fixture/parented.rs`).
+`wp_pointer_warp_v1` moves the pointer only within the surface that has both the pointer's
+focus, since the enter whose serial the warp names, and the keyboard: to a point on that
+surface, and in the confined area under a confinement. Ctrl+Alt+Tab's suspension of decision 30
+refuses it, as it deactivates a pointer lock, until the user clicks or keys back to the client
+(`src/constraints.rs`, `src/fixture/constraints.rs`).
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
