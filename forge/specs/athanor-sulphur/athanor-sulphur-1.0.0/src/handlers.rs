@@ -1361,6 +1361,11 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
     serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
 }
 
+/// xdg-toplevel-icon (doc_own_stack.md decision 33, standard): Smithay keeps each toplevel's
+/// icon in its surface's `ToplevelIconCachedState`, applied with the commit after `set_icon`.
+/// It is not forwarded to the shell yet: that comes with `athanor_toplevel_state_v1`.
+impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
+
 smithay::delegate_dispatch2!(State);
 
 #[cfg(test)]

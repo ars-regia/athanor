@@ -147,6 +147,8 @@ pub struct State {
     pub gesture: Option<crate::gestures::Kind>,
     /// The windows owed an answer to a decoration request (`decoration.rs`).
     pub decoration_owed: Vec<WlSurface>,
+    /// KDE's server-decoration global, which answers client-side to every request.
+    pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
     pub tool_pressed: std::collections::HashMap<
         smithay::backend::input::TabletToolDescriptor,
@@ -371,11 +373,13 @@ impl State {
         crate::gestures::global(&dh);
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
+        let kde_decoration = crate::decoration::kde_global(&dh);
         crate::foreign::global(&dh);
         // Decision 33, wave 2a. Smithay applies a surface's alpha multiplier to that surface's
         // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
         smithay::wayland::fixes::FixesState::new::<Self>(&dh);
         smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
+        smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager::new::<Self>(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -406,6 +410,7 @@ impl State {
             foreign: Default::default(),
             gesture: None,
             decoration_owed: Vec::new(),
+            kde_decoration,
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,

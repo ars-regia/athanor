@@ -129,6 +129,9 @@ included, nor the security context manager.
 Decision 33's wave 2a adds standard globals, which a confined client sees as any other:
 `wl_fixes`, and `wp_alpha_modifier_v1`, whose alpha Smithay applies to the client's own surfaces
 and never to the border and outline drawn around its window.
+`org_kde_kwin_server_decoration_manager` answers client-side to every request, as xdg-decoration
+does (`src/decoration.rs`), and each toplevel keeps the icon `xdg_toplevel_icon_manager_v1` sets,
+not yet forwarded to the shell.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
