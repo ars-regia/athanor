@@ -13,6 +13,7 @@ use smithay::desktop::{
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
@@ -24,7 +25,7 @@ use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
+    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Barrier, Blocker,
     BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{
@@ -59,9 +60,10 @@ use std::time::Duration;
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 
-/// How many commits one client may hold waiting on a fence. Each holds an event source with a
-/// file descriptor and pins its buffer; a client keeps a few frames in flight per surface, and
-/// one that queues more without its fences signalling is flooding the compositor, which
+/// How many commits one client may hold waiting on a fence or a `wp_commit_timer_v1`
+/// timestamp. Each holds an event source, a fence's with a file descriptor, and pins its
+/// buffer; a client keeps a few frames in flight per surface, and one that queues more without
+/// its fences signalling or its timestamps passing is flooding the compositor, which
 /// disconnects it rather than run out of file descriptors.
 pub const MAX_HELD_COMMITS: usize = 64;
 
@@ -153,7 +155,8 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
-            state.wait_for_fence(dh, surface)
+            state.wait_for_fence(dh, surface);
+            state.pace(surface);
         });
     }
 
@@ -277,50 +280,90 @@ impl State {
         B: Blocker + Send + 'static,
         S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
     {
-        let Some(client) = surface.client() else {
+        let Some((client, seq)) = self.hold_slot(surface) else {
             return;
         };
         let id = client.id();
+        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
+            state.unhold(&client, seq);
+            Ok(())
+        };
+        let token = self.loop_handle.insert_source(source, unblock);
+        self.held_on(surface, blocker, id, seq, token.map_err(|error| error.error));
+    }
+
+    /// Holds the pending commit of `surface`, which carries a `wp_commit_timer_v1` timestamp,
+    /// on `barrier` until `wait` has passed, under the bound of `hold_commit`. Every barrier of
+    /// the surface due by then is signalled (`pacing.rs`).
+    pub fn hold_until(&mut self, surface: &WlSurface, barrier: Barrier, wait: Duration) {
+        let Some((client, seq)) = self.hold_slot(surface) else {
+            return;
+        };
+        let id = client.id();
+        let weak = surface.downgrade();
+        let unblock = move |_, _: &mut (), state: &mut State| {
+            if let Ok(surface) = weak.upgrade() {
+                crate::pacing::timestamps_due(&surface, state.clock.now());
+            }
+            state.unhold(&client, seq);
+            TimeoutAction::Drop
+        };
+        let token = self
+            .loop_handle
+            .insert_source(Timer::from_duration(wait), unblock);
+        self.held_on(surface, barrier, id, seq, token.map_err(|error| error.error));
+    }
+
+    /// The client of `surface` and a sequence number for one more held commit, or nothing,
+    /// when the surface has no client or its client is disconnected for holding too many.
+    fn hold_slot(&mut self, surface: &WlSurface) -> Option<(Client, u64)> {
+        let client = surface.client()?;
+        let id = client.id();
         if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
-            tracing::warn!(
-                ?id,
-                "a client holds too many commits on fences: disconnected"
-            );
+            tracing::warn!(?id, "a client holds too many commits: disconnected");
             client.kill(
                 &self.display_handle,
                 ProtocolError {
                     code: NO_MEMORY,
                     object_id: 1,
                     object_interface: "wl_display".into(),
-                    message: format!("more than {MAX_HELD_COMMITS} commits wait on a fence"),
+                    message: format!("more than {MAX_HELD_COMMITS} commits are held"),
                 },
             );
-            return;
+            return None;
         }
         let seq = self.next_held;
         self.next_held += 1;
-        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
-            state.held.retain(|held| held.seq != seq);
-            let dh = state.display_handle.clone();
-            state
-                .client_compositor_state(&client)
-                .blocker_cleared(state, &dh);
-            Ok(())
-        };
-        match self.loop_handle.insert_source(source, unblock) {
+        Some((client, seq))
+    }
+
+    /// Records the held commit `seq` once its event source is in the loop, and blocks it.
+    fn held_on<B: Blocker + Send + 'static>(
+        &mut self,
+        surface: &WlSurface,
+        blocker: B,
+        client: ClientId,
+        seq: u64,
+        token: Result<RegistrationToken, smithay::reexports::calloop::Error>,
+    ) {
+        match token {
             Ok(token) => {
-                self.held.push(HeldCommit {
-                    client: id,
-                    seq,
-                    token,
-                });
+                self.held.push(HeldCommit { client, seq, token });
                 add_blocker(surface, blocker);
             }
-            Err(error) => tracing::warn!(error = %error.error, "a fence cannot be waited on"),
+            Err(error) => tracing::warn!(%error, "a held commit cannot be waited on"),
         }
     }
 
-    /// Drops the commits `client` holds on fences, with their event sources.
+    /// The held commit `seq` of `client` is released: its client's blocked commits are tried.
+    fn unhold(&mut self, client: &Client, seq: u64) {
+        self.held.retain(|held| held.seq != seq);
+        let dh = self.display_handle.clone();
+        self.client_compositor_state(client)
+            .blocker_cleared(self, &dh);
+    }
+
+    /// Drops the commits `client` holds on fences and timestamps, with their event sources.
     pub fn release_held(&mut self, client: &ClientId) {
         let loop_handle = &self.loop_handle;
         self.held.retain(|held| {

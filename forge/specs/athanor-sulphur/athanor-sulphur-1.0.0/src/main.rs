@@ -32,6 +32,7 @@ mod look;
 mod marks;
 mod output_management;
 mod output_power;
+mod pacing;
 mod ready;
 mod screen_filter;
 mod session_calls;

@@ -149,6 +149,8 @@ pub struct State {
     pub decoration_owed: Vec<WlSurface>,
     /// KDE's server-decoration global, which answers client-side to every request.
     pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
+    /// The surfaces whose commits have waited on a FIFO barrier (`pacing.rs`).
+    pub fifo_surfaces: Vec<WlSurface>,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
     pub tool_pressed: std::collections::HashMap<
         smithay::backend::input::TabletToolDescriptor,
@@ -379,6 +381,7 @@ impl State {
         // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
         smithay::wayland::fixes::FixesState::new::<Self>(&dh);
         smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
+        crate::pacing::globals(&dh);
         smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager::new::<Self>(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
@@ -411,6 +414,7 @@ impl State {
             gesture: None,
             decoration_owed: Vec::new(),
             kde_decoration,
+            fifo_surfaces: Vec::new(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
@@ -1206,6 +1210,7 @@ impl State {
         for (surface, _) in &popups {
             with_surfaces_surface_tree(surface, scanout);
         }
+        self.fifo_frame_done(output);
         if damaged {
             self.presentation_feedback(output, states).presented(
                 frame_target,

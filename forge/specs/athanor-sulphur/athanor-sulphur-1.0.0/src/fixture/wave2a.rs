@@ -8,6 +8,10 @@ use smithay::reexports::wayland_protocols_misc::server_decoration::server::__int
 use smithay::wayland::compositor::with_states;
 use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
 use wayland_client::protocol::wl_fixes;
+use wayland_protocols::wp::commit_timing::v1::client::{
+    wp_commit_timer_v1, wp_commit_timing_manager_v1,
+};
+use wayland_protocols::wp::fifo::v1::client::{wp_fifo_manager_v1, wp_fifo_v1};
 use wayland_protocols::xdg::toplevel_icon::v1::client::{
     xdg_toplevel_icon_manager_v1, xdg_toplevel_icon_v1,
 };
@@ -15,6 +19,10 @@ use wayland_protocols::xdg::toplevel_icon::v1::client::{
 delegate_noop!(Client: wl_fixes::WlFixes);
 delegate_noop!(Client: ignore xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1);
 delegate_noop!(Client: xdg_toplevel_icon_v1::XdgToplevelIconV1);
+delegate_noop!(Client: wp_fifo_manager_v1::WpFifoManagerV1);
+delegate_noop!(Client: wp_fifo_v1::WpFifoV1);
+delegate_noop!(Client: wp_commit_timing_manager_v1::WpCommitTimingManagerV1);
+delegate_noop!(Client: wp_commit_timer_v1::WpCommitTimerV1);
 
 /// wl_fixes destroys a registry in the compositor, for a confined client as for any other.
 #[test]
@@ -182,6 +190,119 @@ fn a_toplevel_keeps_its_icon_until_it_is_replaced_or_cleared() {
         icon_of(&run, &other_id),
         named("org.example.Other", 1),
         "the other's kept"
+    );
+    run.stop();
+}
+
+/// The width of the window of client `id` as the compositor has applied it, if it is mapped.
+fn applied_width(state: &State, id: &ClientId) -> Option<i32> {
+    state
+        .space
+        .elements()
+        .find(|window| owned_by(window, id))
+        .map(|window| window.geometry().size.w)
+}
+
+/// FIFO commits are applied a frame apart: in a burst of commits, each waiting on the barrier
+/// the one before set, the last is applied, and not before a frame has passed for each.
+#[test]
+fn fifo_commits_are_applied_a_frame_apart() {
+    const COMMITS: i32 = 6;
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_fifo_manager_v1::WpFifoManagerV1 = local.bind(1);
+    let fifo = manager.get_fifo(&surface, &local.queue.handle(), ());
+    let shm: wl_shm::WlShm = local.bind(1);
+    let mut buffers = Vec::new();
+    let started = Instant::now();
+    for step in 1..=COMMITS {
+        let (buffer, file) = local.buffer(&shm, WIDTH + step, HEIGHT, [0, 0, 255, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage(0, 0, WIDTH + step, HEIGHT);
+        fifo.wait_barrier();
+        fifo.set_barrier();
+        surface.commit();
+        buffers.push((buffer, file));
+    }
+    local.pump(&mut run, "the last FIFO commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + COMMITS)
+    });
+    // The first commit waits on no barrier; each of the others waits for one frame, of which
+    // the first may be a frame already under way.
+    let frame = Duration::from_secs(1) / 60;
+    let frames = u32::try_from(COMMITS - 2).expect("a count");
+    assert!(
+        started.elapsed() >= frame * frames,
+        "{COMMITS} commits applied in {:?}",
+        started.elapsed()
+    );
+    run.stop();
+}
+
+/// A minimised window's FIFO commits are still applied, as no output shows it.
+#[test]
+fn a_minimised_window_s_fifo_commits_are_applied() {
+    const COMMITS: i32 = 3;
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_fifo_manager_v1::WpFifoManagerV1 = local.bind(1);
+    let fifo = manager.get_fifo(&surface, &local.queue.handle(), ());
+    let window = window_of(&run, &id);
+    assert!(run.state.minimise(&window));
+    let shm: wl_shm::WlShm = local.bind(1);
+    let mut buffers = Vec::new();
+    for step in 1..=COMMITS {
+        let (buffer, file) = local.buffer(&shm, WIDTH + step, HEIGHT, [0, 0, 255, 255]);
+        surface.attach(Some(&buffer), 0, 0);
+        fifo.wait_barrier();
+        fifo.set_barrier();
+        surface.commit();
+        buffers.push((buffer, file));
+    }
+    local.pump(
+        &mut run,
+        "the minimised window's last commit is applied",
+        |_, _| window.geometry().size.w == WIDTH + COMMITS,
+    );
+    run.stop();
+}
+
+/// A commit with a timestamp is applied once that time has come, and not before.
+#[test]
+fn a_timed_commit_is_applied_at_its_timestamp() {
+    let wait = Duration::from_millis(300);
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let shm: wl_shm::WlShm = local.bind(1);
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 7, HEIGHT, [0, 0, 255, 255]);
+    let due = Duration::from(run.state.clock.now() + wait);
+    let secs = due.as_secs();
+    timer.set_timestamp(
+        u32::try_from(secs >> 32).expect("seconds"),
+        u32::try_from(secs & u64::from(u32::MAX)).expect("seconds"),
+        due.subsec_nanos(),
+    );
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.pump(&mut run, "the timed commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + 7)
+    });
+    assert!(
+        Duration::from(run.state.clock.now()) >= due,
+        "applied before its timestamp"
     );
     run.stop();
 }

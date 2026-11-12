@@ -132,6 +132,9 @@ and never to the border and outline drawn around its window.
 `org_kde_kwin_server_decoration_manager` answers client-side to every request, as xdg-decoration
 does (`src/decoration.rs`), and each toplevel keeps the icon `xdg_toplevel_icon_manager_v1` sets,
 not yet forwarded to the shell.
+`wp_fifo_manager_v1` and `wp_commit_timing_manager_v1` pace commits (`src/pacing.rs`): a FIFO
+commit waits for a frame of the output that shows its surface, or of any output when none does,
+and a commit with a timestamp is held until then, under the bound of the commits held on fences.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
