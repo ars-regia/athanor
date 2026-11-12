@@ -54,6 +54,22 @@ impl Ui {
         widget.align = align;
         Some(changed)
     }
+
+    /// Gives widget `id` a width of at least `width` logical pixels, as GTK's `width-request`:
+    /// it measures at that width when its content needs less, and its children are placed in
+    /// it as in any wider widget. A width that is not finite, or not above 0, is none. Whether
+    /// it changed; call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_min_width(&mut self, id: WidgetId, width: f32) -> bool {
+        let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+        let widget = &mut self.widgets[id];
+        let changed = widget.min_w != width;
+        widget.min_w = width;
+        changed
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +134,35 @@ mod tests {
             assert_eq!(r.x + r.w, 390.0, "{along:?}");
             let y = if along == Align::End { 290.0 - r.h } else { 10.0 };
             assert_eq!(r.y, y, "{along:?}");
+        }
+    }
+
+    #[test]
+    fn a_least_width_widens_a_widget_and_never_narrows_it() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", theme(), rtl);
+            (ui.min_width, ui.min_height) = (400.0, 300.0);
+            let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+            let row = ui.add(island, Kind::Row);
+            ui.add(row, Kind::Button("Wi-Fi".into()));
+            ui.set_align(island, [Align::End, Align::Start]);
+            ui.layout();
+            let (natural, row_natural) = (ui.widget(island).rect.w, ui.widget(row).rect.w);
+            assert!(natural < 200.0);
+            assert!(ui.set_min_width(island, 200.0));
+            assert!(!ui.set_min_width(island, 200.0), "unchanged");
+            ui.layout();
+            let (i, r) = (ui.widget(island).rect, ui.widget(row).rect);
+            assert_eq!(i.w, 200.0);
+            let right = if rtl { i.x == 10.0 } else { i.x + i.w == 390.0 };
+            assert!(right, "still at its end edge");
+            assert!(r.w > row_natural && r.x >= i.x && r.x + r.w <= i.x + i.w, "a row fills it");
+            // Less than its content needs changes nothing; no width is no least width.
+            for width in [1.0, -5.0, f32::NAN, f32::INFINITY] {
+                ui.set_min_width(island, width);
+                ui.layout();
+                assert_eq!(ui.widget(island).rect.w, natural, "{width}");
+            }
         }
     }
 
