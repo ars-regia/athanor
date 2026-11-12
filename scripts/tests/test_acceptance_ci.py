@@ -36,6 +36,9 @@ case "$*" in
   *boot_id*) cat "$g/boot" ;;
   *"date +%s"*) date +%s ;;
   *ActiveState*) echo inactive ;;
+  *ExecMainStatus*) printf 'Result=success\nExecMainStatus=0\n' ;;
+  *"skopeo inspect"*"10.0.2.2"*) ;;
+  *"skopeo inspect"*) echo "pinging container registry ghcr.io: dial tcp: i/o timeout" >&2; exit 1 ;;
   *loginctl*) cat "$g/sessions" ;;
   *"systemctl reboot"*) echo 2 > "$g/boot"; cp "$g/staged" "$g/booted" ;;
   *tee*) cat > /dev/null ;;
@@ -219,6 +222,16 @@ class CiMode(unittest.TestCase):
         result = self.run_sh("--ci", "upgrade", env=self.ci)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("names no class", result.stderr)
+        # What the guest saw: whether the check ran, and which of the two reads of :stable fail.
+        self.assertIn("the unit: Result=success, ExecMainStatus=0", result.stderr)
+        self.assertIn(
+            "the guest reads 10.0.2.2:5000/owner/athanor-system:stable", result.stderr
+        )
+        self.assertIn(
+            "the guest cannot read ghcr.io/owner/athanor-system:stable: skopeo exited 1: "
+            "pinging container registry ghcr.io: dial tcp: i/o timeout",
+            result.stderr,
+        )
 
     def test_upgrade_boots_a_security_candidate_unlocked_for_the_shutdown(self):
         # UT13: with automatic updates on, the default, the check unlocks a security candidate
