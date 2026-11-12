@@ -47,7 +47,7 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, P
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
-    ClientData, ClientId, DisconnectReason, GlobalId,
+    ClientData, ClientId, DisconnectReason, GlobalId, ObjectId,
 };
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -89,6 +89,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -149,8 +150,8 @@ pub struct State {
     pub decoration_owed: Vec<WlSurface>,
     /// KDE's server-decoration global, which answers client-side to every request.
     pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
-    /// The surfaces whose commits have waited on a FIFO barrier (`pacing.rs`).
-    pub fifo_surfaces: Vec<WlSurface>,
+    /// The surfaces whose current content has a FIFO barrier not yet cleared (`pacing.rs`).
+    pub fifo_surfaces: HashMap<ObjectId, WlSurface>,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
     pub tool_pressed: std::collections::HashMap<
         smithay::backend::input::TabletToolDescriptor,
@@ -382,7 +383,7 @@ impl State {
         smithay::wayland::fixes::FixesState::new::<Self>(&dh);
         smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
         crate::pacing::globals(&dh);
-        smithay::wayland::xdg_toplevel_icon::XdgToplevelIconManager::new::<Self>(&dh);
+        crate::toplevel_icon::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -414,7 +415,7 @@ impl State {
             gesture: None,
             decoration_owed: Vec::new(),
             kde_decoration,
-            fifo_surfaces: Vec::new(),
+            fifo_surfaces: HashMap::new(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
@@ -517,6 +518,7 @@ impl State {
         });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
@@ -530,6 +532,7 @@ impl State {
     pub fn satellite_state(&self) -> Arc<ClientState> {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
             gone: self.client_gone.clone(),
             confined: true,
             grants: Vec::new(),
@@ -1646,6 +1649,8 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 /// What the compositor keeps per client.
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// How many of its commits are queued and not yet applied (`State::queue_commit`).
+    pub queued: Arc<AtomicUsize>,
     gone: channel::Sender<ClientId>,
     /// Whether it is confined: it connected through a security context, as a sandboxed
     /// application does, or through xwayland-satellite's socket.

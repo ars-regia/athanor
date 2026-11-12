@@ -17,7 +17,7 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
-use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
@@ -25,8 +25,9 @@ use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Barrier, Blocker,
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+    add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
+    with_states, Barrier, Blocker, BlockerState, BufferAssignment, CompositorClientState,
+    CompositorHandler, CompositorState, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{
     get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
@@ -54,17 +55,20 @@ use smithay::wayland::xdg_activation::{
 };
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 
-/// How many commits one client may hold waiting on a fence or a `wp_commit_timer_v1`
-/// timestamp. Each holds an event source, a fence's with a file descriptor, and pins its
-/// buffer; a client keeps a few frames in flight per surface, and one that queues more without
-/// its fences signalling or its timestamps passing is flooding the compositor, which
-/// disconnects it rather than run out of file descriptors.
+/// How many commits one client may have waiting to be applied, whatever they wait on: a fence, a
+/// `wp_commit_timer_v1` timestamp, a FIFO barrier, or an earlier commit of the same surface
+/// that waits. Smithay queues them per client without a bound and walks the whole queue at each
+/// commit; a held commit also takes an event source, a fence's with a file descriptor, and pins
+/// its buffer. A client keeps a few frames in flight per surface, and one that queues more is
+/// flooding the compositor, which disconnects it rather than run out of memory, file
+/// descriptors or main-thread time (`queue_commit`, `hold_slot`).
 pub const MAX_HELD_COMMITS: usize = 64;
 
 /// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
@@ -73,11 +77,30 @@ pub const MAX_HELD_COMMITS: usize = 64;
 /// no such error: the client sees its socket close, and the reason reaches `disconnected`.
 const NO_MEMORY: u32 = 2;
 
-/// A commit held on a fence: its client, and the event source that waits on the fence.
+/// A commit held on a fence or a timestamp: its client and surface, and the event source that
+/// waits.
 pub struct HeldCommit {
     client: ClientId,
+    surface: ObjectId,
     seq: u64,
     token: RegistrationToken,
+}
+
+/// Counts one commit in its client's `ClientState::queued` from the moment it is committed until
+/// Smithay applies it or drops it: a blocker that never blocks, put on each commit that is a
+/// transaction of its own, and dropped with that transaction.
+struct Queued(Arc<AtomicUsize>);
+
+impl Blocker for Queued {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Queued {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
@@ -155,14 +178,20 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
-            state.wait_for_fence(dh, surface);
-            state.pace(surface);
+            if state.queue_commit(surface) {
+                state.wait_for_fence(dh, surface);
+                state.pace(surface);
+            }
+        });
+        add_destruction_hook::<Self, _>(surface, |state, surface| {
+            state.release_held_of(&surface.id());
         });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
         // Also reached outside a dispatch of the clients, when a held commit's fence signals.
         self.request_redraw();
+        self.fifo_committed(surface);
         on_commit_buffer_handler::<Self>(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
@@ -293,10 +322,19 @@ impl State {
     }
 
     /// Holds the pending commit of `surface`, which carries a `wp_commit_timer_v1` timestamp,
-    /// on `barrier` until `wait` has passed, under the bound of `hold_commit`. Every barrier of
+    /// on the barrier `register` makes until `wait` has passed, under the bound of
+    /// `hold_commit`: the barrier is made only once the commit has its place. Every barrier of
     /// the surface due by then is signalled (`pacing.rs`).
-    pub fn hold_until(&mut self, surface: &WlSurface, barrier: Barrier, wait: Duration) {
+    pub fn hold_until(
+        &mut self,
+        surface: &WlSurface,
+        wait: Duration,
+        register: impl FnOnce() -> Option<Barrier>,
+    ) {
         let Some((client, seq)) = self.hold_slot(surface) else {
+            return;
+        };
+        let Some(barrier) = register() else {
             return;
         };
         let id = client.id();
@@ -314,22 +352,54 @@ impl State {
         self.held_on(surface, barrier, id, seq, token.map_err(|error| error.error));
     }
 
+    /// Counts the commit `surface` is making among its client's queued commits, until it is
+    /// applied or dropped, and whether it goes on: a client past `MAX_HELD_COMMITS` is
+    /// disconnected instead. A commit of a synchronised subsurface is not queued, but merged into
+    /// its parent's next commit, and is not counted.
+    fn queue_commit(&mut self, surface: &WlSurface) -> bool {
+        if is_sync_subsurface(surface) {
+            return true;
+        }
+        let Some(client) = surface.client() else {
+            return true;
+        };
+        let Some(queued) = client
+            .get_data::<ClientState>()
+            .map(|data| data.queued.clone())
+        else {
+            return true;
+        };
+        let waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
+        add_blocker(surface, Queued(queued));
+        if waiting > MAX_HELD_COMMITS {
+            self.flooded(&client, "queued");
+            return false;
+        }
+        true
+    }
+
+    /// Disconnects `client`, which has more than `MAX_HELD_COMMITS` commits `how`.
+    fn flooded(&self, client: &Client, how: &str) {
+        let id = client.id();
+        tracing::warn!(?id, how, "a client has too many commits waiting: disconnected");
+        client.kill(
+            &self.display_handle,
+            ProtocolError {
+                code: NO_MEMORY,
+                object_id: 1,
+                object_interface: "wl_display".into(),
+                message: format!("more than {MAX_HELD_COMMITS} commits are {how}"),
+            },
+        );
+    }
+
     /// The client of `surface` and a sequence number for one more held commit, or nothing,
     /// when the surface has no client or its client is disconnected for holding too many.
     fn hold_slot(&mut self, surface: &WlSurface) -> Option<(Client, u64)> {
         let client = surface.client()?;
         let id = client.id();
         if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
-            tracing::warn!(?id, "a client holds too many commits: disconnected");
-            client.kill(
-                &self.display_handle,
-                ProtocolError {
-                    code: NO_MEMORY,
-                    object_id: 1,
-                    object_interface: "wl_display".into(),
-                    message: format!("more than {MAX_HELD_COMMITS} commits are held"),
-                },
-            );
+            self.flooded(&client, "held");
             return None;
         }
         let seq = self.next_held;
@@ -348,7 +418,12 @@ impl State {
     ) {
         match token {
             Ok(token) => {
-                self.held.push(HeldCommit { client, seq, token });
+                self.held.push(HeldCommit {
+                    client,
+                    surface: surface.id(),
+                    seq,
+                    token,
+                });
                 add_blocker(surface, blocker);
             }
             Err(error) => tracing::warn!(%error, "a held commit cannot be waited on"),
@@ -365,9 +440,20 @@ impl State {
 
     /// Drops the commits `client` holds on fences and timestamps, with their event sources.
     pub fn release_held(&mut self, client: &ClientId) {
+        self.release_held_where(|held| &held.client == client);
+    }
+
+    /// Drops the commits a destroyed surface holds, with their event sources: Smithay drops
+    /// the commits themselves, and a far timestamp or a fence that never signals would
+    /// otherwise keep its client's places until it disconnects.
+    fn release_held_of(&mut self, surface: &ObjectId) {
+        self.release_held_where(|held| &held.surface == surface);
+    }
+
+    fn release_held_where(&mut self, gone: impl Fn(&HeldCommit) -> bool) {
         let loop_handle = &self.loop_handle;
         self.held.retain(|held| {
-            let keep = &held.client != client;
+            let keep = !gone(held);
             if !keep {
                 loop_handle.remove(held.token);
             }
@@ -1404,9 +1490,9 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
     serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
 }
 
-/// xdg-toplevel-icon (doc_own_stack.md decision 33, standard): Smithay keeps each toplevel's
-/// icon in its surface's `ToplevelIconCachedState`, applied with the commit after `set_icon`.
-/// It is not forwarded to the shell yet: that comes with `athanor_toplevel_state_v1`.
+/// xdg-toplevel-icon (doc_own_stack.md decision 33, standard): the compositor answers the
+/// manager (`toplevel_icon.rs`); each icon passes its requests on to Smithay's, whose checks
+/// need this handler.
 impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
 smithay::delegate_dispatch2!(State);

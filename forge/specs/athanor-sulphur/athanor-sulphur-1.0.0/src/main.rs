@@ -40,6 +40,7 @@ mod shutdown;
 mod state;
 mod tablet;
 mod tiling;
+mod toplevel_icon;
 mod toplevel_state;
 mod xkb_config;
 mod udev;

@@ -6,7 +6,10 @@ use smithay::reexports::wayland_protocols_misc::server_decoration::server::__int
     ORG_KDE_KWIN_SERVER_DECORATION_INTERFACE, ORG_KDE_KWIN_SERVER_DECORATION_MANAGER_INTERFACE,
 };
 use smithay::wayland::compositor::with_states;
-use smithay::wayland::xdg_toplevel_icon::ToplevelIconCachedState;
+use crate::handlers::MAX_HELD_COMMITS;
+use crate::pacing::MAX_TIMED_WAIT;
+use crate::toplevel_icon::ToplevelIcon;
+use smithay::wayland::fifo::FifoBarrierCachedState;
 use wayland_client::protocol::wl_fixes;
 use wayland_protocols::wp::commit_timing::v1::client::{
     wp_commit_timer_v1, wp_commit_timing_manager_v1,
@@ -100,11 +103,11 @@ fn icon_of(run: &Running, id: &ClientId) -> (Option<String>, Vec<i32>) {
     let window = window_of(run, id);
     let toplevel = window.toplevel().expect("a toplevel");
     with_states(toplevel.wl_surface(), |states| {
-        let mut icon = states.cached_state.get::<ToplevelIconCachedState>();
+        let mut icon = states.cached_state.get::<ToplevelIcon>();
         let icon = icon.current();
         (
-            icon.icon_name().map(str::to_owned),
-            icon.buffers().iter().map(|(_, scale)| *scale).collect(),
+            icon.name.clone(),
+            icon.buffers.iter().map(|(_, scale, _)| *scale).collect(),
         )
     })
 }
@@ -304,5 +307,290 @@ fn a_timed_commit_is_applied_at_its_timestamp() {
         Duration::from(run.state.clock.now()) >= due,
         "applied before its timestamp"
     );
+    run.stop();
+}
+
+/// Sets the timestamp of the next commit through `timer` to `due` on the presentation clock.
+fn time(timer: &wp_commit_timer_v1::WpCommitTimerV1, due: Duration) {
+    let secs = due.as_secs();
+    timer.set_timestamp(
+        u32::try_from(secs >> 32).expect("seconds"),
+        u32::try_from(secs & u64::from(u32::MAX)).expect("seconds"),
+        due.subsec_nanos(),
+    );
+}
+
+/// The protocol error the compositor closed `local` with.
+fn error_of(
+    run: &mut Running,
+    local: &mut Local,
+) -> wayland_client::backend::protocol::ProtocolError {
+    local.connection.flush().expect("flush");
+    let started = Instant::now();
+    loop {
+        if let Some(error) = local.connection.protocol_error() {
+            return error;
+        }
+        assert!(started.elapsed() < TIMEOUT, "the error: not in time");
+        if let Some(guard) = local.queue.prepare_read() {
+            drop(guard.read());
+        }
+        run.event_loop
+            .dispatch(Some(Duration::from_millis(5)), &mut run.state)
+            .expect("dispatch");
+    }
+}
+
+/// The compositor's side of the window `local` mapped.
+fn served_surface(run: &Running, local: &Local) -> WlSurface {
+    let id = local.id.clone().expect("an id");
+    let window = window_of(run, &id);
+    window.toplevel().expect("a toplevel").wl_surface().clone()
+}
+
+/// A burst of FIFO commits, each waiting on the barrier the one before set, queues one commit a
+/// frame clears: past `MAX_HELD_COMMITS` waiting the client is disconnected, with nothing held.
+#[test]
+fn a_client_queuing_too_many_fifo_commits_is_disconnected() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_fifo_manager_v1::WpFifoManagerV1 = local.bind(1);
+    let fifo = manager.get_fifo(&surface, &local.queue.handle(), ());
+    for _ in 0..MAX_HELD_COMMITS + 2 {
+        fifo.wait_barrier();
+        fifo.set_barrier();
+        surface.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the client past the bound is disconnected", |state| {
+        !served.is_alive() && state.held.is_empty()
+    });
+    run.stop();
+}
+
+/// Plain commits behind a commit timed far ahead wait on it, and count against the bound: past
+/// `MAX_HELD_COMMITS` waiting the client is disconnected, and its timer goes with it.
+#[test]
+fn a_client_queuing_too_many_commits_behind_a_timed_one_is_disconnected() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    time(&timer, due);
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.held.len(), 1, "the timed commit is held");
+    for _ in 0..MAX_HELD_COMMITS + 1 {
+        surface.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the client past the bound is disconnected", |state| {
+        !served.is_alive() && state.held.is_empty()
+    });
+    run.stop();
+}
+
+/// Timed commits each take a place among the client's waiting commits: past `MAX_HELD_COMMITS`
+/// the client is disconnected, and none of their timers is left.
+#[test]
+fn a_client_holding_too_many_timed_commits_is_disconnected() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    for _ in 0..MAX_HELD_COMMITS + 1 {
+        time(&timer, due);
+        surface.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the client past the bound is disconnected", |state| {
+        !served.is_alive() && state.held.is_empty()
+    });
+    run.stop();
+}
+
+/// A client that disconnects with a timed commit held leaves no timer behind.
+#[test]
+fn a_timed_commit_is_released_when_its_client_disconnects() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    time(&timer, due);
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.held.len(), 1, "the timed commit is held");
+    drop(local);
+    run.until("the held commit is released", |state| state.held.is_empty());
+    run.stop();
+}
+
+/// A surface destroyed with a timed commit held frees its place and its timer at once, not when
+/// the timer fires.
+#[test]
+fn a_timed_commit_is_released_when_its_surface_is_destroyed() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let surface = compositor.create_surface(&local.queue.handle(), ());
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let due = Duration::from(run.state.clock.now()) + Duration::from_secs(3600);
+    time(&timer, due);
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(run.state.held.len(), 1, "the timed commit is held");
+    let destroyed = Instant::now();
+    timer.destroy();
+    surface.destroy();
+    local.roundtrip(&mut run);
+    assert!(run.state.held.is_empty(), "released with its surface");
+    assert!(
+        destroyed.elapsed() < MAX_TIMED_WAIT,
+        "released before its timer could fire"
+    );
+    run.stop();
+}
+
+/// A commit timed further ahead than `MAX_TIMED_WAIT`, even by more seconds than an instant can
+/// hold, is applied once that wait has passed.
+#[test]
+fn a_commit_timed_far_ahead_is_applied_after_the_longest_wait() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    let shm: wl_shm::WlShm = local.bind(1);
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 9, HEIGHT, [0, 0, 255, 255]);
+    let started = Instant::now();
+    timer.set_timestamp(0x7fff_ffff, 0, 0);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.pump(&mut run, "the far timed commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + 9)
+    });
+    assert!(
+        started.elapsed() >= MAX_TIMED_WAIT,
+        "applied in {:?}",
+        started.elapsed()
+    );
+    run.stop();
+}
+
+/// A timestamp whose nanoseconds are a second or more is no time: the client is disconnected
+/// with `invalid_timestamp`, and the compositor goes on.
+#[test]
+fn an_invalid_timestamp_disconnects_its_client() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_commit_timing_manager_v1::WpCommitTimingManagerV1 = local.bind(1);
+    let timer = manager.get_timer(&surface, &local.queue.handle(), ());
+    timer.set_timestamp(0, 1, 1_000_000_000);
+    surface.commit();
+    local.connection.flush().expect("flush");
+    run.until("the client is disconnected", |state| {
+        !served.is_alive() && state.held.is_empty()
+    });
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    run.stop();
+}
+
+/// A barrier set by a commit that waits on none is cleared at the next frame, which that commit
+/// asks for: a later commit that waits on it is applied without a frame of its own, as an output
+/// that draws only on request needs.
+#[test]
+fn a_fifo_barrier_set_alone_is_cleared_at_the_next_frame() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let manager: wp_fifo_manager_v1::WpFifoManagerV1 = local.bind(1);
+    let fifo = manager.get_fifo(&surface, &local.queue.handle(), ());
+    fifo.set_barrier();
+    surface.commit();
+    local.roundtrip(&mut run);
+    let barrier = || {
+        with_states(&served, |states| {
+            states
+                .cached_state
+                .get::<FifoBarrierCachedState>()
+                .current()
+                .barrier
+                .clone()
+        })
+    };
+    assert!(barrier().is_some(), "the barrier is set");
+    run.until("the barrier is cleared", |state| {
+        barrier().is_none() && state.fifo_surfaces.is_empty()
+    });
+    let shm: wl_shm::WlShm = local.bind(1);
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 5, HEIGHT, [0, 0, 255, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    fifo.wait_barrier();
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        applied_width(&run.state, &id),
+        Some(WIDTH + 5),
+        "applied at once"
+    );
+    run.stop();
+}
+
+/// A request that changes an icon already set on a toplevel is the `immutable` error, which
+/// disconnects the client and leaves the compositor running.
+#[test]
+fn changing_an_icon_after_set_icon_is_an_error() {
+    let mut run = Running::start(None);
+    for change in ["set_name", "add_buffer"] {
+        let context = sandbox(&run);
+        let mut local = Local::connect(&mut run, Some(context));
+        let toplevel = local.toplevel(&mut run);
+        let manager: xdg_toplevel_icon_manager_v1::XdgToplevelIconManagerV1 = local.bind(1);
+        let (buffer, icon) = set_icon(&mut local, &manager, &toplevel, "org.example.Set", 1);
+        match change {
+            "set_name" => icon.set_name("org.example.Changed".into()),
+            _ => icon.add_buffer(&buffer, 2),
+        }
+        let error = error_of(&mut run, &mut local);
+        assert_eq!(error.object_interface, "xdg_toplevel_icon_v1", "{change}");
+        assert_eq!(
+            error.code,
+            xdg_toplevel_icon_v1::Error::Immutable as u32,
+            "{change}"
+        );
+    }
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
     run.stop();
 }
