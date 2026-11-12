@@ -562,7 +562,7 @@ pub struct Ui {
     pub min_height: f32,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
-    title_bar: Option<WidgetId>,
+    pub(crate) title_bar: Option<WidgetId>,
     size: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
@@ -1730,7 +1730,22 @@ impl Ui {
                     .filter(|&c| self.widgets[c].align[1] == crate::Align::End)
                     .collect();
                 let tail = bottom.iter().map(|&c| self.widgets[c].rect.h + gap).sum::<f32>();
-                let mut end_y = (outer.bottom() - edge - (tail - gap).max(0.0)).max(cy);
+                // Where the next widget would go after the ones in the flow: the widgets at the
+                // bottom start no higher, so a column too short for both overflows at its end
+                // and never draws them over the flow.
+                let flow = cy
+                    + children
+                        .iter()
+                        .filter(|&&c| self.widgets[c].align[1] != crate::Align::End)
+                        .map(|&c| self.widgets[c].rect.h + gap)
+                        .sum::<f32>();
+                let mut end_y = (outer.bottom() - edge - (tail - gap).max(0.0)).max(flow);
+                // How far down an island in the flow may grow: to the widgets at the bottom.
+                let limit = if bottom.is_empty() {
+                    outer.bottom() - edge
+                } else {
+                    end_y - gap
+                };
                 for &c in children {
                     let [across, along] = self.widgets[c].align;
                     if across == crate::Align::Fill
@@ -1750,18 +1765,21 @@ impl Ui {
                     {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
-                    // An island and a picture take the rest of their column's height too,
-                    // unless aligned along it.
+                    // An island takes the rest of its column's height down to the widgets at
+                    // the bottom, unless aligned along it; a picture, which takes no alignment
+                    // (Ui::set_align), always does.
                     if along == crate::Align::Fill
                         && matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. })
                     {
-                        let rest = outer.bottom() - edge - cy;
                         let r = &mut self.widgets[c].rect;
-                        r.h = r.h.max(rest);
+                        r.h = r.h.max(limit - cy);
                     }
                     let r = self.widgets[c].rect;
-                    // The end edge is the left one in right to left.
-                    let at_right = self.rtl != (across == crate::Align::End);
+                    // The end edge is the left one in right to left. A widget wider than the
+                    // column sits at the start edge, so that it overflows only at the end, as
+                    // a widget that fills does.
+                    let fits = r.w <= outer.w - 2.0 * edge;
+                    let at_right = self.rtl != (fits && across == crate::Align::End);
                     let cx = if at_right {
                         x + outer.w - edge - r.w
                     } else {
@@ -4420,5 +4438,50 @@ mod tests {
         ui.set_focus(Some(field));
         ui.commit("b");
         assert_eq!(text(&ui, field), "ba");
+    }
+
+    /// The column is placed again, shorter than its widgets, as a row cell can make it.
+    #[test]
+    fn a_column_too_short_pushes_the_widgets_at_the_bottom_past_its_end() {
+        let gapped = Theme {
+            gap: 6.0,
+            ..Theme::default()
+        };
+        let mut ui = Ui::new("Align", gapped, false);
+        let group = ui.add(Ui::ROOT, Kind::Group("Short".into()));
+        let first = ui.add(group, Kind::Button("First".into()));
+        let second = ui.add(group, Kind::Button("Second".into()));
+        let done = ui.add(group, Kind::Button("Done".into()));
+        assert_eq!(ui.set_align(done, [crate::Align::Fill, crate::Align::End]), Some(true));
+        ui.layout();
+        let r = ui.widget(group).rect;
+        ui.widgets[group].rect.h = r.h / 3.0;
+        ui.place(group, r.x, r.y);
+        let (f, s, d) = (ui.widget(first).rect, ui.widget(second).rect, ui.widget(done).rect);
+        assert_eq!(s.y, f.y + f.h + 6.0);
+        assert_eq!(d.y, s.y + s.h + 6.0, "after the flow, not over it");
+    }
+
+    /// The column is placed again, narrower than its widget, as a row cell can make it.
+    #[test]
+    fn a_widget_wider_than_its_column_starts_at_the_start_edge() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let wide = ui.add(group, Kind::Button("A button wider than the group".into()));
+            assert_eq!(ui.set_align(wide, [crate::Align::End, crate::Align::Fill]), Some(true));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            let w = ui.widget(wide).rect.w;
+            ui.widgets[group].rect.w = w / 2.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            let b = ui.widget(wide).rect;
+            if rtl {
+                assert_eq!(b.x + b.w, c.x + c.w, "{rtl}: from the right edge");
+            } else {
+                assert_eq!(b.x, c.x, "{rtl}: from the left edge");
+            }
+        }
     }
 }
