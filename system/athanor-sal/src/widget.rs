@@ -107,8 +107,10 @@ pub enum Kind {
         label: String,
         /// Whether this toggle is the active one of its group.
         active: bool,
-        /// Whether assistive technologies read it as a radio button, checked when active, rather
-        /// than as GTK's grouped toggle button, pressed when active. It is drawn the same.
+        /// Whether it is a radio button, checked when active, rather than GTK's grouped toggle
+        /// button, pressed when active: assistive technologies read it so, and it is drawn as
+        /// GTK's radio check button, a ring at the start edge with its label after it, the
+        /// chosen one's ring and the dot in it in the accent.
         radio: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
@@ -662,9 +664,9 @@ impl Ui {
         self.add(parent, Kind::Toggle { label, active, radio })
     }
 
-    /// Adds a toggle showing `label`, the active one of its group when `active`, which
-    /// assistive technologies read as a radio button: a dialog's choices, where
-    /// [`Ui::toggle`] gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
+    /// Adds a radio button showing `label`, the chosen one of its group when `active`: a
+    /// dialog's choices, drawn and read as GTK's radio check buttons, where [`Ui::toggle`]
+    /// gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
     ///
     /// # Panics
     ///
@@ -1617,7 +1619,7 @@ impl Ui {
                 wh
             }
             Kind::Button(text)
-            | Kind::Toggle { label: text, .. }
+            | Kind::Toggle { label: text, radio: false, .. }
             | Kind::MenuItem(text)
             | Kind::ListRow(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
@@ -1625,7 +1627,9 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Check { label, .. } | Kind::Switch { label, .. } => {
+            Kind::Check { label, .. }
+            | Kind::Switch { label, .. }
+            | Kind::Toggle { label, radio: true, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
                 let layout = self.text.layout(label, size, rtl, &style);
                 let wh = (
