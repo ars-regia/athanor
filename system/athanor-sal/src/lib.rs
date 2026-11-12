@@ -14,6 +14,7 @@ pub(crate) mod focus;
 pub(crate) mod gpu;
 mod icon;
 mod motion;
+mod password;
 mod popup;
 pub(crate) mod render;
 pub(crate) mod text;

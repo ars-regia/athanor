@@ -1564,8 +1564,12 @@ type ImeField = (SurfaceId, WidgetId, ContentHint);
 fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
-    let hint = match widget.kind {
+    let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // An input method neither shows, learns nor suggests what a password field is given.
+        Kind::Field(field) if field.is_password() => {
+            ContentHint::HiddenText | ContentHint::SensitiveData
+        }
         _ => ContentHint::None,
     };
     Some((id, widget.rect, hint))
@@ -1836,7 +1840,12 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(hint, ContentPurpose::Normal);
+            let purpose = if hint.contains(ContentHint::HiddenText) {
+                ContentPurpose::Password
+            } else {
+                ContentPurpose::Normal
+            };
+            text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();

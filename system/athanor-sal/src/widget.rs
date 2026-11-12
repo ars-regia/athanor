@@ -143,7 +143,7 @@ pub enum Kind {
     /// width of its column or group, or its cell in a row; [`Ui::set_sensitive`] gives it the
     /// insensitive look. Add it with [`Ui::level`], which keeps its range valid.
     Level(Level),
-    /// A single-line text field.
+    /// A single-line text field, or a password field ([`Ui::password`]).
     Field(Box<TextField>),
     /// A text field of several lines, as GTK's `TextView` in a `ScrolledWindow`: as wide as a
     /// field, its text wrapped at that width, a number of lines tall, and scrolled to keep the
@@ -632,6 +632,34 @@ impl Ui {
     pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
         let field = TextField::new(name, text, self.theme.font_size, self.rtl);
         self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Adds an empty password field named `name` for assistive technologies, as GTK's
+    /// `PasswordEntry` (doc_accessibility.md, AX4): it shows one mask for each character typed,
+    /// and AT-SPI reads it as password text holding only the masks. Nothing is copied, cut or
+    /// offered as the primary selection out of it; text is pasted in. Read what was typed with
+    /// [`Ui::password_text`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn password(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let field = TextField::password(name, self.theme.font_size, self.rtl);
+        self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// What was typed in the password field `id`, or `None` if it is not one. Every other read
+    /// of the field, [`Ui::field_text`] among them, gives only its masks. Clear it with
+    /// [`Ui::set_field_text`] once it is used: the old text is overwritten.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn password_text(&self, id: WidgetId) -> Option<&str> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) => field.password_text(),
+            _ => None,
+        }
     }
 
     /// Adds a text area named `name` for assistive technologies, holding `text`: `lines` lines
@@ -1962,11 +1990,13 @@ impl Ui {
         if field.is_composing() {
             return None;
         }
-        let text: String = text
-            .chars()
-            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-            .take(Self::FIELD_MAX_CHARS)
-            .collect();
+        // Overwritten when dropped: it may be a password field's text.
+        let text: zeroize::Zeroizing<String> = zeroize::Zeroizing::new(
+            text.chars()
+                .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
+                .take(Self::FIELD_MAX_CHARS)
+                .collect(),
+        );
         // Inserting nothing would delete the selection.
         if text.is_empty() {
             return None;
@@ -2022,7 +2052,8 @@ impl Ui {
             return None;
         };
         let composing = field.is_composing();
-        let selected = field.selected_text().is_some();
+        // A password field's selection is deleted, never copied or cut.
+        let (copied, selected) = (field.selected_text().is_some(), field.has_selection());
         let empty = field.text().is_empty();
         let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
         let list = menu.add(Ui::ROOT, Kind::Menu);
@@ -2032,7 +2063,8 @@ impl Ui {
                 && match key {
                     Key::Paste => can_paste,
                     Key::SelectAll => !empty,
-                    _ => selected,
+                    Key::Delete => selected,
+                    _ => copied,
                 };
             if key == Key::SelectAll {
                 menu.add(list, Kind::Separator);
@@ -2052,7 +2084,7 @@ impl Ui {
         else {
             return None;
         };
-        if key == Key::Delete && field.selected_text().is_none() {
+        if key == Key::Delete && !field.has_selection() {
             return None;
         }
         self.set_focus(Some(id));
@@ -2336,7 +2368,9 @@ impl Ui {
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
-        field.commit(&mut self.text, &printable(text, multiline));
+        // Overwritten when dropped: it may be a password field's text.
+        let text = zeroize::Zeroizing::new(printable(text, multiline));
+        field.commit(&mut self.text, &text);
         field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
     }
@@ -2353,11 +2387,13 @@ impl Ui {
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
-        let text: String = text
-            .chars()
-            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-            .take(Self::FIELD_MAX_CHARS)
-            .collect();
+        // Overwritten when dropped: it may be a password field's text.
+        let text: zeroize::Zeroizing<String> = zeroize::Zeroizing::new(
+            text.chars()
+                .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
+                .take(Self::FIELD_MAX_CHARS)
+                .collect(),
+        );
         field.set_text(&text);
         if multiline {
             // As a GTK text view's, where a single-line field's caret stays at its start.
@@ -3845,6 +3881,80 @@ mod tests {
         }
     }
 
+    /// A password field (doc_accessibility.md, AX4) keeps what is typed, and gives out only its
+    /// masks: the field's text, its selection, the clipboards and the input method's preedit
+    /// never hold a character of it. Text is pasted in.
+    #[test]
+    fn a_password_field_keeps_its_text_and_gives_out_only_masks() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        let plain = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.password_text(plain), None, "a plain field is not one");
+
+        ui.key(Key::Text("Zq".into()));
+        ui.commit("7#é");
+        assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●●●"));
+
+        // Edits in the middle follow the masks: Backspace, Delete, and typing over a selection.
+        ui.key(Key::Left);
+        ui.key(Key::Left);
+        ui.key(Key::Backspace);
+        assert_eq!(ui.password_text(field), Some("Zq#é"));
+        ui.key(Key::Delete);
+        assert_eq!(ui.password_text(field), Some("Zqé"));
+        ui.key(Key::SelectLeft);
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.password_text(field), Some("Zxé"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // A selection gives no clipboard anything: no primary selection, Copy or Cut.
+        ui.take_clips();
+        ui.key(Key::SelectAll);
+        assert_eq!((ui.key(Key::Copy), ui.key(Key::Cut)), (None, None));
+        assert!(ui.take_clips().is_empty(), "nothing leaves the field");
+        assert_eq!(
+            ui.cut(field, "●●●"),
+            None,
+            "a cut of the masks deletes nothing"
+        );
+        let (menu, items) = ui.field_menu(field, true).expect("a field's menu");
+        for (item, key) in items {
+            let enabled = menu.is_sensitive(item);
+            match key {
+                Key::Copy | Key::Cut => assert!(!enabled, "{key:?} is refused"),
+                Key::Paste | Key::Delete => assert!(enabled, "{key:?} is allowed"),
+                _ => {}
+            }
+        }
+
+        // Paste in replaces the selection.
+        assert_eq!(ui.key(Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(field)]);
+        assert_eq!(ui.paste(field, "pä§\u{7}"), Some(Event::Edited(field)));
+        assert_eq!(ui.password_text(field), Some("pä§"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // The input method's preedit is never drawn; what it commits is kept.
+        ui.compose("secret", Some((6, 6)));
+        let Kind::Field(text) = &ui.widget(field).kind else {
+            unreachable!("a password field is a field");
+        };
+        assert_eq!(text.shown(), "●●●", "no preedit");
+        ui.commit("ß");
+        assert_eq!(ui.password_text(field), Some("pä§ß"));
+
+        // An assistive technology's SetValue sets it, and clearing it empties both.
+        ui.set_field_text(field, "new");
+        assert_eq!(ui.password_text(field), Some("new"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+        ui.set_field_text(field, "");
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.field_text(field).as_deref(), Some(""));
+    }
     #[test]
     fn copy_cut_and_paste_go_through_the_clipboard() {
         let mut ui = Ui::new("Text", Theme::default(), false);
