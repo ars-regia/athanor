@@ -12,7 +12,8 @@ use crate::text::{Brush, TextContext, TextStyle};
 /// its text on one line, as GTK's minimum and `max-width-chars` ask; it then breaks its lines
 /// at the width its place gives it. A column or a group gives it its whole width and a row its
 /// cell, as they give a row. Start from [`Wrap::default`], which wraps without other limits, and
-/// set the fields that differ.
+/// set the fields that differ: the struct is `#[non_exhaustive]`, so other crates cannot write
+/// it as a literal.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Wrap {
@@ -22,8 +23,8 @@ pub struct Wrap {
     /// its digits'.
     pub max_width_chars: Option<NonZeroU32>,
     /// The most lines the label shows, as GTK's `lines` with `ellipsize` at the end: a text that
-    /// needs more is cut, and its last line shown ends with an ellipsis. Assistive technologies
-    /// still read the whole text.
+    /// needs more, or whose last line shown is wider than the label, is cut, and its last line
+    /// shown ends with an ellipsis. Assistive technologies still read the whole text.
     pub lines: Option<NonZeroU32>,
 }
 
@@ -33,13 +34,23 @@ const DIGITS: &str = "0123456789";
 const ELLIPSIS: char = '\u{2026}';
 
 /// Pango's approximate character width at `size`: the wider of the sample's mean character and
-/// its mean digit.
+/// its mean digit. It depends on the size and the style only, so each pair is shaped once per
+/// [`TextContext`].
 fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> f32 {
+    let known = cx
+        .char_widths
+        .iter()
+        .find(|(s, st, _)| *s == size && st == style);
+    if let Some(&(_, _, width)) = known {
+        return width;
+    }
     let mut mean = |text: &str| {
         let width = cx.layout_at(text, size, false, style, None).full_width();
         width / text.chars().count() as f32
     };
-    mean(SAMPLE).max(mean(DIGITS))
+    let width = mean(SAMPLE).max(mean(DIGITS));
+    cx.char_widths.push((size, style.clone(), width));
+    width
 }
 
 /// The width `text` asks for under `wrap`: its longest word, or `max_width_chars` characters when
@@ -65,33 +76,91 @@ pub(crate) fn request(
 pub(crate) fn layout(
     cx: &mut TextContext,
     text: &str,
-    (size, rtl): (f32, bool),
+    at: (f32, bool),
     style: &TextStyle,
     wrap: &Wrap,
     width: f32,
 ) -> Layout<Brush> {
-    let full = cx.layout_at(text, size, rtl, style, Some(width));
-    let Some(limit) = wrap.lines.map(|n| n.get() as usize) else {
-        return full;
+    let full = cx.layout_at(text, at.0, at.1, style, Some(width));
+    match wrap.lines {
+        Some(limit) => cut(cx, text, at, style, (limit.get() as usize, width), full).1,
+        None => full,
+    }
+}
+
+/// The text shown of `text`, whose layout at `width` is `full`, and its layout, in `limit` lines:
+/// the whole text when it fits; otherwise the most of it that fits with an ellipsis after it, cut
+/// between two clusters of the last line shown, which keeps grapheme clusters whole, as Pango's
+/// end ellipsis. The cut is found by bisection over that line's clusters.
+fn cut(
+    cx: &mut TextContext,
+    text: &str,
+    (size, rtl): (f32, bool),
+    style: &TextStyle,
+    (limit, width): (usize, f32),
+    full: Layout<Brush>,
+) -> (String, Layout<Brush>) {
+    // At most `limit` lines, the last of them no wider than the label, its hanging whitespace
+    // aside; half a pixel for the rounding of advances. A wider line before it is a word that
+    // cannot break, which no cut of the last line narrows.
+    let fits = |layout: &Layout<Brush>| {
+        layout.len() <= limit
+            && layout.lines().last().is_none_or(|line| {
+                let m = line.metrics();
+                m.advance - m.hanging_advance <= width + 0.5
+            })
     };
+    // An empty text has nothing to cut, though parley gives its line a range past its end.
+    if fits(&full) || text.is_empty() {
+        return (text.to_owned(), full);
+    }
     let Some(last) = full
         .get(limit.saturating_sub(1))
-        .filter(|_| full.len() > limit)
+        .or_else(|| full.lines().last())
     else {
-        return full;
+        return (text.to_owned(), full);
     };
-    // The text up to the end of the last line shown, then one character fewer until it fits with
-    // the ellipsis: Pango's end ellipsis, by characters.
-    let mut cut = text[..last.text_range().end].trim_end().to_owned();
-    loop {
-        let candidate = format!("{cut}{ELLIPSIS}");
-        let shaped = cx.layout_at(&candidate, size, rtl, style, Some(width));
-        if shaped.len() <= limit || cut.is_empty() {
-            return shaped;
+    // Parley's ranges can run one byte past the text, over the line's end: within the text.
+    let within = |at: usize| at.min(text.len());
+    let (start, end) = (
+        within(last.text_range().start),
+        within(last.text_range().end),
+    );
+    let mut cuts: Vec<usize> = last
+        .runs()
+        .flat_map(|run| run.clusters())
+        .map(|cluster| within(cluster.text_range().start))
+        .chain([start, end])
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    // Only whitespace after the last line shown, such as a final newline: the text without it.
+    if text[end..].trim().is_empty() {
+        let kept = text.trim_end();
+        let shaped = cx.layout_at(kept, size, rtl, style, Some(width));
+        if fits(&shaped) {
+            return (kept.to_owned(), shaped);
         }
-        cut.pop();
-        cut.truncate(cut.trim_end().len());
     }
+    let mut shape = |cut: usize| {
+        let shown = format!("{}{ELLIPSIS}", text[..cut].trim_end());
+        let layout = cx.layout_at(&shown, size, rtl, style, Some(width));
+        (shown, layout)
+    };
+    // The largest cut that fits: less text needs no more room, so every cut below it fits too.
+    let (mut lo, mut hi, mut best) = (0, cuts.len(), None);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        let candidate = shape(cuts[mid]);
+        if fits(&candidate.1) {
+            best = Some(candidate);
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    // Not even the line's start fits: the lines before it and the ellipsis, as narrow as it gets.
+    best.unwrap_or_else(|| shape(start))
 }
 
 #[cfg(test)]
@@ -99,7 +168,8 @@ mod tests {
     use super::*;
     use crate::{Kind, Theme, Ui, WidgetId};
 
-    const SENTENCE: &str = "Your layout.toml could not be read and was left unchanged. The nearest \
+    const SENTENCE: &str =
+        "Your layout.toml could not be read and was left unchanged. The nearest \
         layout is in use; choosing one here replaces it.";
 
     fn wrap(max_width_chars: u32, lines: u32) -> Wrap {
@@ -139,6 +209,32 @@ mod tests {
         ui.widgets[id].text.as_ref().expect("a laid out label")
     }
 
+    /// The text shown of `text` at `width` in `limit` lines, and its layout.
+    fn shown(
+        cx: &mut TextContext,
+        text: &str,
+        rtl: bool,
+        limit: usize,
+        width: f32,
+    ) -> (String, Layout<Brush>) {
+        let style = TextStyle::default();
+        let full = cx.layout_at(text, 15.0, rtl, &style, Some(width));
+        cut(cx, text, (15.0, rtl), &style, (limit, width), full)
+    }
+
+    /// `shown`, cut from `text`: a prefix of it, the whitespace before the cut trimmed, and the
+    /// ellipsis; returns the prefix.
+    fn kept<'a>(shown: &'a str, text: &str) -> &'a str {
+        let kept = shown
+            .strip_suffix(ELLIPSIS)
+            .expect("an ellipsis at the end");
+        assert!(
+            text.starts_with(kept),
+            "{kept:?} is not a prefix of {text:?}"
+        );
+        kept
+    }
+
     #[test]
     fn a_wrapping_label_keeps_its_window_narrow_and_grows_it_down() {
         let (plain, label) = window(SENTENCE, None, false);
@@ -172,26 +268,133 @@ mod tests {
         assert!((hi - cx.layout("Hi", 15.0, false, &style).width()).abs() < 0.5);
         let word = request(&mut cx, SENTENCE, at, &style, &Wrap::default());
         let longest = cx.layout("unchanged.", 15.0, false, &style).width();
-        assert!((word - longest).abs() < 1.0, "the longest word: {word} against {longest}");
+        assert!(
+            (word - longest).abs() < 1.0,
+            "the longest word: {word} against {longest}"
+        );
     }
 
     #[test]
-    fn a_line_limit_ends_the_last_line_with_an_ellipsis() {
+    fn the_character_width_is_shaped_once_per_size_and_style() {
+        let mut cx = TextContext::default();
+        let style = TextStyle::default();
+        let bold = TextStyle {
+            weight: 700,
+            ..TextStyle::default()
+        };
+        let at = (15.0, false);
+        for text in [SENTENCE, "Hi", SENTENCE] {
+            request(&mut cx, text, at, &style, &wrap(40, 0));
+        }
+        assert_eq!(cx.char_widths.len(), 1);
+        request(&mut cx, SENTENCE, at, &bold, &wrap(40, 0));
+        request(&mut cx, SENTENCE, (13.0, false), &style, &wrap(40, 0));
+        assert_eq!(cx.char_widths.len(), 3);
+        // Without a cap, no character width is needed.
+        let mut plain = TextContext::default();
+        request(&mut plain, SENTENCE, at, &style, &Wrap::default());
+        assert!(plain.char_widths.is_empty());
+    }
+
+    #[test]
+    fn a_line_limit_ends_the_last_line_with_an_ellipsis_at_the_last_cluster_that_fits() {
         let mut cx = TextContext::default();
         let style = TextStyle::default();
         for rtl in [false, true] {
             for limit in [1, 2] {
-                let layout = layout(&mut cx, SENTENCE, (15.0, rtl), &style, &wrap(0, limit), 160.0);
-                assert_eq!(layout.len(), limit as usize, "rtl {rtl}");
+                let (text, layout) = shown(&mut cx, SENTENCE, rtl, limit, 160.0);
+                assert_eq!(layout.len(), limit, "rtl {rtl}");
                 assert!(inked_within(&layout, 160.0, rtl), "rtl {rtl}");
-                // The shaped text is a prefix of the sentence and the ellipsis.
-                let end = layout.lines().last().map_or(0, |l| l.text_range().end);
-                let kept = end - ELLIPSIS.len_utf8();
-                assert!(kept < SENTENCE.len() && SENTENCE.is_char_boundary(kept), "rtl {rtl}");
+                let kept = kept(&text, SENTENCE);
+                // The cut falls inside the last line shown of the whole text, after a word.
+                let full = cx.layout_at(SENTENCE, 15.0, rtl, &style, Some(160.0));
+                let last = full
+                    .get(limit - 1)
+                    .expect("the last line shown")
+                    .text_range();
+                assert!(
+                    last.start < kept.len() && kept.len() < last.end,
+                    "rtl {rtl}"
+                );
+                // The next word's first letter, after the spaces, does not fit: the cut is the
+                // last that does.
+                let rest = &SENTENCE[kept.len()..];
+                let next = kept.len() + rest.len() - rest.trim_start().len() + 1;
+                let more = format!("{}{ELLIPSIS}", &SENTENCE[..next]);
+                let more = cx.layout_at(&more, 15.0, rtl, &style, Some(160.0));
+                assert!(
+                    more.len() > limit || more.width() > 160.5,
+                    "rtl {rtl}: {kept:?}"
+                );
             }
         }
-        let fits = layout(&mut cx, "Fits.", (15.0, false), &style, &wrap(0, 1), 160.0);
-        assert_eq!(fits.lines().last().map(|l| l.text_range().end), Some(5));
+        let (fits, layout) = shown(&mut cx, "Fits.", false, 1, 160.0);
+        assert_eq!((fits.as_str(), layout.len()), ("Fits.", 1));
+    }
+
+    #[test]
+    fn the_ellipsis_never_splits_a_grapheme_cluster() {
+        let mut cx = TextContext::default();
+        // Each "e" carries a combining acute accent: two characters, one cluster.
+        let text = "Cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301}";
+        for width in [60.0, 80.0, 100.0] {
+            let (shown, _) = shown(&mut cx, text, false, 1, width);
+            let kept = kept(&shown, text);
+            assert!(
+                !text[kept.len()..].starts_with('\u{301}'),
+                "split at {width}: {kept:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn edge_cases_keep_the_line_limit() {
+        let mut cx = TextContext::default();
+        // Empty text: no ellipsis.
+        let (empty, layout) = shown(&mut cx, "", false, 1, 100.0);
+        assert_eq!(empty, "");
+        assert!(layout.len() <= 1);
+        let (ui, label) = window("", Some(wrap(0, 2)), false);
+        assert!(shaped(&ui, label).len() <= 1);
+        // One word wider than the label, in one line: cut to fit, with the ellipsis.
+        let word = "Supercalifragilisticexpialidocious";
+        let (text, layout) = shown(&mut cx, word, false, 1, 80.0);
+        assert!(kept(&text, word).len() < word.len());
+        assert_eq!(layout.len(), 1);
+        assert!(layout.width() <= 80.5, "{}", layout.width());
+        // A width of 0: the ellipsis alone, in the lines allowed.
+        for limit in [1, 2] {
+            let (text, layout) = shown(&mut cx, SENTENCE, false, limit, 0.0);
+            assert!(text.ends_with(ELLIPSIS));
+            assert!(layout.len() <= limit, "{limit}: {}", layout.len());
+        }
+        // A final newline is no further line: no ellipsis.
+        let (text, layout) = shown(&mut cx, "Short.\n", false, 1, 160.0);
+        assert_eq!((text.trim_end(), layout.len()), ("Short.", 1));
+        // A hard newline before the cut is trimmed with the whitespace before the ellipsis.
+        let lines = "First line.\nSecond line.\nThird line.";
+        let (text, layout) = shown(&mut cx, lines, false, 2, 300.0);
+        assert_eq!(
+            (text.as_str(), layout.len()),
+            ("First line.\nSecond line.\u{2026}", 2)
+        );
+    }
+
+    #[test]
+    fn a_line_limit_cuts_arabic_and_hebrew_from_their_end() {
+        let mut cx = TextContext::default();
+        let texts = [
+            "تعذّرت قراءة ملف التخطيط وبقي دون تغيير. التخطيط الأقرب مستخدم الآن، واختيار واحد هنا يستبدله.",
+            "לא ניתן היה לקרוא את קובץ הפריסה והוא נשאר ללא שינוי. הפריסה הקרובה ביותר בשימוש כעת.",
+        ];
+        for text in texts {
+            for limit in [1, 2] {
+                let (shown, layout) = shown(&mut cx, text, true, limit, 140.0);
+                assert_eq!(layout.len(), limit, "{text}");
+                assert!(inked_within(&layout, 140.0, true), "{text}");
+                kept(&shown, text);
+            }
+        }
     }
 
     #[test]
@@ -199,6 +402,40 @@ mod tests {
         let (ui, label) = window(SENTENCE, Some(wrap(0, 2)), false);
         assert_eq!(shaped(&ui, label).len(), 2);
         assert!(matches!(&ui.widget(label).kind, Kind::Label(t) if t == SENTENCE));
+        // Assistive technologies read the whole text.
+        let node = crate::a11y::node(&ui, label, 1.0);
+        assert_eq!(node.value(), Some(SENTENCE));
+    }
+
+    #[test]
+    fn a_ui_without_a_wrapping_label_lays_out_in_one_pass() {
+        let mut ui = Ui::new("Plain", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Label(SENTENCE.into()));
+        ui.add(Ui::ROOT, Kind::Button("Go".into()));
+        let size = ui.layout();
+        assert!(!ui.rewrap(), "nothing to break again");
+        assert_eq!(ui.layout(), size);
+    }
+
+    #[test]
+    fn a_label_placed_at_zero_width_breaks_its_lines_there() {
+        let mut ui = Ui::new("Zero", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label(SENTENCE.into()));
+        assert!(ui.set_wrap(label, Some(Wrap::default())));
+        ui.layout();
+        let placed = shaped(&ui, label).len();
+        // A place of no width is a place, recorded and broken at, not "not placed yet": one
+        // word a line.
+        ui.widgets[label].rect.w = 0.0;
+        assert!(ui.rewrap());
+        assert!(!ui.rewrap(), "recorded once");
+        ui.measure(label);
+        let words = SENTENCE.split_whitespace().count();
+        assert_eq!(
+            shaped(&ui, label).len(),
+            words,
+            "{placed} lines when placed"
+        );
     }
 
     #[test]
@@ -215,7 +452,10 @@ mod tests {
         assert_eq!(ui.layout().0, 300.0);
         assert!(shaped(&ui, label).len() > 1);
         assert!(ui.set_wrap(label, None));
-        assert!(ui.layout().0 > 300.0, "on one line it widens the window again");
+        assert!(
+            ui.layout().0 > 300.0,
+            "on one line it widens the window again"
+        );
     }
 
     #[test]
@@ -231,6 +471,9 @@ mod tests {
         let layout = shaped(&ui, label);
         assert!(layout.len() > 1);
         assert!(inked_within(layout, cell.w, false));
-        assert!(ui.widget(row).rect.h >= cell.h, "the row is as tall as the wrapped text");
+        assert!(
+            ui.widget(row).rect.h >= cell.h,
+            "the row is as tall as the wrapped text"
+        );
     }
 }

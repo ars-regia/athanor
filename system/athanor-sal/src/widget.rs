@@ -357,8 +357,8 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
-    /// How a label wraps, see [`Ui::set_wrap`], and the width its last place gave it.
-    pub(crate) wrap: Option<(Wrap, f32)>,
+    /// How a label wraps, see [`Ui::set_wrap`], and the width its last place gave it, if one has.
+    pub(crate) wrap: Option<(Wrap, Option<f32>)>,
 }
 
 impl Widget {
@@ -1327,7 +1327,7 @@ impl Ui {
         if !matches!(widget.kind, Kind::Label(_)) {
             return false;
         }
-        widget.wrap = wrap.map(|w| (w, 0.0));
+        widget.wrap = wrap.map(|w| (w, None));
         true
     }
 
@@ -1551,10 +1551,10 @@ impl Ui {
     }
 
     /// Records the width each wrapping label was placed at; whether one changed.
-    fn rewrap(&mut self) -> bool {
+    pub(crate) fn rewrap(&mut self) -> bool {
         let mut changed = false;
         for widget in &mut self.widgets.0 {
-            let w = widget.rect.w;
+            let w = Some(widget.rect.w);
             if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
                 *given = w;
                 changed = true;
@@ -1569,7 +1569,7 @@ impl Ui {
         shown.copied().filter(|&c| widgets[c].visible).collect()
     }
 
-    fn measure(&mut self, id: WidgetId) -> (f32, f32) {
+    pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap) = (t.margin, t.section_gap);
@@ -1654,7 +1654,7 @@ impl Ui {
                     Some((wrap, given)) => {
                         let asked = wrap::request(&mut self.text, text, (size, rtl), &style, wrap);
                         // Before its first place, at the width it asks for.
-                        let at = if *given > 0.0 { *given } else { asked };
+                        let at = given.unwrap_or(asked);
                         let shaped = (size, rtl);
                         (wrap::layout(&mut self.text, text, shaped, &style, wrap, at), asked)
                     }
