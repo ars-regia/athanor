@@ -395,9 +395,7 @@ fn run_on(
     while !app.shell.exit {
         event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
-        if let Err(error) = app.shell.draw_dirty() {
-            app.fail(error);
-        }
+        app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
         // earlier `drawn`, is not reported drawn.
         let first_frames = std::mem::take(&mut app.shell.first_frames);
@@ -1063,17 +1061,8 @@ impl Shell {
         self.surfaces.retain(|s| s.id != id);
     }
 
-    /// Draws the surfaces whose widgets changed, after closing a drop-down's menu whose items
-    /// the application replaced.
+    /// Draws the surfaces whose widgets changed.
     fn draw_dirty(&mut self) -> Result<(), Error> {
-        if let Some(open) = self.popup {
-            let stale = self
-                .get_mut(open.parent)
-                .is_some_and(|from| std::mem::take(&mut from.ui.stale_popup));
-            if stale {
-                self.close_popup();
-            }
-        }
         for surface in &mut self.surfaces {
             if surface.dirty {
                 let first = !surface.drawn;
@@ -1811,9 +1800,7 @@ impl App {
             }
             None => {}
         }
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
     }
 
     /// Opens the edit menu of field `widget` of `id`, as GTK's entry does: under the pointer for
@@ -1924,9 +1911,7 @@ impl App {
         match seen {
             Ok(Some(id)) => {
                 self.application.output_changed(&mut self.shell, id, &info);
-                if let Err(error) = self.shell.draw_dirty() {
-                    self.fail(error);
-                }
+                self.draw_dirty();
             }
             Ok(None) => {}
             Err(error) => self.fail(error),
@@ -2021,6 +2006,24 @@ impl App {
             }
         }
         self.window_focus = focused;
+    }
+
+    /// Closes a drop-down's menu whose items the application replaced, as Escape does, then
+    /// draws the surfaces whose widgets changed.
+    fn draw_dirty(&mut self) {
+        if let Some(open) = self.shell.popup {
+            let stale = self
+                .shell
+                .get_mut(open.parent)
+                .is_some_and(|from| std::mem::take(&mut from.ui.stale_popup));
+            if stale {
+                self.own_menu = None;
+                self.close_popup();
+            }
+        }
+        if let Err(error) = self.shell.draw_dirty() {
+            self.fail(error);
+        }
     }
 
     /// Closes the popup open, and redraws the surface it was opened from.
@@ -2176,9 +2179,7 @@ impl App {
             return;
         };
         self.application.keyboard(&mut self.shell, id, focused);
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
     }
 
     /// A key held down: as pressed again, with the serial of its press, which the repeat does
@@ -2685,9 +2686,7 @@ impl PointerHandler for App {
                 if let Some(id) = self.shell.find(&event.surface).map(|s| s.id) {
                     let inside = matches!(event.kind, PointerEventKind::Enter { .. });
                     self.application.pointer(&mut self.shell, id, inside);
-                    if let Err(error) = self.shell.draw_dirty() {
-                        self.fail(error);
-                    }
+                    self.draw_dirty();
                 }
             }
             // The press grabs no more once its button is up or the pointer has left, on any
