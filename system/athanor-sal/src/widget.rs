@@ -6,6 +6,8 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
+mod labelled;
+
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
 /// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
@@ -255,6 +257,24 @@ pub enum Kind {
         /// focus, as the GTK dock's inset shadow.
         indicator: Option<crate::driver::Side>,
     },
+    /// A flat button that shows an image beside a text, as a GTK button holding a box of an
+    /// image and a label: named by its label for assistive technologies, which read the text
+    /// it shows as a label inside it. Activating it raises [`Event::Clicked`]. Its content
+    /// is centred, the image at the start, the theme's gap between the two; it is at least
+    /// the theme's `button_min` on each side, with the theme's padding added left and right,
+    /// as [`Kind::IconButton`]. Its text takes [`Ui::set_text_style`]. Add it with
+    /// [`Ui::labelled_button`].
+    #[non_exhaustive]
+    LabelledButton {
+        /// The name assistive technologies read.
+        label: String,
+        /// The image, drawn in a square of `size` logical pixels; none shows the text alone.
+        image: Option<crate::icon::Image>,
+        /// The side of the image's square, in logical pixels.
+        size: f32,
+        /// The text shown after the image; empty shows the image alone.
+        text: String,
+    },
 }
 
 /// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
@@ -417,6 +437,7 @@ impl Widget {
                     | Kind::WindowButton(_)
                     | Kind::MenuItem(_)
                     | Kind::IconButton { .. }
+                    | Kind::LabelledButton { .. }
                     | Kind::ListRow(_)
             )
     }
@@ -943,6 +964,7 @@ impl Ui {
             | Kind::Check { label: t, .. }
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
+            | Kind::LabelledButton { label: t, .. }
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
@@ -1488,7 +1510,7 @@ impl Ui {
     pub fn is_flat(&self, id: WidgetId) -> bool {
         let widget = &self.widgets[id];
         match widget.kind {
-            Kind::MenuItem(_) | Kind::IconButton { .. } => true,
+            Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::LabelledButton { .. } => true,
             Kind::Button(_) => widget
                 .parent
                 .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
@@ -1614,6 +1636,20 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, h + pad)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::LabelledButton {
+                image, size: side, text, ..
+            } => {
+                let shown = (!text.is_empty()).then(|| self.text.layout(text, size, rtl, &style));
+                let wh = labelled::measure(
+                    image.as_ref().map(|_| *side),
+                    shown.as_ref().map(|l| (l.width(), l.height())),
+                    gap,
+                    pad,
+                    button_min,
+                );
+                widget.text = shown;
+                wh
+            }
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 let w = widest * sizes.len() as f32 + spacing;
@@ -1823,7 +1859,10 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
+            Kind::Button(_)
+            | Kind::MenuItem(_)
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. } => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
                 *active = !*active;
