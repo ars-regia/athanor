@@ -23,7 +23,10 @@
 //!   output's area, however large the region. A region of more than `MOST_RECTS` rectangles, as
 //!   the client gives them or as they come out of its subtractions, is taken whole, its
 //!   bounding box, so that the region's shape is worked out from at most `MOST_RECTS`
-//!   rectangles, and once for each region a commit applies, not at every frame.
+//!   rectangles, once for each region the client sets, and kept as at most `MOST_RECTS`
+//!   rectangles. A frame compares the shape a commit applied with the one it kept by pointer,
+//!   and finds each element's surface in a map, so that its cost does not grow with what the
+//!   client sends.
 
 use crate::blur::Blur;
 use crate::state::State;
@@ -39,14 +42,16 @@ use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
 use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer as BufferCoords, Logical, Physical, Rectangle, Scale, Size};
-use smithay::wayland::background_effect::{
-    BackgroundEffectState, BackgroundEffectSurfaceCachedState, ExtBackgroundEffectHandler,
+use smithay::wayland::background_effect::{BackgroundEffectState, ExtBackgroundEffectHandler};
+use smithay::wayland::compositor::{
+    add_destruction_hook, with_states, Cacheable, RectangleKind, RegionAttributes,
 };
-use smithay::wayland::compositor::{with_states, RectangleKind, RegionAttributes};
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// The most rectangles a region's shape is worked out from, or kept as: past it, the region is
 /// its bounding box.
@@ -57,16 +62,60 @@ pub fn global(dh: &DisplayHandle) {
     BackgroundEffectState::new::<State>(dh);
 }
 
+/// The surfaces that ever set a region, by their elements' id, until they are destroyed: as
+/// many as the clients' surfaces at most. Shared with each frame's marks.
+pub type Regions = Arc<HashMap<Id, WlSurface>>;
+
 impl ExtBackgroundEffectHandler for State {
-    // The region is pending here, until the surface's commit applies it: the frame reads the
-    // applied one, and only the surface is noted. The surfaces noted are those alive that ever
-    // set a region, as many as the clients' surfaces at most.
-    fn set_blur_region(&mut self, surface: WlSurface, _region: RegionAttributes) {
-        self.blurred.retain(Resource::is_alive);
-        if !self.blurred.contains(&surface) {
-            self.blurred.push(surface);
+    // The region is pending here, until the surface's commit applies it: its shape goes into a
+    // cached state of its own, which the commit applies with Smithay's.
+    fn set_blur_region(&mut self, surface: WlSurface, region: RegionAttributes) {
+        let shape = Arc::new(shape_of(&region));
+        set_pending(&surface, Some(shape));
+        let id = Id::from_wayland_resource(&surface);
+        if self.blurred.contains_key(&id) {
+            return;
         }
+        // Once for each surface: it stays in the map, its region set or not, until it goes.
+        add_destruction_hook::<State, _>(&surface, |state, surface| {
+            Arc::make_mut(&mut state.blurred).remove(&Id::from_wayland_resource(surface));
+        });
+        Arc::make_mut(&mut self.blurred).insert(id, surface);
     }
+
+    fn unset_blur_region(&mut self, surface: WlSurface) {
+        set_pending(&surface, None);
+    }
+}
+
+/// The shape of a surface's region, as its commits apply it: worked out when the client sets
+/// the region, and double-buffered as the region is.
+#[derive(Clone, Default)]
+struct Applied(Option<Arc<Vec<Rectangle<i32, Logical>>>>);
+
+impl Cacheable for Applied {
+    fn commit(&mut self, _dh: &DisplayHandle) -> Self {
+        self.clone()
+    }
+
+    fn merge_into(self, into: &mut Self, _dh: &DisplayHandle) {
+        *into = self;
+    }
+}
+
+fn set_pending(surface: &WlSurface, shape: Option<Arc<Vec<Rectangle<i32, Logical>>>>) {
+    with_states(surface, |states| {
+        states.cached_state.get::<Applied>().pending().0 = shape;
+    });
+}
+
+/// The shape of the region `surface`'s commits applied, if any.
+#[cfg(test)]
+pub fn applied(surface: &WlSurface) -> Option<Vec<Rectangle<i32, Logical>>> {
+    with_states(surface, |states| {
+        let mut cached = states.cached_state.get::<Applied>();
+        cached.current().0.as_deref().cloned()
+    })
 }
 
 /// What an output keeps for the blur.
@@ -135,25 +184,12 @@ pub fn blurs(output: &Output) -> u64 {
     kept(output).shared.blurs.get()
 }
 
-/// What a surface keeps of its region's shape, worked out once for each region applied.
+/// What a surface's blur element keeps between frames: its id, and the shape it was last
+/// drawn with, whose change is a commit of the element.
 struct Shape {
     id: Id,
     commit: CommitCounter,
-    region: Option<RegionAttributes>,
-    rects: Vec<Rectangle<i32, Logical>>,
-}
-
-/// Whether two regions are the same rectangles, added and subtracted in the same order.
-fn same(a: &RegionAttributes, b: &RegionAttributes) -> bool {
-    a.rects.len() == b.rects.len()
-        && a.rects.iter().zip(&b.rects).all(|((ka, ra), (kb, rb))| {
-            ra == rb
-                && matches!(
-                    (ka, kb),
-                    (RectangleKind::Add, RectangleKind::Add)
-                        | (RectangleKind::Subtract, RectangleKind::Subtract)
-                )
-        })
+    kept: Option<Arc<Vec<Rectangle<i32, Logical>>>>,
 }
 
 /// The bounding box of `rects`, if any.
@@ -244,25 +280,24 @@ impl BlurElement {
         shared: &Rc<Shared>,
     ) -> Option<Self> {
         let (id, commit, rects) = with_states(surface, |states| {
-            let mut cached = states
-                .cached_state
-                .get::<BackgroundEffectSurfaceCachedState>();
-            let region = cached.current().blur_region.as_ref()?;
+            let applied = states.cached_state.get::<Applied>().current().0.clone()?;
             let shape = states.data_map.get_or_insert(|| {
                 RefCell::new(Shape {
                     id: Id::new(),
                     commit: CommitCounter::default(),
-                    region: None,
-                    rects: Vec::new(),
+                    kept: None,
                 })
             });
             let mut shape = shape.borrow_mut();
-            if !shape.region.as_ref().is_some_and(|kept| same(kept, region)) {
-                shape.rects = shape_of(region);
-                shape.region = Some(region.clone());
+            if !shape
+                .kept
+                .as_ref()
+                .is_some_and(|kept| Arc::ptr_eq(kept, &applied))
+            {
+                shape.kept = Some(applied.clone());
                 shape.commit.increment();
             }
-            Some((shape.id.clone(), shape.commit, shape.rects.clone()))
+            Some((shape.id.clone(), shape.commit, applied))
         })?;
         let (geometry, rects) = on_output(&rects, geometry, scale, area)?;
         Some(Self {
@@ -304,9 +339,13 @@ impl BlurElement {
     }
 }
 
-/// `elements`, front to back, with the blur under each surface of `surfaces` whose region shows
-/// on `output`, right behind the surface's element; only on M2.
-pub fn behind<R, E>(output: &Output, surfaces: &[WlSurface], elements: Vec<E>) -> Vec<Blurred<R, E>>
+/// `elements`, front to back, with the blur under each surface of `regions` whose region shows
+/// on `output`, right behind the surface's element; only on M2, and with `regions`.
+pub fn behind<R, E>(
+    output: &Output,
+    regions: Option<&HashMap<Id, WlSurface>>,
+    elements: Vec<E>,
+) -> Vec<Blurred<R, E>>
 where
     R: Blurs,
     E: RenderElement<R>,
@@ -315,25 +354,19 @@ where
     let area = output
         .current_mode()
         .map(|mode| Rectangle::from_size(output.current_transform().transform_size(mode.size)));
-    let wanted: Vec<(Id, &WlSurface)> = match area {
-        Some(_) if kept.live.get() => surfaces
-            .iter()
-            .filter(|surface| surface.is_alive())
-            .map(|surface| (Id::from_wayland_resource(surface), surface))
-            .collect(),
-        _ => Vec::new(),
+    let (Some(regions), Some(area), true) = (regions, area, kept.live.get()) else {
+        return elements.into_iter().map(Blurred::Element).collect();
     };
-    if wanted.is_empty() {
+    if regions.is_empty() {
         return elements.into_iter().map(Blurred::Element).collect();
     }
     let scale = Scale::from(output.current_scale().fractional_scale());
-    let area = area.unwrap_or_default();
-    let mut blurred = Vec::with_capacity(elements.len() + wanted.len());
+    let mut blurred = Vec::with_capacity(elements.len());
     for element in elements {
-        let blur = wanted
-            .iter()
-            .find(|(id, _)| id == element.id())
-            .and_then(|(_, surface)| {
+        let blur = regions
+            .get(element.id())
+            .filter(|surface| surface.is_alive())
+            .and_then(|surface| {
                 BlurElement::of(surface, element.geometry(scale), scale, area, &kept.shared)
             });
         blurred.push(Blurred::Element(element));

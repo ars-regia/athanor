@@ -1842,7 +1842,11 @@ fn render(
         }
     }
     // No region is blurred on the lock screen.
-    let blurred = if lock.is_some() { &[][..] } else { &marks.blurred[..] };
+    let blurred = if lock.is_some() {
+        None
+    } else {
+        Some(&*marks.blurred)
+    };
     let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
     let (frame, filtered) = match look.filter {

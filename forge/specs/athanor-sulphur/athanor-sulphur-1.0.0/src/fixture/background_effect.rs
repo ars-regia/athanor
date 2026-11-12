@@ -12,8 +12,6 @@ use crate::material::Tier;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::utils::{Rectangle, Scale};
-use smithay::wayland::background_effect::BackgroundEffectSurfaceCachedState;
-use smithay::wayland::compositor::with_states;
 use wayland_client::protocol::{wl_region, wl_subcompositor, wl_subsurface};
 use wayland_protocols::ext::background_effect::v1::client::{
     ext_background_effect_manager_v1, ext_background_effect_surface_v1,
@@ -164,17 +162,13 @@ fn on_gpu(run: &mut Running, gpu: &str, tier: Tier) {
 
 /// The compositor's side of the surface that set a region, and the region applied to it.
 fn applied(run: &Running) -> Option<Vec<Rectangle<i32, smithay::utils::Logical>>> {
-    let surface = run.state.blurred.first().expect("a surface set a region");
-    with_states(surface, |states| {
-        let mut cached = states
-            .cached_state
-            .get::<BackgroundEffectSurfaceCachedState>();
-        cached
-            .current()
-            .blur_region
-            .as_ref()
-            .map(crate::background_effect::shape_of)
-    })
+    let surface = run
+        .state
+        .blurred
+        .values()
+        .next()
+        .expect("a surface set a region");
+    crate::background_effect::applied(surface)
 }
 
 /// The blur elements the first output's frame is drawn with, as Pixman draws it.
@@ -183,7 +177,7 @@ fn blur_elements(run: &Running) -> Vec<Rectangle<i32, smithay::utils::Physical>>
     let mut renderer = PixmanRenderer::new().expect("a renderer");
     let marks = run.state.marks();
     let elements = crate::marks::stack(&mut renderer, &run.state.space, &first, &marks);
-    crate::background_effect::behind(&first, &marks.blurred, elements)
+    crate::background_effect::behind(&first, Some(&*marks.blurred), elements)
         .iter()
         .filter(|element| matches!(element, Blurred::Blur(_)))
         .map(|element| element.geometry(Scale::from(1.0)))

@@ -243,7 +243,7 @@ pub struct State {
     /// xdg_system_bell_v1's bells, shown on the focus outline (decision 33).
     pub bell: crate::bell::Bell,
     /// The surfaces that set an ext-background-effect-v1 blur region (decision 35).
-    pub blurred: Vec<WlSurface>,
+    pub blurred: crate::background_effect::Regions,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -486,7 +486,7 @@ impl State {
             inhibitors: HashMap::new(),
             input_hold,
             bell: crate::bell::Bell::default(),
-            blurred: Vec::new(),
+            blurred: Default::default(),
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
@@ -1491,7 +1491,7 @@ where
     // The popups and the lock surface are surfaces as the space's are, above them.
     let mut elements: Vec<Stacked<R>> = Vec::new();
     // No region is blurred on the lock screen.
-    let mut blurred: &[WlSurface] = &[];
+    let mut blurred = None;
     match view {
         View::Space(space, popups, marks) => {
             for (popup, at) in popups {
@@ -1499,7 +1499,7 @@ where
                 elements.extend(surface(renderer, popup, at));
             }
             elements.extend(crate::marks::stack(renderer, space, output, marks));
-            blurred = &marks.blurred;
+            blurred = Some(&*marks.blurred);
         }
         View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
         View::Locked(None) => {}
