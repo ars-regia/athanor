@@ -73,17 +73,20 @@ impl Dialogs {
         order
     }
 
-    /// Forgets `id`, a dialog or a parent; returns the dialogs open on it, which close with it.
-    pub(super) fn closed(&mut self, id: SurfaceId) -> Vec<SurfaceId> {
-        let children = self
-            .open
-            .iter()
-            .filter(|&&(_, parent)| parent == id)
-            .map(|&(dialog, _)| dialog)
-            .collect();
+    /// Forgets `id`, a dialog or a parent, and the dialogs open on it, and theirs; returns those
+    /// of them `open` holds, each once, each dialog before the surface it was opened on: the
+    /// order in which they close.
+    pub(super) fn close(&mut self, id: SurfaceId, open: &[SurfaceId]) -> Vec<SurfaceId> {
+        let mut order = self.closing_order(id);
+        order.retain(|surface| open.contains(surface));
+        for &surface in &order {
+            self.open
+                .retain(|&(dialog, parent)| dialog != surface && parent != surface);
+        }
+        // A dialog closed already, or not open, is forgotten too.
         self.open
             .retain(|&(dialog, parent)| dialog != id && parent != id);
-        children
+        order
     }
 }
 
@@ -171,9 +174,10 @@ mod tests {
         let nested = SurfaceId(3);
         dialogs.opened(nested, dialog);
         assert!(dialogs.blocked(dialog) && dialogs.blocked(window));
-        assert!(dialogs.closed(nested).is_empty());
+        let all = [window, dialog, other, nested];
+        assert_eq!(dialogs.close(nested, &all), [nested]);
         assert!(!dialogs.blocked(dialog));
-        assert!(dialogs.closed(dialog).is_empty());
+        assert_eq!(dialogs.close(dialog, &all), [dialog]);
         assert!(!dialogs.blocked(window) && !dialogs.is_dialog(dialog));
     }
 
@@ -183,16 +187,15 @@ mod tests {
     fn every_close_unblocks_the_parent() {
         let (window, dialog) = (SurfaceId(0), SurfaceId(1));
         let mut dialogs = Dialogs::default();
+        let all = [window, dialog];
         // Shell::close of the dialog, and the loss of the dialog alone, forget the dialog.
         dialogs.opened(dialog, window);
         assert_eq!(dialogs.closing_order(dialog), [dialog]);
-        assert!(dialogs.closed(dialog).is_empty());
+        assert_eq!(dialogs.close(dialog, &all), [dialog]);
         assert!(!dialogs.blocked(window));
-        // The parent's close or loss closes the dialog with it.
+        // The parent's close or loss closes the dialog with it, first.
         dialogs.opened(dialog, window);
-        for id in dialogs.closing_order(window) {
-            dialogs.closed(id);
-        }
+        assert_eq!(dialogs.close(window, &all), [dialog, window]);
         assert!(!dialogs.blocked(window) && !dialogs.is_dialog(dialog));
     }
 
@@ -214,12 +217,35 @@ mod tests {
         assert_eq!(dialogs.closing_order(other), [SurfaceId(5), other]);
     }
 
+    /// Shell::remove closes what Dialogs::close returns, in its order: nested dialogs before
+    /// their parents, each once, and none that is no longer open.
+    #[test]
+    fn a_window_closes_after_its_dialogs_each_once() {
+        let (window, first, nested, second) =
+            (SurfaceId(0), SurfaceId(1), SurfaceId(2), SurfaceId(3));
+        let mut dialogs = Dialogs::default();
+        dialogs.opened(first, window);
+        dialogs.opened(nested, first);
+        dialogs.opened(second, window);
+        // `second` closed already, its surface gone, though still recorded.
+        let open = [window, first, nested];
+        assert_eq!(dialogs.close(window, &open), [nested, first, window]);
+        assert!(!dialogs.blocked(window) && !dialogs.blocked(first));
+        assert!(!dialogs.is_dialog(first) && !dialogs.is_dialog(nested));
+        assert!(
+            !dialogs.is_dialog(second),
+            "a dialog not open is forgotten too"
+        );
+        // Closed again, it reports no dialog a second time.
+        assert_eq!(dialogs.close(window, &open), [window]);
+    }
+
     #[test]
     fn closing_the_parent_closes_its_dialogs() {
         let (window, dialog) = (SurfaceId(0), SurfaceId(1));
         let mut dialogs = Dialogs::default();
         dialogs.opened(dialog, window);
-        assert_eq!(dialogs.closed(window), vec![dialog]);
+        assert_eq!(dialogs.close(window, &[window, dialog]), [dialog, window]);
         assert!(!dialogs.is_dialog(dialog) && !dialogs.blocked(window));
     }
 }

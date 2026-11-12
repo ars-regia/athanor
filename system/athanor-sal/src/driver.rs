@@ -1113,20 +1113,25 @@ impl Shell {
     /// Closes the surface `id`, and the popup open from it first. Closing a menu returns the focus
     /// to its widget.
     fn remove(&mut self, id: SurfaceId) {
-        // The dialogs open on it close with it, and the application ends what they held.
-        for dialog in self.dialogs.closed(id) {
-            self.remove(dialog);
-            self.closing.push(dialog);
-        }
-        if let Some(open) = self.popup.filter(|p| p.surface == id || p.parent == id) {
-            self.popup = None;
-            self.surfaces.retain(|s| s.id != open.surface);
-            if let Some(from) = self.get_mut(open.parent) {
-                open.closed(&mut from.ui);
-                from.dirty = true;
+        // The dialogs open on it close with it, first, and the application ends what they held.
+        let open: Vec<SurfaceId> = self.surfaces.iter().map(|s| s.id).collect();
+        for surface in self.dialogs.close(id, &open) {
+            if let Some(popup) = self
+                .popup
+                .filter(|p| p.surface == surface || p.parent == surface)
+            {
+                self.popup = None;
+                self.surfaces.retain(|s| s.id != popup.surface);
+                if let Some(from) = self.get_mut(popup.parent) {
+                    popup.closed(&mut from.ui);
+                    from.dirty = true;
+                }
+            }
+            self.surfaces.retain(|s| s.id != surface);
+            if surface != id {
+                self.closing.push(surface);
             }
         }
-        self.surfaces.retain(|s| s.id != id);
     }
 
     /// Draws the surfaces whose widgets changed.
@@ -1967,11 +1972,17 @@ impl App {
         }
     }
 
-    /// Ends the pointer's press and hover on each window a dialog opened on in this turn, as if
-    /// the pointer left it: the release it waits for is the dialog's, and a drag under way ends
-    /// over no widget.
+    /// Ends the pointer's press and hover on each window a dialog opened on in this turn and
+    /// still blocks, as if the pointer left it: the release it waits for is the dialog's, a drag
+    /// under way ends over no widget, and its tooltip, shown or waiting, ends.
     fn blocked_by_dialogs(&mut self) {
         for parent in std::mem::take(&mut self.shell.blocking) {
+            if !self.shell.dialogs.blocked(parent) {
+                continue;
+            }
+            if self.tooltip.target().is_some_and(|&(id, _)| id == parent) {
+                self.point_tooltip(None);
+            }
             let Some(surface) = self.shell.get_mut(parent) else {
                 continue;
             };
@@ -1980,9 +1991,10 @@ impl App {
         }
     }
 
-    /// Closes `id`, which the application did not ask to close, and tells it: the dialogs open
-    /// on it first, each before the surface it was opened on. One the application closes from
-    /// Application::closed is closed at its asking, and it is not told of it.
+    /// Closes `id`, which the application did not ask to close, and tells it. One the
+    /// application closes from Application::closed is closed at its asking, and it is not told
+    /// of it. Only layer surfaces are lost today, and dialogs open on windows only: the dialogs
+    /// of `id`, told first, each before the surface it was opened on, are for a window lost.
     fn lost(&mut self, id: SurfaceId) {
         let order = self.shell.dialogs.closing_order(id);
         each_open(
