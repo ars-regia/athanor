@@ -563,6 +563,10 @@ def wait_for_phase(run: pathlib.Path, name: str, timeout: float = 30) -> None:
     raise AssertionError(f"the console never noted {name}")
 
 
+# The bytes the console typed up to the session question, for the cases that ask which one.
+SESSION_TYPED: list[bytes] = []
+
+
 def play_first_boot(server: socket.socket, run: pathlib.Path) -> socket.socket:
     """Play the guest from GRUB to the settings question: the installer finishes, the
     installed system offers its serial login, and each question gets its answer. Returns
@@ -591,7 +595,7 @@ def play_first_boot(server: socket.socket, run: pathlib.Path) -> socket.socket:
 
     # It types the password on the keyboard, one key at a time, then asks whether
     # the session came up.
-    typed_until(conn, b"SESSION_%s", 60)
+    SESSION_TYPED[:] = [typed_until(conn, b"SESSION_%s", 60)]
     conn.sendall(b"SESSION_ALIVE c7\r\n")
 
     # It starts Settings inside that session and asks whether it stayed up. The rest of
@@ -672,6 +676,10 @@ def test_console_logs_in_opens_settings_and_stops(tmp: pathlib.Path) -> None:
     ):
         assert expected in phases, f"{expected} not recorded: {sorted(phases)}"
     assert "idle-timeout" not in phases, "it should not have waited out the idle window"
+    import console
+
+    assert console.SESSION_PROBE in SESSION_TYPED[0], "the strict probe is asked without HOLD"
+    assert console.SESSION_PROBE_HELD not in SESSION_TYPED[0]
 
 
 def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
@@ -735,6 +743,10 @@ def test_console_logs_out_then_holds(tmp: pathlib.Path) -> None:
         server.close()
         monitor.close()
 
+    import console
+
+    assert console.SESSION_PROBE_HELD in SESSION_TYPED[0], "the held probe is asked under HOLD"
+    assert console.SESSION_PROBE not in SESSION_TYPED[0]
     assert typed.split() == [b"exit"], f"typed after Settings answered: {typed!r}"
     phases = dict(line.split() for line in (run / "phases.txt").read_text().splitlines())
     for expected in ("settings-alive", "ready", "secure-boot-refused", "console-closed"):
@@ -834,6 +846,56 @@ def test_karg_probe_answers_from_the_guest(tmp: pathlib.Path) -> None:
         assert answer == expected, f"{fstype or 'unreadable'}: {answer!r} != {expected!r}"
         if "MISSING" in expected:
             assert cmdline in proc.stdout, "a missing karg must print the command line"
+
+
+def test_session_probe_skips_only_absent_units(tmp: pathlib.Path) -> None:
+    """The probe typed on the serial console of the upgrade case runs on the published
+    :stable image, which does not ship a unit added since: a unit systemd cannot find is
+    named under `absent:` and does not kill the session, while the candidate's probe (the
+    one the SSH stages and the fresh install ask) still fails on it, and a unit that exists
+    and is inactive is down in both."""
+    sys.path.insert(0, str(HERE))
+    import console
+
+    work = tmp / "session-probe"
+    shutil.rmtree(work, ignore_errors=True)
+    (work / "bin").mkdir(parents=True)
+    fakes = {
+        "sleep": "exit 0",
+        "loginctl": 'case "$1" in list-sessions) echo "c7 1000 collaudo seat0";;'
+        ' show-session) echo wayland;; esac',
+        "systemctl": 'shift; [ "$1" = -q ] && { shift; shift; case " $FAKE_DOWN $FAKE_GONE " in'
+        ' *" $1 "*) exit 3;; esac; exit 0; }; case " $FAKE_GONE " in *" ${5} "*)'
+        " echo not-found;; *) echo loaded;; esac",
+    }
+    for name, body in fakes.items():
+        (work / "bin" / name).write_text("#!/bin/sh\n" + body + "\n")
+        (work / "bin" / name).chmod(0o755)
+
+    def answer(probe: bytes, down: str, gone: str) -> str:
+        (work / "probe.sh").write_bytes(probe + b"\n")
+        proc = subprocess.run(
+            ["sh", str(work / "probe.sh")],
+            env={**os.environ, "PATH": f"{work}/bin:{os.environ['PATH']}",
+                 "FAKE_DOWN": down, "FAKE_GONE": gone},
+            capture_output=True, text=True, timeout=60,
+        )
+        return proc.stdout.strip()
+
+    wall = "athanor-wallpaper.service"
+    bar = "athanor-bar.service"
+    held, strict = console.SESSION_PROBE_HELD, console.SESSION_PROBE
+    assert answer(held, "", "") == "SESSION_ALIVE c7"
+    assert answer(held, "", wall) == f"SESSION_ALIVE c7 absent: {wall}"
+    assert answer(strict, "", wall) == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(held, wall, "") == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(strict, wall, "") == f"SESSION_DEAD c7 down: {wall}"
+    assert answer(held, bar, wall) == f"SESSION_DEAD c7 down: {bar} absent: {wall}"
+    assert answer(strict, "", "") == "SESSION_ALIVE c7"
+    target = "athanor-session.target"
+    for probe in (held, strict):
+        assert answer(probe, "", target) == f"SESSION_DEAD c7 down: {target}", probe
+    assert b"2>/dev/null)\" = not-found" not in held, "a real error of show must not be hidden"
 
 
 def test_origin_missing_or_wrong_fails(tmp: pathlib.Path) -> None:
@@ -1444,6 +1506,7 @@ def main() -> int:
             test_karg_unreadable_fails,
             test_karg_not_applicable_passes,
             test_karg_probe_answers_from_the_guest,
+            test_session_probe_skips_only_absent_units,
             test_origin_missing_or_wrong_fails,
             test_origin_unreadable_is_not_wrong,
             test_origin_probe_answers_from_the_guest,
