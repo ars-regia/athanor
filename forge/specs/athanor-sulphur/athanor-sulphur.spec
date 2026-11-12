@@ -59,8 +59,8 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 - Serve xdg_wm_dialog_v1 (doc_own_stack.md decision 33): a click on the parent of a shown
   modal dialog gives the keyboard to the dialog, which stays above its parent.
 - Serve wp_pointer_warp_v1 (decision 33): a warp moves the pointer only within the surface
-  that has both the pointer focus and the keyboard focus, and never while Ctrl+Alt+Tab has
-  suspended its client.
+  that has both the pointer focus and the keyboard focus, and never under a pointer lock,
+  while the session is locked or while Ctrl+Alt+Tab has suspended its client.
 - Serve xdg_system_bell_v1 (decision 33): a bell from the client of the focused window, at
   most one a second and never while the session is locked, blinks that window's focus
   outline once, or widens it for half a second under reduced motion; a bell where no outline

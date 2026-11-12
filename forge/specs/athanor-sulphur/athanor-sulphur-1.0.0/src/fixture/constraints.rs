@@ -1367,3 +1367,101 @@ fn ctrl_alt_tab_suspends_a_warp_until_a_click() {
     assert_eq!(Game::location(&run), to, "the click lifted the suspension");
     run.stop();
 }
+
+/// A warp under a pointer lock is refused: a locked pointer stays still, and a oneshot lock
+/// holds.
+#[test]
+fn a_warp_under_a_pointer_lock_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_lock, log) = game.lock(Lifetime::Oneshot);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    assert_eq!(events(&log), ["locked"], "the lock holds");
+    run.stop();
+}
+
+/// While the session is locked a warp is refused, from a window given the pointer and the
+/// keyboard back past the lock too.
+#[test]
+fn a_warp_while_the_session_is_locked_is_refused() {
+    use smithay::input::pointer::MotionEvent;
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_locker, _session) = lock_session(&mut run);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let focus = Some((game.server.clone(), game.origin(&run)));
+    let motion = MotionEvent {
+        location: game.at,
+        serial: SERIAL_COUNTER.next_serial(),
+        time: InputTime::now(),
+    };
+    pointer.motion(&mut run.state, focus, &motion);
+    pointer.frame(&mut run.state);
+    keyboard.set_focus(
+        &mut run.state,
+        Some(game.server.clone()),
+        SERIAL_COUNTER.next_serial(),
+    );
+    game.settle(&mut run);
+    assert_eq!(
+        pointer.current_focus(),
+        Some(game.server.clone()),
+        "the window has the pointer"
+    );
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(game.server.clone()),
+        "and the keyboard"
+    );
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// A second client, with neither the pointer nor the keyboard, cannot warp the pointer onto
+/// its own window, with the serial of the first client's enter.
+#[test]
+fn a_warp_from_another_client_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let apart = window_of(&run, other.id.as_ref().expect("an id"));
+    run.state
+        .space
+        .map_element(apart.clone(), (900, 600), false);
+    run.state.set_keyboard_focus(Some(game.server.clone()));
+    game.aim(&mut run);
+    game.settle(&mut run);
+    other.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(game.server.clone()),
+        "the first window has the keyboard"
+    );
+    assert_eq!(
+        other.client.pointer_enter, None,
+        "the second has never had the pointer"
+    );
+    let (surface, _) = other.window.clone().expect("a window");
+    let pointer = other.pointer.clone().expect("a pointer");
+    let serial = game.local.client.pointer_enter.expect("an enter");
+    // A point on the second window, in the first one's coordinates: were the warp taken from
+    // where the pointer is, it would land there.
+    let location = run
+        .state
+        .space
+        .element_location(&apart)
+        .expect("a location");
+    let target = (location - apart.geometry().loc).to_f64() + Point::from((10.0, 20.0));
+    let to = target - game.origin(&run);
+    let warps: WpPointerWarpV1 = other.bind(1);
+    warps.warp_pointer(&surface, &pointer, to.x, to.y, serial);
+    other.roundtrip(&mut run);
+    game.settle(&mut run);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}

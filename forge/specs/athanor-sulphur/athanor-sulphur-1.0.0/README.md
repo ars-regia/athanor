@@ -133,7 +133,8 @@ dialog is shown raises the parent with its dialogs and gives the keyboard to the
 last of a chain of modal dialogs (`State::focus_clicked`, `src/fixture/parented.rs`).
 `wp_pointer_warp_v1` moves the pointer only within the surface that has both the pointer's
 focus, since the enter whose serial the warp names, and the keyboard: to a point on that
-surface, and in the confined area under a confinement. Ctrl+Alt+Tab's suspension of decision 30
+surface, and in the confined area under a confinement; never under a pointer lock, which keeps
+the pointer still, nor while the session is locked. Ctrl+Alt+Tab's suspension of decision 30
 refuses it, as it deactivates a pointer lock, until the user clicks or keys back to the client
 (`src/constraints.rs`, `src/fixture/constraints.rs`).
 `xdg_system_bell_v1` shows a bell on the focus outline of decision 31, and sounds nothing: from

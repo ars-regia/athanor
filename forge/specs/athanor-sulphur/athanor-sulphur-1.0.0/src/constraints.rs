@@ -15,7 +15,8 @@
 //!   again; a oneshot constraint active when it was suspended has ended (Smithay destroys it).
 //! - A warp moves the pointer only within the surface that has both the pointer's focus, since
 //!   the enter whose serial it names, and the keyboard, to a point on that surface and, under a
-//!   confinement, in the confined area; never while its client is suspended.
+//!   confinement, in the confined area; never under a pointer lock, while its client is
+//!   suspended or while the session is locked.
 //!
 //! Derived in part from niri (https://github.com/niri-wm/niri), revision
 //! fcbc971cf49a987b1e8d5ff1d64da6b1f61a1787: `pointer_moved_by` from `on_pointer_motion`
@@ -212,7 +213,10 @@ impl PointerWarpHandler for State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        if pointer.last_enter() != Some(serial)
+        // The lock screen owns the pointer; the focus checks alone would rest on the lock
+        // having moved it.
+        if self.lock.is_some()
+            || pointer.last_enter() != Some(serial)
             || pointer.current_focus().as_ref() != Some(&surface)
             || !self.has_keyboard(&surface)
             || self.is_suspended(&surface)
@@ -230,10 +234,16 @@ impl PointerWarpHandler for State {
         if self.pointer_target(to).map(|(under, _)| under) != Some(surface) {
             return;
         }
-        if let Some(Hold::Confined(root, origin, region)) = self.hold(&pointer, at) {
-            if !confines(&root, origin, region.as_ref(), to) {
-                return;
+        // A locked pointer stays still, as on every other input path: moving it would end
+        // the lock, a oneshot one for good.
+        match self.hold(&pointer, at) {
+            Some(Hold::Locked) => return,
+            Some(Hold::Confined(root, origin, region))
+                if !confines(&root, origin, region.as_ref(), to) =>
+            {
+                return
             }
+            _ => {}
         }
         self.pointer_to(to, InputTime::now());
     }
