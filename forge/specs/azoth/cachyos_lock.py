@@ -17,7 +17,7 @@ CONFIG_LINE = re.compile(r"^(?:(CONFIG_\w+)=.*|# (CONFIG_\w+) is not set)$")
 def config_entries(text):
     """Map each symbol of a config fragment to its line."""
     entries = {}
-    for line in text.splitlines():
+    for line in text.split("\n"):  # build.sh ends lines with \n only; splitlines() splits on more
         match = CONFIG_LINE.match(line)
         if match:
             entries[match.group(1) or match.group(2)] = line
@@ -27,7 +27,7 @@ def config_entries(text):
 def protected_entries(text):
     """Map each path of a `VALUE  PATH` list to its value (mode and hash, `deleted`, or a status)."""
     entries = {}
-    for line in text.splitlines():
+    for line in text.split("\n"):  # build.sh ends lines with \n only; splitlines() splits on more
         if not line.strip() or line.startswith("#"):
             continue
         digest, sep, path = line.partition("  ")

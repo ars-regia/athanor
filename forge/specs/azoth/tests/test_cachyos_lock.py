@@ -95,6 +95,13 @@ class ProtectedLock(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("changed mm/slub.c: M -> A", result.stdout)
 
+    def test_only_a_newline_ends_a_line(self):
+        # splitlines() would also end a line at U+2028, U+0085 or \x1c: a path holding one
+        # could carry a second, forged entry.
+        for sep in ("\u2028", "\u0085", "\x1c", "\r"):
+            entries = cachyos_lock.protected_entries(f"100644 aa  mm/a{sep}100644 bb  mm/slub.c\n")
+            self.assertEqual(entries, {f"mm/a{sep}100644 bb  mm/slub.c": "100644 aa"})
+
     def test_a_path_listed_twice_is_an_error(self):
         with self.assertRaises(ValueError):
             cachyos_lock.protected_entries("M  mm/slub.c\nA  mm/slub.c\n")
