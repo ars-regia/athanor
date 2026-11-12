@@ -12,15 +12,19 @@ MANIFEST = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/Cargo.toml"
 URL = "https://github.com/Smithay/smithay"
 OLD = "0" * 39 + "1"
 NEW = "a" * 39 + "2"
+HOLD = "b" * 39 + "3"
+README = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/README.md"
 
 # gh answers master's head with $STUB_MASTER, the open bump pull requests with $STUB_PRS, the
-# comparison's status with $STUB_STATUS and its commits by running the script's own --jq filter,
+# held commit's comparison with $STUB_HOLD_STATUS, the pin's comparison's status with
+# $STUB_STATUS and its commits by running the script's own --jq filter,
 # the last argument, over $STUB_COMMITS; cargo rewrites the lock as `cargo update` would.
 STUB_GH = """#!/usr/bin/env bash
 echo "gh $*" >> "$STUB_LOG"
 case "$*" in
 "api repos/Smithay/smithay/commits/master"*) echo "$STUB_MASTER" ;;
 "pr list"*) printf '%s' "$STUB_PRS" ;;
+"api repos/Smithay/smithay/compare/${STUB_HOLD:-none}..."*"--jq .status") echo "$STUB_HOLD_STATUS" ;;
 "api repos/Smithay/smithay/compare/"*"--jq .status") echo "$STUB_STATUS" ;;
 *"repos/Smithay/smithay/compare/"*) printf '%s' "$STUB_COMMITS" | jq -r "${@: -1}" ;;
 *) exit 9 ;;
@@ -140,6 +144,29 @@ class BumpSmithay(unittest.TestCase):
         result = self.run_script(NEW)
         self.assertEqual(result.returncode, 1)
         self.assertIn("at 2 revisions", result.stderr)
+
+    def hold(self, status):
+        (self.work / README).write_text(f"| Revision | `{OLD}` |\n| Held before | `{HOLD}` |\n")
+        self.env["STUB_HOLD"] = HOLD
+        self.env["STUB_HOLD_STATUS"] = status
+
+    def test_a_held_commit_master_contains_writes_nothing(self):
+        for status in ("ahead", "identical"):
+            self.hold(status)
+            result = self.run_script(NEW)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"held before {HOLD[:12]}", result.stdout)
+            self.assertFalse((self.out / "title").exists())
+            self.assertEqual((self.work / MANIFEST).read_text(), manifest(OLD))
+            self.assertNotIn("cargo", self.calls())
+
+    def test_a_held_commit_master_does_not_contain_moves_the_pin(self):
+        self.hold("behind")
+        result = self.run_script(NEW)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.work / MANIFEST).read_text(), manifest(NEW))
+        self.assertTrue((self.out / "title").exists())
+        self.assertIn(f"compare/{HOLD}...{NEW}", self.calls())
 
     def test_a_lock_cargo_did_not_move_fails(self):
         self.env["STUB_OLD"] = "nothing-to-replace"

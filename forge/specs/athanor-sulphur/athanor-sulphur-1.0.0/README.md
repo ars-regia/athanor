@@ -15,6 +15,7 @@ cosmic-comp's session stays at the greeter as the second entry until this one pa
 | Repository | https://github.com/Smithay/smithay |
 | Revision | `62ec78dbe742cc59e7a1cb4ce2b52b4292b531d9` |
 | Date | 2026-11-10 |
+| Held before | `4d80d1c53b2303a3672de41a0a0f9bcbc572fdce` |
 
 The revision is pinned in `Cargo.toml`; `deny.toml` admits this repository and no other git
 source. A new revision changes both lines and this table in one commit.
@@ -22,7 +23,9 @@ source. A new revision changes both lines and this table in one commit.
 The pin stops before Smithay `4d80d1c53b23` (input: Use seperate `Mutex` for grab), the head of
 master on 2026-11-12 included: from it, `TabletToolInnerHandle::set_grab` locks the tool's inner
 mutex twice, so a tool's first tip down on the default grab deadlocks, and the tip-down tests of
-`src/fixture/devices.rs` hang. A bump to that commit or later waits until Smithay fixes it.
+`src/fixture/devices.rs` hang. A bump to that commit or later waits until Smithay fixes it: while
+master contains the commit of the "Held before" row, `scripts/bump/smithay.sh` opens no bump.
+The row goes once Smithay's fix lands.
 
 ## Running
 
