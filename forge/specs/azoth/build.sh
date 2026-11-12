@@ -289,24 +289,28 @@ done
 # what it points to). A file new to a list, gone from it, or with another status, mode or
 # hash stops prep; the refresh stage rewrites the lists, so their diff shows the change.
 PROTECTED=(security certs crypto kernel/module kernel/bpf 'kernel/kexec*' kernel/cred.c kernel/capability.c
-  kernel/ptrace.c kernel/seccomp.c kernel/user_namespace.c kernel/sys.c kernel/fork.c drivers/iommu
+  kernel/ptrace.c kernel/seccomp.c kernel/user_namespace.c kernel/sys.c kernel/fork.c kernel/exit.c drivers/iommu
   drivers/pci drivers/firmware/efi drivers/char/tpm drivers/char/random.c mm init Makefile scripts
   arch/x86/Makefile 'arch/x86/Kconfig*' arch/x86/kernel arch/x86/mm arch/x86/entry arch/x86/lib
-  arch/x86/include arch/x86/boot arch/x86/coco)
-cachyos_tree() { # cachyos_tree: the git tree of the CachyOS tree, ignored files included
+  arch/x86/include arch/x86/boot arch/x86/coco arch/x86/pci arch/x86/realmode)
+cachyos_tree() { # cachyos_tree: sets CACHYOS to the git tree of the CachyOS tree, ignored files included
   local idx=$WORK/cachyos.index
   GIT_INDEX_FILE=$idx git --git-dir="$WORK/a/.git" -C "$WORK/b" add -Af -- .
-  GIT_INDEX_FILE=$idx g write-tree
+  CACHYOS=$(GIT_INDEX_FILE=$idx g write-tree)
+}
+plain_path() { # plain_path PATH: a lock is one line per path, so a path with a control character stops the build
+  [[ $1 != *[[:cntrl:]]* ]] || die "CachyOS changes a path with a control character: ${1@Q}"
 }
 cachyos_files() { # cachyos_files TREE: every file CachyOS changes against vanilla, as STATUS  PATH
   g diff-tree -r --no-renames -z --name-status "$VANILLA" "$1" \
-    | while IFS= read -r -d '' status && IFS= read -r -d '' path; do echo "$status  $path"; done \
+    | while IFS= read -r -d '' status && IFS= read -r -d '' path; do plain_path "$path"; echo "$status  $path"; done \
     | LC_ALL=C sort -k2
 }
 protected_files() { # protected_files TREE: CachyOS's changes under PROTECTED, as MODE SHA256  PATH
   local meta path mode oid status digest
   g diff-tree -r --no-renames -z --raw "$VANILLA" "$1" -- "${PROTECTED[@]}" \
     | while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+      plain_path "$path"
       read -r _ mode _ oid status <<< "$meta"
       if [[ $status == D ]]; then echo "$mode deleted  $path"; continue; fi
       digest=$(g cat-file blob "$oid" | sha256sum)
@@ -314,18 +318,18 @@ protected_files() { # protected_files TREE: CachyOS's changes under PROTECTED, a
     done | LC_ALL=C sort -k3
 }
 step "CachyOS against vanilla (cachyos-files.list, cachyos-protected.sha256)"
-cachyos=$(cachyos_tree)
+cachyos_tree   # not in a command substitution, where a failing git add would not stop the build
 {
-  echo "# Every file the CachyOS base and its patches change (M), add (A) or remove (D) against"
-  echo "# vanilla (doc_kernel_build.md, section 8). Rewritten by build.sh --stage refresh; every"
+  echo "# Every file the CachyOS base and its patches change (M), add (A), remove (D) or turn into"
+  echo "# another type (T) against vanilla (doc_kernel_build.md, section 8). Rewritten by build.sh --stage refresh; every"
   echo "# line is reviewed before it is committed."
-  cachyos_files "$cachyos"
+  cachyos_files "$CACHYOS"
 } > "$OUT/cachyos-files.list"
 {
   echo "# The files the CachyOS base and its patches change, add or remove against vanilla in the"
   echo "# protected paths, with their mode and the sha256 of their content (doc_kernel_build.md,"
   echo "# section 8). Rewritten by build.sh --stage refresh; every line is reviewed before it is committed."
-  protected_files "$cachyos"
+  protected_files "$CACHYOS"
 } > "$OUT/cachyos-protected.sha256"
 echo "files changed by CachyOS: $(grep -vc '^#' "$OUT/cachyos-files.list"), in the protected paths: $(grep -vc '^#' "$OUT/cachyos-protected.sha256")"
 if [[ $STAGE != refresh ]]; then
@@ -402,8 +406,11 @@ echo "derived options: $(wc -l < "$derived")"; cat "$derived"
   cat "$derived"
 } > "$OUT/derived.config"
 if [[ $STAGE == refresh ]]; then
-  # The locks are written together, once every step before has passed.
-  cp "$OUT/derived.config" "$OUT/cachyos-protected.sha256" "$OUT/cachyos-files.list" "$HERE/"
+  # The locks are written together, once every step before has passed: copied next to their
+  # place first, then renamed, so a failed copy leaves the committed set whole.
+  locks=(derived.config cachyos-protected.sha256 cachyos-files.list)
+  for f in "${locks[@]}"; do cp "$OUT/$f" "$HERE/.$f.new"; done
+  for f in "${locks[@]}"; do mv "$HERE/.$f.new" "$HERE/$f"; done
   step "refresh done: review the diff of derived.config, cachyos-protected.sha256 and cachyos-files.list, and the copies in $OUT/refreshed (none if nothing needed a refresh)"
   exit 0
 fi

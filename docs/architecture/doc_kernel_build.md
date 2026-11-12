@@ -600,7 +600,8 @@ what was read, and `prep`, which `microvm` and `build` run first, checks them:
   must not follow CachyOS goes into `kernel-local`, which wins over the derivation and is held
   by `check_delta` (section 4). A `--variant` build is only measured and is not held to the lock.
 - `cachyos-files.list`: every file the CachyOS base and the patches of `patches.list` change
-  (`M`), add (`A`) or remove (`D`) against the signed vanilla tree, in the whole tree. A file
+  (`M`), add (`A`), remove (`D`) or turn into another type (`T`, a file into a symlink)
+  against the signed vanilla tree, in the whole tree. A file
   new to the list, gone from it or with another status stops prep with `refresh needed`,
   naming it, so a file CachyOS starts to touch is always read once.
 - `cachyos-protected.sha256`: the same changes in the protected paths, each with its git mode
@@ -608,14 +609,15 @@ what was read, and `prep`, which `microvm` and `build` run first, checks them:
   never of what it points to). The protected paths are `security/`, `certs/`, `crypto/`,
   `kernel/module/`, `kernel/bpf/`, `kernel/kexec*`, `kernel/cred.c`, `kernel/capability.c`,
   `kernel/ptrace.c`, `kernel/seccomp.c`, `kernel/user_namespace.c`, `kernel/sys.c`,
-  `kernel/fork.c`, `drivers/iommu/`, `drivers/pci/`, `drivers/firmware/efi/`,
+  `kernel/fork.c`, `kernel/exit.c`, `drivers/iommu/`, `drivers/pci/`, `drivers/firmware/efi/`,
   `drivers/char/tpm/`, `drivers/char/random.c`, `mm/`, `init/`, the top `Makefile`,
   `scripts/`, `arch/x86/Makefile`, `arch/x86/Kconfig*`, `arch/x86/kernel/`, `arch/x86/mm/`,
-  `arch/x86/entry/`, `arch/x86/lib/`, `arch/x86/include/`, `arch/x86/boot/` and
-  `arch/x86/coco/`: the code that enforces isolation, the compiler's hardening flags and the
+  `arch/x86/entry/`, `arch/x86/lib/`, `arch/x86/include/`, `arch/x86/boot/`,
+  `arch/x86/coco/`, `arch/x86/pci/` and `arch/x86/realmode/`: the code that enforces isolation, the compiler's hardening flags and the
   x86 mitigations. A file new to the list, with another mode or hash, or gone from it stops
   prep with `refresh needed`, naming it. The variants are held to these two lists as well,
-  since they change only the config.
+  since they change only the config. A path with a control character, or listed twice, stops
+  the build: each lock holds one line per path.
 
 `build.sh --stage refresh` rewrites the three files in place, together, once the patches and
 the config derivation have passed; it refuses `--variant`. The bump pull request then carries them, and its diff shows every new line: the

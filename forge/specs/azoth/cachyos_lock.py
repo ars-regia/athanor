@@ -33,6 +33,8 @@ def protected_entries(text):
         digest, sep, path = line.partition("  ")
         if not sep or not path:
             raise ValueError(f"malformed line: {line!r}")
+        if path in entries:
+            raise ValueError(f"path listed twice: {path!r}")
         entries[path] = digest
     return entries
 

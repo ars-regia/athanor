@@ -1,5 +1,5 @@
-# Every file the CachyOS base and its patches change (M), add (A) or remove (D) against
-# vanilla (doc_kernel_build.md, section 8). Rewritten by build.sh --stage refresh; every
+# Every file the CachyOS base and its patches change (M), add (A), remove (D) or turn into
+# another type (T) against vanilla (doc_kernel_build.md, section 8). Rewritten by build.sh --stage refresh; every
 # line is reviewed before it is committed.
 M  Documentation/admin-guide/kernel-parameters.txt
 M  MAINTAINERS

@@ -1,6 +1,10 @@
 """Unit test of the CachyOS locks (python3 -B -m unittest discover -s forge/specs/azoth/tests -v)."""
 
+import hashlib
+import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -91,6 +95,10 @@ class ProtectedLock(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("changed mm/slub.c: M -> A", result.stdout)
 
+    def test_a_path_listed_twice_is_an_error(self):
+        with self.assertRaises(ValueError):
+            cachyos_lock.protected_entries("M  mm/slub.c\nA  mm/slub.c\n")
+
     def test_a_malformed_line_is_an_error(self):
         with self.assertRaises(ValueError):
             cachyos_lock.protected_entries("mm/slub.c\n")
@@ -107,7 +115,7 @@ class CommittedLocks(unittest.TestCase):
         for path, value in protected.items():
             self.assertRegex(value, r"^[0-7]{6} ([0-9a-f]{64}|deleted)$", path)
         files = cachyos_lock.protected_entries((AZOTH / "cachyos-files.list").read_text())
-        self.assertTrue(set(files.values()) <= {"M", "A", "D"}, set(files.values()))
+        self.assertTrue(set(files.values()) <= {"M", "A", "D", "T"}, set(files.values()))
         self.assertTrue(protected.keys() <= files.keys(), protected.keys() - files.keys())
 
     def test_the_protected_paths_are_those_of_the_specification(self):
@@ -117,8 +125,12 @@ class CommittedLocks(unittest.TestCase):
         doc = (AZOTH.parents[2] / "docs/architecture/doc_kernel_build.md").read_text()
         bullet = doc[doc.index("- `cachyos-protected.sha256`:") :]
         bullet = bullet[: bullet.index("\n\n")]
-        for path in paths:
-            self.assertTrue(f"`{path}/`" in bullet or f"`{path}`" in bullet, path)
+        named = {
+            token.rstrip("/")
+            for token in re.findall(r"`([^`]+)`", bullet)
+            if "/" in token or token == "Makefile"
+        }
+        self.assertEqual(named, set(paths))
 
     def test_a_lock_failure_is_a_refresh_for_the_bump(self):
         build = (AZOTH / "build.sh").read_text()
@@ -133,6 +145,84 @@ class CommittedLocks(unittest.TestCase):
         inputs = (AZOTH / "build-inputs.py").read_text()
         for name in ("cachyos_lock.py", "derived.config", "cachyos-protected.sha256", "cachyos-files.list"):
             self.assertIn(f'"{name}"', inputs)
+
+
+def build_sh_part(pattern):
+    """The text of build.sh that pattern, anchored on a line start, matches."""
+    match = re.search(pattern, (AZOTH / "build.sh").read_text(), re.M | re.S)
+    if not match:
+        raise AssertionError(f"build.sh has no {pattern!r}")
+    return match.group(0)
+
+
+@unittest.skipUnless(shutil.which("git") and shutil.which("bash"), "needs git and bash")
+class LockFunctions(unittest.TestCase):
+    """The functions of build.sh that write the locks, run on a vanilla and a CachyOS tree."""
+
+    def run_locks(self, work):
+        parts = [
+            build_sh_part(r"^die\(\) \{.*?\}$"),
+            build_sh_part(r"^g\(\) \{.*?\}$"),
+            build_sh_part(r"^PROTECTED=\(.*?\)$"),
+            build_sh_part(r"^cachyos_tree\(\) \{.*?^\}$"),
+            build_sh_part(r"^plain_path\(\) \{.*?^\}$"),
+            build_sh_part(r"^cachyos_files\(\) \{.*?^\}$"),
+            build_sh_part(r"^protected_files\(\) \{.*?^\}$"),
+        ]
+        script = "\n".join([
+            "set -euo pipefail", "WORK=$1", *parts,
+            'VANILLA=$(g rev-parse HEAD)', "cachyos_tree",
+            'echo "-- files"; cachyos_files "$CACHYOS"',
+            'echo "-- protected"; protected_files "$CACHYOS"',
+        ])
+        return subprocess.run(["bash", "-c", script, "locks", str(work)],
+                              capture_output=True, text=True, check=False)
+
+    def trees(self, tmp):
+        a, b = tmp / "a", tmp / "b"
+        for rel, text in {"mm/slub.c": "v\n", "mm/gone.c": "g\n", "fs/x.c": "x\n",
+                          "Makefile": "m\n", ".gitignore": "*.o\n"}.items():
+            (a / rel).parent.mkdir(parents=True, exist_ok=True)
+            (a / rel).write_text(text)
+        os.symlink("target-v", a / "mm/link")
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        for args in (["init", "-q"], ["add", "-Af", "."], ["commit", "-qm", "vanilla"]):
+            subprocess.run(["git", "-C", str(a), *args], check=True, env=env)
+        shutil.copytree(a, b, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+        (b / "mm/slub.c").write_text("cachyos\n")
+        (b / "mm/gone.c").unlink()
+        (b / "mm/new.o").write_text("ignored but added\n")
+        (b / "fs/x.c").write_text("outside\n")
+        (b / "Makefile").chmod(0o755)
+        (b / "mm/link").unlink()
+        os.symlink("target-c", b / "mm/link")
+        return b
+
+    def test_both_lists_hold_every_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.trees(pathlib.Path(tmp))
+            r = self.run_locks(tmp)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            files, protected = r.stdout.split("-- protected\n")
+            self.assertEqual(files, "-- files\nM  Makefile\nM  fs/x.c\nD  mm/gone.c\n"
+                                    "M  mm/link\nA  mm/new.o\nM  mm/slub.c\n")
+            sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
+            self.assertEqual(protected.splitlines(), [
+                f"100755 {sha('m' + chr(10))}  Makefile",
+                "000000 deleted  mm/gone.c",
+                f"120000 {sha('target-c')}  mm/link",
+                f"100644 {sha('ignored but added' + chr(10))}  mm/new.o",
+                f"100644 {sha('cachyos' + chr(10))}  mm/slub.c",
+            ])
+
+    def test_a_path_with_a_newline_stops_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            b = self.trees(pathlib.Path(tmp))
+            (b / "mm/a\n100644 x  mm").write_text("forged\n")
+            r = self.run_locks(tmp)
+            self.assertEqual(r.returncode, 1, r.stdout)
+            self.assertIn("build.sh: CachyOS changes a path with a control character", r.stderr)
 
 if __name__ == "__main__":
     unittest.main()
