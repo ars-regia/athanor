@@ -104,7 +104,7 @@ tracing-subscriber = "0.3.23"
 xcursor = "0.3.11"
 
 # Hashing & Utilities
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 hex = "0.4.3"
 zeroize = "1.8.1"
 subtle = "2.6.1"
