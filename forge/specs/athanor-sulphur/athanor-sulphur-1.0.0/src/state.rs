@@ -610,7 +610,6 @@ impl State {
     /// the first output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
-        crate::background_effect::release(output);
         self.close_layers(output);
         if let Some(lock) = &mut self.lock {
             lock.forget_output(output);

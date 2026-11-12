@@ -7,7 +7,7 @@ use super::marks::{clear_the_fixture, frame};
 use super::material::{on_a_fake_gpu, output, times, LONG};
 use super::wave2a::error_of;
 use super::*;
-use crate::background_effect::{blurs, holds_buffers, Blurred};
+use crate::background_effect::{blurs, held, Blurred};
 use crate::material::Tier;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
@@ -136,6 +136,16 @@ impl Scene {
     /// Sets the region, or none, on the subsurface and commits it, then its parent.
     fn set(&mut self, run: &mut Running, region: Option<&wl_region::WlRegion>) {
         self.effect.set_blur_region(region);
+        self.child.commit();
+        self.parent.commit();
+        self.local.roundtrip(run);
+    }
+
+    /// Attaches the subsurface's buffer again, all of it damaged, and commits it, then its
+    /// parent: what is drawn over the blur changes, not what lies under it.
+    fn redraw_child(&mut self, run: &mut Running) {
+        self.child.attach(Some(&self.transparent), 0, 0);
+        self.child.damage(0, 0, CHILD.0, CHILD.1);
         self.child.commit();
         self.parent.commit();
         self.local.roundtrip(run);
@@ -294,7 +304,7 @@ fn d35_m0_m1_and_software_draw_the_region_as_it_is() {
         };
         assert_eq!(blur_elements(&run), expected, "{what}: the elements");
         assert!(as_it_is(&frame(&mut run), UNDER), "{what}: as it is");
-        assert!(!holds_buffers(&first), "{what}: no buffers");
+        assert_eq!(held(&first), 0, "{what}: no buffers");
     }
     run.stop();
 }
@@ -344,24 +354,15 @@ fn softness(frame: &[u8]) -> f64 {
 #[test]
 #[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
 fn d35_the_blur_on_a_render_node() {
-    let node = PathBuf::from(
-        std::env::var_os("ATHANOR_RENDER_NODE").expect("ATHANOR_RENDER_NODE names a render node"),
-    );
-    let mut run = Running::start(Some(&node));
-    let mut scene = Scene::new(&mut run);
-    let first = output(&run, 0);
-    on_a_fake_gpu(&mut run, LONG, |_, _, _| Ok(times(Tier::M2)));
-    scene.local.pump(&mut run, "M2", |_, state| {
-        state.materials.tier_of(Some(&first)) == Tier::M2 && !state.materials.probing()
-    });
+    let (mut run, mut scene, first) = on_m2();
     let before = frame(&mut run);
     assert!(as_it_is(&before, UNDER), "no region: as it is");
-    assert!(!holds_buffers(&first), "no region: no buffers");
+    assert_eq!(held(&first), 0, "no region: no buffers");
 
     let region = scene.region();
     scene.set(&mut run, Some(&region));
     let shot = frame(&mut run);
-    assert!(holds_buffers(&first), "the buffers, made for the region");
+    assert_eq!(held(&first), 1, "the region's copy");
     let blurred = blurs(&first);
     assert!(blurred >= 1, "blurred");
 
@@ -416,11 +417,7 @@ fn d35_the_blur_on_a_render_node() {
     let _ = frame(&mut run);
     assert_eq!(blurs(&first), blurred, "nothing changed");
     // A surface's damage counts only with a buffer attached.
-    scene.child.attach(Some(&scene.transparent), 0, 0);
-    scene.child.damage(0, 0, CHILD.0, CHILD.1);
-    scene.child.commit();
-    scene.parent.commit();
-    scene.local.roundtrip(&mut run);
+    scene.redraw_child(&mut run);
     let _ = frame(&mut run);
     assert_eq!(blurs(&first), blurred, "only the surface over it changed");
     scene.parent.attach(Some(&scene.shown), 0, 0);
@@ -430,11 +427,147 @@ fn d35_the_blur_on_a_render_node() {
     let _ = frame(&mut run);
     assert!(blurs(&first) > blurred, "what lies under it changed");
 
+    // Unset, the region's copy goes with the next frame.
+    scene.set(&mut run, None);
+    assert!(as_it_is(&frame(&mut run), UNDER), "unset: as it is");
+    assert_eq!(held(&first), 0, "unset: the copy is freed");
+    scene.set(&mut run, Some(&region));
+    let _ = frame(&mut run);
+    assert_eq!(held(&first), 1, "set again: a copy");
+
     on_gpu(&mut run, "/dev/dri/renderD-m1", Tier::M1);
     scene.local.pump(&mut run, "M1", |_, state| {
         state.materials.tier_of(Some(&first)) == Tier::M1 && !state.materials.probing()
     });
-    assert!(!holds_buffers(&first), "M1: the buffers are freed");
     assert!(as_it_is(&frame(&mut run), UNDER), "M1: as it is");
+    assert_eq!(held(&first), 0, "M1: the copy is freed");
+    run.stop();
+}
+
+/// The fixture on the render node `ATHANOR_RENDER_NODE` names, with the scene, and its first
+/// output on M2.
+fn on_m2() -> (Running, Scene, smithay::output::Output) {
+    let node = PathBuf::from(
+        std::env::var_os("ATHANOR_RENDER_NODE").expect("ATHANOR_RENDER_NODE names a render node"),
+    );
+    let mut run = Running::start(Some(&node));
+    let mut scene = Scene::new(&mut run);
+    let first = output(&run, 0);
+    on_a_fake_gpu(&mut run, LONG, |_, _, _| Ok(times(Tier::M2)));
+    let on = first.clone();
+    scene.local.pump(&mut run, "M2", move |_, state| {
+        state.materials.tier_of(Some(&on)) == Tier::M2 && !state.materials.probing()
+    });
+    (run, scene, first)
+}
+
+/// Whether `a` and `b` are the same within `(x0, y0, w, h)` of the output.
+fn same_in(a: &[u8], b: &[u8], (x0, y0, w, h): (i32, i32, i32, i32)) -> bool {
+    let width = OUTPUTS[0].width;
+    (y0..y0 + h).all(|y| (x0..x0 + w).all(|x| pixel(a, width, x, y) == pixel(b, width, x, y)))
+}
+
+/// Where the second window is, over the first's subsurface, and its size: it covers the
+/// subsurface's bottom right, the step included.
+const OVER_AT: (i32, i32) = (450, 300);
+const OVER: (i32, i32) = (300, 250);
+
+/// Two regions whose boxes overlap each keep their own copy: when only what lies under the
+/// upper one changes, the lower subsurface being drawn again, the upper is blurred again and
+/// the lower is not, and neither shows the other's pixels: the frame is as it was.
+#[test]
+#[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
+fn d35_overlapping_regions_keep_their_own_copies() {
+    let (mut run, mut scene, first) = on_m2();
+    let region = scene.region();
+    scene.set(&mut run, Some(&region));
+
+    let mut over = Local::connect(&mut run, None);
+    over.toplevel(&mut run);
+    let window = window_of(&run, over.id.as_ref().expect("an id"));
+    run.state.space.map_element(window.clone(), OVER_AT, true);
+    run.state.focus(&window);
+    let compositor: wl_compositor::WlCompositor = over.bind(4);
+    let manager: ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1 = over.bind(1);
+    let qh = over.queue.handle();
+    let (surface, _) = over.window.clone().expect("a window");
+    let clear = vec![0; usize::try_from(OVER.0 * OVER.1 * 4).expect("size")];
+    let transparent = shm_buffer(&mut over, OVER, wl_shm::Format::Argb8888, &clear);
+    let effect = manager.get_background_effect(&surface, &qh, ());
+    let whole = compositor.create_region(&qh, ());
+    whole.add(0, 0, OVER.0, OVER.1);
+    effect.set_blur_region(Some(&whole));
+    surface.attach(Some(&transparent), 0, 0);
+    surface.damage(0, 0, OVER.0, OVER.1);
+    surface.commit();
+    over.roundtrip(&mut run);
+
+    let shot = frame(&mut run);
+    assert_eq!(held(&first), 2, "a copy for each region");
+    let _ = frame(&mut run);
+    let blurred = blurs(&first);
+    scene.redraw_child(&mut run);
+    let again = frame(&mut run);
+    assert_eq!(
+        blurs(&first),
+        blurred + 1,
+        "the upper region alone is blurred again"
+    );
+    let lower = (AT.0 + CHILD_AT.0, AT.1 + CHILD_AT.1, CHILD.0, CHILD.1);
+    let upper = (OVER_AT.0, OVER_AT.1, OVER.0, OVER.1);
+    assert!(same_in(&shot, &again, lower), "the lower region, as it was");
+    assert!(same_in(&shot, &again, upper), "the upper region, as it was");
+    run.stop();
+}
+
+/// A capture of the output draws with a damage tracker of its own, at the places the screen's
+/// contents have, without the magnifier: it copies and blurs into copies of its own, freed
+/// with it, and the screen's blur, drawn again from its own copy, is as it was.
+#[test]
+#[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
+fn d35_a_capture_leaves_the_screens_blur_as_it_was() {
+    let (mut run, mut scene, first) = on_m2();
+    let region = scene.region();
+    scene.set(&mut run, Some(&region));
+    // The magnifier about the subsurface's middle, which keeps its box on the output.
+    let middle = (
+        AT.0 + CHILD_AT.0 + CHILD.0 / 2,
+        AT.1 + CHILD_AT.1 + CHILD.1 / 2,
+    );
+    run.state.pointer_to(
+        Point::from((f64::from(middle.0), f64::from(middle.1))),
+        InputTime::now(),
+    );
+    run.state.zoom_step(true);
+    let shot = frame(&mut run);
+    let _ = frame(&mut run);
+    let blurred = blurs(&first);
+    assert_eq!(held(&first), 1, "the screen's copy");
+
+    let marks = run.state.marks();
+    let crate::state::Backend::Headless(headless) = &mut run.state.backend else {
+        panic!("the fixture is headless");
+    };
+    let captured = headless.read_back(
+        &crate::capture::Target::Output(first.clone()),
+        &run.state.space,
+        &marks,
+    );
+    assert!(captured.is_ok(), "the capture: {:?}", captured.err());
+    assert_eq!(blurs(&first), blurred + 1, "the capture blurs for itself");
+    assert_eq!(held(&first), 1, "the capture's copy goes with it");
+
+    scene.redraw_child(&mut run);
+    let again = frame(&mut run);
+    assert_eq!(
+        blurs(&first),
+        blurred + 1,
+        "the screen's blur is not copied again"
+    );
+    let (width, height) = (OUTPUTS[0].width, OUTPUTS[0].height);
+    assert!(
+        same_in(&shot, &again, (0, 0, width, height)),
+        "the screen's blur, as it was"
+    );
     run.stop();
 }

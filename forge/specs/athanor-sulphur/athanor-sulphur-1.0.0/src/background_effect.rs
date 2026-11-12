@@ -13,10 +13,12 @@
 //! - The blur is one of Smithay's framebuffer effects: the damage tracker draws again what lies
 //!   under it whenever that changes, and only then is it copied out and blurred again. While
 //!   nothing under it changes, the frame draws the blur kept from the last copy.
-//! - Each output on M2 keeps one buffer of its own size, which holds every region's copy, each
-//!   at its own place, and is blurred there in place, and the Kawase levels, from half its size
-//!   down. They are made at the first region drawn, and freed when the output goes or drops
-//!   below M2. No region, no buffers.
+//! - Each blur element keeps its own copy of what lies under it, of the size its box shows on
+//!   the frame, blurred there in place, and the Kawase levels, from half that size down. The
+//!   damage tracker keeps them for the element (its effects cache), so that overlapping regions
+//!   share no pixels, a capture's tracker (`capture.rs`) makes its own and frees them with it,
+//!   and a region that goes, or an output that drops below M2, lets them go at the tracker's
+//!   next frame. No region, no buffers.
 //! - Cost: a region is clipped to its surface and to the output, so that one blur is at most the
 //!   output's area, however large the region. A region of more than `MOST_RECTS` rectangles, as
 //!   the client gives them or as they come out of its subtractions, is taken whole, its
@@ -75,45 +77,56 @@ struct Kept {
     shared: Rc<Shared>,
 }
 
-/// What an output's blur elements share with it.
+/// What an output's blur elements share with it: in tests, what they did.
 #[derive(Default)]
 struct Shared {
-    buffers: RefCell<Option<Buffers>>,
     /// How many times a region was copied out and blurred.
     #[cfg(test)]
     blurs: Cell<u64>,
+    /// How many copies are held, by every damage tracker.
+    #[cfg(test)]
+    held: Cell<usize>,
 }
 
-/// The output's buffers, made in one GL context for one size.
-struct Buffers {
+/// A blur element's copy of what lies under it, made in one GL context for one size, and
+/// where on the frame it was copied from. A dropped GL texture is freed when its renderer next
+/// cleans up.
+struct Backdrop {
     context: ContextId<GlesTexture>,
+    /// The part of the element's box on the frame.
+    at: Rectangle<i32, Physical>,
+    /// That part, as the frame's pixels are stored.
     size: Size<i32, Physical>,
     blur: Blur,
+    #[cfg(test)]
+    shared: Rc<Shared>,
 }
+
+#[cfg(test)]
+impl Drop for Backdrop {
+    fn drop(&mut self) {
+        self.shared.held.set(self.shared.held.get() - 1);
+    }
+}
+
+/// The copy a damage tracker keeps for a blur element: none until it is first copied out, or
+/// when it could not be.
+struct Copied(RefCell<Option<Backdrop>>);
 
 fn kept(output: &Output) -> &Kept {
     output.user_data().get_or_insert(Kept::default)
 }
 
-/// Whether `output` blurs regions, as its tier says: when it does not, its buffers are freed.
+/// Whether `output` blurs regions, as its tier says: when it does not, its elements go, and
+/// their copies with them at the next frame.
 pub fn set_live(output: &Output, live: bool) {
-    let kept = kept(output);
-    kept.live.set(live);
-    if !live {
-        kept.shared.buffers.borrow_mut().take();
-    }
+    kept(output).live.set(live);
 }
 
-/// Lets go of `output`'s buffers, as it goes. A dropped GL texture is freed when its renderer
-/// next cleans up.
-pub fn release(output: &Output) {
-    set_live(output, false);
-}
-
-/// Whether `output` holds the blur's buffers.
+/// How many copies of what lies under a region `output`'s damage trackers hold.
 #[cfg(test)]
-pub fn holds_buffers(output: &Output) -> bool {
-    kept(output).shared.buffers.borrow().is_some()
+pub fn held(output: &Output) -> usize {
+    kept(output).shared.held.get()
 }
 
 /// How many times a region on `output` was copied out and blurred.
@@ -367,10 +380,6 @@ impl<E> Element for Behind<E> {
     }
 }
 
-/// Whether the region's blur was copied out and blurred, kept by the damage tracker for the
-/// element between frames.
-struct Captured(Cell<bool>);
-
 impl<R: Blurs, E> RenderElement<R> for Behind<E> {
     fn draw(
         &self,
@@ -381,15 +390,15 @@ impl<R: Blurs, E> RenderElement<R> for Behind<E> {
         _opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
-        // A region that could not be blurred is drawn as it is.
-        let captured = cache
-            .and_then(|cache| cache.get::<Captured>())
-            .is_some_and(|captured| captured.0.get());
+        // A region never copied out is drawn as it is.
+        let Some(cache) = cache else {
+            return Ok(());
+        };
         let clip = self.0.clip(dst, damage);
-        if !captured || clip.is_empty() {
+        if clip.is_empty() {
             return Ok(());
         }
-        R::draw_blur(frame, &self.0, dst, &clip)
+        R::draw_blur(frame, &self.0, dst, &clip, cache)
     }
 
     fn capture_framebuffer(
@@ -399,28 +408,29 @@ impl<R: Blurs, E> RenderElement<R> for Behind<E> {
         dst: Rectangle<i32, Physical>,
         cache: &UserDataMap,
     ) -> Result<(), R::Error> {
-        let captured = cache.get_or_insert(|| Captured(Cell::new(false)));
-        captured.0.set(R::capture(frame, &self.0, dst));
+        R::capture(frame, &self.0, dst, cache);
         Ok(())
     }
 }
 
 /// A renderer that draws the blur, or with nothing to draw it with draws regions as they are.
 pub trait Blurs: Renderer {
-    /// Copies what lies under `dst` out of the frame and blurs it in the element's buffers:
-    /// whether it did.
+    /// Copies what lies under `dst` out of the frame and blurs it, in the copy `cache` keeps
+    /// for the element; with none kept when it cannot.
     fn capture(
         frame: &mut Self::Frame<'_, '_>,
         element: &BlurElement,
         dst: Rectangle<i32, Physical>,
-    ) -> bool;
+        cache: &UserDataMap,
+    );
 
-    /// Draws `clip`, relative to `dst`, of the blur last copied out under `dst`.
+    /// Draws `clip`, relative to `dst`, of the blur `cache` keeps, if any.
     fn draw_blur(
         frame: &mut Self::Frame<'_, '_>,
         element: &BlurElement,
         dst: Rectangle<i32, Physical>,
         clip: &[Rectangle<i32, Physical>],
+        cache: &UserDataMap,
     ) -> Result<(), Self::Error>;
 }
 
@@ -432,40 +442,56 @@ impl Blurs for GlesRenderer {
         frame: &mut GlesFrame<'_, '_>,
         element: &BlurElement,
         dst: Rectangle<i32, Physical>,
-    ) -> bool {
-        match blur_under(frame, &element.shared, dst) {
-            Ok(()) => true,
-            Err(error) => {
-                if !REPORTED.swap(true, Ordering::Relaxed) {
-                    tracing::warn!(%error, "a region cannot be blurred: it is drawn as it is");
-                }
-                false
+        cache: &UserDataMap,
+    ) {
+        let copied = cache.get_or_insert(|| Copied(RefCell::new(None)));
+        let mut copied = copied.0.borrow_mut();
+        if let Err(error) = blur_under(frame, &mut copied, &element.shared, dst) {
+            // What was kept is of another frame: the region is drawn as it is.
+            copied.take();
+            if !REPORTED.swap(true, Ordering::Relaxed) {
+                tracing::warn!(%error, "a region cannot be blurred: it is drawn as it is");
             }
         }
     }
 
     fn draw_blur(
         frame: &mut GlesFrame<'_, '_>,
-        element: &BlurElement,
+        _element: &BlurElement,
         dst: Rectangle<i32, Physical>,
         clip: &[Rectangle<i32, Physical>],
+        cache: &UserDataMap,
     ) -> Result<(), GlesError> {
-        let buffers = element.shared.buffers.borrow();
-        let Some(buffers) = buffers.as_ref() else {
+        let Some(copied) = cache.get::<Copied>() else {
             return Ok(());
         };
+        let copied = copied.0.borrow();
+        let Some(backdrop) = copied.as_ref() else {
+            return Ok(());
+        };
+        // `clip` is relative to `dst`; the copy covers only the part of it on the frame.
+        let offset = backdrop.at.loc - dst.loc;
+        let shown = Rectangle::from_size(backdrop.at.size);
+        let clip: Vec<Rectangle<i32, Physical>> = clip
+            .iter()
+            .filter_map(|rect| {
+                let mut rect = *rect;
+                rect.loc -= offset;
+                rect.intersection(shown)
+            })
+            .collect();
+        if clip.is_empty() {
+            return Ok(());
+        }
+        let size = backdrop.size;
+        let src = Rectangle::<i32, BufferCoords>::from_size((size.w, size.h).into());
         let transform = frame.transformation();
-        let stored = transform.transform_rect_in(dst, &frame.output_size());
-        let src = Rectangle::<i32, BufferCoords>::new(
-            (stored.loc.x, stored.loc.y).into(),
-            (stored.size.w, stored.size.h).into(),
-        );
         frame.render_texture_from_to(
-            buffers.blur.texture(),
+            backdrop.blur.texture(),
             src.to_f64(),
-            dst,
-            clip,
-            clip,
+            backdrop.at,
+            &clip,
+            &clip,
             transform,
             1.0,
             None,
@@ -474,41 +500,50 @@ impl Blurs for GlesRenderer {
     }
 }
 
-/// Copies what lies under `dst` out of `frame` into the output's buffer, at its own place, and
-/// blurs it there; makes the buffers first, or again for another context or size.
+/// Copies what lies under `dst`, as far as it is on `frame`, out into `copied` and blurs it
+/// there; makes the copy first, or again for another context or size. `shared` counts both,
+/// in tests.
+#[cfg_attr(not(test), allow(unused_variables))]
 fn blur_under(
     frame: &mut GlesFrame<'_, '_>,
-    shared: &Shared,
+    copied: &mut Option<Backdrop>,
+    shared: &Rc<Shared>,
     dst: Rectangle<i32, Physical>,
 ) -> Result<(), crate::Error> {
+    let area = frame.output_size();
+    let at = dst
+        .intersection(Rectangle::from_size(area))
+        .ok_or("the region lies off the frame")?;
     let transform = frame.transformation();
     // The frame's pixels as they are stored: the output's mode, before its transform.
-    let stored = transform.transform_rect_in(dst, &frame.output_size());
-    let size = transform.transform_size(frame.output_size());
+    let stored = transform.transform_rect_in(at, &area);
     let context = frame.context_id();
-    let mut buffers = shared.buffers.borrow_mut();
-    if !buffers
+    if !copied
         .as_ref()
-        .is_some_and(|buffers| buffers.context == context && buffers.size == size)
+        .is_some_and(|kept| kept.context == context && kept.size == stored.size)
     {
-        buffers.take();
-        let blur = Blur::new(frame.renderer().as_mut(), size)?;
-        *buffers = Some(Buffers {
+        copied.take();
+        let blur = Blur::new(frame.renderer().as_mut(), stored.size)?;
+        #[cfg(test)]
+        shared.held.set(shared.held.get() + 1);
+        *copied = Some(Backdrop {
             context,
-            size,
+            at,
+            size: stored.size,
             blur,
+            #[cfg(test)]
+            shared: shared.clone(),
         });
     }
-    let buffers = buffers.as_mut().ok_or("the blur's buffers were not made")?;
-    let mut target = frame.renderer().as_mut().bind(buffers.blur.backdrop())?;
+    let backdrop = copied.as_mut().ok_or("the region's copy was not made")?;
+    backdrop.at = at;
+    let whole = Rectangle::from_size(stored.size);
+    let mut target = frame.renderer().as_mut().bind(backdrop.blur.backdrop())?;
     // The passes are drawn in the same GL context, which orders them after the copy.
-    drop(frame.blit_to(&mut target, stored, stored, TextureFilter::Nearest)?);
+    drop(frame.blit_to(&mut target, stored, whole, TextureFilter::Nearest)?);
     drop(target);
-    let rect = Rectangle::<i32, BufferCoords>::new(
-        (stored.loc.x, stored.loc.y).into(),
-        (stored.size.w, stored.size.h).into(),
-    );
-    buffers.blur.in_place(frame.renderer().as_mut(), rect)?;
+    let rect = Rectangle::<i32, BufferCoords>::from_size((stored.size.w, stored.size.h).into());
+    backdrop.blur.in_place(frame.renderer().as_mut(), rect)?;
     #[cfg(test)]
     shared.blurs.set(shared.blurs.get() + 1);
     Ok(())
@@ -520,8 +555,8 @@ impl Blurs for PixmanRenderer {
         _frame: &mut PixmanFrame<'_, '_>,
         _element: &BlurElement,
         _dst: Rectangle<i32, Physical>,
-    ) -> bool {
-        false
+        _cache: &UserDataMap,
+    ) {
     }
 
     fn draw_blur(
@@ -529,6 +564,7 @@ impl Blurs for PixmanRenderer {
         _element: &BlurElement,
         _dst: Rectangle<i32, Physical>,
         _clip: &[Rectangle<i32, Physical>],
+        _cache: &UserDataMap,
     ) -> Result<(), PixmanError> {
         Ok(())
     }
