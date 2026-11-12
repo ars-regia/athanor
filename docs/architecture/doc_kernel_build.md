@@ -64,8 +64,9 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `patches/refreshed/`     | copie rinfrescate delle patch di `patches.list` che non entrano più senza fuzz, stesso percorso relativo; il preambolo registra commit e SHA-256 del file upstream da cui derivano (sezione 8)                                                                                   |
 | `patches/`               | patch di Athanor in formato git, applicate dopo `patches.list` in ordine di nome; il messaggio spiega il perché, e ogni patch è candidata all'upstream                                                                                                                           |
 | `patches/redhat/`        | patch di Athanor al codice che aggiunge solo la patch Red Hat: vanno soltanto sull'indice Fedora, non sull'albero CachyOS della derivazione del config, e non toccano Kconfig                                                                                                    |
-| `derived.config`         | the options the tree introduces, with the values of the CachyOS config: the lock of section 8, rewritten by `build.sh --stage refresh` |
-| `cachyos-protected.sha256` | the files the CachyOS base and its patches change, add or remove against vanilla in the protected paths, with their sha256: the lock of section 8 |
+| `derived.config`         | the options the tree introduces, with the values of the CachyOS config: a lock of section 8, rewritten by `build.sh --stage refresh` |
+| `cachyos-protected.sha256` | the files the CachyOS base and its patches change, add or remove against vanilla in the protected paths, with their mode and sha256: a lock of section 8 |
+| `cachyos-files.list`     | every file the CachyOS base and its patches change, add or remove against vanilla in the whole tree: a lock of section 8 |
 | `fedora-wins.list`       | percorsi in cui un conflitto del merge tra base CachyOS e patch Red Hat si risolve con l'albero Fedora; ogni altro conflitto ferma la build                                                                                                                                      |
 | `cmdline`                | riga di comando del kernel, firmata nella UKI (sezione 6)                                                                                                                                                                                                                        |
 | `boot.sh`, `boot/`       | la boot matrix (sezione 7, gate 3): ambiente QEMU/OVMF/shim pinnato come il builder, PID 1 dell'initramfs di prova con le asserzioni                                                                                                                                             |
@@ -589,27 +590,39 @@ ciclo delle patch: va cancellata.
 
 **CachyOS locks** (maintainer decision, 2026-11-12, revision 4). CachyOS is a base for
 performance, never an authority on security: what it changes in the config and in the code
-that enforces isolation reaches the kernel only after a person has read it. Two files hold
-what was read:
+that enforces isolation reaches the kernel only after a person has read it. Three files hold
+what was read, and `prep`, which `microvm` and `build` run first, checks them:
 
 - `derived.config`: every option the tree introduces that `build.sh` derives with the value of
   the CachyOS config (listnewconfig on the Fedora config, the clang snippets and
   `kernel-local`), with that value. A derived option that is new, has another value or is gone
-  stops every stage but `refresh` with `refresh needed`, naming the symbols. An option that
+  stops prep with `refresh needed`, naming the symbols. An option that
   must not follow CachyOS goes into `kernel-local`, which wins over the derivation and is held
   by `check_delta` (section 4). A `--variant` build is only measured and is not held to the lock.
-- `cachyos-protected.sha256`: the files the CachyOS base and the patches of `patches.list`
-  change, add or remove against the signed vanilla tree in the protected paths, each with its
-  sha256 (`deleted` for a removed file). The protected paths are `security/`, `certs/`,
-  `crypto/`, `kernel/module/`, `kernel/bpf/`, `kernel/kexec*`, `drivers/iommu/`,
-  `drivers/pci/`, `drivers/firmware/efi/`, `drivers/char/tpm/`, `mm/`, `init/`,
-  `arch/x86/kernel/`, `arch/x86/mm/` and `arch/x86/entry/`. A file new to the list, with
-  another hash, or gone from it stops every stage but `refresh` with `refresh needed`, naming it.
+- `cachyos-files.list`: every file the CachyOS base and the patches of `patches.list` change
+  (`M`), add (`A`) or remove (`D`) against the signed vanilla tree, in the whole tree. A file
+  new to the list, gone from it or with another status stops prep with `refresh needed`,
+  naming it, so a file CachyOS starts to touch is always read once.
+- `cachyos-protected.sha256`: the same changes in the protected paths, each with its git mode
+  and the sha256 of its content (`deleted` for a removed file; for a symlink, of its target,
+  never of what it points to). The protected paths are `security/`, `certs/`, `crypto/`,
+  `kernel/module/`, `kernel/bpf/`, `kernel/kexec*`, `kernel/cred.c`, `kernel/capability.c`,
+  `kernel/ptrace.c`, `kernel/seccomp.c`, `kernel/user_namespace.c`, `kernel/sys.c`,
+  `kernel/fork.c`, `drivers/iommu/`, `drivers/pci/`, `drivers/firmware/efi/`,
+  `drivers/char/tpm/`, `drivers/char/random.c`, `mm/`, `init/`, the top `Makefile`,
+  `scripts/`, `arch/x86/Makefile`, `arch/x86/Kconfig*`, `arch/x86/kernel/`, `arch/x86/mm/`,
+  `arch/x86/entry/`, `arch/x86/lib/`, `arch/x86/include/`, `arch/x86/boot/` and
+  `arch/x86/coco/`: the code that enforces isolation, the compiler's hardening flags and the
+  x86 mitigations. A file new to the list, with another mode or hash, or gone from it stops
+  prep with `refresh needed`, naming it. The variants are held to these two lists as well,
+  since they change only the config.
 
-`build.sh --stage refresh` rewrites both files in place, after the patches and the config
-derivation. The bump pull request then carries them, and its diff shows every new line: the
+`build.sh --stage refresh` rewrites the three files in place, together, once the patches and
+the config derivation have passed; it refuses `--variant`. The bump pull request then carries them, and its diff shows every new line: the
 person who merges it reads each one, and the bump's prep outcome is `REFRESH`, so it has no
-auto-merge. check-plan (`system/kernel-artifacts.sh`) accepts both files next to the pins.
+auto-merge. check-plan (`system/kernel-artifacts.sh`) accepts the three files next to the pins,
+and the kernel's build inputs (`build-inputs.py`) include them and `cachyos_lock.py`, so a
+pull request that changes a lock runs the kernel build that checks it.
 
 ## 9. Kernel guest per le MicroVM
 

@@ -2,7 +2,7 @@
 """Compare what CachyOS gives the build with what a person reviewed (doc_kernel_build.md, section 8).
 
     cachyos_lock.py config LOCK GENERATED      derived.config: the options taken from CachyOS
-    cachyos_lock.py protected LOCK GENERATED   cachyos-protected.sha256: CachyOS's files in the protected paths
+    cachyos_lock.py protected LOCK GENERATED   cachyos-protected.sha256, cachyos-files.list: VALUE  PATH lines
 
 Prints every entry that is new, changed or gone in GENERATED against LOCK and exits 1 when
 there is one, 0 when the two agree. Comment lines and blank lines are ignored.
@@ -25,7 +25,7 @@ def config_entries(text):
 
 
 def protected_entries(text):
-    """Map each path of a sha256sum-style list to its hash (or `deleted`)."""
+    """Map each path of a `VALUE  PATH` list to its value (mode and hash, `deleted`, or a status)."""
     entries = {}
     for line in text.splitlines():
         if not line.strip() or line.startswith("#"):

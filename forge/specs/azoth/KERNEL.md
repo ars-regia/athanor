@@ -19,7 +19,7 @@ directory e come si usa.
 | `patches/redhat/` | patch di Athanor al codice della patch Red Hat: solo sull'albero Fedora, mai su Kconfig |
 | `fedora-wins.list` | percorsi in cui un conflitto tra base CachyOS e patch Red Hat si risolve con l'albero Fedora |
 | `cmdline` | la riga di comando base usata dalla matrice di avvio, generata da `athanor-kernel-profile/profile.toml` (`kernel_profile.py generate`); non modificarla a mano |
-| `build.sh` | dai pin agli RPM: stadi `manifest` (scarica i sorgenti dei pin e scrive il loro manifesto), `prep` (sorgenti, patch, gate dei config), `refresh` (propone le copie rinfrescate delle patch di CachyOS che non entrano senza fuzz e riscrive i lock `derived.config` e `cachyos-protected.sha256`), `microvm` (prep e il solo kernel guest) e `build` (entrambi i kernel); `--variant NOME` per una variante di `variants/` |
+| `build.sh` | dai pin agli RPM: stadi `manifest` (scarica i sorgenti dei pin e scrive il loro manifesto), `prep` (sorgenti, patch, gate dei config), `refresh` (propone le copie rinfrescate delle patch di CachyOS che non entrano senza fuzz e riscrive i lock `derived.config`, `cachyos-protected.sha256` e `cachyos-files.list`), `microvm` (prep e il solo kernel guest) e `build` (entrambi i kernel); `--variant NOME` per una variante di `variants/` |
 | `variants/` | frammenti che sovrascrivono righe di `kernel-local` per il confronto A/B del benchmark (`o3`: -O3 al posto di -O2); buildid `.azoth.NOME`, mai pubblicati |
 | `repro.py` | la riproducibilita': due build dello stesso pin a confronto (config, System.map, vmlinux per sezioni, moduli senza firma) |
 | `bench.sh`, `bench/init`, `bench-report.py` | il benchmark di tendenza: kernel in QEMU/KVM con hackbench, schbench, fio, netperf; tabelle, confronto A/B e grafici dai `results.json` |
@@ -81,8 +81,8 @@ podman run --rm -v "$PWD:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
 ```
 
 Le copie da rivedere finiscono in `out/refreshed/`, da copiare sotto
-`patches/refreshed/` dopo aver riletto gli hunk applicati con fuzz. `derived.config` e
-`cachyos-protected.sha256` vengono riscritti sul posto: ogni riga nuova del loro diff si
+`patches/refreshed/` dopo aver riletto gli hunk applicati con fuzz. `derived.config`,
+`cachyos-protected.sha256` e `cachyos-files.list` vengono riscritti sul posto: ogni riga nuova del loro diff si
 legge prima del commit (spec sezione 8, "CachyOS locks").
 
 ## Boot matrix

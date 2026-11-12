@@ -6,8 +6,8 @@
 # the pinned sources and writes their manifest: that is how the bump bot (bump.py)
 # regenerates SOURCES/sources.sha256. The refresh stage stops after the config derivation: it
 # writes to DIR/refreshed the copies of the CachyOS patches that no longer apply without fuzz,
-# for a human to review and commit under patches/refreshed, and rewrites derived.config and
-# cachyos-protected.sha256, the two CachyOS locks the other stages check (section 8). The microvm stage runs prep and compiles only the
+# for a human to review and commit under patches/refreshed, and rewrites derived.config,
+# cachyos-protected.sha256 and cachyos-files.list, the CachyOS locks prep checks (section 8). The microvm stage runs prep and compiles only the
 # MicroVM guest kernel (section 9); build compiles both kernels. --variant NAME
 # (variants/NAME) is the same build with a fragment overriding kernel-local, for the A/B
 # comparison of the benchmark (kernel-weekly.yml): buildid .azoth.NAME, never published.
@@ -24,6 +24,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ ( $STAGE == manifest || $STAGE == prep || $STAGE == refresh || $STAGE == microvm || $STAGE == build ) && -n $OUT ]] || usage
+[[ $STAGE != refresh || -z $VARIANT ]] || { echo "build.sh: --stage refresh rewrites the locks of the published kernel: run it without --variant" >&2; exit 2; }
 
 die() { echo "build.sh: $*" >&2; exit 1; }
 step() { echo; echo ">>> $*"; }
@@ -281,33 +282,57 @@ for p in "${PATCHES[@]}"; do
   g apply --cached "$use"
   (cd "$WORK/b" && git apply "$use")     # the CachyOS tree serves the config derivation
 done
-# The protected paths (doc_kernel_build.md, section 8): what the CachyOS base and its patches
-# change, add or remove there against vanilla is a list a person reviewed,
-# cachyos-protected.sha256. A file new to the list, or with another hash, stops prep; the
-# refresh stage rewrites the list, so its diff shows the change to review.
-PROTECTED=(security certs crypto kernel/module kernel/bpf 'kernel/kexec*' drivers/iommu drivers/pci
-  drivers/firmware/efi drivers/char/tpm mm init arch/x86/kernel arch/x86/mm arch/x86/entry)
-protected_files() { # protected_files: CachyOS's changes against vanilla under PROTECTED, as sha256sum lines
-  local idx=$WORK/protected.index tree status path
-  GIT_INDEX_FILE=$idx git --git-dir="$WORK/a/.git" -C "$WORK/b" add -Af -- "${PROTECTED[@]}"
-  tree=$(GIT_INDEX_FILE=$idx g write-tree)
-  g diff-tree -r --no-renames --name-status "$VANILLA" "$tree" -- "${PROTECTED[@]}" \
-    | while IFS=$'\t' read -r status path; do
-      if [[ $status == D ]]; then echo "deleted  $path"; else (cd "$WORK/b" && sha256sum -- "$path"); fi
-    done | LC_ALL=C sort -k2
+# The CachyOS locks (doc_kernel_build.md, section 8). What the CachyOS base and its patches
+# change against vanilla is a list a person reviewed: cachyos-files.list names every file they
+# change, add or remove in the whole tree, and cachyos-protected.sha256 holds, for the
+# protected paths, each file's mode and the sha256 of its git blob (a symlink's target, never
+# what it points to). A file new to a list, gone from it, or with another status, mode or
+# hash stops prep; the refresh stage rewrites the lists, so their diff shows the change.
+PROTECTED=(security certs crypto kernel/module kernel/bpf 'kernel/kexec*' kernel/cred.c kernel/capability.c
+  kernel/ptrace.c kernel/seccomp.c kernel/user_namespace.c kernel/sys.c kernel/fork.c drivers/iommu
+  drivers/pci drivers/firmware/efi drivers/char/tpm drivers/char/random.c mm init Makefile scripts
+  arch/x86/Makefile 'arch/x86/Kconfig*' arch/x86/kernel arch/x86/mm arch/x86/entry arch/x86/lib
+  arch/x86/include arch/x86/boot arch/x86/coco)
+cachyos_tree() { # cachyos_tree: the git tree of the CachyOS tree, ignored files included
+  local idx=$WORK/cachyos.index
+  GIT_INDEX_FILE=$idx git --git-dir="$WORK/a/.git" -C "$WORK/b" add -Af -- .
+  GIT_INDEX_FILE=$idx g write-tree
 }
-step "CachyOS in the protected paths (cachyos-protected.sha256)"
+cachyos_files() { # cachyos_files TREE: every file CachyOS changes against vanilla, as STATUS  PATH
+  g diff-tree -r --no-renames -z --name-status "$VANILLA" "$1" \
+    | while IFS= read -r -d '' status && IFS= read -r -d '' path; do echo "$status  $path"; done \
+    | LC_ALL=C sort -k2
+}
+protected_files() { # protected_files TREE: CachyOS's changes under PROTECTED, as MODE SHA256  PATH
+  local meta path mode oid status digest
+  g diff-tree -r --no-renames -z --raw "$VANILLA" "$1" -- "${PROTECTED[@]}" \
+    | while IFS= read -r -d '' meta && IFS= read -r -d '' path; do
+      read -r _ mode _ oid status <<< "$meta"
+      if [[ $status == D ]]; then echo "$mode deleted  $path"; continue; fi
+      digest=$(g cat-file blob "$oid" | sha256sum)
+      echo "$mode ${digest%% *}  $path"
+    done | LC_ALL=C sort -k3
+}
+step "CachyOS against vanilla (cachyos-files.list, cachyos-protected.sha256)"
+cachyos=$(cachyos_tree)
+{
+  echo "# Every file the CachyOS base and its patches change (M), add (A) or remove (D) against"
+  echo "# vanilla (doc_kernel_build.md, section 8). Rewritten by build.sh --stage refresh; every"
+  echo "# line is reviewed before it is committed."
+  cachyos_files "$cachyos"
+} > "$OUT/cachyos-files.list"
 {
   echo "# The files the CachyOS base and its patches change, add or remove against vanilla in the"
-  echo "# protected paths, with their sha256 (doc_kernel_build.md, section 8). Rewritten by"
-  echo "# build.sh --stage refresh; every line is reviewed before it is committed."
-  protected_files
+  echo "# protected paths, with their mode and the sha256 of their content (doc_kernel_build.md,"
+  echo "# section 8). Rewritten by build.sh --stage refresh; every line is reviewed before it is committed."
+  protected_files "$cachyos"
 } > "$OUT/cachyos-protected.sha256"
-echo "protected files changed by CachyOS: $(grep -vc '^#' "$OUT/cachyos-protected.sha256")"
-if [[ $STAGE == refresh ]]; then
-  cp "$OUT/cachyos-protected.sha256" "$HERE/cachyos-protected.sha256"
-elif ! python3 "$HERE/cachyos_lock.py" protected "$HERE/cachyos-protected.sha256" "$OUT/cachyos-protected.sha256"; then
-  die "refresh needed: CachyOS changes the protected paths otherwise than cachyos-protected.sha256 says (the files above)"
+echo "files changed by CachyOS: $(grep -vc '^#' "$OUT/cachyos-files.list"), in the protected paths: $(grep -vc '^#' "$OUT/cachyos-protected.sha256")"
+if [[ $STAGE != refresh ]]; then
+  python3 "$HERE/cachyos_lock.py" protected "$HERE/cachyos-files.list" "$OUT/cachyos-files.list" \
+    || die "refresh needed: CachyOS changes other files than cachyos-files.list says (the files above)"
+  python3 "$HERE/cachyos_lock.py" protected "$HERE/cachyos-protected.sha256" "$OUT/cachyos-protected.sha256" \
+    || die "refresh needed: CachyOS changes the protected paths otherwise than cachyos-protected.sha256 says (the files above)"
 fi
 # The Athanor patches (patches/), in name order, after the CachyOS ones.
 for p in "${ATHANOR_PATCHES[@]}"; do
@@ -377,9 +402,9 @@ echo "derived options: $(wc -l < "$derived")"; cat "$derived"
   cat "$derived"
 } > "$OUT/derived.config"
 if [[ $STAGE == refresh ]]; then
-  [[ -z $VARIANT ]] || die "--stage refresh rewrites the locks of the published kernel: run it without --variant"
-  cp "$OUT/derived.config" "$HERE/derived.config"
-  step "refresh done: review the diff of derived.config and cachyos-protected.sha256, and the copies in $OUT/refreshed (none if nothing needed a refresh)"
+  # The locks are written together, once every step before has passed.
+  cp "$OUT/derived.config" "$OUT/cachyos-protected.sha256" "$OUT/cachyos-files.list" "$HERE/"
+  step "refresh done: review the diff of derived.config, cachyos-protected.sha256 and cachyos-files.list, and the copies in $OUT/refreshed (none if nothing needed a refresh)"
   exit 0
 fi
 if [[ -z $VARIANT ]] && ! python3 "$HERE/cachyos_lock.py" config "$HERE/derived.config" "$OUT/derived.config"; then
