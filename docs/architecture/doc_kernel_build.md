@@ -6,7 +6,11 @@ ThinLTO e `RANDSTRUCT` spenti, sezione 13); **revisione 2 del 2026-10-14**, appr
 pull request che la introduce: allinea le sezioni 7 e 10 ai job reali dei workflow dei moduli NVIDIA
 (#388, ADR-0110). Revision 3 of 2026-10-23, approved with the pull request that introduces it:
 a pull request whose kernel inputs equal its base's does not build the kernel (section 7,
-"Pull request skip"). Sostituisce il
+"Pull request skip"). Revision 4 of 2026-11-12, approved with the pull request that
+introduces it, on the maintainer's decision of the same day (section 13, decision 9): CachyOS
+does not decide Athanor's security. The options its config gives the tree and its files in the
+protected paths are two locks a person reviews (section 8, "CachyOS locks"), and
+`PCI_ACS_OVERRIDE` stays off (section 4). Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
 `prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
 comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
@@ -60,6 +64,8 @@ Directory `forge/specs/azoth/` dopo il blocco:
 | `patches/refreshed/`     | copie rinfrescate delle patch di `patches.list` che non entrano più senza fuzz, stesso percorso relativo; il preambolo registra commit e SHA-256 del file upstream da cui derivano (sezione 8)                                                                                   |
 | `patches/`               | patch di Athanor in formato git, applicate dopo `patches.list` in ordine di nome; il messaggio spiega il perché, e ogni patch è candidata all'upstream                                                                                                                           |
 | `patches/redhat/`        | patch di Athanor al codice che aggiunge solo la patch Red Hat: vanno soltanto sull'indice Fedora, non sull'albero CachyOS della derivazione del config, e non toccano Kconfig                                                                                                    |
+| `derived.config`         | the options the tree introduces, with the values of the CachyOS config: the lock of section 8, rewritten by `build.sh --stage refresh` |
+| `cachyos-protected.sha256` | the files the CachyOS base and its patches change, add or remove against vanilla in the protected paths, with their sha256: the lock of section 8 |
 | `fedora-wins.list`       | percorsi in cui un conflitto del merge tra base CachyOS e patch Red Hat si risolve con l'albero Fedora; ogni altro conflitto ferma la build                                                                                                                                      |
 | `cmdline`                | riga di comando del kernel, firmata nella UKI (sezione 6)                                                                                                                                                                                                                        |
 | `boot.sh`, `boot/`       | la boot matrix (sezione 7, gate 3): ambiente QEMU/OVMF/shim pinnato come il builder, PID 1 dell'initramfs di prova con le asserzioni                                                                                                                                             |
@@ -233,6 +239,7 @@ delta, e resta corto:
 | `CFI`                                                 | y      | kCFI, richiede clang; con IBT già attivo                                                                                               |
 | `ZERO_CALL_USED_REGS`                                 | y      | hardening a costo trascurabile                                                                                                         |
 | `RANDSTRUCT_NONE`                                     | y      | come Fedora: `RUST` dipende da `!RANDSTRUCT`, e il layout randomizzato costa in cache                                                  |
+| `PCI_ACS_OVERRIDE`                                    | n      | off: the CachyOS tree carries it since 7.3, default y. `pcie_acs_override=` splits IOMMU groups the hardware does not isolate and breaks the DMA isolation zero-trust relies on (revision 4) |
 | `MODULE_SIG_FORCE`                                    | y      | ogni modulo firmato: chiave effimera di build per l'albero, MOK per i kmod esterni                                                     |
 | `DEFAULT_TCP_CONG`                                    | "bbr3" | BBRv3 dalla base CachyOS                                                                                                               |
 | `DEFAULT_FQ`                                          | y      | BBR richiede pacing: FQ come qdisc di default                                                                                          |
@@ -580,6 +587,30 @@ qui (sezione 2). Una copia sotto `patches/refreshed/` senza una voce
 corrispondente in `patches.list` ferma la build in ogni stadio che arriva al
 ciclo delle patch: va cancellata.
 
+**CachyOS locks** (maintainer decision, 2026-11-12, revision 4). CachyOS is a base for
+performance, never an authority on security: what it changes in the config and in the code
+that enforces isolation reaches the kernel only after a person has read it. Two files hold
+what was read:
+
+- `derived.config`: every option the tree introduces that `build.sh` derives with the value of
+  the CachyOS config (listnewconfig on the Fedora config, the clang snippets and
+  `kernel-local`), with that value. A derived option that is new, has another value or is gone
+  stops every stage but `refresh` with `refresh needed`, naming the symbols. An option that
+  must not follow CachyOS goes into `kernel-local`, which wins over the derivation and is held
+  by `check_delta` (section 4). A `--variant` build is only measured and is not held to the lock.
+- `cachyos-protected.sha256`: the files the CachyOS base and the patches of `patches.list`
+  change, add or remove against the signed vanilla tree in the protected paths, each with its
+  sha256 (`deleted` for a removed file). The protected paths are `security/`, `certs/`,
+  `crypto/`, `kernel/module/`, `kernel/bpf/`, `kernel/kexec*`, `drivers/iommu/`,
+  `drivers/pci/`, `drivers/firmware/efi/`, `drivers/char/tpm/`, `mm/`, `init/`,
+  `arch/x86/kernel/`, `arch/x86/mm/` and `arch/x86/entry/`. A file new to the list, with
+  another hash, or gone from it stops every stage but `refresh` with `refresh needed`, naming it.
+
+`build.sh --stage refresh` rewrites both files in place, after the patches and the config
+derivation. The bump pull request then carries them, and its diff shows every new line: the
+person who merges it reads each one, and the bump's prep outcome is `REFRESH`, so it has no
+auto-merge. check-plan (`system/kernel-artifacts.sh`) accepts both files next to the pins.
+
 ## 9. Kernel guest per le MicroVM
 
 Stessa sorgente e stesso pin, secondo config: `make x86_64_defconfig` +
@@ -792,5 +823,9 @@ task_struct`.
    (sezione 5), perché la stessa coppia di pin dia lo stesso kernel. (2026-10-03)
    Bloccati allo stesso modo gli ambienti `boot/` e `nvidia/`, un lock per stadio, e
    l'archivio GitHub di schbench pinnato per sha256 come Firecracker.
+9. (2026-11-12) CachyOS does not decide security. The options derived from its config and its
+   changes in the protected paths are locks a person reviews, which `refresh` rewrites and
+   every other stage checks (section 8, "CachyOS locks"). `PCI_ACS_OVERRIDE`, which the
+   CachyOS tree turned on in 7.3, stays off in `kernel-local` and in `microvm/kernel-local`.
 
 | `bump.py` | il bot di bump (sezione 8), in due gruppi: kernel (pin nuovi da Bodhi, CachyOS, NVIDIA e registro; riscrive `pins.env`, i `FROM` del kernel e `KERNEL.md`) e system (`system/Containerfile` e i lock NVIDIA ripubblicati) |

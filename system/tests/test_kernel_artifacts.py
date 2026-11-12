@@ -1003,6 +1003,8 @@ class CheckPlan(Repo):
             "forge/specs/azoth/patches.list": "l\n",
             "forge/specs/azoth/kernel-local": "# CONFIG_X is not set\n",
             "forge/specs/azoth/microvm/kernel-local": "# CONFIG_X is not set\n",
+            "forge/specs/azoth/derived.config": "CONFIG_Y=y\n",
+            "forge/specs/azoth/cachyos-protected.sha256": "deleted  mm/x.c\n",
         })
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("", "false"))
