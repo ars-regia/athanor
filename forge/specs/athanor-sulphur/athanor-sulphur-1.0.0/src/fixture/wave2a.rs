@@ -5,7 +5,7 @@ use super::*;
 use smithay::reexports::wayland_protocols_misc::server_decoration::server::__interfaces::{
     ORG_KDE_KWIN_SERVER_DECORATION_INTERFACE, ORG_KDE_KWIN_SERVER_DECORATION_MANAGER_INTERFACE,
 };
-use smithay::wayland::compositor::with_states;
+use smithay::wayland::compositor::{get_children, with_states};
 use crate::handlers::MAX_HELD_COMMITS;
 use crate::pacing::MAX_TIMED_WAIT;
 use crate::toplevel_icon::{ToplevelIcon, MAX_ICON_BUFFERS};
@@ -811,6 +811,124 @@ fn commits_of_a_destroyed_surface_leave_the_bound_with_it() {
     window.commit();
     local.pump(&mut run, "the window's commit is applied", |_, state| {
         applied_width(state, &id) == Some(WIDTH + 11)
+    });
+    run.stop();
+}
+
+/// How many commits each subsurface of the next tests keeps: more than half the bound, so that two
+/// subsurfaces counted together would pass it.
+const KEPT: usize = MAX_HELD_COMMITS / 2 + 8;
+
+/// The commits a subsurface kept while synchronised stay after `set_desync` until its own next
+/// commit, and they are its own: another subsurface's do not add up with them, and once it is
+/// synchronised again they still count, so its client is disconnected one past the bound.
+#[test]
+fn commits_kept_through_set_desync_count_for_their_subsurface_alone() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let qh = local.queue.handle();
+    let first = compositor.create_surface(&qh, ());
+    let first_subsurface = subcompositor.get_subsurface(&first, &surface, &qh, ());
+    let second = compositor.create_surface(&qh, ());
+    let _second_subsurface = subcompositor.get_subsurface(&second, &surface, &qh, ());
+    for _ in 0..KEPT {
+        first.commit();
+    }
+    first_subsurface.set_desync();
+    surface.commit();
+    for _ in 0..KEPT {
+        second.commit();
+    }
+    local.roundtrip(&mut run);
+    assert!(served.is_alive(), "two subsurfaces each under the bound");
+    first_subsurface.set_sync();
+    for _ in KEPT..=MAX_HELD_COMMITS {
+        first.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the subsurface past the bound has its client disconnected", |_| {
+        !served.is_alive()
+    });
+    run.stop();
+}
+
+/// A subsurface whose `wl_subsurface` is destroyed stays synchronised without a parent, and Smithay
+/// keeps each of its commits: they count for that surface alone, and one past the bound its
+/// client is disconnected.
+#[test]
+fn an_orphaned_subsurface_s_commits_count_for_it_alone() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let qh = local.queue.handle();
+    let orphan = compositor.create_surface(&qh, ());
+    let orphan_subsurface = subcompositor.get_subsurface(&orphan, &surface, &qh, ());
+    let other = compositor.create_surface(&qh, ());
+    let _other_subsurface = subcompositor.get_subsurface(&other, &surface, &qh, ());
+    orphan_subsurface.destroy();
+    for _ in 0..KEPT {
+        orphan.commit();
+        other.commit();
+    }
+    local.roundtrip(&mut run);
+    assert!(served.is_alive(), "an orphan and a subsurface each under the bound");
+    for _ in KEPT..=MAX_HELD_COMMITS {
+        orphan.commit();
+    }
+    local.connection.flush().expect("flush");
+    run.until("the orphan past the bound has its client disconnected", |_| {
+        !served.is_alive()
+    });
+    run.stop();
+}
+
+/// The commits a destroyed subsurface kept leave the bound with it, even while the compositor still
+/// holds the surface: subsurfaces destroyed one after another, together past the bound, leave
+/// their client connected and its window's commits applied.
+#[test]
+fn commits_kept_by_destroyed_subsurfaces_leave_the_bound_with_them() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut local = Local::connect(&mut run, Some(context));
+    local.toplevel(&mut run);
+    let id = local.id.clone().expect("an id");
+    let served = served_surface(&run, &local);
+    let (surface, _) = local.window.clone().expect("a window");
+    let compositor: wl_compositor::WlCompositor = local.bind(4);
+    let subcompositor: wl_subcompositor::WlSubcompositor = local.bind(1);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let qh = local.queue.handle();
+    let mut held = Vec::new();
+    for _ in 0..3 {
+        let child = compositor.create_surface(&qh, ());
+        let subsurface = subcompositor.get_subsurface(&child, &surface, &qh, ());
+        for _ in 0..KEPT {
+            child.commit();
+        }
+        local.roundtrip(&mut run);
+        held.extend(get_children(&served));
+        subsurface.destroy();
+        child.destroy();
+    }
+    local.roundtrip(&mut run);
+    assert!(served.is_alive(), "destroyed subsurfaces past the bound together");
+    assert!(held.len() >= 3, "the compositor holds each destroyed subsurface");
+    let (buffer, _file) = local.buffer(&shm, WIDTH + 13, HEIGHT, [0, 0, 255, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.pump(&mut run, "the window's commit is applied", |_, state| {
+        applied_width(state, &id) == Some(WIDTH + 13)
     });
     run.stop();
 }
