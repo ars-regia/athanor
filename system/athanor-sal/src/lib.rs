@@ -15,6 +15,7 @@ pub(crate) mod gpu;
 mod icon;
 mod motion;
 mod popup;
+mod range;
 pub(crate) mod render;
 pub(crate) mod text;
 mod theme;

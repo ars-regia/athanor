@@ -280,6 +280,29 @@ pub struct Slider {
 }
 
 impl Slider {
+    /// The slider [`Ui::slider`] adds; `None` for the numbers it refuses.
+    pub(crate) fn new(name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<Slider> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Ui::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(slider)
+    }
+
     /// How many steps `value` is from `min`, the last one being `max`.
     fn last(&self) -> i64 {
         // A hair under the exact quotient, so that a range the step divides does not count
@@ -949,24 +972,7 @@ impl Ui {
         step: f64,
         value: f64,
     ) -> Option<WidgetId> {
-        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
-        if !(finite && min < max && step > 0.0) {
-            return None;
-        }
-        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
-        // counted, so that the index arithmetic and the drawing never leave the numbers.
-        let span = max - min;
-        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
-            return None;
-        }
-        let mut slider = Slider {
-            name: name.to_owned(),
-            value: min,
-            min,
-            max,
-            step,
-        };
-        slider.value = slider.snap(value)?;
+        let slider = Slider::new(name, min, max, step, value)?;
         Some(self.add(parent, Kind::Slider(slider)))
     }
 
