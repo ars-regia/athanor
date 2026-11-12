@@ -19,6 +19,11 @@ cosmic-comp's session stays at the greeter as the second entry until this one pa
 The revision is pinned in `Cargo.toml`; `deny.toml` admits this repository and no other git
 source. A new revision changes both lines and this table in one commit.
 
+The pin stops before Smithay `4d80d1c53b23` (input: Use seperate `Mutex` for grab), the head of
+master on 2026-11-12 included: from it, `TabletToolInnerHandle::set_grab` locks the tool's inner
+mutex twice, so a tool's first tip down on the default grab deadlocks, and the tip-down tests of
+`src/fixture/devices.rs` hang. A bump to that commit or later waits until Smithay fixes it.
+
 ## Running
 
 Task 1 runs nested, on Smithay's winit backend, inside a parent Wayland compositor:

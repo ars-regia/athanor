@@ -638,7 +638,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 - **Lines:** 8297 in `src/` by `wc -l` at `f12b0cc7`, 5641 of them outside the fixture; 54 test
   attributes, 52 passing and 2 ignored (#679); `tokei` was not run (section 2).
-- **Protocols:** Smithay, pinned at `023b78b1`, gives the server side of the standard protocols the
+- **Protocols:** Smithay, pinned at the revision Sulphur's README records, gives the server side of the standard protocols the
   shell uses; the five COSMIC protocols have no equivalent yet, and the bar shows 6 of its 8
   interactive widgets (sections 1 and 4).
 - **Goldens:** the toolkit's chooser matches its goldens under the compositor with 0 differing
