@@ -755,9 +755,12 @@ pub fn paint<C: Canvas>(
             }
         }
         if focus == Some(id) {
-            // A row's ring stays inside it, where its list's edge and the viewport do not cut it.
-            let row = matches!(ui.widgets[id].kind, Kind::ListRow(_));
-            let (outset, radius) = if row {
+            // A list row's and a menu item's ring stays inside it, where the list's or menu's
+            // edge and a scroll's viewport do not cut it.
+            let parent = ui.widgets[id].parent.map(|p| &ui.widgets[p].kind);
+            let inside = matches!(ui.widgets[id].kind, Kind::ListRow(_))
+                || matches!(parent, Some(Kind::Menu));
+            let (outset, radius) = if inside {
                 (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
             } else {
                 (t.focus_width, t.radius)
@@ -1065,6 +1068,33 @@ mod tests {
         // Its label follows the ring, as a check button's does, not centred as a toggle's.
         let label = ui.widget(chosen).text.as_ref().map(|l| l.width());
         assert!(label.is_some_and(|w| ui.widget(chosen).rect.w >= on.w + t.gap + w));
+        Ok(())
+    }
+
+    #[test]
+    fn a_menu_items_focus_ring_is_drawn_inside_it_where_a_scroll_cannot_clip_it(
+    ) -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Menu", crate::Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(crate::Ui::ROOT, "Media player", &names, 0);
+        let Some((mut menu, items)) = ui.drop_down_menu(players, Some(200.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let (first, _) = items[0];
+        menu.set_focus(Some(first));
+        let pixmap = render(&mut menu, 1.0)?;
+        let t = menu.theme.clone();
+        let r = menu.widget(first).rect;
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        // Across the item's start band, at its middle: the ring's colour inside its rect.
+        let y = r.y + r.h / 2.0;
+        let band = (0..(t.focus_width as usize + 3)).map(|dx| r.x + dx as f32);
+        let inside = band.filter(|&x| at(x, y) == t.focus.0.to_vec()).count();
+        assert!(inside > 0, "the ring is drawn inside the item at {r:?}");
         Ok(())
     }
 
