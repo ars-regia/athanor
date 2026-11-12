@@ -1,7 +1,8 @@
 //! What a client may hold of the input, under doc_own_stack.md decision 30 (all three
 //! `standard`): its pointer locked or confined (pointer-constraints-unstable-v1), the pointer's
 //! raw motion (relative-pointer-unstable-v1) and the compositor's key bindings
-//! (keyboard-shortcuts-inhibit-unstable-v1).
+//! (keyboard-shortcuts-inhibit-unstable-v1); and, under decision 33, where its pointer is
+//! (pointer-warp-v1, `standard`).
 //!
 //! - A lock or a confinement is active only while its surface has the keyboard.
 //! - While a surface with an active inhibitor has the keyboard, the bound keys go to it, but
@@ -12,6 +13,10 @@
 //!   xdg-activation or a new surface lifts nothing, and what the client asks for meanwhile stays
 //!   inactive. On the lift its persistent constraints, and those asked for meanwhile, apply
 //!   again; a oneshot constraint active when it was suspended has ended (Smithay destroys it).
+//! - A warp moves the pointer only within the surface that has both the pointer's focus, since
+//!   the enter whose serial it names, and the keyboard, to a point on that surface and, under a
+//!   confinement, in the confined area; never under a pointer lock, while its client is
+//!   suspended or while the session is locked.
 //!
 //! Derived in part from niri (https://github.com/niri-wm/niri), revision
 //! fcbc971cf49a987b1e8d5ff1d64da6b1f61a1787: `pointer_moved_by` from `on_pointer_motion`
@@ -43,9 +48,9 @@ use smithay::desktop::utils::under_from_surface_tree;
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::pointer::{MotionEvent, PointerHandle, RelativeMotionEvent};
 use smithay::reexports::wayland_server::backend::ClientId;
-use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::protocol::{wl_pointer::WlPointer, wl_surface::WlSurface};
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
-use smithay::utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER};
+use smithay::utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::compositor::{
     get_parent, with_states, RectangleKind, RegionAttributes, SubsurfaceCachedState,
     SurfaceAttributes,
@@ -56,6 +61,7 @@ use smithay::wayland::keyboard_shortcuts_inhibit::{
 use smithay::wayland::pointer_constraints::{
     with_pointer_constraint, PointerConstraint, PointerConstraintsHandler, PointerConstraintsState,
 };
+use smithay::wayland::pointer_warp::{PointerWarpHandler, PointerWarpManager};
 use smithay::wayland::relative_pointer::RelativePointerManagerState;
 use std::collections::HashMap;
 
@@ -72,10 +78,11 @@ pub struct Held {
 }
 
 impl Held {
-    /// Creates the three globals.
+    /// Creates the four globals.
     pub fn new(dh: &DisplayHandle) -> Self {
         PointerConstraintsState::new::<State>(dh);
         RelativePointerManagerState::new::<State>(dh);
+        PointerWarpManager::new::<State>(dh);
         Self {
             shortcuts: KeyboardShortcutsInhibitState::new::<State>(dh),
             inhibitors: Vec::new(),
@@ -191,6 +198,54 @@ fn confines(
 impl PointerConstraintsHandler for State {
     fn new_constraint(&mut self, _surface: &WlSurface, _pointer: &PointerHandle<Self>) {
         self.refresh_constraint();
+    }
+}
+
+impl PointerWarpHandler for State {
+    /// `pos` is in the surface's coordinates, which Smithay has scaled to logical ones.
+    fn warp_pointer(
+        &mut self,
+        surface: WlSurface,
+        _pointer: WlPointer,
+        pos: Point<f64, Logical>,
+        serial: Serial,
+    ) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        // No warp while the session is locked, the locker's own included: its lock surface,
+        // with the pointer and the keyboard, passes every check below.
+        if self.lock.is_some()
+            || pointer.last_enter() != Some(serial)
+            || pointer.current_focus().as_ref() != Some(&surface)
+            || !self.has_keyboard(&surface)
+            || self.is_suspended(&surface)
+        {
+            return;
+        }
+        let at = pointer.current_location();
+        let Some((_, origin)) = self
+            .pointer_target(at)
+            .filter(|(under, _)| *under == surface)
+        else {
+            return;
+        };
+        let to = origin + pos;
+        if self.pointer_target(to).map(|(under, _)| under) != Some(surface) {
+            return;
+        }
+        // A locked pointer stays still, as on every other input path: moving it would end
+        // the lock, a oneshot one for good.
+        match self.hold(&pointer, at) {
+            Some(Hold::Locked) => return,
+            Some(Hold::Confined(root, origin, region))
+                if !confines(&root, origin, region.as_ref(), to) =>
+            {
+                return
+            }
+            _ => {}
+        }
+        self.pointer_to(to, InputTime::now());
     }
 }
 

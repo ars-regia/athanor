@@ -772,6 +772,7 @@ compositor-globals)
     # Decision 33, wave 2a.
     standard+=(wl_fixes wp_alpha_modifier_v1 wp_fifo_manager_v1 wp_commit_timing_manager_v1
         org_kde_kwin_server_decoration_manager xdg_toplevel_icon_manager_v1)
+    standard+=(xdg_wm_dialog_v1 wp_pointer_warp_v1 xdg_system_bell_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")

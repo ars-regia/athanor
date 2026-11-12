@@ -28,10 +28,11 @@ use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHan
 use std::sync::{Mutex, PoisonError};
 
 impl State {
-    /// A click at `location` focuses the window it lands on, or the layer surface there that
-    /// asks for the keyboard on demand. A click on a layer surface that takes the keyboard, of a
-    /// identity Super+Escape took the keyboard from, gives its exclusive surfaces the keyboard
-    /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
+    /// A click at `location` focuses the window it lands on, or its modal dialog
+    /// (`State::focus_clicked`), or the layer surface there that asks for the keyboard on
+    /// demand. A click on a layer surface that takes the keyboard, of a identity Super+Escape
+    /// took the keyboard from, gives its exclusive surfaces the keyboard back; a click on its
+    /// windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
         // A click on a surface of a client Ctrl+Alt+Tab suspended ends the suspension.
         if let Some(client) = self
@@ -49,7 +50,7 @@ impl State {
             }
         }
         match under {
-            Some((Under::Window(window), _)) => self.focus(&window),
+            Some((Under::Window(window), _)) => self.focus_clicked(&window),
             Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
             None => {}
         }

@@ -8697,6 +8697,14 @@ fn os9_a_virtual_pointer_stays_inside_the_outputs() {
 /// Locks the session for a new client, with a lock surface on the first output that has the
 /// keyboard, and returns the client, which records its keys, and its lock.
 fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLockV1) {
+    let (locker, lock, _) = lock_session_with_surface(run);
+    (locker, lock)
+}
+
+/// `lock_session`, and the lock surface's `wl_surface` on the client's side.
+fn lock_session_with_surface(
+    run: &mut Running,
+) -> (Local, ext_session_lock_v1::ExtSessionLockV1, wl_surface::WlSurface) {
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     let mut locker = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = locker.bind(4);
@@ -8721,7 +8729,7 @@ fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLoc
     locker.pump(run, "the lock surface has the keyboard", |_, state| {
         focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
     });
-    (locker, lock)
+    (locker, lock, surface)
 }
 
 /// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
