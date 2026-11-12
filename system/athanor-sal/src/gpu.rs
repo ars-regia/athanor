@@ -274,6 +274,9 @@ impl Painter {
             .filter_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. }
                 | Kind::IconButton { image, .. }
+                | Kind::LabelledButton {
+                    image: Some(image), ..
+                }
                 | Kind::Picture { image, .. } => Some(image.pixmap()),
                 _ => None,
             })
