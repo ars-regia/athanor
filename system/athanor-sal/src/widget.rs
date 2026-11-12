@@ -371,6 +371,12 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
+    /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
+    /// [`Ui::set_fill`].
+    pub(crate) fill: bool,
+    /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
+    /// shown a cell.
+    pub(crate) slots: usize,
 }
 
 impl Widget {
@@ -387,6 +393,8 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
+            fill: false,
+            slots: 0,
         }
     }
 
@@ -1557,6 +1565,7 @@ impl Ui {
         let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
+        let slots = self.widgets[id].slots;
         let between = match self.widgets[id].kind {
             Kind::Column => section_gap,
             _ => gap,
@@ -1624,7 +1633,8 @@ impl Ui {
             Kind::CenterBox => strip::measure_center(&sizes),
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
-                let w = widest * sizes.len() as f32 + spacing;
+                let cells = sizes.len().max(slots);
+                let w = widest * cells as f32 + gap * cells.saturating_sub(1) as f32;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
@@ -1682,7 +1692,7 @@ impl Ui {
             Kind::Inline { padding } => self.place_inline(id, x, y, padding),
             Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
-                let n = children.len().max(1) as f32;
+                let n = children.len().max(self.widgets[id].slots).max(1) as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
                 let mut cx = if self.rtl { x + outer.w } else { x };
                 for c in children {
@@ -1753,7 +1763,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) {
+                    ) || self.inline_fills(c)
+                    {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     // An island and a picture take the rest of their column's height too.

@@ -35,6 +35,19 @@ impl Ui {
         let gap = self.theme.gap;
         let outer = self.widgets[id].rect;
         let h = (outer.h - 2.0 * pad[1]).max(0.0);
+        // The children that fill split what the others leave of the width, as GTK's hexpand.
+        let shown = self.visible_children(id);
+        let fills = shown.iter().filter(|&&c| self.widgets[c].fill).count();
+        if fills > 0 {
+            let gaps = gap * shown.len().saturating_sub(1) as f32;
+            let used = shown.iter().map(|&c| self.widgets[c].rect.w).sum::<f32>() + gaps;
+            let share = (outer.w - 2.0 * pad[0] - used).max(0.0) / fills as f32;
+            for &c in &shown {
+                if self.widgets[c].fill {
+                    self.widgets[c].rect.w += share;
+                }
+            }
+        }
         let mut cx = if self.rtl {
             x + outer.w - pad[0]
         } else {
@@ -100,6 +113,47 @@ impl Ui {
     pub fn inline(&mut self, parent: WidgetId, padding: [f32; 2]) -> WidgetId {
         self.add(parent, Kind::Inline { padding })
     }
+
+    /// Makes widget `id` take a share of the width its inline has to spare, as GTK's `hexpand`:
+    /// the children of an inline that fill split equally what the others leave of its width, and
+    /// an inline with a child shown that fills takes the width of its column or group. Elsewhere
+    /// it changes nothing. Whether it changed; call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_fill(&mut self, id: WidgetId, fill: bool) -> bool {
+        let widget = &mut self.widgets[id];
+        let changed = widget.fill != fill;
+        widget.fill = fill;
+        changed
+    }
+
+    /// Splits row `id` into at least `slots` equal cells, as the columns of a homogeneous GTK
+    /// grid: with fewer children shown, the cells past them stay empty at the end edge. 0 gives
+    /// each child shown a cell. Whether it changed: `false` for a widget that is not a row. Call
+    /// [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_slots(&mut self, id: WidgetId, slots: usize) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Row) || widget.slots == slots {
+            return false;
+        }
+        widget.slots = slots;
+        true
+    }
+
+    /// Whether `id` is an inline with a child shown that fills, which takes its column's width.
+    pub(super) fn inline_fills(&self, id: WidgetId) -> bool {
+        matches!(self.widgets[id].kind, Kind::Inline { .. })
+            && self.widgets[id]
+                .children
+                .iter()
+                .any(|&c| self.widgets[c].fill && self.widgets[c].visible)
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +200,58 @@ mod tests {
             }
             assert_eq!(s.y, i.y + 2.0);
         }
+    }
+
+    #[test]
+    fn a_child_that_fills_takes_the_spare_width_and_its_inline_the_columns() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Strip", theme(), rtl);
+            ui.min_width = 400.0;
+            let plain = ui.inline(Ui::ROOT, [0.0, 0.0]);
+            let alone = ui.add(plain, Kind::Button("Alone".into()));
+            let inline = ui.inline(Ui::ROOT, [4.0, 0.0]);
+            let mute = ui.add(inline, Kind::Button("Mute".into()));
+            let volume = ui.slider(inline, "Volume", 0.0, 100.0, 1.0, 50.0);
+            let open = ui.add(inline, Kind::Button("Open".into()));
+            let Some(volume) = volume else {
+                unreachable!("a valid range");
+            };
+            assert!(ui.set_fill(volume, true));
+            assert!(!ui.set_fill(volume, true), "already filling");
+            ui.layout();
+            let (p, a) = (ui.widget(plain).rect, ui.widget(alone).rect);
+            assert_eq!(p.w, a.w, "no child fills: the inline keeps its width");
+            let (i, m, v, o) = (
+                ui.widget(inline).rect,
+                ui.widget(mute).rect,
+                ui.widget(volume).rect,
+                ui.widget(open).rect,
+            );
+            assert_eq!(i.w, 400.0, "it takes the column's width");
+            assert_eq!(m.w + v.w + o.w + 2.0 * 2.0 + 8.0, 400.0, "no width left");
+            if rtl {
+                assert_eq!((m.x + m.w, o.x), (396.0, 4.0));
+            } else {
+                assert_eq!((m.x, o.x + o.w), (4.0, 396.0));
+            }
+        }
+    }
+
+    #[test]
+    fn a_row_with_slots_keeps_a_cell_for_each_slot() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        ui.min_width = 202.0;
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let only = ui.add(row, Kind::Button("Wi-Fi".into()));
+        assert!(ui.set_slots(row, 2));
+        assert!(!ui.set_slots(row, 2), "already two");
+        assert!(!ui.set_slots(only, 2), "not a row");
+        ui.layout();
+        assert_eq!(ui.widget(only).rect.w, 100.0, "half the row, less the gap");
+        assert_eq!(ui.widget(only).rect.x, 0.0);
+        assert!(ui.set_slots(row, 0));
+        ui.layout();
+        assert_eq!(ui.widget(only).rect.w, 202.0, "one cell for its one child");
     }
 
     #[test]
