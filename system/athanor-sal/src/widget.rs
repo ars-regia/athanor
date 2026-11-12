@@ -6,6 +6,8 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
+mod strip;
+
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
 /// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
@@ -255,6 +257,19 @@ pub enum Kind {
         /// focus, as the GTK dock's inset shadow.
         indicator: Option<crate::driver::Side>,
     },
+    /// Its children side by side in reading order, each at its own width and all at its
+    /// height, as a GTK box that is not homogeneous: a bar's group of buttons. `padding` is
+    /// kept free left and right, then above and below. Add it with [`Ui::inline`].
+    #[non_exhaustive]
+    Inline {
+        /// The room kept free inside its edges, horizontal then vertical, on both sides.
+        padding: [f32; 2],
+    },
+    /// Three children along a line, as GTK's `CenterBox`: the first at the start edge, the
+    /// second centred on the whole line, moved aside only when its neighbours need the room,
+    /// and the third at the end edge, all at its height. In a column it fills the line. A
+    /// child that is not shown keeps its place empty.
+    CenterBox,
 }
 
 /// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
@@ -1614,6 +1629,8 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, h + pad)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::CenterBox => strip::measure_center(&sizes),
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 let w = widest * sizes.len() as f32 + spacing;
@@ -1673,6 +1690,8 @@ impl Ui {
         let outer = self.widgets[id].rect;
         let children = self.visible_children(id);
         match self.widgets[id].kind {
+            Kind::Inline { padding } => self.place_inline(id, x, y, padding),
+            Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
                 let n = children.len().max(1) as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
@@ -1735,6 +1754,7 @@ impl Ui {
                     if matches!(
                         self.widgets[c].kind,
                         Kind::Row
+                            | Kind::CenterBox
                             | Kind::Group(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
