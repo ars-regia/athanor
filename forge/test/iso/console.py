@@ -387,16 +387,40 @@ SESSION_UNITS = (
     b"athanor-session.target athanor-bar.service athanor-dock.service athanor-shelld.service"
     b" athanor-wallpaper.service"
 )
-SESSION_PROBE = (
-    b"for i in $(seq 60); do"
-    b' s=$(loginctl list-sessions --no-legend 2>/dev/null | awk \'$3=="collaudo" && $4=="seat0"{print $1; exit}\');'
-    b' [ -n "$s" ] && systemctl --user -q is-active athanor-session.target && break; sleep 1; done; sleep 15;'
-    b" down=; for u in "
-    + SESSION_UNITS
-    + b'; do systemctl --user -q is-active "$u" || down="$down $u"; done;'
-    b' if [ -n "$s" ] && [ "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" = wayland ] && [ -z "$down" ];'
-    b' then printf \'SESSION_%s %s\\n\' ALIVE "$s"; else printf \'SESSION_%s %s down:%s\\n\' DEAD "${s:-none}" "$down"; fi'
-)
+
+def session_probe(skip_absent: bool) -> bytes:
+    """The question above. With skip_absent a unit whose LoadState is not-found is not a
+    dead one: it is listed after `absent:` and the session is judged without it. That is
+    for the image the upgrade case starts from, which cannot ship a unit added since it
+    was published; a unit that exists and is inactive or failed is down either way."""
+    absent = (
+        b' if [ "$u" != athanor-session.target ] && [ "$(systemctl --user show -p LoadState --value "$u")" = not-found ];'
+        b' then gone="$gone $u"; else down="$down $u"; fi;'
+        if skip_absent
+        else b' down="$down $u";'
+    )
+    tail = b"${gone:+ absent:$gone}" if skip_absent else b""
+    return (
+        b"for i in $(seq 60); do"
+        b' s=$(loginctl list-sessions --no-legend 2>/dev/null | awk \'$3=="collaudo" && $4=="seat0"{print $1; exit}\');'
+        b' [ -n "$s" ] && systemctl --user -q is-active athanor-session.target && break; sleep 1; done; sleep 15;'
+        b" down=;"
+        + (b" gone=;" if skip_absent else b"")
+        + b" for u in "
+        + SESSION_UNITS
+        + b"; do systemctl --user -q is-active \"$u\" ||"
+        + absent
+        + b" done;"
+        b' if [ -n "$s" ] && [ "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" = wayland ] && [ -z "$down" ];'
+        b" then printf 'SESSION_%s %s%s\\n' ALIVE \"$s\" \"" + tail + b"\";"
+        b" else printf 'SESSION_%s %s down:%s%s\\n' DEAD \"${s:-none}\" \"$down\" \"" + tail + b"\"; fi"
+    )
+
+
+SESSION_PROBE = session_probe(False)
+# What the serial console asks in the upgrade case, where the guest runs the published
+# :stable image; the SSH stages ask SESSION_PROBE of the candidate.
+SESSION_PROBE_HELD = session_probe(True)
 # Sixty seconds of looking plus fifteen of watching, and a margin.
 SESSION_PROBE_WAIT = 85.0
 
@@ -657,7 +681,7 @@ def main() -> int:
         guest whether the desktop came up, and keep a picture of the screen as it is
         when it answers."""
         monitor(*(f"sendkey {key}" for key in GREETER_PASSWORD_KEYS), "sendkey ret")
-        ask(SESSION_PROBE, SESSION_PROBE_WAIT)
+        ask(SESSION_PROBE_HELD if HOLD else SESSION_PROBE, SESSION_PROBE_WAIT)
         monitor(f"screendump {pathlib.Path(log_path).with_name('screen-session.ppm')}")
         note("login-sent")
 

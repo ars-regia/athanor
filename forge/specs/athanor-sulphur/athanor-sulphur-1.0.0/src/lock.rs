@@ -86,6 +86,9 @@ impl SessionLockHandler for State {
         if let Some(pointer) = self.seat.get_pointer() {
             pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
         }
+        // A finger held on a window goes on reaching it no more: its surface is told the touch
+        // is cancelled, and its release is no event (`touch.rs`).
+        self.cancel_touches();
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
             locker: Some(locker),
@@ -101,6 +104,8 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        // Decision 35: nothing was sent while locked; the current answer is sent now.
+        self.resend_dock_overlaps();
         self.aids_drop_pending();
         self.aids_quiet_changed();
         self.focus_top();

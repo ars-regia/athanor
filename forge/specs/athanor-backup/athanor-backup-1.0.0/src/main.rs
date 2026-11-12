@@ -198,7 +198,7 @@ fn restore(id: &str, path: &Path) -> Result<()> {
     // user, reaches the snapshot it could not open by path. This process exits right
     // after the copy, which closes it.
     let parent_fd = openat2(
-        snapshot.as_raw_fd(),
+        &snapshot,
         parent,
         OpenHow::new()
             .flags(OFlag::O_PATH | OFlag::O_DIRECTORY)
@@ -216,7 +216,7 @@ fn restore(id: &str, path: &Path) -> Result<()> {
         )
     })?;
     fstatat(
-        Some(parent_fd),
+        &parent_fd,
         name,
         nix::fcntl::AtFlags::AT_SYMLINK_NOFOLLOW,
     )
@@ -227,7 +227,7 @@ fn restore(id: &str, path: &Path) -> Result<()> {
         .and_then(|parent| parent.strip_prefix(home_name).ok())
         .unwrap_or(Path::new(""));
     let destination = home.join(RESTORE_DIR).join(id).join(below_home);
-    let mut source = OsString::from(format!("/proc/self/fd/{parent_fd}/"));
+    let mut source = OsString::from(format!("/proc/self/fd/{}/", parent_fd.as_raw_fd()));
     source.push(name);
 
     let (uid, gid) = (home_meta.uid(), home_meta.gid());

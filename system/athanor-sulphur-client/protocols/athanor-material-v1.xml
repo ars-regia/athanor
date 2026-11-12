@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="athanor_material_v1">
+  <copyright>
+    Copyright © 2026 Athanor Forge
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="the material tier of each output">
+    The material tier of an output, for the shell's overlay surfaces: m0, opaque; m1, glass
+    over the wallpaper blurred once; m2, live blur drawn by the compositor through
+    ext_background_effect_manager_v1. The compositor measures each output's frame time to
+    choose it (doc_visual_language.md VL13). The compositor offers the manager only to the
+    clients it trusts with it; it is Athanor's own protocol (doc_own_stack.md decision 35).
+
+    A new version adds interfaces, requests, events or enum entries; a client binds the
+    version it knows.
+  </description>
+
+  <interface name="athanor_material_manager_v1" version="1">
+    <description summary="the tiers of the outputs">
+      Makes the tier object of an output.
+    </description>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        The tier objects made from the manager stay valid.
+      </description>
+    </request>
+
+    <request name="get_tier">
+      <description summary="the tier of an output">
+        Makes the tier object of an output. It sends the output's tier at once.
+      </description>
+      <arg name="id" type="new_id" interface="athanor_material_v1"/>
+      <arg name="output" type="object" interface="wl_output"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_material_v1" version="1">
+    <description summary="the tier of an output">
+      The tier of one output. An output is m0 until the compositor has measured it, when the
+      compositor renders in software, and when its measurement failed or did not finish. An
+      output the compositor no longer shows is m0.
+    </description>
+
+    <enum name="tier">
+      <entry name="m0" value="0" summary="opaque"/>
+      <entry name="m1" value="1" summary="glass over the wallpaper blurred once"/>
+      <entry name="m2" value="2" summary="live blur, drawn by the compositor"/>
+    </enum>
+
+    <event name="tier">
+      <description summary="the output's tier">
+        Sent when the object is made and at each change of the output's tier.
+      </description>
+      <arg name="tier" type="uint" enum="tier"/>
+    </event>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the tier object">
+      </description>
+    </request>
+  </interface>
+</protocol>

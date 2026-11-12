@@ -478,6 +478,15 @@ item = "CI31"
 purpose = "cargo-fuzz targets and the committed corpus of the parsers that read untrusted input"
 
 [[component]]
+path = "release"
+kind = "config"
+area = "signing-update"
+status = "specified"
+spec = "doc_pipeline.md"
+item = "PL55"
+purpose = "release-class.toml files: the security class and advisory ids a release candidate's range carries"
+
+[[component]]
 path = "scripts/bump"
 kind = "script tool"
 area = "build-ci"

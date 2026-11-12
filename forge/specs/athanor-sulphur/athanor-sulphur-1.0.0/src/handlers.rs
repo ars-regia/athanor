@@ -11,6 +11,7 @@ use smithay::desktop::{
     PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
+use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -859,30 +860,43 @@ impl State {
             .collect()
     }
 
-    /// The pointer, the start of its grab and the window, when the client of `surface` may
+    /// The device, the start of its grab and the window, when the client of `surface` may
     /// start a window grab with `serial`: the session is not locked, and `serial` is the last
-    /// button press, sent to that client and still held. A client cannot take the pointer when
-    /// it likes, as the popup grab checks.
+    /// button press or touch-down, sent to that client and still held. A client cannot take the
+    /// pointer or a finger when it likes, as the popup grab checks.
     fn window_grab(
         &self,
         surface: &ToplevelSurface,
         seat: &wl_seat::WlSeat,
         serial: Serial,
-    ) -> Option<(PointerHandle<Self>, GrabStartData<Self>, Window)> {
+    ) -> Option<(Grabbed, Window)> {
         if self.lock.is_some() {
             return None;
         }
-        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        let seat = Seat::<Self>::from_resource(seat)?;
         let client = surface.wl_surface().client()?.id();
-        if !self.grab_serials.clicked(serial, &client) || !pointer.has_grab(serial) {
-            return None;
-        }
-        let start = pointer.grab_start_data()?;
+        let pointer = seat.get_pointer().filter(|pointer| {
+            self.grab_serials.clicked(serial, &client) && pointer.has_grab(serial)
+        });
+        let touch = seat.get_touch().filter(|touch| {
+            self.grab_serials.touched(serial, &client) && touch.has_grab(serial)
+        });
+        let grabbed = match (pointer, touch) {
+            (Some(pointer), _) => {
+                let start = pointer.grab_start_data()?;
+                Grabbed::Pointer(pointer, start)
+            }
+            (None, Some(touch)) => {
+                let start = touch.grab_start_data()?;
+                Grabbed::Touch(touch, start)
+            }
+            (None, None) => return None,
+        };
         // A full-screen window has no place to be dragged from.
         let window = self
             .window_for(surface.wl_surface())
             .filter(|window| !is_full_screen(window))?;
-        Some((pointer, start, window))
+        Some((grabbed, window))
     }
 
     /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
@@ -1147,27 +1161,32 @@ impl XdgShellHandler for State {
         self.repoint();
     }
 
-    /// The window follows the pointer until every button is up. A maximised window is
-    /// restored first, its top edge where it was and its centre under the pointer.
+    /// The window follows the pointer until every button is up, or the finger until it is
+    /// lifted. A maximised window is restored first, its top edge where it was and its centre
+    /// under the pointer or the finger.
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+        let Some((grabbed, window)) = self.window_grab(&surface, &seat, serial) else {
             return;
         };
         let Some(mut from) = self.space.element_geometry(&window).map(|g| g.loc) else {
             return;
         };
+        let at = grabbed.location();
         if let Some(kept) = self.restore(&window) {
-            from.x = start
-                .location
-                .to_i32_round::<i32>()
-                .x
-                .saturating_sub(kept.size.w / 2);
-            if let Some(area) = self.window_area_at(start.location) {
+            from.x = at.to_i32_round::<i32>().x.saturating_sub(kept.size.w / 2);
+            if let Some(area) = self.window_area_at(at) {
                 self.move_window(&window, kept_reachable(area, from, kept.size));
             }
         }
-        let grab = MoveGrab::new(start, window, from);
-        pointer.set_grab(self, grab, serial, Focus::Clear);
+        match grabbed {
+            Grabbed::Pointer(pointer, start) => {
+                let grab = MoveGrab::new(start, at, window, from);
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
+            Grabbed::Touch(touch, start) => {
+                touch.set_grab(self, MoveGrab::new(start, at, window, from), serial);
+            }
+        }
     }
 
     /// The window's `edges` follow the pointer until every button is up. A maximised window
@@ -1184,15 +1203,23 @@ impl XdgShellHandler for State {
         if edges == xdg_toplevel::ResizeEdge::None || maximised {
             return;
         }
-        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+        let Some((grabbed, window)) = self.window_grab(&surface, &seat, serial) else {
             return;
         };
         let Some(from) = self.space.element_geometry(&window) else {
             return;
         };
         moved(&window);
-        let grab = ResizeGrab::new(start, window, edges, from);
-        pointer.set_grab(self, grab, serial, Focus::Clear);
+        let at = grabbed.location();
+        match grabbed {
+            Grabbed::Pointer(pointer, start) => {
+                let grab = ResizeGrab::new(start, at, window, edges, from);
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
+            Grabbed::Touch(touch, start) => {
+                touch.set_grab(self, ResizeGrab::new(start, at, window, edges, from), serial);
+            }
+        }
     }
 
     /// A full-screen window keeps its output, and is told what it has.
@@ -1425,6 +1452,27 @@ impl SeatHandler for State {
         if let Some(surface) = focused.cloned().filter(|_| !self.a11y.pointing) {
             self.loop_handle
                 .insert_idle(move |state| state.zoom_to_focus(&surface));
+        }
+    }
+
+    /// Each finger goes to the surface under it (`touch.rs`).
+    fn touch_down_grab(&mut self, start_data: TouchGrabStartData<Self>) -> impl TouchGrab<Self> {
+        crate::touch::Fingers::new(start_data)
+    }
+}
+
+/// The device a window grab follows, with the start of its own grab.
+enum Grabbed {
+    Pointer(PointerHandle<State>, GrabStartData<State>),
+    Touch(TouchHandle<State>, TouchGrabStartData<State>),
+}
+
+impl Grabbed {
+    /// Where the press or the touch was.
+    fn location(&self) -> Point<f64, Logical> {
+        match self {
+            Self::Pointer(_, start) => start.location,
+            Self::Touch(_, start) => start.location,
         }
     }
 }

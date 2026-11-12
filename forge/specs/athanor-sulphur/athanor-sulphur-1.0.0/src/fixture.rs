@@ -188,6 +188,66 @@ mod athanor_workspace_tiling {
     );
 }
 
+/// The client side of athanor-dock-overlap-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_dock_overlap {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+    );
+}
+
+/// The client side of athanor-material-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_material {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-material-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-material-v1.xml"
+    );
+}
+
 /// The client side of athanor-a11y-v1.
 #[allow(
     dead_code,
@@ -273,6 +333,8 @@ const GLOBALS: [&str; 16] = [
 struct Client {
     /// What the tablet, gesture, decoration and foreign globals sent (`fixture_devices.rs`).
     devices: devices::Seen,
+    /// What the seat's wl_touch sent (`fixture/touch.rs`).
+    touch: touch::Seen,
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
@@ -365,6 +427,10 @@ struct Client {
     /// The `state` events of every athanor_workspace_tiling_v1 object, in order, `None` for
     /// `removed`.
     tilings: Vec<(ObjectId, Option<u32>)>,
+    /// The `overlapped` events of every athanor_dock_overlap_v1 object, in order.
+    overlaps: Vec<(ObjectId, u32)>,
+    /// The `tier` events of every athanor_material_v1 object, in order.
+    tiers: Vec<(ObjectId, u32)>,
 }
 
 /// An event of a zwlr_output_power_v1 object.
@@ -605,6 +671,40 @@ delegate_noop!(
 delegate_noop!(
     Client: athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::AthanorWorkspaceTilingManagerV1
 );
+
+delegate_noop!(
+    Client: athanor_dock_overlap::athanor_dock_overlap_manager_v1::AthanorDockOverlapManagerV1
+);
+
+delegate_noop!(Client: athanor_material::athanor_material_manager_v1::AthanorMaterialManagerV1);
+
+impl Dispatch<athanor_material::athanor_material_v1::AthanorMaterialV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_material::athanor_material_v1::AthanorMaterialV1,
+        event: athanor_material::athanor_material_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_material::athanor_material_v1::Event::Tier { tier } = event;
+        client.tiers.push((object.id(), tier.into()));
+    }
+}
+
+impl Dispatch<athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1,
+        event: athanor_dock_overlap::athanor_dock_overlap_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_dock_overlap::athanor_dock_overlap_v1::Event::Overlapped { overlapped } = event;
+        client.overlaps.push((object.id(), overlapped));
+    }
+}
 
 impl Dispatch<athanor_workspace_tiling::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1, ()>
     for Client
@@ -1260,9 +1360,10 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
     athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 \
-    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1\n\
+    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1 \
+    athanor_dock_overlap_manager_v1 athanor_material_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
-    zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
+    zwlr_output_manager_v1 athanor_toplevel_manager_v1 athanor_material_manager_v1\n";
 
 /// The bar's executable file, as the compositor sees it.
 const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
@@ -4988,6 +5089,7 @@ fn os9_every_global_is_classified() {
     let mut expected = unprivileged.clone();
     expected.insert("zwlr_output_manager_v1");
     expected.insert("athanor_toplevel_manager_v1");
+    expected.insert("athanor_material_manager_v1");
     offered(&control_center, "the control center", expected);
 
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
@@ -5753,6 +5855,14 @@ mod marks;
 // OS12: `xdg_toplevel.set_fullscreen`.
 #[cfg(test)]
 mod full_screen;
+
+// Decision 35: the dock's intellihide (athanor-dock-overlap-v1, `dock_overlap.rs`).
+#[cfg(test)]
+mod dock_overlap;
+
+// Decision 35 and VL13: each output's material tier (athanor-material-v1, `material.rs`).
+#[cfg(test)]
+mod material;
 
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
@@ -12230,6 +12340,8 @@ fn a_window_is_maximised_on_its_output() {
 mod clipboard;
 #[cfg(test)]
 mod devices;
+#[cfg(test)]
+mod touch;
 
 #[cfg(test)]
 mod keyboard_monitor;

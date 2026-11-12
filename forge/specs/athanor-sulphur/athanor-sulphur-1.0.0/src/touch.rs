@@ -1,0 +1,394 @@
+//! wl_touch (doc_own_stack.md decision 33, wave 2a): the touchscreens libinput finds, on the
+//! seat's own `wl_touch`, with no global of their own. A touch goes to the surface under the
+//! finger, and a touch-down focuses as a button press does (`State::click_focus`). Each
+//! touchscreen spans its own output under that output's transform, never the first output: the
+//! output libinput names for it, else the built-in panel; a touch with neither reaches nothing.
+//! While the session is locked a touch reaches only a lock surface, and the lock cancels every
+//! touch held before it (`State::cancel_touches`). Injected touch is libei's (wave 2c), not here.
+//!
+//! The event handlers are read in `State` methods that take plain values, as `tablet.rs` has
+//! them, so that the fixture drives them without libinput.
+
+use crate::state::State;
+use smithay::backend::input::{
+    AbsolutePositionEvent, Device, Event, InputBackend, InputEvent, InputTime, TouchEvent,
+    TouchSlot,
+};
+use smithay::input::touch::{
+    DownEvent, GrabStartData, MotionEvent, OrientationEvent, ShapeEvent, TouchGrab, TouchHandle,
+    TouchInnerHandle, UpEvent,
+};
+use smithay::output::Output;
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::{Logical, Point, Size, SERIAL_COUNTER};
+use std::any::Any;
+use std::collections::HashMap;
+
+/// The touch points the seat was told of.
+#[derive(Debug, Default)]
+pub struct Touches {
+    /// Each touch point the seat was given a down for and not yet its up, by its device and the
+    /// device's own slot (`key`): the slot the seat knows it by, and where it is now. A device's
+    /// slots are its own, so two touchscreens both report a slot 0; the seat's slot is the
+    /// lowest one no other held touch has.
+    held: HashMap<(String, TouchSlot), (TouchSlot, Point<f64, Logical>)>,
+    /// The seat's slots released since the last frame. Smithay keeps the frame owed to a
+    /// released slot's client until the next frame, and a down on the slot drops it, so a slot is
+    /// given again only after the frame.
+    released: Vec<TouchSlot>,
+    /// Whether the seat was given an event since its last frame or cancel.
+    unframed: bool,
+}
+
+/// A touch point by the device that reports it (`Device::id`, libinput's sysname) and its slot.
+fn key(device: &str, slot: TouchSlot) -> (String, TouchSlot) {
+    (device.to_owned(), slot)
+}
+
+/// The names DRM gives the connectors of a built-in panel (`udev.rs`), as cosmic-comp takes them.
+const BUILT_IN: [&str; 3] = ["eDP-", "LVDS-", "DSI-"];
+
+impl State {
+    /// The output a touchscreen spans: the one libinput names for it (udev's `WL_OUTPUT`), else
+    /// the built-in panel. None when the named output is not shown, or when nothing is named and
+    /// no output is built in: the first output is never assumed, since a touch on one screen would
+    /// land on another.
+    pub(crate) fn touch_output(&self, named: Option<&str>) -> Option<Output> {
+        let mut outputs = self.space.outputs();
+        match named {
+            Some(name) => outputs.find(|output| output.name() == name),
+            None => outputs.find(|output| {
+                let name = output.name();
+                BUILT_IN.iter().any(|prefix| name.starts_with(prefix))
+            }),
+        }
+        .cloned()
+    }
+
+    /// Where in the space a touchscreen whose output libinput names `named` is touched: it reports
+    /// `position` on its panel, which the output's transform turns under what the output shows.
+    pub(crate) fn touch_location(
+        &self,
+        named: Option<&str>,
+        position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
+        let output = self.touch_output(named);
+        let location = output
+            .as_ref()
+            .and_then(|output| self.on_output(output, position));
+        if location.is_none() {
+            tracing::debug!(output = named, "a touch on no output shown is dropped");
+        }
+        location
+    }
+
+    /// A finger touched `device`'s screen at `location`, on the device's `slot`. It goes to the
+    /// surface under it, and the first finger focuses as a button press does. While locked, a
+    /// touch where no lock surface is reaches nothing, and neither do its motion and its release.
+    pub(crate) fn touch_down(
+        &mut self,
+        device: &str,
+        slot: TouchSlot,
+        location: Point<f64, Logical>,
+        time: InputTime,
+    ) {
+        self.super_tap = None;
+        self.aids_pointer_pressed();
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        if self.lock.is_some() && self.surface_under(location).is_none() {
+            return;
+        }
+        let key = key(device, slot);
+        if self.touches.held.contains_key(&key) {
+            return;
+        }
+        let free = (0..=u32::MAX)
+            .map(|id| TouchSlot::from(Some(id)))
+            .find(|free| {
+                !self.touches.released.contains(free)
+                    && self.touches.held.values().all(|(taken, _)| taken != free)
+            });
+        let Some(seat_slot) = free else {
+            return;
+        };
+        // By the rule of a click (`button_input`), which focuses only when the pointer holds no
+        // grab: a finger after the first, one during a move, or one while a button is held or a
+        // popup holds the pointer changes no focus.
+        let pointer_held = self
+            .seat
+            .get_pointer()
+            .is_some_and(|pointer| pointer.is_grabbed());
+        // The finger that starts the touch grab: its serial is the one a move, a resize or a
+        // drag names (`touch::Fingers`), until the grab ends.
+        let first = !touch.is_grabbed();
+        if first && !pointer_held {
+            self.a11y.set_pointing(true);
+            self.click_focus(location);
+            self.a11y.set_pointing(false);
+        }
+        // After the focus, as for a button: the serial is newer than the keyboard's enter.
+        let under = self.surface_under(location);
+        let serial = SERIAL_COUNTER.next_serial();
+        self.last_input_serial = Some(serial);
+        let to = under.as_ref().and_then(|(surface, _)| surface.client());
+        if first {
+            self.grab_serials.touch = to.map(|client| (serial, client.id()));
+        }
+        self.touches.held.insert(key, (seat_slot, location));
+        self.touches.unframed = true;
+        touch.down(
+            self,
+            under,
+            &DownEvent {
+                slot: seat_slot,
+                location,
+                serial,
+                time,
+            },
+        );
+    }
+
+    /// A finger moved to `location`; it stays with the surface it touched.
+    pub(crate) fn touch_motion(
+        &mut self,
+        device: &str,
+        slot: TouchSlot,
+        location: Point<f64, Logical>,
+        time: InputTime,
+    ) {
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        let Some((seat_slot, at)) = self.touches.held.get_mut(&key(device, slot)) else {
+            return;
+        };
+        *at = location;
+        let slot = *seat_slot;
+        self.touches.unframed = true;
+        let under = self.surface_under(location);
+        touch.motion(
+            self,
+            under,
+            &MotionEvent {
+                slot,
+                location,
+                time,
+            },
+        );
+    }
+
+    /// A finger left the screen. The release of a touch the seat was never given, refused while
+    /// locked or cancelled by the lock, is no event at all.
+    pub(crate) fn touch_up(&mut self, device: &str, slot: TouchSlot, time: InputTime) {
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        let Some((slot, _)) = self.touches.held.remove(&key(device, slot)) else {
+            return;
+        };
+        self.touches.released.push(slot);
+        self.touches.unframed = true;
+        let serial = SERIAL_COUNTER.next_serial();
+        touch.up(self, &UpEvent { slot, serial, time });
+    }
+
+    /// The end of a set of touch events; none when the seat was given none of them.
+    pub(crate) fn touch_frame(&mut self) {
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        if std::mem::take(&mut self.touches.unframed) {
+            touch.frame(self);
+        }
+        self.touches.released.clear();
+    }
+
+    /// A touchscreen went away with fingers on it: their release never comes. `wl_touch.cancel`
+    /// ends every touch point of a client, and Smithay cancels a seat's touch points only all at
+    /// once, so the removal cancels every touch held, the other devices' included, as the lock
+    /// does (`cancel_touches`): no touch point is left half held, and a finger still down on
+    /// another device reaches no one until it is lifted and put down again.
+    pub(crate) fn touch_device_gone(&mut self, device: &str) {
+        if self.touches.held.keys().any(|(of, _)| of == device) {
+            self.cancel_touches();
+        }
+    }
+
+    /// Cancels every touch held: its surface is sent `wl_touch.cancel`, and its later motion and
+    /// release reach no one. A move or resize from a touch ends. Smithay cancels only the touch
+    /// points with an event since the last frame, so each is first given a motion where it
+    /// already is, which the cancel tells its client to discard. The events before the cancel
+    /// are framed first, so that a release just before it keeps its frame. The grab is ended
+    /// before the motions, so that a window grab, which keeps its finger's motion, passes them.
+    pub(crate) fn cancel_touches(&mut self) {
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        self.touch_frame();
+        touch.unset_grab(self);
+        let held = std::mem::take(&mut self.touches.held);
+        if held.is_empty() {
+            return;
+        }
+        let time = InputTime::now();
+        for (slot, location) in held.into_values() {
+            touch.motion(
+                self,
+                None,
+                &MotionEvent {
+                    slot,
+                    location,
+                    time,
+                },
+            );
+        }
+        touch.cancel(self);
+    }
+
+    /// A touch event from the backend, on the output libinput names for its device.
+    pub(crate) fn touch_event<I: InputBackend>(&mut self, event: InputEvent<I>)
+    where
+        I::Device: 'static,
+    {
+        match event {
+            InputEvent::TouchDown { event } => {
+                let named = output_name(&event.device());
+                let location = self
+                    .touch_location(named.as_deref(), |panel| event.position_transformed(panel));
+                if let Some(location) = location {
+                    self.touch_down(&event.device().id(), event.slot(), location, event.time());
+                }
+            }
+            InputEvent::TouchMotion { event } => {
+                let named = output_name(&event.device());
+                let location = self
+                    .touch_location(named.as_deref(), |panel| event.position_transformed(panel));
+                if let Some(location) = location {
+                    self.touch_motion(&event.device().id(), event.slot(), location, event.time());
+                }
+            }
+            InputEvent::TouchUp { event } => {
+                self.touch_up(&event.device().id(), event.slot(), event.time())
+            }
+            InputEvent::TouchCancel { .. } => self.cancel_touches(),
+            InputEvent::TouchFrame { .. } => self.touch_frame(),
+            _ => {}
+        }
+    }
+}
+
+/// The output libinput names for `device` (udev's `WL_OUTPUT`); none for another backend's.
+fn output_name<D: 'static>(device: &D) -> Option<String> {
+    let device: &dyn Any = device;
+    let device = device.downcast_ref::<smithay::reexports::input::Device>()?;
+    device.output_name().map(String::from)
+}
+
+/// The seat's grab while a finger is down (`SeatHandler::touch_down_grab`): each finger goes to
+/// the surface under it, where Smithay's own grab sends every finger after the first to the
+/// first's surface. It holds the first down's serial, which a move, a resize or a drag names,
+/// until that finger is lifted (`end_touch_grab`), and ends with the last finger held.
+pub struct Fingers {
+    start: GrabStartData<State>,
+}
+
+impl Fingers {
+    pub fn new(start: GrabStartData<State>) -> Self {
+        Self { start }
+    }
+}
+
+/// Ends the seat's touch grab `grab`, whose own finger is lifted. While other fingers are held
+/// the seat goes back to their grab, so that a new finger is not taken as a first touch, under a
+/// serial no client was sent, so that no move, resize or drag starts from the finger lifted;
+/// with none held, to Smithay's default grab.
+pub(crate) fn end_touch_grab(
+    grab: &mut dyn TouchGrab<State>,
+    data: &mut State,
+    handle: &mut TouchInnerHandle<'_, State>,
+) {
+    let start = grab.start_data().clone();
+    if data.touches.held.is_empty() {
+        handle.unset_grab(grab, data);
+    } else {
+        handle.set_grab(grab, data, SERIAL_COUNTER.next_serial(), Fingers { start });
+    }
+}
+
+impl State {
+    /// `end_touch_grab` from outside the grab, for a window that leaves its move or resize.
+    pub(crate) fn end_window_touch_grab(&mut self, touch: &TouchHandle<State>) {
+        match touch
+            .grab_start_data()
+            .filter(|_| !self.touches.held.is_empty())
+        {
+            Some(start) => touch.set_grab(self, Fingers { start }, SERIAL_COUNTER.next_serial()),
+            None => touch.unset_grab(self),
+        }
+    }
+}
+
+impl TouchGrab<State> for Fingers {
+    fn down(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &DownEvent,
+    ) {
+        handle.down(data, focus, event);
+    }
+
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &UpEvent) {
+        handle.up(data, event);
+        if data.touches.held.is_empty() || event.slot == self.start.slot {
+            end_touch_grab(self, data, handle);
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        handle.motion(data, focus, event);
+    }
+
+    fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.frame(data);
+    }
+
+    fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+        handle.cancel(data);
+        handle.unset_grab(self, data);
+    }
+
+    fn shape(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &ShapeEvent,
+    ) {
+        handle.shape(data, event);
+    }
+
+    fn orientation(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        event: &OrientationEvent,
+    ) {
+        handle.orientation(data, event);
+    }
+
+    fn start_data(&self) -> &GrabStartData<State> {
+        &self.start
+    }
+
+    fn unset(&mut self, _data: &mut State) {}
+}
