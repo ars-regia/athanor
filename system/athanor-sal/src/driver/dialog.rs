@@ -73,20 +73,16 @@ impl Dialogs {
         order
     }
 
-    /// Forgets `id`, a dialog or a parent, and the dialogs open on it, and theirs; returns those
-    /// of them `open` holds, each once, each dialog before the surface it was opened on: the
-    /// order in which they close.
+    /// Forgets `id`, a dialog or a parent, and the dialogs open on it, and theirs, whether or not
+    /// their surfaces are still open; returns those of them `open` holds, each once, each dialog
+    /// before the surface it was opened on: the order in which they close.
     pub(super) fn close(&mut self, id: SurfaceId, open: &[SurfaceId]) -> Vec<SurfaceId> {
-        let mut order = self.closing_order(id);
-        order.retain(|surface| open.contains(surface));
+        let order = self.closing_order(id);
         for &surface in &order {
             self.open
                 .retain(|&(dialog, parent)| dialog != surface && parent != surface);
         }
-        // A dialog closed already, or not open, is forgotten too.
-        self.open
-            .retain(|&(dialog, parent)| dialog != id && parent != id);
-        order
+        order.into_iter().filter(|s| open.contains(s)).collect()
     }
 }
 
@@ -217,25 +213,33 @@ mod tests {
         assert_eq!(dialogs.closing_order(other), [SurfaceId(5), other]);
     }
 
-    /// Shell::remove closes what Dialogs::close returns, in its order: nested dialogs before
-    /// their parents, each once, and none that is no longer open.
+    /// Guards what Shell::remove closes, in the order Dialogs::close gives: each dialog before
+    /// the surface it was opened on, each surface once, and a recorded dialog that is no longer
+    /// open skipped and forgotten, with the dialogs under it.
     #[test]
     fn a_window_closes_after_its_dialogs_each_once() {
         let (window, first, nested, second) =
             (SurfaceId(0), SurfaceId(1), SurfaceId(2), SurfaceId(3));
+        let under_second = SurfaceId(4);
         let mut dialogs = Dialogs::default();
         dialogs.opened(first, window);
         dialogs.opened(nested, first);
         dialogs.opened(second, window);
-        // `second` closed already, its surface gone, though still recorded.
-        let open = [window, first, nested];
-        assert_eq!(dialogs.close(window, &open), [nested, first, window]);
+        dialogs.opened(under_second, second);
+        // `second` closed already, its surface gone, though still recorded; the dialog under it
+        // is still open.
+        let open = [window, first, nested, under_second];
+        assert_eq!(
+            dialogs.close(window, &open),
+            [nested, first, under_second, window]
+        );
         assert!(!dialogs.blocked(window) && !dialogs.blocked(first));
         assert!(!dialogs.is_dialog(first) && !dialogs.is_dialog(nested));
         assert!(
-            !dialogs.is_dialog(second),
+            !dialogs.is_dialog(second) && !dialogs.blocked(second),
             "a dialog not open is forgotten too"
         );
+        assert!(!dialogs.is_dialog(under_second), "and the dialogs under it");
         // Closed again, it reports no dialog a second time.
         assert_eq!(dialogs.close(window, &open), [window]);
     }
