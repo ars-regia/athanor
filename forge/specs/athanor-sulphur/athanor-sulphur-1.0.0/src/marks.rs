@@ -296,6 +296,8 @@ pub struct Marks {
     /// `None` when the setting is off.
     pub outline: Option<Outline>,
     pub edge: Edge,
+    /// The surfaces that set a blur region (`background_effect.rs`).
+    pub blurred: Vec<WlSurface>,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,

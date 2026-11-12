@@ -8,6 +8,7 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
+use crate::background_effect::Blurs;
 use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
@@ -241,6 +242,8 @@ pub struct State {
     pub input_hold: crate::constraints::Held,
     /// xdg_system_bell_v1's bells, shown on the focus outline (decision 33).
     pub bell: crate::bell::Bell,
+    /// The surfaces that set an ext-background-effect-v1 blur region (decision 35).
+    pub blurred: Vec<WlSurface>,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -403,6 +406,8 @@ impl State {
         crate::toplevel_icon::global(&dh);
         smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
         crate::bell::global(&dh);
+        // Decision 35.
+        crate::background_effect::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -481,6 +486,7 @@ impl State {
             inhibitors: HashMap::new(),
             input_hold,
             bell: crate::bell::Bell::default(),
+            blurred: Vec::new(),
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
@@ -604,6 +610,7 @@ impl State {
     /// the first output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
+        crate::background_effect::release(output);
         self.close_layers(output);
         if let Some(lock) = &mut self.lock {
             lock.forget_output(output);
@@ -1467,7 +1474,7 @@ pub fn draw_view<'d, R>(
     look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
-    R: Filters,
+    R: Filters + Blurs,
     R::TextureId: Send + Clone + Texture + 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
@@ -1484,6 +1491,8 @@ where
     };
     // The popups and the lock surface are surfaces as the space's are, above them.
     let mut elements: Vec<Stacked<R>> = Vec::new();
+    // No region is blurred on the lock screen.
+    let mut blurred: &[WlSurface] = &[];
     match view {
         View::Space(space, popups, marks) => {
             for (popup, at) in popups {
@@ -1491,10 +1500,12 @@ where
                 elements.extend(surface(renderer, popup, at));
             }
             elements.extend(crate::marks::stack(renderer, space, output, marks));
+            blurred = &marks.blurred;
         }
         View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
         View::Locked(None) => {}
     }
+    let elements = crate::background_effect::behind(output, blurred, elements);
     crate::look::draw(
         renderer,
         framebuffer,
@@ -1743,6 +1754,7 @@ impl State {
             focused,
             outline,
             edge: self.focus_theme.edge(),
+            blurred: self.blurred.clone(),
         }
     }
 }

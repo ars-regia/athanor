@@ -10,6 +10,7 @@ use crate::capture::Target;
 use crate::a11y::Look;
 use crate::cursor::{pointer_elements, Cursor, PointerElement};
 use crate::look::FilterElement;
+use crate::background_effect::Blurred;
 use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
 use crate::output_management::{set_can_sync, Step};
@@ -89,11 +90,12 @@ smithay::backend::renderer::element::render_elements! {
     Pointer=PointerElement<GlesRenderer>,
 }
 
-// The frame as the magnifier and the colour filters show it: the elements scaled, or the whole
-// frame drawn offscreen and shown through the colour pass (`look.rs`).
+// The frame as the magnifier and the colour filters show it: the elements, with the blur under
+// each blur region (`background_effect.rs`), scaled, or the whole frame drawn offscreen and
+// shown through the colour pass (`look.rs`).
 smithay::backend::renderer::element::render_elements! {
     Frame<=GlesRenderer>;
-    Zoomed=RescaleRenderElement<Element>,
+    Zoomed=RescaleRenderElement<Blurred<GlesRenderer, Element>>,
     Filtered=FilterElement<GlesTexture>,
 }
 
@@ -1839,6 +1841,9 @@ fn render(
             elements.extend(stacked.into_iter().map(Element::Space));
         }
     }
+    // No region is blurred on the lock screen.
+    let blurred = if lock.is_some() { &[][..] } else { &marks.blurred[..] };
+    let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
     let (frame, filtered) = match look.filter {
         Some(affine) => {
