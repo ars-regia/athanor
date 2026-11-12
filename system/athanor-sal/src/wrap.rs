@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU32;
 
-use parley::Layout;
+use parley::{Layout, Line};
 
 use crate::text::{Brush, TextContext, TextStyle};
 
@@ -32,11 +32,18 @@ pub struct Wrap {
 const SAMPLE: &str = "The quick brown fox jumps over the lazy dog.";
 const DIGITS: &str = "0123456789";
 const ELLIPSIS: char = '\u{2026}';
+/// The most (size, style) pairs a [`TextContext`] keeps the character width of: a window uses a
+/// handful, and the list starts again when it is full.
+const CHAR_WIDTHS: usize = 16;
 
 /// Pango's approximate character width at `size`: the wider of the sample's mean character and
 /// its mean digit. It depends on the size and the style only, so each pair is shaped once per
-/// [`TextContext`].
+/// [`TextContext`], up to [`CHAR_WIDTHS`] pairs. A size that is not a finite number has no
+/// width: 0, not kept, so `max_width_chars` asks for nothing.
 fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> f32 {
+    if !(size * style.scale).is_finite() {
+        return 0.0;
+    }
     let known = cx
         .char_widths
         .iter()
@@ -49,6 +56,9 @@ fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> f32 {
         width / text.chars().count() as f32
     };
     let width = mean(SAMPLE).max(mean(DIGITS));
+    if cx.char_widths.len() >= CHAR_WIDTHS {
+        cx.char_widths.clear();
+    }
     cx.char_widths.push((size, style.clone(), width));
     width
 }
@@ -100,16 +110,7 @@ fn cut(
     (limit, width): (usize, f32),
     full: Layout<Brush>,
 ) -> (String, Layout<Brush>) {
-    // At most `limit` lines, the last of them no wider than the label, its hanging whitespace
-    // aside; half a pixel for the rounding of advances. A wider line before it is a word that
-    // cannot break, which no cut of the last line narrows.
-    let fits = |layout: &Layout<Brush>| {
-        layout.len() <= limit
-            && layout.lines().last().is_none_or(|line| {
-                let m = line.metrics();
-                m.advance - m.hanging_advance <= width + 0.5
-            })
-    };
+    let fits = |layout: &Layout<Brush>| fits(layout, limit, width);
     // An empty text has nothing to cut, though parley gives its line a range past its end.
     if fits(&full) || text.is_empty() {
         return (text.to_owned(), full);
@@ -120,20 +121,8 @@ fn cut(
     else {
         return (text.to_owned(), full);
     };
-    // Parley's ranges can run one byte past the text, over the line's end: within the text.
-    let within = |at: usize| at.min(text.len());
-    let (start, end) = (
-        within(last.text_range().start),
-        within(last.text_range().end),
-    );
-    let mut cuts: Vec<usize> = last
-        .runs()
-        .flat_map(|run| run.clusters())
-        .map(|cluster| within(cluster.text_range().start))
-        .chain([start, end])
-        .collect();
-    cuts.sort_unstable();
-    cuts.dedup();
+    let cuts = cuts(&last, text);
+    let (start, end) = (cuts[0], cuts[cuts.len() - 1]);
     // Only whitespace after the last line shown, such as a final newline: the text without it.
     if text[end..].trim().is_empty() {
         let kept = text.trim_end();
@@ -161,6 +150,36 @@ fn cut(
     }
     // Not even the line's start fits: the lines before it and the ellipsis, as narrow as it gets.
     best.unwrap_or_else(|| shape(start))
+}
+
+/// Whether `layout` holds at most `limit` lines, the last of them no wider than `width`, its
+/// hanging whitespace aside; half a pixel for the rounding of advances. A wider line before it is
+/// a word that cannot break, which no cut of the last line narrows.
+fn fits(layout: &Layout<Brush>, limit: usize, width: f32) -> bool {
+    layout.len() <= limit
+        && layout.lines().last().is_none_or(|line| {
+            let m = line.metrics();
+            m.advance - m.hanging_advance <= width + 0.5
+        })
+}
+
+/// Where `line` of `text` can be cut, in order: its start, the start of each of its clusters, and
+/// its end. Parley's clusters are the extended grapheme clusters of UAX #29, as ICU segments them,
+/// so no cut parts a letter from its marks, a flag's two regional indicators or an emoji sequence
+/// joined by ZWJ. Never empty.
+fn cuts(line: &Line<'_, Brush>, text: &str) -> Vec<usize> {
+    // Parley's ranges can run one byte past the text, over the line's end: within the text.
+    let within = |at: usize| at.min(text.len());
+    let range = line.text_range();
+    let mut cuts: Vec<usize> = line
+        .runs()
+        .flat_map(|run| run.clusters())
+        .map(|cluster| within(cluster.text_range().start))
+        .chain([within(range.start), within(range.end)])
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts
 }
 
 #[cfg(test)]
@@ -294,6 +313,15 @@ mod tests {
         let mut plain = TextContext::default();
         request(&mut plain, SENTENCE, at, &style, &Wrap::default());
         assert!(plain.char_widths.is_empty());
+        // A size that is no number is not kept, and the list stays bounded.
+        for size in [f32::NAN, f32::INFINITY, f32::NAN] {
+            assert_eq!(char_width(&mut plain, size, &style), 0.0);
+        }
+        assert!(plain.char_widths.is_empty());
+        for size in 0..40 {
+            char_width(&mut plain, 8.0 + size as f32, &style);
+            assert!(plain.char_widths.len() <= CHAR_WIDTHS);
+        }
     }
 
     #[test]
@@ -332,18 +360,53 @@ mod tests {
         assert_eq!((fits.as_str(), layout.len()), ("Fits.", 1));
     }
 
+    /// The byte offsets strictly inside each of `graphemes` where it occurs in `text`: where no
+    /// cut may fall.
+    fn inside(text: &str, graphemes: &[&str]) -> Vec<usize> {
+        let mut inside = Vec::new();
+        for g in graphemes {
+            for (at, _) in text.match_indices(g) {
+                inside.extend(g.char_indices().skip(1).map(|(i, _)| at + i));
+            }
+        }
+        inside
+    }
+
     #[test]
-    fn the_ellipsis_never_splits_a_grapheme_cluster() {
+    fn no_cut_parts_a_grapheme_cluster() {
         let mut cx = TextContext::default();
-        // Each "e" carries a combining acute accent: two characters, one cluster.
-        let text = "Cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301} cafe\u{301}";
-        for width in [60.0, 80.0, 100.0] {
-            let (shown, _) = shown(&mut cx, text, false, 1, width);
-            let kept = kept(&shown, text);
-            assert!(
-                !text[kept.len()..].starts_with('\u{301}'),
-                "split at {width}: {kept:?}"
-            );
+        let style = TextStyle::default();
+        // A letter and its combining acute, a flag of two regional indicators, and a family of
+        // three emoji joined by ZWJ: each one cluster of several characters.
+        let graphemes = [
+            "e\u{301}",
+            "\u{1F1EE}\u{1F1F9}",
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}",
+        ];
+        let text = graphemes
+            .iter()
+            .map(|g| format!("Caf{g}{g} {g}cafe{g} "))
+            .collect::<String>()
+            .repeat(2);
+        let inside = inside(&text, &graphemes);
+        assert!(inside.len() > 20);
+        // Every cut each line offers, at every width.
+        for width in (20..400).step_by(10).map(|w| w as f32) {
+            let layout = cx.layout_at(&text, 15.0, false, &style, Some(width));
+            for line in layout.lines() {
+                let cuts = cuts(&line, &text);
+                assert!(
+                    cuts.iter().all(|c| !inside.contains(c)),
+                    "{width}: {cuts:?}"
+                );
+            }
+            // And the cut the line limit chooses, its trailing whitespace trimmed.
+            for limit in [1, 2] {
+                let (shown, _) = shown(&mut cx, &text, false, limit, width);
+                if let Some(kept) = shown.strip_suffix(ELLIPSIS) {
+                    assert!(!inside.contains(&kept.len()), "{width}: {kept:?}");
+                }
+            }
         }
     }
 
@@ -362,10 +425,11 @@ mod tests {
         assert!(kept(&text, word).len() < word.len());
         assert_eq!(layout.len(), 1);
         assert!(layout.width() <= 80.5, "{}", layout.width());
-        // A width of 0: the ellipsis alone, in the lines allowed.
-        for limit in [1, 2] {
+        // A width of 0: no cut fits, so the lines before the last one shown stay, one word each,
+        // and the ellipsis follows them: alone in one line, after the first word in two.
+        for (limit, expected) in [(1, "\u{2026}"), (2, "Your\u{2026}")] {
             let (text, layout) = shown(&mut cx, SENTENCE, false, limit, 0.0);
-            assert!(text.ends_with(ELLIPSIS));
+            assert_eq!(text, expected);
             assert!(layout.len() <= limit, "{limit}: {}", layout.len());
         }
         // A final newline is no further line: no ellipsis.
@@ -381,18 +445,43 @@ mod tests {
     }
 
     #[test]
-    fn a_line_limit_cuts_arabic_and_hebrew_from_their_end() {
+    fn a_line_limit_cuts_arabic_and_hebrew_at_the_last_cluster_that_fits_ellipsis_left() {
         let mut cx = TextContext::default();
+        let style = TextStyle::default();
+        // Vowelled throughout, so that a mark sits next to every cut.
         let texts = [
-            "تعذّرت قراءة ملف التخطيط وبقي دون تغيير. التخطيط الأقرب مستخدم الآن، واختيار واحد هنا يستبدله.",
-            "לא ניתן היה לקרוא את קובץ הפריסה והוא נשאר ללא שינוי. הפריסה הקרובה ביותר בשימוש כעת.",
+            "تَعَذَّرَتْ قِرَاءَةُ مَلَفِّ التَّخْطِيطِ وَبَقِيَ دُونَ تَغْيِيرٍ. التَّخْطِيطُ الْأَقْرَبُ مُسْتَخْدَمٌ الْآنَ.",
+            "לֹא נִתָּן הָיָה לִקְרֹא אֶת קֹבֶץ הַפְּרִיסָה וְהוּא נִשְׁאַר לְלֹא שִׁנּוּי. הַפְּרִיסָה הַקְּרוֹבָה בְּשִׁמּוּשׁ.",
         ];
         for text in texts {
             for limit in [1, 2] {
                 let (shown, layout) = shown(&mut cx, text, true, limit, 140.0);
                 assert_eq!(layout.len(), limit, "{text}");
                 assert!(inked_within(&layout, 140.0, true), "{text}");
-                kept(&shown, text);
+                let kept = kept(&shown, text);
+                // Maximal: the next cut of the last line shown, past the whitespace, does not fit.
+                let full = cx.layout_at(text, 15.0, true, &style, Some(140.0));
+                let last = full.get(limit - 1).expect("the last line shown");
+                let next = cuts(&last, text)
+                    .into_iter()
+                    .map(|c| text[..c].trim_end())
+                    .find(|k| k.len() > kept.len());
+                if let Some(next) = next {
+                    let more = format!("{next}{ELLIPSIS}");
+                    let more = cx.layout_at(&more, 15.0, true, &style, Some(140.0));
+                    assert!(!fits(&more, limit, 140.0), "{kept:?} is not the last fit");
+                }
+                // The ellipsis ends the line in reading order: at its visual left.
+                let line = layout.get(limit - 1).expect("the last line");
+                let at = shown.len() - ELLIPSIS.len_utf8();
+                let offsets: Vec<(usize, f32)> = line
+                    .runs()
+                    .flat_map(|run| run.clusters())
+                    .filter_map(|c| Some((c.text_range().start, c.visual_offset()?)))
+                    .collect();
+                let ellipsis = offsets.iter().find(|(start, _)| *start == at);
+                let (_, x) = ellipsis.expect("the ellipsis drawn");
+                assert!(offsets.iter().all(|(_, o)| x <= o), "{text}: {offsets:?}");
             }
         }
     }
