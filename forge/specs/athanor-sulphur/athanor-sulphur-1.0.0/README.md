@@ -13,8 +13,8 @@ cosmic-comp's session stays at the greeter as the second entry until this one pa
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/Smithay/smithay |
-| Revision | `023b78b1c5a05ca512767cacc07efca55fae8be4` |
-| Date | 2026-10-15 |
+| Revision | `62ec78dbe742cc59e7a1cb4ce2b52b4292b531d9` |
+| Date | 2026-11-10 |
 
 The revision is pinned in `Cargo.toml`; `deny.toml` admits this repository and no other git
 source. A new revision changes both lines and this table in one commit.
