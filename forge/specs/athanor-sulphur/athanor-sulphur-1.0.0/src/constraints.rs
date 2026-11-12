@@ -213,8 +213,8 @@ impl PointerWarpHandler for State {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
-        // The lock screen owns the pointer; the focus checks alone would rest on the lock
-        // having moved it.
+        // No warp while the session is locked, the locker's own included: its lock surface,
+        // with the pointer and the keyboard, passes every check below.
         if self.lock.is_some()
             || pointer.last_enter() != Some(serial)
             || pointer.current_focus().as_ref() != Some(&surface)

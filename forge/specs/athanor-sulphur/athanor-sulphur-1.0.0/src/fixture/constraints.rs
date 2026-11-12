@@ -1465,3 +1465,36 @@ fn a_warp_from_another_client_is_refused() {
     assert_eq!(Game::location(&run), game.at, "the pointer stays");
     run.stop();
 }
+
+/// The locker cannot warp the pointer either, though its lock surface has both the pointer
+/// and the keyboard and passes every other check.
+#[test]
+fn a_warp_from_the_locker_is_refused() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock, surface) = lock_session_with_surface(&mut run);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let pointer = seat.get_pointer(&locker.queue.handle(), ());
+    locker.roundtrip(&mut run);
+    // Off the outputs and back, so that the new pointer is sent an enter.
+    run.state
+        .pointer_to(Point::from((-50.0, -50.0)), InputTime::now());
+    let at = Point::from((100.0, 100.0));
+    run.state.pointer_to(at, InputTime::now());
+    locker.roundtrip(&mut run);
+    let serial = locker
+        .client
+        .pointer_enter
+        .expect("an enter on the lock surface");
+    let focus = run.state.seat.get_pointer().and_then(|p| p.current_focus());
+    assert_eq!(
+        focus.as_ref().and_then(|s| s.client()).map(|c| c.id()),
+        locker.id.clone(),
+        "the lock surface has the pointer"
+    );
+    let warps: WpPointerWarpV1 = locker.bind(1);
+    warps.warp_pointer(&surface, &pointer, 10.0, 20.0, serial);
+    locker.roundtrip(&mut run);
+    locker.roundtrip(&mut run);
+    assert_eq!(Game::location(&run), at, "the pointer stays");
+    run.stop();
+}
