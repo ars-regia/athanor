@@ -1,6 +1,7 @@
-//! The window actions a client asks for on a button press of its own (doc_own_stack.md, OS12):
-//! the pointer grabs that move a window, kept where its title bar can be grabbed again, and
-//! that resize it from the edge it names, within the sizes it accepts.
+//! The window actions a client asks for on a button press or a touch of its own
+//! (doc_own_stack.md, OS12 and decision 33): the pointer and touch grabs that move a window, kept
+//! where its title bar can be grabbed again, and that resize it from the edge it names, within
+//! the sizes it accepts.
 
 use crate::state::{answered, State};
 use smithay::backend::input::InputTime;
@@ -11,6 +12,7 @@ use smithay::input::pointer::{
     GestureSwipeUpdateEvent, GrabStartData, MotionEvent, PointerGrab, PointerInnerHandle,
     RelativeMotionEvent,
 };
+use smithay::input::touch::{self, TouchGrab, TouchInnerHandle};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel::{self, ResizeEdge};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
@@ -125,27 +127,113 @@ macro_rules! passed_on {
     };
 }
 
-/// A window following the pointer from a press its client was sent, until every button is up.
-/// No client has the pointer meanwhile.
-pub struct MoveGrab {
-    start: GrabStartData<State>,
+/// Where a touch grab started: the finger it follows.
+type TouchStart = touch::GrabStartData<State>;
+
+/// The touch events a window grab does not act on, passed on as they come: the other fingers'
+/// shape and orientation, a frame of what was passed on, and a cancel, which ends the grab. A
+/// frame with nothing passed on since the last is not sent, which Smithay would warn of.
+macro_rules! touch_passed_on {
+    () => {
+        fn frame(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+            if std::mem::take(&mut self.unframed) {
+                handle.frame(data);
+            }
+        }
+
+        fn cancel(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>) {
+            handle.cancel(data);
+            handle.unset_grab(self, data);
+        }
+
+        fn shape(
+            &mut self,
+            data: &mut State,
+            handle: &mut TouchInnerHandle<'_, State>,
+            event: &touch::ShapeEvent,
+        ) {
+            handle.shape(data, event);
+            self.unframed = true;
+        }
+
+        fn orientation(
+            &mut self,
+            data: &mut State,
+            handle: &mut TouchInnerHandle<'_, State>,
+            event: &touch::OrientationEvent,
+        ) {
+            handle.orientation(data, event);
+            self.unframed = true;
+        }
+
+        fn start_data(&self) -> &TouchStart {
+            &self.start
+        }
+
+        fn unset(&mut self, data: &mut State) {
+            self.ended(data);
+        }
+    };
+}
+
+/// A window following the pointer from a press its client was sent, until every button is up,
+/// or a finger from a touch its client was sent (`S` is then `TouchStart`), until it is lifted.
+/// No client has the pointer meanwhile, nor that finger.
+pub struct MoveGrab<S = GrabStartData<State>> {
+    start: S,
+    /// Where the pointer or the finger was at the press.
+    at: Point<f64, Logical>,
+    /// Where the finger is now.
+    now: Point<f64, Logical>,
     window: Window,
     /// Where the window's geometry was when the pointer was at the press.
     from: Point<i32, Logical>,
+    /// Whether the seat's touch was given an event since its last frame.
+    unframed: bool,
 }
 
-impl MoveGrab {
+impl<S> MoveGrab<S> {
     /// The grab of `window`, which a layout leaves alone until it ends (`Held`). A move ends the
     /// resize it replaces, whose `unset` runs after this.
-    pub fn new(start: GrabStartData<State>, window: Window, from: Point<i32, Logical>) -> Self {
+    pub fn new(start: S, at: Point<f64, Logical>, window: Window, from: Point<i32, Logical>) -> Self {
         hold(&window);
         if let Some(resizing) = window.user_data().get::<Resizing>() {
             resizing.0.set(None);
         }
         Self {
             start,
+            at,
+            now: at,
             window,
             from,
+            unframed: false,
+        }
+    }
+
+    /// The window under the pointer or the finger, now at `location`.
+    fn follow(&mut self, data: &mut State, location: Point<f64, Logical>) {
+        self.now = location;
+        let Some(area) = data.window_area_at(location) else {
+            return;
+        };
+        crate::handlers::moved(&self.window);
+        let delta = (location - self.at).to_i32_round();
+        let at = kept_reachable(area, self.from + delta, self.window.geometry().size);
+        data.move_window(&self.window, at);
+    }
+
+    /// The window dropped with the pointer or the finger at `at`.
+    fn drop_at(&self, data: &mut State, at: Point<f64, Logical>) {
+        let from = data.workspace_of(&self.window);
+        data.settle(&self.window);
+        if data.workspace_of(&self.window) == from {
+            data.drop_on_tile(&self.window, at);
+        }
+    }
+
+    fn ended(&self, data: &mut State) {
+        if let_go(&self.window) {
+            data.grab_ended(&self.window);
         }
     }
 }
@@ -159,13 +247,7 @@ impl PointerGrab<State> for MoveGrab {
         event: &MotionEvent,
     ) {
         handle.motion(data, None, event);
-        let Some(area) = data.window_area_at(event.location) else {
-            return;
-        };
-        crate::handlers::moved(&self.window);
-        let delta = (event.location - self.start.location).to_i32_round();
-        let at = kept_reachable(area, self.from + delta, self.window.geometry().size);
-        data.move_window(&self.window, at);
+        self.follow(data, event.location);
     }
 
     fn button(
@@ -176,12 +258,7 @@ impl PointerGrab<State> for MoveGrab {
     ) {
         handle.button(data, event);
         if handle.current_pressed().is_empty() {
-            let at = handle.current_location();
-            let from = data.workspace_of(&self.window);
-            data.settle(&self.window);
-            if data.workspace_of(&self.window) == from {
-                data.drop_on_tile(&self.window, at);
-            }
+            self.drop_at(data, handle.current_location());
             handle.unset_grab(self, data, event.serial, event.time, true);
         }
     }
@@ -189,28 +266,70 @@ impl PointerGrab<State> for MoveGrab {
     passed_on!();
 
     fn unset(&mut self, data: &mut State) {
-        if let_go(&self.window) {
-            data.grab_ended(&self.window);
-        }
+        self.ended(data);
     }
 }
 
+impl TouchGrab<State> for MoveGrab<TouchStart> {
+    fn down(
+        &mut self,
+        _data: &mut State,
+        _handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        _event: &touch::DownEvent,
+    ) {
+    }
+
+    /// The finger's client is sent its release, and the window is dropped where it is.
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &touch::UpEvent) {
+        handle.up(data, event);
+        self.unframed = true;
+        if event.slot == self.start.slot {
+            self.drop_at(data, self.now);
+            handle.unset_grab(self, data);
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &touch::MotionEvent,
+    ) {
+        if event.slot == self.start.slot {
+            self.follow(data, event.location);
+        } else {
+            handle.motion(data, focus, event);
+            self.unframed = true;
+        }
+    }
+
+    touch_passed_on!();
+}
+
 /// A window's `edges` following the pointer from a press its client was sent, until every
-/// button is up: each motion sends a configure with the `resizing` state and the size the
-/// pointer asks for, and each commit keeps the opposite edges where they were.
-pub struct ResizeGrab {
-    start: GrabStartData<State>,
+/// button is up, or a finger from a touch until it is lifted: each motion sends a configure with
+/// the `resizing` state and the size the pointer asks for, and each commit keeps the opposite
+/// edges where they were.
+pub struct ResizeGrab<S = GrabStartData<State>> {
+    start: S,
+    /// Where the pointer or the finger was at the press.
+    at: Point<f64, Logical>,
     window: Window,
     edges: ResizeEdge,
     /// The window's geometry at the press.
     from: Rectangle<i32, Logical>,
     /// The size the last motion asked for.
     asked: Option<Size<i32, Logical>>,
+    /// Whether the seat's touch was given an event since its last frame.
+    unframed: bool,
 }
 
-impl ResizeGrab {
+impl<S> ResizeGrab<S> {
     pub fn new(
-        start: GrabStartData<State>,
+        start: S,
+        at: Point<f64, Logical>,
         window: Window,
         edges: ResizeEdge,
         from: Rectangle<i32, Logical>,
@@ -228,23 +347,17 @@ impl ResizeGrab {
             .set(Some(resize));
         Self {
             start,
+            at,
             window,
             edges,
             from,
             asked: None,
+            unframed: false,
         }
     }
-}
 
-impl PointerGrab<State> for ResizeGrab {
-    fn motion(
-        &mut self,
-        data: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        _focus: Option<(WlSurface, Point<f64, Logical>)>,
-        event: &MotionEvent,
-    ) {
-        handle.motion(data, None, event);
+    /// The size the pointer or the finger, now at `location`, asks for.
+    fn resize_to(&mut self, location: Point<f64, Logical>) {
         let Some(toplevel) = self.window.toplevel() else {
             return;
         };
@@ -253,7 +366,7 @@ impl PointerGrab<State> for ResizeGrab {
             let limits = cached.current();
             (limits.min_size, limits.max_size)
         });
-        let delta = event.location - self.start.location;
+        let delta = location - self.at;
         let size = resized(self.edges, self.from.size, delta, min, max);
         self.asked = Some(size);
         toplevel.with_pending_state(|state| {
@@ -263,25 +376,11 @@ impl PointerGrab<State> for ResizeGrab {
         toplevel.send_pending_configure();
     }
 
-    fn button(
-        &mut self,
-        data: &mut State,
-        handle: &mut PointerInnerHandle<'_, State>,
-        event: &ButtonEvent,
-    ) {
-        handle.button(data, event);
-        if handle.current_pressed().is_empty() {
-            handle.unset_grab(self, data, event.serial, event.time, true);
-        }
-    }
-
-    passed_on!();
-
     /// The release, or the lock: a configure without the `resizing` state, and the window
     /// stays anchored until the commit that answers it. A grab that replaced this one keeps its
     /// own record; a tile is not anchored, since its layout places it, with the splits the
     /// resize moved (D11).
-    fn unset(&mut self, data: &mut State) {
+    fn ended(&mut self, data: &mut State) {
         let last = let_go(&self.window);
         if let Some(toplevel) = self.window.toplevel() {
             toplevel.with_pending_state(|state| {
@@ -304,6 +403,74 @@ impl PointerGrab<State> for ResizeGrab {
             data.grab_ended(&self.window);
         }
     }
+}
+
+impl PointerGrab<State> for ResizeGrab {
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &MotionEvent,
+    ) {
+        handle.motion(data, None, event);
+        self.resize_to(event.location);
+    }
+
+    fn button(
+        &mut self,
+        data: &mut State,
+        handle: &mut PointerInnerHandle<'_, State>,
+        event: &ButtonEvent,
+    ) {
+        handle.button(data, event);
+        if handle.current_pressed().is_empty() {
+            handle.unset_grab(self, data, event.serial, event.time, true);
+        }
+    }
+
+    passed_on!();
+
+    fn unset(&mut self, data: &mut State) {
+        self.ended(data);
+    }
+}
+
+impl TouchGrab<State> for ResizeGrab<TouchStart> {
+    fn down(
+        &mut self,
+        _data: &mut State,
+        _handle: &mut TouchInnerHandle<'_, State>,
+        _focus: Option<(WlSurface, Point<f64, Logical>)>,
+        _event: &touch::DownEvent,
+    ) {
+    }
+
+    /// The finger's client is sent its release, and the resize ends.
+    fn up(&mut self, data: &mut State, handle: &mut TouchInnerHandle<'_, State>, event: &touch::UpEvent) {
+        handle.up(data, event);
+        self.unframed = true;
+        if event.slot == self.start.slot {
+            handle.unset_grab(self, data);
+        }
+    }
+
+    fn motion(
+        &mut self,
+        data: &mut State,
+        handle: &mut TouchInnerHandle<'_, State>,
+        focus: Option<(WlSurface, Point<f64, Logical>)>,
+        event: &touch::MotionEvent,
+    ) {
+        if event.slot == self.start.slot {
+            self.resize_to(event.location);
+        } else {
+            handle.motion(data, focus, event);
+            self.unframed = true;
+        }
+    }
+
+    touch_passed_on!();
 }
 
 /// How many window grabs hold a window. A grab replaced by another on the same window ends after
@@ -352,6 +519,17 @@ impl State {
     /// Ends a move or resize of `window`, whose size and place maximising takes over: the
     /// grab, and the anchoring of a resize that ended without its last configure answered.
     pub fn end_window_grab(&mut self, window: &Window) {
+        if let Some(touch) = self.seat.get_touch() {
+            let grabbed = touch.with_grab(|_, grab| {
+                grab.downcast_ref::<MoveGrab<TouchStart>>()
+                    .map(|grab| &grab.window)
+                    .or_else(|| grab.downcast_ref::<ResizeGrab<TouchStart>>().map(|grab| &grab.window))
+                    == Some(window)
+            });
+            if grabbed == Some(true) {
+                touch.unset_grab(self);
+            }
+        }
         if let Some(pointer) = self.seat.get_pointer() {
             let grabbed = pointer.with_grab(|_, grab| {
                 grab.downcast_ref::<MoveGrab>()

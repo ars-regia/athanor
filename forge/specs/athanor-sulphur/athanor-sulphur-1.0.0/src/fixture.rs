@@ -273,6 +273,8 @@ const GLOBALS: [&str; 16] = [
 struct Client {
     /// What the tablet, gesture, decoration and foreign globals sent (`fixture_devices.rs`).
     devices: devices::Seen,
+    /// What the seat's wl_touch sent (`fixture/touch.rs`).
+    touch: touch::Seen,
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
@@ -12230,6 +12232,8 @@ fn a_window_is_maximised_on_its_output() {
 mod clipboard;
 #[cfg(test)]
 mod devices;
+#[cfg(test)]
+mod touch;
 
 #[cfg(test)]
 mod keyboard_monitor;

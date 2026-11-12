@@ -371,6 +371,23 @@ libinput.
 athanor-sulphur --drm
 ```
 
+Touchscreens come through the seat's `wl_touch`, with no global of their own (`doc_own_stack.md`
+decision 33, wave 2a; `src/touch.rs`):
+
+| Rule | How | Test (`src/fixture/touch.rs`) |
+| --- | --- | --- |
+| A touch reaches the surface under the finger | each finger keeps its own surface (`touch::Fingers`), where Smithay's default grab sends every later finger to the first one's | `a_touch_reaches_the_surface_under_each_finger` |
+| A touch-down focuses by the rule of a click | the first finger goes through `click_focus`; a finger after it changes no focus | `a_touch_down_focuses_the_window_under_the_finger` |
+| While locked, a touch off the lock surface is refused | the down never reaches the seat, nor do its motion and release | `a_touch_off_the_lock_surface_reaches_nothing` |
+| A touch held at lock is cancelled | `lock` sends `wl_touch.cancel`; the later motion and release reach no one | `a_touch_held_at_lock_is_cancelled_and_its_release_reaches_no_one` |
+| Each touchscreen spans its own output, under its transform | the output libinput names (udev's `WL_OUTPUT`), else the built-in panel (`eDP-`, `LVDS-`, `DSI-`), else the touch is dropped; never the first output | `a_touchscreen_maps_to_its_own_output` |
+| A move or a resize starts from a touch serial | the window grabs follow the finger that started them, and its release ends them | `a_touch_moves_and_resizes_a_window` |
+| A drag starts from a touch serial | as from a press: the source is cancelled, drag and drop not being offered yet | `a_drag_starts_from_a_touch` |
+
+libinput reports no touch shape or orientation, so none is sent; the grabs pass them on should a
+backend give them. Injected touch comes only through libei (wave 2c), not yet built. A touch on the
+nested window names no output, so it is dropped.
+
 It offers `linux-dmabuf` with feedback naming the render node and, when the GPU can wait on a
 syncobj, `linux-drm-syncobj-v1`. A monitor plugged in gets an output and its `wl_output`. The make,
 model and serial are those that `athanor-edid` reads from the connector's EDID blob (the
