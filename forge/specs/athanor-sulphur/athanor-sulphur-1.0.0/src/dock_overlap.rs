@@ -143,7 +143,9 @@ impl Dispatch2<AthanorDockOverlapV1, State> for DockOverlaps {
                     .iter_mut()
                     .find(|overlap| overlap.object == *object)
                 {
-                    overlap.rectangle = Some(Rectangle::new((x, y).into(), (width, height).into()));
+                    // A negative size has no area, as a zero one: a Size may not be negative.
+                    let size = (width.max(0), height.max(0));
+                    overlap.rectangle = Some(Rectangle::new((x, y).into(), size.into()));
                 }
                 state.send_dock_overlaps();
             }

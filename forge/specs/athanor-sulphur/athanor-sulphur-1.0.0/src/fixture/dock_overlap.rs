@@ -1,7 +1,8 @@
 //! Decision 35: the dock's intellihide, athanor-dock-overlap-v1 (`dock_overlap.rs`). Each rule
 //! of the decision has its test: the grant, the answer on the rectangle sent, the minimised
 //! window, the other workspace and the other output, the output's coordinates, the lock, and
-//! the surface that is no layer surface.
+//! the surface that is no layer surface; then a hostile rectangle, a destroyed surface, and two
+//! objects of one surface.
 
 use super::*;
 use athanor_dock_overlap::athanor_dock_overlap_manager_v1::AthanorDockOverlapManagerV1;
@@ -40,6 +41,19 @@ impl Local {
         output: Option<&wl_output::WlOutput>,
         anchor: zwlr_layer_surface_v1::Anchor,
     ) -> wl_surface::WlSurface {
+        self.dock_layer(run, output, anchor).0
+    }
+
+    /// `dock`, with its layer surface.
+    fn dock_layer(
+        &mut self,
+        run: &mut Running,
+        output: Option<&wl_output::WlOutput>,
+        anchor: zwlr_layer_surface_v1::Anchor,
+    ) -> (
+        wl_surface::WlSurface,
+        zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    ) {
         use zwlr_layer_surface_v1::Anchor;
         let compositor: wl_compositor::WlCompositor = self.bind(4);
         let shm: wl_shm::WlShm = self.bind(1);
@@ -64,7 +78,7 @@ impl Local {
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
         self.roundtrip(run);
-        surface
+        (surface, layer)
     }
 
     /// The overlap object of `surface`, from a new manager, with `rectangle` set.
@@ -315,5 +329,106 @@ fn d35_a_surface_without_the_layer_role_is_an_error() {
     assert_eq!(error.object_interface, "athanor_dock_overlap_manager_v1");
     assert_eq!(error.code, 0);
     assert!(run.state.dock_overlaps.is_empty());
+    run.stop();
+}
+
+/// The rectangle is the client's to choose: one at the edge of the coordinates, on an output
+/// away from the origin, or one of a negative size intersects nothing, and neither upsets the
+/// compositor, whose sums saturate.
+#[test]
+fn d35_a_hostile_rectangle_intersects_nothing() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let second = run
+        .state
+        .space
+        .outputs()
+        .nth(1)
+        .cloned()
+        .expect("a second output");
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    let mut dock = Local::connect(&mut run, None);
+    let name = dock
+        .client
+        .globals
+        .iter()
+        .filter(|(_, interface, _)| interface == "wl_output")
+        .nth(1)
+        .map(|(name, _, _)| *name)
+        .expect("a second wl_output");
+    let qh = dock.queue.handle();
+    let output: wl_output::WlOutput = dock.registry.bind(name, 4, &qh, ());
+    let surface = dock.dock(
+        &mut run,
+        Some(&output),
+        zwlr_layer_surface_v1::Anchor::Bottom,
+    );
+    let (_app, window) = window_at(&mut run, 0, 0);
+    let theirs = run.state.active_workspace(&second).expect("a workspace");
+    assert!(run.state.move_window_to(&window, theirs));
+    run.state
+        .move_window(&window, (area.loc.x + 100, area.loc.y + 100).into());
+    let geometry = run.state.space.element_geometry(&window).expect("mapped");
+    let (x, y) = (geometry.loc.x - area.loc.x, geometry.loc.y - area.loc.y);
+    let (w, h) = (geometry.size.w, geometry.size.h);
+    assert!(
+        w > 40 && h > 40,
+        "a window wide enough to hold a negative rectangle"
+    );
+    let covered = (x, y, 10, 10);
+    let object = dock.overlap(&mut run, &surface, covered);
+    dock.heard_overlaps(&mut run, &object, &[1]);
+
+    object.set_rectangle(i32::MAX, i32::MAX, i32::MAX, i32::MAX);
+    dock.heard_overlaps(&mut run, &object, &[1, 0]);
+    object.set_rectangle(covered.0, covered.1, covered.2, covered.3);
+    dock.heard_overlaps(&mut run, &object, &[1, 0, 1]);
+    // Inside the window, its size reaching back over it.
+    object.set_rectangle(x + w - 10, y + h - 10, -(w / 2), -(h / 2));
+    dock.heard_overlaps(&mut run, &object, &[1, 0, 1, 0]);
+    run.stop();
+}
+
+/// A dock that destroys its layer surface keeps its overlap object, answered on the surface's
+/// last output, as a hidden dock's is.
+#[test]
+fn d35_a_destroyed_dock_surface_keeps_its_last_output() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let mut dock = Local::connect(&mut run, None);
+    let (surface, layer) = dock.dock_layer(&mut run, None, zwlr_layer_surface_v1::Anchor::Bottom);
+    let (_app, window) = window_at(&mut run, 100, 100);
+    let object = dock.overlap(&mut run, &surface, SHOWN);
+    dock.heard_overlaps(&mut run, &object, &[0]);
+    let layers = |run: &Running| -> usize {
+        run.state
+            .space
+            .outputs()
+            .map(|output| layer_map_for_output(output).layers().count())
+            .sum()
+    };
+    let before = layers(&run);
+    layer.destroy();
+    dock.roundtrip(&mut run);
+    assert_eq!(layers(&run) + 1, before, "the layer surface is unmapped");
+    run.state.move_window(&window, (100, SHOWN.1 - 20).into());
+    dock.heard_overlaps(&mut run, &object, &[0, 1]);
+    run.stop();
+}
+
+/// Two overlap objects of one surface are answered apart, each on its own rectangle.
+#[test]
+fn d35_two_overlap_objects_of_one_surface_answer_apart() {
+    let mut run = Running::start(None);
+    without_the_fixture(&mut run);
+    let mut dock = Local::connect(&mut run, None);
+    let surface = dock.dock(&mut run, None, zwlr_layer_surface_v1::Anchor::Bottom);
+    let (_app, _window) = window_at(&mut run, 100, SHOWN.1 - 20);
+    let low = dock.overlap(&mut run, &surface, SHOWN);
+    let high = dock.overlap(&mut run, &surface, (0, 0, OUTPUTS[0].width, DOCK));
+    dock.heard_overlaps(&mut run, &low, &[1]);
+    dock.heard_overlaps(&mut run, &high, &[0]);
+    dock.frames(&mut run, 3);
+    assert_eq!(dock.overlaps_of(&low), [1], "each on its own");
     run.stop();
 }
