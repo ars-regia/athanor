@@ -139,6 +139,10 @@ pub enum Kind {
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
     /// it with [`Ui::slider`], which keeps its range valid.
     Slider(Slider),
+    /// A drop-down, as GTK's `DropDown`: a raised button that shows its chosen item and opens
+    /// its items in a menu, where choosing one raises [`Event::Changed`]. Activating it raises
+    /// [`Event::Clicked`], which the driver takes to open the menu. Add it with [`Ui::drop_down`].
+    DropDown(crate::drop_down::DropDown),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
     /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
@@ -388,6 +392,7 @@ impl Widget {
                     | Kind::Check { .. }
                     | Kind::Switch { .. }
                     | Kind::Slider(_)
+                    | Kind::DropDown(_)
                     | Kind::Field(_)
                     | Kind::TextArea(_)
                     | Kind::WindowButton(_)
@@ -923,6 +928,7 @@ impl Ui {
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
             Kind::Slider(slider) => &mut slider.name,
+            Kind::DropDown(drop) => &mut drop.name,
             Kind::Level(level) => &mut level.name,
             _ => return None,
         };
@@ -1640,6 +1646,17 @@ impl Ui {
                 wh
             }
             Kind::Slider(_) | Kind::Level(_) => (field_width, slider_knob(size) + pad),
+            // The chosen item, then the arrow at the end edge.
+            Kind::DropDown(drop) => {
+                let layout = self.text.layout(drop.chosen_text(), size, rtl, &style);
+                let arrow = size * crate::drop_down::ARROW;
+                let wh = (
+                    (layout.width() + gap + arrow + 2.0 * pad).max(button_min),
+                    layout.height().max(arrow) + pad,
+                );
+                widget.text = Some(layout);
+                wh
+            }
             Kind::Field(field) => {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
@@ -1816,7 +1833,9 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
+            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::DropDown(_) => {
+                Some(Event::Clicked(id))
+            }
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
                 *active = !*active;

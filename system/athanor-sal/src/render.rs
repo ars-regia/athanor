@@ -571,6 +571,41 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
             }
+            // A drop-down: a raised button, its chosen item at the start edge and a downward
+            // chevron at the end edge, as GTK's DropDown.
+            Kind::DropDown(_) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                let arrow = t.font_size * crate::drop_down::ARROW;
+                let ax = if ui.rtl {
+                    r.x + t.padding
+                } else {
+                    r.x + r.w - t.padding - arrow
+                };
+                if let Some(layout) = &widget.text {
+                    let x = if ui.rtl {
+                        ax + arrow + t.gap
+                    } else {
+                        r.x + t.padding
+                    };
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+                let (ax, ay) = (f64::from(ax), f64::from(r.y + r.h / 2.0));
+                let a = f64::from(arrow);
+                let mut chevron = BezPath::new();
+                chevron.move_to((ax + a * 0.2, ay - a * 0.15));
+                chevron.line_to((ax + a * 0.5, ay + a * 0.15));
+                chevron.line_to((ax + a * 0.8, ay - a * 0.15));
+                ctx.set_paint(color(t.text));
+                ctx.set_stroke(Stroke::new(1.5));
+                ctx.stroke_path(&chevron);
+            }
             Kind::Button(_) | Kind::Toggle { .. } => {
                 let active = matches!(widget.kind, Kind::Toggle { active: true, .. });
                 let (fill, ink) = if active {

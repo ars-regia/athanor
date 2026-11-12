@@ -98,16 +98,20 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node
         }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
-        // active, as GTK's ToggleButton; a radio as a radio button, checked when active.
+        // active, as GTK's ToggleButton; a radio as a radio button, checked when active, and as
+        // a radio menu item in a menu, as a drop-down's items.
         Kind::Toggle {
             label,
             active,
             radio,
         } => {
-            let mut node = Node::new(if *radio {
-                Role::RadioButton
-            } else {
-                Role::Button
+            let in_menu = widget
+                .parent
+                .is_some_and(|p| matches!(ui.widget(p).kind, Kind::Menu));
+            let mut node = Node::new(match (*radio, in_menu) {
+                (true, true) => Role::MenuItemRadio,
+                (true, false) => Role::RadioButton,
+                (false, _) => Role::Button,
             });
             node.set_label(label.as_str());
             node.set_toggled(if *active {
@@ -115,6 +119,15 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             } else {
                 Toggled::False
             });
+            node.add_action(Action::Click);
+            node
+        }
+        // A drop-down: a combo box, as GTK's DropDown, whose value is its chosen item. Its menu
+        // is announced by the popup state every widget with one carries.
+        Kind::DropDown(drop) => {
+            let mut node = Node::new(Role::ComboBox);
+            node.set_label(drop.name.as_str());
+            node.set_value(drop.chosen_text());
             node.add_action(Action::Click);
             node
         }
