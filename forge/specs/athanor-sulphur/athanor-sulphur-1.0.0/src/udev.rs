@@ -55,7 +55,7 @@ use smithay::reexports::input::event::gesture::{
 };
 use smithay::reexports::input::event::{
     DeviceEvent, EventTrait, GestureEvent, KeyboardEvent, PointerEvent, SwitchEvent,
-    TabletToolEvent,
+    TabletToolEvent, TouchEvent,
 };
 use smithay::reexports::input::{
     Device as InputDevice, Event as LibinputEvent, Libinput, SendEventsMode,
@@ -329,7 +329,8 @@ fn send_events(device: &InputDevice, on: bool) {
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
-/// devices, the switches, the gestures, the tablet tools and the kinds that handler acts on;
+/// devices, the switches, the gestures, the tablet tools, the touchscreens and the kinds that
+/// handler acts on;
 /// `None` for the rest, which it takes only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
 fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend>> {
     Some(match event {
@@ -387,6 +388,14 @@ fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend
             TabletToolEvent::Proximity(event) => InputEvent::TabletToolProximity { event },
             TabletToolEvent::Tip(event) => InputEvent::TabletToolTip { event },
             TabletToolEvent::Button(event) => InputEvent::TabletToolButton { event },
+            _ => return None,
+        },
+        LibinputEvent::Touch(touch) => match touch {
+            TouchEvent::Down(event) => InputEvent::TouchDown { event },
+            TouchEvent::Motion(event) => InputEvent::TouchMotion { event },
+            TouchEvent::Up(event) => InputEvent::TouchUp { event },
+            TouchEvent::Cancel(event) => InputEvent::TouchCancel { event },
+            TouchEvent::Frame(event) => InputEvent::TouchFrame { event },
             _ => return None,
         },
         _ => return None,
@@ -691,8 +700,8 @@ impl State {
                     self.track_touchpads(&event);
                     self.process_input_event(event)
                 }
-                // As `process_input_event` does for every event: a touch, a gesture or a
-                // tablet event keeps the session awake although the handler does not act on it.
+                // As `process_input_event` does for every event: a gesture or a tablet event
+                // keeps the session awake although the handler does not act on it.
                 None => self.activity(),
             }
         }

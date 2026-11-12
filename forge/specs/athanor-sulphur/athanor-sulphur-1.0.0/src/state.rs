@@ -147,6 +147,8 @@ pub struct State {
     pub gesture: Option<crate::gestures::Kind>,
     /// The windows owed an answer to a decoration request (`decoration.rs`).
     pub decoration_owed: Vec<WlSurface>,
+    /// The touch points the seat was told of (`touch.rs`).
+    pub touches: crate::touch::Touches,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
     pub tool_pressed: std::collections::HashMap<
         smithay::backend::input::TabletToolDescriptor,
@@ -277,11 +279,13 @@ pub struct State {
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
 /// to: the last button press, sent to the client under the pointer, and the last key press and
-/// release, sent to the focused client. Serials come from one counter and can be guessed; the
-/// client is what keeps one client from naming another's.
+/// release, sent to the focused client; a window grab may also name the last touch-down, sent to
+/// the client under the finger. Serials come from one counter and can be guessed; the client is
+/// what keeps one client from naming another's.
 #[derive(Debug, Default)]
 pub struct GrabSerials {
     pub button: Option<(Serial, ClientId)>,
+    pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
 }
@@ -290,6 +294,11 @@ impl GrabSerials {
     /// Whether `serial` is the last button press, and was sent to `client`.
     pub fn clicked(&self, serial: Serial, client: &ClientId) -> bool {
         sent(self.button.as_ref(), serial, client)
+    }
+
+    /// Whether `serial` is the last touch-down, and was sent to `client`.
+    pub fn touched(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.touch.as_ref(), serial, client)
     }
 
     /// Whether `serial` is the last key press or release, and was sent to `client`.
@@ -380,6 +389,8 @@ impl State {
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
         seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)?;
         seat.add_pointer();
+        // wl_touch (decision 33); each finger goes to its own surface (`touch.rs`).
+        seat.add_touch();
 
         dispatch_clients(event_loop, display)?;
         let (client_gone, gone) = channel::channel();
@@ -402,6 +413,7 @@ impl State {
             foreign: Default::default(),
             gesture: None,
             decoration_owed: Vec::new(),
+            touches: Default::default(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
@@ -2150,6 +2162,7 @@ mod tests {
             button: Some((s(7), b.clone())),
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
+            touch: Some((s(10), b.clone())),
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");
@@ -2158,5 +2171,9 @@ mod tests {
         assert!(serials.typed(s(8), &b) && serials.typed(s(9), &m));
         assert!(!serials.typed(s(8), &m), "B's key named by M");
         assert!(!serials.typed(s(7), &b), "a click is not a key");
+        assert!(serials.touched(s(10), &b));
+        assert!(!serials.touched(s(10), &m), "B's touch named by M");
+        assert!(!serials.touched(s(7), &b), "a click is not a touch");
+        assert!(!serials.clicked(s(10), &b), "a touch is not a click");
     }
 }

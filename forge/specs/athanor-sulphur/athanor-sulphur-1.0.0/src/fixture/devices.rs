@@ -931,7 +931,7 @@ fn locker_without_surface(
 }
 
 /// Gives the lock its surface on `output`, mapped.
-fn show_lock_surface(
+pub(super) fn show_lock_surface(
     run: &mut Running,
     locker: &mut Local,
     lock: &ext_session_lock_v1::ExtSessionLockV1,

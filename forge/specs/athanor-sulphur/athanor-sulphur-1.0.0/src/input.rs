@@ -315,7 +315,10 @@ impl State {
     }
 
     /// Input from the backend; it may change what is on screen, the pointer or the stacking.
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>)
+    where
+        I::Device: 'static,
+    {
         self.activity();
         self.request_redraw();
         match event {
@@ -394,6 +397,11 @@ impl State {
             | InputEvent::TabletToolProximity { .. }
             | InputEvent::TabletToolTip { .. }
             | InputEvent::TabletToolButton { .. }) => self.tablet_event(event),
+            event @ (InputEvent::TouchDown { .. }
+            | InputEvent::TouchMotion { .. }
+            | InputEvent::TouchUp { .. }
+            | InputEvent::TouchCancel { .. }
+            | InputEvent::TouchFrame { .. }) => self.touch_event(event),
             _ => {}
         }
     }
@@ -436,7 +444,16 @@ impl State {
         &self,
         position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
     ) -> Option<Point<f64, Logical>> {
-        let output = self.space.outputs().next()?;
+        self.on_output(self.space.outputs().next()?, position)
+    }
+
+    /// Where in the space an absolute device points on `output`, as `on_first_panel` has it for
+    /// the first output: under `output`'s own transform, kept on it.
+    pub(crate) fn on_output(
+        &self,
+        output: &Output,
+        position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
         let area = self.space.output_geometry(output)?;
         Some(self.unzoomed(clamp_into(area, on_panel(output, area, position))))
     }
