@@ -6,6 +6,7 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 
+mod alert;
 mod labelled;
 mod strip;
 
@@ -97,6 +98,9 @@ pub enum Kind {
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
+    /// A column with an accessible name that assistive technologies read as an alert, as GTK's
+    /// `alert` role: laid out as a [`Kind::Group`]. Add it with [`Ui::alert`].
+    Alert(String),
     /// A line of text that takes no input.
     Label(String),
     /// A button with a label; activating it raises [`Event::Clicked`].
@@ -943,6 +947,7 @@ impl Ui {
         }
         let now = match &mut self.widgets[id].kind {
             Kind::Group(t)
+            | Kind::Alert(t)
             | Kind::Label(t)
             | Kind::Button(t)
             | Kind::MenuItem(t)
@@ -1616,7 +1621,7 @@ impl Ui {
                     content[1] + 2.0 * island_pad + top + bottom,
                 )
             }
-            Kind::Column | Kind::Group(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
                     Some((bar, rest)) if bar_first => (*bar, rest),
@@ -1765,7 +1770,7 @@ impl Ui {
                     }
                 }
             }
-            Kind::Column | Kind::Group(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
                 let mut cy = y + edge;
                 let mut children = &children[..];
                 if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
@@ -1780,6 +1785,7 @@ impl Ui {
                         Kind::Row
                             | Kind::CenterBox
                             | Kind::Group(_)
+                            | Kind::Alert(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
                             | Kind::Slider(_)

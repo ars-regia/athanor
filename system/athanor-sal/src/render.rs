@@ -349,6 +349,7 @@ pub fn paint<C: Canvas>(
             | Kind::Inline { .. }
             | Kind::CenterBox
             | Kind::Group(_)
+            | Kind::Alert(_)
             | Kind::Menu
             | Kind::Scroll { .. } => {}
             Kind::Island { .. } => {
