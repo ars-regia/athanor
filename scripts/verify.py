@@ -2536,7 +2536,6 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # must keep one line, for the unit it runs in, and a spec that comes to install one ends its
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
 UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
             "/usr/bin/cosmic-osd": "cosmic-osd.service",
             "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
@@ -2563,7 +2562,10 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
 # toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
 # capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
-# every name of them in the crate.
+# every name of them in the crate. connection.rs binds the rest when a client connects, so it
+# counts for a target only when code outside the crate names `Client`, the one type that
+# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
+# does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2580,7 +2582,10 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/windows.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
@@ -2777,6 +2782,23 @@ def path_dependencies(crate, manifest, root):
                 yield name, entry, (base / path).resolve()
 
 
+def depends_on(root, where, owner):
+    """Whether the crate of `where`, a file relative to `root`, reaches the crate at `owner`,
+    relative to `root` too, through the path dependencies of its Cargo.toml, under any name,
+    directly or through the dependencies of those."""
+    root = root.resolve()
+    crate = next((d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None)
+    seen, todo = set(), [crate] if crate else []
+    while todo:
+        crate = todo.pop()
+        if crate in seen:
+            continue
+        seen.add(crate)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        todo += [dep for _, _, dep in path_dependencies(crate, manifest, root)]
+    return (root / owner).resolve() in seen
+
+
 def target_files(crate, entry, features, defaults, root):
     """The production files a binary target is built from: its own, and those of the path
     dependencies its code names, followed transitively with the features the build enables
@@ -2931,9 +2953,14 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         layer, names = None, {}
         files = {path.relative_to(root.resolve()): text for path, text in
                  target_files(crate, entry, features, defaults, root).items()}
+        # The call is looked for only in crates whose Cargo.toml depends on the owner: a crate
+        # that does not cannot reach its calls, whatever its code names (Sal's
+        # `DecorationMode::Client` is no `Client` of athanor-sulphur-client; maintainer
+        # decision, 2026-11-07).
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
             owner, call = ON_DEMAND[where.as_posix()]
-            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
+            if not any(call.search(text) for other, text in files.items()
+                       if not other.is_relative_to(owner) and depends_on(root, other, owner)):
                 del files[where]
         layer = top_layer(files)
         for where, text in sorted(files.items()):
@@ -4469,6 +4496,8 @@ SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-idle.service": ("guard", True, "preset"),
+    "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
     "athanor-update-notify.service": ("surface", False, "preset"),
@@ -4480,7 +4509,6 @@ SESSION_UNITS = {
     "xdg-desktop-portal-athanor.service": ("helper", True, "activated"),
     "athanor-desktop.service": ("step", False, "target"),
     "athanor-skel-sync.service": ("step", False, "target"),
-    "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
     # The own compositor (SN15): athanor-sulphur-session starts it and waits on it, and its
@@ -4492,6 +4520,8 @@ SESSION_TARGET = "athanor-session.target"
 NOT_SESSION_UNITS = {
     "athanor-launcher-rates.service": "the launcher's exchange-rate job, started by its timer",
     "athanor-launcher-rates.timer": "the launcher's exchange-rate timer, under timers.target",
+    "athanor-wallpaper-decode.socket": "the wallpaper decoder's static socket, wanted by athanor-wallpaper.service (doc_session_daemons.md, SD17)",
+    "athanor-wallpaper-decode@.service": "the wallpaper decoder, one instance per connection to its socket",
 }
 # SN6's policy per class: each setting's required value, None where the unit must not set it.
 # A time span is compared in seconds. Restart= unset is Restart=no (systemd.service(5)).
@@ -4535,7 +4565,6 @@ SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
         "SN13 step 1 does not list it",
     ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
-    ("cosmic-bg.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("athanor-launcher.service", ACTIVATED_INSTALL):

@@ -20,5 +20,5 @@ Before=xdg-desktop-autostart.target
 # and the desktop units below are ordered after it.
 Requires=athanor-desktop.service
 After=athanor-desktop.service
-Wants=athanor-skel-sync.service cosmic-bg.service
+Wants=athanor-skel-sync.service
 Wants=cosmic-settings-daemon.service cosmic-osd.service

@@ -145,7 +145,7 @@ pub enum Role {
 /// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets, and along an
 /// axis anchored on both edges at least the size the compositor configures: a surface anchored
 /// on all four whose widgets are a [`crate::Kind::Picture`] takes exactly the configured size.
-/// New fields are added over time: start from [`LayerOptions::default`] and set the fields that
+/// New fields are added over time: start from [`LayerOptions::new`] and set the fields that
 /// differ.
 #[non_exhaustive]
 pub struct LayerOptions {
@@ -165,13 +165,14 @@ pub struct LayerOptions {
     pub input_region: Option<Vec<Rect>>,
 }
 
-impl Default for LayerOptions {
-    /// The protocol's defaults where it has them: no anchor, no margin, an exclusive zone of 0,
-    /// no keyboard and the pointer on the whole surface. The layer is the top one, as
-    /// gtk-layer-shell's default, and the namespace is empty.
-    fn default() -> Self {
+impl LayerOptions {
+    /// A surface on `layer`, with the protocol's defaults where it has them: no anchor, no
+    /// margin, an exclusive zone of 0, no keyboard and the pointer on the whole surface. The
+    /// namespace is empty. The layer has no default: the compositor grants the top and overlay
+    /// layers only to the clients of its allow-list, so each client names the one it asks for.
+    pub fn new(layer: Layer) -> Self {
         Self {
-            layer: Layer::Top,
+            layer,
             namespace: String::new(),
             anchor: Anchor::empty(),
             margin: [0; 4],
@@ -2978,9 +2979,8 @@ mod tests {
     fn set_layer_moves_a_layer_surface_to_another_layer_and_keeps_its_namespace() {
         let placed = (Layer::Background, "athanor-osd".to_owned());
         let mut options = LayerOptions {
-            layer: Layer::Background,
             namespace: "athanor-osd".into(),
-            ..LayerOptions::default()
+            ..LayerOptions::new(Layer::Background)
         };
         assert_eq!(layer_change(&placed, &options, 4).ok(), Some(None));
         options.layer = Layer::Overlay;

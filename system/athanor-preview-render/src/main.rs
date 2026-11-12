@@ -26,13 +26,35 @@ const MAGIC: &[u8; 5] = b"ATPV1";
 const MAX_INPUT: u64 = 64 << 20;
 /// The longest side of a bitmap, whatever the caller asks.
 const MAX_SIDE: u32 = 1024;
-/// 6144 × 6144 × 4 bytes = 144 MiB is the largest decode. Peak memory of an image in the
+/// The preview's largest decode: 6144 × 6144 × 4 bytes = 144 MiB. Peak memory of an image in the
 /// unit (MemoryMax 512 MiB): the input, at most 64 MiB; the loader's frame, at most 144 MiB;
 /// that frame's copy inside the loader before it is handed over, at most 144 MiB; the
 /// output, at most 4 MiB (the picture is averaged straight from the frame). Total at most
 /// 356 MiB, plus the runtime. 8192² would have been 256 MiB twice, with the old full copy
 /// a third time.
 const MAX_DECODE: u32 = 6144;
+/// How long the preview's loader may run.
+const PREVIEW_TIMEOUT: Duration = Duration::from_secs(3);
+/// The wallpaper's longest side, for an 8K output (maintainer decision, 2026-11-07). The bound is
+/// on the side, not the area: the decoder's unit (`MemoryMax=1G`) was measured at 651M for
+/// 12000 × 8000 (96 MP), and past about 150 MP a decode may be killed for memory, which the
+/// daemon reads as a fault and answers with the hearth. The launcher's 512M has room for neither.
+const WALLPAPER_MAX_DECODE: u32 = 16384;
+/// How long the wallpaper's loader may run: a 100 MP picture takes about 3 s on the reference
+/// laptop (maintainer decision, 2026-11-07).
+const WALLPAPER_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// What a caller allows a loader: the longest side it decodes and how long it may run.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Bounds {
+    side: u32,
+    timeout: Duration,
+}
+
+/// The launcher's previews and the wallpaper's decoder run in units of different sizes, so
+/// each has its own bounds.
+const PREVIEW: Bounds = Bounds { side: MAX_DECODE, timeout: PREVIEW_TIMEOUT };
+const WALLPAPER: Bounds = Bounds { side: WALLPAPER_MAX_DECODE, timeout: WALLPAPER_TIMEOUT };
 
 struct Picture {
     width: u32,
@@ -84,7 +106,7 @@ fn main() -> ExitCode {
 }
 
 fn image(input: Vec<u8>, side: u32) -> Result<Picture, String> {
-    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8Premultiplied).map_err(|err| err.to_string())?;
+    let frame = decode(input, glycin::MemoryFormat::R8g8b8a8Premultiplied, PREVIEW).map_err(|err| err.to_string())?;
     packed(frame.width(), frame.height(), frame.stride() as usize, frame.buf_slice(), side, |px| px)
 }
 
@@ -119,7 +141,7 @@ impl From<glycin::Error> for Undecoded {
 }
 
 /// The first frame of an image, decoded by glycin's loaders in bubblewrap, in `format`.
-fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame, Undecoded> {
+fn decode(input: Vec<u8>, format: glycin::MemoryFormat, bounds: Bounds) -> Result<glycin::Frame, Undecoded> {
     let selection = match format {
         glycin::MemoryFormat::R8g8b8a8 => glycin::MemoryFormatSelection::R8g8b8a8,
         _ => glycin::MemoryFormatSelection::R8g8b8a8Premultiplied,
@@ -129,12 +151,12 @@ fn decode(input: Vec<u8>, format: glycin::MemoryFormat) -> Result<glycin::Frame,
         loader
             .sandbox_selector(glycin::SandboxSelector::Bwrap)
             .accepted_memory_formats(selection)
-            .limits(glycin::Limits::default().timeout(Duration::from_secs(3)).max_dimensions((MAX_DECODE, MAX_DECODE)));
+            .limits(glycin::Limits::default().timeout(bounds.timeout).max_dimensions((bounds.side, bounds.side)));
         let mut image = loader.load().await?;
         // glycin's own check of the limit tells it from no other error: this one does.
         let details = image.details();
-        if details.width() > MAX_DECODE || details.height() > MAX_DECODE {
-            return Err(Undecoded::Picture(format!("a side is over {MAX_DECODE} pixels")));
+        if details.width() > bounds.side || details.height() > bounds.side {
+            return Err(Undecoded::Picture(format!("a side is over {} pixels", bounds.side)));
         }
         let frame = image.next_frame().await?;
         if frame.memory_format() != format {
@@ -183,7 +205,7 @@ fn picture(file: File) -> Result<glycin::Frame, Undecoded> {
     if input.len() as u64 > MAX_INPUT {
         return Err(Undecoded::Picture(format!("the file is larger than {MAX_INPUT} bytes")));
     }
-    decode(input, glycin::MemoryFormat::R8g8b8a8)
+    decode(input, glycin::MemoryFormat::R8g8b8a8, WALLPAPER)
 }
 
 /// The request on `connection` and the one file descriptor that came with it.
@@ -296,6 +318,12 @@ fn write(out: &mut impl Write, picture: &Picture) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_preview_and_the_wallpaper_each_get_their_own_bounds() {
+        assert_eq!(PREVIEW, Bounds { side: 6144, timeout: Duration::from_secs(3) });
+        assert_eq!(WALLPAPER, Bounds { side: 16384, timeout: Duration::from_secs(15) });
+    }
 
     // poppler rebuilds the missing cross-reference table, as it does for a damaged file.
     const PAGE: &[u8] = b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n\

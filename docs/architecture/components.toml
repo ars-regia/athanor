@@ -222,6 +222,15 @@ purpose = "The greeter run by greetd: login, language and layout"
 
 
 [[component]]
+path = "forge/specs/athanor-idle"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD22"
+purpose = "The idle daemon's package: the binary, its guard unit and preset, and the bus service files of org.freedesktop.ScreenSaver and os.athanor.Idle1"
+
+[[component]]
 path = "forge/specs/athanor-kernel-profile"
 kind = "rpm spec"
 area = "kernel"
@@ -370,6 +379,15 @@ status = "specified"
 spec = "doc_update_trust.md"
 item = "UT1"
 purpose = "System image updates, trust state and the update notifier"
+
+[[component]]
+path = "forge/specs/athanor-wallpaper"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_session_daemons.md"
+item = "SD22"
+purpose = "The wallpaper package: the daemon, its user unit and preset, and the decoder's socket and templated unit"
 
 [[component]]
 path = "forge/specs/athanor-xdg-desktop-portal-athanor"
