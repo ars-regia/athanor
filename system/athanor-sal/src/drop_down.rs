@@ -51,8 +51,9 @@ impl Ui {
     }
 
     /// Replaces the items of drop-down `id` with `items` and chooses the one at `selected`, as
-    /// [`Ui::drop_down`] does. Whether anything changed: `false` for a widget that is not a
-    /// drop-down. Raises no event; call [`Ui::layout`] afterwards.
+    /// [`Ui::drop_down`] does; a change closes its menu if it is open. Whether anything
+    /// changed: `false` for a widget that is not a drop-down. Raises no event; call
+    /// [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
@@ -67,6 +68,7 @@ impl Ui {
         }
         drop.items = items.iter().map(|&item| item.to_owned()).collect();
         drop.selected = selected;
+        self.stale_popup |= self.is_expanded(id);
         true
     }
 
@@ -191,5 +193,11 @@ mod tests {
         let label = ui.add(Ui::ROOT, Kind::Label("Media".into()));
         assert!(!ui.set_drop_down(label, &["Firefox"], 0));
         assert_eq!(ui.chosen(label), None);
+        assert!(!ui.stale_popup, "no menu is open");
+        ui.set_expanded(players, true);
+        assert!(!ui.set_drop_down(players, &["Firefox", "Spotify"], 1));
+        assert!(!ui.stale_popup, "the same items");
+        assert!(ui.set_drop_down(players, &["Spotify"], 0));
+        assert!(ui.stale_popup, "the open menu shows the old items");
     }
 }

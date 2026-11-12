@@ -1056,8 +1056,17 @@ impl Shell {
         self.surfaces.retain(|s| s.id != id);
     }
 
-    /// Draws the surfaces whose widgets changed.
+    /// Draws the surfaces whose widgets changed, after closing a drop-down's menu whose items
+    /// the application replaced.
     fn draw_dirty(&mut self) -> Result<(), Error> {
+        if let Some(open) = self.popup {
+            let stale = self
+                .get_mut(open.parent)
+                .is_some_and(|from| std::mem::take(&mut from.ui.stale_popup));
+            if stale {
+                self.close_popup();
+            }
+        }
         for surface in &mut self.surfaces {
             if surface.dirty {
                 let first = !surface.drawn;

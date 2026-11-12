@@ -564,6 +564,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// The items of a drop-down whose menu is open changed: the driver closes the menu, whose
+    /// items are the old ones.
+    pub(crate) stale_popup: bool,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
@@ -592,6 +595,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            stale_popup: false,
             focus: None,
             text: TextContext::default(),
             title_bar: None,
@@ -1351,6 +1355,7 @@ impl Ui {
     /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
     /// collapsed, as when GTK's popover closes.
     pub(crate) fn popup_closed(&mut self, id: WidgetId) {
+        self.stale_popup = false;
         self.set_expanded(id, false);
         self.set_focus(Some(id));
     }
