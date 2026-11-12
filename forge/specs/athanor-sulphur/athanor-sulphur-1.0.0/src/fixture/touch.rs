@@ -166,6 +166,109 @@ fn a_touch_reaches_the_surface_under_each_finger() {
     run.stop();
 }
 
+/// A finger lifted on X's window and another put on Y's in one frame: X is sent its frame after
+/// the release, and Y's finger is a touch point of its own.
+#[test]
+fn a_release_and_a_touch_in_one_frame_each_get_their_frame() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, _, _) = window_at(&mut run, (300, 200));
+    let (mut y, _, _) = window_at(&mut run, (700, 200));
+    down(&mut run, 0, (320.0, 210.0).into());
+    x.roundtrip(&mut run);
+    let frames = x.client.touch.frames;
+
+    let now = InputTime::now;
+    run.state.touch_up(SCREEN, slot(0), now());
+    run.state
+        .touch_down(SCREEN, slot(1), (720.0, 210.0).into(), now());
+    run.state.touch_frame();
+    x.roundtrip(&mut run);
+    y.roundtrip(&mut run);
+
+    assert_eq!(x.client.touch.ups.len(), 1, "X's finger is lifted");
+    assert_eq!(
+        x.client.touch.frames,
+        frames + 1,
+        "X is sent the frame of its release"
+    );
+    assert_eq!(y.client.touch.downs.len(), 1, "Y is touched");
+    assert_eq!(y.client.touch.frames, 1, "and sent its frame");
+    let x_id = x.client.touch.downs[0].1;
+    assert_ne!(
+        y.client.touch.downs[0].1, x_id,
+        "on a touch point of its own"
+    );
+    run.stop();
+}
+
+/// A touchscreen removed with a finger on a window: the window is sent `cancel`, and when a
+/// device of the same name returns its slot touches and focuses again.
+#[test]
+fn a_touchscreen_removed_cancels_its_touches() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut x, _, _) = window_at(&mut run, (300, 200));
+    let (y, _, _) = window_at(&mut run, (700, 200));
+    down(&mut run, 0, (320.0, 210.0).into());
+    x.roundtrip(&mut run);
+
+    run.state.touch_device_gone(SCREEN);
+    x.roundtrip(&mut run);
+    assert_eq!(x.client.touch.cancels, 1, "the window's touch is cancelled");
+    assert!(x.client.touch.ups.is_empty(), "with no release");
+    assert!(
+        !run.state.seat.get_touch().expect("a touch").is_grabbed(),
+        "the seat holds nothing"
+    );
+
+    let focused = |run: &Running| {
+        keyboard_focus(run)
+            .and_then(|surface| surface.client())
+            .map(|client| client.id())
+    };
+    down(&mut run, 0, (720.0, 210.0).into());
+    assert_eq!(
+        focused(&run),
+        y.id,
+        "the same slot touches and focuses again"
+    );
+    run.stop();
+}
+
+/// Two fingers on a window: a move named by the first finger's serial is granted, as the grab of
+/// the seat is the first finger's, and follows that finger.
+#[test]
+fn a_move_from_the_first_of_two_fingers() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (mut local, toplevel, _) = window_at(&mut run, (300, 200));
+    let id = local.id.clone().expect("an id");
+    let seat = local.seat.clone().expect("a seat");
+
+    down(&mut run, 0, (320.0, 210.0).into());
+    down(&mut run, 1, (340.0, 220.0).into());
+    local.pump(&mut run, "the touches", |client, _| {
+        client.touch.downs.len() == 2
+    });
+    let serial = local.client.touch.downs[0].3;
+    toplevel._move(&seat, serial);
+    local.roundtrip(&mut run);
+    assert!(
+        touch_grab_is::<MoveGrab<TouchStart>>(&run),
+        "the first finger's serial moves it"
+    );
+    motion(&mut run, 0, (370.0, 230.0).into());
+    assert_eq!(
+        location_of(&run, &id),
+        Point::from((350, 220)),
+        "the window follows it"
+    );
+    up(&mut run, 1);
+    up(&mut run, 0);
+    run.stop();
+}
+
 /// Two touchscreens each report their finger on their own slot 0, one on each output over the
 /// window of another client: the seat tells the fingers apart, so each client is sent its own
 /// down, motion and release, under its own touch point, and the seat lets go of both.

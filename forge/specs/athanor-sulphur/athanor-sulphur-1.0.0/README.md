@@ -378,11 +378,12 @@ decision 33, wave 2a; `src/touch.rs`):
 | --- | --- | --- |
 | A touch reaches the surface under the finger | each finger keeps its own surface (`touch::Fingers`), where Smithay's default grab sends every later finger to the first one's | `a_touch_reaches_the_surface_under_each_finger` |
 | Two touchscreens do not mix their fingers | a touch point is held by its device and the device's own slot, and the seat gives it a slot no other held touch has | `two_touchscreens_on_the_same_slot_touch_apart` |
+| A release is framed, and a removed touchscreen lets go | the seat gives a released slot again only after the frame owed to its client; a touchscreen removed with fingers on it cancels them and frees their slots | `a_release_and_a_touch_in_one_frame_each_get_their_frame`, `a_touchscreen_removed_cancels_its_touches` |
 | A touch-down focuses by the rule of a click | the first finger goes through `click_focus`; a finger after it, or one while the pointer holds a grab (a button held, a popup), changes no focus | `a_touch_down_focuses_the_window_under_the_finger`, `a_touch_while_the_pointer_is_grabbed_changes_no_focus` |
 | While locked, a touch off the lock surface is refused | the down never reaches the seat, nor do its motion and release | `a_touch_off_the_lock_surface_reaches_nothing` |
 | A touch held at lock is cancelled | `lock` sends `wl_touch.cancel`; the later motion and release reach no one | `a_touch_held_at_lock_is_cancelled_and_its_release_reaches_no_one` |
 | Each touchscreen spans its own output, under its transform | the output libinput names (udev's `WL_OUTPUT`), else the built-in panel (`eDP-`, `LVDS-`, `DSI-`), else the touch is dropped; never the first output | `a_touchscreen_maps_to_its_own_output` |
-| A move or a resize starts from a touch serial | the window grabs follow the finger that started them, and its release ends them | `a_touch_moves_and_resizes_a_window` |
+| A move or a resize starts from a touch serial | the serial is the first finger's, the one that starts the seat's touch grab, until the grab ends; the window grabs follow the finger that started them, and its release ends them | `a_touch_moves_and_resizes_a_window`, `a_move_from_the_first_of_two_fingers` |
 | A drag starts from a touch serial | as from a press: the source is cancelled, drag and drop not being offered yet | `a_drag_starts_from_a_touch` |
 
 libinput reports no touch shape or orientation, so none is sent; the grabs pass them on should a

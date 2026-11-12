@@ -33,6 +33,10 @@ pub struct Touches {
     /// slots are its own, so two touchscreens both report a slot 0; the seat's slot is the
     /// lowest one no other held touch has.
     held: HashMap<(String, TouchSlot), (TouchSlot, Point<f64, Logical>)>,
+    /// The seat's slots released since the last frame. Smithay keeps the frame owed to a
+    /// released slot's client until the next frame, and a down on the slot drops it, so a slot is
+    /// given again only after the frame.
+    released: Vec<TouchSlot>,
     /// Whether the seat was given an event since its last frame or cancel.
     unframed: bool,
 }
@@ -103,7 +107,10 @@ impl State {
         }
         let free = (0..=u32::MAX)
             .map(|id| TouchSlot::from(Some(id)))
-            .find(|free| self.touches.held.values().all(|(taken, _)| taken != free));
+            .find(|free| {
+                !self.touches.released.contains(free)
+                    && self.touches.held.values().all(|(taken, _)| taken != free)
+            });
         let Some(seat_slot) = free else {
             return;
         };
@@ -114,7 +121,10 @@ impl State {
             .seat
             .get_pointer()
             .is_some_and(|pointer| pointer.is_grabbed());
-        if !touch.is_grabbed() && !pointer_held {
+        // The finger that starts the touch grab: its serial is the one a move, a resize or a
+        // drag names (`touch::Fingers`), until the grab ends.
+        let first = !touch.is_grabbed();
+        if first && !pointer_held {
             self.a11y.set_pointing(true);
             self.click_focus(location);
             self.a11y.set_pointing(false);
@@ -124,7 +134,9 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
         let to = under.as_ref().and_then(|(surface, _)| surface.client());
-        self.grab_serials.touch = to.map(|client| (serial, client.id()));
+        if first {
+            self.grab_serials.touch = to.map(|client| (serial, client.id()));
+        }
         self.touches.held.insert(key, (seat_slot, location));
         self.touches.unframed = true;
         touch.down(
@@ -177,6 +189,7 @@ impl State {
         let Some((slot, _)) = self.touches.held.remove(&key(device, slot)) else {
             return;
         };
+        self.touches.released.push(slot);
         self.touches.unframed = true;
         let serial = SERIAL_COUNTER.next_serial();
         touch.up(self, &UpEvent { slot, serial, time });
@@ -190,6 +203,42 @@ impl State {
         if std::mem::take(&mut self.touches.unframed) {
             touch.frame(self);
         }
+        self.touches.released.clear();
+    }
+
+    /// A touchscreen went away with fingers on it: their release never comes, so each one's
+    /// client is sent `wl_touch.cancel` and its slot is free again. The touch points of other
+    /// devices are framed first, so that the cancel takes only the device's own.
+    pub(crate) fn touch_device_gone(&mut self, device: &str) {
+        let gone: Vec<_> = self
+            .touches
+            .held
+            .keys()
+            .filter(|(of, _)| of == device)
+            .cloned()
+            .collect();
+        if gone.is_empty() {
+            return;
+        }
+        let Some(touch) = self.seat.get_touch() else {
+            return;
+        };
+        self.touch_frame();
+        let time = InputTime::now();
+        for key in gone {
+            if let Some((slot, location)) = self.touches.held.remove(&key) {
+                touch.motion(
+                    self,
+                    None,
+                    &MotionEvent {
+                        slot,
+                        location,
+                        time,
+                    },
+                );
+            }
+        }
+        touch.cancel(self);
     }
 
     /// Cancels every touch held: its surface is sent `wl_touch.cancel`, and its later motion and
@@ -202,6 +251,7 @@ impl State {
         };
         touch.unset_grab(self);
         let held = std::mem::take(&mut self.touches.held);
+        self.touches.released.clear();
         self.touches.unframed = false;
         if held.is_empty() {
             return;
