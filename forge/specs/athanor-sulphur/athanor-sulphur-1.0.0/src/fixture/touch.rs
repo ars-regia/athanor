@@ -7,7 +7,9 @@ use crate::grabs::{MoveGrab, ResizeGrab};
 use smithay::backend::input::TouchSlot;
 use smithay::utils::Transform;
 use std::sync::atomic::AtomicBool;
-use wayland_client::protocol::{wl_data_device, wl_data_device_manager, wl_data_offer, wl_data_source, wl_touch};
+use wayland_client::protocol::{
+    wl_data_device, wl_data_device_manager, wl_data_offer, wl_data_source, wl_touch,
+};
 
 /// The touch grab start, the parameter of a window grab that follows a finger.
 type TouchStart = smithay::input::touch::GrabStartData<State>;
@@ -57,18 +59,22 @@ fn slot(id: u32) -> TouchSlot {
     TouchSlot::from(Some(id))
 }
 
+/// The device the helpers below touch with (`Device::id`, as libinput's sysname).
+const SCREEN: &str = "event10";
+
 fn down(run: &mut Running, id: u32, at: Point<f64, Logical>) {
-    run.state.touch_down(slot(id), at, InputTime::now());
+    run.state.touch_down(SCREEN, slot(id), at, InputTime::now());
     run.state.touch_frame();
 }
 
 fn motion(run: &mut Running, id: u32, at: Point<f64, Logical>) {
-    run.state.touch_motion(slot(id), at, InputTime::now());
+    run.state
+        .touch_motion(SCREEN, slot(id), at, InputTime::now());
     run.state.touch_frame();
 }
 
 fn up(run: &mut Running, id: u32) {
-    run.state.touch_up(slot(id), InputTime::now());
+    run.state.touch_up(SCREEN, slot(id), InputTime::now());
     run.state.touch_frame();
 }
 
@@ -160,6 +166,111 @@ fn a_touch_reaches_the_surface_under_each_finger() {
     run.stop();
 }
 
+/// Two touchscreens each report their finger on their own slot 0, one on each output over the
+/// window of another client: the seat tells the fingers apart, so each client is sent its own
+/// down, motion and release, under its own touch point, and the seat lets go of both.
+#[test]
+fn two_touchscreens_on_the_same_slot_touch_apart() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let second = run
+        .state
+        .space
+        .output_geometry(&output_at(&run, 1))
+        .expect("placed");
+    let (mut p, _, p_surface) = window_at(&mut run, (300, 200));
+    let (mut q, _, q_surface) = window_at(&mut run, (second.loc.x + 20, second.loc.y + 20));
+    let on_q = |dx: f64, dy: f64| -> Point<f64, Logical> {
+        (
+            f64::from(second.loc.x) + 20.0 + dx,
+            f64::from(second.loc.y) + 20.0 + dy,
+        )
+            .into()
+    };
+    let now = InputTime::now;
+
+    run.state
+        .touch_down("event1", slot(0), (320.0, 210.0).into(), now());
+    run.state.touch_frame();
+    run.state
+        .touch_down("event2", slot(0), on_q(30.0, 40.0), now());
+    run.state.touch_frame();
+    run.state
+        .touch_motion("event1", slot(0), (325.0, 215.0).into(), now());
+    run.state.touch_frame();
+    run.state.touch_up("event2", slot(0), now());
+    run.state.touch_frame();
+    run.state.touch_up("event1", slot(0), now());
+    run.state.touch_frame();
+    p.roundtrip(&mut run);
+    q.roundtrip(&mut run);
+
+    let (surface, p_id, at, _) = p.client.touch.downs[0].clone();
+    assert_eq!(
+        (surface, at),
+        (p_surface.id(), (20.0, 10.0)),
+        "the first finger on P"
+    );
+    let (surface, q_id, at, _) = q.client.touch.downs[0].clone();
+    assert_eq!(
+        (surface, at),
+        (q_surface.id(), (30.0, 40.0)),
+        "the second finger on Q"
+    );
+    assert_ne!(p_id, q_id, "two touch points of the seat");
+    assert_eq!(
+        p.client.touch.motions,
+        [(p_id, (25.0, 15.0))],
+        "P's finger moves on P"
+    );
+    assert!(
+        q.client.touch.motions.is_empty(),
+        "Q is sent no motion of P's finger"
+    );
+    assert_eq!(
+        (p.client.touch.ups.as_slice(), q.client.touch.ups.as_slice()),
+        ([p_id].as_slice(), [q_id].as_slice())
+    );
+    assert_eq!(
+        (p.client.touch.downs.len(), q.client.touch.downs.len()),
+        (1, 1)
+    );
+    assert!(
+        !run.state.seat.get_touch().expect("a touch").is_grabbed(),
+        "both fingers let go"
+    );
+    run.stop();
+}
+
+/// While a button is held, a touch-down on another window changes no focus, as a second click
+/// would not (`button_input` focuses only when the pointer holds no grab, a popup's included).
+#[test]
+fn a_touch_while_the_pointer_is_grabbed_changes_no_focus() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let (a, _, _) = window_at(&mut run, (300, 200));
+    let (b, _, _) = window_at(&mut run, (700, 200));
+    let focused = |run: &Running| {
+        keyboard_focus(run)
+            .and_then(|surface| surface.client())
+            .map(|client| client.id())
+    };
+
+    press(&mut run, (320.0, 210.0).into());
+    assert_eq!(focused(&run), a.id, "the press focuses its window");
+    down(&mut run, 0, (720.0, 210.0).into());
+    assert_eq!(focused(&run), a.id, "the touch during the press keeps it");
+    up(&mut run, 0);
+    release(&mut run);
+    down(&mut run, 0, (720.0, 210.0).into());
+    assert_eq!(
+        focused(&run),
+        b.id,
+        "with the button released, the touch moves it"
+    );
+    run.stop();
+}
+
 /// A touch-down gives the window under the finger the keyboard, as a button press does; a
 /// finger after the first, as a second button, changes no focus.
 #[test]
@@ -168,7 +279,11 @@ fn a_touch_down_focuses_the_window_under_the_finger() {
     park_the_fixture(&mut run);
     let (a, _, _) = window_at(&mut run, (300, 200));
     let (b, _, _) = window_at(&mut run, (700, 200));
-    let focused = |run: &Running| keyboard_focus(run).and_then(|surface| surface.client()).map(|client| client.id());
+    let focused = |run: &Running| {
+        keyboard_focus(run)
+            .and_then(|surface| surface.client())
+            .map(|client| client.id())
+    };
     run.state.set_keyboard_focus(None);
 
     down(&mut run, 0, (320.0, 210.0).into());
@@ -233,9 +348,9 @@ fn a_touch_off_the_lock_surface_reaches_nothing() {
     assert!(seen.downs.is_empty() && seen.motions.is_empty() && seen.ups.is_empty());
     assert_eq!(seen.frames, 0, "the window was sent nothing");
     let seen = &locker.client.touch;
-    let ids: Vec<i32> = seen.downs.iter().map(|(_, id, _, _)| *id).collect();
-    assert_eq!(ids, [1], "the lock had the touch on it alone");
-    assert_eq!(seen.ups, [1]);
+    let at: Vec<(f64, f64)> = seen.downs.iter().map(|(_, _, at, _)| *at).collect();
+    assert_eq!(at, [(100.0, 100.0)], "the lock had the touch on it alone");
+    assert_eq!(seen.ups.len(), 1);
     assert!(seen.motions.is_empty(), "no motion of the refused touch");
     run.stop();
 }
@@ -467,12 +582,23 @@ fn a_drag_starts_from_a_touch() {
 
     down(&mut run, 0, (320.0, 210.0).into());
     down(&mut run, 1, (340.0, 220.0).into());
-    local.pump(&mut run, "the touches", |client, _| client.touch.downs.len() == 2);
+    local.pump(&mut run, "the touches", |client, _| {
+        client.touch.downs.len() == 2
+    });
     let serial = local.client.touch.downs[0].3;
-    assert!(!drag(&mut local, &mut run, serial.wrapping_sub(1)), "a serial no touch sent");
+    assert!(
+        !drag(&mut local, &mut run, serial.wrapping_sub(1)),
+        "a serial no touch sent"
+    );
     up(&mut run, 1);
-    assert!(drag(&mut local, &mut run, serial), "the first touch, held, starts a drag");
+    assert!(
+        drag(&mut local, &mut run, serial),
+        "the first touch, held, starts a drag"
+    );
     up(&mut run, 0);
-    assert!(!drag(&mut local, &mut run, serial), "the lifted touch no longer does");
+    assert!(
+        !drag(&mut local, &mut run, serial),
+        "the lifted touch no longer does"
+    );
     run.stop();
 }
