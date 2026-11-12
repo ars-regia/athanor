@@ -20,7 +20,7 @@ local commands.
   `kernel_profile.py generate`: edit the manifest, never the file.
 - **Patches apply without fuzz.** When `build.sh --stage prep` stops with
   `refresh needed`, run `--stage refresh`, review the hunks it applied, and commit the copies
-  under `patches/refreshed/`. Athanor's own patches are git-format files in `patches/`;
+  as `doc_kernel_build.md`, section 8, describes. Athanor's own patches are git-format files in `patches/`;
   those in `patches/redhat/` touch the Fedora tree only, never Kconfig.
 - **Configuration decisions go in `kernel-local`.** Normalise `=n` to
   `# CONFIG_X is not set` before comparing configs: both spellings mean the same.
