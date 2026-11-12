@@ -20,7 +20,7 @@ pub(crate) mod text;
 mod theme;
 mod widget;
 
-pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
+pub use driver::{run_with, Application, KeyModifiers, LayerOptions, Shell, Side, SurfaceId};
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use motion::{Curve, Motion, Pose};
 pub use render::Error;

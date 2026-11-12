@@ -5,6 +5,9 @@
 //! AT-SPI per surface.
 
 mod clipboard;
+mod modifiers;
+
+pub use modifiers::KeyModifiers;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
 use crate::motion::{Motion, Pose, Running};
@@ -229,6 +232,22 @@ pub trait Application {
 
     /// The keyboard entered (`focused`) or left `surface`, a popup included.
     fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
+
+    /// A key pressed, or repeated, on `surface`, before its widgets see it, a focused field
+    /// included: `true` takes it, and the widgets never see it. Where an application gives keys
+    /// a meaning of its own while the focus stays in a field: the arrows that move a list of
+    /// results, say, or Ctrl+Enter, which [`Key::Enter`] with `modifiers.ctrl` tells from Enter.
+    /// The keys of an open menu come to the menu's surface. Escape on a popup that Escape
+    /// dismisses closes it first, without this call. The default takes no key.
+    fn key(
+        &mut self,
+        _shell: &mut Shell,
+        _surface: SurfaceId,
+        _key: &Key,
+        _modifiers: KeyModifiers,
+    ) -> bool {
+        false
+    }
 
     /// Runs after each turn of the event loop, once its events are handled: where the
     /// application applies what its own source (see [`run_with`]) changed since.
@@ -2135,6 +2154,13 @@ impl App {
         let Some(id) = target else {
             return;
         };
+        let modifiers = KeyModifiers::from(self.modifiers);
+        if self.shell.get_mut(id).is_some()
+            && self.application.key(&mut self.shell, id, &key, modifiers)
+        {
+            self.changed(id, None);
+            return;
+        }
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
