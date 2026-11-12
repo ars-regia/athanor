@@ -846,7 +846,14 @@ impl Shell {
             ((right - x) as i32).max(1),
             ((bottom - y) as i32).max(1),
         );
-        let along_x = ConstraintAdjustment::FlipY | ConstraintAdjustment::SlideX;
+        // A menu also slides along its axis, so that one as high as the output stays on it.
+        let along_x = ConstraintAdjustment::FlipY
+            | ConstraintAdjustment::SlideX
+            | if menu {
+                ConstraintAdjustment::SlideY
+            } else {
+                ConstraintAdjustment::empty()
+            };
         let along_y = ConstraintAdjustment::FlipX | ConstraintAdjustment::SlideY;
         let (edge, gravity, adjust) = match side {
             Side::Top => (Edge::Top, Gravity::Top, along_x),
@@ -1825,7 +1832,19 @@ impl App {
     /// Opens the items of drop-down `widget` of `id` in a menu under it, with the focus on the
     /// chosen one, as GTK's DropDown does.
     fn open_drop_down(&mut self, id: SurfaceId, widget: WidgetId) {
-        let Some((menu, items)) = self.shell.ui(id).and_then(|ui| ui.drop_down_menu(widget)) else {
+        // As high as the drop-down's output, or its own surface when the output is not known.
+        let max_height = self.shell.surfaces.iter().find(|s| s.id == id).and_then(|from| {
+            let output = from.output.as_ref().and_then(|output| {
+                let (_, info) = self.shell.outputs.iter().find(|(o, _)| o == output)?;
+                info.logical_size.map(|(_, h)| h as f32)
+            });
+            output.or_else(|| (from.size.1 > 0).then_some(from.size.1 as f32))
+        });
+        let Some((menu, items)) = self
+            .shell
+            .ui(id)
+            .and_then(|ui| ui.drop_down_menu(widget, max_height))
+        else {
             return;
         };
         let chosen = items.iter().find(|&&(item, _)| menu.is_active(item)).map(|&(item, _)| item);
@@ -2730,7 +2749,7 @@ mod tests {
         assert_eq!(opened, Some(Route::DropDown(players)));
         let kept = ui.activate(empty).map(|event| route(&ui, event, false));
         assert_eq!(kept, Some(Route::Kept), "an empty drop-down opens nothing");
-        let Some((mut menu, items)) = ui.drop_down_menu(players) else {
+        let Some((mut menu, items)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
         };
         let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
@@ -2741,7 +2760,7 @@ mod tests {
         assert_eq!(ui.choose(players, index), Some(Event::Changed(players)));
         assert_eq!(ui.chosen(players), Some(1));
         // Escape, or a press outside, closes the menu and chooses nothing.
-        let Some((mut menu, _)) = ui.drop_down_menu(players) else {
+        let Some((mut menu, _)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
         };
         let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);

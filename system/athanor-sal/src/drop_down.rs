@@ -86,23 +86,39 @@ impl Ui {
     }
 
     /// The menu drop-down `id` opens: its items as radios, the chosen one checked, each with
-    /// the index it chooses. `None` for a drop-down without items, or a widget that is not one.
-    pub(crate) fn drop_down_menu(&self, id: WidgetId) -> Option<(Ui, Vec<(WidgetId, usize)>)> {
+    /// the index it chooses. A menu taller than `max_height`, the height of the output, holds
+    /// its items in a scroll that fits it. `None` for a drop-down without items, or a widget
+    /// that is not one.
+    pub(crate) fn drop_down_menu(
+        &self,
+        id: WidgetId,
+        max_height: Option<f32>,
+    ) -> Option<(Ui, Vec<(WidgetId, usize)>)> {
         let Kind::DropDown(drop) = &self.widgets.get(id.index())?.kind else {
             return None;
         };
         if drop.items.is_empty() {
             return None;
         }
-        let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
-        let list = menu.add(Ui::ROOT, Kind::Menu);
-        let items = drop
-            .items
-            .iter()
-            .enumerate()
-            .map(|(index, item)| (menu.radio(list, item, index == drop.selected), index))
-            .collect();
-        Some((menu, items))
+        let build = |viewport: Option<f32>| {
+            let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
+            let parent = viewport.map_or(Ui::ROOT, |height| menu.scroll(Ui::ROOT, height));
+            let list = menu.add(parent, Kind::Menu);
+            let items: Vec<_> = drop
+                .items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| (menu.radio(list, item, index == drop.selected), index))
+                .collect();
+            (menu, items)
+        };
+        let (mut menu, items) = build(None);
+        let (_, height) = menu.layout();
+        match max_height.filter(|&max| height > max) {
+            // The root's margin stays around the scroll.
+            Some(max) => Some(build(Some(max - 2.0 * self.theme.margin))),
+            None => Some((menu, items)),
+        }
     }
 
     /// Chooses the item at `index` of drop-down `id`, as its menu does: [`Event::Changed`] when
@@ -131,7 +147,7 @@ mod tests {
         assert!(ui.widget(players).is_focusable());
         assert_eq!(ui.activate(players), Some(Event::Clicked(players)));
         assert_eq!(ui.chosen(players), Some(1));
-        let Some((menu, items)) = ui.drop_down_menu(players) else {
+        let Some((menu, items)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
         };
         let checked: Vec<bool> = items
@@ -162,7 +178,7 @@ mod tests {
             (Some("Media player"), Some("Spotify"))
         );
         assert_eq!(node.has_popup(), Some(HasPopup::Menu));
-        let Some((menu, items)) = ui.drop_down_menu(players) else {
+        let Some((menu, items)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
         };
         let read: Vec<_> = items
@@ -182,11 +198,43 @@ mod tests {
     }
 
     #[test]
+    fn a_menu_taller_than_its_output_scrolls_and_shows_the_chosen_item() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(Ui::ROOT, "Media player", &names, 39);
+        let Some((mut whole, _)) = ui.drop_down_menu(players, Some(10_000.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let (_, tall) = whole.layout();
+        assert!(tall > 300.0, "forty items do not fit in 300 pixels");
+        let Some((mut menu, items)) = ui.drop_down_menu(players, Some(300.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let (_, high) = menu.layout();
+        assert!(high <= 300.0, "{high} fits the output");
+        assert_eq!(items.len(), 40);
+        let (last, _) = items[39];
+        menu.set_focus(Some(last));
+        menu.layout();
+        let scroll = menu.widget(Ui::ROOT).children[0];
+        assert!(matches!(menu.widget(scroll).kind, Kind::Scroll { .. }));
+        assert_eq!(
+            menu.clip(last).map(|view| view.contains(
+                menu.widget(last).rect.x + 1.0,
+                menu.widget(last).rect.y + 1.0
+            )),
+            Some(true),
+            "the focused item is scrolled into view"
+        );
+    }
+
+    #[test]
     fn a_drop_down_takes_new_items_and_keeps_its_choice_in_range() {
         let mut ui = Ui::new("t", Theme::default(), false);
         let players = ui.drop_down(Ui::ROOT, "Media player", &[], 3);
         assert_eq!(ui.chosen(players), None);
-        assert!(ui.drop_down_menu(players).is_none(), "nothing to offer");
+        assert!(ui.drop_down_menu(players, None).is_none(), "nothing to offer");
         assert!(ui.set_drop_down(players, &["Firefox", "Spotify"], 7));
         assert_eq!(ui.chosen(players), Some(1), "the last one");
         assert!(!ui.set_drop_down(players, &["Firefox", "Spotify"], 1));
