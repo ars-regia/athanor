@@ -8,8 +8,8 @@ use athanor_shelld::store::CAPACITY;
 use athanor_shelld::wire::WireNotification;
 use common::{Bus, APP, BAR};
 use futures_util::StreamExt;
+use zbus::Variant;
 use zbus::{Connection, Proxy};
-use zbus::zvariant::Value;
 
 async fn public(conn: &Connection) -> Proxy<'static> {
     Proxy::new(
@@ -39,7 +39,7 @@ async fn notify(
     summary: &str,
     body: &str,
     actions: &[&str],
-    hints: HashMap<&str, Value<'_>>,
+    hints: HashMap<&str, Variant<'_>>,
 ) -> u32 {
     proxy
         .call(
@@ -232,8 +232,8 @@ async fn private_signals_reach_only_the_bar_that_listed() {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
         .interface("os.athanor.Notifications1")
-        .expect("interface")
-        .build();
+        .build()
+        .expect("a match rule");
     let mut eavesdrop = zbus::MessageStream::for_match_rule(rule, &bystander, None)
         .await
         .expect("match rule");
@@ -266,8 +266,8 @@ async fn no_private_signal_is_sent_before_any_bar_has_listed() {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
         .interface("os.athanor.Notifications1")
-        .expect("interface")
-        .build();
+        .build()
+        .expect("a match rule");
     let mut eavesdrop = zbus::MessageStream::for_match_rule(rule, &client, None)
         .await
         .expect("match rule");
@@ -296,8 +296,8 @@ async fn an_action_sends_the_token_first_then_closes_unless_resident() {
     let rule = zbus::MatchRule::builder()
         .msg_type(zbus::message::Type::Signal)
         .path(NOTIFICATIONS_PATH)
-        .expect("path")
-        .build();
+        .build()
+        .expect("a match rule");
     let mut stream = zbus::MessageStream::for_match_rule(rule, &client, None)
         .await
         .expect("match rule");
@@ -335,7 +335,7 @@ async fn an_action_sends_the_token_first_then_closes_unless_resident() {
         "r",
         "",
         &["default", "Open"],
-        HashMap::from([("resident", Value::Bool(true))]),
+        HashMap::from([("resident", Variant::Bool(true))]),
     )
     .await;
     private
@@ -378,7 +378,7 @@ async fn do_not_disturb_persists_and_ends_popups_but_critical() {
         "c",
         "",
         &[],
-        HashMap::from([("urgency", Value::U8(2))]),
+        HashMap::from([("urgency", Variant::U8(2))]),
     )
     .await;
     let (dnd, listed): (bool, Vec<WireNotification>) =
@@ -426,7 +426,7 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
     let _daemon = bus.daemon(BAR).await;
     let client = bus.client().await;
     let (public, private) = (public(&client).await, private(&client).await);
-    let good = Value::new((
+    let good = Variant::new((
         200i32,
         100i32,
         800i32,
@@ -435,7 +435,7 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
         4i32,
         vec![255u8; 200 * 100 * 4],
     ));
-    let bad = Value::new((
+    let bad = Variant::new((
         100_000i32,
         1i32,
         400_000i32,
@@ -461,7 +461,7 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
         &[],
         HashMap::from([
             ("image-data", bad),
-            ("image-path", Value::from("https://x/y.png")),
+            ("image-path", Variant::from("https://x/y.png")),
         ]),
     )
     .await;
@@ -471,7 +471,7 @@ async fn images_are_scaled_and_bad_ones_dropped_without_failing_the_call() {
         "huge",
         "",
         &[],
-        HashMap::from([("x-huge", Value::new(vec![0u8; 256 * 1024]))]),
+        HashMap::from([("x-huge", Variant::new(vec![0u8; 256 * 1024]))]),
     )
     .await;
     let (_, listed): (bool, Vec<WireNotification>) = private.call("List", &()).await.expect("List");

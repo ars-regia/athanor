@@ -148,7 +148,7 @@ async fn log_caller(query: Connection, sender: OwnedUniqueName) {
 /// cannot (`zbus::Error::NameTaken`). The returned connections must live as long as the
 /// service.
 pub async fn serve(keys: Sender<Key>) -> zbus::Result<(Connection, Connection)> {
-    let query = connection::Builder::session()?.build().await?;
+    let query = connection::Builder::session().build().await?;
     let osd = Osd {
         keys,
         full: false,
@@ -158,9 +158,9 @@ pub async fn serve(keys: Sender<Key>) -> zbus::Result<(Connection, Connection)> 
         checked: HashSet::new(),
     };
     // The builder requests the name with DoNotQueue: taken, the build fails.
-    let served = connection::Builder::session()?
-        .serve_at(PATH, osd)?
-        .name(NAME)?
+    let served = connection::Builder::session()
+        .serve_at(PATH, osd)
+        .name(NAME)
         .build()
         .await?;
     Ok((served, query))

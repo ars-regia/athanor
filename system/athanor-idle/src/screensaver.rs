@@ -576,11 +576,11 @@ pub async fn serve(
         conn.object_server()
             .at(IDLE_PATH, Idle1(state.clone()))
             .await?;
-        conn.request_name_with_flags(NAME, RequestNameFlags::DoNotQueue.into())
+        conn.request_name_with_flags(NAME, RequestNameFlags::DO_NOT_QUEUE)
             .await?;
         // Without its name only InhibitSuspend is missing: the rest of the daemon goes on.
         if let Err(e) = conn
-            .request_name_with_flags(IDLE_NAME, RequestNameFlags::DoNotQueue.into())
+            .request_name_with_flags(IDLE_NAME, RequestNameFlags::DO_NOT_QUEUE)
             .await
         {
             conn.object_server().remove::<Idle1, _>(IDLE_PATH).await?;
@@ -657,7 +657,6 @@ mod tests {
 
         async fn connect(&self) -> Connection {
             Builder::address(self.address.as_str())
-                .unwrap()
                 .build()
                 .await
                 .unwrap()
@@ -676,7 +675,7 @@ mod tests {
         c: &Connection,
         path: &str,
         member: &str,
-        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+        body: &(impl serde::Serialize + zbus::DynamicType),
     ) -> zbus::Result<zbus::Message> {
         c.call_method(Some(NAME), path, Some(NAME), member, body)
             .await
@@ -785,13 +784,9 @@ mod tests {
         for _ in 0..5 {
             let c = bus.connect().await;
             let msg = zbus::Message::method_call(PATHS[0], "Inhibit")
-                .unwrap()
                 .destination(NAME)
-                .unwrap()
                 .interface(NAME)
-                .unwrap()
-                .with_flags(zbus::message::Flags::NoReplyExpected)
-                .unwrap()
+                .with_flags(zbus::message::Flags::NO_REPLY_EXPECTED)
                 .build(&("app", "fire and forget"))
                 .unwrap();
             c.send(&msg).await.unwrap();
@@ -862,13 +857,9 @@ mod tests {
 
     fn inhibit_message() -> zbus::Message {
         zbus::Message::method_call(PATHS[0], "Inhibit")
-            .unwrap()
             .destination(NAME)
-            .unwrap()
             .interface(NAME)
-            .unwrap()
-            .with_flags(zbus::message::Flags::NoReplyExpected)
-            .unwrap()
+            .with_flags(zbus::message::Flags::NO_REPLY_EXPECTED)
             .build(&("app", "burst"))
             .unwrap()
     }
@@ -985,7 +976,7 @@ mod tests {
         async fn main_pid(
             &self,
             _manager: bus_caller::Manager<'_>,
-            _path: &zbus::zvariant::OwnedObjectPath,
+            _path: &zbus::OwnedObjectPath,
         ) -> std::result::Result<u32, String> {
             Err("not asked".into())
         }
@@ -1001,14 +992,14 @@ mod tests {
             &self,
             _manager: bus_caller::Manager<'_>,
             _pidfd: std::os::fd::BorrowedFd<'_>,
-        ) -> std::result::Result<(zbus::zvariant::OwnedObjectPath, String), String> {
+        ) -> std::result::Result<(zbus::OwnedObjectPath, String), String> {
             Err("not asked".into())
         }
 
         async fn unit(
             &self,
             _manager: bus_caller::Manager<'_>,
-            _path: &zbus::zvariant::OwnedObjectPath,
+            _path: &zbus::OwnedObjectPath,
         ) -> std::result::Result<bus_caller::Unit, String> {
             Err("not asked".into())
         }
@@ -1035,11 +1026,11 @@ mod tests {
         #[zbus(name = "GetUnitByPIDFD")]
         fn get_unit_by_pidfd(
             &self,
-            _pidfd: zbus::zvariant::Fd<'_>,
-        ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
+            _pidfd: zbus::Fd<'_>,
+        ) -> (zbus::OwnedObjectPath, String, Vec<u8>) {
             self.asked.fetch_add(1, Ordering::SeqCst);
             (
-                zbus::zvariant::OwnedObjectPath::try_from(self.path).unwrap(),
+                zbus::OwnedObjectPath::try_from(self.path).unwrap(),
                 self.unit.clone(),
                 Vec::new(),
             )
@@ -1161,7 +1152,7 @@ mod tests {
     async fn idle(
         c: &Connection,
         member: &str,
-        body: &(impl serde::Serialize + zbus::zvariant::DynamicType),
+        body: &(impl serde::Serialize + zbus::DynamicType),
     ) -> zbus::Result<zbus::Message> {
         c.call_method(Some(IDLE_NAME), IDLE_PATH, Some(IDLE_NAME), member, body)
             .await
@@ -1341,8 +1332,8 @@ mod tests {
         #[zbus(name = "GetUnitByPIDFD")]
         async fn get_unit_by_pidfd(
             &self,
-            _pidfd: zbus::zvariant::OwnedFd,
-        ) -> (zbus::zvariant::OwnedObjectPath, String, Vec<u8>) {
+            _pidfd: zbus::OwnedFd,
+        ) -> (zbus::OwnedObjectPath, String, Vec<u8>) {
             std::future::pending().await
         }
     }

@@ -133,8 +133,7 @@ pub fn is_player(name: &str) -> bool {
 /// The metadata dictionary, `a{sv}`; `None` for any other type.
 fn metadata(player: &Props) -> Option<Props> {
     let value = player.get("Metadata")?.try_clone().ok()?;
-    let entries: std::collections::HashMap<String, zbus::zvariant::OwnedValue> =
-        value.try_into().ok()?;
+    let entries: std::collections::HashMap<String, zbus::OwnedVariant> = value.try_into().ok()?;
     Some(entries.into_iter().collect())
 }
 
@@ -578,13 +577,13 @@ async fn execute(
 ) -> zbus::Result<()> {
     let call = async {
         let proxy = Builder::<'_, zbus::Proxy<'_>>::new(&connection)
-            .destination(player)?
-            .path(MPRIS_PATH)?
-            .interface(MPRIS_PLAYER)?
+            .destination(player)
+            .path(MPRIS_PATH)
+            .interface(MPRIS_PLAYER)
             .cache_properties(CacheProperties::No)
             .build()
             .await?;
-        let interactive = MethodFlags::AllowInteractiveAuth.into();
+        let interactive = MethodFlags::ALLOW_INTERACTIVE_AUTH;
         match command {
             MediaCommand::PlayPause => {
                 proxy
@@ -625,21 +624,21 @@ mod tests {
     use tokio::runtime::Handle;
     use tokio::sync::{mpsc, watch};
     use zbus::message::Header;
-    use zbus::zvariant::{OwnedValue, Value};
     use zbus::Connection;
+    use zbus::{OwnedVariant, Variant};
 
     use super::*;
     use crate::testbus::{self, TestBus};
 
-    fn owned(value: Value<'_>) -> OwnedValue {
+    fn owned(value: Variant<'_>) -> OwnedVariant {
         value.try_to_owned().expect("owned value")
     }
 
-    fn dict(entries: Vec<(&str, Value<'_>)>) -> OwnedValue {
-        owned(Value::new(entries.into_iter().collect::<HashMap<_, _>>()))
+    fn dict(entries: Vec<(&str, Variant<'_>)>) -> OwnedVariant {
+        owned(Variant::new(entries.into_iter().collect::<HashMap<_, _>>()))
     }
 
-    fn props(entries: Vec<(&str, OwnedValue)>) -> Props {
+    fn props(entries: Vec<(&str, OwnedVariant)>) -> Props {
         entries
             .into_iter()
             .map(|(name, value)| (name.to_owned(), value))
@@ -648,15 +647,15 @@ mod tests {
 
     #[test]
     fn the_track_is_sanitised_and_needs_a_title() {
-        let player = |metadata: OwnedValue| {
+        let player = |metadata: OwnedVariant| {
             props(vec![
                 ("Metadata", metadata),
-                ("PlaybackStatus", owned(Value::from("Playing"))),
+                ("PlaybackStatus", owned(Variant::from("Playing"))),
             ])
         };
         let full = player(dict(vec![
-            ("xesam:title", Value::from("Night\u{202e} Drive")),
-            ("xesam:artist", Value::new(vec!["Calmo", "Duo"])),
+            ("xesam:title", Variant::from("Night\u{202e} Drive")),
+            ("xesam:artist", Variant::new(vec!["Calmo", "Duo"])),
         ]));
         assert_eq!(
             track(&full),
@@ -666,10 +665,10 @@ mod tests {
             })
         );
         assert!(playing(&full));
-        let no_title = player(dict(vec![("xesam:artist", Value::new(vec!["Calmo"]))]));
+        let no_title = player(dict(vec![("xesam:artist", Variant::new(vec!["Calmo"]))]));
         assert_eq!(track(&no_title), None);
         assert_eq!(
-            track(&player(dict(vec![("xesam:title", Value::from(42u32))]))),
+            track(&player(dict(vec![("xesam:title", Variant::from(42u32))]))),
             None
         );
         assert!(is_player("org.mpris.MediaPlayer2.athanor"));
@@ -680,10 +679,10 @@ mod tests {
     #[test]
     fn a_property_of_the_wrong_type_reads_as_absent_instead_of_panicking() {
         let wrong = props(vec![
-            ("Metadata", owned(Value::from(42u32))),
-            ("PlaybackStatus", owned(Value::from(7u32))),
-            ("CanSeek", owned(Value::from("yes"))),
-            ("Position", owned(Value::from("0"))),
+            ("Metadata", owned(Variant::from(42u32))),
+            ("PlaybackStatus", owned(Variant::from(7u32))),
+            ("CanSeek", owned(Variant::from("yes"))),
+            ("Position", owned(Variant::from("0"))),
         ]);
         assert_eq!(track(&wrong), None);
         assert!(!playing(&wrong));
@@ -698,25 +697,25 @@ mod tests {
 
     #[test]
     fn the_length_is_read_from_the_metadata_in_either_integer_type() {
-        let length = |value: Value<'_>| {
+        let length = |value: Variant<'_>| {
             let player = props(vec![("Metadata", dict(vec![("mpris:length", value)]))]);
             read_player("org.mpris.MediaPlayer2.x", &player, &Props::new(), None).length_us
         };
-        assert_eq!(length(Value::from(5_000_000i64)), Some(5_000_000));
-        assert_eq!(length(Value::from(5_000_000u64)), Some(5_000_000));
-        assert_eq!(length(Value::from(u64::MAX)), None);
-        assert_eq!(length(Value::from("5")), None);
+        assert_eq!(length(Variant::from(5_000_000i64)), Some(5_000_000));
+        assert_eq!(length(Variant::from(5_000_000u64)), Some(5_000_000));
+        assert_eq!(length(Variant::from(u64::MAX)), None);
+        assert_eq!(length(Variant::from("5")), None);
         // A length that is not positive says nothing: a player controls it, and a reader that
         // clamps a position to it would otherwise be asked for an inverted range.
-        assert_eq!(length(Value::from(0i64)), None);
-        assert_eq!(length(Value::from(-1i64)), None);
-        assert_eq!(length(Value::from(i64::MIN)), None);
+        assert_eq!(length(Variant::from(0i64)), None);
+        assert_eq!(length(Variant::from(-1i64)), None);
+        assert_eq!(length(Variant::from(i64::MIN)), None);
     }
 
     #[test]
     fn a_negative_position_says_nothing() {
         let position = |value: i64| {
-            let player = props(vec![("Position", owned(Value::from(value)))]);
+            let player = props(vec![("Position", owned(Variant::from(value)))]);
             read_player("org.mpris.MediaPlayer2.x", &player, &Props::new(), None).position_us
         };
         assert_eq!(position(1_500_000), Some(1_500_000));
@@ -848,12 +847,12 @@ mod tests {
 
     struct FakePlayer {
         tag: String,
-        status: OwnedValue,
-        metadata: OwnedValue,
-        can_next: OwnedValue,
-        can_previous: OwnedValue,
-        can_seek: OwnedValue,
-        position: OwnedValue,
+        status: OwnedVariant,
+        metadata: OwnedVariant,
+        can_next: OwnedVariant,
+        can_previous: OwnedVariant,
+        can_seek: OwnedVariant,
+        position: OwnedVariant,
         log: Shared,
     }
 
@@ -862,7 +861,7 @@ mod tests {
             let interactive = header
                 .primary()
                 .flags()
-                .contains(zbus::message::Flags::AllowInteractiveAuth);
+                .contains(zbus::message::Flags::ALLOW_INTERACTIVE_AUTH);
             let (hold, refuse) = {
                 let mut log = self.log.lock().unwrap();
                 let line = format!("{} {what}", self.tag);
@@ -888,28 +887,28 @@ mod tests {
     #[zbus::interface(name = "org.mpris.MediaPlayer2.Player")]
     impl FakePlayer {
         #[zbus(property)]
-        fn playback_status(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.status.try_clone().map_err(zbus::Error::from)?)
+        fn playback_status(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.status.try_clone()?)
         }
         #[zbus(property)]
-        fn metadata(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.metadata.try_clone().map_err(zbus::Error::from)?)
+        fn metadata(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.metadata.try_clone()?)
         }
         #[zbus(property)]
-        fn can_go_next(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.can_next.try_clone().map_err(zbus::Error::from)?)
+        fn can_go_next(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.can_next.try_clone()?)
         }
         #[zbus(property)]
-        fn can_go_previous(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.can_previous.try_clone().map_err(zbus::Error::from)?)
+        fn can_go_previous(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.can_previous.try_clone()?)
         }
         #[zbus(property)]
-        fn can_seek(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.can_seek.try_clone().map_err(zbus::Error::from)?)
+        fn can_seek(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.can_seek.try_clone()?)
         }
         #[zbus(property)]
-        fn position(&self) -> zbus::fdo::Result<OwnedValue> {
-            Ok(self.position.try_clone().map_err(zbus::Error::from)?)
+        fn position(&self) -> zbus::fdo::Result<OwnedVariant> {
+            Ok(self.position.try_clone()?)
         }
         async fn play_pause(&self, #[zbus(header)] header: Header<'_>) -> zbus::fdo::Result<()> {
             self.call("PlayPause".into(), &header).await
@@ -932,12 +931,15 @@ mod tests {
     fn fake(tag: &str, log: &Shared) -> FakePlayer {
         FakePlayer {
             tag: tag.to_owned(),
-            status: owned(Value::from("Paused")),
-            metadata: dict(vec![("xesam:title", Value::from(format!("Song of {tag}")))]),
-            can_next: owned(Value::from(true)),
-            can_previous: owned(Value::from(false)),
-            can_seek: owned(Value::from(true)),
-            position: owned(Value::from(1_500_000i64)),
+            status: owned(Variant::from("Paused")),
+            metadata: dict(vec![(
+                "xesam:title",
+                Variant::from(format!("Song of {tag}")),
+            )]),
+            can_next: owned(Variant::from(true)),
+            can_previous: owned(Variant::from(false)),
+            can_seek: owned(Variant::from(true)),
+            position: owned(Variant::from(1_500_000i64)),
             log: log.clone(),
         }
     }
@@ -953,11 +955,8 @@ mod tests {
                     identity: format!("Identity {suffix}"),
                 },
             )
-            .expect("root")
             .serve_at(MPRIS_PATH, player)
-            .expect("player")
             .name(format!("{PREFIX}{suffix}"))
-            .expect("name")
             .build();
         tokio::time::timeout(testbus::WAIT, build)
             .await
@@ -971,7 +970,7 @@ mod tests {
             .interface::<_, FakePlayer>(MPRIS_PATH)
             .await
             .expect("player object");
-        object.get_mut().await.metadata = dict(vec![("xesam:title", Value::from(title))]);
+        object.get_mut().await.metadata = dict(vec![("xesam:title", Variant::from(title))]);
         object
             .get()
             .await
@@ -1047,11 +1046,11 @@ mod tests {
     async fn a_player_is_listed_with_what_the_controls_show() {
         let mut rig = rig().await;
         let mut player = fake("a", &rig.log);
-        player.status = owned(Value::from("Playing"));
+        player.status = owned(Variant::from("Playing"));
         player.metadata = dict(vec![
-            ("xesam:title", Value::from("Night Drive")),
-            ("xesam:artist", Value::new(vec!["Calmo"])),
-            ("mpris:length", Value::from(200_000_000i64)),
+            ("xesam:title", Variant::from("Night Drive")),
+            ("xesam:artist", Variant::new(vec!["Calmo"])),
+            ("mpris:length", Variant::from(200_000_000i64)),
         ]);
         let _server = serve_player(&rig.bus, "a", player).await;
         let state = wait_for(&mut rig.states, |state| {
@@ -1084,10 +1083,10 @@ mod tests {
         std::fs::write(&cover, b"png").unwrap();
         let mut local = fake("a", &rig.log);
         local.metadata = dict(vec![
-            ("xesam:title", Value::from("Local")),
+            ("xesam:title", Variant::from("Local")),
             (
                 "mpris:artUrl",
-                Value::from(format!(
+                Variant::from(format!(
                     "file://{}",
                     cover.display().to_string().replace(' ', "%20")
                 )),
@@ -1095,8 +1094,11 @@ mod tests {
         ]);
         let mut remote = fake("b", &rig.log);
         remote.metadata = dict(vec![
-            ("xesam:title", Value::from("Remote")),
-            ("mpris:artUrl", Value::from("https://example.org/cover.png")),
+            ("xesam:title", Variant::from("Remote")),
+            (
+                "mpris:artUrl",
+                Variant::from("https://example.org/cover.png"),
+            ),
         ]);
         let _a = serve_player(&rig.bus, "a", local).await;
         let _b = serve_player(&rig.bus, "b", remote).await;
@@ -1166,7 +1168,7 @@ mod tests {
         // Another peer signals the player's path: the model follows the owner's signals only.
         let stranger = rig.bus.client().await;
         let emitter = zbus::object_server::SignalEmitter::new(&stranger, MPRIS_PATH).unwrap();
-        let forged = HashMap::from([("PlaybackStatus", Value::from("Playing"))]);
+        let forged = HashMap::from([("PlaybackStatus", Variant::from("Playing"))]);
         emitter
             .emit(
                 "org.freedesktop.DBus.Properties",
@@ -1190,10 +1192,10 @@ mod tests {
     async fn a_player_whose_properties_have_the_wrong_type_is_listed_without_a_panic() {
         let mut rig = rig().await;
         let mut player = fake("a", &rig.log);
-        player.status = owned(Value::from(3u32));
-        player.metadata = owned(Value::from("not a dict"));
-        player.can_next = owned(Value::from("yes"));
-        player.position = owned(Value::from(true));
+        player.status = owned(Variant::from(3u32));
+        player.metadata = owned(Variant::from("not a dict"));
+        player.can_next = owned(Variant::from("yes"));
+        player.position = owned(Variant::from(true));
         let _a = serve_player(&rig.bus, "a", player).await;
         let state = wait_for(&mut rig.states, |state| {
             state.settled && !state.players.is_empty()

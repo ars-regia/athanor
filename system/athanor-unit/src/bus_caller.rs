@@ -28,8 +28,8 @@ use std::path::{Component, Path};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
-use zbus::zvariant::{Fd, OwnedObjectPath, OwnedValue};
 use zbus::Connection;
+use zbus::{Fd, OwnedObjectPath, OwnedVariant};
 
 /// The user units of the image, read-only under `/usr`.
 pub const IMAGE_USER_UNITS: &str = "/usr/lib/systemd/user";
@@ -43,7 +43,7 @@ const SYSTEM_BUS: &str = "unix:path=/run/dbus/system_bus_socket";
 
 /// A builder for the connection to the system bus that [`OnBus`] asks, at [`SYSTEM_BUS`]
 /// whatever the environment says. Every `system` connection given to [`OnBus`] comes from here.
-pub fn system_bus() -> zbus::Result<zbus::connection::Builder<'static>> {
+pub fn system_bus() -> zbus::connection::Builder<'static> {
     zbus::connection::Builder::address(SYSTEM_BUS)
 }
 
@@ -257,7 +257,7 @@ impl OnBus<'_> {
         path: &OwnedObjectPath,
         interface: &str,
         name: &str,
-    ) -> Result<OwnedValue, String> {
+    ) -> Result<OwnedVariant, String> {
         let (connection, destination) = self.at(manager);
         let reply = connection
             .call_method(
@@ -282,7 +282,7 @@ type Exec = (String, Vec<String>, bool, u64, u64, u64, u64, u32, i32, i32);
 const SERVICE: &str = "org.freedesktop.systemd1.Service";
 const UNIT: &str = "org.freedesktop.systemd1.Unit";
 
-fn convert(name: &str, e: zbus::zvariant::Error) -> String {
+fn convert(name: &str, e: zbus::Error) -> String {
     format!("{name}: {e}")
 }
 
@@ -378,7 +378,7 @@ mod tests {
     fn the_system_bus_is_the_fixed_socket_whatever_the_environment_says() {
         // Edition 2021: `set_var` is safe. Nothing else in this crate's tests reads this variable.
         std::env::set_var("DBUS_SYSTEM_BUS_ADDRESS", "unix:path=/nonexistent/bogus_bus");
-        let builder = format!("{:?}", system_bus().expect("builder"));
+        let builder = format!("{:?}", system_bus());
         assert!(builder.contains("/run/dbus/system_bus_socket"), "{builder}");
         assert!(!builder.contains("bogus_bus"), "{builder}");
     }

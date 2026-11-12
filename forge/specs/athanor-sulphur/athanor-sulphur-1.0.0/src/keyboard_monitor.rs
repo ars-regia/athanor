@@ -29,6 +29,7 @@
 use crate::identity::{self, Process};
 use crate::state::State;
 use crate::Error;
+use futures_util::StreamExt;
 use smithay::input::keyboard::{Keysym, KeysymHandle, ModifiersState};
 use smithay::reexports::calloop::{channel, LoopHandle};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -41,13 +42,13 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
-use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::connection::Builder;
-use zbus::blocking::Connection;
+use zbus::connection::Builder;
 use zbus::fdo::ConnectionCredentials;
+use zbus::fdo::DBusProxy;
 use zbus::message::Header;
 use zbus::names::BusName;
 use zbus::object_server::SignalEmitter;
+use zbus::Connection;
 
 pub(crate) const PATH: &str = "/org/freedesktop/a11y/Manager";
 pub(crate) const NAME: &str = "org.freedesktop.a11y.Manager";
@@ -382,13 +383,13 @@ pub(crate) fn check(
 
 /// Asks the bus who owns Orca's name and who `client` is, and `check`s them.
 fn admit(bus: &DBusProxy<'_>, client: &str, process: &dyn Process) -> Result<(), Error> {
-    let owner = bus.get_name_owner(ORCA.try_into()?)?;
-    let credentials = bus.get_connection_credentials(client.try_into()?)?;
+    let owner = zbus::block_on(bus.get_name_owner(ORCA.try_into()?))?;
+    let credentials = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
     let pid = check(client, owner.as_str(), &credentials, process)?;
     if credentials.process_fd().is_none() {
         // The pidfd was opened after the bus named the pid: the connection, still open with that
         // pid, shows the pid was not reused in between.
-        let again = bus.get_connection_credentials(client.try_into()?)?;
+        let again = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
         if again.process_id().map(i64::from) != Some(i64::from(pid)) {
             return Err(format!("{client}'s pid changed while it was read").into());
         }
@@ -552,9 +553,9 @@ impl Interface {
     }
 
     /// A key pressed or released, sent to the one client it is for. Declared so that the
-    /// interface's introspection lists it; `keyboard-monitor-signals` sends it through the
-    /// blocking connection with the same member and arguments (`emit_signal`), so this
-    /// asynchronous form goes unused.
+    /// interface's introspection lists it; `keyboard-monitor-signals` sends it in a
+    /// `zbus::block_on` call with the same member and arguments (`emit_signal`), so this
+    /// form goes unused.
     #[allow(dead_code)]
     #[zbus(signal)]
     async fn key_event(
@@ -590,9 +591,8 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) -> Option<SyncSender<Ke
                     .send(update)
                     .map_err(|_| Error::from("the event loop has ended"))
             };
-            let served = Builder::session().and_then(|served| {
-                Connection::session().map(|asking| (served, asking))
-            });
+            let served = zbus::block_on(Connection::session())
+                .map(|asking| (Builder::session(), asking));
             let ended = match served {
                 Ok((served, asking)) => serve(served, &asking, &identity::Proc, &send, queued),
                 Err(error) => Err(error.into()),
@@ -620,42 +620,43 @@ pub(crate) fn serve(
     updates: &dyn Fn(Update) -> Result<(), Error>,
     queued: Receiver<KeyEvent>,
 ) -> Result<(), Error> {
-    let bus = DBusProxy::new(asking)?;
+    let bus = zbus::block_on(DBusProxy::new(asking))?;
     // Read from before the first call can be admitted, so that no change is missed.
-    let renames = bus.receive_name_owner_changed()?;
+    let mut renames = zbus::block_on(bus.receive_name_owner_changed())?;
     let names = Arc::new(Names::default());
     let (jobs, admissions) = sync_channel(JOBS);
     let (watcher, seen) = (jobs.clone(), names.clone());
     std::thread::Builder::new()
         .name("keyboard-monitor-names".into())
         .spawn(move || {
-            for rename in renames {
-                let args = match rename.args() {
-                    Ok(args) => args,
-                    Err(error) => {
-                        tracing::error!(%error, "a change of a name on the bus cannot be read");
-                        break;
-                    }
-                };
-                // Orca's name or a connection came or went; another well-known name is no
-                // client of the monitor.
-                let name = args.name();
-                if matches!(name, BusName::Unique(_)) || name.as_str() == ORCA {
-                    seen.changed.store(true, Ordering::SeqCst);
-                    if !seen.wake(&watcher) {
-                        return;
+            zbus::block_on(async {
+                while let Some(rename) = renames.next().await {
+                    let args = match rename.args() {
+                        Ok(args) => args,
+                        Err(error) => {
+                            tracing::error!(%error, "a change of a name on the bus cannot be read");
+                            break;
+                        }
+                    };
+                    // Orca's name or a connection came or went; another well-known name is no
+                    // client of the monitor.
+                    let name = args.name();
+                    if matches!(name, BusName::Unique(_)) || name.as_str() == ORCA {
+                        seen.changed.store(true, Ordering::SeqCst);
+                        if !seen.wake(&watcher) {
+                            return;
+                        }
                     }
                 }
-            }
-            seen.blind.store(true, Ordering::SeqCst);
-            if !seen.wake(&watcher) {
-                tracing::debug!("the keyboard monitor ended before its reader of names");
-            }
+                seen.blind.store(true, Ordering::SeqCst);
+                if !seen.wake(&watcher) {
+                    tracing::debug!("the keyboard monitor ended before its reader of names");
+                }
+            })
         })?;
-    // The interface is served from the connection's start: its object server is set up in
-    // zbus's runtime, which `blocking::Connection::object_server` called first, outside it,
-    // is not.
-    let served = served.serve_at(PATH, Interface { jobs })?.build()?;
+    // The interface is served from the connection's start: the builder sets up its object
+    // server before the connection reads a message.
+    let served = zbus::block_on(served.serve_at(PATH, Interface { jobs }).build())?;
     let emitter = served.clone();
     std::thread::Builder::new()
         .name("keyboard-monitor-signals".into())
@@ -670,17 +671,22 @@ pub(crate) fn serve(
                     event.keycode,
                 );
                 let destination = Some(event.destination.as_str());
-                if let Err(error) =
-                    emitter.emit_signal(destination, PATH, INTERFACE, "KeyEvent", &body)
-                {
+                if let Err(error) = zbus::block_on(emitter.emit_signal(
+                    destination,
+                    PATH,
+                    INTERFACE,
+                    "KeyEvent",
+                    &body,
+                )) {
                     if let Some(held) = failed.now() {
                         tracing::warn!(%error, held, "a key was not sent to Orca");
                     }
                 }
             }
         })?;
-    let reply =
-        served.request_name_with_flags(NAME, zbus::fdo::RequestNameFlags::DoNotQueue.into())?;
+    let reply = zbus::block_on(
+        served.request_name_with_flags(NAME, zbus::fdo::RequestNameFlags::DO_NOT_QUEUE),
+    )?;
     if reply != zbus::fdo::RequestNameReply::PrimaryOwner {
         return Err(format!("{NAME} is owned by another process ({reply:?})").into());
     }
@@ -750,8 +756,8 @@ pub(crate) fn serve(
     }
     // The calls queued, and those that follow, are refused.
     drop(admissions);
-    served.object_server().remove::<Interface, _>(PATH)?;
-    served.release_name(NAME)?;
+    zbus::block_on(served.object_server().remove::<Interface, _>(PATH))?;
+    zbus::block_on(served.release_name(NAME))?;
     Err("the changes of names on the bus can no longer be read".into())
 }
 

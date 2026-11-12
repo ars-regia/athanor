@@ -84,20 +84,8 @@ fn main() -> ExitCode {
 }
 
 async fn serve(state_dir: PathBuf) -> ExitCode {
-    let builder = match zbus::connection::Builder::session() {
-        Ok(builder) => builder,
-        Err(err) => {
-            tracing::error!(error = %err, "no session bus");
-            return ExitCode::FAILURE;
-        }
-    };
-    let query = match zbus::connection::Builder::session() {
-        Ok(builder) => builder,
-        Err(err) => {
-            tracing::error!(error = %err, "no session bus");
-            return ExitCode::FAILURE;
-        }
-    };
+    let builder = zbus::connection::Builder::session();
+    let query = zbus::connection::Builder::session();
     let _connection = match server::start(
         builder,
         query,
