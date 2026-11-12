@@ -645,6 +645,7 @@ mod tests {
             ("athanor-control-center", false),
             ("athanor-dock", false),
             ("athanor-launcher", false),
+            ("athanor-osd", false),
         ] {
             let client = Identity {
                 executable: format!("/usr/bin/{name}").into(),
@@ -812,7 +813,7 @@ mod tests {
     /// draws on the overlay layer; athanor-idle blanks the outputs and draws its fade
     /// (doc_session_daemons.md, SD22). Then the upstream clients of doc_session.md revision 4,
     /// SN12 and SN15, which no crate of the tree builds: the locker and cosmic-osd.
-    const SHELL_CLIENTS: [(&str, &str, &[&str]); 8] = [
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 9] = [
         (
             "athanor-bar",
             "athanor-bar.service",
@@ -861,6 +862,11 @@ mod tests {
                 "ext_foreign_toplevel_list_v1",
                 "athanor_toplevel_manager_v1",
             ],
+        ),
+        (
+            "athanor-osd",
+            "athanor-osd.service",
+            &["zwlr_layer_shell_v1", "ext_workspace_manager_v1"],
         ),
         (
             "athanor-idle",

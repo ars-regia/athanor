@@ -290,6 +290,15 @@ item = "SW9"
 purpose = "Nix on the immutable image: /nix bind mount, daemon socket, presets, SELinux module"
 
 [[component]]
+path = "forge/specs/athanor-osd"
+kind = "rpm spec"
+area = "shell"
+status = "specified"
+spec = "doc_osd.md"
+item = "OD17"
+purpose = "The Athanor on-screen display: the volume and microphone keys' overlay on Sal"
+
+[[component]]
 path = "forge/specs/athanor-recovery"
 kind = "rpm spec"
 area = "signing-update"
