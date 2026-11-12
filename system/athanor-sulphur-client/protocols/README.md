@@ -56,3 +56,8 @@ in `SHA256SUMS` either. The client binds it in `src/workspace_tiling.rs` at the 
 whether a window covers the rectangle the dock shows itself in, for its intellihide, made by
 `athanor_dock_overlap_manager_v1` for the dock's layer surface, served by athanor-sulphur from
 `src/dock_overlap.rs`. It is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either.
+
+`athanor-material-v1.xml` is Athanor's own protocol as well (doc_own_stack.md decision 35,
+doc_visual_language.md VL13): each output's material tier, M0, M1 or M2, made by
+`athanor_material_manager_v1` for a `wl_output`, served by athanor-sulphur from
+`src/material.rs`. It is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either.

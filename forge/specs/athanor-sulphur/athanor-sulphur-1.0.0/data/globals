@@ -59,5 +59,7 @@ athanor_a11y_manager_v1 privileged
 athanor_workspace_tiling_manager_v1 privileged
 # The dock's intellihide (doc_own_stack.md decision 35, `dock_overlap.rs`).
 athanor_dock_overlap_manager_v1 privileged
+# Each output's material tier, for the shell's surfaces (decision 35, VL13, `material.rs`).
+athanor_material_manager_v1 privileged
 ext_data_control_manager_v1 privileged
 zwlr_data_control_manager_v1 privileged

@@ -9,6 +9,7 @@
 mod a11y;
 mod aids;
 mod bindings;
+mod blur;
 mod capture;
 mod clipboard;
 mod constraints;
@@ -31,6 +32,7 @@ mod layer;
 mod lock;
 mod look;
 mod marks;
+mod material;
 mod output_management;
 mod output_power;
 mod ready;

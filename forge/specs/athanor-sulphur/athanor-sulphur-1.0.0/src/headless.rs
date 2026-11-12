@@ -330,9 +330,11 @@ impl State {
             let view = (&self.space, self.lock.as_ref(), &popups[..], &marks, look);
             match headless.draw(index, view, false) {
                 Ok(drawn) => {
-                    frames.push((headless.outputs[index].output.clone(), drawn));
+                    // The frame has been waited for: this is its time to its sync point.
+                    let time = started.elapsed();
+                    frames.push((headless.outputs[index].output.clone(), drawn, time));
                     if let Some(stats) = &mut self.frame_stats {
-                        stats.drew(started.elapsed());
+                        stats.drew(time);
                     }
                 }
                 Err(error) => {
@@ -341,8 +343,11 @@ impl State {
             }
         }
         let all_drawn = frames.len() == shown;
-        for (output, drawn) in frames {
+        for (output, drawn, time) in frames {
             self.frame_done(&output, &drawn.states, drawn.damaged, frame_target, period);
+            if drawn.damaged {
+                self.material_frame(&output, time);
+            }
         }
         self.serve_captures();
         // A lock is confirmed only once every output shows it.
@@ -352,6 +357,7 @@ impl State {
         self.space.refresh();
         self.send_toplevel_states();
         self.send_dock_overlaps();
+        self.refresh_materials();
         self.popups.cleanup();
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");
@@ -360,6 +366,14 @@ impl State {
 }
 
 impl Headless {
+    /// The render node that draws, none under Pixman.
+    pub fn render_node(&self) -> Option<DrmNode> {
+        match &self.gpu {
+            Gpu::Gbm { node, .. } => Some(*node),
+            Gpu::Pixman { .. } => None,
+        }
+    }
+
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> Result<(), Error> {
         match &mut self.gpu {
             Gpu::Gbm { manager, node, .. } => {

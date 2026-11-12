@@ -170,6 +170,15 @@ impl State {
         self.answer_dock_overlaps(true);
     }
 
+    /// The rectangle the dock last set on `output`, in its logical coordinates: the region
+    /// VL13's probe blurs as the dock's.
+    pub(crate) fn dock_rectangle(&self, output: &Output) -> Option<Rectangle<i32, Logical>> {
+        self.dock_overlaps
+            .iter()
+            .filter(|overlap| overlap.output.as_ref() == Some(output))
+            .find_map(|overlap| overlap.rectangle)
+    }
+
     fn answer_dock_overlaps(&mut self, again: bool) {
         if self.lock.is_some() {
             return;

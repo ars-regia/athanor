@@ -49,6 +49,9 @@ pub enum Privilege {
     /// `athanor_dock_overlap_manager_v1`: whether a window covers the dock's rectangle, the
     /// dock's (doc_own_stack.md decision 35).
     DockOverlap,
+    /// `athanor_material_manager_v1`: each output's material tier, the shell surfaces'
+    /// (doc_own_stack.md decision 35, doc_visual_language.md VL13).
+    Material,
     /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
     /// keyboard aids configured (doc_accessibility.md AX10, AX11).
     A11y,
@@ -65,7 +68,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 21] = [
+    const ALL: [(Self, &'static str); 22] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -95,6 +98,7 @@ impl Privilege {
             "athanor_workspace_tiling_manager_v1",
         ),
         (Self::DockOverlap, "athanor_dock_overlap_manager_v1"),
+        (Self::Material, "athanor_material_manager_v1"),
         (Self::TrustedPrompt, MARK),
     ];
 
@@ -830,6 +834,7 @@ mod tests {
                 "athanor_keyboard_group_manager_v1",
                 "athanor_a11y_manager_v1",
                 "athanor_workspace_tiling_manager_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -843,6 +848,7 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -855,6 +861,7 @@ mod tests {
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
                 "athanor_dock_overlap_manager_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -866,12 +873,17 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "ext_foreign_toplevel_list_v1",
                 "athanor_toplevel_manager_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
             "athanor-osd",
             "athanor-osd.service",
-            &["zwlr_layer_shell_v1", "ext_workspace_manager_v1"],
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_workspace_manager_v1",
+                "athanor_material_manager_v1",
+            ],
         ),
         (
             "athanor-idle",
