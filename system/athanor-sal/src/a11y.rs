@@ -678,7 +678,8 @@ mod tests {
             .widget(bar)
             .children
             .iter()
-            .map(|&id| &update.nodes[id.index()].1)
+            .filter_map(|&id| update.nodes.iter().find(|(n, _)| *n == node_id(id)))
+            .map(|(_, node)| node)
             .collect();
         let read: Vec<_> = parts
             .iter()
