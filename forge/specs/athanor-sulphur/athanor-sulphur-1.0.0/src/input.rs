@@ -14,7 +14,7 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, KeymapFile, Xkb, XkbConfig,
 };
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
 use smithay::output::Output;
@@ -25,7 +25,7 @@ use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardSpecialEvent,
 };
 use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHandler};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 impl State {
     /// A click at `location` focuses the window it lands on, or the layer surface there that
@@ -504,7 +504,7 @@ impl State {
             return true;
         };
         let current = self.virtual_keymap.as_ref();
-        if current.is_some_and(|current| current.device == *device && current.keymap == keymap) {
+        if current.is_some_and(|current| current.device == *device && current.keymap.id() == keymap.id()) {
             return true;
         }
         let (seat_keymap, seat_layouts, seat_modifiers) = match current {
@@ -514,16 +514,16 @@ impl State {
                 current.seat_modifiers,
             ),
             None => (
-                keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                keyboard.keymap_file(),
                 keyboard.with_xkb_state(self, |context| layout_names(context.xkb())),
                 self.seat_modifiers(keyboard),
             ),
         };
-        if *keymap == *seat_keymap {
+        if keymap.id() == seat_keymap.id() {
             self.restore_seat_keymap();
             return true;
         }
-        if let Err(error) = keyboard.set_keymap_from_string(self, keymap.to_string()) {
+        if let Err(error) = keyboard.set_keymap_from_keymap_file(self, keymap.clone()) {
             tracing::warn!(
                 ?error,
                 "a virtual keyboard's keymap did not load: its key is dropped"
@@ -559,7 +559,7 @@ impl State {
         else {
             return;
         };
-        if let Err(error) = keyboard.set_keymap_from_string(self, current.seat_keymap) {
+        if let Err(error) = keyboard.set_keymap_from_keymap_file(self, current.seat_keymap) {
             // The seat's configuration, as `State::new` gives it, so that the seat never stays
             // on a client's keymap.
             tracing::error!(
@@ -584,10 +584,10 @@ impl State {
 /// A virtual keyboard's keymap the seat has in place of its own (`State::with_keymap_of`).
 pub struct VirtualKeymap {
     device: VirtualKeyboardDevice,
-    keymap: Arc<str>,
+    keymap: KeymapFile,
     /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
     /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
-    seat_keymap: String,
+    seat_keymap: KeymapFile,
     /// The names of the seat's layouts, which the current keymap no longer has.
     pub(crate) seat_layouts: Vec<String>,
     pub(crate) seat_modifiers: [u32; 4],
