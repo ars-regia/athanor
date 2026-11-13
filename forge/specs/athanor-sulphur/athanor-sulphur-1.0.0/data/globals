@@ -40,6 +40,8 @@ wp_fifo_manager_v1 standard
 wp_commit_timing_manager_v1 standard
 org_kde_kwin_server_decoration_manager standard
 xdg_toplevel_icon_manager_v1 standard
+# Decision 35.
+ext_background_effect_manager_v1 standard
 # Under doc_own_stack.md decision 30's rule (`constraints.rs`).
 zwp_pointer_constraints_v1 standard
 zwp_relative_pointer_manager_v1 standard

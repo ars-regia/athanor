@@ -13,6 +13,7 @@ pub(crate) mod focus;
 #[cfg(feature = "gpu")]
 pub(crate) mod gpu;
 mod icon;
+mod icon_toggle;
 mod motion;
 mod popup;
 mod range;
@@ -25,6 +26,7 @@ mod wrap;
 
 pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
+pub use icon_toggle::IconToggle;
 pub use motion::{Curve, Motion, Pose};
 pub use render::Error;
 pub use text::TextStyle;

@@ -274,6 +274,7 @@ impl Painter {
             .flat_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. }
                 | Kind::IconButton { image, .. }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
                 | Kind::Picture { image, .. } => vec![image.pixmap()],
                 // Both of a tile's glyphs, so that turning it over draws one already uploaded.
                 Kind::Tile(tile) => tile.glyphs.iter().flat_map(|g| &g.tinted).map(|i| i.pixmap()).collect(),
@@ -467,6 +468,26 @@ mod tests {
         let blue = [0, 0, 0xcc, 0xff];
         assert_eq!(centre_of(&mut painter, image(solid(red)))?, red);
         assert_eq!(centre_of(&mut painter, image(solid(blue)))?, blue);
+        assert_eq!(painter.resources.images.len(), 1);
+        Ok(())
+    }
+
+    /// An icon toggle's image reaches the atlas, as an icon button's does, and is drawn.
+    #[test]
+    #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
+    fn an_icon_toggles_image_is_uploaded_and_drawn() -> Result<(), Error> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = ready(instance.request_adapter(&Default::default()))??;
+        let mut painter = Painter::new(&adapter, TextureFormat::Rgba8Unorm)?;
+        let red = [0xcc, 0, 0, 0xff];
+        let toggle = Kind::IconToggle(crate::icon_toggle::IconToggle {
+            label: "Do Not Disturb".into(),
+            image: solid(red),
+            size: 32.0,
+            active: false,
+        });
+        assert_eq!(centre_of(&mut painter, toggle)?, red);
         assert_eq!(painter.resources.images.len(), 1);
         Ok(())
     }

@@ -642,6 +642,23 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
                 }
             }
+            // An icon toggle: raised, as a button, and darker or lighter toward its text while
+            // it is on, without the accent (VL10).
+            Kind::IconToggle(toggle) => {
+                let base = if toggle.active {
+                    mix(t.surface, t.text, crate::icon_toggle::ON)
+                } else {
+                    t.surface
+                };
+                let fill = if hover == Some(id) {
+                    mix(base, t.text, HOVER)
+                } else {
+                    base
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
+            }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
