@@ -172,7 +172,7 @@ pub async fn render(file: File, kind: Kind, side: u32, cancellable: &gio::Cancel
         }
     };
     let (width, height, rgba) = decode(&answer)?;
-    Ok(Picture { width, height, rgba: rgba.to_vec() })
+    Ok(Picture { width, height, rgba: glib::Bytes::from(rgba) })
 }
 
 /// How long a stop is retried.

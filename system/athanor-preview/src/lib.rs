@@ -35,7 +35,9 @@ pub enum Subject {
 pub struct Picture {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    /// Shared, so that a toolkit that keeps the bytes, as GDK's textures do, takes them
+    /// without a copy.
+    pub rgba: glib::Bytes,
 }
 
 /// What the pane shows: from the top, the picture or else the icon, the title, the body and
@@ -103,6 +105,13 @@ impl Preview {
         self.card.borrow().clone()
     }
 
+    /// The longest side, in pixels, of a picture drawn at the pane's scale: what a picture
+    /// handed to [`Preview::show`] needs at most.
+    pub fn picture_side(&self) -> u32 {
+        // `set_scale` keeps the scale finite and positive; `render` clamps the side.
+        (f64::from(PICTURE_SIDE) * self.scale.get()).ceil().max(1.0) as u32
+    }
+
     /// The scale of the surface that shows the pane, for the pictures decoded after this call.
     pub fn set_scale(&self, scale: f64) {
         if scale.is_finite() && scale > 0.0 {
@@ -118,8 +127,10 @@ impl Preview {
         self.notify();
     }
 
+    /// Calls `changed` with a copy of the card, so that it may show or clear the pane again.
     fn notify(&self) {
-        (self.changed)(&self.card.borrow());
+        let card = self.card.borrow().clone();
+        (self.changed)(&card);
     }
 
     /// Changes the card and tells the launcher.
@@ -287,8 +298,7 @@ impl Preview {
             self.update(|card| card.body = head.unwrap_or_default());
             return;
         };
-        // `set_scale` keeps the scale finite and positive; `render` clamps the side.
-        let side = (f64::from(PICTURE_SIDE) * self.scale.get()).ceil().max(1.0) as u32;
+        let side = self.picture_side();
         *self.queued.borrow_mut() = Some(Job { file: opened, kind: decode, side, path, generation });
         self.pump();
     }
@@ -346,7 +356,7 @@ mod tests {
             let seen = Rc::clone(&seen);
             move |card| seen.borrow_mut().push(card.clone())
         });
-        let picture = Picture { width: 1, height: 1, rgba: vec![1, 2, 3, 255] };
+        let picture = Picture { width: 1, height: 1, rgba: glib::Bytes::from_owned(vec![1u8, 2, 3, 255]) };
         preview.show(Subject::Window { title: "Files".into(), app: "Nautilus".into(), picture: Some(picture.clone()) });
         let card = preview.card();
         assert_eq!((card.title.as_str(), card.body.as_str(), card.facts.as_str()), ("Files", "Nautilus", ""));
@@ -360,6 +370,37 @@ mod tests {
         // show: clear, then the subject, twice; then clear.
         assert_eq!(seen.len(), 5);
         assert!(seen.last().is_some_and(|card| card.title.is_empty() && card.picture.is_none()));
+    }
+
+    #[test]
+    fn the_launcher_may_change_the_pane_from_its_callback() {
+        let preview: Rc<RefCell<std::rc::Weak<Preview>>> = Rc::default();
+        let calls = Rc::new(Cell::new(0));
+        let pane = Preview::new({
+            let (preview, calls) = (Rc::clone(&preview), Rc::clone(&calls));
+            move |card| {
+                calls.set(calls.get() + 1);
+                // The first card with a title clears the pane again, inside the callback.
+                if !card.title.is_empty() {
+                    if let Some(preview) = preview.borrow().upgrade() {
+                        preview.clear();
+                    }
+                }
+            }
+        });
+        preview.replace(Rc::downgrade(&pane));
+        pane.show(Subject::Note { title: "Note".into(), body: String::new() });
+        // show: clear, then the note, whose callback cleared it.
+        assert_eq!(calls.get(), 3);
+        assert!(pane.card().title.is_empty());
+    }
+
+    #[test]
+    fn a_window_picture_needs_the_side_at_the_panes_scale() {
+        let preview = Preview::new(|_| {});
+        assert_eq!(preview.picture_side(), PICTURE_SIDE);
+        preview.set_scale(1.5);
+        assert_eq!(preview.picture_side(), 768);
     }
 
     #[test]

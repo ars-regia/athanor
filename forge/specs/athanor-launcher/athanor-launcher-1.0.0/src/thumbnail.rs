@@ -3,33 +3,75 @@
 use athanor_preview::Picture;
 use athanor_sulphur_client::{Picture as Capture, PixelFormat};
 
-/// The pixels of `capture` as red, green, blue and alpha, the alpha opaque for a format
-/// without one. `None` for a capture whose bytes do not hold its rows.
-pub fn picture(capture: &Capture) -> Option<Picture> {
+/// Where red, green and blue sit in a pixel of `format`, and alpha when it has one.
+fn channels(format: PixelFormat) -> ([usize; 3], Option<usize>) {
+    match format {
+        PixelFormat::Argb8888 => ([2, 1, 0], Some(3)),
+        PixelFormat::Xrgb8888 => ([2, 1, 0], None),
+        PixelFormat::Abgr8888 => ([0, 1, 2], Some(3)),
+        PixelFormat::Xbgr8888 => ([0, 1, 2], None),
+    }
+}
+
+/// The pixels of `capture` as red, green and blue premultiplied by alpha, and alpha, the alpha
+/// opaque for a format without one, at most `side` pixels on either side: a larger capture is
+/// shrunk by a whole factor, each pixel the mean of the block it stands for, so that a 4K
+/// window is not copied whole for a pane a few hundred pixels wide. `None` for a capture with
+/// no pixel, or whose bytes do not hold its rows.
+pub fn picture(capture: &Capture, side: u32) -> Option<Picture> {
     let (width, height, stride) = (
         capture.width as usize,
         capture.height as usize,
         capture.stride as usize,
     );
     let row = width.checked_mul(4)?;
-    if row > stride || capture.bytes.len() < stride.checked_mul(height)? {
+    if row == 0
+        || height == 0
+        || row > stride
+        || capture.bytes.len() < stride.checked_mul(height)?
+    {
         return None;
     }
-    let mut rgba = Vec::with_capacity(row * height);
-    for line in capture.bytes.chunks_exact(stride).take(height) {
-        for &[b0, b1, b2, b3] in line[..row].as_chunks::<4>().0 {
-            rgba.extend_from_slice(&match capture.format {
-                PixelFormat::Argb8888 => [b2, b1, b0, b3],
-                PixelFormat::Xrgb8888 => [b2, b1, b0, 255],
-                PixelFormat::Abgr8888 => [b0, b1, b2, b3],
-                PixelFormat::Xbgr8888 => [b0, b1, b2, 255],
-            });
+    // The smallest whole factor that brings the longer side within `side`.
+    let factor = width.max(height).div_ceil((side as usize).max(1));
+    let (out_w, out_h) = (width / factor, height / factor);
+    if out_w == 0 || out_h == 0 {
+        return None;
+    }
+    let ([r, g, b], a) = channels(capture.format);
+    let block = (factor * factor) as u32;
+    let mut sums = vec![[0u32; 4]; out_w];
+    let mut rgba = Vec::with_capacity(out_w * out_h * 4);
+    for (y, line) in capture
+        .bytes
+        .chunks_exact(stride)
+        .take(out_h * factor)
+        .enumerate()
+    {
+        for (x, pixel) in line[..out_w * factor * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .enumerate()
+        {
+            let sum = &mut sums[x / factor];
+            sum[0] += u32::from(pixel[r]);
+            sum[1] += u32::from(pixel[g]);
+            sum[2] += u32::from(pixel[b]);
+            sum[3] += a.map_or(255, |a| u32::from(pixel[a]));
+        }
+        if (y + 1) % factor == 0 {
+            for sum in &mut sums {
+                // The mean of bytes is a byte.
+                rgba.extend(sum.map(|channel| (channel / block) as u8));
+                *sum = [0; 4];
+            }
         }
     }
     Some(Picture {
-        width: capture.width,
-        height: capture.height,
-        rgba,
+        width: out_w as u32,
+        height: out_h as u32,
+        rgba: glib::Bytes::from_owned(rgba),
     })
 }
 
@@ -37,21 +79,29 @@ pub fn picture(capture: &Capture) -> Option<Picture> {
 mod tests {
     use super::*;
 
-    fn capture(format: PixelFormat, stride: u32, bytes: Vec<u8>) -> Capture {
+    fn capture(
+        format: PixelFormat,
+        (width, height, stride): (u32, u32, u32),
+        bytes: Vec<u8>,
+    ) -> Capture {
         Capture {
-            width: 1,
-            height: 2,
+            width,
+            height,
             stride,
             format,
             bytes,
         }
     }
 
+    fn rgba(capture: &Capture, side: u32) -> Option<(u32, u32, Vec<u8>)> {
+        picture(capture, side).map(|p| (p.width, p.height, p.rgba.to_vec()))
+    }
+
     #[test]
     fn the_bytes_of_a_little_endian_word_become_red_green_blue_alpha() {
         // Two rows of one pixel, each row padded to 8 bytes.
         let bytes = vec![1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7, 8, 0, 0, 0, 0];
-        let rgba = |format| picture(&capture(format, 8, bytes.clone())).map(|p| p.rgba);
+        let rgba = |format| rgba(&capture(format, (1, 2, 8), bytes.clone()), 512).map(|p| p.2);
         assert_eq!(
             rgba(PixelFormat::Argb8888),
             Some(vec![3, 2, 1, 4, 7, 6, 5, 8])
@@ -71,15 +121,39 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_too_short_for_its_rows_is_refused() {
-        assert_eq!(
-            picture(&capture(PixelFormat::Argb8888, 4, vec![0; 7])),
-            None
+    fn a_capture_too_short_for_its_rows_or_without_a_pixel_is_refused() {
+        let refused = |shape, len| rgba(&capture(PixelFormat::Argb8888, shape, vec![0; len]), 512);
+        assert_eq!(refused((1, 2, 4), 7), None);
+        assert_eq!(refused((1, 2, 2), 8), None, "a stride below a row");
+        assert_eq!(refused((0, 2, 0), 8), None, "no column, and a stride of 0");
+        assert_eq!(refused((0, 2, 4), 8), None, "no column");
+        assert_eq!(refused((1, 0, 4), 8), None, "no row");
+        assert_eq!(refused((1, 2, 0), 8), None, "a stride of 0");
+    }
+
+    #[test]
+    fn a_capture_larger_than_the_side_is_the_mean_of_its_blocks() {
+        // 4 by 2 pixels shrunk by 2 into 2 by 1: each pixel the mean of a 2 by 2 block.
+        let mut bytes = Vec::new();
+        for line in [[0, 10, 20, 30], [40, 50, 60, 70]] {
+            for v in line {
+                bytes.extend([v, v, v, 255]);
+            }
+        }
+        let shrunk = rgba(&capture(PixelFormat::Argb8888, (4, 2, 16), bytes), 2);
+        assert_eq!(shrunk, Some((2, 1, vec![25, 25, 25, 255, 45, 45, 45, 255])));
+    }
+
+    #[test]
+    fn a_4k_capture_fits_the_side() {
+        let (width, height) = (3840u32, 2160u32);
+        let bytes = vec![128; (width * height * 4) as usize];
+        let shrunk = picture(
+            &capture(PixelFormat::Xrgb8888, (width, height, width * 4), bytes),
+            768,
         );
-        assert_eq!(
-            picture(&capture(PixelFormat::Argb8888, 2, vec![0; 8])),
-            None,
-            "a stride below a row"
-        );
+        let size = shrunk.as_ref().map(|p| (p.width, p.height));
+        assert_eq!(size, Some((768, 432)));
+        assert_eq!(shrunk.map(|p| p.rgba.len()), Some(768 * 432 * 4));
     }
 }

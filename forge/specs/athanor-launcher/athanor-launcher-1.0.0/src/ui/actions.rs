@@ -227,11 +227,19 @@ impl Launcher {
         glib::spawn_future_local(async move {
             let Some(client) = this.client.as_ref() else { return };
             match client.capture_pixels(id).await {
-                Ok(capture) if this.selection.get() == selection => this.preview.show(Subject::Window {
-                    title: hit.title,
-                    app: hit.subtitle,
-                    picture: thumbnail::picture(&capture),
-                }),
+                Ok(capture) if this.selection.get() == selection => {
+                    let picture = thumbnail::picture(&capture, this.preview.picture_side());
+                    if picture.is_none() {
+                        tracing::warn!(
+                            width = capture.width,
+                            height = capture.height,
+                            stride = capture.stride,
+                            bytes = capture.bytes.len(),
+                            "the window capture holds no picture; the preview shows none"
+                        );
+                    }
+                    this.preview.show(Subject::Window { title: hit.title, app: hit.subtitle, picture });
+                }
                 Ok(_) => {}
                 Err(err) => tracing::warn!(error = %err, "no window thumbnail"),
             }
