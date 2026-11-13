@@ -161,6 +161,11 @@ impl Budget {
         }
     }
 
+    /// Whether it takes no more regions.
+    fn spent(&self) -> bool {
+        self.left == 0
+    }
+
     /// Whether it takes a region whose box is `rect`; once a region is past it, it takes none.
     fn takes(&mut self, rect: Rectangle<i32, Physical>) -> bool {
         let area = area_of(rect);
@@ -187,6 +192,12 @@ struct Shared {
     /// How many copies are held, by every damage tracker.
     #[cfg(test)]
     held: Cell<usize>,
+    /// How many times a region was placed on the output, for its blur element.
+    #[cfg(test)]
+    placed: Cell<u64>,
+    /// How many regions were past the bound in the last frame.
+    #[cfg(test)]
+    past: Cell<usize>,
 }
 
 /// A blur element's copy of what lies under it, made in one GL context for one size, and
@@ -234,6 +245,25 @@ pub fn held(output: &Output) -> usize {
 #[cfg(test)]
 pub fn blurs(output: &Output) -> u64 {
     kept(output).shared.blurs.get()
+}
+
+/// How many times a region was placed on `output`, for its blur element.
+#[cfg(test)]
+pub fn placed(output: &Output) -> u64 {
+    kept(output).shared.placed.get()
+}
+
+/// How many regions were past `output`'s bound in its last frame.
+#[cfg(test)]
+pub fn past(output: &Output) -> usize {
+    kept(output).shared.past.get()
+}
+
+/// Whether `surface` has a region its commits applied.
+fn has_region(surface: &WlSurface) -> bool {
+    with_states(surface, |states| {
+        states.cached_state.get::<Applied>().current().0.is_some()
+    })
 }
 
 /// What a surface's blur element keeps between frames: its id, and the shape it was last
@@ -351,6 +381,8 @@ impl BlurElement {
             }
             Some((shape.id.clone(), shape.commit, applied))
         })?;
+        #[cfg(test)]
+        shared.placed.set(shared.placed.get() + 1);
         let (geometry, rects) = on_output(&rects, geometry, scale, area)?;
         Some(Self {
             id,
@@ -417,17 +449,25 @@ where
     let mut budget = Budget::of(area);
     let mut past = 0usize;
     for element in elements {
-        let blur = regions
+        let surface = regions
             .get(element.id())
-            .filter(|surface| surface.is_alive())
-            .and_then(|surface| {
-                BlurElement::of(surface, element.geometry(scale), scale, area, &kept.shared)
-            });
-        let blur = match blur {
-            Some(blur) if budget.takes(blur.geometry) => Some(blur),
-            Some(_) => {
-                past += 1;
+            .filter(|surface| surface.is_alive());
+        // Once the budget is spent, a region is past it without being placed on the output: it
+        // is counted whether or not it would show there.
+        let blur = match surface {
+            Some(surface) if budget.spent() => {
+                past += usize::from(has_region(surface));
                 None
+            }
+            Some(surface) => {
+                match BlurElement::of(surface, element.geometry(scale), scale, area, &kept.shared) {
+                    Some(blur) if budget.takes(blur.geometry) => Some(blur),
+                    Some(_) => {
+                        past += 1;
+                        None
+                    }
+                    None => None,
+                }
             }
             None => None,
         };
@@ -436,6 +476,8 @@ where
             blurred.push(Blurred::Blur(Behind(blur, PhantomData)));
         }
     }
+    #[cfg(test)]
+    kept.shared.past.set(past);
     if past > 0 {
         if let Some(repeats) = kept.hush.borrow_mut().now() {
             tracing::warn!(

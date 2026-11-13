@@ -7,7 +7,7 @@ use super::marks::{clear_the_fixture, frame};
 use super::material::{on_a_fake_gpu, output, times, LONG};
 use super::wave2a::error_of;
 use super::*;
-use crate::background_effect::{blurs, held, Blurred, MOST_BLURS};
+use crate::background_effect::{blurs, held, past, placed, Blurred, MOST_BLURS};
 use crate::material::Tier;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
@@ -637,14 +637,15 @@ fn d35_under_the_magnifier_a_region_past_the_output_is_not_stretched() {
 
 /// A client that sets more regions than an output blurs in a frame has the frontmost blurred,
 /// up to `MOST_BLURS`, and the rest drawn as they are: here the scene's subsurface, the
-/// bottom one, is past the bound once as many subsurfaces with a region are put over it.
+/// bottom one, is past the bound once as many subsurfaces with a region are put over it. It is
+/// counted for the warning, and, the budget spent, not placed on the output.
 #[test]
 fn d35_an_output_blurs_at_most_most_blurs_regions_in_a_frame() {
     let mut run = Running::start(None);
     let mut scene = Scene::new(&mut run);
     let region = scene.region();
     scene.set(&mut run, Some(&region));
-    on_pixman_m2(&mut run, &mut scene);
+    let first = on_pixman_m2(&mut run, &mut scene);
     let lowest = Rectangle::new((AT.0 + CHILD_AT.0, AT.1 + CHILD_AT.1).into(), CHILD.into());
     assert_eq!(blur_elements(&run), [lowest], "one region, blurred");
 
@@ -673,9 +674,16 @@ fn d35_an_output_blurs_at_most_most_blurs_regions_in_a_frame() {
     }
     scene.parent.commit();
     scene.local.roundtrip(&mut run);
+    let before = placed(&first);
     let shown = blur_elements(&run);
     assert_eq!(shown.len(), MOST_BLURS, "the bound: {shown:?}");
     assert!(!shown.contains(&lowest), "the bottom one is past it");
+    assert_eq!(past(&first), 1, "and counted past it");
+    assert_eq!(
+        placed(&first) - before,
+        MOST_BLURS as u64,
+        "the one past the spent budget is not placed on the output"
+    );
     run.stop();
 }
 
