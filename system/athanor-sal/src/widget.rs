@@ -3,7 +3,7 @@
 
 use crate::focus;
 use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
-use crate::theme::Theme;
+use crate::theme::{Rgba, Theme, TitleBarStyle};
 use crate::wrap::{self, Wrap};
 use parley::Layout;
 use std::cell::Cell;
@@ -557,6 +557,8 @@ pub struct Widget {
     /// How a label wraps, see [`Ui::set_wrap`], the width its last place gave it, if one has,
     /// and the narrowest it can be, its longest word, as its last measure found it.
     pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
+    /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
+    pub(crate) ink: Option<Rgba>,
 }
 
 impl Widget {
@@ -575,6 +577,7 @@ impl Widget {
             sensitive: true,
             align: [crate::Align::Fill; 2],
             wrap: None,
+            ink: None,
         }
     }
 
@@ -765,6 +768,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// Whether the compositor may make the window larger than its widgets, as GTK's
+    /// `resizable`: when false, the window's maximum size is its minimum. True by default.
+    pub resizable: bool,
     /// The items of a drop-down whose menu is open changed: the driver closes the menu, whose
     /// items are the old ones.
     pub(crate) stale_popup: bool,
@@ -804,6 +810,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            resizable: true,
             stale_popup: false,
             focus: None,
             text: TextContext::default(),
@@ -1037,7 +1044,10 @@ impl Ui {
         let root = &mut self.widgets[Self::ROOT].children;
         root.pop();
         root.insert(0, bar);
-        self.add(bar, Kind::Label(self.title.clone()));
+        let title = self.add(bar, Kind::Label(self.title.clone()));
+        if self.theme.title_bar_style == TitleBarStyle::Bare {
+            self.widgets[title].style.weight = 700;
+        }
         // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
         if !self.modal {
             self.add(bar, Kind::WindowButton(WindowButton::Minimize));
@@ -1582,6 +1592,22 @@ impl Ui {
         live
     }
 
+    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or, with `None`,
+    /// in the theme's text colour again. `false`, and nothing changes, for a widget that is not a
+    /// label.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_ink(&mut self, id: WidgetId, ink: Option<Rgba>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_)) {
+            return false;
+        }
+        widget.ink = ink;
+        true
+    }
+
     /// Makes label `id` wrap as [`Wrap`] says, as GTK's `wrap`, `max-width-chars`, `lines` and
     /// end `ellipsize`, or, with `None`, keep its text on one line again; takes effect from its
     /// next layout. `false`, and nothing changes, for a widget that is not a label.
@@ -1806,6 +1832,7 @@ impl Ui {
 
     /// Shapes every text and places every widget; returns the window's size in logical pixels.
     pub fn layout(&mut self) -> (f32, f32) {
+        self.text.set_family(self.theme.font_family.as_deref());
         let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
         // Height for width: a wrapping label asks for a width that does not depend on the one its
@@ -1843,6 +1870,7 @@ impl Ui {
         let (margin, section_gap) = (t.margin, t.section_gap);
         let (min_width, min_height) = (self.min_width, self.min_height);
         let (island_pad, button_min) = (t.island_padding, t.button_min);
+        let (control_border, control_min) = (t.control_border, t.control_min_height);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
@@ -1914,7 +1942,8 @@ impl Ui {
                 let title = sizes.first().map_or(0.0, |s| s.0);
                 let buttons = sizes.iter().skip(1).map(|s| s.0 + gap).sum::<f32>();
                 let h = sizes.iter().map(|s| s.1).fold(0.0, f32::max);
-                (title + 2.0 * buttons + 2.0 * pad, h + pad)
+                let bar = self.theme.title_bar_height.map_or(h + pad, |bar| bar.max(h));
+                (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
             Kind::Row => {
@@ -1943,17 +1972,22 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
+            Kind::Button(text) | Kind::Toggle { label: text, radio: false, .. } => {
+                let layout = self.text.layout(text, size, rtl, &style);
+                // GTK's box: the minimum height inside the outline, the outline outside it.
+                let h = (layout.height() + pad).max(control_min);
+                let edge = 2.0 * control_border;
+                let wh = (layout.width() + 2.0 * pad + edge, h + edge);
+                widget.text = Some(layout);
+                wh
+            }
             // Its widgets side by side, inside the padding a row of text has.
             Kind::ListRow(_) if !sizes.is_empty() => {
                 widget.text = None;
                 let w = sizes.iter().map(|s| s.0).sum::<f32>() + spacing;
                 (w + 2.0 * pad, sizes.iter().map(|s| s.1).fold(0.0, f32::max) + pad)
             }
-            Kind::Button(text)
-            | Kind::Toggle { label: text, radio: false, .. }
-            | Kind::MenuItem(text)
-            | Kind::ListRow(text)
-            | Kind::ListHeading(text) => {
+            Kind::MenuItem(text) | Kind::ListRow(text) | Kind::ListHeading(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
                 widget.text = Some(layout);
@@ -4917,6 +4951,113 @@ mod tests {
         ui.set_focus(Some(field));
         ui.commit("b");
         assert_eq!(text(&ui, field), "ba");
+    }
+
+    #[test]
+    fn a_control_outline_and_minimum_height_grow_buttons_and_toggles_only() {
+        let sizes = |theme: Theme| {
+            let mut ui = Ui::new("Sizes", theme, false);
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let toggle = ui.toggle(row, "Top", true);
+            let button = ui.add(Ui::ROOT, Kind::Button("Save".into()));
+            let menu = ui.add(Ui::ROOT, Kind::Menu);
+            let item = ui.add(menu, Kind::MenuItem("Open".into()));
+            // What each asks for: a placed control takes the width of its row or column.
+            [toggle, button, item].map(|id| ui.measure(id))
+        };
+        let plain = sizes(Theme::default());
+        let theme = Theme {
+            control_border: 1.0,
+            control_min_height: 34.0,
+            ..Theme::default()
+        };
+        let outlined = sizes(theme);
+        for i in 0..2 {
+            assert_eq!(outlined[i].0, plain[i].0 + 2.0, "control {i}");
+            assert_eq!(outlined[i].1, plain[i].1.max(34.0) + 2.0, "control {i}");
+        }
+        assert_eq!(outlined[2], plain[2], "a menu's item keeps its size");
+    }
+
+    #[test]
+    fn a_bare_title_bar_sets_its_title_bold() {
+        for (style, weight) in [(TitleBarStyle::Round, 400), (TitleBarStyle::Bare, 700)] {
+            let theme = Theme {
+                title_bar_style: style,
+                ..Theme::default()
+            };
+            let mut ui = Ui::new("Layout", theme, false);
+            ui.add_title_bar();
+            let bar = ui.title_bar.expect("a title bar");
+            let title = ui.widget(bar).children[0];
+            assert!(matches!(ui.widget(title).kind, Kind::Label(_)));
+            assert_eq!(ui.widget(title).style.weight, weight, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn a_theme_sets_the_title_bar_height_but_never_below_its_buttons() {
+        let bar_height = |title_bar_height| {
+            let theme = Theme {
+                title_bar_height,
+                ..Theme::default()
+            };
+            let mut ui = Ui::new("Layout", theme, false);
+            ui.add_title_bar();
+            ui.layout();
+            ui.widget(ui.title_bar.expect("a title bar")).rect.h
+        };
+        let natural = bar_height(None);
+        assert_eq!(bar_height(Some(natural + 7.0)), natural + 7.0);
+        // The buttons' height: the natural bar less the padding.
+        assert_eq!(bar_height(Some(1.0)), natural - Theme::default().padding);
+    }
+
+    #[test]
+    fn the_title_bar_takes_no_alignment_and_the_column_aligns_under_it() {
+        let theme = Theme {
+            title_bar_height: Some(39.0),
+            title_bar_style: crate::theme::TitleBarStyle::Bare,
+            ..Theme::default()
+        };
+        let margin = theme.margin;
+        let mut ui = Ui::new("Layout", theme, false);
+        ui.min_height = 300.0;
+        ui.resizable = false;
+        ui.add_title_bar();
+        let bar = ui.title_bar.expect("a title bar");
+        let title = ui.widget(bar).children[0];
+        let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
+        let done = ui.add(Ui::ROOT, Kind::Button("Done".into()));
+        let end = [crate::Align::Fill, crate::Align::End];
+        assert_eq!(ui.set_align(bar, end), None);
+        assert_eq!(ui.set_align(title, end), None);
+        assert_eq!(ui.set_align(done, end), Some(true));
+        ui.layout();
+        let (root, b, l, d) = (
+            ui.widget(Ui::ROOT).rect,
+            ui.widget(bar).rect,
+            ui.widget(label).rect,
+            ui.widget(done).rect,
+        );
+        assert_eq!((b.y, b.h, root.h), (0.0, 39.0, 300.0));
+        assert_eq!(l.y, b.h + margin, "the flow starts under the bar");
+        assert_eq!(d.y + d.h, root.h - margin, "the bottom is the window's");
+        assert_eq!(ui.widget(title).style.weight, 700, "a bare bar's title stays bold");
+    }
+
+    #[test]
+    fn only_a_label_takes_an_ink() {
+        let mut ui = Ui::new("Ink", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
+        let button = ui.add(Ui::ROOT, Kind::Button("Save".into()));
+        let red = Some(Rgba::rgb(255, 0, 0));
+        assert!(ui.set_ink(label, red));
+        assert_eq!(ui.widget(label).ink, red);
+        assert!(!ui.set_ink(button, red));
+        assert_eq!(ui.widget(button).ink, None);
+        assert!(ui.set_ink(label, None));
+        assert_eq!(ui.widget(label).ink, None);
     }
 
     #[test]

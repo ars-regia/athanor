@@ -72,7 +72,15 @@ SURFACES = {
 # page and the number of controls on it, insensitive ones left out as Tab skips them; a widget
 # task adds its page here. Both galleries start a
 # page with the focus on its toggle in the page row.
-GALLERY_PAGES = {"buttons": 5, "choices": 3, "values": 1, "lists": 1, "text": 1, "states": 1}
+GALLERY_PAGES = {
+    "buttons": 5,
+    "choices": 3,
+    "values": 1,
+    "lists": 1,
+    "text": 1,
+    "states": 1,
+    "dialogs": 1,
+}
 GALLERIES = ("toolkit-gallery", "gtk-gallery")
 GalleryCase = namedtuple("GalleryCase", "tag variant scale locale catalog page direction")
 
