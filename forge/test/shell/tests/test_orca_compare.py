@@ -205,6 +205,24 @@ class CompareTest(unittest.TestCase):
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/orca"
 
 
+class SecondLineTest(unittest.TestCase):
+    """A focused list row that holds more labels than its name is read with them: Orca 49 speaks
+    the row's name, then each label its name does not repeat (_generate_descendants), which a
+    label offers only through AT-SPI's Text interface. The gallery's lists page pins it."""
+
+    def test_the_gallery_walk_reads_the_first_rows_second_line(self):
+        for lang, golden, row, line in (
+            ("en", "orca-gallery.txt", "Row 1.", "A second line."),
+            ("it", "orca-gallery-it.txt", "Riga 1.", "Una seconda riga."),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                self.assertIn(row, reference)
+                self.assertEqual(reference[reference.index(row) + 1], line)
+                spoken = [u for u in reference if u != line]
+                self.assertEqual(compare.compare(reference, spoken)[1], [f"{line!r}: missing"])
+
+
 class HiddenTest(unittest.TestCase):
     """doc_own_stack.md, decision 28 item 3: under the own compositor the buttons it hides are
     exempt, each with the decision and its control's issue, from golden_report.exemptions."""

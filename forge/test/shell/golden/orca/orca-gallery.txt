@@ -36,8 +36,10 @@ Gallery
 Lists toggle button pressed.
 Text toggle button not pressed.
 States toggle button not pressed.
-A list List with 50 items
+Replace the rows button.
+A list List with 51 items
 Row 1.
+A second line.
 Screen reader off.
 Screen reader on.
 Gallery

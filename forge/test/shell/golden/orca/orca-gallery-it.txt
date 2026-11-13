@@ -36,8 +36,10 @@ Galleria
 Elenchi pulsante di commutazione premuto.
 Testo pulsante di commutazione non premuto.
 Stati pulsante di commutazione non premuto.
-Un elenco Elenco con 50 voci
+Sostituisci le righe button.
+Un elenco Elenco con 51 voci
 Riga 1.
+Una seconda riga.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
