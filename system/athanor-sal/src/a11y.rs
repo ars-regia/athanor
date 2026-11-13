@@ -102,16 +102,20 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node
         }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
-        // active, as GTK's ToggleButton; a radio as a radio button, checked when active.
+        // active, as GTK's ToggleButton; a radio as a radio button, checked when active, and as
+        // a radio menu item in a menu, as a drop-down's items.
         Kind::Toggle {
             label,
             active,
             radio,
         } => {
-            let mut node = Node::new(if *radio {
-                Role::RadioButton
-            } else {
-                Role::Button
+            let in_menu = widget
+                .parent
+                .is_some_and(|p| matches!(ui.widget(p).kind, Kind::Menu));
+            let mut node = Node::new(match (*radio, in_menu) {
+                (true, true) => Role::MenuItemRadio,
+                (true, false) => Role::RadioButton,
+                (false, _) => Role::Button,
             });
             node.set_label(label.as_str());
             node.set_toggled(if *active {
@@ -119,6 +123,24 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             } else {
                 Toggled::False
             });
+            node.add_action(Action::Click);
+            node
+        }
+        // A drop-down: a combo box, as GTK's DropDown, which names it by its chosen item and
+        // gives the name an application sets as its description, through the tooltip GTK's
+        // panels set to it; without an item it has no name, as GTK's, and Orca reads the
+        // description. The value is the chosen item too, though AT-SPI reads no value of a combo
+        // box (AccessKit#824). Its menu is announced by the popup state every widget with one
+        // carries; a description or a tooltip set on the drop-down takes the place of its name
+        // below.
+        Kind::DropDown(drop) => {
+            let mut node = Node::new(Role::ComboBox);
+            let chosen = drop.chosen_text();
+            if !chosen.is_empty() {
+                node.set_label(chosen);
+            }
+            node.set_description(drop.name.as_str());
+            node.set_value(chosen);
             node.add_action(Action::Click);
             node
         }
@@ -1362,6 +1384,53 @@ mod tests {
         assert!(!ui.is_active(headphones));
         assert_eq!(read(&ui, "Headphones"), (radio, [true, false, false]));
         assert_eq!(read(&ui, "Headset with microphone"), (radio, [true, true, false]));
+    }
+
+    /// A drop-down reaches AT-SPI as GTK's DropDown with the name and the tooltip the panels set:
+    /// a combo box named by its chosen item, with its own name as its description, renamed on
+    /// every choice through the updates a live adapter takes; a description or a tooltip set on
+    /// it describes it in place of its name; without items it has no name, as GTK's.
+    #[test]
+    fn a_drop_down_reads_as_gtks_named_by_its_chosen_item() {
+        use accesskit_atspi_common::{Adapter, Role as AtspiRole};
+        let read = |adapter: &Adapter| {
+            let root = adapter.platform_node(adapter.root_id());
+            let combo = (0..root.child_count().expect("children"))
+                .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+                .map(|child| root.relative(child))
+                .find(|child| child.role().ok() == Some(AtspiRole::ComboBox))
+                .expect("the combo box reaches AT-SPI");
+            let read = (combo.name(), combo.description());
+            (read.0.expect("a name"), read.1.expect("a description"))
+        };
+        let publish = |ui: &mut Ui, adapter: &mut Adapter| {
+            ui.layout();
+            for update in tree_updates(ui, 1.0) {
+                adapter.update(update);
+            }
+        };
+        let mut ui = Ui::new("Drop-down", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Spotify", "Firefox"], 0);
+        ui.layout();
+        let (mut adapter, _) = at_spi(&ui);
+        assert_eq!(read(&adapter), ("Spotify".into(), "Media player".into()));
+        assert_eq!(ui.choose(players, 1), Some(Event::Changed(players)));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Media player".into()));
+        ui.set_tooltip(players, Some("Choose a player"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Choose a player".into()));
+        ui.set_description(players, Some("The player the keys control"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(
+            read(&adapter),
+            ("Firefox".into(), "The player the keys control".into())
+        );
+        let mut empty = Ui::new("Drop-down", Theme::default(), false);
+        empty.drop_down(Ui::ROOT, "Media player", &[], 0);
+        empty.layout();
+        let (adapter, _) = at_spi(&empty);
+        assert_eq!(read(&adapter), (String::new(), "Media player".into()));
     }
 
     /// An announcement reaches AT-SPI once, at polite priority, from a live region that leaves
