@@ -2391,15 +2391,15 @@ reason = "the window and its toggles take VL10's surf and surf2, which the gener
 surface = "chooser"
 item = 7
 what = "the system sans"
-state = "closed"
-reason = "Theme::font_family sets Calmo's family, Inter, ahead of the system's sans-serif. The GTK sheet also sets the features tnum and cv11 on every text, which draw a single-storey a and a spaced hyphen; VL10 keeps only tnum for the toolkit, through a numeric class, and the chooser shows no numbers"
+state = "recorded"
+reason = "closed but for the font features: Theme::font_family sets Calmo's family, Inter, ahead of the system's sans-serif. The GTK sheet also sets the features tnum and cv11 on every text, which draw a single-storey a and a spaced hyphen; VL10 keeps only tnum for the toolkit, through a numeric class, so the toolkit draws Inter's double-storey a, and the chooser shows no numbers"
 
 [[gtk-difference]]
 surface = "chooser"
 item = 8
 what = "wider buttons and larger padding, the German window about 650 px wide"
-state = "closed"
-reason = "the toggles take the GTK chooser's 14 px padding and the window its 420 px default width. The German window stays 3 px narrower at scale 1, 616 px against 619, a residue of the text widths that is recorded, not traced further"
+state = "recorded"
+reason = "closed but for 3 px: the toggles take the GTK chooser's 14 px padding and the window its 420 px default width. The German window stays 3 px narrower at scale 1, 616 px against 619, a residue of the text widths that is recorded, not traced further"
 
 [[gtk-difference]]
 surface = "chooser"
