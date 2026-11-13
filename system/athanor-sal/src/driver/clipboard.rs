@@ -98,18 +98,24 @@ fn drop_paste_into<D>(
     }
 }
 
+/// The event loop's data a paste is read for.
+trait PasteHost {
+    /// The paste being read, which the loop's sources find here.
+    fn pending_paste(&mut self) -> &mut Option<Pending>;
+    /// Whether a dialog keeps `surface`'s input from it.
+    fn blocked(&self, surface: SurfaceId) -> bool;
+}
+
 /// Reads a paste into `surface` from `pipe` through the event loop of `handle`, and hands its
-/// text to `done`, unless `blocked` says a dialog now keeps the surface's input from it: one
-/// may open in the same dispatch as the pipe completes, before the driver drops the paste.
-/// One paste at a time: the one still in `slot`, which `pending` finds in the loop's data, is
-/// dropped with its pipe, and a paste whose owner has not sent the whole text in `timeout` is
-/// dropped too, so that an owner that never closes its pipe holds no descriptor.
-fn read_paste<D: 'static>(
+/// text to `done`, unless a dialog now keeps the surface's input from it: one may open in the
+/// same dispatch as the pipe completes, before the driver drops the paste. One paste at a
+/// time: the one still in `slot`, the loop data's [`PasteHost::pending_paste`], is dropped
+/// with its pipe, and a paste whose owner has not sent the whole text in `timeout` is dropped
+/// too, so that an owner that never closes its pipe holds no descriptor.
+fn read_paste<D: PasteHost + 'static>(
     handle: &LoopHandle<'static, D>,
     slot: &mut Option<Pending>,
-    pending: fn(&mut D) -> &mut Option<Pending>,
     surface: SurfaceId,
-    blocked: fn(&D, SurfaceId) -> bool,
     pipe: ReadPipe,
     timeout: Duration,
     mut done: impl FnMut(&mut D, String) + 'static,
@@ -124,11 +130,11 @@ fn read_paste<D: 'static>(
         let Some(result) = incoming.read(&**pipe) else {
             return PostAction::Continue;
         };
-        if let Some(read) = pending(data).take() {
+        if let Some(read) = data.pending_paste().take() {
             loop_handle.remove(read.deadline);
         }
         match result {
-            Ok(_) if blocked(data, surface) => {
+            Ok(_) if data.blocked(surface) => {
                 eprintln!("athanor-sal: nothing pasted: a dialog now blocks the window");
             }
             Ok(text) => done(data, text),
@@ -139,7 +145,7 @@ fn read_paste<D: 'static>(
     let read = read.map_err(|e| e.to_string())?;
     let loop_handle = handle.clone();
     let deadline = handle.insert_source(Timer::from_duration(timeout), move |_, _, data| {
-        if let Some(late) = pending(data).take() {
+        if let Some(late) = data.pending_paste().take() {
             loop_handle.remove(late.pipe);
         }
         eprintln!(
@@ -416,9 +422,7 @@ impl App {
         let read = read_paste(
             &self.loop_handle,
             &mut self.clipboards.pending,
-            |app| &mut app.clipboards.pending,
             id,
-            |app, id| app.shell.dialogs.blocked(id),
             pipe,
             PASTE_TIMEOUT,
             move |app, text| app.pasted(id, widget, &text),
@@ -452,6 +456,16 @@ impl App {
         if let Err(error) = write_offer(&self.loop_handle, text, pipe, OFFER_TIMEOUT) {
             eprintln!("athanor-sal: the clipboard's reader took no text: {error}");
         }
+    }
+}
+
+impl PasteHost for App {
+    fn pending_paste(&mut self) -> &mut Option<Pending> {
+        &mut self.clipboards.pending
+    }
+
+    fn blocked(&self, surface: SurfaceId) -> bool {
+        self.shell.dialogs.blocked(surface)
     }
 }
 
@@ -688,6 +702,16 @@ mod tests {
         blocked: Vec<SurfaceId>,
     }
 
+    impl PasteHost for Pastes {
+        fn pending_paste(&mut self) -> &mut Option<Pending> {
+            &mut self.pending
+        }
+
+        fn blocked(&self, surface: SurfaceId) -> bool {
+            self.blocked.contains(&surface)
+        }
+    }
+
     /// Starts a paste from a new pipe, as the clipboard's owner would get it; returns the
     /// owner's end.
     fn paste(
@@ -700,9 +724,7 @@ mod tests {
         read_paste(
             &event_loop.handle(),
             &mut pastes.pending,
-            |pastes| &mut pastes.pending,
             SurfaceId(0),
-            |pastes, surface| pastes.blocked.contains(&surface),
             pipe,
             timeout,
             |pastes, text| pastes.pasted.push(text),
