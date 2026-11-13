@@ -963,8 +963,9 @@ impl Ui {
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
     /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
-    /// an icon toggle;
-    /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
+    /// an icon toggle; the description of an image; what a drop-down is for, its description
+    /// ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text
+    /// changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
     /// takes, and for a widget that has no text. Call [`Ui::layout`] afterwards.

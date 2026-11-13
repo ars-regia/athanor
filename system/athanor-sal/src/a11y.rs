@@ -128,14 +128,17 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         }
         // A drop-down: a combo box, as GTK's DropDown, which names it by its chosen item and
         // gives the name an application sets as its description, through the tooltip GTK's
-        // panels set to it; without an item, by that name. The value is the chosen item too,
-        // though AT-SPI reads no value of a combo box (AccessKit#824). Its menu is announced by
-        // the popup state every widget with one carries; a description or a tooltip set on the
-        // drop-down takes the place of its name below.
+        // panels set to it; without an item it has no name, as GTK's, and Orca reads the
+        // description. The value is the chosen item too, though AT-SPI reads no value of a combo
+        // box (AccessKit#824). Its menu is announced by the popup state every widget with one
+        // carries; a description or a tooltip set on the drop-down takes the place of its name
+        // below.
         Kind::DropDown(drop) => {
             let mut node = Node::new(Role::ComboBox);
             let chosen = drop.chosen_text();
-            node.set_label(if chosen.is_empty() { drop.name.as_str() } else { chosen });
+            if !chosen.is_empty() {
+                node.set_label(chosen);
+            }
             node.set_description(drop.name.as_str());
             node.set_value(chosen);
             node.add_action(Action::Click);

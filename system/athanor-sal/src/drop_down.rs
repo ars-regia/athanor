@@ -10,7 +10,8 @@ use crate::widget::{Event, Kind, Rect, Ui, WidgetId};
 /// index always names one of its items, or is 0 without items: only [`Ui::drop_down`] and
 /// [`Ui::set_drop_down`] make or change one.
 pub struct DropDown {
-    /// Its name for assistive technologies.
+    /// What it is for: its description for assistive technologies, which name it by its chosen
+    /// item.
     pub(crate) name: String,
     /// What it offers, in order.
     pub(crate) items: Vec<String>,
@@ -19,7 +20,8 @@ pub struct DropDown {
 }
 
 impl DropDown {
-    /// Its name for assistive technologies.
+    /// What it is for: its description for assistive technologies, which name it by its chosen
+    /// item.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -56,8 +58,10 @@ pub(crate) fn spots(r: Rect, text_w: f32, arrow: f32, padding: f32, rtl: bool) -
 }
 
 impl Ui {
-    /// Adds a drop-down named `name`, offering `items` with the one at `selected` chosen, or the
+    /// Adds a drop-down for `name`, offering `items` with the one at `selected` chosen, or the
     /// last one when `selected` is past the end. Activating it opens the items in a menu.
+    /// Assistive technologies read the chosen item as its name, none without items, and `name`
+    /// as its description, as GTK's `DropDown` with the name the panels give it.
     ///
     /// # Panics
     ///
@@ -215,8 +219,13 @@ mod tests {
             (node.label(), node.description(), node.value()),
             (Some("Spotify"), Some("Media player"), Some("Spotify"))
         );
-        let empty = ui.drop_down(Ui::ROOT, "Nothing", &[], 0);
-        assert_eq!(crate::a11y::node(&ui, empty, 1.0).label(), Some("Nothing"));
+        let empty = ui.drop_down(Ui::ROOT, "Media player", &[], 0);
+        let node_empty = crate::a11y::node(&ui, empty, 1.0);
+        assert_eq!(
+            (node_empty.label(), node_empty.description()),
+            (None, Some("Media player")),
+            "no item: no name, as GTK's, and the description"
+        );
         assert_eq!(node.has_popup(), Some(HasPopup::Menu));
         let Some((menu, items)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
