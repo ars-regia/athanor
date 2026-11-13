@@ -170,9 +170,9 @@ const FONT_PX: std::ops::RangeInclusive<f64> = 4.0..=512.0;
 /// the factor, one in pixels (`px`) as written. Pango takes the size from the last word, after
 /// up to two words of `#features` and `@variations`, and a comma ends the family before it
 /// (`pango_font_description_from_string`). A factor that is not a positive number counts as 1,
-/// a size that does not parse as GTK's 10 points, and the result is held to [`FONT_PX`]; each
-/// is logged once, until the keys change.
-fn font_px(font_name: &str, scaling: f64) -> f32 {
+/// a size that does not parse as GTK's 10 points, and the result is held to [`FONT_PX`]. Returns
+/// the size and what was corrected, empty when nothing was; [`warn_once`] logs it.
+fn font_px(font_name: &str, scaling: f64) -> (f32, String) {
     let mut problems = Vec::new();
     let scaling = if scaling.is_finite() && scaling > 0.0 {
         scaling
@@ -221,21 +221,23 @@ fn font_px(font_name: &str, scaling: f64) -> f32 {
             "font-name {font_name:?} at a factor of {scaling} gives {px} px: {held} px is used"
         ));
     }
-    warn_once(problems.join("; "));
-    held as f32
+    (held as f32, problems.join("; "))
 }
 
-/// Logs `problem` unless it is the one logged last, so that a store read again with the same
-/// keys does not log it again; an empty `problem` forgets the last one.
-fn warn_once(problem: String) {
+/// Logs `problem`, a correction of the system font's size, unless it is the one the last store
+/// read made, so that a store read again with the same keys does not log it again; an empty
+/// `problem`, a read with nothing to correct, forgets the last one. Returns whether it logged.
+fn warn_once(problem: String) -> bool {
     thread_local! {
         static LAST: Cell<String> = const { Cell::new(String::new()) };
     }
     let last = LAST.take();
-    if !problem.is_empty() && problem != last {
+    let new = !problem.is_empty() && problem != last;
+    if new {
         tracing::warn!("{problem}");
     }
     LAST.set(problem);
+    new
 }
 
 impl Default for Appearance {
@@ -248,7 +250,7 @@ impl Default for Appearance {
             accent_mode: AccentMode::Fixed,
             accent_computed: None,
             animations: true,
-            font_size: font_px(DEFAULT_FONT, 1.0),
+            font_size: font_px(DEFAULT_FONT, 1.0).0,
         }
     }
 }
@@ -363,13 +365,17 @@ impl Stores {
                 .as_ref()
                 .and_then(|store| store.boolean("enable-animations"))
                 .unwrap_or(default.animations),
-            font_size: font_px(
-                interface("font-name").as_deref().unwrap_or(DEFAULT_FONT),
-                self.interface
-                    .as_ref()
-                    .and_then(|store| store.double("text-scaling-factor"))
-                    .unwrap_or(1.0),
-            ),
+            font_size: {
+                let (size, problem) = font_px(
+                    interface("font-name").as_deref().unwrap_or(DEFAULT_FONT),
+                    self.interface
+                        .as_ref()
+                        .and_then(|store| store.double("text-scaling-factor"))
+                        .unwrap_or(1.0),
+                );
+                warn_once(problem);
+                size
+            },
         }
     }
 
@@ -760,12 +766,26 @@ mod tests {
     }
 
     #[test]
+    fn a_correction_of_the_font_size_is_logged_once_until_the_keys_change() {
+        // As `Stores::read` does: the defaults first, then the store's keys.
+        let read = |name| {
+            let _ = Appearance::default();
+            warn_once(font_px(name, 1.0).1)
+        };
+        assert!(read("Inter 1000000"), "a size held to the range is logged");
+        assert!(!read("Inter 1000000"), "the same keys read again are not");
+        assert!(!read("Inter 12"), "a valid size is not");
+        assert!(read("Inter 1000000"), "the bad size, back, is logged again");
+        assert!(read("Inter 0.0001"), "another bad size is logged");
+    }
+
+    #[test]
     fn the_font_size_is_gtks_from_the_font_name_and_the_scaling_factor() {
-        let px = |name, scaling| (font_px(name, scaling) * 1000.0).round() / 1000.0;
+        let px = |name, scaling| (font_px(name, scaling).0 * 1000.0).round() / 1000.0;
         assert_eq!(px("Adwaita Sans 11", 1.0), 14.667, "11 pt at 96 dpi");
         assert_eq!(
             Appearance::default().font_size,
-            font_px("Adwaita Sans 11", 1.0)
+            font_px("Adwaita Sans 11", 1.0).0
         );
         assert_eq!(
             px("Adwaita Sans 11", 1.25),
