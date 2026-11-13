@@ -2409,7 +2409,6 @@ CSS_DIRS = ["system", "forge/specs"]
 CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
 CSS_BUDGETS = {
     "forge/specs/athanor-control-center/athanor-control-center-1.0.0/src/ui.rs": {"px": 2},
-    "forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/ui/mod.rs": {"px": 10},
     "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
     "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
     "system/athanor-style/src/accent_template.css": {"px": 2},
