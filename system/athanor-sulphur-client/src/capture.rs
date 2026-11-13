@@ -1,5 +1,6 @@
 //! A window's picture for the launcher's preview (doc_launcher.md, LA6), through
-//! ext-image-copy-capture-v1 into a shared-memory buffer.
+//! ext-image-copy-capture-v1 into a shared-memory buffer: its pixels as the compositor wrote
+//! them, and with the `gtk` feature a GDK texture of them.
 
 use std::fs::{File, OpenOptions};
 use std::future::poll_fn;
@@ -8,7 +9,8 @@ use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::task::{Poll, Waker};
 use std::time::Duration;
 
-use gtk4::{gdk, glib};
+#[cfg(feature = "gtk")]
+use gtk4::gdk;
 use wayland_client::protocol::{wl_buffer, wl_shm, wl_shm_pool};
 use wayland_client::globals::GlobalList;
 use wayland_client::{delegate_noop, Connection, Dispatch, Proxy, QueueHandle, WEnum};
@@ -34,6 +36,29 @@ const TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_SIDE: u32 = 8192;
 const MAX_BYTES: u32 = 4096 * 4096 * 4;
 
+/// The layout of a picture's pixels: four bytes each, named as wl_shm names them, the bytes of
+/// a little-endian 32-bit word, so that [`PixelFormat::Argb8888`] holds blue, green, red and
+/// alpha in that order. The colour is premultiplied by the alpha; an `X` format has no alpha,
+/// and its fourth byte means nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PixelFormat {
+    Argb8888,
+    Xrgb8888,
+    Abgr8888,
+    Xbgr8888,
+}
+
+/// A window's picture, as large as the window: `height` rows of `stride` bytes, of which the
+/// first `width` pixels of [`PixelFormat`] are the picture.
+#[derive(Clone, Debug)]
+pub struct Picture {
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
+    pub format: PixelFormat,
+    pub bytes: Vec<u8>,
+}
+
 /// One capture in flight. Dropping it destroys its protocol objects.
 pub(crate) struct Pending {
     /// The capture ends with this window: it is dropped when the toplevel closes, so no
@@ -45,7 +70,7 @@ pub(crate) struct Pending {
     format: Option<wl_shm::Format>,
     frame: Option<ExtImageCopyCaptureFrameV1>,
     buffer: Option<Shm>,
-    result: Option<Result<gdk::MemoryTexture, Error>>,
+    result: Option<Result<Picture, Error>>,
     waker: Option<Waker>,
 }
 
@@ -60,7 +85,7 @@ struct Shm {
 }
 
 impl Pending {
-    pub(crate) fn finish(&mut self, result: Result<gdk::MemoryTexture, Error>) {
+    pub(crate) fn finish(&mut self, result: Result<Picture, Error>) {
         self.result.get_or_insert(result);
         self.wake();
     }
@@ -89,7 +114,7 @@ impl Drop for Pending {
     }
 }
 
-/// How much a shared-memory format is preferred; 0 for one GDK cannot show.
+/// How much a shared-memory format is preferred; 0 for one a [`Picture`] cannot hold.
 fn rank(format: wl_shm::Format) -> u8 {
     match format {
         wl_shm::Format::Argb8888 | wl_shm::Format::Abgr8888 => 2,
@@ -98,14 +123,24 @@ fn rank(format: wl_shm::Format) -> u8 {
     }
 }
 
-/// wl_shm formats name the bytes of a little-endian 32-bit word.
-fn memory_format(format: wl_shm::Format) -> Option<gdk::MemoryFormat> {
+fn pixel_format(format: wl_shm::Format) -> Option<PixelFormat> {
     match format {
-        wl_shm::Format::Argb8888 => Some(gdk::MemoryFormat::B8g8r8a8Premultiplied),
-        wl_shm::Format::Xrgb8888 => Some(gdk::MemoryFormat::B8g8r8x8),
-        wl_shm::Format::Abgr8888 => Some(gdk::MemoryFormat::R8g8b8a8Premultiplied),
-        wl_shm::Format::Xbgr8888 => Some(gdk::MemoryFormat::R8g8b8x8),
+        wl_shm::Format::Argb8888 => Some(PixelFormat::Argb8888),
+        wl_shm::Format::Xrgb8888 => Some(PixelFormat::Xrgb8888),
+        wl_shm::Format::Abgr8888 => Some(PixelFormat::Abgr8888),
+        wl_shm::Format::Xbgr8888 => Some(PixelFormat::Xbgr8888),
         _ => None,
+    }
+}
+
+/// wl_shm formats name the bytes of a little-endian 32-bit word.
+#[cfg(feature = "gtk")]
+fn memory_format(format: PixelFormat) -> gdk::MemoryFormat {
+    match format {
+        PixelFormat::Argb8888 => gdk::MemoryFormat::B8g8r8a8Premultiplied,
+        PixelFormat::Xrgb8888 => gdk::MemoryFormat::B8g8r8x8,
+        PixelFormat::Abgr8888 => gdk::MemoryFormat::R8g8b8a8Premultiplied,
+        PixelFormat::Xbgr8888 => gdk::MemoryFormat::R8g8b8x8,
     }
 }
 
@@ -181,8 +216,23 @@ impl Drop for Forget<'_> {
 }
 
 impl Client {
-    /// The picture of a window, as large as the window.
+    /// The picture of a window, as large as the window, as a GDK texture.
+    #[cfg(feature = "gtk")]
     pub async fn capture(&self, window: WindowId) -> Result<gdk::MemoryTexture, Error> {
+        let picture = self.capture_pixels(window).await?;
+        Ok(gdk::MemoryTexture::new(
+            // `layout` bounds every size below i32::MAX.
+            picture.width as i32,
+            picture.height as i32,
+            memory_format(picture.format),
+            &glib::Bytes::from_owned(picture.bytes),
+            picture.stride as usize,
+        ))
+    }
+
+    /// The picture of a window, as large as the window: its pixels as the compositor wrote
+    /// them.
+    pub async fn capture_pixels(&self, window: WindowId) -> Result<Picture, Error> {
         self.live()?;
         let id = fresh();
         {
@@ -266,7 +316,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, u64> for State {
                     return;
                 }
                 let (Some((width, height)), Some(format), Some(shm)) = (pending.size, pending.format, shm) else {
-                    pending.finish(Err(Error::Capture("no shared-memory format GDK can show")));
+                    pending.finish(Err(Error::Capture("no shared-memory format a picture can hold")));
                     return;
                 };
                 let Some((stride, len)) = layout(width, height) else {
@@ -311,17 +361,17 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, u64> for State {
         let Some(pending) = state.captures.get_mut(id) else { return };
         match event {
             ext_image_copy_capture_frame_v1::Event::Ready => {
-                let result = match (&pending.buffer, pending.format.and_then(memory_format)) {
-                    (Some(shm), Some(memory)) => {
+                let result = match (&pending.buffer, pending.format.and_then(pixel_format)) {
+                    (Some(shm), Some(format)) => {
                         let mut bytes = vec![0; shm.len as usize];
                         match shm.file.read_exact_at(&mut bytes, 0) {
-                            Ok(()) => Ok(gdk::MemoryTexture::new(
-                                shm.width as i32,
-                                shm.height as i32,
-                                memory,
-                                &glib::Bytes::from_owned(bytes),
-                                shm.stride as usize,
-                            )),
+                            Ok(()) => Ok(Picture {
+                                width: shm.width,
+                                height: shm.height,
+                                stride: shm.stride,
+                                format,
+                                bytes,
+                            }),
                             Err(err) => {
                                 tracing::warn!("the capture buffer was not read: {err}");
                                 Err(Error::Capture("the buffer could not be read"))
@@ -388,7 +438,7 @@ mod tests {
         let window = *client.inner.state.borrow().toplevels.keys().next().expect("a window");
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         for _ in 0..2 {
-            let mut capture = std::pin::pin!(client.capture(window));
+            let mut capture = std::pin::pin!(client.capture_pixels(window));
             let answer = std::future::Future::poll(capture.as_mut(), &mut context);
             assert!(matches!(answer, Poll::Ready(Err(Error::Unavailable("wl_shm")))), "{answer:?}");
         }
@@ -409,8 +459,19 @@ mod tests {
         assert!(rank(wl_shm::Format::Argb8888) > rank(wl_shm::Format::Xrgb8888));
         assert!(rank(wl_shm::Format::Abgr8888) > rank(wl_shm::Format::Xbgr8888));
         assert_eq!(rank(wl_shm::Format::Rgb565), 0);
-        assert_eq!(memory_format(wl_shm::Format::Argb8888), Some(gdk::MemoryFormat::B8g8r8a8Premultiplied));
-        assert_eq!(memory_format(wl_shm::Format::Rgb565), None);
+        assert_eq!(pixel_format(wl_shm::Format::Argb8888), Some(PixelFormat::Argb8888));
+        assert_eq!(pixel_format(wl_shm::Format::Rgb565), None);
+        // Every format ranked is one a picture holds.
+        for format in [wl_shm::Format::Argb8888, wl_shm::Format::Xrgb8888, wl_shm::Format::Abgr8888, wl_shm::Format::Xbgr8888] {
+            assert!(rank(format) > 0 && pixel_format(format).is_some(), "{format:?}");
+        }
+    }
+
+    #[cfg(feature = "gtk")]
+    #[test]
+    fn a_gdk_texture_reads_the_bytes_of_a_little_endian_word() {
+        assert_eq!(memory_format(PixelFormat::Argb8888), gdk::MemoryFormat::B8g8r8a8Premultiplied);
+        assert_eq!(memory_format(PixelFormat::Xbgr8888), gdk::MemoryFormat::R8g8b8x8);
     }
 
     #[test]
