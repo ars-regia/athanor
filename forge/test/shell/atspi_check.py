@@ -39,9 +39,11 @@ def password_problems(nodes):
 
 def problems(nodes, expected, required=(), window=None):
     """nodes: [(role, name, showing)], or (role, name, showing, (x, y, width, height)) with the
-    extents in the window's coordinates. With `window`, (x, y, width, height), a showing
-    interactive node must have extents inside it (doc_accessibility.md, AX17)."""
+    extents in the window's coordinates, or that and the node's own top-level window,
+    (x, y, width, height), as with_extents() gives. A showing interactive node with extents must
+    lie inside its own window, else inside `window` (doc_accessibility.md, AX17)."""
     extents = {index: node[3] for index, node in enumerate(nodes) if len(node) > 3}
+    windows = {index: node[4] for index, node in enumerate(nodes) if len(node) > 4}
     nodes = [node[:3] for node in nodes]
     found = [f"no showing node is named {name!r}" for name in required
              if not any(showing and node_name == name for _, node_name, showing in nodes)]
@@ -49,16 +51,16 @@ def problems(nodes, expected, required=(), window=None):
     for role, name in interactive:
         if not name.strip():
             found.append(f"a showing '{role}' has no accessible name")
-    if window is not None:
-        wx, wy, ww, wh = window
-        for index, (role, name, showing) in enumerate(nodes):
-            if not (showing and role in INTERACTIVE and index in extents):
-                continue
-            x, y, w, h = extents[index]
-            if w <= 0 or h <= 0:
-                found.append(f"the showing '{role}' {name!r} has no extents")
-            elif x < wx or y < wy or x + w > wx + ww or y + h > wy + wh:
-                found.append(f"the showing '{role}' {name!r} at {(x, y, w, h)} is outside its window {window}")
+    for index, (role, name, showing) in enumerate(nodes):
+        own = windows.get(index, window)
+        if not (showing and role in INTERACTIVE and index in extents and own is not None):
+            continue
+        wx, wy, ww, wh = own
+        x, y, w, h = extents[index]
+        if w <= 0 or h <= 0:
+            found.append(f"the showing '{role}' {name!r} has no extents")
+        elif x < wx or y < wy or x + w > wx + ww or y + h > wy + wh:
+            found.append(f"the showing '{role}' {name!r} at {(x, y, w, h)} is outside its window {own}")
     if len(interactive) < expected:
         found.append(f"{len(interactive)} interactive widget(s) in the tree, expected at least {expected}: "
                      f"the accessibility tree is missing or incomplete")
@@ -106,26 +108,23 @@ def extents_of(accessible, Atspi):
     return (rect.x, rect.y, rect.width, rect.height)
 
 
-def with_extents(accessible, Atspi, out=None):
-    """[(role, name, showing, extents)] depth first, as walk() orders them."""
+def with_extents(accessible, Atspi, out=None, window=None, depth=0):
+    """[(role, name, showing, extents, window)] depth first, as walk() orders them: `window` is
+    the node's own top-level window, a child of the application, at the origin of its own
+    coordinates, since a popup is a window of its own with extents in its own coordinates. The
+    application's node has none."""
     out = [] if out is None else out
     showing = accessible.get_state_set().contains(Atspi.StateType.SHOWING)
-    out.append((accessible.get_role_name(), accessible.get_name() or "", showing,
-                extents_of(accessible, Atspi) or (0, 0, 0, 0)))
+    extents = extents_of(accessible, Atspi) or (0, 0, 0, 0)
+    if depth == 1:
+        window = (0, 0, extents[2], extents[3])
+    node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
+    out.append(node if window is None else node + (window,))
     for index in range(accessible.get_child_count()):
         child = accessible.get_child_at_index(index)
         if child is not None:
-            with_extents(child, Atspi, out)
+            with_extents(child, Atspi, out, window, depth + 1)
     return out
-
-
-def window_of(app, Atspi):
-    """The largest top-level window of the application, at the origin of its own coordinates."""
-    sizes = [extents_of(app.get_child_at_index(index), Atspi) or (0, 0, 0, 0)
-             for index in range(app.get_child_count())]
-    width, height = max(((w, h) for _, _, w, h in sizes), default=(0, 0))
-    # ponytail: the largest window bounds every control; a popup larger than its parent would hide an overflow
-    return (0, 0, width, height)
 
 
 def password_texts(accessible, Atspi):
@@ -223,8 +222,7 @@ def main(argv):
     for role, name, showing, depth in tree:
         print(f"{'  ' * depth}{role}: {name!r}{'' if showing else ' (hidden)'}")
     found = problems(with_extents(app, Atspi), int(argv[1]),
-                     [name for name in [os.environ.get("ATSPI_REQUIRED_NAME", "")] if name],
-                     window_of(app, Atspi))
+                     [name for name in [os.environ.get("ATSPI_REQUIRED_NAME", "")] if name])
     path = os.environ.get("ATSPI_TRANSCRIPT", "")
     if path:
         with open(path, "w", encoding="utf-8") as file:

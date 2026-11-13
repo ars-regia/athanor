@@ -65,6 +65,56 @@ class ExtentsTest(unittest.TestCase):
     def test_a_hidden_control_has_no_extents_to_check(self):
         self.assertEqual(check.problems([("push button", "Sign in", False, (0, 0, 0, 0))], 0, window=WINDOW), [])
 
+    def test_each_control_is_checked_against_its_own_top_level_window(self):
+        # A bar 56 px high and its popup, a window of its own: a button low in the popup is
+        # inside it, and one below the bar's edge is outside the bar, however tall the popup.
+        bar = Fake("frame", (0, 0, 1280, 56), [Fake("button", (0, 50, 34, 32), name="Low")])
+        popup = Fake("window", (0, 0, 300, 350), [Fake("button", (10, 300, 34, 32), name="Next month")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [bar, popup]), FakeAtspi), 2)
+        self.assertEqual(found, ["the showing 'button' 'Low' at (0, 50, 34, 32) is outside its window (0, 0, 1280, 56)"])
+
+
+class Fake:
+    """An accessible of the AT-SPI calls with_extents() makes."""
+
+    def __init__(self, role, extents, children=(), name=""):
+        self.role, self.extents, self.children, self.name = role, extents, list(children), name
+
+    def get_state_set(self):
+        return self
+
+    def contains(self, _state):
+        return True
+
+    def get_role_name(self):
+        return self.role
+
+    def get_name(self):
+        return self.name
+
+    def get_component_iface(self):
+        return self
+
+    def get_child_count(self):
+        return len(self.children)
+
+    def get_child_at_index(self, index):
+        return self.children[index]
+
+
+class FakeAtspi:
+    class StateType:
+        SHOWING = "showing"
+
+    class CoordType:
+        WINDOW = "window"
+
+    class Component:
+        @staticmethod
+        def get_extents(accessible, _coord):
+            x, y, width, height = accessible.extents
+            return type("Rect", (), {"x": x, "y": y, "width": width, "height": height})
+
 
 class PasswordTest(unittest.TestCase):
     DOTS = "\u25cf\u25cf\u25cf\u25cf"
