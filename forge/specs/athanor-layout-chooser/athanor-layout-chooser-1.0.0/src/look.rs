@@ -39,6 +39,9 @@ pub fn look(appearance: &Appearance) -> Look {
     theme.font_family = Some(FONT_FAMILY.into());
     theme.font_size = BODY;
     theme.title_bar_style = TitleBarStyle::Bare;
+    // The height of the GTK chooser's title bar in its goldens: 39 px at scale 1 from the top
+    // of the window to its bottom border, which it includes.
+    theme.title_bar_height = Some(39.0);
     // `button.layout-choice`: 14 px across, at least 34 px tall, a 1 px `line` border and a
     // radius of 8.
     theme.padding = 14.0;

@@ -2357,7 +2357,7 @@ surface = "chooser"
 item = 2
 what = "a white title bar with a regular title and round grey buttons"
 state = "recorded"
-reason = "closed but for the bar's colour: TitleBarStyle::Bare gives the bold title and the bare buttons of GTK's header bar; the bar takes VL10's bar token, where the GTK chooser drew GTK's built-in header bar colour, which no Calmo token names (doc_visual_language.md VL1, VL10). The bar is also 2 px taller, 39 px against GTK's 37 at scale 1: the toolkit sizes it from the window buttons and the theme's padding, which the chooser sets to the toggles' 14 px, where GTK's header bar has a height of its own"
+reason = "closed but for the bar's colour: TitleBarStyle::Bare gives the bold title and the bare buttons of GTK's header bar; the bar takes VL10's bar token, where the GTK chooser drew GTK's built-in header bar colour, which no Calmo token names (doc_visual_language.md VL1, VL10): maintainer decision, 2026-11-13: on the port to Sal, the Calmo palette prevails over Adwaita's header-bar colour; this applies to every Sal window. Its height is GTK's through Theme::title_bar_height: 39 px at scale 1 from the top of the window to the bar's bottom border, as the GTK goldens draw it"
 
 [[gtk-difference]]
 surface = "chooser"
