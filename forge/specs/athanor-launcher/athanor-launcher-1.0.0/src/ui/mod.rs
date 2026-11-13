@@ -397,6 +397,9 @@ impl Launcher {
         if let Err(err) = shell.set_layer(surface, &shown()) {
             tracing::error!(error = %err, "cannot show the launcher's surface");
         }
+        // The surface stays open while hidden: the frame that shows it is timed, as GTK's
+        // first frame-clock tick after present.
+        shell.report_next_frame(surface);
         if let Err(err) = shell.set_accessible(surface, true) {
             tracing::error!(error = %err, "the launcher's surface is not in the accessibility tree");
         }
