@@ -279,6 +279,24 @@ mod tests {
         assert!(second.width() > 0.0, "the start of the name and the ellipsis");
     }
 
+    /// The second line stays the tile's description over a tooltip, as the GTK panel sets it;
+    /// without one, the tooltip describes it.
+    #[test]
+    fn the_second_line_describes_the_tile_over_a_tooltip() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let wifi = ui.tile(Ui::ROOT, "Wi-Fi", "Home", glyph(), true);
+        ui.set_tooltip(wifi, Some("Wi-Fi"));
+        ui.layout();
+        let described = |ui: &Ui| {
+            crate::a11y::node(ui, wifi, 1.0)
+                .description()
+                .map(str::to_owned)
+        };
+        assert_eq!(described(&ui).as_deref(), Some("Home"));
+        assert!(ui.set_tile_subtitle(wifi, ""));
+        assert_eq!(described(&ui).as_deref(), Some("Wi-Fi"));
+    }
+
     #[test]
     fn the_disc_and_the_lines_follow_the_reading_order() {
         let r = crate::widget::Rect {

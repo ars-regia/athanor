@@ -232,7 +232,10 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_has_popup(HasPopup::Menu);
         node.set_expanded(expanded);
     }
-    if let Some(description) = ui.description(id) {
+    // A tile's second line stays its description over a tooltip, as the GTK panel sets the
+    // description after the tooltip its name gives.
+    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty());
+    if let Some(description) = ui.description(id).filter(|_| !second_line) {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
