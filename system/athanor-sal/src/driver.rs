@@ -1974,7 +1974,8 @@ impl App {
 
     /// Ends the pointer's press and hover on each window a dialog opened on in this turn and
     /// still blocks, as if the pointer left it: the release it waits for is the dialog's, a drag
-    /// under way ends over no widget, and its tooltip, shown or waiting, ends.
+    /// under way ends over no widget, and its tooltip, shown or waiting, ends. A paste still
+    /// being read into it is dropped: its text would reach a window that takes no input.
     fn blocked_by_dialogs(&mut self) {
         for parent in std::mem::take(&mut self.shell.blocking) {
             if !self.shell.dialogs.blocked(parent) {
@@ -1983,6 +1984,7 @@ impl App {
             if self.tooltip.target().is_some_and(|&(id, _)| id == parent) {
                 self.point_tooltip(None);
             }
+            self.drop_paste_into(parent);
             let Some(surface) = self.shell.get_mut(parent) else {
                 continue;
             };
