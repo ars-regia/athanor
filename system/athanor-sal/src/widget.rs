@@ -1424,6 +1424,21 @@ impl Ui {
         }
     }
 
+    /// The selected text of the field `id`: `None` if it is not a field, if its selection is
+    /// only the caret, or while the input method composes. Where Ctrl+C copies something else
+    /// unless the user selected text in the field, as the launcher's result (doc_launcher.md,
+    /// LA5), [`crate::driver::Application::key`] reads it before the field takes the key.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_selection(&self, id: WidgetId) -> Option<String> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
+            _ => None,
+        }
+    }
+
     /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
     /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
     /// expands it while its menu is open.
@@ -4044,10 +4059,7 @@ mod tests {
 
     /// The selected text of field `id`, if any.
     fn selected(ui: &Ui, id: WidgetId) -> Option<String> {
-        match &ui.widgets[id].kind {
-            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
-            _ => None,
-        }
+        ui.field_selection(id)
     }
 
     #[test]
@@ -4075,6 +4087,8 @@ mod tests {
         assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
         assert_eq!(ui.key(Key::SelectLeft), Some(Event::Changed(id)));
         assert_eq!(ui.value(id), Some(6.0));
+        // Only a field has a selection.
+        assert_eq!(ui.field_selection(id), None);
     }
 
     #[test]
