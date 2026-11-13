@@ -87,8 +87,10 @@ SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
 # AccessKit can emit the focus before the activation (#1123). The rule holds only for a line of
 # the reference that says the gallery's `title` with the frame's role word of the same language,
 # and that directly follows, past Orca's key echoes, the line of the gallery dialog's `dialog.close`
-# button in that language; every occurrence of the line must follow it. Any other missing frame
-# role, the same line outside a dialog's return included, still fails.
+# button in that language; every occurrence of the line must follow it. The transcript must say
+# the title at the same place, right after that close button past the key echoes: the gallery
+# says its title at the start of every walk too. Any other missing frame role, the same line
+# outside a dialog's return included, still fails.
 FOCUS_RETURN = "AccessKit activates the window before it moves the focus (maintainer, 2026-11-13, #1123)"
 # The frame's role word in the columns of the gallery's strings.tsv: English, Italian.
 FRAME_ROLE = ("frame", "cornice")
@@ -115,8 +117,8 @@ def heard_as(utterance):
 
 
 def dialog_returns(reference):
-    """The lines of the reference that FOCUS_RETURN covers, each mapped to the window title the
-    transcript may say in its place."""
+    """The lines of the reference that FOCUS_RETURN covers, each mapped to the close button's
+    line the transcript must say first and the window title it may say in the line's place."""
     if not any(line.endswith(f" {word}") for line in reference for word in FRAME_ROLE):
         return {}
     forms = {
@@ -130,12 +132,11 @@ def dialog_returns(reference):
     for before, line in zip([None, *lines], lines):
         if line not in forms:
             continue
-        close, title = forms[line]
-        if before == close:
-            returns[line] = title
+        if before == forms[line][0]:
+            returns[line] = forms[line]
         else:
             elsewhere.add(line)
-    return {line: title for line, title in returns.items() if line not in elsewhere}
+    return {line: heard for line, heard in returns.items() if line not in elsewhere}
 
 
 def compare(reference, transcript, exempt=None):
@@ -162,11 +163,13 @@ def compare(reference, transcript, exempt=None):
                 together.setdefault(field, joined)
                 together.setdefault(after, joined)
     returns = dialog_returns(reference)
+    # Each line the transcript says with the line before it, past the key echoes.
+    follows = set(pairwise(line for line in transcript if line not in KEY_ECHOES))
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
         said = said or together.get(utterance)
-        if said is None and returns.get(utterance) in spoken:
-            said = returns[utterance]
+        if said is None and returns.get(utterance) in follows:
+            said = returns[utterance][1]
             lines.append(f"{utterance!r}: spoken as {said!r}; note: {FOCUS_RETURN}")
             continue
         if utterance in exempt:

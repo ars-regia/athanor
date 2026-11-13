@@ -279,6 +279,11 @@ class FocusReturnTest(unittest.TestCase):
             ["'Galleria cornice': missing"],
         )
 
+    def test_the_title_heard_elsewhere_than_after_the_dialog_close_fails(self):
+        # The gallery says its title as a walk starts; that is not the focus's return.
+        transcript = ["Galleria", "Chiudi button.", "spazio", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(self.RETURN, transcript)[1], ["'Galleria cornice': missing"])
+
     def test_another_missing_word_after_a_dialog_close_fails(self):
         for line in ("Galleria finestra", "Pagine cornice", "Gallery cornice"):
             with self.subTest(line=line):
