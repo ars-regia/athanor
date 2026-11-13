@@ -129,6 +129,21 @@ class GoldenReportTest(unittest.TestCase):
         known = {tag for _, tag in gr.expected(gr.surfaces())}
         self.assertLessEqual({e["case"] for e in entries}, known)
 
+    def test_the_chooser_answers_every_item_of_t1_task_4(self):
+        """Each of the eleven differences of the toolkit chooser against the GTK chooser
+        (docs/spikes/t1-own-toolkit.md, task 4) is closed or recorded with its reason, and the
+        report reads none of them."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [e for e in table.get("gtk-difference", []) if e.get("surface") == "chooser"]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 12)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertNotIn("item", {key for e in table.get("difference", []) for key in e})
+
 
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"

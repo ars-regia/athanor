@@ -1,13 +1,16 @@
 # Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
 # drift check of PL52, the daily check of the evidence copies off GitHub (#401), the
-# daily check that :stable was promoted (#405) and the daily rescan of the Rust advisories;
-# the other maintenance jobs move here with PB12. A failed or cancelled scheduled job opens
+# daily check that :stable was promoted (#405) and the daily rescan of the Rust advisories
+# and, on Mondays, the weekly CodeQL scan of Rust, Python and the workflows (PL28, PB8); the other
+# maintenance jobs move here with PB12. The Monday cron fires a run of its own, in which only
+# CodeQL runs; the daily jobs skip it. A failed or cancelled scheduled job opens
 # or updates its ci-alert issue (PL51).
 name: Maintenance
 
 on:
   schedule:
     - cron: "23 5 * * *"
+    - cron: "23 6 * * 1"
   workflow_dispatch:
 
 permissions: {}
@@ -18,6 +21,7 @@ jobs:
   # copy must verify against the plan on its GitHub Release. The job holds no environment, no
   # write permission and no secret: the registry is read anonymously and the token only reads.
   evidence-copies:
+    if: ${{ github.event.schedule != '23 6 * * 1' }}
     name: Evidence copies are intact
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -43,6 +47,7 @@ jobs:
         run: python3 system/check_evidence_copies.py
 
   settings-drift:
+    if: ${{ github.event.schedule != '23 6 * * 1' }}
     name: Settings drift
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -72,6 +77,7 @@ jobs:
   # previous_stable, and every :stable-<day> the last record of its day (doc_ci.md CI29).
   # The job holds no environment, no package write and no secret: it reads.
   stable-promotions:
+    if: ${{ github.event.schedule != '23 6 * * 1' }}
     name: Stable was promoted
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -101,15 +107,45 @@ jobs:
   # against a lockfile nobody touched turns every Rust pull request red at once. The daily run
   # finds it before they do; on 2026-11-09 a weekly run failed and no one was told.
   rust-advisories:
+    if: ${{ github.event.schedule != '23 6 * * 1' }}
     permissions:
       contents: read
     uses: ./.github/workflows/rust-security-audit.yml
+
+  # CodeQL over the three languages the repository ships (PL28, PB8). No build: Rust, Python and the
+  # workflows are analysed from source (build-mode none). The repository is public, so the job needs
+  # no `actions: read`. Results go to the code scanning alerts, not to a log.
+  codeql:
+    if: ${{ github.event.schedule == '23 6 * * 1' || github.event_name == 'workflow_dispatch' }}
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, python, actions]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
 
   alert:
     # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
     # success closes it. A job of its own on a GitHub runner, after the others whatever their
     # result.
-    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories]
+    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql]
     if: ${{ always() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -1,6 +1,7 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
 use crate::widget::Rect;
+use parley::fontique::FamilyId;
 use parley::setting::{FontFeature, Tag};
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFeatures, FontWeight,
@@ -43,6 +44,13 @@ pub struct TextContext {
     pub fonts: FontContext,
     /// The scratch space shaping uses.
     pub layouts: LayoutContext<Brush>,
+    /// The approximate character width of a wrapping label's `max_width_chars`, by font size and
+    /// style: each pair is shaped once, for the family set.
+    pub(crate) char_widths: Vec<(f32, TextStyle, f32)>,
+    /// The Latin font that leads the sans-serif family: see [`TextContext::new`].
+    latin: Option<FamilyId>,
+    /// The family set ahead of it: see [`TextContext::set_family`].
+    family: Option<String>,
 }
 
 impl Default for TextContext {
@@ -80,12 +88,50 @@ impl TextContext {
         Self {
             fonts,
             layouts: LayoutContext::new(),
+            char_widths: Vec::new(),
+            latin,
+            family: None,
         }
+    }
+
+    /// Puts `family` ahead of the Latin font in the sans-serif family every layout is set in, as
+    /// a theme's [`crate::Theme::font_family`]; `None` leaves the Latin font first again. A family
+    /// the system lacks is skipped, with a message.
+    pub(crate) fn set_family(&mut self, family: Option<&str>) {
+        if self.family.as_deref() == family {
+            return;
+        }
+        self.family = family.map(str::to_owned);
+        // The character widths were measured in the family before.
+        self.char_widths.clear();
+        let collection = &mut self.fonts.collection;
+        let first = family.and_then(|name| {
+            let id = collection.family_id(name);
+            if id.is_none() {
+                eprintln!("athanor-sal: no font family {name:?}; text keeps the system's sans-serif");
+            }
+            id
+        });
+        let families: Vec<FamilyId> = first.into_iter().chain(self.latin).collect();
+        collection.set_generic_families(GenericFamily::SansSerif, families.into_iter());
     }
 
     /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start, at
     /// `size` times the style's scale.
     pub fn layout(&mut self, text: &str, size: f32, rtl: bool, style: &TextStyle) -> Layout<Brush> {
+        self.layout_at(text, size, rtl, style, None)
+    }
+
+    /// [`TextContext::layout`], its lines broken at `width` logical pixels when it is given and
+    /// aligned to the start edge of that width.
+    pub(crate) fn layout_at(
+        &mut self,
+        text: &str,
+        size: f32,
+        rtl: bool,
+        style: &TextStyle,
+        width: Option<f32>,
+    ) -> Layout<Brush> {
         let features: Vec<FontFeature> = style
             .features
             .iter()
@@ -104,7 +150,7 @@ impl TextContext {
         )));
         builder.set_base_direction(base_direction(rtl));
         let mut layout = builder.build(text);
-        layout.break_all_lines(None);
+        layout.break_all_lines(width);
         layout.align(Alignment::Start, AlignmentOptions::default());
         layout
     }
@@ -763,5 +809,34 @@ mod tests {
 
         field.set_text("שלום");
         assert_eq!(field.text(), "שלום");
+    }
+
+    /// The first family of the sans-serif family layouts are set in.
+    fn first_sans(cx: &mut TextContext) -> Option<String> {
+        let collection = &mut cx.fonts.collection;
+        let first = collection.generic_families(GenericFamily::SansSerif).next();
+        first.and_then(|id| collection.family_name(id)).map(str::to_owned)
+    }
+
+    #[test]
+    fn a_family_leads_the_sans_serif_until_it_is_taken_away() {
+        let mut cx = TextContext::default();
+        let latin = first_sans(&mut cx);
+        // Any family of the system other than the Latin one, by the name its id gives back: a
+        // name such as "Noto Sans Arabic SemCond ExtLt" finds the id of "Noto Sans Arabic".
+        let collection = &mut cx.fonts.collection;
+        let names: Vec<String> = collection.family_names().map(str::to_owned).collect();
+        let ids: Vec<_> = names.iter().filter_map(|name| collection.family_id(name)).collect();
+        let other = ids
+            .into_iter()
+            .filter_map(|id| collection.family_name(id).map(str::to_owned))
+            .find(|name| Some(name) != latin.as_ref())
+            .expect("a second font family");
+        cx.set_family(Some(&other));
+        assert_eq!(first_sans(&mut cx), Some(other));
+        cx.set_family(None);
+        assert_eq!(first_sans(&mut cx), latin);
+        cx.set_family(Some("No Such Family Anywhere"));
+        assert_eq!(first_sans(&mut cx), latin, "a missing family is skipped");
     }
 }

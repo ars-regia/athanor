@@ -6,10 +6,11 @@
 //! client's request or commit, input, an output or the lock), at most once a refresh, and not
 //! at all while idle.
 
-use crate::capture::Target;
+use crate::capture::{Pointer, Target};
 use crate::a11y::Look;
-use crate::cursor::{pointer_elements, Cursor, PointerElement};
+use crate::cursor::{pointer_on, Cursor, PointerElement};
 use crate::look::FilterElement;
+use crate::background_effect::Blurred;
 use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
 use crate::output_management::{set_can_sync, Step};
@@ -89,11 +90,12 @@ smithay::backend::renderer::element::render_elements! {
     Pointer=PointerElement<GlesRenderer>,
 }
 
-// The frame as the magnifier and the colour filters show it: the elements scaled, or the whole
-// frame drawn offscreen and shown through the colour pass (`look.rs`).
+// The frame as the magnifier and the colour filters show it: the elements, with the blur under
+// each blur region (`background_effect.rs`), scaled, or the whole frame drawn offscreen and
+// shown through the colour pass (`look.rs`).
 smithay::backend::renderer::element::render_elements! {
     Frame<=GlesRenderer>;
-    Zoomed=RescaleRenderElement<Element>,
+    Zoomed=RescaleRenderElement<Blurred<GlesRenderer, Element>>,
     Filtered=FilterElement<GlesTexture>,
 }
 
@@ -116,7 +118,6 @@ pub struct Drm {
     edid_faults: HashSet<(connector::Handle, EdidFault)>,
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
-    cursor: Cursor,
     /// The devices that can tap, which the touchpad key turns off and on (D16).
     touchpads: Vec<InputDevice>,
     /// Whether the touchpad key has turned them off.
@@ -466,7 +467,6 @@ pub fn start(
         failed: HashMap::new(),
         edid_faults: HashSet::new(),
         nvidia,
-        cursor: Cursor::from_env(),
         touchpads: Vec::new(),
         touchpads_off: false,
     };
@@ -555,12 +555,14 @@ impl Drm {
         what: &Target,
         space: &smithay::desktop::Space<Window>,
         marks: &Marks,
+        pointer: Option<Pointer<'_>>,
     ) -> Result<Vec<u8>, Error> {
         crate::capture::read_back::<_, GlesTexture>(
             gles(&mut self.gpus, &self.render_node)?,
             what,
             space,
             marks,
+            pointer,
         )
     }
 }
@@ -1488,7 +1490,7 @@ impl State {
                 &popups,
                 &marks,
                 pointer.as_ref(),
-                &mut drm.cursor,
+                &mut self.cursor,
                 look,
             ),
             Err(error) => {
@@ -1793,15 +1795,10 @@ fn render(
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
     let mut elements: Vec<Element> = Vec::new();
-    if let (Some((location, status)), Some(area)) = (pointer, space.output_geometry(output)) {
-        if area.to_f64().contains(*location) {
-            let at = *location - area.loc.to_f64();
-            elements.extend(
-                pointer_elements(renderer, cursor, status, at, scale)
-                    .into_iter()
-                    .map(Element::Pointer),
-            );
-        }
+    if let Some((location, status)) = pointer {
+        let pointer: Vec<PointerElement<_>> =
+            pointer_on(renderer, cursor, status, *location, space, output);
+        elements.extend(pointer.into_iter().map(Element::Pointer));
     }
     match lock {
         Some(lock) => {
@@ -1839,6 +1836,13 @@ fn render(
             elements.extend(stacked.into_iter().map(Element::Space));
         }
     }
+    // No region is blurred on the lock screen.
+    let blurred = if lock.is_some() {
+        None
+    } else {
+        Some(&*marks.blurred)
+    };
+    let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
     let (frame, filtered) = match look.filter {
         Some(affine) => {
