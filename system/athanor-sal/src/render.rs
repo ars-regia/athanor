@@ -590,15 +590,18 @@ pub fn paint<C: Canvas>(
                 ctx.set_paint(color(fill));
                 ctx.fill_path(&rounded(r, 0.0, crate::tile::RADIUS));
                 let disc = crate::tile::disc(r, t.padding, ui.rtl);
-                let (disc_fill, ink) = if tile.active {
-                    (t.accent, t.on_accent)
+                // The glyph is in the ink of the disc: Tile::glyph.
+                let disc_fill = if tile.active {
+                    t.accent
                 } else {
-                    (mix(t.surface, t.text, 2.0 * HOVER), t.text)
+                    mix(t.surface, t.text, 2.0 * HOVER)
                 };
                 let centre = (f64::from(disc.center_x()), f64::from(disc.y + disc.h / 2.0));
                 ctx.set_paint(color(disc_fill));
                 ctx.fill_path(&Circle::new(centre, f64::from(disc.w / 2.0)).to_path(0.1));
-                draw_icon(ctx, resources, &tile.image.tinted(ink), disc, crate::tile::GLYPH);
+                if let Some(glyph) = tile.glyph() {
+                    draw_icon(ctx, resources, glyph, disc, crate::tile::GLYPH);
+                }
                 if let (Some(first), Some(second)) = (&widget.text, &tile.second) {
                     let top = r.y + (r.h - first.height() - second.height()) / 2.0;
                     let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, first.width());

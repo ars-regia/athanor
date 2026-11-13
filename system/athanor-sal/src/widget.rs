@@ -1585,6 +1585,7 @@ impl Ui {
                 &mut widget.text,
                 (size, pad, gap, rtl),
                 &style,
+                [t.text, t.on_accent],
             ),
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };

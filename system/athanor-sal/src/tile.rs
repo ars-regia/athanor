@@ -4,10 +4,13 @@
 //! the controls' fill. AT-SPI reads it as GTK's ToggleButton: a toggle button named by its title,
 //! described by its second line, pressed while on.
 
+use std::sync::Arc;
+
 use parley::Layout;
 
 use crate::icon::Image;
 use crate::text::{Brush, TextContext, TextStyle};
+use crate::theme::Rgba;
 use crate::widget::{Kind, Rect, Ui, WidgetId};
 
 /// A tile's height, its icon's disc and the glyph in it, and its corner radius: a 2×1 tile of
@@ -32,6 +35,39 @@ pub struct Tile {
     /// The second line, laid out by the last layout; boxed, so that a tile does not make every
     /// widget as large as a layout.
     pub(crate) second: Option<Box<Layout<Brush>>>,
+    /// The glyph in the disc's inks, off and on, made by a layout from `image` and the theme's
+    /// inks: kept between frames, so that the GPU's atlas holds them and a frame tints nothing.
+    pub(crate) glyphs: Option<Glyphs>,
+}
+
+/// A tile's glyph tinted in the disc's two inks, and what it was tinted from.
+pub(crate) struct Glyphs {
+    from: Image,
+    inks: [Rgba; 2],
+    /// Off, then on.
+    pub(crate) tinted: [Image; 2],
+}
+
+impl Tile {
+    /// The glyph as the disc draws it: in the theme's text colour while off, in the colour on
+    /// the accent while on. `None` before the first layout.
+    pub(crate) fn glyph(&self) -> Option<&Image> {
+        self.glyphs.as_ref().map(|g| &g.tinted[usize::from(self.active)])
+    }
+
+    /// Tints the glyph again when its image or the inks changed since the last time.
+    fn tint(&mut self, inks: [Rgba; 2]) {
+        let same = self.glyphs.as_ref().is_some_and(|g| {
+            g.inks == inks && Arc::ptr_eq(g.from.pixmap(), self.image.pixmap())
+        });
+        if !same {
+            self.glyphs = Some(Glyphs {
+                from: self.image.clone(),
+                inks,
+                tinted: inks.map(|ink| self.image.tinted(ink)),
+            });
+        }
+    }
 }
 
 impl Ui {
@@ -56,6 +92,7 @@ impl Ui {
             image,
             active,
             second: None,
+            glyphs: None,
         };
         self.add(parent, Kind::Tile(tile))
     }
@@ -86,7 +123,9 @@ pub(crate) fn measure(
     title: &mut Option<Layout<Brush>>,
     (size, pad, gap, rtl): (f32, f32, f32, bool),
     style: &TextStyle,
+    inks: [Rgba; 2],
 ) -> (f32, f32) {
+    tile.tint(inks);
     let heading = TextStyle {
         weight: 700,
         ..style.clone()
@@ -162,6 +201,35 @@ mod tests {
         assert!(!ui.set_tile_subtitle(wifi, "Connecting"));
         ui.layout();
         assert!(ui.widget(wifi).rect.h >= super::HEIGHT);
+    }
+
+    #[test]
+    fn a_tile_tints_its_glyph_once_until_the_image_or_the_theme_changes() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let wifi = ui.tile(Ui::ROOT, "Wi-Fi", "On", glyph(), true);
+        let tinted = |ui: &Ui| match &ui.widget(wifi).kind {
+            Kind::Tile(tile) => tile.glyph().map(|g| std::sync::Arc::clone(g.pixmap())),
+            _ => None,
+        };
+        assert!(tinted(&ui).is_none(), "before a layout");
+        ui.layout();
+        let first = tinted(&ui).expect("a layout tints it");
+        let ink = ui.theme.on_accent.0;
+        let pixel = first.data()[0];
+        assert_eq!([pixel.r, pixel.g, pixel.b], [ink[0], ink[1], ink[2]], "on: on the accent");
+        ui.layout();
+        let again = tinted(&ui).expect("still tinted");
+        assert!(std::sync::Arc::ptr_eq(&first, &again), "the same theme and image: kept");
+        ui.theme.on_accent = crate::Rgba([1, 2, 3, 255]);
+        ui.layout();
+        let other = tinted(&ui).expect("tinted again");
+        assert!(!std::sync::Arc::ptr_eq(&first, &other), "a new theme: tinted again");
+        if let Kind::Tile(tile) = &mut ui.widgets[wifi].kind {
+            tile.image = glyph();
+        }
+        ui.layout();
+        let image = tinted(&ui).expect("tinted again");
+        assert!(!std::sync::Arc::ptr_eq(&other, &image), "a new image: tinted again");
     }
 
     #[test]
