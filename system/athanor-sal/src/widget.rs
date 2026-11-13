@@ -6,6 +6,8 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
 use std::cell::Cell;
+use std::fmt;
+use std::time::{Duration, Instant};
 
 mod rows;
 
@@ -42,8 +44,36 @@ pub(crate) struct Widgets {
     dead: Widget,
     /// What a stale id writes, emptied at every write.
     scratch: Widget,
-    /// The stale id last logged: a method that indexes it several times logs it once.
-    logged: Cell<Option<WidgetId>>,
+    /// The warnings of stale ids and of widgets refused, said at most once a minute.
+    hush: Hush,
+}
+
+/// How long [`Hush`] holds back the warnings after one it says.
+const HUSH: Duration = Duration::from_secs(60);
+
+/// A warning said at most once a [`HUSH`], with the count of those held back since: an
+/// application that keeps a stale id, or an assistive technology that keeps acting on a cached
+/// node, does not flood the journal.
+#[derive(Default)]
+struct Hush {
+    said: Cell<Option<Instant>>,
+    held: Cell<u64>,
+}
+
+impl Hush {
+    /// Whether to say a warning at `now`, and how many were held back since the last one said.
+    fn due(&self, now: Instant) -> Option<u64> {
+        if self
+            .said
+            .get()
+            .is_some_and(|said| now.duration_since(said) < HUSH)
+        {
+            self.held.set(self.held.get() + 1);
+            return None;
+        }
+        self.said.set(Some(now));
+        Some(self.held.replace(0))
+    }
 }
 
 /// The generation of a retired slot, which holds no widget again: the first whose low 16 bits,
@@ -71,7 +101,7 @@ impl Widgets {
             generations: vec![0],
             dead: dead(),
             scratch: dead(),
-            logged: Cell::new(None),
+            hush: Hush::default(),
         }
     }
 
@@ -116,10 +146,18 @@ impl Widgets {
         (generation != RETIRED).then_some(WidgetId(id.0, generation))
     }
 
-    /// Logs the use of stale `id`, once for a run of uses.
+    /// Logs the use of stale `id`.
     fn stale(&self, id: WidgetId) {
-        if self.logged.replace(Some(id)) != Some(id) {
-            eprintln!("athanor-sal: {id:?} names a removed widget: nothing done");
+        self.warn(format_args!("{id:?} names a removed widget: nothing done"));
+    }
+
+    /// Logs `what`, unless a warning was logged less than a minute ago: then it is counted, and
+    /// the count logged with the next one.
+    pub(crate) fn warn(&self, what: fmt::Arguments<'_>) {
+        match self.hush.due(Instant::now()) {
+            None => {}
+            Some(0) => eprintln!("athanor-sal: {what}"),
+            Some(held) => eprintln!("athanor-sal: {what} ({held} more held back)"),
         }
     }
 }
@@ -754,7 +792,8 @@ impl Ui {
     /// When `parent` is past the widgets of this `Ui`.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
         if parent.index() < self.widgets.len() && !self.widgets.contains(parent) {
-            eprintln!("athanor-sal: nothing added under {parent:?}, a removed widget");
+            self.widgets
+                .warn(format_args!("nothing added under {parent:?}, a removed widget"));
             return parent;
         }
         if let Some(id) = self.reuse(parent) {
@@ -766,7 +805,8 @@ impl Ui {
         // The parent first: an id past the arena panics before the arena changes.
         let parent_children = &mut self.widgets[parent].children;
         if next >= MAX_WIDGETS {
-            eprintln!("athanor-sal: nothing added under {parent:?}: the Ui is full");
+            self.widgets
+                .warn(format_args!("nothing added under {parent:?}: the Ui is full"));
             return REFUSED;
         }
         let id = WidgetId(next as u32, 0);
@@ -2662,6 +2702,18 @@ fn is_invisible_format(c: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warnings_are_said_at_most_once_a_minute_with_the_count_held_back() {
+        let hush = Hush::default();
+        let start = Instant::now();
+        assert_eq!(hush.due(start), Some(0));
+        assert_eq!(hush.due(start + Duration::from_secs(1)), None);
+        assert_eq!(hush.due(start + Duration::from_secs(59)), None);
+        assert_eq!(hush.due(start + HUSH), Some(2));
+        assert_eq!(hush.due(start + HUSH), None);
+        assert_eq!(hush.due(start + HUSH * 3), Some(1));
+    }
 
     #[test]
     fn the_constructors_add_each_kind_with_its_fields() {

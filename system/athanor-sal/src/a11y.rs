@@ -478,7 +478,8 @@ impl Ui {
         let Some(id) = widget_of(self, request.target_node) else {
             let slot = request.target_node.0 & ((1 << SLOT_BITS) - 1);
             if request.target_node.0 >> WIDGET_BITS == 0 && (slot as usize) < self.len() {
-                eprintln!("athanor-sal: no action on slot {slot}: its widget was removed");
+                self.widgets
+                    .warn(format_args!("no action on slot {slot}: its widget was removed"));
             }
             return None;
         };
