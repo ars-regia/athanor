@@ -51,6 +51,15 @@ print(
                 for name in ("kernel-local", "azoth-microvm.spec")
             },
             "build_sh_sha256": sha("build.sh"),
+            "cachyos_locks_sha256": {
+                name: sha(name)
+                for name in (
+                    "cachyos_lock.py",
+                    "derived.config",
+                    "cachyos-protected.sha256",
+                    "cachyos-files.list",
+                )
+            },
             "bconds_sha256": sha("bconds.sh"),
             "builder_base": base,
             "containerfile_sha256": sha("builder/Containerfile"),

@@ -38,6 +38,14 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# A merge into iso-v0 cancels the push run of the merge before it: the newer head holds both
+# changes. Every other run has a group of its own, its run id: called from pr.yml, github.workflow
+# and github.ref are the caller's, and a group built from them would be the one
+# rust-security-audit.yml takes in the same run, so either job could cancel the other.
+concurrency:
+  group: shell-surfaces-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

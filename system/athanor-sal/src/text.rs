@@ -43,6 +43,9 @@ pub struct TextContext {
     pub fonts: FontContext,
     /// The scratch space shaping uses.
     pub layouts: LayoutContext<Brush>,
+    /// The approximate character width of a wrapping label's `max_width_chars`, by font size and
+    /// style: each pair is shaped once.
+    pub(crate) char_widths: Vec<(f32, TextStyle, f32)>,
 }
 
 impl Default for TextContext {
@@ -80,12 +83,26 @@ impl TextContext {
         Self {
             fonts,
             layouts: LayoutContext::new(),
+            char_widths: Vec::new(),
         }
     }
 
     /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start, at
     /// `size` times the style's scale.
     pub fn layout(&mut self, text: &str, size: f32, rtl: bool, style: &TextStyle) -> Layout<Brush> {
+        self.layout_at(text, size, rtl, style, None)
+    }
+
+    /// [`TextContext::layout`], its lines broken at `width` logical pixels when it is given and
+    /// aligned to the start edge of that width.
+    pub(crate) fn layout_at(
+        &mut self,
+        text: &str,
+        size: f32,
+        rtl: bool,
+        style: &TextStyle,
+        width: Option<f32>,
+    ) -> Layout<Brush> {
         let features: Vec<FontFeature> = style
             .features
             .iter()
@@ -104,7 +121,7 @@ impl TextContext {
         )));
         builder.set_base_direction(base_direction(rtl));
         let mut layout = builder.build(text);
-        layout.break_all_lines(None);
+        layout.break_all_lines(width);
         layout.align(Alignment::Start, AlignmentOptions::default());
         layout
     }
