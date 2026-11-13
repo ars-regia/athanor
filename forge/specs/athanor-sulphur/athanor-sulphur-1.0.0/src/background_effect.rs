@@ -29,8 +29,8 @@
 //!   bounding box, so that the region's shape is worked out from at most `MOST_RECTS`
 //!   rectangles, once for each region the client sets, and kept as at most `MOST_RECTS`
 //!   rectangles. A frame compares the shape a commit applied with the one it kept by pointer,
-//!   and finds each element's surface in a map, so that its cost does not grow with what the
-//!   client sends.
+//!   a region set again as it was being the shape it was, and finds each element's surface in
+//!   a map, so that its cost does not grow with what the client sends.
 
 use crate::blur::Blur;
 use crate::state::State;
@@ -78,8 +78,7 @@ impl ExtBackgroundEffectHandler for State {
     // The region is pending here, until the surface's commit applies it: its shape goes into a
     // cached state of its own, which the commit applies with Smithay's.
     fn set_blur_region(&mut self, surface: WlSurface, region: RegionAttributes) {
-        let shape = Arc::new(shape_of(&region));
-        set_pending(&surface, Some(shape));
+        set_pending(&surface, Some(shape_of(&region)));
         let id = Id::from_wayland_resource(&surface);
         if self.blurred.contains_key(&id) {
             return;
@@ -111,9 +110,20 @@ impl Cacheable for Applied {
     }
 }
 
-fn set_pending(surface: &WlSurface, shape: Option<Arc<Vec<Rectangle<i32, Logical>>>>) {
+/// Makes `shape` the surface's pending one. A shape equal to the pending or the applied one is
+/// that one, so that a client that sends the same region again with each commit changes
+/// nothing a frame compares by pointer.
+fn set_pending(surface: &WlSurface, shape: Option<Vec<Rectangle<i32, Logical>>>) {
     with_states(surface, |states| {
-        states.cached_state.get::<Applied>().pending().0 = shape;
+        let mut cached = states.cached_state.get::<Applied>();
+        let shape = shape.map(|shape| {
+            [cached.pending().0.clone(), cached.current().0.clone()]
+                .into_iter()
+                .flatten()
+                .find(|kept| **kept == shape)
+                .unwrap_or_else(|| Arc::new(shape))
+        });
+        cached.pending().0 = shape;
     });
 }
 

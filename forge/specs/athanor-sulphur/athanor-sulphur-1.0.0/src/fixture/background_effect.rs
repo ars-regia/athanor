@@ -11,6 +11,7 @@ use crate::background_effect::{blurs, held, Blurred, MOST_BLURS};
 use crate::material::Tier;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
+use smithay::backend::renderer::utils::CommitCounter;
 use smithay::utils::{Rectangle, Scale};
 use wayland_client::protocol::{wl_region, wl_subcompositor, wl_subsurface};
 use wayland_protocols::ext::background_effect::v1::client::{
@@ -171,8 +172,9 @@ fn applied(run: &Running) -> Option<Vec<Rectangle<i32, smithay::utils::Logical>>
     crate::background_effect::applied(surface)
 }
 
-/// The blur elements the first output's frame is drawn with, as Pixman draws it.
-fn blur_elements(run: &Running) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+/// The blur elements the first output's frame is drawn with, as Pixman draws it: their
+/// geometry and their commit.
+fn blurs_drawn(run: &Running) -> Vec<(Rectangle<i32, smithay::utils::Physical>, CommitCounter)> {
     let first = output(run, 0);
     let mut renderer = PixmanRenderer::new().expect("a renderer");
     let marks = run.state.marks();
@@ -180,8 +182,27 @@ fn blur_elements(run: &Running) -> Vec<Rectangle<i32, smithay::utils::Physical>>
     crate::background_effect::behind(&first, Some(&*marks.blurred), elements)
         .iter()
         .filter(|element| matches!(element, Blurred::Blur(_)))
-        .map(|element| element.geometry(Scale::from(1.0)))
+        .map(|element| (element.geometry(Scale::from(1.0)), element.current_commit()))
         .collect()
+}
+
+/// The geometry of the blur elements the first output's frame is drawn with, as Pixman draws
+/// it.
+fn blur_elements(run: &Running) -> Vec<Rectangle<i32, smithay::utils::Physical>> {
+    blurs_drawn(run).into_iter().map(|(at, _)| at).collect()
+}
+
+/// Puts the first output on M2 with Pixman drawing it, and returns it.
+fn on_pixman_m2(run: &mut Running, scene: &mut Scene) -> smithay::output::Output {
+    on_gpu(run, "/dev/dri/renderD-m2", Tier::M2);
+    let first = output(run, 0);
+    let on = first.clone();
+    scene
+        .local
+        .pump(run, "Pixman taken for M2", move |_, state| {
+            state.materials.tier_of(Some(&on)) == Tier::M2 && !state.materials.probing()
+        });
+    first
 }
 
 /// The frame's value at `(x, y)` of the window, of a grey: its red.
@@ -623,14 +644,7 @@ fn d35_an_output_blurs_at_most_most_blurs_regions_in_a_frame() {
     let mut scene = Scene::new(&mut run);
     let region = scene.region();
     scene.set(&mut run, Some(&region));
-    on_gpu(&mut run, "/dev/dri/renderD-m2", Tier::M2);
-    let first = output(&run, 0);
-    let on = first.clone();
-    scene
-        .local
-        .pump(&mut run, "Pixman taken for M2", move |_, state| {
-            state.materials.tier_of(Some(&on)) == Tier::M2 && !state.materials.probing()
-        });
+    on_pixman_m2(&mut run, &mut scene);
     let lowest = Rectangle::new((AT.0 + CHILD_AT.0, AT.1 + CHILD_AT.1).into(), CHILD.into());
     assert_eq!(blur_elements(&run), [lowest], "one region, blurred");
 
@@ -662,5 +676,46 @@ fn d35_an_output_blurs_at_most_most_blurs_regions_in_a_frame() {
     let shown = blur_elements(&run);
     assert_eq!(shown.len(), MOST_BLURS, "the bound: {shown:?}");
     assert!(!shown.contains(&lowest), "the bottom one is past it");
+    run.stop();
+}
+
+/// A region sent again as it was, as a client may with each commit, is no change of the blur
+/// element, so that what lies under it is not copied out again; whether it was applied or
+/// still pending, and after another region was set in between. Another region is a change.
+#[test]
+fn d35_a_region_sent_again_as_it_was_is_no_change() {
+    let mut run = Running::start(None);
+    let mut scene = Scene::new(&mut run);
+    let region = scene.region();
+    scene.set(&mut run, Some(&region));
+    on_pixman_m2(&mut run, &mut scene);
+    let commit = |run: &Running| match blurs_drawn(run)[..] {
+        [(_, commit)] => commit,
+        ref drawn => panic!("one blur element: {drawn:?}"),
+    };
+    let first = commit(&run);
+    assert_eq!(commit(&run), first, "a frame alone changes nothing");
+    let again = scene.region();
+    scene.set(&mut run, Some(&again));
+    assert_eq!(commit(&run), first, "sent again, applied");
+    let other = scene
+        .compositor
+        .create_region(&scene.local.queue.handle(), ());
+    other.add(0, 0, 10, 10);
+    scene.effect.set_blur_region(Some(&other));
+    scene.effect.set_blur_region(Some(&again));
+    scene.child.commit();
+    scene.parent.commit();
+    scene.local.roundtrip(&mut run);
+    assert_eq!(
+        commit(&run),
+        first,
+        "another region pending, then this one again"
+    );
+    scene.set(&mut run, Some(&other));
+    let changed = commit(&run);
+    assert_ne!(changed, first, "another region");
+    scene.set(&mut run, Some(&other));
+    assert_eq!(commit(&run), changed, "that one sent again");
     run.stop();
 }
