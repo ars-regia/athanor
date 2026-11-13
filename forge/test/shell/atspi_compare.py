@@ -85,6 +85,14 @@ EXPECTED_DIFFERENCES = {}
 # publish elsewhere still fails as missing.
 INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer, 2026-11-05, #982)"
 INDICATOR_PAGES = {"lists"}
+# GTK 4.20's calendar leaves its four arrow buttons unnamed, which SH13 fails; the toolkit's
+# calendar names them from its CalendarText. The maintainer decided on 2026-11-13 (#1122) that
+# an unnamed button of the bar's calendar references matches the transcript's named button at the
+# same position: the k-th unnamed button of the reference, the k-th named button of the
+# transcript that no element of the reference names. The rule holds only for the references it
+# names, so that an unnamed button anywhere else still fails as missing.
+ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
+ARROWS_REFERENCES = {"atspi-bar-calendar", "atspi-bar-calendar-it"}
 
 
 def in_scroll_bar(nodes):
@@ -158,10 +166,20 @@ def same_role(a, b):
     return a == b or any(a in group and b in group for group in SAME_ROLE)
 
 
-def compare(reference, transcript, exempt=None, indicator=False):
+def arrow_counterparts(reference, candidates):
+    """The ARROWS rule: the id of each unnamed button of the reference, mapped to the named
+    button of `candidates` at its position among those no element of the reference names."""
+    names = {ref["name"] for ref in reference}
+    unnamed = [ref for ref in reference if same_role(ref["role"], "button") and not ref["name"]]
+    named = [node for node in candidates
+             if same_role(node["role"], "button") and node["name"] and node["name"] not in names]
+    return {id(ref): node for ref, node in zip(unnamed, named)}
+
+
+def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
     """Returns (lines, failures): a verdict per element of the reference, and the failures.
     `exempt` maps the name of an element decision 28 hides to its (cause, issue); `indicator`
-    applies the scroll-indicator rule of INDICATOR_PAGES."""
+    applies the scroll-indicator rule of INDICATOR_PAGES, `arrows` the ARROWS rule."""
     exempt = exempt or {}
     candidates = spoken(transcript)
     lines, failures = [], []
@@ -172,6 +190,7 @@ def compare(reference, transcript, exempt=None, indicator=False):
         f"exemption {name!r} names no element of the reference"
         for name in sorted(set(exempt) - {ref["name"] for ref in spoken(reference)})
     ]
+    counterparts = arrow_counterparts(spoken(reference), candidates) if arrows else {}
     bars = set()
     if indicator and not any(node["role"] == "scroll bar" for node in transcript):
         bars = in_scroll_bar(reference)
@@ -183,6 +202,7 @@ def compare(reference, transcript, exempt=None, indicator=False):
         match = next(
             (node for node in named if node["role"] == ref["role"]), None
         ) or next(iter(named), None)
+        match = counterparts.get(id(ref), match)
         label = f"{ref['role']} {ref['name']!r}"
         if ref["name"] in exempt:
             cause, issue = exempt[ref["name"]]
@@ -200,6 +220,8 @@ def compare(reference, transcript, exempt=None, indicator=False):
             continue
         candidates.remove(match)
         problems, notes = [], []
+        if id(ref) in counterparts:
+            notes.append(f"named {match['name']!r}: {ARROWS}")
         if not (
             same_role(match["role"], ref["role"])
             or gallery_switch(ref["role"], match["role"], ref["name"])
@@ -281,7 +303,8 @@ def main(argv):
         if own:
             preset, dock, lang = (None if v == "-" else v for v in own[1:])
             exempt = exemptions(preset, dock, lang)
-        lines, failures = compare(reference, transcript, exempt)
+        arrows = Path(argv[0]).stem in ARROWS_REFERENCES
+        lines, failures = compare(reference, transcript, exempt, arrows=arrows)
     for line in lines:
         print(line)
     for line in failures:

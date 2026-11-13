@@ -220,6 +220,41 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, ["scroll bar '': value '5.0', expected '0.0'"])
         self.assertEqual(compare.INDICATOR_PAGES, {"lists"})
 
+    def test_the_calendars_unnamed_arrows_match_the_named_buttons_at_their_place(self):
+        reference = [node("button", "Today", ["showing"])] + [
+            node("button", "", ["focusable", "sensitive", "showing"]) for _ in range(4)
+        ] + [node("label", "2026", ["showing"])]
+        names = ["Previous month", "Next month", "Previous year", "Next year"]
+        transcript = [node("button", "Today", ["showing"]), node("label", "2026", ["showing"])] + [
+            node("button", name, ["focusable", "sensitive", "showing"]) for name in names
+        ]
+        lines, failures = compare.compare(reference, transcript, arrows=True)
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            [line.split("; ")[-1] for line in lines if "named" in line],
+            [f"note: named {name!r}: {compare.ARROWS}" for name in names],
+        )
+        # A named button too few: the last arrow is missing.
+        _, failures = compare.compare(reference, transcript[:-1], arrows=True)
+        self.assertEqual(failures, ["button '': missing"])
+        # Its states are compared as any element's.
+        bare = transcript[:2] + [node("button", name, ["sensitive", "showing"]) for name in names]
+        _, failures = compare.compare(reference, bare, arrows=True)
+        self.assertEqual(failures, ["button '': state 'focusable' missing"] * 4)
+
+    def test_the_arrow_rule_holds_only_for_the_calendars_references(self):
+        reference = [node("button", "", ["showing"])]
+        transcript = [node("button", "Next month", ["showing"])]
+        self.assertEqual(compare.ARROWS_REFERENCES, {"atspi-bar-calendar", "atspi-bar-calendar-it"})
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {}
+            for name, tree in [("atspi-bar", reference), ("atspi-bar-calendar", reference), ("t", transcript)]:
+                paths[name] = Path(tmp) / f"{name}.json"
+                paths[name].write_text(json.dumps(tree), encoding="utf-8")
+            with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                self.assertEqual(compare.main([str(paths["atspi-bar"]), str(paths["t"])]), 1)
+                self.assertEqual(compare.main([str(paths["atspi-bar-calendar"]), str(paths["t"])]), 0)
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
