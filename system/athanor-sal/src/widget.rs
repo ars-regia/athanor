@@ -1697,7 +1697,8 @@ impl Ui {
                 let title = sizes.first().map_or(0.0, |s| s.0);
                 let buttons = sizes.iter().skip(1).map(|s| s.0 + gap).sum::<f32>();
                 let h = sizes.iter().map(|s| s.1).fold(0.0, f32::max);
-                (title + 2.0 * buttons + 2.0 * pad, h + pad)
+                let bar = self.theme.title_bar_height.map_or(h + pad, |bar| bar.max(h));
+                (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
             Kind::Row => {
@@ -4571,6 +4572,24 @@ mod tests {
             assert!(matches!(ui.widget(title).kind, Kind::Label(_)));
             assert_eq!(ui.widget(title).style.weight, weight, "{style:?}");
         }
+    }
+
+    #[test]
+    fn a_theme_sets_the_title_bar_height_but_never_below_its_buttons() {
+        let bar_height = |title_bar_height| {
+            let theme = Theme {
+                title_bar_height,
+                ..Theme::default()
+            };
+            let mut ui = Ui::new("Layout", theme, false);
+            ui.add_title_bar();
+            ui.layout();
+            ui.widget(ui.title_bar.expect("a title bar")).rect.h
+        };
+        let natural = bar_height(None);
+        assert_eq!(bar_height(Some(natural + 7.0)), natural + 7.0);
+        // The buttons' height: the natural bar less the padding.
+        assert_eq!(bar_height(Some(1.0)), natural - Theme::default().padding);
     }
 
     #[test]

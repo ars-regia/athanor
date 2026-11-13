@@ -73,6 +73,10 @@ pub struct Theme {
     pub control_min_height: f32,
     /// How the title bar draws its title and its buttons.
     pub title_bar_style: TitleBarStyle,
+    /// The title bar's height in logical pixels, never less than its buttons', as GTK's header
+    /// bar has a height of its own. `None`, the default, sizes it from its buttons and the
+    /// padding.
+    pub title_bar_height: Option<f32>,
 }
 
 /// How the title bar the window draws itself shows its title and its buttons.
@@ -114,6 +118,7 @@ impl Default for Theme {
             control_border: 0.0,
             control_min_height: 0.0,
             title_bar_style: TitleBarStyle::Round,
+            title_bar_height: None,
         }
     }
 }
