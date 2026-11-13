@@ -15,9 +15,9 @@ fn channels(format: PixelFormat) -> ([usize; 3], Option<usize>) {
 
 /// The pixels of `capture` as red, green and blue premultiplied by alpha, and alpha, the alpha
 /// opaque for a format without one, at most `side` pixels on either side: a larger capture is
-/// shrunk by a whole factor, each pixel the mean of the block it stands for, so that a 4K
-/// window is not copied whole for a pane a few hundred pixels wide. `None` for a capture with
-/// no pixel, or whose bytes do not hold its rows.
+/// shrunk by a whole factor, each pixel the mean of four samples of the block it stands for, so
+/// that a 4K window is not copied whole for a pane a few hundred pixels wide. `None` for a
+/// capture with no pixel, or whose bytes do not hold its rows.
 pub fn picture(capture: &Capture, side: u32) -> Option<Picture> {
     let (width, height, stride) = (
         capture.width as usize,
@@ -39,34 +39,24 @@ pub fn picture(capture: &Capture, side: u32) -> Option<Picture> {
         return None;
     }
     let ([r, g, b], a) = channels(capture.format);
-    let block = (factor * factor) as u32;
-    let mut sums = vec![[0u32; 4]; out_w];
+    // Four taps per output pixel, at the quarters of its block, as a linear filter samples a
+    // shrunk texture: reading every pixel of a 4K window costs more than it shows at this size.
+    let taps = [factor / 4, factor * 3 / 4];
     let mut rgba = Vec::with_capacity(out_w * out_h * 4);
-    for (y, line) in capture
-        .bytes
-        .chunks_exact(stride)
-        .take(out_h * factor)
-        .enumerate()
-    {
-        // Each output pixel sums the bytes of its block's `factor` pixels on this line, in the
-        // capture's order: the channels are told apart once per output pixel, below.
-        for (sum, run) in sums
-            .iter_mut()
-            .zip(line[..out_w * factor * 4].chunks_exact(factor * 4))
-        {
-            for pixel in run.as_chunks::<4>().0 {
-                for (total, byte) in sum.iter_mut().zip(pixel) {
-                    *total += u32::from(*byte);
+    for out_y in 0..out_h {
+        for out_x in 0..out_w {
+            let mut sum = [0u32; 4];
+            for y in taps.map(|tap| out_y * factor + tap) {
+                for x in taps.map(|tap| out_x * factor + tap) {
+                    let at = y * stride + x * 4;
+                    for (total, byte) in sum.iter_mut().zip(capture.bytes.get(at..at + 4)?) {
+                        *total += u32::from(*byte);
+                    }
                 }
             }
-        }
-        if (y + 1) % factor == 0 {
-            for sum in &mut sums {
-                // The mean of bytes is a byte.
-                let mean = |channel: usize| (sum[channel] / block) as u8;
-                rgba.extend([mean(r), mean(g), mean(b), a.map_or(255, mean)]);
-                *sum = [0; 4];
-            }
+            // The mean of four bytes is a byte.
+            let mean = |channel: usize| (sum[channel] / 4) as u8;
+            rgba.extend([mean(r), mean(g), mean(b), a.map_or(255, mean)]);
         }
     }
     Some(Picture {
@@ -133,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn a_capture_larger_than_the_side_is_the_mean_of_its_blocks() {
+    fn a_capture_shrunk_by_two_is_the_mean_of_its_blocks() {
         // 4 by 2 pixels shrunk by 2 into 2 by 1: each pixel the mean of a 2 by 2 block.
         let mut bytes = Vec::new();
         for line in [[0, 10, 20, 30], [40, 50, 60, 70]] {
