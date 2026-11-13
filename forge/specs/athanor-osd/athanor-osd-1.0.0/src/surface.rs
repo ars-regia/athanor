@@ -531,7 +531,7 @@ fn fit(ui: &mut Ui, island: WidgetId) {
 
 /// The overlay's colours and measures from the toolkit's tokens (OD10, VL10): the shell's
 /// neutral surface, the ink, the accent's foreground for the bar and the warning colour
-/// beyond 100 %, the panel radius and an 18 px padding.
+/// beyond 100 %, the panel radius, an 18 px padding and the system font's size (VL6).
 fn theme(appearance: &Appearance) -> Theme {
     let palette = sal::palette(appearance);
     let mut theme = Theme::default();
@@ -543,6 +543,7 @@ fn theme(appearance: &Appearance) -> Theme {
     theme.border = Rgba(palette.line);
     theme.warning = Rgba(palette.warn);
     theme.focus = Rgba(palette.acc_fg);
+    theme.font_size = appearance.font_size;
     theme.margin = 0.0;
     theme.gap = sal::space::M;
     theme.island = Rgba(palette.surf);
@@ -622,5 +623,27 @@ mod tests {
         assert_eq!(theme.warning, Rgba(palette.warn));
         assert_eq!(theme.island, Rgba(palette.surf));
         assert_eq!(theme.background.0[3], 0, "transparent around the fill");
+    }
+
+    #[test]
+    fn the_number_is_body_text_of_the_system_font_with_tabular_figures() {
+        let mut osd = Osd::new(Rc::new(RefCell::new(Vec::new())), None);
+        osd.appearance = Appearance {
+            font_size: 22.0,
+            ..Appearance::default()
+        };
+        let built = osd.build(&level(45.0, 100.0), 45.0, 1);
+        let (ui, widgets) = built.expect("the level is built");
+        assert_eq!(ui.theme.font_size, 22.0);
+        let style = &ui.widget(widgets.number).style;
+        assert_eq!(
+            (style.scale, style.weight),
+            (sal::size::BODY.scale, sal::size::BODY.weight)
+        );
+        assert_eq!(
+            style.features,
+            [*b"tnum"],
+            "its digits change in place (VL6)"
+        );
     }
 }

@@ -382,7 +382,7 @@ pub struct Widget {
     pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
     /// How its text is set: see [`Ui::set_text_style`].
-    pub(crate) style: TextStyle,
+    pub style: TextStyle,
     /// `Some` for a widget that opens a popup: whether it is open.
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,

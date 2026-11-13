@@ -3,7 +3,9 @@
 //!
 //! The store is the GNOME keys `color-scheme`, `accent-color` and `high-contrast`, plus
 //! the two keys of `org.athanor.desktop.appearance` GNOME has no key for. A change written
-//! by any tool is the user's choice; nothing here keeps a copy that could disagree.
+//! by any tool is the user's choice; nothing here keeps a copy that could disagree. The
+//! system font's size is read from GNOME's `font-name` and `text-scaling-factor`, the keys
+//! GTK reads (VL6); `apply` never writes them.
 //!
 //! GIO aborts the process on a schema or a key it cannot find, and a panic is a loss of
 //! service here, so every schema and key is looked up before it is touched. One that is
@@ -132,7 +134,7 @@ impl AccentMode {
 }
 
 /// The user's appearance, as the store holds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Appearance {
     pub dark: bool,
     pub high_contrast: bool,
@@ -145,6 +147,47 @@ pub struct Appearance {
     /// GNOME's `enable-animations`: false is reduced motion (VL9). A store without the key
     /// keeps the animations on.
     pub animations: bool,
+    /// The size of body text in logical pixels: the size of GNOME's `font-name` at its
+    /// `text-scaling-factor`, as GTK sets it (VL6). The toolkit's type scale,
+    /// `sal::size`, multiplies it. A store without the keys reads as GTK's own default,
+    /// Adwaita Sans 11 at a factor of 1: 14.67 px.
+    pub font_size: f32,
+}
+
+/// GTK 4.20's `font-name` when the store has none (`gdk/wayland/gdksettings-wayland.c`).
+const DEFAULT_FONT: &str = "Adwaita Sans 11";
+/// GTK's size in points for a `font-name` that gives none or 0 (`DEFAULT_FONT_SIZE_PT` of
+/// `gtk/gtkcssenumvalue.c`).
+const DEFAULT_POINTS: f64 = 10.0;
+
+/// The size in logical pixels GTK 4.20 gives body text for `font_name`, a Pango font
+/// description, at `scaling`, GNOME's `text-scaling-factor`, as
+/// `gtk_css_font_size_get_default_px` computes it: a size in points at 96 dots per inch times
+/// the factor, one in pixels (`px`) as written. Pango takes the size from the last word, after
+/// up to two words of `#features` and `@variations` (`pango_font_description_from_string`).
+fn font_px(font_name: &str, scaling: f64) -> f32 {
+    let mut words = font_name
+        .split(|c: char| c.is_ascii_whitespace() || c == ',')
+        .filter(|word| !word.is_empty())
+        .rev()
+        .peekable();
+    for _ in 0..2 {
+        words.next_if(|word| word.starts_with(['#', '@']));
+    }
+    let size = words.next().and_then(|word| {
+        let (number, pixels) = match word.strip_suffix("px") {
+            Some(number) => (number, true),
+            None => (word, false),
+        };
+        let size = number.parse::<f64>().ok()?;
+        (size > 0.0 && size <= 1e6).then_some((size, pixels))
+    });
+    let px = match size {
+        Some((size, true)) => size,
+        Some((points, false)) => points * 96.0 * scaling / 72.0,
+        None => DEFAULT_POINTS * 96.0 * scaling / 72.0,
+    };
+    px as f32
 }
 
 impl Default for Appearance {
@@ -157,6 +200,7 @@ impl Default for Appearance {
             accent_mode: AccentMode::Fixed,
             accent_computed: None,
             animations: true,
+            font_size: font_px(DEFAULT_FONT, 1.0),
         }
     }
 }
@@ -184,6 +228,10 @@ impl Store {
 
     fn boolean(&self, key: &str) -> Option<bool> {
         self.schema.has_key(key).then(|| self.settings.boolean(key))
+    }
+
+    fn double(&self, key: &str) -> Option<f64> {
+        self.schema.has_key(key).then(|| self.settings.double(key))
     }
 
     fn set_string(&self, key: &str, value: &str) -> io::Result<()> {
@@ -267,6 +315,13 @@ impl Stores {
                 .as_ref()
                 .and_then(|store| store.boolean("enable-animations"))
                 .unwrap_or(default.animations),
+            font_size: font_px(
+                interface("font-name").as_deref().unwrap_or(DEFAULT_FONT),
+                self.interface
+                    .as_ref()
+                    .and_then(|store| store.double("text-scaling-factor"))
+                    .unwrap_or(1.0),
+            ),
         }
     }
 
@@ -653,6 +708,33 @@ mod tests {
         assert_eq!(Rgb::from_hex("#9141AC"), Some(Accent::Purple.rgb()));
         for bad in ["", "9141ac", "#9141a", "#9141acff", "#9141ag", "#+141ac"] {
             assert_eq!(Rgb::from_hex(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_font_size_is_gtks_from_the_font_name_and_the_scaling_factor() {
+        let px = |name, scaling| (font_px(name, scaling) * 1000.0).round() / 1000.0;
+        assert_eq!(px("Adwaita Sans 11", 1.0), 14.667, "11 pt at 96 dpi");
+        assert_eq!(
+            Appearance::default().font_size,
+            font_px("Adwaita Sans 11", 1.0)
+        );
+        assert_eq!(
+            px("Adwaita Sans 11", 1.25),
+            18.333,
+            "text-scaling-factor scales points"
+        );
+        assert_eq!(px("Inter Bold Italic 13.5", 1.0), 18.0);
+        assert_eq!(px("Cantarell,Sans 12", 1.0), 16.0);
+        assert_eq!(
+            px("Inter 12 @wght=450 #tnum=1", 1.0),
+            16.0,
+            "after variations, features"
+        );
+        assert_eq!(px("Inter 15px", 2.0), 15.0, "pixels are not scaled");
+        // No size, a size of 0 or a word that is not one: GTK's 10 pt.
+        for name in ["", "Inter", "Inter 0", "Inter 0px", "Inter -3", "Inter px"] {
+            assert_eq!(px(name, 1.0), 13.333, "{name:?}");
         }
     }
 
