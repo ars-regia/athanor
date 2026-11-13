@@ -19,7 +19,7 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     use crate::{Event, Kind, Theme, Ui};
-    use accesskit::Role;
+    use accesskit::{Orientation, Role};
 
     #[test]
     fn an_alert_stacks_its_children_as_a_group_does() {
@@ -48,5 +48,6 @@ mod tests {
         let node = crate::a11y::node(&ui, alert, 1.0);
         assert_eq!(node.role(), Role::Alert);
         assert_eq!(node.label(), Some("Battery low"));
+        assert_eq!(node.orientation(), Some(Orientation::Vertical), "as a group");
     }
 }

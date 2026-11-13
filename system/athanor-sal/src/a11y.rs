@@ -49,8 +49,10 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             Node::new(Role::GenericContainer)
         }
         Kind::Alert(name) => {
+            // A column as a group is, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Alert);
             node.set_label(name.as_str());
+            node.set_orientation(Orientation::Vertical);
             node
         }
         Kind::Group(name) => {
