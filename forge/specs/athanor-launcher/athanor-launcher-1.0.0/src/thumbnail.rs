@@ -48,17 +48,22 @@ pub fn picture(capture: &Capture, side: u32) -> Option<Picture> {
         .take(out_h * factor)
         .enumerate()
     {
-        for (x, pixel) in line[..out_w * factor * 4]
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .enumerate()
+        // Each output pixel sums the `factor` pixels of its block on this line.
+        for (sum, run) in sums
+            .iter_mut()
+            .zip(line[..out_w * factor * 4].chunks_exact(factor * 4))
         {
-            let sum = &mut sums[x / factor];
-            sum[0] += u32::from(pixel[r]);
-            sum[1] += u32::from(pixel[g]);
-            sum[2] += u32::from(pixel[b]);
-            sum[3] += a.map_or(255, |a| u32::from(pixel[a]));
+            for pixel in run.as_chunks::<4>().0 {
+                sum[0] += u32::from(pixel[r]);
+                sum[1] += u32::from(pixel[g]);
+                sum[2] += u32::from(pixel[b]);
+                if let Some(a) = a {
+                    sum[3] += u32::from(pixel[a]);
+                }
+            }
+            if a.is_none() {
+                sum[3] += 255 * factor as u32;
+            }
         }
         if (y + 1) % factor == 0 {
             for sum in &mut sums {
