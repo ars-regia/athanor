@@ -1388,16 +1388,12 @@ mod tests {
 
     /// A drop-down reaches AT-SPI as GTK's DropDown with the name and the tooltip the panels set:
     /// a combo box named by its chosen item, with its own name as its description, renamed on
-    /// every choice.
+    /// every choice through the updates a live adapter takes; a description or a tooltip set on
+    /// it describes it in place of its name; without items it has no name, as GTK's.
     #[test]
     fn a_drop_down_reads_as_gtks_named_by_its_chosen_item() {
-        use accesskit_atspi_common::Role as AtspiRole;
-        let mut ui = Ui::new("Drop-down", Theme::default(), false);
-        ui.add(Ui::ROOT, Kind::Label("Media player".into()));
-        let players = ui.drop_down(Ui::ROOT, "Media player", &["Spotify", "Firefox"], 0);
-        ui.layout();
-        let read = |ui: &Ui| {
-            let (adapter, _) = at_spi(ui);
+        use accesskit_atspi_common::{Adapter, Role as AtspiRole};
+        let read = |adapter: &Adapter| {
             let root = adapter.platform_node(adapter.root_id());
             let combo = (0..root.child_count().expect("children"))
                 .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
@@ -1407,9 +1403,34 @@ mod tests {
             let read = (combo.name(), combo.description());
             (read.0.expect("a name"), read.1.expect("a description"))
         };
-        assert_eq!(read(&ui), ("Spotify".into(), "Media player".into()));
+        let publish = |ui: &mut Ui, adapter: &mut Adapter| {
+            ui.layout();
+            for update in tree_updates(ui, 1.0) {
+                adapter.update(update);
+            }
+        };
+        let mut ui = Ui::new("Drop-down", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Spotify", "Firefox"], 0);
+        ui.layout();
+        let (mut adapter, _) = at_spi(&ui);
+        assert_eq!(read(&adapter), ("Spotify".into(), "Media player".into()));
         assert_eq!(ui.choose(players, 1), Some(Event::Changed(players)));
-        assert_eq!(read(&ui), ("Firefox".into(), "Media player".into()));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Media player".into()));
+        ui.set_tooltip(players, Some("Choose a player"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Choose a player".into()));
+        ui.set_description(players, Some("The player the keys control"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(
+            read(&adapter),
+            ("Firefox".into(), "The player the keys control".into())
+        );
+        let mut empty = Ui::new("Drop-down", Theme::default(), false);
+        empty.drop_down(Ui::ROOT, "Media player", &[], 0);
+        empty.layout();
+        let (adapter, _) = at_spi(&empty);
+        assert_eq!(read(&adapter), (String::new(), "Media player".into()));
     }
 
     /// An announcement reaches AT-SPI once, at polite priority, from a live region that leaves
