@@ -33,7 +33,7 @@ pub use icon_toggle::IconToggle;
 pub use motion::{Curve, Motion, Pose};
 pub use render::Error;
 pub use text::TextStyle;
-pub use theme::{Rgba, Theme};
+pub use theme::{Rgba, Theme, TitleBarStyle};
 pub use wrap::Wrap;
 pub use widget::{
     Calendar, CalendarText, Cell, Date, Event, Key, Kind, Level, Mark, PointerButton, Rect,
