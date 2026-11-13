@@ -592,6 +592,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// Whether the compositor may make the window larger than its widgets, as GTK's
+    /// `resizable`: when false, the window's maximum size is its minimum. True by default.
+    pub resizable: bool,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
@@ -622,6 +625,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            resizable: true,
             focus: None,
             text: TextContext::default(),
             title_bar: None,

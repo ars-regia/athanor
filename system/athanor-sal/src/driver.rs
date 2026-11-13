@@ -1082,6 +1082,7 @@ impl Shell {
                 layout(&mut ui, 1.0)?;
                 let size = logical_size(&ui);
                 window.set_min_size(Some(size));
+                window.set_max_size(max_size(&ui, size));
                 size
             }
         };
@@ -1286,6 +1287,12 @@ fn requested(size: (u32, u32), stretch: (bool, bool)) -> (u32, u32) {
     )
 }
 
+/// The maximum size of a window whose widgets take `size`: that size when the window is not
+/// resizable, as GTK sets a fixed window's on Wayland, and none otherwise.
+fn max_size(ui: &Ui, size: (u32, u32)) -> Option<(u32, u32)> {
+    (!ui.resizable).then_some(size)
+}
+
 /// The widgets' size in whole logical pixels, never empty.
 fn logical_size(ui: &Ui) -> (u32, u32) {
     let (w, h) = ui.size();
@@ -1475,6 +1482,7 @@ impl Surface {
             }
             Shown::Window(window) if size != self.size => {
                 window.set_min_size(Some(size));
+                window.set_max_size(max_size(&self.ui, size));
                 self.size = size;
             }
             _ => {}
@@ -2799,6 +2807,14 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
+        let mut ui = Ui::new("Fixed", crate::Theme::default(), false);
+        assert_eq!(max_size(&ui, (420, 300)), None, "a window is resizable by default");
+        ui.resizable = false;
+        assert_eq!(max_size(&ui, (420, 300)), Some((420, 300)));
+    }
 
     #[test]
     fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
