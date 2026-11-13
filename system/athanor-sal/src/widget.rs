@@ -141,6 +141,9 @@ pub enum Kind {
     /// it with [`Ui::slider`], which keeps its range valid; change its value with
     /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
+    /// A raised button that shows only an icon and turns on and off by itself, as a mute
+    /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
+    IconToggle(crate::icon_toggle::IconToggle),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
     /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
@@ -415,6 +418,7 @@ impl Widget {
                     | Kind::Toggle { .. }
                     | Kind::Check { .. }
                     | Kind::Switch { .. }
+                    | Kind::IconToggle(_)
                     | Kind::Slider(_)
                     | Kind::Field(_)
                     | Kind::TextArea(_)
@@ -434,7 +438,8 @@ pub enum Event {
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
-    /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
+    /// A check button, a switch or an icon toggle was turned on or off; ask [`Ui::is_active`]
+    /// which.
     Toggled(WidgetId),
     /// A slider's value changed; ask [`Ui::value`] what it is.
     Changed(WidgetId),
@@ -861,7 +866,7 @@ impl Ui {
     }
 
     /// Whether `id` is a toggle that is the active one of its group, or a check button that is
-    /// checked, or a switch that is on.
+    /// checked, or a switch or an icon toggle that is on.
     ///
     /// # Panics
     ///
@@ -872,14 +877,16 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
         )
     }
 
-    /// Sets the state of the toggle, check button or switch `id` as activating it would, without
-    /// moving the focus, and returns the event the activation raises: [`Event::Toggled`] for a
-    /// check button or a switch, [`Event::Selected`] for a toggle, which becomes the active one
-    /// of its group and releases the others. Only another toggle of its group releases a
-    /// toggle, as a click does, so setting one inactive changes nothing. `None`, and nothing
+    /// Sets the state of the toggle, check button, switch or icon toggle `id` as activating it
+    /// would, without moving the focus, and returns the event the activation raises:
+    /// [`Event::Toggled`] for a check button, a switch or an icon toggle, [`Event::Selected`]
+    /// for a toggle, which becomes the active one of its group and releases the others. Only
+    /// another toggle of its group releases a toggle, as a click does, so setting one inactive
+    /// changes nothing. `None`, and nothing
     /// changes, for another kind and for the state the widget already has. An insensitive
     /// widget is set as well.
     ///
@@ -895,7 +902,11 @@ impl Ui {
             | Kind::Switch {
                 active: ref mut now,
                 ..
-            } => {
+            }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle {
+                active: ref mut now,
+                ..
+            }) => {
                 if *now == active {
                     return None;
                 }
@@ -923,7 +934,8 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider or an icon button;
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
+    /// an icon toggle;
     /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
@@ -947,6 +959,7 @@ impl Ui {
             | Kind::Check { label: t, .. }
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
@@ -1616,6 +1629,11 @@ impl Ui {
             Kind::Picture { .. } => (0.0, 0.0),
             // GTK's box: the padding outside the minimum, across the line of text only.
             Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
+            // A raised button: the padding on every side, and at least the smallest button.
+            Kind::IconToggle(toggle) => {
+                let side = (toggle.size + pad).max(button_min);
+                (side, side)
+            }
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
                 let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
@@ -1864,7 +1882,8 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group, a check button or a switch turns over, a list's row becomes its selected one.
+    /// its group, a check button, a switch or an icon toggle turns over, a list's row becomes its
+    /// selected one.
     /// Each takes the focus.
     ///
     /// # Panics
@@ -1878,7 +1897,9 @@ impl Ui {
         match self.widgets[id].kind {
             Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
-            Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
+            Kind::Check { ref mut active, .. }
+            | Kind::Switch { ref mut active, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { ref mut active, .. }) => {
                 *active = !*active;
                 Some(Event::Toggled(id))
             }
