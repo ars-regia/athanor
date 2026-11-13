@@ -383,6 +383,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-i18n",
  "athanor-layout",
+ "athanor-sal",
  "athanor-sulphur-client",
  "athanor-unit",
  "gio",
@@ -481,7 +482,6 @@ dependencies = [
  "athanor-sulphur-client",
  "athanor-unit",
  "gio",
- "gio-unix",
  "glib",
  "gtk4",
  "gtk4-layer-shell",

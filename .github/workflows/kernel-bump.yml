@@ -182,7 +182,7 @@ jobs:
             echo; echo "## prep: ${outcome}"; echo
             if [[ $outcome == REFRESH ]]; then
               # shellcheck disable=SC2016
-              echo 'A CachyOS patch no longer applies without fuzz. On this branch run `build.sh --stage refresh --out DIR` in the builder, as in `forge/specs/azoth/KERNEL.md`, review the hunks GNU patch applied with fuzz, commit the copy under `forge/specs/azoth/patches/refreshed/` and merge by hand (doc_kernel_build.md, section 8). This PR does not merge by itself.'
+              echo 'A CachyOS patch no longer applies without fuzz, or CachyOS changes what its locks hold (the lines below). On this branch run `build.sh --stage refresh --out DIR` in the builder, as in `forge/specs/azoth/KERNEL.md`: review the hunks GNU patch applied with fuzz and commit the copy under `forge/specs/azoth/patches/refreshed/`, and review and commit every new line of `derived.config`, `cachyos-protected.sha256` and `cachyos-files.list`. Then merge by hand (doc_kernel_build.md, section 8). This PR does not merge by itself.'
               echo; echo '```'; grep '^build.sh: refresh needed: ' prep.log; echo '```'
             fi
             if [[ $outcome != ok ]]; then

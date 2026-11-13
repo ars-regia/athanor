@@ -47,7 +47,7 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, P
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
-    ClientData, ClientId, DisconnectReason, GlobalId,
+    ClientData, ClientId, DisconnectReason, GlobalId, ObjectId,
 };
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -89,6 +89,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -147,6 +148,10 @@ pub struct State {
     pub gesture: Option<crate::gestures::Kind>,
     /// The windows owed an answer to a decoration request (`decoration.rs`).
     pub decoration_owed: Vec<WlSurface>,
+    /// KDE's server-decoration global, which answers client-side to every request.
+    pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
+    /// The surfaces whose current content has a FIFO barrier not yet cleared (`pacing.rs`).
+    pub fifo_surfaces: HashMap<ObjectId, WlSurface>,
     /// The touch points the seat was told of (`touch.rs`).
     pub touches: crate::touch::Touches,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
@@ -388,7 +393,14 @@ impl State {
         crate::gestures::global(&dh);
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
+        let kde_decoration = crate::decoration::kde_global(&dh);
         crate::foreign::global(&dh);
+        // Decision 33, wave 2a. Smithay applies a surface's alpha multiplier to that surface's
+        // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
+        smithay::wayland::fixes::FixesState::new::<Self>(&dh);
+        smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
+        crate::pacing::globals(&dh);
+        crate::toplevel_icon::global(&dh);
         smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
         crate::bell::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
@@ -423,6 +435,8 @@ impl State {
             foreign: Default::default(),
             gesture: None,
             decoration_owed: Vec::new(),
+            kde_decoration,
+            fifo_surfaces: HashMap::new(),
             touches: Default::default(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
@@ -529,6 +543,8 @@ impl State {
         });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
@@ -542,6 +558,8 @@ impl State {
     pub fn satellite_state(&self) -> Arc<ClientState> {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: true,
             grants: Vec::new(),
@@ -1222,6 +1240,7 @@ impl State {
         for (surface, _) in &popups {
             with_surfaces_surface_tree(surface, scanout);
         }
+        self.fifo_frame_done(output);
         if damaged {
             self.presentation_feedback(output, states).presented(
                 frame_target,
@@ -1657,6 +1676,10 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 /// What the compositor keeps per client.
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// How many of its commits are queued and not yet applied (`State::queue_commit`).
+    pub queued: Arc<AtomicUsize>,
+    /// How many commits its synchronised subsurfaces keep, all together (`State::queue_commit`).
+    pub retained: Arc<AtomicUsize>,
     gone: channel::Sender<ClientId>,
     /// Whether it is confined: it connected through a security context, as a sandboxed
     /// application does, or through xwayland-satellite's socket.
