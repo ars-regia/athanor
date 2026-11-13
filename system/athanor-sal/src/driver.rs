@@ -1075,7 +1075,15 @@ impl Shell {
                 size
             }
             Shown::Popup(_) => logical_size(&ui),
-            Shown::Window(_) => (0, 0),
+            // A window gives its widgets' size as its minimum before the first configure, as
+            // GTK does: a compositor that suggests a smaller first size, as cosmic-comp does on
+            // a small output, would otherwise place the window for a width it never takes.
+            Shown::Window(window) => {
+                layout(&mut ui, 1.0)?;
+                let size = logical_size(&ui);
+                window.set_min_size(Some(size));
+                size
+            }
         };
         self.next += 1;
         self.surfaces.push(Surface {
@@ -1335,7 +1343,7 @@ struct Surface {
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
-    /// The logical size last asked of a layer surface.
+    /// The logical size last asked of a layer surface, or given as a window's minimum.
     size: (u32, u32),
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
@@ -1454,15 +1462,22 @@ impl Surface {
     }
 
     /// Sets, for the next commit, how the buffer drawn at `scale` maps onto the surface, and a
-    /// layer surface's size when its widgets' changed.
+    /// layer surface's size, or a window's minimum size, when its widgets' changed.
     fn place(&mut self) {
         let size = logical_size(&self.ui);
-        if let Shown::Layer(surface) = &self.shown {
-            let asked = requested(size, self.stretch);
-            if asked != self.size {
-                surface.set_size(asked.0, asked.1);
-                self.size = asked;
+        match &self.shown {
+            Shown::Layer(surface) => {
+                let asked = requested(size, self.stretch);
+                if asked != self.size {
+                    surface.set_size(asked.0, asked.1);
+                    self.size = asked;
+                }
             }
+            Shown::Window(window) if size != self.size => {
+                window.set_min_size(Some(size));
+                self.size = size;
+            }
+            _ => {}
         }
         match &self.fractional {
             Some((_, viewport)) => {
