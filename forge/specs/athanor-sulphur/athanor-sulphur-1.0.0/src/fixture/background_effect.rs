@@ -468,7 +468,8 @@ const OVER: (i32, i32) = (300, 250);
 
 /// Two regions whose boxes overlap each keep their own copy: when only what lies under the
 /// upper one changes, the lower subsurface being drawn again, the upper is blurred again and
-/// the lower is not, and neither shows the other's pixels: the frame is as it was.
+/// the lower is not, and neither shows the other's pixels: the frame is as it was. Once the
+/// upper surface is destroyed, its copy is freed at the next frame.
 #[test]
 #[ignore = "needs a render node, named by ATHANOR_RENDER_NODE"]
 fn d35_overlapping_regions_keep_their_own_copies() {
@@ -511,6 +512,14 @@ fn d35_overlapping_regions_keep_their_own_copies() {
     let upper = (OVER_AT.0, OVER_AT.1, OVER.0, OVER.1);
     assert!(same_in(&shot, &again, lower), "the lower region, as it was");
     assert!(same_in(&shot, &again, upper), "the upper region, as it was");
+
+    // The upper surface's client goes: its surface leaves the map, and its copy the tracker.
+    drop(over);
+    run.until("the upper surface leaves the map", |state| {
+        state.blurred.len() == 1
+    });
+    let _ = frame(&mut run);
+    assert_eq!(held(&first), 1, "the copy of a destroyed surface is freed");
     run.stop();
 }
 
