@@ -116,8 +116,11 @@ impl Ui {
 
     /// The menu drop-down `id` opens: its items as radios, the chosen one checked, each with
     /// the index it chooses. A menu taller than `max_height`, the height of the output, holds
-    /// its items in a scroll that fits it, never shorter than one item. `None` for a drop-down
-    /// without items, or a widget that is not one.
+    /// its items in a scroll that fits it. The scroll always shows one item, and that floor
+    /// wins over the bound: on an output about one item high, the menu is one item and its
+    /// margins high, taller than `max_height`, which the compositor's slide then keeps on the
+    /// output as far as it can. `None` for a drop-down without items, or a widget that is not
+    /// one.
     pub(crate) fn drop_down_menu(
         &self,
         id: WidgetId,
@@ -144,7 +147,7 @@ impl Ui {
         let (mut menu, items) = build(None);
         let (_, height) = menu.layout();
         // The root's margin stays around the scroll, which shows one item at least however short
-        // the bound; a bound of 0 or less, or not finite, is none.
+        // the bound, even past it; a bound of 0 or less, or not finite, is none.
         let margins = 2.0 * self.theme.margin;
         let item = items.first().map_or(0.0, |&(first, _)| menu.widget(first).rect.h);
         match max_height.filter(|&max| max.is_finite() && max > 0.0 && height > max) {
@@ -303,6 +306,9 @@ mod tests {
         let (view, item) = (menu.widget(scroll).rect.h, menu.widget(items[0].0).rect.h);
         assert!(item > 0.0);
         assert!(view >= item, "a viewport of {view} shows an item {item} high");
+        let margins = 2.0 * menu.theme.margin;
+        let (_, high) = menu.layout();
+        assert!(high >= item + margins, "{high}: the one-item floor wins over the bound of 1");
     }
 
     #[test]
