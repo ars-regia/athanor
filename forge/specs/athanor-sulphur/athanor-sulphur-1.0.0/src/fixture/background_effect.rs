@@ -7,7 +7,7 @@ use super::marks::{clear_the_fixture, frame};
 use super::material::{on_a_fake_gpu, output, times, LONG};
 use super::wave2a::error_of;
 use super::*;
-use crate::background_effect::{blurs, held, Blurred};
+use crate::background_effect::{blurs, held, Blurred, MOST_BLURS};
 use crate::material::Tier;
 use smithay::backend::renderer::element::Element;
 use smithay::backend::renderer::pixman::PixmanRenderer;
@@ -602,5 +602,56 @@ fn d35_under_the_magnifier_a_region_past_the_output_is_not_stretched() {
         (f64::from(crossing) - edge).abs() <= 3.0,
         "the edge is at {crossing}, not at {edge}: the blur is stretched"
     );
+    run.stop();
+}
+
+/// A client that sets more regions than an output blurs in a frame has the frontmost blurred,
+/// up to `MOST_BLURS`, and the rest drawn as they are: here the scene's subsurface, the
+/// bottom one, is past the bound once as many subsurfaces with a region are put over it.
+#[test]
+fn d35_an_output_blurs_at_most_most_blurs_regions_in_a_frame() {
+    let mut run = Running::start(None);
+    let mut scene = Scene::new(&mut run);
+    let region = scene.region();
+    scene.set(&mut run, Some(&region));
+    on_gpu(&mut run, "/dev/dri/renderD-m2", Tier::M2);
+    let first = output(&run, 0);
+    let on = first.clone();
+    scene
+        .local
+        .pump(&mut run, "Pixman taken for M2", move |_, state| {
+            state.materials.tier_of(Some(&on)) == Tier::M2 && !state.materials.probing()
+        });
+    let lowest = Rectangle::new((AT.0 + CHILD_AT.0, AT.1 + CHILD_AT.1).into(), CHILD.into());
+    assert_eq!(blur_elements(&run), [lowest], "one region, blurred");
+
+    let subcompositor: wl_subcompositor::WlSubcompositor = scene.local.bind(1);
+    let qh = scene.local.queue.handle();
+    let side = 10;
+    let clear = vec![0; usize::try_from(side * side * 4).expect("size")];
+    let mut kept = Vec::new();
+    for i in 0..i32::try_from(MOST_BLURS).expect("a small bound") {
+        let surface = scene.compositor.create_surface(&qh, ());
+        let subsurface = subcompositor.get_subsurface(&surface, &scene.parent, &qh, ());
+        subsurface.set_position(i * 2 * side, PARENT.1 - side);
+        let buffer = shm_buffer(
+            &mut scene.local,
+            (side, side),
+            wl_shm::Format::Argb8888,
+            &clear,
+        );
+        let effect = scene.manager.get_background_effect(&surface, &qh, ());
+        let whole = scene.compositor.create_region(&qh, ());
+        whole.add(0, 0, side, side);
+        effect.set_blur_region(Some(&whole));
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        kept.push((surface, subsurface, effect));
+    }
+    scene.parent.commit();
+    scene.local.roundtrip(&mut run);
+    let shown = blur_elements(&run);
+    assert_eq!(shown.len(), MOST_BLURS, "the bound: {shown:?}");
+    assert!(!shown.contains(&lowest), "the bottom one is past it");
     run.stop();
 }

@@ -20,7 +20,11 @@
 //!   and a region that goes, or an output that drops below M2, lets them go at the tracker's
 //!   next frame. No region, no buffers.
 //! - Cost: a region is clipped to its surface and to the output, so that one blur is at most the
-//!   output's area, however large the region. A region of more than `MOST_RECTS` rectangles, as
+//!   output's area, however large the region. An output blurs, front to back, at most
+//!   `MOST_BLURS` regions in a frame, of at most its own area together, which VL13's probe
+//!   measured before it gave the output M2: the regions past that are drawn as they are, and
+//!   said so in the journal at most once a minute. The bound is counted on the boxes before
+//!   the magnifier scales them. A region of more than `MOST_RECTS` rectangles, as
 //!   the client gives them or as they come out of its subtractions, is taken whole, its
 //!   bounding box, so that the region's shape is worked out from at most `MOST_RECTS`
 //!   rectangles, once for each region the client sets, and kept as at most `MOST_RECTS`
@@ -56,6 +60,10 @@ use std::sync::Arc;
 /// The most rectangles a region's shape is worked out from, or kept as: past it, the region is
 /// its bounding box.
 pub const MOST_RECTS: usize = 128;
+
+/// The most regions an output blurs in a frame, front to back: each costs a copy, seven passes
+/// and a draw, whatever its size (the maintainer's choice, 2026-11-13).
+pub const MOST_BLURS: usize = 8;
 
 /// Creates the global.
 pub fn global(dh: &DisplayHandle) {
@@ -124,6 +132,40 @@ struct Kept {
     /// Whether the output is on M2.
     live: Cell<bool>,
     shared: Rc<Shared>,
+    /// The warning that regions are past the output's bound.
+    hush: RefCell<crate::keyboard_monitor::Hush>,
+}
+
+/// What an output may still blur in a frame, front to back: `MOST_BLURS` regions, of as much
+/// area as the output's together.
+struct Budget {
+    left: usize,
+    area: i64,
+}
+
+impl Budget {
+    fn of(output: Rectangle<i32, Physical>) -> Self {
+        Self {
+            left: MOST_BLURS,
+            area: area_of(output),
+        }
+    }
+
+    /// Whether it takes a region whose box is `rect`; once a region is past it, it takes none.
+    fn takes(&mut self, rect: Rectangle<i32, Physical>) -> bool {
+        let area = area_of(rect);
+        if self.left == 0 || area > self.area {
+            self.left = 0;
+            return false;
+        }
+        self.left -= 1;
+        self.area -= area;
+        true
+    }
+}
+
+fn area_of(rect: Rectangle<i32, Physical>) -> i64 {
+    i64::from(rect.size.w) * i64::from(rect.size.h)
 }
 
 /// What an output's blur elements share with it: in tests, what they did.
@@ -362,6 +404,8 @@ where
     }
     let scale = Scale::from(output.current_scale().fractional_scale());
     let mut blurred = Vec::with_capacity(elements.len());
+    let mut budget = Budget::of(area);
+    let mut past = 0usize;
     for element in elements {
         let blur = regions
             .get(element.id())
@@ -369,9 +413,28 @@ where
             .and_then(|surface| {
                 BlurElement::of(surface, element.geometry(scale), scale, area, &kept.shared)
             });
+        let blur = match blur {
+            Some(blur) if budget.takes(blur.geometry) => Some(blur),
+            Some(_) => {
+                past += 1;
+                None
+            }
+            None => None,
+        };
         blurred.push(Blurred::Element(element));
         if let Some(blur) = blur {
             blurred.push(Blurred::Blur(Behind(blur, PhantomData)));
+        }
+    }
+    if past > 0 {
+        if let Some(repeats) = kept.hush.borrow_mut().now() {
+            tracing::warn!(
+                output = %output.name(),
+                past,
+                repeats,
+                "more blur regions than an output draws in a frame: those past its bound are \
+                 drawn as they are"
+            );
         }
     }
     blurred
@@ -674,6 +737,29 @@ mod tests {
         holes.extend((0..MOST_RECTS as i32 - 1).map(|i| (false, rect(i * 4 + 1, 1, 1, 1))));
         assert!(holes.len() <= MOST_RECTS);
         assert_eq!(shape_of(&region(&holes)), [rect(0, 0, 1000, 3)]);
+    }
+
+    /// An output blurs at most `MOST_BLURS` regions in a frame, of at most its area together;
+    /// once a region is past the bound, none after it is blurred.
+    #[test]
+    fn d35_an_output_blurs_at_most_its_bound_in_a_frame() {
+        let output = rect(0, 0, 1280, 800);
+        let mut budget = Budget::of(output);
+        for _ in 0..MOST_BLURS {
+            assert!(budget.takes(rect(0, 0, 10, 10)));
+        }
+        assert!(!budget.takes(rect(0, 0, 1, 1)), "past the count");
+        let mut budget = Budget::of(output);
+        assert!(budget.takes(rect(0, 0, 1280, 400)));
+        assert!(
+            budget.takes(rect(0, 400, 1280, 400)),
+            "the output's area, whole"
+        );
+        assert!(!budget.takes(rect(0, 0, 1, 1)), "past the area");
+        let mut budget = Budget::of(output);
+        assert!(budget.takes(rect(0, 0, 1280, 600)));
+        assert!(!budget.takes(rect(0, 0, 1280, 300)), "past the area");
+        assert!(!budget.takes(rect(0, 0, 1, 1)), "and none after it");
     }
 
     /// A region is clipped to its surface and to the output, however large, and is relative to
