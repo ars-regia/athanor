@@ -21,6 +21,8 @@ pub fn look(appearance: &Appearance) -> Look {
     panel.text = Rgba(palette.ink);
     panel.accent = Rgba(palette.acc_fg);
     panel.on_accent = Rgba(palette.acc_ink);
+    // The query and the results lie on a sheet a step into the panel, dark in the dark variant.
+    panel.view = Rgba(palette.surf2);
     panel.border = Rgba(palette.line);
     panel.title_bar = Rgba(palette.bar);
     panel.focus = Rgba(palette.acc_fg);
@@ -52,5 +54,6 @@ mod tests {
         assert_eq!(look.panel.background.0[3], 0);
         assert_eq!(look.panel.island_radius, sal::radius::PANEL);
         assert_eq!(look.menu.background, Rgba(palette.surf));
+        assert_eq!(look.panel.view, Rgba(palette.surf2));
     }
 }
