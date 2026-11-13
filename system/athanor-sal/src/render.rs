@@ -746,11 +746,11 @@ pub fn paint<C: Canvas>(
         }
         if focus == Some(id) {
             // A row's ring stays inside it, where its list's edge and the viewport do not cut it.
-            let row = matches!(ui.widgets[id].kind, Kind::ListRow(_));
-            let (outset, radius) = if row {
-                (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
-            } else {
-                (t.focus_width, t.radius)
+            // A tile's follows its larger corners.
+            let (outset, radius) = match ui.widgets[id].kind {
+                Kind::ListRow(_) => (-t.focus_width / 2.0 - 1.0, t.radius - 1.0),
+                Kind::Tile(_) => (t.focus_width, crate::tile::RADIUS),
+                _ => (t.focus_width, t.radius),
             };
             ctx.set_paint(color(t.focus));
             ctx.set_stroke(Stroke::new(f64::from(t.focus_width)));
