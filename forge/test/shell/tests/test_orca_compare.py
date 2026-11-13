@@ -120,6 +120,19 @@ class CompareTest(unittest.TestCase):
             ["'Name text.': missing", "'Screen reader off.': missing"],
         )
 
+    def test_a_field_and_the_query_the_recipe_types_may_be_heard_as_one_entry_utterance(self):
+        reference = ["Search text.", "cc window.", "Cerca testo.", "cc window."]
+        transcript = ["Search entry cc window.", "Cerca campo inserimento cc window."]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Search entry cc window.'", lines[0])
+
+    def test_a_field_is_not_joined_to_a_query_the_recipe_does_not_type(self):
+        self.assertEqual(
+            compare.compare(["Search text.", "cc terminal."], ["Search entry cc terminal."])[1],
+            ["'Search text.': missing", "'cc terminal.': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",
