@@ -46,8 +46,8 @@
 #   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
-#   rig.sh atspi <greeter|chooser|bar|dock|launcher> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <greeter|chooser|bar|bar-calendar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-calendar|dock|launcher> it   the same in Italian, with the shipped catalog
 #   rig.sh atspi <bar|bar-modules|dock|launcher> --matrix   AX17: the walk in light, dark and both high-contrast
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
@@ -1147,6 +1147,7 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
+            [bar-calendar]="athanor-bar Alimentazione"
             [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$2]}"
@@ -1226,31 +1227,34 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-sal-chooser"
         ;;
-    bar)
+    bar | bar-calendar)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-sulphur the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
         # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
-        # hides workspaces (#835) and applications (#836).
-        unit='' widgets=8 own=()
+        # hides workspaces (#835) and applications (#836). bar-calendar opens the clock's
+        # calendar too, whose tree the Orca walk never reaches; at least the same widgets.
+        # To record it again, copy <out>/atspi-bar-calendar[-it].json of a GTK run into golden/atspi/.
+        unit='' widgets=8 own=() open=()
+        if [ "$2" = bar-calendar ]; then open=(ATHANOR_BAR_OPEN=clock); fi
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-sulphur build-compositor
             unit=--unit widgets=6 own=(--own-compositor float - "${3:-en}")
         fi
         stage_greeter_icons
-        seed_bar "$out/seed-atspi-bar" float top visible light
-        atspi_variant "$out/seed-atspi-bar"
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
-            RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
-            ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
+        seed_bar "$out/seed-atspi-$2" float top visible light
+        atspi_variant "$out/seed-atspi-$2"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-atspi-$2" \
+            RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" "${open[@]}" \
+            ATSPI_TRANSCRIPT="/out/atspi-$2${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
-            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-$2" -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
-        surface_not_closed atspi bar atspi-bar
+        surface_not_closed atspi "$2" "atspi-$2"
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
         # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
         in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
+            "/repo/forge/test/shell/golden/atspi/atspi-$2${3:+-$3}.json" "/out/atspi-$2${3:+-$3}.json" "${own[@]}"
         ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
