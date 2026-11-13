@@ -13,6 +13,7 @@ pub mod order;
 pub mod popups;
 pub mod power;
 pub mod props;
+pub mod reduced_motion;
 pub mod screen_reader;
 pub mod shield;
 pub mod tiling;

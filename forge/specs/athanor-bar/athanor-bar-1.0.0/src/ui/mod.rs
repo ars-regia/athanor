@@ -34,6 +34,7 @@ use std::time::Duration;
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
 use athanor_bar::order::{self, Module};
+use athanor_bar::reduced_motion;
 use athanor_sulphur_client::{outputs, Client, Event, Opener};
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
@@ -625,6 +626,27 @@ impl Bar {
         }
     }
 
+    /// Sends `enable-animations` to the own compositor now and at each change (AX9). Under
+    /// cosmic-comp, or a compositor of version 1, the request does not exist and is logged.
+    fn send_reduced_motion(self: &Rc<Self>) {
+        let Some(client) = self.client() else {
+            return;
+        };
+        if let Err(err) = client.watch_accessibility() {
+            tracing::warn!(error = %err, "cannot watch the compositor's accessibility state");
+            return;
+        }
+        let weak = Rc::downgrade(self);
+        reduced_motion::follow(move |reduced| {
+            let Some(bar) = weak.upgrade() else {
+                return;
+            };
+            if let Some(Err(err)) = bar.client().map(|client| client.set_reduced_motion(reduced)) {
+                tracing::info!(error = %err, "the reduced-motion setting cannot reach the compositor");
+            }
+        });
+    }
+
     fn watch(self: &Rc<Self>) {
         self.aids.start(self);
         if let Some(client) = &self.client {
@@ -646,6 +668,7 @@ impl Bar {
         });
         let display = self.display.clone();
         appearance::watch(move |current| appearance::load(&display, &current));
+        self.send_reduced_motion();
 
         let weak = Rc::downgrade(self);
         glib::timeout_add_seconds_local(1, move || match weak.upgrade() {

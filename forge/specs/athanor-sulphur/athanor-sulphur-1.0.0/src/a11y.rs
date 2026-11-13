@@ -115,7 +115,7 @@ pub struct A11yManagers;
 
 /// Offers the manager to the clients the allow-list grants it.
 pub fn global(dh: &DisplayHandle) {
-    dh.create_global::<State, AthanorA11yManagerV1, _>(1, A11yManagers);
+    dh.create_global::<State, AthanorA11yManagerV1, _>(2, A11yManagers);
 }
 
 impl GlobalDispatch2<AthanorA11yManagerV1, State> for A11yManagers {
@@ -188,6 +188,10 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
                 active: WEnum::Value(active),
                 delay,
             } => bounded(state.set_bounce_keys(on(active), delay)),
+            Request::SetReducedMotion { active } => match active {
+                WEnum::Value(active) => state.bell.reduced_motion = on(active),
+                WEnum::Unknown(_) => refuse("no such active_state"),
+            },
             Request::SetStickyKeys { .. }
             | Request::SetAidGestures { .. }
             | Request::SetSlowKeys { .. }

@@ -17,6 +17,9 @@ use crate::protocols::athanor_a11y::client::athanor_a11y_manager_v1::{
     self, Aid as AthanorAid, AthanorA11yManagerV1, Filter as AthanorFilter,
 };
 
+/// The version of `athanor_a11y_manager_v1` that has `set_reduced_motion`.
+const REDUCED_MOTION: u32 = 2;
+
 /// The version of `cosmic_a11y_manager_v1` that replaced the screen filter's messages.
 const SCREEN_FILTER2: u32 = 3;
 
@@ -42,7 +45,7 @@ impl Client {
                 return Ok(());
             }
             state.globals.a11y =
-                bind(&self.inner.registry, &self.inner.qh, 1..=1).map(Manager::Athanor);
+                bind(&self.inner.registry, &self.inner.qh, 1..=2).map(Manager::Athanor);
         }
         self.flush()
     }
@@ -70,6 +73,19 @@ impl Manager {
         manager.set_bounce_keys(athanor_state(aids.bounce), aids.bounce_delay);
         manager.set_aid_gestures(athanor_state(aids.gestures));
         Ok(())
+    }
+
+    /// Sends the user's reduced-motion setting (AX9). Version 2 of athanor-sulphur's manager
+    /// has the request: a version 1 compositor, and cosmic-comp, are refused here, since a
+    /// request above the bound version ends the connection.
+    pub(crate) fn set_reduced_motion(&self, reduced: bool) -> Result<(), Error> {
+        match self {
+            Manager::Athanor(manager) if manager.version() >= REDUCED_MOTION => {
+                manager.set_reduced_motion(athanor_state(reduced));
+                Ok(())
+            }
+            _ => Err(Error::Unavailable("athanor_a11y_manager_v1 version 2")),
+        }
     }
 
     pub(crate) fn set_magnifier(&self, enabled: bool) {
