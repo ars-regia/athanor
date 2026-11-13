@@ -54,7 +54,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 /// The most rectangles a region's shape is worked out from, or kept as: past it, the region is
@@ -183,9 +182,13 @@ fn area_of(rect: Rectangle<i32, Physical>) -> i64 {
     i64::from(rect.size.w) * i64::from(rect.size.h)
 }
 
-/// What an output's blur elements share with it: in tests, what they did.
+/// What an output's blur elements share with it: the warnings that a region cannot be
+/// blurred, and in tests, what they did.
 #[derive(Default)]
 struct Shared {
+    /// The warnings that a region cannot be blurred, one for each error, as its text says: as
+    /// many as the ways a blur fails.
+    failed: RefCell<HashMap<String, crate::keyboard_monitor::Hush>>,
     /// How many times a region was copied out and blurred.
     #[cfg(test)]
     blurs: Cell<u64>,
@@ -198,6 +201,15 @@ struct Shared {
     /// How many regions were past the bound in the last frame.
     #[cfg(test)]
     past: Cell<usize>,
+}
+
+impl Shared {
+    /// Whether to say now that a region cannot be blurred for `error`, and how many times it
+    /// could not for that error since it was last said: each error at most once a minute, and
+    /// one of another kind whenever it first comes.
+    fn failed(&self, error: String) -> Option<u64> {
+        self.failed.borrow_mut().entry(error).or_default().now()
+    }
 }
 
 /// A blur element's copy of what lies under it, made in one GL context for one size, and
@@ -582,9 +594,6 @@ pub trait Blurs: Renderer {
     ) -> Result<(), Self::Error>;
 }
 
-/// Whether a failed blur was reported: once is enough, the next fail the same way.
-static REPORTED: AtomicBool = AtomicBool::new(false);
-
 impl Blurs for GlesRenderer {
     fn capture(
         frame: &mut GlesFrame<'_, '_>,
@@ -597,8 +606,12 @@ impl Blurs for GlesRenderer {
         if let Err(error) = blur_under(frame, &mut copied, &element.shared, dst) {
             // What was kept is of another frame: the region is drawn as it is.
             copied.take();
-            if !REPORTED.swap(true, Ordering::Relaxed) {
-                tracing::warn!(%error, "a region cannot be blurred: it is drawn as it is");
+            if let Some(repeats) = element.shared.failed(error.to_string()) {
+                tracing::warn!(
+                    %error,
+                    repeats,
+                    "a region cannot be blurred: it is drawn as it is"
+                );
             }
         }
     }
@@ -812,6 +825,35 @@ mod tests {
         assert!(budget.takes(rect(0, 0, 1280, 600)));
         assert!(!budget.takes(rect(0, 0, 1280, 300)), "past the area");
         assert!(!budget.takes(rect(0, 0, 1, 1)), "and none after it");
+    }
+
+    /// A blur that fails is said at most once a minute for each error, and an error of another
+    /// kind is said when it first comes.
+    #[test]
+    fn d35_each_way_a_blur_fails_is_said_at_most_once_a_minute() {
+        let shared = Shared::default();
+        assert_eq!(shared.failed("no blit".into()), Some(0), "the first");
+        assert_eq!(
+            shared.failed("no blit".into()),
+            None,
+            "the same, within the minute"
+        );
+        assert_eq!(shared.failed("no blit".into()), None, "and again");
+        assert_eq!(
+            shared.failed("off the frame".into()),
+            Some(0),
+            "another kind"
+        );
+        assert_eq!(
+            shared.failed("off the frame".into()),
+            None,
+            "that one again"
+        );
+        assert_eq!(
+            shared.failed("no blit".into()),
+            None,
+            "the first kind, still within its minute"
+        );
     }
 
     /// A region is clipped to its surface and to the output, however large, and is relative to
