@@ -1194,8 +1194,8 @@ fn each_open<T, S: Copy>(
 /// exits and its unit's `Restart=` applies (#1129). calloop-wayland-source returns an end of file,
 /// but only logs a protocol error, and the dead socket then wakes the loop at every turn with
 /// nothing to dispatch. The error names the protocol error's code and object, and its message
-/// where the backend keeps one: libwayland's, under the `gpu` feature, keeps none. Every caller of
-/// [`run`] logs it before it exits.
+/// where the backend keeps one: libwayland's keeps none. Every caller of [`run`] logs it before
+/// it exits.
 fn dispatch<D>(
     event_loop: &mut EventLoop<'static, D>,
     conn: &Connection,
@@ -3500,10 +3500,14 @@ mod tests {
         let error = first_error(&mut event_loop, &conn);
         let ended = "the compositor ended the Wayland connection: \
                      Protocol error 3 on object wl_registry@2";
-        // The Rust backend keeps the message; libwayland's, under the `gpu` feature, does not.
+        // The Rust backend keeps the message; libwayland's does not. Which one runs is not Sal's
+        // to choose: any crate built with it may turn on wayland-backend's client_system, as Sal's
+        // `gpu` feature does, and Cargo unifies features across a build, so both forms are right.
         let message = format!("{ended}: invalid size");
-        let expected = if cfg!(feature = "gpu") { ended } else { &message };
-        assert_eq!(error.as_deref(), Some(expected));
+        assert!(
+            error.as_deref() == Some(&message) || error.as_deref() == Some(ended),
+            "{error:?}"
+        );
         Ok(())
     }
 
