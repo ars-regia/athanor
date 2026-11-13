@@ -230,9 +230,11 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::ListRow(text) => {
             let mut node = Node::new(Role::ListBoxOption);
             node.set_label(text.as_str());
-            // As GTK's rows, selected or not once the list has a selection, and neither before.
-            if let Some(selected) = widget.parent.and_then(|list| ui.selected(list)) {
-                node.set_selected(selected == id);
+            // As the rows of GTK's single-selection ListBox: selectable from the start, so
+            // selected or not before the first selection as after it.
+            let in_list = |&list: &WidgetId| matches!(ui.widget(list).kind, Kind::List { .. });
+            if let Some(list) = widget.parent.filter(in_list) {
+                node.set_selected(ui.selected(list) == Some(id));
             }
             node.add_action(Action::Click);
             node
@@ -970,6 +972,20 @@ mod tests {
     }
 
     #[test]
+    fn every_row_is_selectable_before_the_first_selection() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Fruit");
+        let rows = [ui.list_row(list, "Apple"), ui.list_row(list, "Pear")];
+        ui.layout();
+        assert_eq!(ui.selected(list), None);
+        let update = tree_update(&ui, 1.0);
+        for row in rows {
+            // GTK's rows carry the selectable state, unselected, before any row is chosen.
+            assert_eq!(update.nodes[row.index()].1.is_selected(), Some(false));
+        }
+    }
+
+    #[test]
     fn a_list_in_a_scroll_reads_as_gtks() {
         let mut ui = Ui::new("Lists", Theme::default(), false);
         let scroll = ui.scroll(Ui::ROOT, 100.0);
@@ -979,8 +995,6 @@ mod tests {
             .map(|name| ui.list_row(list, name))
             .collect();
         ui.layout();
-        let unselected = tree_update(&ui, 1.0);
-        assert_eq!(unselected.nodes[rows[0].index()].1.is_selected(), None);
         assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
         ui.key(crate::Key::End);
         let update = tree_update(&ui, 1.0);
