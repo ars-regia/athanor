@@ -10,7 +10,9 @@ use smithay::backend::renderer::element::memory::{
 use smithay::backend::renderer::element::{render_elements, Kind};
 use smithay::backend::renderer::{ImportAll, ImportMem, Renderer, Texture};
 use smithay::desktop::utils::bbox_from_surface_tree;
+use smithay::desktop::{Space, Window};
 use smithay::input::pointer::{CursorIcon, CursorImageStatus, CursorImageSurfaceData};
+use smithay::output::Output;
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, Transform};
@@ -23,7 +25,7 @@ const DEFAULT_SIZE: u32 = 24;
 
 /// The square drawn when the theme has no cursor: C1's pointer, so that it is never invisible.
 const FALLBACK_SIDE: i32 = 12;
-const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
+pub(crate) const FALLBACK_RGBA: [u8; 4] = [230, 230, 230, 255];
 
 /// The largest cursor surface a client may set, in logical pixels a side: a larger one, or
 /// one whose hotspot lies off it, gets the default cursor, so that no client covers the screen
@@ -194,21 +196,46 @@ fn fallback() -> CursorImage {
     }
 }
 
+/// The pointer's elements on `output` of `space`, `location` in the space's coordinates: those
+/// of `pointer_elements`, or none when the pointer is not on that output.
+pub fn pointer_on<R, E>(
+    renderer: &mut R,
+    cursor: &mut Cursor,
+    status: &CursorImageStatus,
+    location: Point<f64, Logical>,
+    space: &Space<Window>,
+    output: &Output,
+) -> Vec<E>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Send + Clone + Texture + 'static,
+    E: From<MemoryRenderBufferRenderElement<R>> + From<SurfaceElement<R>>,
+{
+    match space.output_geometry(output) {
+        Some(area) if area.to_f64().contains(location) => {
+            let scale = output.current_scale().fractional_scale();
+            pointer_elements(renderer, cursor, status, location - area.loc.to_f64(), scale)
+        }
+        _ => Vec::new(),
+    }
+}
+
 /// The pointer's elements on an output at `scale`, `at` relative to the output, all drawn as
 /// cursors: the cursor `status` names, or the theme's default in place of a client's surface
 /// too large to be a cursor or with its hotspot off it. An image the renderer cannot take is
 /// left out: the frame is drawn
 /// without the pointer rather than not at all.
-pub fn pointer_elements<R>(
+pub fn pointer_elements<R, E>(
     renderer: &mut R,
     cursor: &mut Cursor,
     status: &CursorImageStatus,
     at: Point<f64, Logical>,
     scale: f64,
-) -> Vec<PointerElement<R>>
+) -> Vec<E>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Send + Clone + Texture + 'static,
+    E: From<MemoryRenderBufferRenderElement<R>> + From<SurfaceElement<R>>,
 {
     let icon = match status {
         CursorImageStatus::Hidden => return Vec::new(),
@@ -229,10 +256,17 @@ where
                 CursorIcon::Default
             } else {
                 let location = (at - hotspot.to_f64()).to_physical(scale).to_i32_round();
-                return surface_elements(renderer, surface, location, scale, 1.0, Kind::Cursor)
-                    .into_iter()
-                    .map(PointerElement::Surface)
-                    .collect();
+                return surface_elements::<_, SurfaceElement<R>>(
+                    renderer,
+                    surface,
+                    location,
+                    scale,
+                    1.0,
+                    Kind::Cursor,
+                )
+                .into_iter()
+                .map(E::from)
+                .collect();
             }
         }
         CursorImageStatus::Named(icon) => *icon,
@@ -248,7 +282,7 @@ where
         None,
         Kind::Cursor,
     ) {
-        Ok(element) => vec![PointerElement::Memory(element)],
+        Ok(element) => vec![E::from(element)],
         Err(error) => {
             tracing::warn!(%error, "the pointer's image cannot be drawn");
             Vec::new()
@@ -324,7 +358,8 @@ mod tests {
         let mut cursor = Cursor::new("athanor-no-such-theme", 24);
         let at = Point::from((40.0, 30.0));
         let named = CursorImageStatus::default_named();
-        let elements = pointer_elements(&mut renderer, &mut cursor, &named, at, 1.0);
+        let elements: Vec<PointerElement<_>> =
+            pointer_elements(&mut renderer, &mut cursor, &named, at, 1.0);
         assert!(!elements.is_empty(), "the pointer is drawn");
         assert!(elements.iter().all(|e| e.kind() == Kind::Cursor));
 
@@ -348,7 +383,9 @@ mod tests {
         assert_eq!(pixel(52, 30), Some([0; 4]), "right of the square");
 
         let hidden = CursorImageStatus::Hidden;
-        assert!(pointer_elements(&mut renderer, &mut cursor, &hidden, at, 1.0).is_empty());
+        let none: Vec<PointerElement<_>> =
+            pointer_elements(&mut renderer, &mut cursor, &hidden, at, 1.0);
+        assert!(none.is_empty());
     }
 
     #[test]

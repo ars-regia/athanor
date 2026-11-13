@@ -9,6 +9,7 @@ use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
 use crate::background_effect::Blurs;
+use crate::cursor::Cursor;
 use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
@@ -198,6 +199,8 @@ pub struct State {
     /// The cursor a client set last and that client, or the default and no client: shown only
     /// while that client holds the pointer's focus (`shown_cursor`).
     pub cursor_status: (CursorImageStatus, Option<ClientId>),
+    /// The cursor theme the pointer is drawn with, on a monitor and in a capture that asks for it.
+    pub cursor: Cursor,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -457,6 +460,7 @@ impl State {
             lock_requests: 0,
             fatal: None,
             cursor_status: (CursorImageStatus::default_named(), None),
+            cursor: Cursor::from_env(),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -1461,14 +1465,16 @@ impl<'a> View<'a> {
     }
 }
 
-/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents, as
-/// `look` says of the magnifier and the colour filters.
+/// Draws `view` on `output` into `framebuffer`, with `pointer` above it, `age` frames after its
+/// previous contents, as `look` says of the magnifier and the colour filters.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_view<'d, R>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
     output: &Output,
     age: usize,
     view: View<'_>,
+    pointer: Vec<Stacked<R>>,
     damage_tracker: &'d mut OutputDamageTracker,
     look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
@@ -1488,8 +1494,9 @@ where
             Kind::Unspecified,
         )
     };
-    // The popups and the lock surface are surfaces as the space's are, above them.
-    let mut elements: Vec<Stacked<R>> = Vec::new();
+    // The pointer above all; the popups and the lock surface are surfaces as the space's are,
+    // above them.
+    let mut elements: Vec<Stacked<R>> = pointer;
     // No region is blurred on the lock screen.
     let mut blurred = None;
     match view {
