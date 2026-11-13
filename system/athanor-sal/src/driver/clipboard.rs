@@ -303,13 +303,55 @@ fn retry(e: &io::Error) -> bool {
     )
 }
 
+/// The requests of `clips` that an application made outside a key or a click: a copy or a cut
+/// is refused, and logged, since only the serial of the input it answers can offer it, and the
+/// clipboard is never replaced at a later, unrelated input; a refused cut leaves its text in
+/// place. The others are kept.
+fn outside_input(clips: Vec<Clip>) -> Vec<Clip> {
+    clips
+        .into_iter()
+        .filter(|clip| match clip {
+            Clip::Copy(_) => {
+                eprintln!("athanor-sal: nothing copied: Ui::copy outside a key or a click");
+                false
+            }
+            Clip::Cut(..) => {
+                eprintln!("athanor-sal: nothing cut: a cut outside a key or a click");
+                false
+            }
+            Clip::Paste(_) | Clip::PastePrimary(_) | Clip::Select(_) | Clip::Unselect => true,
+        })
+        .collect()
+}
+
 impl App {
-    /// Serves what the widgets of `id` asked of the clipboards.
+    /// Serves what the widgets of `id` asked of the clipboards while a key or a click of `id`
+    /// was handled.
     pub(super) fn clips(&mut self, id: SurfaceId) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        for clip in surface.ui.take_clips() {
+        let clips = surface.ui.take_clips();
+        self.serve(id, clips);
+    }
+
+    /// Serves what the widgets of every surface asked of the clipboards since their last
+    /// event, at the end of a turn of the event loop, once no input is being handled: the
+    /// copies are refused ([`outside_input`]), and nothing waits for a later input.
+    pub(super) fn clips_outside_input(&mut self) {
+        let ids: Vec<SurfaceId> = self.shell.surfaces().collect();
+        for id in ids {
+            let Some(surface) = self.shell.get_mut(id) else {
+                continue;
+            };
+            let clips = outside_input(surface.ui.take_clips());
+            self.serve(id, clips);
+        }
+    }
+
+    /// Serves `clips`, which the widgets of `id` asked for, in order.
+    fn serve(&mut self, id: SurfaceId, clips: Vec<Clip>) {
+        for clip in clips {
             match clip {
                 Clip::Copy(text) => {
                     self.copy(text);
@@ -437,11 +479,16 @@ impl App {
         drop_paste_into(&self.loop_handle, &mut self.clipboards.pending, id);
     }
 
-    /// Puts the text read from a clipboard into `widget` of `id`.
+    /// Puts the text read from a clipboard into `widget` of `id`, unless the widget was removed
+    /// while the text was read: its id is then stale, and the field in its slot takes nothing.
     fn pasted(&mut self, id: SurfaceId, widget: WidgetId, text: &str) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
+        if !surface.ui.contains(widget) {
+            eprintln!("athanor-sal: nothing pasted: its field was removed");
+            return;
+        }
         if let Some(event) = surface.ui.paste(widget, text) {
             self.changed(id, Some(event));
         }
@@ -593,6 +640,21 @@ impl PrimarySelectionSourceHandler for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_or_a_cut_outside_a_key_or_a_click_is_refused_and_the_rest_kept() {
+        let clips = vec![
+            Clip::Copy("late".into()),
+            Clip::Unselect,
+            Clip::Cut(WidgetId(2, 0), "cut".into()),
+            Clip::Paste(WidgetId(3, 0)),
+            Clip::Copy("later".into()),
+        ];
+        assert_eq!(
+            outside_input(clips),
+            [Clip::Unselect, Clip::Paste(WidgetId(3, 0))]
+        );
+    }
 
     #[test]
     fn the_best_type_of_text_is_read() {

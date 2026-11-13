@@ -411,8 +411,8 @@ pub fn paint<C: Canvas>(
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
             }
             // A row with its text at the start edge: tinted with the accent when selected, and
-            // toward the text under the pointer.
-            Kind::ListRow(_) => {
+            // toward the text under the pointer. A heading is neither.
+            Kind::ListRow(_) | Kind::ListHeading(_) => {
                 let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
                 let fill = if selected {
                     Some(mix(t.on_accent, t.accent, SELECTED))
@@ -589,6 +589,33 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, (x, y), t.text)?;
                 }
             }
+            // A drop-down: a raised button, its chosen item at the start edge and a downward
+            // chevron at the end edge, as GTK's DropDown.
+            Kind::DropDown(_) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                let arrow = t.font_size * crate::drop_down::ARROW;
+                let text_w = widget.text.as_ref().map_or(0.0, |layout| layout.width());
+                let (x, ax) = crate::drop_down::spots(r, text_w, arrow, t.padding, ui.rtl);
+                if let Some(layout) = &widget.text {
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+                let (ax, ay) = (f64::from(ax), f64::from(r.y + r.h / 2.0));
+                let a = f64::from(arrow);
+                let mut chevron = BezPath::new();
+                chevron.move_to((ax + a * 0.2, ay - a * 0.15));
+                chevron.line_to((ax + a * 0.5, ay + a * 0.15));
+                chevron.line_to((ax + a * 0.8, ay - a * 0.15));
+                ctx.set_paint(color(t.text));
+                ctx.set_stroke(Stroke::new(1.5));
+                ctx.stroke_path(&chevron);
+            }
             Kind::Button(_) | Kind::Toggle { .. } => {
                 let active = matches!(widget.kind, Kind::Toggle { active: true, .. });
                 let (fill, ink) = if active {
@@ -763,9 +790,12 @@ pub fn paint<C: Canvas>(
             }
         }
         if focus == Some(id) {
-            // A row's ring stays inside it, where its list's edge and the viewport do not cut it.
-            let row = matches!(ui.widgets[id].kind, Kind::ListRow(_));
-            let (outset, radius) = if row {
+            // A list row's and a menu item's ring stays inside it, where the list's or menu's
+            // edge and a scroll's viewport do not cut it.
+            let parent = ui.widgets[id].parent.map(|p| &ui.widgets[p].kind);
+            let inside = matches!(ui.widgets[id].kind, Kind::ListRow(_))
+                || matches!(parent, Some(Kind::Menu));
+            let (outset, radius) = if inside {
                 (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
             } else {
                 (t.focus_width, t.radius)
@@ -790,25 +820,22 @@ pub fn paint<C: Canvas>(
     Ok(())
 }
 
-/// The visible widgets in the order they are drawn, each with the topmost insensitive widget
-/// above it or itself: the order of the tree, but with the subtree of each such widget in one
-/// run, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
+/// The visible widgets in the order they are drawn, the order of the tree, each with the
+/// topmost insensitive widget above it or itself: the subtree of each such widget is one run
+/// of it, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
 /// insensitive widget and everything under it as one group.
 fn paint_order(ui: &Ui) -> Vec<(WidgetId, Option<WidgetId>)> {
-    // A parent comes before its children in the arena.
-    let mut faint: Vec<Option<WidgetId>> = Vec::with_capacity(ui.len());
+    let mut faint: Vec<Option<WidgetId>> = vec![None; ui.len()];
+    let mut order = Vec::with_capacity(ui.len());
+    // A parent comes before its children in the order of the tree.
     for id in ui.ids() {
         let widget = &ui.widgets[id];
         let above = widget.parent.and_then(|p| faint[p.index()]);
-        faint.push(above.or((!widget.sensitive).then_some(id)));
+        faint[id.index()] = above.or((!widget.sensitive).then_some(id));
+        if ui.is_visible(id) {
+            order.push((id, faint[id.index()]));
+        }
     }
-    let mut order: Vec<_> = ui
-        .ids()
-        .filter(|&id| ui.is_visible(id))
-        .map(|id| (id, faint[id.index()]))
-        .collect();
-    // Stable: each subtree keeps the order of the tree, and starts where its root stood.
-    order.sort_by_key(|&(id, root)| root.unwrap_or(id));
     order
 }
 
@@ -1073,6 +1100,33 @@ mod tests {
         // Its label follows the ring, as a check button's does, not centred as a toggle's.
         let label = ui.widget(chosen).text.as_ref().map(|l| l.width());
         assert!(label.is_some_and(|w| ui.widget(chosen).rect.w >= on.w + t.gap + w));
+        Ok(())
+    }
+
+    #[test]
+    fn a_menu_items_focus_ring_is_drawn_inside_it_where_a_scroll_cannot_clip_it(
+    ) -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Menu", crate::Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(crate::Ui::ROOT, "Media player", &names, 0);
+        let Some((mut menu, items)) = ui.drop_down_menu(players, Some(200.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let (first, _) = items[0];
+        menu.set_focus(Some(first));
+        let pixmap = render(&mut menu, 1.0)?;
+        let t = menu.theme.clone();
+        let r = menu.widget(first).rect;
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        // Across the item's start band, at its middle: the ring's colour inside its rect.
+        let y = r.y + r.h / 2.0;
+        let band = (0..(t.focus_width as usize + 3)).map(|dx| r.x + dx as f32);
+        let inside = band.filter(|&x| at(x, y) == t.focus.0.to_vec()).count();
+        assert!(inside > 0, "the ring is drawn inside the item at {r:?}");
         Ok(())
     }
 

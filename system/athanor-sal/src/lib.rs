@@ -13,6 +13,7 @@ pub mod driver;
 pub(crate) mod focus;
 #[cfg(feature = "gpu")]
 pub(crate) mod gpu;
+mod drop_down;
 mod icon;
 mod icon_toggle;
 mod motion;
@@ -25,7 +26,8 @@ mod widget;
 mod wrap;
 
 pub use align::Align;
-pub use driver::{run_with, Application, LayerOptions, Shell, Side, SurfaceId};
+pub use driver::{run_with, Application, KeyModifiers, LayerOptions, Shell, Side, SurfaceId};
+pub use drop_down::DropDown;
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use icon_toggle::IconToggle;
 pub use motion::{Curve, Motion, Pose};

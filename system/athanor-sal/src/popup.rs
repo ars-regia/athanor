@@ -60,6 +60,12 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
         }
     }
 
+    /// The anchor in `parent`, while it is the widget the popup opened from: `None` once the
+    /// application removed it, whatever took its slot since.
+    pub fn anchor_in(&self, parent: &Ui) -> Option<WidgetId> {
+        parent.contains(self.anchor).then_some(self.anchor)
+    }
+
     /// Whether `input` closes the popup: Escape or a press outside closes a menu; a tooltip
     /// closes on its own terms (see [`Tooltip`]).
     pub fn dismissed_by(&self, input: Dismiss<S>) -> bool {
@@ -70,10 +76,11 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
         }
     }
 
-    /// The popup closed: a menu returns the focus to its button, which collapses.
+    /// The popup closed: a menu returns the focus to its button, which collapses, unless the
+    /// button was removed.
     pub fn closed(&self, parent: &mut Ui) {
-        if self.menu {
-            parent.popup_closed(self.anchor);
+        if let Some(anchor) = self.anchor_in(parent).filter(|_| self.menu) {
+            parent.popup_closed(anchor);
         }
     }
 }
@@ -259,7 +266,7 @@ mod tests {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: WidgetId(5),
+            anchor: WidgetId(5, 0),
             menu: true,
         };
         assert!(menu.dismissed_by(Dismiss::Escape));
@@ -318,11 +325,36 @@ mod tests {
     }
 
     #[test]
+    fn a_menu_whose_button_was_removed_gives_the_focus_to_no_widget_in_its_slot() {
+        let mut parent = Ui::new("Dock", Theme::default(), false);
+        let apps = parent.add(Ui::ROOT, Kind::Row);
+        let app = parent.add(apps, Kind::Button("Files".into()));
+        parent.set_has_popup(app, true);
+        let mut menu = Ui::new("Files", Theme::default(), false);
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        menu.add(list, Kind::MenuItem("New Window".into()));
+        let open = OpenPopup::opened(1, app, 2, &mut parent, &mut menu, true);
+        assert_eq!(open.anchor_in(&parent), Some(app));
+        // The application rebuilds the row while the menu is open.
+        parent.remove_children(apps);
+        let next = parent.add(apps, Kind::Button("Terminal".into()));
+        assert_eq!(next.index(), app.index(), "the slot is reused");
+        parent.set_focus(None);
+        open.closed(&mut parent);
+        assert_eq!(open.anchor_in(&parent), None);
+        assert_eq!(
+            (parent.focus(), parent.is_expanded(next)),
+            (None, false),
+            "the new button is left as it is"
+        );
+    }
+
+    #[test]
     fn the_open_menu_is_the_focused_window_while_the_application_has_the_keys() {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: WidgetId(5),
+            anchor: WidgetId(5, 0),
             menu: true,
         };
         let tooltip = OpenPopup {
