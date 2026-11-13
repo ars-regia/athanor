@@ -5,7 +5,8 @@ doc_own_stack.md, OS10: the GTK 4 twin of athanor-sal's gallery
 (system/athanor-sal/gallery). It shows the same pages with GTK widgets, from the same
 strings.tsv, and takes the same command line. What a screen reader is told about it, and how it
 draws, are the references the toolkit's gallery is checked against (rig.sh orca gallery, atspi
-gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start.
+gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start;
+the dialogs page starts with its dialog open, the focus on the dialog's button.
 """
 
 import argparse
@@ -15,7 +16,8 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from cases import GALLERY_PAGES  # noqa: E402
 
@@ -138,6 +140,16 @@ def fill_page(page, container, text):
         scroll.set_child(rows)
         container.append(scroll)
     elif page == "text":
+        container.append(
+            Gtk.Label(
+                label=text["wrap"],
+                xalign=0,
+                wrap=True,
+                max_width_chars=40,
+                lines=3,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
+        )
         view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False)
         view.get_buffer().set_text(text["notes.text"].replace("\\n", "\n"))
         view.update_property([Gtk.AccessibleProperty.LABEL], [text["notes"]])
@@ -163,8 +175,49 @@ def fill_page(page, container, text):
         button = Gtk.Button(label=text["waiting"], sensitive=False)
         switch.connect("notify::active", lambda s, _: button.set_sensitive(s.get_active()))
         container.append(button)
+    elif page == "dialogs":
+        button = Gtk.Button(label=text["dialog.open"])
+        button.connect("clicked", lambda b: open_dialog(b.get_root(), text))
+        container.append(button)
     else:
         raise ValueError(f"no page {page!r}")
+
+
+def open_dialog(parent, text):
+    """The dialog of the dialogs page, as the toolkit's Shell::open_dialog opens one: a modal
+    window of `parent` that reads as a dialog, with a sentence that wraps and a button that
+    closes it, which holds the focus. Escape closes it, as GTK's dialogs."""
+    dialog = Gtk.Window(
+        transient_for=parent,
+        modal=True,
+        title=text["dialog.title"],
+        default_width=360,
+        resizable=False,
+        accessible_role=Gtk.AccessibleRole.DIALOG,
+    )
+    content = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=18,
+        margin_top=24,
+        margin_bottom=24,
+        margin_start=24,
+        margin_end=24,
+    )
+    content.append(Gtk.Label(label=text["dialog.text"], xalign=0, wrap=True))
+    close = Gtk.Button(label=text["dialog.close"])
+    close.connect("clicked", lambda _: dialog.close())
+    content.append(close)
+    escape = Gtk.ShortcutController()
+    escape.add_shortcut(
+        Gtk.Shortcut(
+            trigger=Gtk.KeyvalTrigger(keyval=Gdk.KEY_Escape, modifiers=0),
+            action=Gtk.CallbackAction.new(lambda *_: dialog.close() or True),
+        )
+    )
+    dialog.add_controller(escape)
+    dialog.set_child(content)
+    dialog.set_focus(close)
+    dialog.present()
 
 
 def present(application, options, text):
@@ -208,6 +261,8 @@ def present(application, options, text):
     window.set_child(content)
     window.set_focus(toggles[pages.index(options.page)])
     window.present()
+    if options.page == "dialogs":
+        open_dialog(window, text)
 
 
 def main(argv):

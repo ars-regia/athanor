@@ -1,55 +1,110 @@
 Lettore schermo attivo.
 Galleria
 Pulsanti pulsante di commutazione premuto.
+spazio
 Scelte pulsante di commutazione non premuto.
+tabulazione
 Valori pulsante di commutazione non premuto.
+tabulazione
 Elenchi pulsante di commutazione non premuto.
+tabulazione
 Testo pulsante di commutazione non premuto.
+tabulazione
 Stati pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Un pulsante button.
+tabulazione
 Uno pulsante di commutazione premuto.
+tabulazione
 Due pulsante di commutazione non premuto.
+tabulazione
 Tre pulsante di commutazione non premuto.
+tabulazione
 Nome testo.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Scelte pulsante di commutazione premuto.
+spazio
 Valori pulsante di commutazione non premuto.
+tabulazione
 Elenchi pulsante di commutazione non premuto.
+tabulazione
 Testo pulsante di commutazione non premuto.
+tabulazione
 Stati pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Opzione uno casella di spunta spuntata.
+tabulazione
 Opzione due casella di spunta non spuntata.
+tabulazione
 Un interruttore casella di spunta spuntata.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Valori pulsante di commutazione premuto.
+spazio
 Elenchi pulsante di commutazione non premuto.
+tabulazione
 Testo pulsante di commutazione non premuto.
+tabulazione
 Stati pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Un cursore controllo scorrevole orizzontale 50 50 percento.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Elenchi pulsante di commutazione premuto.
+spazio
 Testo pulsante di commutazione non premuto.
+tabulazione
 Stati pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Sostituisci le righe button.
+tabulazione
 Un elenco Elenco con 51 voci
 Riga 1.
 Una seconda riga.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Testo pulsante di commutazione premuto.
+spazio
 Stati pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Note testo.
 Il cursore parte da qui.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Stati pulsante di commutazione premuto.
+spazio
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
 Abilita il pulsante casella di spunta non spuntata.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Una finestra di dialogo Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
+Chiudi button.
+spazio
+Galleria cornice
+Dialoghi pulsante di commutazione premuto.
+Apri una finestra di dialogo button.
+tabulazione
 Lettore schermo disattivato.

@@ -598,12 +598,12 @@ version = "1.0.0"
 dependencies = [
  "athanor-i18n",
  "athanor-layout",
+ "athanor-sal",
  "athanor-style",
- "athanor-sulphur-client",
- "gtk4",
  "landlock",
  "tracing",
  "tracing-subscriber",
+ "zbus 5.19.0",
 ]
 
 [[package]]
