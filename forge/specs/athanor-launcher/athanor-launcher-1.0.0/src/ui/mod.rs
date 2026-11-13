@@ -160,6 +160,9 @@ pub struct Launcher {
     start_query: Option<String>,
     /// When the Show being drawn was asked for, logged at its first frame.
     asked: Option<Instant>,
+    /// Whether a screen reader follows the selected row: from the first arrow until the query
+    /// changes, as an ARIA combobox's active descendant (LA7).
+    following: bool,
     /// A context singleton: it lives, and keeps its handler, only while held.
     _apps_monitor: gio::AppInfoMonitor,
     _owner: gio::OwnerId,
@@ -317,6 +320,7 @@ impl Launcher {
             discover_providers: !options.given_up,
             start_query: options.show.filter(|query| !query.is_empty()),
             asked: None,
+            following: false,
             _apps_monitor: apps_monitor,
             _owner: owner,
         }
@@ -423,8 +427,9 @@ impl Launcher {
         let (mut ui, panel) = panel(&self.look, self.rtl, size, height);
         ui.set_field_text(panel.field, text);
         ui.set_focus(Some(panel.field));
-        // A screen reader follows the selected row while the query keeps the focus (LA7).
-        ui.set_active_descendant(panel.field, Some(panel.list));
+        if self.following {
+            ui.set_active_descendant(panel.field, Some(panel.list));
+        }
         self.rows = self
             .lines
             .iter()
@@ -476,6 +481,7 @@ impl Launcher {
         self.shown = None;
         self.panel = None;
         self.asked = None;
+        self.following = false;
         self.rows.clear();
         self.preview_timer.cancel();
         self.engine.query("");
@@ -557,13 +563,20 @@ impl Launcher {
         let Some(target) = list::step(&self.lines, self.selected_index(shell), delta) else {
             return;
         };
-        let (Some(surface), Some(row)) = (self.shown, self.rows.get(target).copied()) else {
+        let (Some(surface), Some(panel), Some(row)) =
+            (self.shown, self.panel, self.rows.get(target).copied())
+        else {
             return;
         };
         let Some(ui) = shell.ui_mut(surface) else {
             return;
         };
-        // The query keeps the focus; the list scrolls the row into view.
+        // The query keeps the focus, and a screen reader follows the row the arrows choose
+        // until the query changes (doc_launcher.md item 12, LA7); the list scrolls it into view.
+        if !self.following {
+            self.following = true;
+            ui.set_active_descendant(panel.field, Some(panel.list));
+        }
         if ui.select_row(row).is_some() {
             // The menu belongs to the row it opened on: Enter must never run its choice for
             // another.
@@ -673,6 +686,13 @@ impl Application for Launcher {
         }
         match event {
             Event::Edited(field) if field == panel.field => {
+                // A screen reader is back on the query the user types (LA7).
+                if self.following {
+                    self.following = false;
+                    if let Some(ui) = shell.ui_mut(surface) {
+                        ui.set_active_descendant(field, None);
+                    }
+                }
                 let text = shell
                     .ui(surface)
                     .and_then(|ui| ui.field_text(field))
