@@ -228,6 +228,26 @@ mod tests {
     }
 
     #[test]
+    fn a_wrapping_label_fills_its_column_unless_aligned_across_it() {
+        let mut ui = Ui::new("Align", gapped(), false);
+        ui.min_width = 400.0;
+        let wrap = crate::Wrap {
+            max_width_chars: std::num::NonZeroU32::new(10),
+            lines: None,
+        };
+        let filled = ui.add(Ui::ROOT, Kind::Label("A sentence long enough to wrap".into()));
+        let start = ui.add(Ui::ROOT, Kind::Label("A sentence long enough to wrap".into()));
+        assert!(ui.set_wrap(filled, Some(wrap.clone())));
+        assert!(ui.set_wrap(start, Some(wrap)));
+        assert_eq!(ui.set_align(start, [Align::Start, Align::Start]), Some(true));
+        ui.layout();
+        let (f, s) = (ui.widget(filled).rect, ui.widget(start).rect);
+        assert_eq!(f.w, 380.0, "the column's width inside its margins");
+        assert!(s.w < f.w, "{} keeps the width it asks for", s.w);
+        assert_eq!(s.x, f.x, "at the start");
+    }
+
+    #[test]
     fn widgets_at_the_bottom_follow_one_another_a_gap_apart_and_skip_the_hidden() {
         let mut ui = Ui::new("Align", gapped(), false);
         (ui.min_width, ui.min_height) = (400.0, 300.0);
