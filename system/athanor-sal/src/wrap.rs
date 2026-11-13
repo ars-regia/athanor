@@ -63,22 +63,22 @@ pub(crate) fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> 
     width
 }
 
-/// The width `text` asks for under `wrap`: its longest word, or `max_width_chars` characters when
-/// wider, at most its width on one line.
+/// The narrowest `text` can be under `wrap`, its longest word, and the width it asks for: its
+/// longest word, or `max_width_chars` characters when wider, at most its width on one line.
 pub(crate) fn request(
     cx: &mut TextContext,
     text: &str,
     (size, rtl): (f32, bool),
     style: &TextStyle,
     wrap: &Wrap,
-) -> f32 {
+) -> (f32, f32) {
     let widths = cx
         .layout_at(text, size, rtl, style, None)
         .calculate_content_widths();
     let chars = wrap
         .max_width_chars
         .map_or(0.0, |n| n.get() as f32 * char_width(cx, size, style));
-    widths.max.min(widths.min.max(chars))
+    (widths.min, widths.max.min(widths.min.max(chars)))
 }
 
 /// `text` broken at `width`, cut to `wrap.lines` lines with an ellipsis at the end of the last one
@@ -279,18 +279,20 @@ mod tests {
         let mut cx = TextContext::default();
         let style = TextStyle::default();
         let at = (15.0, false);
-        let ten = request(&mut cx, SENTENCE, at, &style, &wrap(10, 0));
-        let forty = request(&mut cx, SENTENCE, at, &style, &wrap(40, 0));
+        let (least, ten) = request(&mut cx, SENTENCE, at, &style, &wrap(10, 0));
+        let (_, forty) = request(&mut cx, SENTENCE, at, &style, &wrap(40, 0));
         assert!(ten < forty, "{ten} < {forty}");
         assert!(forty < cx.layout(SENTENCE, 15.0, false, &style).width());
-        let hi = request(&mut cx, "Hi", at, &style, &wrap(40, 0));
+        let (_, hi) = request(&mut cx, "Hi", at, &style, &wrap(40, 0));
         assert!((hi - cx.layout("Hi", 15.0, false, &style).width()).abs() < 0.5);
-        let word = request(&mut cx, SENTENCE, at, &style, &Wrap::default());
+        let (_, word) = request(&mut cx, SENTENCE, at, &style, &Wrap::default());
         let longest = cx.layout("unchanged.", 15.0, false, &style).width();
-        assert!(
-            (word - longest).abs() < 1.0,
-            "the longest word: {word} against {longest}"
-        );
+        for width in [word, least] {
+            assert!(
+                (width - longest).abs() < 1.0,
+                "the longest word: {width} against {longest}"
+            );
+        }
     }
 
     #[test]

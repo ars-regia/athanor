@@ -1,5 +1,7 @@
-//! The launcher's preview pane (doc_launcher.md, LA6). Every string from outside is set as
-//! plain text through athanor-unit::text; no untrusted file is decoded in this process.
+//! The launcher's preview pane (doc_launcher.md, LA6), without its widgets: what the pane
+//! shows, as a [`Card`] handed to the launcher at each change, which draws it with its toolkit.
+//! Every string from outside is cut through athanor-unit::text and is plain text, never markup;
+//! no untrusted file is decoded in this process.
 
 pub mod origin;
 pub mod render;
@@ -12,10 +14,9 @@ use std::rc::Rc;
 
 use athanor_search::calc::Calc;
 use athanor_unit::text::{line, lines, BODY_CHARS, NAME_CHARS, SUMMARY_CHARS};
-use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib};
+use gio::prelude::*;
 
-/// The longest side of a decoded picture, in device pixels.
+/// The longest side of a decoded picture, in logical pixels.
 const PICTURE_SIDE: u32 = 512;
 /// `flatpak list` that takes longer is given up.
 const FLATPAK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
@@ -23,18 +24,39 @@ const FLATPAK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
 pub enum Subject {
     File { uri: String },
     App { info: gio_unix::DesktopAppInfo },
-    Window { title: String, app: String, picture: Option<gdk::Texture> },
+    Window { title: String, app: String, picture: Option<Picture> },
     Calc { calc: Calc, rates_date: Option<String> },
     Note { title: String, body: String },
 }
 
+/// A picture: `height` rows of `width` pixels of red, green, blue and alpha, the colour
+/// premultiplied by the alpha.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Picture {
+    pub width: u32,
+    pub height: u32,
+    /// Shared, so that a toolkit that keeps the bytes, as GDK's textures do, takes them
+    /// without a copy.
+    pub rgba: glib::Bytes,
+}
+
+/// What the pane shows: from the top, the picture or else the icon, the title, the body and
+/// the facts. An empty text is not shown.
+#[derive(Clone, Debug, Default)]
+pub struct Card {
+    pub picture: Option<Rc<Picture>>,
+    pub icon: Option<gio::Icon>,
+    pub title: String,
+    pub body: String,
+    pub facts: String,
+}
+
 pub struct Preview {
-    root: gtk4::Box,
-    picture: gtk4::Picture,
-    icon: gtk4::Image,
-    title: gtk4::Label,
-    body: gtk4::Label,
-    facts: gtk4::Label,
+    card: RefCell<Card>,
+    /// Called with the card at each change.
+    changed: Box<dyn Fn(&Card)>,
+    /// The scale of the surface that shows the pane, which sizes a decoded picture.
+    scale: Cell<f64>,
     /// Every `show` takes a new value; an answer for an older one is dropped.
     generation: Cell<u64>,
     /// One decode at a time: the unit of a decode that was passed over is stopped before the
@@ -64,86 +86,86 @@ pub fn themed(icon: Option<gio::Icon>) -> gio::Icon {
     }
 }
 
-fn label(class: &str) -> gtk4::Label {
-    let label = gtk4::Label::builder().xalign(0.0).wrap(true).selectable(false).use_markup(false).build();
-    label.add_css_class(class);
-    label
-}
-
 impl Preview {
-    pub fn new() -> Rc<Self> {
-        let root = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-        root.add_css_class("preview");
-        root.set_accessible_role(gtk4::AccessibleRole::Region);
-        let picture = gtk4::Picture::builder().can_shrink(true).content_fit(gtk4::ContentFit::Contain).height_request(220).build();
-        let icon = gtk4::Image::builder().pixel_size(96).build();
-        let (title, body, facts) = (label("preview-title"), label("preview-body"), label("preview-facts"));
-        body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-        for widget in [picture.upcast_ref::<gtk4::Widget>(), icon.upcast_ref(), title.upcast_ref(), body.upcast_ref(), facts.upcast_ref()] {
-            root.append(widget);
-        }
-        let preview = Rc::new(Self { root, picture, icon, title, body, facts, generation: Cell::new(0), inflight: Cell::new(false), queued: RefCell::new(None), cancellable: RefCell::new(gio::Cancellable::new()) });
-        preview.clear();
-        preview
+    /// An empty pane, which calls `changed` with what it shows at each change.
+    pub fn new(changed: impl Fn(&Card) + 'static) -> Rc<Self> {
+        Rc::new(Self {
+            card: RefCell::default(),
+            changed: Box::new(changed),
+            scale: Cell::new(1.0),
+            generation: Cell::new(0),
+            inflight: Cell::new(false),
+            queued: RefCell::new(None),
+            cancellable: RefCell::new(gio::Cancellable::new()),
+        })
     }
 
-    pub fn widget(&self) -> &gtk4::Widget {
-        self.root.upcast_ref()
+    /// What the pane shows now.
+    pub fn card(&self) -> Card {
+        self.card.borrow().clone()
+    }
+
+    /// The longest side, in pixels, of a picture drawn at the pane's scale: what a picture
+    /// handed to [`Preview::show`] needs at most.
+    pub fn picture_side(&self) -> u32 {
+        // `set_scale` keeps the scale finite and positive; `render` clamps the side.
+        (f64::from(PICTURE_SIDE) * self.scale.get()).ceil().max(1.0) as u32
+    }
+
+    /// The scale of the surface that shows the pane, for the pictures decoded after this call.
+    pub fn set_scale(&self, scale: f64) {
+        if scale.is_finite() && scale > 0.0 {
+            self.scale.set(scale);
+        }
     }
 
     pub fn clear(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
         self.queued.borrow_mut().take();
         self.cancellable.replace(gio::Cancellable::new()).cancel();
-        self.picture.set_paintable(None::<&gdk::Paintable>);
-        self.picture.set_visible(false);
-        self.icon.set_visible(false);
-        for label in [&self.title, &self.body, &self.facts] {
-            label.set_text("");
-            label.set_visible(false);
-        }
+        self.card.replace(Card::default());
+        self.notify();
     }
 
-    fn set(label: &gtk4::Label, text: &str) {
-        label.set_text(text);
-        label.set_visible(!text.is_empty());
+    /// Calls `changed` with a copy of the card, so that it may show or clear the pane again.
+    fn notify(&self) {
+        let card = self.card.borrow().clone();
+        (self.changed)(&card);
     }
 
-    fn set_icon(&self, icon: Option<&gio::Icon>) {
-        if let Some(icon) = icon {
-            self.icon.set_from_gicon(icon);
-        }
-        self.icon.set_visible(icon.is_some());
+    /// Changes the card and tells the launcher.
+    fn update(&self, change: impl FnOnce(&mut Card)) {
+        change(&mut self.card.borrow_mut());
+        self.notify();
     }
 
-    fn set_picture(&self, texture: &gdk::Texture) {
-        self.picture.set_paintable(Some(texture));
-        self.picture.set_visible(true);
-        self.icon.set_visible(false);
+    fn set_picture(&self, picture: Picture) {
+        self.update(|card| {
+            card.picture = Some(Rc::new(picture));
+            card.icon = None;
+        });
     }
 
     pub fn show(self: &Rc<Self>, subject: Subject) {
         self.clear();
         let generation = self.generation.get();
         match subject {
-            Subject::Note { title, body } => {
-                Self::set(&self.title, &line(&title, SUMMARY_CHARS));
-                Self::set(&self.body, &lines(&body, BODY_CHARS));
-            }
-            Subject::Calc { calc, rates_date } => {
-                Self::set(&self.title, &line(&calc.result, SUMMARY_CHARS));
-                Self::set(&self.body, &line(&calc.expression, SUMMARY_CHARS));
+            Subject::Note { title, body } => self.update(|card| {
+                card.title = line(&title, SUMMARY_CHARS);
+                card.body = lines(&body, BODY_CHARS);
+            }),
+            Subject::Calc { calc, rates_date } => self.update(|card| {
+                card.title = line(&calc.result, SUMMARY_CHARS);
+                card.body = line(&calc.expression, SUMMARY_CHARS);
                 if let Some(date) = rates_date {
-                    Self::set(&self.facts, &tr_with("Exchange rates of {date}", "date", &line(&date, SUMMARY_CHARS)));
+                    card.facts = tr_with("Exchange rates of {date}", "date", &line(&date, SUMMARY_CHARS));
                 }
-            }
-            Subject::Window { title, app, picture } => {
-                if let Some(texture) = picture {
-                    self.set_picture(&texture);
-                }
-                Self::set(&self.title, &line(&title, SUMMARY_CHARS));
-                Self::set(&self.body, &line(&app, NAME_CHARS));
-            }
+            }),
+            Subject::Window { title, app, picture } => self.update(|card| {
+                card.picture = picture.map(Rc::new);
+                card.title = line(&title, SUMMARY_CHARS);
+                card.body = line(&app, NAME_CHARS);
+            }),
             Subject::App { info } => self.show_app(&info, generation),
             Subject::File { uri } => {
                 let this = Rc::clone(self);
@@ -153,17 +175,21 @@ impl Preview {
     }
 
     fn show_app(self: &Rc<Self>, info: &gio_unix::DesktopAppInfo, generation: u64) {
-        self.set_icon(Some(&themed(info.icon())));
-        Self::set(&self.title, &line(&info.name(), NAME_CHARS));
-        Self::set(&self.body, &lines(&info.description().unwrap_or_default(), BODY_CHARS));
         let provenance = info.filename().map_or(origin::Provenance::User, |path| {
             origin::provenance(&path, info.string("X-Flatpak").as_deref(), &glib::user_data_dir())
         });
-        let app_id = match provenance {
-            origin::Provenance::Flatpak(app_id) => app_id,
-            origin::Provenance::Image => return Self::set(&self.facts, &tr("System image")),
-            origin::Provenance::User => return Self::set(&self.facts, &tr("Installed by you")),
+        let facts = match &provenance {
+            origin::Provenance::Flatpak(_) => String::new(),
+            origin::Provenance::Image => tr("System image"),
+            origin::Provenance::User => tr("Installed by you"),
         };
+        self.update(|card| {
+            card.icon = Some(themed(info.icon()));
+            card.title = line(&info.name(), NAME_CHARS);
+            card.body = lines(&info.description().unwrap_or_default(), BODY_CHARS);
+            card.facts = facts;
+        });
+        let origin::Provenance::Flatpak(app_id) = provenance else { return };
         let this = Rc::clone(self);
         glib::spawn_future_local(async move {
             if this.generation.get() != generation {
@@ -199,7 +225,7 @@ impl Preview {
                 Some(origin::Origin { remote, version: None }) => format!("Flatpak · {}", line(&remote, NAME_CHARS)),
                 None => "Flatpak".to_owned(),
             };
-            Self::set(&this.facts, &text);
+            this.update(|card| card.facts = text);
         });
     }
 
@@ -217,15 +243,17 @@ impl Preview {
             return;
         }
         // The card: shown at once, and kept when the content cannot be shown.
-        self.set_icon(Some(&themed(info.icon())));
-        Self::set(&self.title, &line(&info.display_name(), NAME_CHARS));
         let folder = file.parent().and_then(|parent| parent.path()).map(|path| path.display().to_string()).unwrap_or_default();
         let modified = info
             .modification_date_time()
             .and_then(|time| time.to_local().ok())
             .and_then(|time| time.format("%x %X").ok())
             .unwrap_or_default();
-        Self::set(&self.facts, &[line(&folder, SUMMARY_CHARS), glib::format_size(info.size().max(0) as u64).to_string(), modified.to_string()].join(" · "));
+        self.update(|card| {
+            card.icon = Some(themed(info.icon()));
+            card.title = line(&info.display_name(), NAME_CHARS);
+            card.facts = [line(&folder, SUMMARY_CHARS), glib::format_size(info.size().max(0) as u64).to_string(), modified.to_string()].join(" · ");
+        });
 
         let Some(path) = file.path() else { return };
         let kind = info.content_type().unwrap_or_default();
@@ -267,10 +295,10 @@ impl Preview {
             return;
         }
         let Some(decode) = decode else {
-            Self::set(&self.body, &head.unwrap_or_default());
+            self.update(|card| card.body = head.unwrap_or_default());
             return;
         };
-        let side = (PICTURE_SIDE as i32 * self.root.scale_factor()).max(1) as u32;
+        let side = self.picture_side();
         *self.queued.borrow_mut() = Some(Job { file: opened, kind: decode, side, path, generation });
         self.pump();
     }
@@ -291,7 +319,7 @@ impl Preview {
             let answer = render::render(job.file, job.kind, job.side, &cancellable).await;
             this.inflight.set(false);
             match answer {
-                Ok(texture) if this.generation.get() == job.generation => this.set_picture(texture.upcast_ref()),
+                Ok(picture) if this.generation.get() == job.generation => this.set_picture(picture),
                 Ok(_) | Err(render::RenderError::Cancelled) => {}
                 Err(err) => tracing::warn!(path = %job.path.display(), "no preview: {err}"),
             }
@@ -320,6 +348,70 @@ fn tr_with(msgid: &str, key: &str, value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_change_reaches_the_launcher_and_a_new_subject_starts_from_an_empty_card() {
+        let seen = Rc::new(RefCell::new(Vec::<Card>::new()));
+        let preview = Preview::new({
+            let seen = Rc::clone(&seen);
+            move |card| seen.borrow_mut().push(card.clone())
+        });
+        let picture = Picture { width: 1, height: 1, rgba: glib::Bytes::from_owned(vec![1u8, 2, 3, 255]) };
+        preview.show(Subject::Window { title: "Files".into(), app: "Nautilus".into(), picture: Some(picture.clone()) });
+        let card = preview.card();
+        assert_eq!((card.title.as_str(), card.body.as_str(), card.facts.as_str()), ("Files", "Nautilus", ""));
+        assert_eq!(card.picture.as_deref(), Some(&picture));
+        preview.show(Subject::Note { title: "Note".into(), body: "One\ntwo".into() });
+        let card = preview.card();
+        assert!(card.picture.is_none() && card.icon.is_none(), "nothing of the window is left");
+        assert_eq!((card.title.as_str(), card.body.as_str()), ("Note", "One\ntwo"));
+        preview.clear();
+        let seen = seen.borrow();
+        // show: clear, then the subject, twice; then clear.
+        assert_eq!(seen.len(), 5);
+        assert!(seen.last().is_some_and(|card| card.title.is_empty() && card.picture.is_none()));
+    }
+
+    #[test]
+    fn the_launcher_may_change_the_pane_from_its_callback() {
+        let preview: Rc<RefCell<std::rc::Weak<Preview>>> = Rc::default();
+        let calls = Rc::new(Cell::new(0));
+        let pane = Preview::new({
+            let (preview, calls) = (Rc::clone(&preview), Rc::clone(&calls));
+            move |card| {
+                calls.set(calls.get() + 1);
+                // The first card with a title clears the pane again, inside the callback.
+                if !card.title.is_empty() {
+                    if let Some(preview) = preview.borrow().upgrade() {
+                        preview.clear();
+                    }
+                }
+            }
+        });
+        preview.replace(Rc::downgrade(&pane));
+        pane.show(Subject::Note { title: "Note".into(), body: String::new() });
+        // show: clear, then the note, whose callback cleared it.
+        assert_eq!(calls.get(), 3);
+        assert!(pane.card().title.is_empty());
+    }
+
+    #[test]
+    fn a_window_picture_needs_the_side_at_the_panes_scale() {
+        let preview = Preview::new(|_| {});
+        assert_eq!(preview.picture_side(), PICTURE_SIDE);
+        preview.set_scale(1.5);
+        assert_eq!(preview.picture_side(), 768);
+    }
+
+    #[test]
+    fn a_scale_that_is_not_a_positive_number_is_ignored() {
+        let preview = Preview::new(|_| {});
+        preview.set_scale(1.5);
+        for wrong in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            preview.set_scale(wrong);
+        }
+        assert_eq!(preview.scale.get(), 1.5);
+    }
 
     #[test]
     fn only_a_themed_icon_is_shown() {
