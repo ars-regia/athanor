@@ -4,7 +4,7 @@ use crate::widget::Rect;
 use parley::setting::{FontFeature, Tag};
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFeatures, FontWeight,
-    GenericFamily, Layout, LayoutContext, PlainEditor, StyleProperty,
+    GenericFamily, Layout, LayoutContext, OverflowWrap, PlainEditor, StyleProperty,
 };
 
 mod fontconfig;
@@ -86,6 +86,19 @@ impl TextContext {
     /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start, at
     /// `size` times the style's scale.
     pub fn layout(&mut self, text: &str, size: f32, rtl: bool, style: &TextStyle) -> Layout<Brush> {
+        self.wrapped(text, size, rtl, style, None)
+    }
+
+    /// [`TextContext::layout`], its lines broken at `width` logical pixels when it is `Some`:
+    /// between words, and inside a word wider than that.
+    pub(crate) fn wrapped(
+        &mut self,
+        text: &str,
+        size: f32,
+        rtl: bool,
+        style: &TextStyle,
+        width: Option<f32>,
+    ) -> Layout<Brush> {
         let features: Vec<FontFeature> = style
             .features
             .iter()
@@ -102,9 +115,12 @@ impl TextContext {
         builder.push_default(StyleProperty::FontFeatures(FontFeatures::from(
             &features[..],
         )));
+        if width.is_some() {
+            builder.push_default(StyleProperty::OverflowWrap(OverflowWrap::Anywhere));
+        }
         builder.set_base_direction(base_direction(rtl));
         let mut layout = builder.build(text);
-        layout.break_all_lines(None);
+        layout.break_all_lines(width);
         layout.align(Alignment::Start, AlignmentOptions::default());
         layout
     }
