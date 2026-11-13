@@ -233,6 +233,13 @@ pub trait Application {
     /// The keyboard entered (`focused`) or left `surface`, a popup included.
     fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
 
+    /// The primary button was pressed on `surface` at `at`, in logical pixels, after its widgets
+    /// took the press: where a surface closes when the user presses beside its content, as the
+    /// launcher's panel over its whole output does (doc_launcher.md, LA5), comparing `at` with
+    /// [`crate::Ui::island_fill`] or a widget's `rect`. A press that closes a popup comes here
+    /// for no surface, nor does one that moves a window by its title bar.
+    fn pressed(&mut self, _shell: &mut Shell, _surface: SurfaceId, _at: (f32, f32)) {}
+
     /// A key pressed, or repeated, on `surface`, before its widgets see it, a focused field
     /// included: `true` takes it, and the widgets never see it. Where an application gives keys
     /// a meaning of its own while the focus stays in a field: the arrows that move a list of
@@ -2063,6 +2070,11 @@ impl App {
         let event = surface.ui.pointer_press(x, y, button);
         self.pressed_at = Some((x, y));
         self.changed(id, event);
+        if button == PointerButton::Primary && !self.shell.exit {
+            self.application.pressed(&mut self.shell, id, (x, y));
+            // What the application changed is drawn, and the input method follows the focus.
+            self.changed(id, None);
+        }
         self.pressed_at = None;
     }
 
