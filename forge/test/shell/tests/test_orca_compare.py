@@ -246,5 +246,46 @@ class HiddenTest(unittest.TestCase):
         )
 
 
+class FocusReturnTest(unittest.TestCase):
+    """The line Orca says when the focus returns from the gallery's dialog (#1123)."""
+
+    RETURN = ["Chiudi button.", "spazio", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+    HEARD = ["Chiudi button.", "spazio", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+
+    def setUp(self):
+        # The gallery's strings, as its strings.tsv holds them.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        strings = Path(folder.name) / "strings.tsv"
+        strings.write_text("title\tGallery\tGalleria\ndialog.close\tClose\tChiudi\n", encoding="utf-8")
+        moved = compare.STRINGS
+        compare.STRINGS = strings
+        compare.gallery_labels.cache_clear()
+        self.addCleanup(compare.gallery_labels.cache_clear)
+        self.addCleanup(setattr, compare, "STRINGS", moved)
+
+    def test_the_frame_title_after_a_dialog_close_is_heard_as_the_title(self):
+        lines, failures = compare.compare(self.RETURN, self.HEARD)
+        self.assertEqual(failures, [])
+        self.assertIn(f"'Galleria cornice': spoken as 'Galleria'; note: {compare.FOCUS_RETURN}", lines)
+
+    def test_the_same_line_outside_a_dialog_return_fails(self):
+        reference = ["Lettore schermo attivo.", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+        transcript = ["Lettore schermo attivo.", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(reference, transcript)[1], ["'Galleria cornice': missing"])
+        # A line that also follows something else is not covered by its return either.
+        self.assertEqual(
+            compare.compare(reference + self.RETURN, transcript + self.HEARD)[1],
+            ["'Galleria cornice': missing"],
+        )
+
+    def test_another_missing_word_after_a_dialog_close_fails(self):
+        for line in ("Galleria finestra", "Pagine cornice", "Gallery cornice"):
+            with self.subTest(line=line):
+                reference = ["Chiudi button.", "spazio", line]
+                transcript = ["Chiudi button.", "spazio", line.split()[0]]
+                self.assertEqual(compare.compare(reference, transcript)[1], [f"{line!r}: missing"])
+
+
 if __name__ == "__main__":
     unittest.main()

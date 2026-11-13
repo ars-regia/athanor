@@ -53,8 +53,8 @@ STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/stri
 @cache
 def gallery_labels(*keys):
     """The texts of `keys` in the gallery's strings.tsv, every language. Read on first use, by
-    a reference that holds a gallery's switch or text area, so that the walk of another surface
-    does not need the file; a missing key is an error that names it."""
+    a reference that holds a gallery's switch, text area or frame title, so that the walk of
+    another surface does not need the file; a missing key is an error that names it."""
     rows = {
         row[0]: row[1:]
         for row in (line.split("\t") for line in STRINGS.read_text(encoding="utf-8").splitlines())
@@ -77,6 +77,21 @@ SWITCH_SPEECH = {
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
+
+# Focus that returns from a dialog. When a dialog closes, GTK moves the focus to the window's
+# control, then makes the window active, then sends window:activate, and Orca says the window's
+# title with the frame's role ("Galleria cornice"; in English it says the title alone). AccessKit
+# reports the window's activation before the focus (focus_moved of accesskit_atspi_common), so
+# Orca hears the title without the role. The maintainer decided on 2026-11-13 that GTK's
+# "<window title> <frame role word>" is matched by "<window title>" in the transcript, until
+# AccessKit can emit the focus before the activation (#1123). The rule holds only for a line of
+# the reference that says the gallery's `title` with the frame's role word of the same language,
+# and that directly follows, past Orca's key echoes, the line of the gallery dialog's `dialog.close`
+# button in that language; every occurrence of the line must follow it. Any other missing frame
+# role, the same line outside a dialog's return included, still fails.
+FOCUS_RETURN = "AccessKit activates the window before it moves the focus (maintainer, 2026-11-13, #1123)"
+# The frame's role word in the columns of the gallery's strings.tsv: English, Italian.
+FRAME_ROLE = ("frame", "cornice")
 # Orca's echo of the keys a gallery walk presses (rig.sh: space, then Tab), in English and in
 # Italian. An echo is not speech about the focused object, and it may land before or after the
 # focus's last utterance (#999), so walk_problems drops it.
@@ -97,6 +112,30 @@ def heard_as(utterance):
         label = utterance.removesuffix(f" {gtk}")
         if label != utterance and label in switch_labels():
             yield f"{label} {said}"
+
+
+def dialog_returns(reference):
+    """The lines of the reference that FOCUS_RETURN covers, each mapped to the window title the
+    transcript may say in its place."""
+    if not any(line.endswith(f" {word}") for line in reference for word in FRAME_ROLE):
+        return {}
+    forms = {
+        f"{title} {word}": (f"{close} button.", title)
+        for title, close, word in zip(
+            gallery_labels("title"), gallery_labels("dialog.close"), FRAME_ROLE, strict=True
+        )
+    }
+    lines = [line for line in reference if line not in KEY_ECHOES]
+    returns, elsewhere = {}, set()
+    for before, line in zip([None, *lines], lines):
+        if line not in forms:
+            continue
+        close, title = forms[line]
+        if before == close:
+            returns[line] = title
+        else:
+            elsewhere.add(line)
+    return {line: title for line, title in returns.items() if line not in elsewhere}
 
 
 def compare(reference, transcript, exempt=None):
@@ -122,9 +161,14 @@ def compare(reference, transcript, exempt=None):
             if joined in spoken:
                 together.setdefault(field, joined)
                 together.setdefault(after, joined)
+    returns = dialog_returns(reference)
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
         said = said or together.get(utterance)
+        if said is None and returns.get(utterance) in spoken:
+            said = returns[utterance]
+            lines.append(f"{utterance!r}: spoken as {said!r}; note: {FOCUS_RETURN}")
+            continue
         if utterance in exempt:
             cause, issue = exempt[utterance]
             if said is None:
