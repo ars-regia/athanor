@@ -486,6 +486,7 @@ mod tests {
             image: solid([0xcc, 0, 0, 0xff]),
             active: true,
             second: None,
+            placed: None,
             glyphs: None,
         });
         centre_of(&mut painter, tile)?;

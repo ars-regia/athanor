@@ -4,6 +4,7 @@
 //! the controls' fill. AT-SPI reads it as GTK's ToggleButton: a toggle button named by its title,
 //! described by its second line, pressed while on.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use parley::Layout;
@@ -12,6 +13,7 @@ use crate::icon::Image;
 use crate::text::{Brush, TextContext, TextStyle};
 use crate::theme::Rgba;
 use crate::widget::{Kind, Rect, Ui, WidgetId};
+use crate::wrap::{self, Wrap};
 
 /// A tile's height, its icon's disc and the glyph in it, and its corner radius: a 2×1 tile of
 /// VL7, `size.icon.cc_disc` and `size.icon.cc_glyph` of the tokens.
@@ -35,6 +37,9 @@ pub struct Tile {
     /// The second line, laid out by the last layout; boxed, so that a tile does not make every
     /// widget as large as a layout.
     pub(crate) second: Option<Box<Layout<Brush>>>,
+    /// The width the last place gave the tile, which the second line ends in an ellipsis at;
+    /// `None` before the first. [`Ui::layout`] records it.
+    pub(crate) placed: Option<f32>,
     /// The glyph in the disc's inks, off and on, made by a layout from `image` and the theme's
     /// inks: kept between frames, so that the GPU's atlas holds them and a frame tints nothing.
     pub(crate) glyphs: Option<Glyphs>,
@@ -92,6 +97,7 @@ impl Ui {
             image,
             active,
             second: None,
+            placed: None,
             glyphs: None,
         };
         self.add(parent, Kind::Tile(tile))
@@ -114,9 +120,11 @@ impl Ui {
     }
 }
 
-/// The tile's size: its padding around the disc and the widest of its two lines, and at least
-/// its height. The title takes the widget's style at the `heading` weight; the layouts are kept
-/// for drawing, the title's in the widget's `text`.
+/// The tile's size: its padding around the disc and its title, and at least its height. The
+/// second line, as GTK's tile ellipsizes it, asks for no width: it ends in an ellipsis at the
+/// width the tile is placed at, so a long one, a network's name, never widens the tile. The title
+/// takes the widget's style at the `heading` weight; the layouts are kept for drawing, the
+/// title's in the widget's `text`.
 pub(crate) fn measure(
     tile: &mut Tile,
     text: &mut TextContext,
@@ -136,8 +144,19 @@ pub(crate) fn measure(
         ..style.clone()
     };
     let first = text.layout(&tile.title, size, rtl, &heading);
-    let second = text.layout(&tile.subtitle, size, rtl, &caption);
-    let w = 2.0 * pad + DISC + gap + first.width().max(second.width());
+    let chrome = 2.0 * pad + DISC + gap;
+    let second = match tile.placed {
+        Some(placed) => {
+            let one = Wrap {
+                lines: NonZeroU32::new(1),
+                ..Wrap::default()
+            };
+            let width = (placed - chrome).max(0.0);
+            wrap::layout(text, &tile.subtitle, (size, rtl), &caption, &one, width)
+        }
+        None => text.layout(&tile.subtitle, size, rtl, &caption),
+    };
+    let w = chrome + first.width();
     let h = (2.0 * pad + first.height() + second.height()).max(HEIGHT);
     *title = Some(first);
     tile.second = Some(Box::new(second));
@@ -230,6 +249,34 @@ mod tests {
         ui.layout();
         let image = tinted(&ui).expect("tinted again");
         assert!(!std::sync::Arc::ptr_eq(&other, &image), "a new image: tinted again");
+    }
+
+    /// GTK's tile ellipsizes its second line at the end: a network's long name ends in an
+    /// ellipsis inside the tile and leaves the row as wide as a short one does.
+    #[test]
+    fn a_long_second_line_ends_in_an_ellipsis_and_never_widens_the_row() {
+        let long = "A network whose name runs on for sixty characters or nearly";
+        let lay = |subtitle: &str| {
+            let mut ui = Ui::new("t", Theme::default(), false);
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let wifi = ui.tile(row, "Wi-Fi", subtitle, glyph(), true);
+            ui.tile(row, "Bluetooth", "Off", glyph(), false);
+            ui.layout();
+            (ui, wifi)
+        };
+        let (short, _) = lay("Home");
+        let (ui, wifi) = lay(long);
+        assert_eq!(ui.size(), short.size(), "the long name widens nothing");
+        let r = ui.widget(wifi).rect;
+        let room = r.w - 2.0 * ui.theme.padding - super::DISC - ui.theme.gap;
+        let Kind::Tile(tile) = &ui.widget(wifi).kind else {
+            unreachable!("a tile");
+        };
+        assert_eq!(tile.placed, Some(r.w), "the layout recorded its place");
+        let second = tile.second.as_deref().expect("laid out");
+        assert_eq!(second.len(), 1, "one line");
+        assert!(second.width() <= room + 0.5, "{} in {room}", second.width());
+        assert!(second.width() > 0.0, "the start of the name and the ellipsis");
     }
 
     #[test]

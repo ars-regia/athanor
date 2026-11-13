@@ -1561,7 +1561,8 @@ impl Ui {
         let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
         // Height for width: a wrapping label asks for a width that does not depend on the one its
-        // place gives it, so a second pass breaks its lines at that width and settles the heights.
+        // place gives it, so a second pass breaks its lines at that width and settles the heights;
+        // a tile's second line ends in an ellipsis at its place's width the same way.
         if self.rewrap() {
             (w, h) = self.measure(Self::ROOT);
             self.place(Self::ROOT, 0.0, 0.0);
@@ -1570,12 +1571,16 @@ impl Ui {
         self.size
     }
 
-    /// Records the width each wrapping label was placed at; whether one changed.
+    /// Records the width each wrapping label and each tile was placed at; whether one changed.
     pub(crate) fn rewrap(&mut self) -> bool {
         let mut changed = false;
         for widget in &mut self.widgets.0 {
             let w = Some(widget.rect.w);
-            if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
+            let given = match &mut widget.kind {
+                Kind::Tile(tile) => Some(&mut tile.placed),
+                _ => widget.wrap.as_mut().map(|(_, given)| given),
+            };
+            if let Some(given) = given.filter(|given| **given != w) {
                 *given = w;
                 changed = true;
             }
