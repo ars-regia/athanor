@@ -2340,9 +2340,7 @@ impl Ui {
             (key @ (Key::Home | Key::End | Key::PageUp | Key::PageDown), Some(menu)) => {
                 let items = focus::items(self, menu);
                 // A menu with no item to focus, all insensitive say, keeps the focus where it is.
-                let Some(last) = items.len().checked_sub(1) else {
-                    return None;
-                };
+                let last = items.len().checked_sub(1)?;
                 let at = self.focus.and_then(|f| items.iter().position(|&i| i == f));
                 let to = match key {
                     Key::Home => 0,
