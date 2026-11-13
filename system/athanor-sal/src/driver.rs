@@ -15,6 +15,7 @@ use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOL
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
+use dialog::CloseRequest;
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -2424,13 +2425,17 @@ impl LayerShellHandler for App {
 }
 
 impl WindowHandler for App {
-    /// Ends the run, but for a dialog, whose application is asked as at its Close button.
+    /// Ends the run, but for a dialog, whose application is asked as at its Close button, and
+    /// for a window a dialog blocks, which stays open with the dialog unanswered, as GTK's.
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
-        match self.shell.find(window.wl_surface()).map(|s| s.id) {
-            Some(id) if self.shell.dialogs.is_dialog(id) => {
-                self.update(id, Some(Event::Window(WindowButton::Close)));
-            }
-            _ => self.shell.exit = true,
+        let Some(id) = self.shell.find(window.wl_surface()).map(|s| s.id) else {
+            self.shell.exit = true;
+            return;
+        };
+        match self.shell.dialogs.close_request(id) {
+            CloseRequest::Dialog => self.update(id, Some(Event::Window(WindowButton::Close))),
+            CloseRequest::Ignored => {}
+            CloseRequest::Exit => self.shell.exit = true,
         }
     }
 

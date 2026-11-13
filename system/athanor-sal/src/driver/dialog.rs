@@ -14,6 +14,19 @@ use smithay_client_toolkit::reexports::protocols::xdg::shell::client::xdg_toplev
 use wayland_client::globals::GlobalList;
 use wayland_client::{Connection, QueueHandle};
 
+/// What the compositor's request to close a window does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum CloseRequest {
+    /// Nothing: a dialog open on the window keeps it from closing, as GTK ignores a delete
+    /// event on any window but the root of its group's grab, which a shown modal window holds
+    /// (gtk/gtkmain.c, GDK_DELETE).
+    Ignored,
+    /// The dialog's application is asked, as at its Close button.
+    Dialog,
+    /// The run ends.
+    Exit,
+}
+
 /// The dialogs open, each with the window it was opened on, and the compositor's dialog global.
 #[derive(Default)]
 pub(super) struct Dialogs {
@@ -58,6 +71,17 @@ impl Dialogs {
     /// Whether a dialog open on `id` keeps its input from it.
     pub(super) fn blocked(&self, id: SurfaceId) -> bool {
         self.open.iter().any(|&(_, parent)| parent == id)
+    }
+
+    /// What the compositor's request to close the window `id` does.
+    pub(super) fn close_request(&self, id: SurfaceId) -> CloseRequest {
+        if self.blocked(id) {
+            CloseRequest::Ignored
+        } else if self.is_dialog(id) {
+            CloseRequest::Dialog
+        } else {
+            CloseRequest::Exit
+        }
     }
 
     /// `id` and the dialogs open on it, and theirs, each dialog before the surface it was opened
@@ -242,6 +266,24 @@ mod tests {
         assert!(!dialogs.is_dialog(under_second), "and the dialogs under it");
         // Closed again, it reports no dialog a second time.
         assert_eq!(dialogs.close(window, &open), [window]);
+    }
+
+    /// The compositor's close of a window a dialog blocks is ignored, as GTK's; a dialog's
+    /// asks its application, unless a dialog of its own blocks it; any other window's ends the
+    /// run.
+    #[test]
+    fn a_close_request_on_a_blocked_window_is_ignored() {
+        let (window, dialog, nested) = (SurfaceId(0), SurfaceId(1), SurfaceId(2));
+        let mut dialogs = Dialogs::default();
+        assert_eq!(dialogs.close_request(window), CloseRequest::Exit);
+        dialogs.opened(dialog, window);
+        assert_eq!(dialogs.close_request(window), CloseRequest::Ignored);
+        assert_eq!(dialogs.close_request(dialog), CloseRequest::Dialog);
+        dialogs.opened(nested, dialog);
+        assert_eq!(dialogs.close_request(dialog), CloseRequest::Ignored);
+        assert_eq!(dialogs.close_request(nested), CloseRequest::Dialog);
+        dialogs.close(dialog, &[window, dialog, nested]);
+        assert_eq!(dialogs.close_request(window), CloseRequest::Exit);
     }
 
     #[test]
