@@ -58,7 +58,7 @@ CONFIGURE = re.compile(
 
 # xdg_positioner's enums.
 TOP, BOTTOM = 1, 2
-SLIDE_X, FLIP_Y = 1, 8
+SLIDE_X, SLIDE_Y, FLIP_Y = 1, 2, 8
 
 
 def popups(lines):
@@ -229,7 +229,8 @@ def main():
             "set_anchor_rect": whole(bx, by, bw, bh),
             "set_anchor": (TOP,),
             "set_gravity": (TOP,),
-            "set_constraint_adjustment": (FLIP_Y | SLIDE_X,),
+            # A menu also slides along its axis, so that one as high as the output stays on it.
+            "set_constraint_adjustment": (FLIP_Y | SLIDE_X | SLIDE_Y,),
         }
         for key, value in expect.items():
             if menu["positioner"].get(key) != value:

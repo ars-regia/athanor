@@ -141,6 +141,10 @@ pub enum Kind {
     /// it with [`Ui::slider`], which keeps its range valid; change its value with
     /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
+    /// A drop-down, as GTK's `DropDown`: a raised button that shows its chosen item and opens
+    /// its items in a menu, where choosing one raises [`Event::Changed`]. Activating it raises
+    /// [`Event::Clicked`], which the driver takes to open the menu. Add it with [`Ui::drop_down`].
+    DropDown(crate::drop_down::DropDown),
     /// A raised button that shows only an icon and turns on and off by itself, as a mute
     /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
     IconToggle(crate::icon_toggle::IconToggle),
@@ -424,6 +428,7 @@ impl Widget {
                     | Kind::Switch { .. }
                     | Kind::IconToggle(_)
                     | Kind::Slider(_)
+                    | Kind::DropDown(_)
                     | Kind::Field(_)
                     | Kind::TextArea(_)
                     | Kind::WindowButton(_)
@@ -598,6 +603,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// The items of a drop-down whose menu is open changed: the driver closes the menu, whose
+    /// items are the old ones.
+    pub(crate) stale_popup: bool,
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     pub(crate) title_bar: Option<WidgetId>,
@@ -628,6 +636,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            stale_popup: false,
             focus: None,
             text: TextContext::default(),
             title_bar: None,
@@ -958,8 +967,9 @@ impl Ui {
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
     /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
-    /// an icon toggle;
-    /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
+    /// an icon toggle; the description of an image; what a drop-down is for, its description
+    /// ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text
+    /// changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
     /// takes, and for a widget that has no text. Call [`Ui::layout`] afterwards.
@@ -987,6 +997,7 @@ impl Ui {
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
             Kind::Slider(slider) => &mut slider.name,
+            Kind::DropDown(drop) => &mut drop.name,
             Kind::Level(level) => &mut level.name,
             _ => return None,
         };
@@ -1408,6 +1419,7 @@ impl Ui {
     /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
     /// collapsed, as when GTK's popover closes.
     pub(crate) fn popup_closed(&mut self, id: WidgetId) {
+        self.stale_popup = false;
         self.set_expanded(id, false);
         self.set_focus(Some(id));
     }
@@ -1742,6 +1754,17 @@ impl Ui {
                 wh
             }
             Kind::Slider(_) | Kind::Level(_) => (field_width, slider_knob(size) + pad),
+            // The chosen item, then the arrow at the end edge.
+            Kind::DropDown(drop) => {
+                let layout = self.text.layout(drop.chosen_text(), size, rtl, &style);
+                let arrow = size * crate::drop_down::ARROW;
+                let wh = (
+                    (layout.width() + gap + arrow + 2.0 * pad).max(button_min),
+                    layout.height().max(arrow) + pad,
+                );
+                widget.text = Some(layout);
+                wh
+            }
             Kind::Field(field) => {
                 let line = field.layout(&mut self.text).height().max(size * 1.25);
                 (field_width, line + pad)
@@ -1977,7 +2000,9 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } => Some(Event::Clicked(id)),
+            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::DropDown(_) => {
+                Some(Event::Clicked(id))
+            }
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Check { ref mut active, .. }
             | Kind::Switch { ref mut active, .. }
@@ -2479,6 +2504,20 @@ impl Ui {
             // Up and down cycle through a menu's items, as in GTK's menus.
             (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
             (Key::Down, Some(menu)) => focus::cycle(self, menu, false),
+            // Home and End go to the first and the last item, Page Up and Page Down a viewport
+            // up or down a scrolled menu, without wrapping, as in GTK's menus.
+            (key @ (Key::Home | Key::End | Key::PageUp | Key::PageDown), Some(menu)) => {
+                let items = focus::items(self, menu);
+                // A menu with no item to focus, all insensitive say, keeps the focus where it is.
+                let last = items.len().checked_sub(1)?;
+                let at = self.focus.and_then(|f| items.iter().position(|&i| i == f));
+                let to = match key {
+                    Key::Home => 0,
+                    Key::End => last,
+                    _ => self.page(menu, &items, at.unwrap_or(0), key == Key::PageDown),
+                };
+                items.get(to).copied()
+            }
             (Key::Tab, _) => focus::step(self, false),
             (Key::BackTab, _) => focus::step(self, true),
             (key @ (Key::Left | Key::Right | Key::Up | Key::Down), _) => focus::arrow(self, &key),
@@ -2986,6 +3025,48 @@ mod tests {
             assert_eq!(walk(Key::Up), Some(third), "rtl {rtl}: up wraps");
             assert_eq!(walk(Key::Up), Some(second), "rtl {rtl}");
             assert_eq!(walk(Key::Left), Some(second), "rtl {rtl}: no item beside");
+        }
+    }
+
+    #[test]
+    fn home_end_and_the_page_keys_walk_a_long_menu_as_gtks_do() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(Ui::ROOT, "Media player", &names, 0);
+        let Some((mut popup, items)) = ui.drop_down_menu(players, Some(300.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        popup.layout();
+        let items: Vec<WidgetId> = items.into_iter().map(|(item, _)| item).collect();
+        popup.set_focus(Some(items[0]));
+        let mut walk = |key: Key| {
+            assert_eq!(popup.key(key), None);
+            popup.layout();
+            popup.focus().and_then(|f| items.iter().position(|&i| i == f))
+        };
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::Home), Some(0));
+        let Some(down) = walk(Key::PageDown) else {
+            unreachable!("the focus stays in the menu");
+        };
+        assert!(down > 1 && down < 39, "a viewport down, not one item and not the end: {down}");
+        assert_eq!(walk(Key::PageUp), Some(0), "and back up");
+        assert_eq!(walk(Key::PageUp), Some(0), "no wrap at the top");
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::PageDown), Some(39), "no wrap at the end");
+    }
+
+    #[test]
+    fn the_page_keys_home_and_end_leave_a_menu_of_insensitive_items_alone() {
+        let (mut ui, [_, first, second, third]) = menu(false);
+        for item in [first, second, third] {
+            ui.set_sensitive(item, false);
+        }
+        ui.layout();
+        for key in [Key::PageDown, Key::PageUp, Key::Home, Key::End] {
+            assert_eq!(ui.key(key.clone()), None, "{key:?}");
+            assert_eq!(ui.focus(), None, "{key:?}");
         }
     }
 
