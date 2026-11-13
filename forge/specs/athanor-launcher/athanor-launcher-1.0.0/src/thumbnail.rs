@@ -48,27 +48,23 @@ pub fn picture(capture: &Capture, side: u32) -> Option<Picture> {
         .take(out_h * factor)
         .enumerate()
     {
-        // Each output pixel sums the `factor` pixels of its block on this line.
+        // Each output pixel sums the bytes of its block's `factor` pixels on this line, in the
+        // capture's order: the channels are told apart once per output pixel, below.
         for (sum, run) in sums
             .iter_mut()
             .zip(line[..out_w * factor * 4].chunks_exact(factor * 4))
         {
             for pixel in run.as_chunks::<4>().0 {
-                sum[0] += u32::from(pixel[r]);
-                sum[1] += u32::from(pixel[g]);
-                sum[2] += u32::from(pixel[b]);
-                if let Some(a) = a {
-                    sum[3] += u32::from(pixel[a]);
+                for (total, byte) in sum.iter_mut().zip(pixel) {
+                    *total += u32::from(*byte);
                 }
-            }
-            if a.is_none() {
-                sum[3] += 255 * factor as u32;
             }
         }
         if (y + 1) % factor == 0 {
             for sum in &mut sums {
                 // The mean of bytes is a byte.
-                rgba.extend(sum.map(|channel| (channel / block) as u8));
+                let mean = |channel: usize| (sum[channel] / block) as u8;
+                rgba.extend([mean(r), mean(g), mean(b), a.map_or(255, mean)]);
                 *sum = [0; 4];
             }
         }
