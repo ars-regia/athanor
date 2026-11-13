@@ -9,14 +9,16 @@ use std::cell::Cell;
 
 mod rows;
 
-/// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
-/// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
-/// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
+/// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
+/// the widget's slot in the `Ui` and the slot's generation, and is meaningful only in the `Ui`
+/// that returned it.
 ///
-/// The id names its widget's slot in the `Ui` and the slot's generation. Once
-/// [`Ui::remove_children`] removes the widget the id is stale, also after another widget takes
-/// the slot: a method given it does nothing, and logs it, or returns `None` where it returns an
-/// `Option`; it never reaches the widget in the slot.
+/// The id is live until [`Ui::remove_children`] removes its widget, and stale from then on, also
+/// once another widget takes the slot under the next generation. A method given a stale id never
+/// reaches the widget in the slot: a setter changes nothing and logs it, returning `false` or
+/// `None` where it returns either, [`Ui::add`] adds nothing and returns the stale id, and a
+/// reader reads a hidden column without children. A method given an id past the slots of the
+/// `Ui`, as an id of another `Ui` can be, panics, as its `# Panics` says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WidgetId(pub(crate) u32, pub(crate) u32);
 

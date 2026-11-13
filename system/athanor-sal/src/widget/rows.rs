@@ -40,10 +40,13 @@ impl Ui {
 
     /// Removes every child of `parent` and everything under them, as GTK's `remove_all`: to
     /// fill a list anew, say. The title bar stays. The focus on a removed widget moves as it
-    /// would off a hidden one, a list loses the selected row removed from it, and a removed
-    /// widget's slot is filled again by a later [`Ui::add`], so that a list filled anew at each
-    /// key does not grow the tree. An id of a removed widget may therefore name a widget added
-    /// later: forget the ids of the removed ones. Call [`Ui::layout`] afterwards.
+    /// would off a hidden one, and a list loses the selected row removed from it. Every id of a
+    /// removed widget is stale from then on ([`WidgetId`]), the driver's and the application's
+    /// alike: nothing done with it reaches a widget added later. A removed widget's slot is
+    /// filled again by a later [`Ui::add`], under the next generation, so that a list filled
+    /// anew at each key does not grow the tree; a slot removed 65,536 times is retired instead,
+    /// so that no accessibility node cached for one of its widgets names another. Call
+    /// [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
