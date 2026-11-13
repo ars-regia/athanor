@@ -291,7 +291,8 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
     Ok(pixmap)
 }
 
-/// Lays the window out; returns its size in physical pixels at `scale`.
+/// Lays the window out; returns its size in physical pixels at `scale`, one logical pixel at
+/// least along each axis: wl_shm refuses an empty buffer, and the refusal ends the connection.
 pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     if !(scale.is_finite() && scale > 0.0) {
         return Err(format!("scale {scale} is not a positive number").into());
@@ -299,7 +300,7 @@ pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     // Whole logical pixels: an integer buffer scale then divides the buffer, as wl_surface
     // requires, and the background covers every pixel.
     let (w, h) = ui.layout();
-    Ok((physical(w, scale)?, physical(h, scale)?))
+    Ok((physical(w.max(1.0), scale)?, physical(h.max(1.0), scale)?))
 }
 
 /// `logical` pixels, rounded up to whole ones, in physical pixels at `scale`, as
@@ -858,6 +859,17 @@ mod tests {
         let mut h = DefaultHasher::new();
         pixmap.data_as_u8_slice().hash(&mut h);
         h.finish()
+    }
+
+    #[test]
+    fn a_window_without_widgets_draws_one_pixel_at_least() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Hidden", crate::Theme::default(), false);
+        assert_eq!(ui.layout(), (0.0, 0.0));
+        assert_eq!(layout(&mut ui, 1.0)?, (1, 1));
+        assert_eq!(layout(&mut ui, 2.0)?, (2, 2));
+        let pixmap = render(&mut ui, 1.0)?;
+        assert_eq!((pixmap.width(), pixmap.height()), (1, 1));
+        Ok(())
     }
 
     /// A field holding "abc", composed or committed, drawn without focus so no caret shows.
