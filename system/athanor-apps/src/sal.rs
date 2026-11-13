@@ -335,6 +335,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_reset_empties_the_cache_and_tints_the_next_images_with_the_new_ink() {
+        let (old, new) = (Rgba::rgb(1, 2, 3), Rgba::rgb(4, 5, 6));
+        let mut icons = Icons::new("Adwaita", old);
+        icons.images.insert(("mail-client".to_owned(), ENTRY_ICON, 1), None);
+        icons.reset(new);
+        assert!(icons.images.is_empty(), "the images are read again");
+        assert_eq!(icons.ink, new);
+    }
+
+    #[test]
     fn the_pin_row_follows_the_favourites_as_they_are_now() {
         let id = "org.athanor.CcWindow1.desktop".to_owned();
         let pinned = Some(vec![id.clone()]);

@@ -613,9 +613,10 @@ impl Dock {
 
     fn menu_act(&mut self, shell: &mut Shell, act: row::MenuAct) {
         self.close_menu(shell);
-        if let Some(client) = &self.client {
-            row::menu_act(client, &self.favorites, act, APP);
-        }
+        let Some(client) = &self.client else {
+            return;
+        };
+        row::menu_act(client, &self.favorites, act, APP);
         self.stale = true;
     }
 
@@ -772,6 +773,10 @@ impl Application for Dock {
         }
         let changes = std::mem::take(&mut *self.queue.borrow_mut());
         for change in changes {
+            if let Change::Appearance(current) = &change {
+                self.look = look::look(current);
+            }
+            // After the look, whose ink tints the images anew.
             if reads_icons_again(&change) {
                 self.icons.reset(self.look.dock.text);
             }
@@ -781,12 +786,7 @@ impl Application for Dock {
                     .debounce
                     .start(DEBOUNCE, &self.queue, || Change::Reload),
                 Change::Reload => self.reload(shell),
-                Change::Appearance(current) => {
-                    self.look = look::look(&current);
-                    // The new look tints the images anew.
-                    self.icons.reset(self.look.dock.text);
-                    self.rebuild_all(shell);
-                }
+                Change::Appearance(_) => self.rebuild_all(shell),
                 Change::Apps => {
                     self.apps = None;
                     self.stale = true;
