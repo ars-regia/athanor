@@ -4,7 +4,7 @@
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
 use crate::background_effect::Blurs;
-use crate::capture::Target;
+use crate::capture::{Pointer, Target};
 use crate::lock::Lock;
 use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
@@ -393,13 +393,18 @@ impl Headless {
         what: &Target,
         space: &Space<Window>,
         marks: &Marks,
+        pointer: Option<Pointer<'_>>,
     ) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
-            Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space, marks)
-            }
+            Gpu::Gbm { manager, node, .. } => crate::capture::read_back::<_, GlesTexture>(
+                gles(manager, node)?,
+                what,
+                space,
+                marks,
+                pointer,
+            ),
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_back::<_, Image>(renderer, what, space, marks)
+                crate::capture::read_back::<_, Image>(renderer, what, space, marks, pointer)
             }
         }
     }
@@ -470,6 +475,7 @@ where
         &virt.output,
         age,
         view,
+        Vec::new(),
         &mut virt.damage_tracker,
         look,
     )
