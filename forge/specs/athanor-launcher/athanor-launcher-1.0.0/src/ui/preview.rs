@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use athanor_preview::{Card, Picture, Preview};
 use gtk4::prelude::*;
-use gtk4::{gdk, glib};
+use gtk4::gdk;
 
 struct Widgets {
     picture: gtk4::Picture,
