@@ -4,6 +4,7 @@
 use crate::focus;
 use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
+use crate::wrap::{self, Wrap};
 use parley::Layout;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
@@ -382,6 +383,8 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
+    /// How a label wraps, see [`Ui::set_wrap`], and the width its last place gave it, if one has.
+    pub(crate) wrap: Option<(Wrap, Option<f32>)>,
 }
 
 impl Widget {
@@ -398,6 +401,7 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
+            wrap: None,
         }
     }
 
@@ -1320,6 +1324,22 @@ impl Ui {
         true
     }
 
+    /// Makes label `id` wrap as [`Wrap`] says, as GTK's `wrap`, `max-width-chars`, `lines` and
+    /// end `ellipsize`, or, with `None`, keep its text on one line again; takes effect from its
+    /// next layout. `false`, and nothing changes, for a widget that is not a label.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_wrap(&mut self, id: WidgetId, wrap: Option<Wrap>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_)) {
+            return false;
+        }
+        widget.wrap = wrap.map(|w| (w, None));
+        true
+    }
+
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
     /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
     /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
@@ -1527,10 +1547,29 @@ impl Ui {
 
     /// Shapes every text and places every widget; returns the window's size in logical pixels.
     pub fn layout(&mut self) -> (f32, f32) {
-        let (w, h) = self.measure(Self::ROOT);
+        let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
+        // Height for width: a wrapping label asks for a width that does not depend on the one its
+        // place gives it, so a second pass breaks its lines at that width and settles the heights.
+        if self.rewrap() {
+            (w, h) = self.measure(Self::ROOT);
+            self.place(Self::ROOT, 0.0, 0.0);
+        }
         self.size = (w, h);
         self.size
+    }
+
+    /// Records the width each wrapping label was placed at; whether one changed.
+    pub(crate) fn rewrap(&mut self) -> bool {
+        let mut changed = false;
+        for widget in &mut self.widgets.0 {
+            let w = Some(widget.rect.w);
+            if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
+                *given = w;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
@@ -1539,7 +1578,7 @@ impl Ui {
         shown.copied().filter(|&c| widgets[c].visible).collect()
     }
 
-    fn measure(&mut self, id: WidgetId) -> (f32, f32) {
+    pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap) = (t.margin, t.section_gap);
@@ -1620,8 +1659,21 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.layout(text, size, rtl, &style);
-                let wh = (layout.width(), layout.height());
+                let (layout, w) = match &widget.wrap {
+                    Some((wrap, given)) => {
+                        let asked = wrap::request(&mut self.text, text, (size, rtl), &style, wrap);
+                        // Before its first place, at the width it asks for.
+                        let at = given.unwrap_or(asked);
+                        let shaped = (size, rtl);
+                        (wrap::layout(&mut self.text, text, shaped, &style, wrap, at), asked)
+                    }
+                    None => {
+                        let layout = self.text.layout(text, size, rtl, &style);
+                        let w = layout.width();
+                        (layout, w)
+                    }
+                };
+                let wh = (w, layout.height());
                 widget.text = Some(layout);
                 wh
             }
@@ -1744,7 +1796,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) {
+                    ) || self.widgets[c].wrap.is_some()
+                    {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     // An island and a picture take the rest of their column's height too.
