@@ -6,6 +6,9 @@
 
 mod clipboard;
 mod dialog;
+mod modifiers;
+
+pub use modifiers::KeyModifiers;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
 use crate::motion::{Motion, Pose, Running};
@@ -232,6 +235,30 @@ pub trait Application {
     /// The keyboard entered (`focused`) or left `surface`, a popup included.
     fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
 
+    /// A key pressed, or repeated, on `surface`, before its widgets see it, a focused field
+    /// included: `true` takes it, and the widgets never see it. Where an application gives keys
+    /// a meaning of its own while the focus stays in a field: the arrows that move a list of
+    /// results, say, or Ctrl+Enter, which [`Key::Enter`] with `modifiers.ctrl` tells from Enter.
+    /// The keys of an open menu come to the menu's surface. Escape on a popup that Escape
+    /// dismisses closes it first, without this call. The default takes no key.
+    ///
+    /// Only the keys a [`Key`] names come here: Tab and Shift+Tab, the arrows, Home, End,
+    /// Page Up, Page Down, Enter, Backspace, Delete, Escape, Menu and Shift+F10, Ctrl+A, Ctrl+C,
+    /// Ctrl+X and Ctrl+V, and a key that types text, which comes as [`Key::Text`] whatever the
+    /// modifiers held, Alt or Super included. Shift with Left or Right comes as
+    /// [`Key::SelectLeft`] or [`Key::SelectRight`]. The other keys reach neither this call nor
+    /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
+    /// keys that type nothing, such as Insert.
+    fn key(
+        &mut self,
+        _shell: &mut Shell,
+        _surface: SurfaceId,
+        _key: &Key,
+        _modifiers: KeyModifiers,
+    ) -> bool {
+        false
+    }
+
     /// Runs after each turn of the event loop, once its events are handled: where the
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
@@ -428,6 +455,9 @@ fn run_on(
             },
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
+        // What the application asked of the clipboards outside an input handler is served now,
+        // a copy refused, and never at a later key or click.
+        app.clips_outside_input();
         app.closed_by_application();
         app.blocked_by_dialogs();
         app.sync_window_focus();
@@ -887,7 +917,7 @@ impl Shell {
         if self.dialogs.blocked(parent) {
             return Err(format!("no popup of {parent:?}: a dialog blocks it").into());
         }
-        if anchor.index() >= from.ui.len() {
+        if !from.ui.contains(anchor) {
             return Err(format!("no widget {anchor:?} on {parent:?}").into());
         }
         let r = at.map_or(from.ui.widget(anchor).rect, |(x, y)| Rect {
@@ -1776,7 +1806,7 @@ enum Route {
 fn route(ui: &Ui, event: Event, own: bool) -> Route {
     let drop_down = |widget: WidgetId| {
         ui.widgets
-            .get(widget.index())
+            .get(widget)
             .is_some_and(|w| matches!(w.kind, Kind::DropDown(_)))
     };
     match event {
@@ -1966,9 +1996,12 @@ impl App {
         let event = self
             .shell
             .get_mut(open.parent)
-            .and_then(|parent| match choice {
-                Choice::Edit(key) => parent.ui.field_edit(open.anchor, key),
-                Choice::Item(index) => parent.ui.choose(open.anchor, index),
+            .and_then(|parent| {
+                let anchor = open.anchor_in(&parent.ui)?;
+                match choice {
+                    Choice::Edit(key) => parent.ui.field_edit(anchor, key),
+                    Choice::Item(index) => parent.ui.choose(anchor, index),
+                }
             });
         self.changed(open.parent, event);
     }
@@ -2175,7 +2208,8 @@ impl App {
     }
 
     /// The widget with a tooltip under the pointer, or newly focused, is now `target`: the
-    /// tooltip shown hides, and the target's shows after GTK's delay.
+    /// tooltip shown hides, and the target's shows after GTK's delay, if the widget was not
+    /// removed since.
     fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId)>) {
         let (hide, wait) = self.tooltip.point(target, Instant::now());
         if hide {
@@ -2208,7 +2242,7 @@ impl App {
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
-        let text = (widget.index() < ui.len() && ui.is_visible(widget))
+        let text = (ui.contains(widget) && ui.is_visible(widget))
             .then(|| ui.tooltip(widget))
             .flatten();
         let Some(text) = text else {
@@ -2380,6 +2414,13 @@ impl App {
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return;
         };
+        let modifiers = KeyModifiers::from(self.modifiers);
+        if self.shell.get_mut(id).is_some()
+            && self.application.key(&mut self.shell, id, &key, modifiers)
+        {
+            self.changed(id, None);
+            return;
+        }
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
@@ -3339,12 +3380,12 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
         assert!(ime.change(None));
         ime.entered = Some(b);
-        let field = Some((b, WidgetId(1), ContentHint::None));
+        let field = Some((b, WidgetId(1, 0), ContentHint::None));
         assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
         assert!(!ime.change(field));
@@ -3354,10 +3395,30 @@ mod tests {
     fn every_change_of_the_focused_field_enables_the_text_input_again() {
         let a = SurfaceId(1);
         let mut ime = Ime::default();
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // Another field of the same hint, on the same surface.
-        assert!(ime.change(Some((a, WidgetId(2), ContentHint::None))));
-        assert!(!ime.change(Some((a, WidgetId(2), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+        assert!(!ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+    }
+
+    #[test]
+    fn a_field_focused_in_a_removed_fields_slot_enables_the_text_input_again() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.field(column, "Old", "");
+        ui.layout();
+        ui.set_focus(Some(old));
+        let a = SurfaceId(1);
+        let field = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (a, id, hint));
+        let mut ime = Ime::default();
+        assert!(ime.change(field(&ui)));
+        ui.remove_children(column);
+        let new = ui.field(column, "New", "");
+        ui.layout();
+        ui.set_focus(Some(new));
+        assert_eq!(new.index(), old.index(), "the slot is reused");
+        assert!(ime.change(field(&ui)), "the removed field's cursor rectangle stays");
+        assert!(!ime.change(field(&ui)));
     }
 
     #[test]
