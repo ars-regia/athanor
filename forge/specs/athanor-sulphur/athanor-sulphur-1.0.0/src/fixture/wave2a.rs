@@ -321,7 +321,7 @@ fn time(timer: &wp_commit_timer_v1::WpCommitTimerV1, due: Duration) {
 }
 
 /// The protocol error the compositor closed `local` with.
-fn error_of(
+pub(super) fn error_of(
     run: &mut Running,
     local: &mut Local,
 ) -> wayland_client::backend::protocol::ProtocolError {
