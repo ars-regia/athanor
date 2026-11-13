@@ -127,8 +127,10 @@ impl Preview {
         self.notify();
     }
 
+    /// Calls `changed` with a copy of the card, so that it may show or clear the pane again.
     fn notify(&self) {
-        (self.changed)(&self.card.borrow());
+        let card = self.card.borrow().clone();
+        (self.changed)(&card);
     }
 
     /// Changes the card and tells the launcher.
@@ -368,6 +370,29 @@ mod tests {
         // show: clear, then the subject, twice; then clear.
         assert_eq!(seen.len(), 5);
         assert!(seen.last().is_some_and(|card| card.title.is_empty() && card.picture.is_none()));
+    }
+
+    #[test]
+    fn the_launcher_may_change_the_pane_from_its_callback() {
+        let preview: Rc<RefCell<std::rc::Weak<Preview>>> = Rc::default();
+        let calls = Rc::new(Cell::new(0));
+        let pane = Preview::new({
+            let (preview, calls) = (Rc::clone(&preview), Rc::clone(&calls));
+            move |card| {
+                calls.set(calls.get() + 1);
+                // The first card with a title clears the pane again, inside the callback.
+                if !card.title.is_empty() {
+                    if let Some(preview) = preview.borrow().upgrade() {
+                        preview.clear();
+                    }
+                }
+            }
+        });
+        preview.replace(Rc::downgrade(&pane));
+        pane.show(Subject::Note { title: "Note".into(), body: String::new() });
+        // show: clear, then the note, whose callback cleared it.
+        assert_eq!(calls.get(), 3);
+        assert!(pane.card().title.is_empty());
     }
 
     #[test]
