@@ -1110,7 +1110,16 @@ impl Shell {
                 size
             }
             Shown::Popup(_) => logical_size(&ui),
-            Shown::Window(_) => (0, 0),
+            // A window gives its widgets' size as its minimum before the first configure, as
+            // GTK does: a compositor that suggests a smaller first size, as cosmic-comp does on
+            // a small output, would otherwise place the window for a width it never takes.
+            Shown::Window(window) => {
+                layout(&mut ui, 1.0)?;
+                let size = logical_size(&ui);
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&ui, size));
+                size
+            }
         };
         self.next += 1;
         self.surfaces.push(Surface {
@@ -1325,6 +1334,12 @@ fn requested(size: (u32, u32), stretch: (bool, bool)) -> (u32, u32) {
     )
 }
 
+/// The maximum size of a window whose widgets take `size`: that size when the window is not
+/// resizable, as GTK sets a fixed window's on Wayland, and none otherwise.
+fn max_size(ui: &Ui, size: (u32, u32)) -> Option<(u32, u32)> {
+    (!ui.resizable).then_some(size)
+}
+
 /// The widgets' size in whole logical pixels, never empty.
 fn logical_size(ui: &Ui) -> (u32, u32) {
     let (w, h) = ui.size();
@@ -1382,7 +1397,7 @@ struct Surface {
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
-    /// The logical size last asked of a layer surface.
+    /// The logical size last asked of a layer surface, or given as a window's minimum.
     size: (u32, u32),
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
@@ -1501,15 +1516,23 @@ impl Surface {
     }
 
     /// Sets, for the next commit, how the buffer drawn at `scale` maps onto the surface, and a
-    /// layer surface's size when its widgets' changed.
+    /// layer surface's size, or a window's minimum size, when its widgets' changed.
     fn place(&mut self) {
         let size = logical_size(&self.ui);
-        if let Shown::Layer(surface) = &self.shown {
-            let asked = requested(size, self.stretch);
-            if asked != self.size {
-                surface.set_size(asked.0, asked.1);
-                self.size = asked;
+        match &self.shown {
+            Shown::Layer(surface) => {
+                let asked = requested(size, self.stretch);
+                if asked != self.size {
+                    surface.set_size(asked.0, asked.1);
+                    self.size = asked;
+                }
             }
+            Shown::Window(window) if size != self.size => {
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&self.ui, size));
+                self.size = size;
+            }
+            _ => {}
         }
         match &self.fractional {
             Some((_, viewport)) => {
@@ -2936,6 +2959,14 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
+        let mut ui = Ui::new("Fixed", crate::Theme::default(), false);
+        assert_eq!(max_size(&ui, (420, 300)), None, "a window is resizable by default");
+        ui.resizable = false;
+        assert_eq!(max_size(&ui, (420, 300)), Some((420, 300)));
+    }
 
     #[test]
     fn a_drop_down_menu_is_bounded_by_its_output_else_the_shortest_one() {
