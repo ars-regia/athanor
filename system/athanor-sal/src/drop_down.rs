@@ -1,7 +1,7 @@
 //! A drop-down, as GTK's `DropDown`: a raised button that shows the chosen one of its items, with
-//! an arrow at its end edge, and opens them in a menu. AT-SPI reads it as a combo box named for
-//! assistive technologies, its chosen item as its value, and the menu's items as radio menu items,
-//! the chosen one checked. The driver opens the menu and does the choice: the application learns
+//! an arrow at its end edge, and opens them in a menu. AT-SPI reads it as GTK's: a combo box named
+//! by its chosen item, with its own name as its description, and the menu's items as radio menu
+//! items, the chosen one checked. The driver opens the menu and does the choice: the application learns
 //! of it through [`crate::Event::Changed`].
 
 use crate::widget::{Event, Kind, Rect, Ui, WidgetId};
@@ -212,9 +212,11 @@ mod tests {
         let node = crate::a11y::node(&ui, players, 1.0);
         assert_eq!(node.role(), Role::ComboBox);
         assert_eq!(
-            (node.label(), node.value()),
-            (Some("Media player"), Some("Spotify"))
+            (node.label(), node.description(), node.value()),
+            (Some("Spotify"), Some("Media player"), Some("Spotify"))
         );
+        let empty = ui.drop_down(Ui::ROOT, "Nothing", &[], 0);
+        assert_eq!(crate::a11y::node(&ui, empty, 1.0).label(), Some("Nothing"));
         assert_eq!(node.has_popup(), Some(HasPopup::Menu));
         let Some((menu, items)) = ui.drop_down_menu(players, None) else {
             unreachable!("a drop-down with items opens a menu");
