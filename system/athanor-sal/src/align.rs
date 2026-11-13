@@ -8,9 +8,9 @@ use crate::widget::{Kind, Ui, WidgetId};
 /// How a widget sits along one axis of its column: see [`Ui::set_align`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Align {
-    /// As the column places it: a row, a group, a switch, a slider, a list and the like take
-    /// its width, every other widget sits at its start edge; along the column, after the
-    /// widget before it.
+    /// As the column places it: a row, a group, a switch, a slider, a list, a wrapping label
+    /// and the like take its width, every other widget sits at its start edge; along the
+    /// column, after the widget before it.
     #[default]
     Fill,
     /// At the start edge at its own width: the left one, the right one in right to left; at
@@ -26,8 +26,9 @@ impl Ui {
     /// and `valign`: [`Align::Start`] and [`Align::End`] keep its own width at that edge, and
     /// along the column [`Align::End`] puts it at the bottom, with every other widget at the
     /// bottom in order. A widget wider than its column sits at the start edge and overflows at
-    /// the end, and the widgets at the bottom never rise over the ones before them. Call
-    /// [`Ui::layout`] afterwards.
+    /// the end, and the widgets at the bottom never rise over the ones before them. A wrapping
+    /// label aligned across keeps its own width, up to the column's, and in a narrower column
+    /// breaks into more lines, down to its longest word. Call [`Ui::layout`] afterwards.
     ///
     /// - `Some(true)`: the alignment changed.
     /// - `Some(false)`: the widget already has this alignment.
