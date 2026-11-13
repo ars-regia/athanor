@@ -100,8 +100,11 @@ pub(crate) fn layout(
 
 /// The text shown of `text`, whose layout at `width` is `full`, and its layout, in `limit` lines:
 /// the whole text when it fits; otherwise the most of it that fits with an ellipsis after it, cut
-/// between two clusters of the last line shown, which keeps grapheme clusters whole, as Pango's
-/// end ellipsis. The cut is found by bisection over that line's clusters.
+/// between two clusters from the start of the last line shown to the end of the text, which keeps
+/// grapheme clusters whole, as Pango's end ellipsis. Pango lays the rest of the text on the last
+/// line shown before it cuts it, so a word that broke to the next line is cut where the room ends:
+/// "Not connected" in a narrow label shows "Not connec…", not "Not…". The cut is found by
+/// bisection over those clusters.
 fn cut(
     cx: &mut TextContext,
     text: &str,
@@ -115,14 +118,13 @@ fn cut(
     if fits(&full) || text.is_empty() {
         return (text.to_owned(), full);
     }
-    let Some(last) = full
-        .get(limit.saturating_sub(1))
-        .or_else(|| full.lines().last())
-    else {
+    let shown = limit.min(full.len()).saturating_sub(1);
+    let Some(last) = full.get(shown) else {
         return (text.to_owned(), full);
     };
-    let cuts = cuts(&last, text);
-    let (start, end) = (cuts[0], cuts[cuts.len() - 1]);
+    let end = last.text_range().end.min(text.len());
+    let cuts = cuts(full.lines().skip(shown), text);
+    let start = cuts[0];
     // Only whitespace after the last line shown, such as a final newline: the text without it.
     if text[end..].trim().is_empty() {
         let kept = text.trim_end();
@@ -163,20 +165,20 @@ fn fits(layout: &Layout<Brush>, limit: usize, width: f32) -> bool {
         })
 }
 
-/// Where `line` of `text` can be cut, in order: its start, the start of each of its clusters, and
-/// its end. Parley's clusters are the extended grapheme clusters of UAX #29, as ICU segments them,
-/// so no cut parts a letter from its marks, a flag's two regional indicators or an emoji sequence
-/// joined by ZWJ. Never empty.
-fn cuts(line: &Line<'_, Brush>, text: &str) -> Vec<usize> {
+/// Where `lines` of `text` can be cut, in order: the start and the end of each, and the start of
+/// each of their clusters. Parley's clusters are the extended grapheme clusters of UAX #29, as ICU
+/// segments them, so no cut parts a letter from its marks, a flag's two regional indicators or an
+/// emoji sequence joined by ZWJ. Never empty when `lines` holds a line.
+fn cuts<'a>(lines: impl IntoIterator<Item = Line<'a, Brush>>, text: &str) -> Vec<usize> {
     // Parley's ranges can run one byte past the text, over the line's end: within the text.
     let within = |at: usize| at.min(text.len());
-    let range = line.text_range();
-    let mut cuts: Vec<usize> = line
-        .runs()
-        .flat_map(|run| run.clusters())
-        .map(|cluster| within(cluster.text_range().start))
-        .chain([within(range.start), within(range.end)])
-        .collect();
+    let mut cuts = Vec::new();
+    for line in lines {
+        let range = line.text_range();
+        let clusters = line.runs().flat_map(|run| run.clusters());
+        cuts.extend(clusters.map(|cluster| within(cluster.text_range().start)));
+        cuts.extend([within(range.start), within(range.end)]);
+    }
     cuts.sort_unstable();
     cuts.dedup();
     cuts
@@ -336,18 +338,15 @@ mod tests {
                 assert_eq!(layout.len(), limit, "rtl {rtl}");
                 assert!(inked_within(&layout, 160.0, rtl), "rtl {rtl}");
                 let kept = kept(&text, SENTENCE);
-                // The cut falls inside the last line shown of the whole text, after a word.
+                // The cut falls past the start of the last line shown of the whole text: in it,
+                // or in the rest of the text, which that line holds up to the cut.
                 let full = cx.layout_at(SENTENCE, 15.0, rtl, &style, Some(160.0));
                 let last = full
                     .get(limit - 1)
                     .expect("the last line shown")
                     .text_range();
-                assert!(
-                    last.start < kept.len() && kept.len() < last.end,
-                    "rtl {rtl}"
-                );
-                // The next word's first letter, after the spaces, does not fit: the cut is the
-                // last that does.
+                assert!(last.start < kept.len(), "rtl {rtl}");
+                // The next letter, after the spaces, does not fit: the cut is the last that does.
                 let rest = &SENTENCE[kept.len()..];
                 let next = kept.len() + rest.len() - rest.trim_start().len() + 1;
                 let more = format!("{}{ELLIPSIS}", &SENTENCE[..next]);
@@ -396,7 +395,7 @@ mod tests {
         for width in (20..400).step_by(10).map(|w| w as f32) {
             let layout = cx.layout_at(&text, 15.0, false, &style, Some(width));
             for line in layout.lines() {
-                let cuts = cuts(&line, &text);
+                let cuts = cuts([line], &text);
                 assert!(
                     cuts.iter().all(|c| !inside.contains(c)),
                     "{width}: {cuts:?}"
@@ -463,8 +462,7 @@ mod tests {
                 let kept = kept(&shown, text);
                 // Maximal: the next cut of the last line shown, past the whitespace, does not fit.
                 let full = cx.layout_at(text, 15.0, true, &style, Some(140.0));
-                let last = full.get(limit - 1).expect("the last line shown");
-                let next = cuts(&last, text)
+                let next = cuts(full.lines().skip(limit - 1), text)
                     .into_iter()
                     .map(|c| text[..c].trim_end())
                     .find(|k| k.len() > kept.len());
@@ -485,6 +483,40 @@ mod tests {
                 let (_, x) = ellipsis.expect("the ellipsis drawn");
                 assert!(offsets.iter().all(|(_, o)| x <= o), "{text}: {offsets:?}");
             }
+        }
+    }
+
+    #[test]
+    fn the_last_line_shown_cuts_the_word_that_broke_past_it_as_pango_does() {
+        let mut cx = TextContext::default();
+        let style = TextStyle::default();
+        let mut wide = |text: &str| cx.layout_at(text, 15.0, false, &style, None).width();
+        // Room for "Not connec…" and not for "Not connect…", nor for "Not connected" or
+        // "connected Not", so that both texts below break before their last word.
+        let room = wide("Not connec\u{2026}") + 0.25;
+        assert!(wide("Not connect\u{2026}") > room + 0.5);
+        assert!(wide("Not connected") > room && wide("connected Not") > room);
+        assert!(wide("connected") <= room);
+        for rtl in [false, true] {
+            // GTK 4.20 with lines 1 and PANGO_ELLIPSIZE_END: "Not connec…", where a cut at the
+            // last word boundary of the first line gave "Not…".
+            let (text, layout) = shown(&mut cx, "Not connected", rtl, 1, room);
+            assert_eq!(
+                (text.as_str(), layout.len()),
+                ("Not connec\u{2026}", 1),
+                "rtl {rtl}"
+            );
+            assert!(inked_within(&layout, room, rtl), "rtl {rtl}");
+            // In two lines, the first keeps its word and the second is cut in the word that
+            // broke past it.
+            let words = "connected Not connected";
+            let (text, layout) = shown(&mut cx, words, rtl, 2, room);
+            assert_eq!(
+                (text.as_str(), layout.len()),
+                ("connected Not connec\u{2026}", 2),
+                "rtl {rtl}"
+            );
+            assert!(inked_within(&layout, room, rtl), "rtl {rtl}");
         }
     }
 
