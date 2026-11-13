@@ -11,11 +11,12 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
-use athanor_apps::entries::{self, app_name, entry_label, Apps, State, FALLBACK_ICON};
+use athanor_apps::entries::{self, Apps, State};
 use athanor_apps::favorites::Store;
-use athanor_apps::i18n::{tr, tr_with};
-use athanor_apps::model::{self, Open, Primary};
-use athanor_sulphur_client::{Client, Event as Compositor, Opener, WindowId};
+use athanor_apps::i18n::tr;
+use athanor_apps::model;
+use athanor_apps::sal::{self as row, Icons, Press, Row};
+use athanor_sulphur_client::{Client, Event as Compositor, Opener};
 use athanor_dock::autohide::{self, AutoHide, Event as Hide, Timer};
 use athanor_dock::i18n;
 use athanor_dock::placement::{self, Placement};
@@ -25,12 +26,11 @@ use athanor_layout::placement::Output;
 use athanor_layout::preset::Layout;
 use athanor_style::appearance::{self, Appearance};
 use athanor_sal::driver::{
-    Anchor as Edges, Application, LayerOptions, OutputInfo, Shell, Side, SurfaceId,
+    Anchor as Edges, Application, LayerOptions, OutputInfo, Shell, SurfaceId,
 };
-use athanor_sal::{Event, IconTheme, Image, Kind, Rect, Ui, WidgetId};
+use athanor_sal::{Event, Rect, Ui, WidgetId};
 use gio::glib;
 use gio::prelude::*;
-use gio_unix::DesktopAppInfo;
 
 use crate::edge;
 use crate::look::{self, Look};
@@ -41,8 +41,6 @@ const APP: &str = "athanor-dock";
 const DEBOUNCE: Duration = Duration::from_millis(250);
 /// The icon theme the GTK dock draws with.
 const ICON_THEME: &str = "Adwaita";
-const OPENER_ICON: u16 = 16;
-const ENTRY_ICON: u16 = 24;
 
 /// What GLib's callbacks tell the dock, applied at the next turn.
 enum Change {
@@ -58,37 +56,11 @@ enum Change {
 
 type Queue = Rc<RefCell<Vec<Change>>>;
 
-/// The images by icon, size and scale; `None` for one that could not be read.
-type Images = HashMap<(String, u16, u16), Option<Image>>;
-
-/// Drops the cached images that `change` makes stale: a new look tints them anew, and an
+/// Whether `change` makes the cached images stale: a new look tints them anew, and an
 /// application installed or removed can bring the icon an entry fell back from, as the GTK
 /// dock follows the theme.
-fn drop_stale_images(images: &mut Images, change: &Change) {
-    if matches!(change, Change::Appearance(_) | Change::Apps) {
-        images.clear();
-    }
-}
-
-/// The icon an entry is drawn with: its desktop entry's, or [`FALLBACK_ICON`].
-fn entry_icon(info: Option<&DesktopAppInfo>) -> String {
-    info.and_then(|info| info.string("Icon"))
-        .map_or_else(|| FALLBACK_ICON.to_owned(), |icon| icon.to_string())
-}
-
-/// Whether a surface drawn from `before` must be drawn again for `now`: an entry changed, or
-/// what its button shows of the desktop entry, its icon or its name, as when the application
-/// of a pinned entry is installed or its desktop entry edited.
-fn redraws(before: &[State], now: &[State]) -> bool {
-    let drawn = |states: &[State]| {
-        states
-            .iter()
-            .map(|(entry, info)| {
-                (entry.clone(), entry_icon(info.as_ref()), app_name(entry, info.as_ref()))
-            })
-            .collect::<Vec<_>>()
-    };
-    drawn(before) != drawn(now)
+fn reads_icons_again(change: &Change) -> bool {
+    matches!(change, Change::Appearance(_) | Change::Apps)
 }
 
 /// A GLib timeout that can be replaced. The slot holds the id until the timeout fires and
@@ -133,13 +105,8 @@ struct Hider {
     depth: f32,
 }
 
-/// What a widget of the island does.
-#[derive(Clone, Copy)]
-enum Act {
-    Opener(Opener),
-    /// The entry at this index of the surface's states.
-    Entry(usize),
-}
+/// What an opener of the island opens.
+type Act = Opener;
 
 /// One output's surface.
 struct Out {
@@ -147,7 +114,7 @@ struct Out {
     placement: Option<Placement>,
     island: Option<WidgetId>,
     acts: Vec<(WidgetId, Act)>,
-    states: Vec<State>,
+    row: Row,
     hider: Option<Hider>,
     /// The keyboard is on the surface; it says so only at its enter.
     keyboard: bool,
@@ -164,10 +131,7 @@ impl Out {
     }
 
     fn entry(&self, widget: WidgetId) -> Option<&State> {
-        match self.act(widget)? {
-            Act::Entry(index) => self.states.get(index),
-            Act::Opener(_) => None,
-        }
+        self.row.entry(widget)
     }
 
     /// Shows or hides the island as the hider says, the surface keeping its depth.
@@ -194,35 +158,11 @@ impl Out {
     }
 }
 
-/// What a row of an entry's menu does.
-#[derive(Clone)]
-enum MenuAct {
-    Activate(Open<WindowId>),
-    Minimize(WindowId),
-    Close(WindowId),
-    Launch(DesktopAppInfo),
-    Pin(String),
-    Unpin(String),
-}
-
-/// The pin row of the menu of the entry with the desktop id `id`, from the favourites file
-/// read as the menu opens rather than from the row as it was last drawn: a menu holds the
-/// row, so a change another writer made to the file shows in the next menu all the same.
-/// Pinning needs the favourites and a desktop id; without either there is no row.
-fn pin_act(favourites: Option<Vec<String>>, id: Option<String>) -> Option<MenuAct> {
-    let (ids, id) = (favourites?, id?);
-    Some(if ids.contains(&id) {
-        MenuAct::Unpin(id)
-    } else {
-        MenuAct::Pin(id)
-    })
-}
-
 /// The open menu of an entry.
 struct Menu {
     parent: SurfaceId,
     popup: SurfaceId,
-    acts: Vec<(WidgetId, MenuAct)>,
+    rows: row::Menu,
 }
 
 pub struct Dock {
@@ -235,8 +175,7 @@ pub struct Dock {
     apps: Option<Apps>,
     look: Look,
     rtl: bool,
-    icons: IconTheme,
-    images: Images,
+    icons: Icons,
     outs: HashMap<SurfaceId, Out>,
     queue: Queue,
     debounce: Slot,
@@ -293,16 +232,16 @@ impl Dock {
         let apps_monitor = gio::AppInfoMonitor::get();
         let watched = queue.clone();
         apps_monitor.connect_changed(move |_| watched.borrow_mut().push(Change::Apps));
+        let look = look::look(&Appearance::read());
         Dock {
             client,
             source,
             layout,
             favorites: Store::load(favorites_file),
             apps: None,
-            look: look::look(&Appearance::read()),
+            icons: Icons::new(ICON_THEME, look.dock.text),
+            look,
             rtl: i18n::is_rtl(),
-            icons: IconTheme::system(ICON_THEME),
-            images: HashMap::new(),
             outs: HashMap::new(),
             queue,
             debounce: Slot::default(),
@@ -346,40 +285,6 @@ impl Dock {
             .states(&favorites, &windows)
     }
 
-    fn image(&mut self, icon: &str, size: u16, scale: u16) -> Option<Image> {
-        let (icons, ink) = (&self.icons, self.look.dock.text);
-        self.images
-            .entry((icon.to_owned(), size, scale))
-            .or_insert_with(|| match icons.image(icon, size, scale) {
-                Ok(image) if icon.ends_with("-symbolic") => Some(image.tinted(ink)),
-                Ok(image) => Some(image),
-                Err(err) => {
-                    tracing::error!(error = %err, icon, "cannot draw the icon; the button shows its name");
-                    None
-                }
-            })
-            .clone()
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn icon_button(
-        &mut self,
-        ui: &mut Ui,
-        parent: WidgetId,
-        icon: &str,
-        size: u16,
-        scale: u16,
-        label: &str,
-        indicator: Option<Side>,
-    ) -> WidgetId {
-        let button = match self.image(icon, size, scale) {
-            Some(image) => ui.icon_button(parent, label, image, f32::from(size), indicator),
-            None => ui.add(parent, Kind::Button(label.to_owned())),
-        };
-        ui.set_tooltip(button, Some(label));
-        button
-    }
-
     /// The island of `placement`: the launcher and workspaces openers, the entries, and the
     /// application library last, as the GTK dock lines them.
     fn island(
@@ -389,7 +294,7 @@ impl Dock {
         scale: u16,
         states: &[State],
         acts: &mut Vec<(WidgetId, Act)>,
-    ) -> WidgetId {
+    ) -> (WidgetId, Row) {
         let anchor = placement.anchor;
         let island = ui.island(Ui::ROOT, anchor.vertical(), edge::margin(anchor));
         let own = self.client.as_ref().is_some_and(|client| client.own_compositor());
@@ -399,24 +304,16 @@ impl Dock {
                     return;
                 }
                 let (icon, name) = entries::opener(opener);
-                let button = dock.icon_button(ui, island, icon, OPENER_ICON, scale, &name, None);
-                acts.push((button, Act::Opener(opener)));
+                let button =
+                    dock.icons.button(ui, island, icon, row::SMALL_ICON, scale, &name, None);
+                acts.push((button, opener));
             };
         opener(self, ui, acts, Opener::Launcher);
         opener(self, ui, acts, Opener::Workspaces);
-        for (index, (entry, info)) in states.iter().enumerate() {
-            let label = entry_label(&app_name(entry, info.as_ref()), &entry.windows);
-            let icon = entry_icon(info.as_ref());
-            let indicator = entries::active(entry).then(|| edge::indicator_side(anchor));
-            let button = self.icon_button(ui, island, &icon, ENTRY_ICON, scale, &label, indicator);
-            if !entry.windows.is_empty() {
-                ui.set_description(button, Some(&tr("Running")));
-            }
-            ui.set_has_popup(button, true);
-            acts.push((button, Act::Entry(index)));
-        }
+        let side = edge::indicator_side(anchor);
+        let row = Row::build(ui, island, states, &mut self.icons, scale, side);
         opener(self, ui, acts, Opener::AppLibrary);
-        island
+        (island, row)
     }
 
     /// Draws `id` again from its placement and `states`. The focus stays where it was when
@@ -428,8 +325,12 @@ impl Dock {
         let (placement, scale) = (out.placement, out.info.scale_factor.clamp(1, 16) as u16);
         let mut ui = Ui::new(&tr("Dock"), self.look.dock.clone(), self.rtl);
         let mut acts = Vec::new();
-        let island =
-            placement.map(|placement| self.island(&mut ui, placement, scale, states, &mut acts));
+        let (island, row) = match placement
+            .map(|placement| self.island(&mut ui, placement, scale, states, &mut acts))
+        {
+            Some((island, row)) => (Some(island), row),
+            None => (None, Row::default()),
+        };
         if island.is_none() {
             // An empty surface stays mapped (see `edge::layer`): one transparent pixel.
             ui.min_width = 1.0;
@@ -468,7 +369,7 @@ impl Dock {
         };
         out.island = island;
         out.acts = acts;
-        out.states = states.to_vec();
+        out.row = row;
         out.hider = hider;
         out.region = None;
         // A new auto-hiding island starts hidden, as the GTK dock's, unless it holds the keyboard.
@@ -505,8 +406,8 @@ impl Dock {
             .outs
             .iter()
             .filter(|(_, out)| out.placement.is_some())
-            .filter(|(_, out)| redraws(&out.states, &states))
-            .map(|(id, out)| (*id, model::same_shape(&entries(&out.states), &now)))
+            .filter(|(_, out)| row::redraws(out.row.states(), &states))
+            .map(|(id, out)| (*id, model::same_shape(&entries(out.row.states()), &now)))
             .collect();
         for (id, same) in changed {
             self.build(shell, id, &states, same);
@@ -647,47 +548,20 @@ impl Dock {
     }
 
     fn open(&self, opener: Opener) {
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        glib::spawn_future_local(async move { entries::open(&client, opener).await });
-    }
-
-    /// BR2: every start goes through the compositor client, behind a security context
-    /// (`entries::launch`).
-    fn launch(&self, info: &DesktopAppInfo) {
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        let info = info.clone();
-        glib::spawn_future_local(async move { entries::launch(&client, &info, APP).await });
+        if let Some(client) = &self.client {
+            row::open(client, opener);
+        }
     }
 
     fn press(&mut self, shell: &mut Shell, surface: SurfaceId, button: WidgetId) {
-        let Some((entry, info)) = self
-            .outs
-            .get(&surface)
-            .and_then(|out| out.entry(button))
-            .cloned()
-        else {
+        let (Some(client), Some(state)) = (
+            self.client.clone(),
+            self.outs.get(&surface).and_then(|out| out.entry(button)),
+        ) else {
             return;
         };
-        let Some(client) = self.client.clone() else {
-            return;
-        };
-        match model::primary(&entry) {
-            Primary::Launch => {
-                if let Some(info) = &info {
-                    self.launch(info);
-                }
-            }
-            Primary::Activate(id) => {
-                if let Some(window) = entry.windows.iter().find(|window| window.id == id) {
-                    entries::activate(&client, window);
-                }
-            }
-            Primary::Minimize(id) => entries::minimize(&client, id),
-            Primary::Choose => self.open_menu(shell, surface, button),
+        if let Press::Menu = row::press(&client, state, APP) {
+            self.open_menu(shell, surface, button);
         }
     }
 
@@ -695,77 +569,25 @@ impl Dock {
         let Some(out) = self.outs.get(&surface) else {
             return;
         };
-        let (Some((entry, info)), Some(placement)) = (out.entry(button).cloned(), out.placement)
-        else {
+        let (Some(state), Some(placement)) = (out.entry(button).cloned(), out.placement) else {
             return;
         };
         let scale = out.info.scale_factor.clamp(1, 16) as u16;
-        let mut ui = Ui::new(
-            &app_name(&entry, info.as_ref()),
-            self.look.menu.clone(),
-            self.rtl,
-        );
-        let list = ui.add(Ui::ROOT, Kind::Menu);
-        let mut acts = Vec::new();
-        for window in &entry.windows {
-            let title = entries::window_title(window);
-            let row = ui.add(list, Kind::Button(title.clone()));
-            acts.push((row, MenuAct::Activate(window.clone())));
-            let minimise = tr_with("Minimise {title}", "title", &title);
-            let row = self.icon_button(
-                &mut ui,
-                list,
-                "window-minimize-symbolic",
-                OPENER_ICON,
-                scale,
-                &minimise,
-                None,
-            );
-            acts.push((row, MenuAct::Minimize(window.id)));
-            let close = tr_with("Close {title}", "title", &title);
-            let row = self.icon_button(
-                &mut ui,
-                list,
-                "window-close-symbolic",
-                OPENER_ICON,
-                scale,
-                &close,
-                None,
-            );
-            acts.push((row, MenuAct::Close(window.id)));
-        }
-        if let Some(info) = &info {
-            if !entry.windows.is_empty() {
-                ui.add(list, Kind::Separator);
-            }
-            let open = if entry.windows.is_empty() {
-                tr("Open")
+        let mut ui = Ui::new(&row::menu_title(&state), self.look.menu.clone(), self.rtl);
+        let rows = row::menu(&mut ui, &mut self.icons, scale, &state, &self.favorites, |pinned| {
+            if pinned {
+                tr("Unpin from Dock")
             } else {
-                tr("New Window")
-            };
-            let row = ui.add(list, Kind::Button(open));
-            acts.push((row, MenuAct::Launch(info.clone())));
-            // The file as it is now, not as the watch's debounce last read it: one small
-            // read, bounded by favorites::MAX_FILE_BYTES, per menu. A change the watch has
-            // not brought yet redraws the row too, once the menu closes.
-            if self.favorites.reload() {
-                self.stale = true;
+                tr("Pin to Dock")
             }
-            if let Some(act) = pin_act(self.favorites.ids(), entry.desktop_id.clone()) {
-                let label = match act {
-                    MenuAct::Unpin(_) => tr("Unpin from Dock"),
-                    _ => tr("Pin to Dock"),
-                };
-                let row = ui.add(list, Kind::Button(label));
-                acts.push((row, act));
-            }
-        }
+        });
+        self.stale |= rows.stale;
         match shell.open_popup(surface, button, ui, edge::menu_side(placement.anchor)) {
             Ok(popup) => {
                 self.menu = Some(Menu {
                     parent: surface,
                     popup,
-                    acts,
+                    rows,
                 });
                 self.hold(shell, true);
             }
@@ -789,31 +611,18 @@ impl Dock {
         }
     }
 
-    fn menu_act(&mut self, shell: &mut Shell, act: MenuAct) {
+    fn menu_act(&mut self, shell: &mut Shell, act: row::MenuAct) {
         self.close_menu(shell);
-        let Some(client) = self.client.clone() else {
+        let Some(client) = &self.client else {
             return;
         };
-        match act {
-            MenuAct::Activate(window) => entries::activate(&client, &window),
-            MenuAct::Minimize(id) => entries::minimize(&client, id),
-            MenuAct::Close(id) => entries::close(&client, id),
-            MenuAct::Launch(info) => self.launch(&info),
-            MenuAct::Pin(id) => {
-                self.favorites.change(|ids| favorites::pinned(ids, &id));
-            }
-            MenuAct::Unpin(id) => {
-                self.favorites
-                    .change(|ids| Ok(favorites::unpinned(ids, &id)));
-            }
-        }
+        row::menu_act(client, &self.favorites, act, APP);
         self.stale = true;
     }
 
     /// The desktop id of a pinned entry's button.
     fn pinned(&self, surface: SurfaceId, button: WidgetId) -> Option<String> {
-        let (entry, _) = self.outs.get(&surface)?.entry(button)?;
-        entry.pinned.then(|| entry.desktop_id.clone())?
+        self.outs.get(&surface)?.row.pinned(button)
     }
 }
 
@@ -845,7 +654,7 @@ impl Application for Dock {
                     placement,
                     island: None,
                     acts: Vec::new(),
-                    states: Vec::new(),
+                    row: Row::default(),
                     hider: None,
                     keyboard: false,
                     region: None,
@@ -869,12 +678,7 @@ impl Application for Dock {
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
         if let Some(menu) = self.menu.as_ref().filter(|menu| menu.popup == surface) {
             if let Event::Clicked(row) = event {
-                let act = menu
-                    .acts
-                    .iter()
-                    .find(|(w, _)| *w == row)
-                    .map(|(_, act)| act.clone());
-                if let Some(act) = act {
+                if let Some(act) = menu.rows.act(row) {
                     self.menu_act(shell, act);
                 }
             }
@@ -885,12 +689,11 @@ impl Application for Dock {
         };
         match event {
             Event::Clicked(button) => match out.act(button) {
-                Some(Act::Opener(opener)) => self.open(opener),
-                Some(Act::Entry(_)) => self.press(shell, surface, button),
-                None => {}
+                Some(opener) => self.open(opener),
+                None => self.press(shell, surface, button),
             },
             Event::ContextMenu(button) => {
-                if let Some(Act::Entry(_)) = out.act(button) {
+                if out.entry(button).is_some() {
                     self.open_menu(shell, surface, button);
                 }
             }
@@ -970,17 +773,20 @@ impl Application for Dock {
         }
         let changes = std::mem::take(&mut *self.queue.borrow_mut());
         for change in changes {
-            drop_stale_images(&mut self.images, &change);
+            if let Change::Appearance(current) = &change {
+                self.look = look::look(current);
+            }
+            // After the look, whose ink tints the images anew.
+            if reads_icons_again(&change) {
+                self.icons.reset(self.look.dock.text);
+            }
             match change {
                 Change::Windows => self.stale = true,
                 Change::Files => self
                     .debounce
                     .start(DEBOUNCE, &self.queue, || Change::Reload),
                 Change::Reload => self.reload(shell),
-                Change::Appearance(current) => {
-                    self.look = look::look(&current);
-                    self.rebuild_all(shell);
-                }
+                Change::Appearance(_) => self.rebuild_all(shell),
                 Change::Apps => {
                     self.apps = None;
                     self.stale = true;
@@ -1010,56 +816,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_pin_row_follows_the_favourites_as_they_are_now() {
-        let id = "org.athanor.CcWindow1.desktop".to_owned();
-        let pinned = Some(vec![id.clone()]);
-        assert!(matches!(pin_act(pinned, Some(id.clone())), Some(MenuAct::Unpin(i)) if i == id));
-        assert!(matches!(pin_act(Some(Vec::new()), Some(id.clone())), Some(MenuAct::Pin(i)) if i == id));
-        // Unavailable favourites, or an entry without a desktop id: no row.
-        assert!(pin_act(None, Some(id)).is_none());
-        assert!(pin_act(Some(Vec::new()), None).is_none());
-    }
-
-    #[test]
     fn a_new_look_or_a_change_of_the_installed_applications_reads_the_icons_again() {
-        let cached = || Images::from([(("mail-client".to_owned(), 24, 1), None)]);
         for change in [Change::Windows, Change::Files, Change::Reload] {
-            let mut images = cached();
-            drop_stale_images(&mut images, &change);
-            assert_eq!(images.len(), 1, "the images stay");
+            assert!(!reads_icons_again(&change), "the images stay");
         }
         for change in [Change::Appearance(Appearance::default()), Change::Apps] {
-            let mut images = cached();
-            drop_stale_images(&mut images, &change);
-            assert!(images.is_empty(), "the images are read again");
+            assert!(reads_icons_again(&change), "the images are read again");
         }
-    }
-
-    fn info(icon: &str, name: &str) -> Option<DesktopAppInfo> {
-        let file = glib::KeyFile::new();
-        let data = format!("[Desktop Entry]\nType=Application\nName={name}\nIcon={icon}\nExec=true\n");
-        file.load_from_data(&data, glib::KeyFileFlags::NONE).ok()?;
-        DesktopAppInfo::from_keyfile(&file)
-    }
-
-    #[test]
-    fn a_pinned_entry_is_drawn_again_when_its_application_comes_or_its_desktop_entry_changes() {
-        let entry = athanor_apps::model::Entry {
-            desktop_id: Some("org.example.Mail.desktop".to_owned()),
-            app_id: "org.example.Mail".to_owned(),
-            pinned: true,
-            windows: Vec::new(),
-        };
-        let missing: Vec<State> = vec![(entry.clone(), None)];
-        let installed: Vec<State> = vec![(entry.clone(), info("mail-client", "Mail"))];
-        assert!(installed[0].1.is_some(), "the fixture is a desktop entry");
-        assert!(!redraws(&missing, &missing));
-        assert!(!redraws(&installed, &installed));
-        // The same entry: the fallback icon and the app id give way to the desktop entry's.
-        assert!(redraws(&missing, &installed));
-        let renamed: Vec<State> = vec![(entry.clone(), info("mail-client", "Post"))];
-        let new_icon: Vec<State> = vec![(entry, info("mail-new", "Mail"))];
-        assert!(redraws(&installed, &renamed));
-        assert!(redraws(&installed, &new_icon));
     }
 }
