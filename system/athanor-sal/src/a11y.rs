@@ -1353,6 +1353,9 @@ mod tests {
         announcements: Vec<(String, String)>,
         /// The windows deactivated, by name.
         deactivated: Vec<String>,
+        /// The focus gained, the window state made active and the windows activated, in the
+        /// order the bus heard them: `focused`, `active` and `activate <name>`.
+        activation: Vec<String>,
         /// The nodes with interfaces registered on the bus, and their interfaces' bits.
         registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
     }
@@ -1367,7 +1370,7 @@ mod tests {
         use accesskit::{ActionHandler, ActionRequest};
         use accesskit_atspi_common::{
             Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, ObjectEvent,
-            WindowBounds, WindowEvent,
+            State, WindowBounds, WindowEvent,
         };
         struct Recorder(Bus);
         impl AdapterCallback for Recorder {
@@ -1396,6 +1399,19 @@ mod tests {
                         event: WindowEvent::Deactivated,
                         ..
                     } => heard.deactivated.push(name),
+                    Event::Window {
+                        name,
+                        event: WindowEvent::Activated,
+                        ..
+                    } => heard.activation.push(format!("activate {name}")),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Focused, true),
+                        ..
+                    } => heard.activation.push("focused".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Active, true),
+                        ..
+                    } => heard.activation.push("active".into()),
                     _ => {}
                 }
             }
@@ -1587,6 +1603,23 @@ mod tests {
         fn apply(&mut self, update: TreeUpdate) {
             self.update(update);
         }
+    }
+
+    /// A window taking the keyboard back, as one does when its dialog closes, reports the focus
+    /// of the widget that takes it before the window's activation, as GTK 4.20 does: Orca then
+    /// says the window's name and role, not its name alone (#1123; the second change of
+    /// `vendor/accesskit_atspi_common`).
+    #[test]
+    fn a_window_taking_the_keyboard_back_reports_the_focus_before_its_activation() {
+        let mut ui = Ui::new("Gallery", Theme::default(), false);
+        let button = ui.add(Ui::ROOT, Kind::Button("Open the dialog".into()));
+        ui.layout();
+        ui.set_focus(Some(button));
+        let (mut adapter, heard) = at_spi(&ui);
+        assert!(heard.lock().expect("not poisoned").activation.is_empty());
+        adapter.update_window_focus_state(true);
+        let heard = heard.lock().expect("not poisoned");
+        assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
     }
 
     /// An announcement asked for before a surface leaves the accessibility tree and not yet
