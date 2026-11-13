@@ -7,11 +7,10 @@ license = "GPL-3.0-or-later"
 description = "The Athanor layout chooser: three presets and two knobs, written to the user's layout document"
 
 [dependencies]
-athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
-athanor-style = { path = "../../../../system/athanor-style" }
-gtk4 = { workspace = true }
+athanor-sal = { path = "../../../../system/athanor-sal" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
 landlock = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

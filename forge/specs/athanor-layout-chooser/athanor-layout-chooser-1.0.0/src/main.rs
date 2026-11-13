@@ -1,23 +1,23 @@
 //! athanor-layout-chooser: the layout chooser of doc_shell.md, stage 1c. A small window
-//! that writes the user's layout document; athanor-bar and athanor-dock apply it.
+//! that writes the user's layout document; athanor-bar and athanor-dock apply it. It draws
+//! with Athanor's toolkit, athanor-sal.
 
 mod i18n;
+mod look;
 mod sandbox;
 mod ui;
 
 use std::io::{self, IsTerminal};
+use std::process::ExitCode;
 
 use athanor_layout::loader::Paths;
-use gtk4::prelude::*;
-use gtk4::{glib, Application};
+use athanor_style::appearance::Appearance;
 
-const APP_ID: &str = "os.athanor.Layout";
-
-fn main() -> glib::ExitCode {
+fn main() -> ExitCode {
     // Confinement first, while this is the only thread; logging is not set up yet.
     let Some(paths) = Paths::from_env() else {
         eprintln!("athanor-layout-chooser: no absolute XDG_CONFIG_HOME or HOME");
-        return glib::ExitCode::FAILURE;
+        return ExitCode::FAILURE;
     };
     if let Err(err) =
         sandbox::ensure_single_threaded().and_then(|()| sandbox::apply(&paths.user_file))
@@ -25,7 +25,7 @@ fn main() -> glib::ExitCode {
         eprintln!(
             "athanor-layout-chooser: cannot confine the process, refusing to run unconfined: {err}"
         );
-        return glib::ExitCode::FAILURE;
+        return ExitCode::FAILURE;
     }
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -38,7 +38,13 @@ fn main() -> glib::ExitCode {
         .init();
     i18n::init();
 
-    let app = Application::builder().application_id(APP_ID).build();
-    app.connect_activate(move |app| ui::build_ui(app, paths.clone()));
-    app.run_with_args(&Vec::<String>::new())
+    let look = look::look(&Appearance::read());
+    let chooser = ui::Chooser::new(paths, look, i18n::is_rtl());
+    match athanor_sal::driver::run(chooser) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            tracing::error!(error = %err, "the layout chooser stopped");
+            ExitCode::FAILURE
+        }
+    }
 }
