@@ -3,7 +3,7 @@
 
 use crate::text::Brush;
 use crate::driver::Side;
-use crate::theme::Rgba;
+use crate::theme::{Rgba, TitleBarStyle};
 use crate::widget::{
     knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui, WidgetId,
     WindowButton,
@@ -462,16 +462,21 @@ pub fn paint<C: Canvas>(
                     f64::from(r.bottom()),
                 ));
             }
-            // A round button with its mark drawn as lines, as GTK's symbolic icons.
+            // A round button with its mark drawn as lines, as GTK's symbolic icons; a bare one
+            // is filled only under the pointer, as GTK's header bar buttons.
             Kind::WindowButton(button) => {
                 let (cx, cy) = (f64::from(r.center_x()), f64::from(r.y + r.h / 2.0));
-                let fill = if hover == Some(id) {
-                    mix(t.surface, t.text, HOVER)
-                } else {
-                    t.surface
+                let bare = t.title_bar_style == TitleBarStyle::Bare;
+                let fill = match (hover == Some(id), bare) {
+                    (true, true) => Some(mix(t.title_bar, t.text, HOVER)),
+                    (true, false) => Some(mix(t.surface, t.text, HOVER)),
+                    (false, true) => None,
+                    (false, false) => Some(t.surface),
                 };
-                ctx.set_paint(color(fill));
-                ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                if let Some(fill) = fill {
+                    ctx.set_paint(color(fill));
+                    ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                }
                 let arm = f64::from(r.w) * 0.16;
                 let lines = match button {
                     WindowButton::Minimize => {
@@ -520,7 +525,8 @@ pub fn paint<C: Canvas>(
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
-                    draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
+                    let ink = widget.ink.unwrap_or(t.text);
+                    draw_text(ctx, resources, layout, (r.x, r.y), ink)?;
                 }
             }
             // A button a menu holds reads as one of its rows.
@@ -583,8 +589,14 @@ pub fn paint<C: Canvas>(
                 } else {
                     fill
                 };
+                // The outline, as GTK's border: the fill inside it, the radius its outer edge's.
+                let border = t.control_border;
+                if border > 0.0 {
+                    ctx.set_paint(color(if active { t.accent } else { t.border }));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
                 ctx.set_paint(color(fill));
-                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                ctx.fill_path(&rounded(r, -border, t.radius));
                 if let Some(layout) = &widget.text {
                     let at = (
                         r.x + (r.w - layout.width()) / 2.0,
@@ -1305,6 +1317,74 @@ mod tests {
             assert_ne!(at(far, view.y + 8.0), t.border.0.to_vec(), "rtl {rtl}");
             assert_ne!(at(edge, view.bottom() - 8.0), t.border.0.to_vec(), "rtl {rtl}");
         }
+        Ok(())
+    }
+
+    /// The pixel of `p` at logical `(x, y)`, drawn at scale 1.
+    fn pixel(p: &Pixmap, x: f32, y: f32) -> Vec<u8> {
+        let i = 4 * (usize::from(p.width()) * y as usize + x as usize);
+        p.data_as_u8_slice()[i..i + 4].to_vec()
+    }
+
+    #[test]
+    fn a_label_is_drawn_in_its_own_ink() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Ink", crate::Theme::default(), false);
+        let label = ui.add(crate::Ui::ROOT, crate::Kind::Label("WWWW".into()));
+        let red = crate::Rgba::rgb(255, 0, 0);
+        ui.set_ink(label, Some(red));
+        let pixmap = render(&mut ui, 1.0)?;
+        let r = ui.widget(label).rect;
+        let inked = (r.x as u32..(r.x + r.w) as u32)
+            .flat_map(|x| (r.y as u32..r.bottom() as u32).map(move |y| (x, y)))
+            .any(|(x, y)| pixel(&pixmap, x as f32, y as f32) == red.0.to_vec());
+        assert!(inked, "no pixel of the label is in its ink");
+        Ok(())
+    }
+
+    #[test]
+    fn a_control_outline_is_the_border_or_the_active_toggles_accent() -> Result<(), Error> {
+        // Two pixels wide, so that one whole pixel lies inside the outline wherever a control
+        // starts between two pixels.
+        let theme = crate::Theme {
+            control_border: 2.0,
+            radius: 0.0,
+            ..crate::Theme::default()
+        };
+        let mut ui = crate::Ui::new("Outline", theme, false);
+        let row = ui.add(crate::Ui::ROOT, crate::Kind::Row);
+        let on = ui.toggle(row, "On", true);
+        let off = ui.toggle(row, "Off", false);
+        let pixmap = render(&mut ui, 1.0)?;
+        let t = &ui.theme;
+        for (id, outline, fill) in [(on, t.accent, t.accent), (off, t.border, t.surface)] {
+            let r = ui.widget(id).rect;
+            let mid = r.y + r.h / 2.0;
+            assert_eq!(pixel(&pixmap, r.x + 1.0, mid), outline.0.to_vec());
+            assert_eq!(pixel(&pixmap, r.x + 3.0, mid), fill.0.to_vec());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_bare_window_button_is_filled_only_under_the_pointer() -> Result<(), Error> {
+        let theme = crate::Theme {
+            title_bar_style: TitleBarStyle::Bare,
+            ..crate::Theme::default()
+        };
+        let mut ui = crate::Ui::new("Bare", theme, false);
+        ui.add_title_bar();
+        // The title bar is the root's first child.
+        let bar = ui.widget(crate::Ui::ROOT).children[0];
+        let close = *ui.widget(bar).children.last().expect("the Close button");
+        let plain = render(&mut ui, 1.0)?;
+        let r = ui.widget(close).rect;
+        // Inside the circle, away from the mark.
+        let (x, y) = (r.center_x(), r.y + 2.0);
+        let t = ui.theme.clone();
+        assert_eq!(pixel(&plain, x, y), t.title_bar.0.to_vec());
+        ui.pointer_motion(x, y);
+        let hovered = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&hovered, x, y), mix(t.title_bar, t.text, HOVER).0.to_vec());
         Ok(())
     }
 }
