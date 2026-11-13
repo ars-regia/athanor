@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use athanor_launcher::menu::{self, Choice};
+use athanor_launcher::thumbnail;
 use athanor_preview::Subject;
 use athanor_search::calc::{Calc, Rates};
 use athanor_search::item::{Action, Hit};
@@ -225,11 +226,11 @@ impl Launcher {
         let (this, hit) = (Rc::clone(self), hit.clone());
         glib::spawn_future_local(async move {
             let Some(client) = this.client.as_ref() else { return };
-            match client.capture(id).await {
-                Ok(texture) if this.selection.get() == selection => this.preview.show(Subject::Window {
+            match client.capture_pixels(id).await {
+                Ok(capture) if this.selection.get() == selection => this.preview.show(Subject::Window {
                     title: hit.title,
                     app: hit.subtitle,
-                    picture: Some(texture.upcast()),
+                    picture: thumbnail::picture(&capture),
                 }),
                 Ok(_) => {}
                 Err(err) => tracing::warn!(error = %err, "no window thumbnail"),
