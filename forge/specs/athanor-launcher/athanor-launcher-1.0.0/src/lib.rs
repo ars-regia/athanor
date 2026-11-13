@@ -9,8 +9,9 @@ pub mod thumbnail;
 
 /// Device nodes the launcher may open for writing, besides the directories of its Landlock
 /// ruleset. `/dev/null` is what GSubprocess opens for STDOUT_SILENCE and STDERR_SILENCE
-/// (qalc, `flatpak list`, the preview's `systemctl stop`).
-pub const DEVICE_WRITES: [&str; 2] = ["/dev/dri", "/dev/null"];
+/// (qalc, `flatpak list`, the preview's `systemctl stop`). No DRM node: athanor-sal draws the
+/// launcher on vello_cpu, in shared memory.
+pub const DEVICE_WRITES: [&str; 1] = ["/dev/null"];
 
 #[cfg(test)]
 mod tests {
