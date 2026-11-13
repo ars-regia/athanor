@@ -10,7 +10,6 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 mod rows;
-mod wrap;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
 /// the widget's slot in the `Ui` and the slot's generation, and is meaningful only in the `Ui`
@@ -519,8 +518,6 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
-    /// The width a label's lines break at: see [`Ui::set_wrap`].
-    pub(crate) wrap: Option<f32>,
 }
 
 impl Widget {
@@ -537,7 +534,6 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
-            wrap: None,
         }
     }
 
@@ -1841,7 +1837,7 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.wrapped(text, size, rtl, &style, widget.wrap);
+                let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width(), layout.height());
                 widget.text = Some(layout);
                 wh
