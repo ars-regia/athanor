@@ -10,15 +10,38 @@ use accesskit::{
 use std::ops::Range;
 use std::sync::Mutex;
 
-/// The AccessKit node id of a widget.
+/// The bits of a node id below which its widget's slot lies.
+const SLOT_BITS: u32 = 24;
+/// The bits of a node id below which its widget's slot and generation lie: the line of a text
+/// run lies above, and the announcement's bit 63 above that.
+const WIDGET_BITS: u32 = 40;
+
+/// The AccessKit node id of a widget: its slot, and the low 16 bits of its generation above,
+/// so that a node an assistive technology cached for a widget since removed names no widget,
+/// also once another widget takes the slot: the slot is retired before those bits come back
+/// (`Widgets::free`).
 pub fn node_id(id: WidgetId) -> NodeId {
-    NodeId(u64::from(id.0))
+    NodeId(u64::from(id.0) | u64::from(id.1 & 0xffff) << SLOT_BITS)
 }
 
 /// The node of line `line` of a field's text, beside the widgets' ids: a single-line field has
 /// one line, a text area one per line as it is seen.
+// ponytail: 23 bits of line, past 8 million lines a run would reach the announcement's bit.
 pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
-    NodeId(u64::from(id.0) | (line as u64 + 1) << 32)
+    NodeId(node_id(id).0 | (line as u64 + 1) << WIDGET_BITS)
+}
+
+/// The widget `node` names, while it is the one the node was published for: `None` for a node
+/// of a text run or of the announcement, past the arena, or once the widget was removed,
+/// whatever took its slot since.
+fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
+    if node.0 >> WIDGET_BITS != 0 {
+        return None;
+    }
+    let index = (node.0 & ((1 << SLOT_BITS) - 1)) as u32;
+    let generation = ui.widgets.generation(index as usize)?;
+    let id = WidgetId(index, generation);
+    (node_id(id) == node).then_some(id)
 }
 
 /// The node of a list row's label, beside the widgets' ids: a row has no text runs, so it takes
@@ -236,7 +259,15 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
+        // As GTK's row that is neither selectable nor activatable: an option with no name, no
+        // selected state and no action, its text a label inside it.
+        Kind::ListHeading(_) => Node::new(Role::ListBoxOption),
     };
+    // The selected row of a list stands for the widget while it has the focus: a field that
+    // moves the selection of the list under it, as a combo box's entry.
+    if let Some(row) = ui.active_descendant(id) {
+        node.set_active_descendant(node_id(row));
+    }
     let sensitive = ui.is_sensitive(id);
     // A list is focusable as GTK's ListBox is, while it has a row to take the focus.
     if (widget.is_focusable() || list_stop(ui, id).is_some()) && sensitive {
@@ -255,7 +286,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if let Kind::ListRow(_) = widget.kind {
+    if has_row_label(ui, id) {
         children.push(row_label_id(id));
     }
     if id == Ui::ROOT && ui.announcement.is_some() {
@@ -305,13 +336,27 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
 /// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
 /// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
 fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let Kind::ListRow(text) = &ui.widget(id).kind else {
+    if !has_row_label(ui, id) {
+        return None;
+    }
+    let (Kind::ListRow(text) | Kind::ListHeading(text)) = &ui.widget(id).kind else {
         return None;
     };
     let mut label = Node::new(Role::Label);
     label.set_value(text.as_str());
     label.set_bounds(bounds(ui, id, scale));
     Some((row_label_id(id), label))
+}
+
+/// Whether row or heading `id` holds its text as a label: a row that shows widgets of its own
+/// has them in its place.
+fn has_row_label(ui: &Ui, id: WidgetId) -> bool {
+    let widget = ui.widget(id);
+    match widget.kind {
+        Kind::ListHeading(_) => true,
+        Kind::ListRow(_) => ui.visible_children(id).is_empty(),
+        _ => false,
+    }
 }
 
 /// Byte `index` of field `id`'s `text`, split in `lines` as its runs, as a run and a character
@@ -465,14 +510,20 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 
 impl Ui {
     /// Carries out an assistive technology's request on the widget it names, unless it is
-    /// hidden or insensitive.
+    /// hidden or insensitive. A request for a node of a widget since removed is refused, and
+    /// logged: it never reaches the widget that took the slot ([`node_id`]).
     pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
-        let id = u32::try_from(request.target_node.0)
-            .ok()
-            .map(WidgetId)
-            .filter(|&id| {
-                id.index() < self.len() && self.is_visible(id) && self.is_sensitive(id)
-            })?;
+        let Some(id) = widget_of(self, request.target_node) else {
+            let slot = request.target_node.0 & ((1 << SLOT_BITS) - 1);
+            if request.target_node.0 >> WIDGET_BITS == 0 && (slot as usize) < self.len() {
+                self.widgets
+                    .warn(format_args!("no action on slot {slot}: its widget was removed"));
+            }
+            return None;
+        };
+        if !self.is_visible(id) || !self.is_sensitive(id) {
+            return None;
+        }
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             // A list's focus goes to its stop, as the Tab key's does.
@@ -646,6 +697,67 @@ mod tests {
     }
 
     #[test]
+    fn a_node_cached_for_a_removed_widget_never_reaches_the_one_in_its_slot() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.add(column, Kind::Button("Old".into()));
+        ui.layout();
+        let cached = node_id(old);
+        assert!(tree_update(&ui, 1.0).nodes.iter().any(|(n, _)| *n == cached));
+        let click = |node| ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node,
+            data: None,
+        };
+        // The application replaces the button, and the tree is published again; the assistive
+        // technology still acts on the node it cached.
+        ui.remove_children(column);
+        let new = ui.add(column, Kind::Button("New".into()));
+        ui.layout();
+        let published = tree_update(&ui, 1.0);
+        assert_eq!(new.index(), old.index(), "the slot is reused");
+        assert_ne!(node_id(new), cached, "under another node");
+        assert!(!published.nodes.iter().any(|(n, _)| *n == cached));
+        assert_eq!(ui.do_action(&click(cached)), None);
+        assert_ne!(ui.focus(), Some(new));
+        // A request on the node published for the new button acts on it.
+        assert_eq!(ui.do_action(&click(node_id(new))), Some(Event::Clicked(new)));
+        // A text run's node names no widget, whatever its slot.
+        assert_eq!(ui.do_action(&click(text_run_id(new, 0))), None);
+    }
+
+    #[test]
+    fn a_slot_is_retired_before_a_cached_node_could_name_its_next_widget() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let first = ui.add(column, Kind::Button("First".into()));
+        let cached = node_id(first);
+        // 65,535 removals bring the slot's generation to the last whose low 16 bits are its own.
+        let mut last = first;
+        for _ in 0..u16::MAX {
+            ui.remove_children(column);
+            last = ui.add(column, Kind::Button("Again".into()));
+            assert_eq!(last.index(), first.index(), "the slot is reused");
+        }
+        assert_eq!(last.1, u32::from(u16::MAX));
+        // The next removal would bring them back to the first widget's: the slot is retired.
+        ui.remove_children(column);
+        let next = ui.add(column, Kind::Button("Next".into()));
+        assert_ne!(next.index(), first.index(), "a retired slot holds no widget again");
+        assert_eq!(widget_of(&ui, cached), None);
+        ui.layout();
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: cached,
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), None);
+        assert_eq!(widget_of(&ui, node_id(next)), Some(next));
+    }
+
+    #[test]
     fn requests_from_assistive_technologies_are_bounded() {
         let mut ui = Ui::new("Requests", Theme::default(), false);
         let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
@@ -664,7 +776,7 @@ mod tests {
         assert_eq!(ui.do_action(&request(label, Action::Click, None)), None);
         assert_eq!(ui.do_action(&request(label, Action::Focus, None)), None);
         assert_eq!(
-            ui.do_action(&request(WidgetId(ui.len() as u32), Action::Click, None)),
+            ui.do_action(&request(WidgetId(ui.len() as u32, 0), Action::Click, None)),
             None
         );
         assert_eq!(ui.focus(), Some(button));
@@ -694,7 +806,8 @@ mod tests {
             .widget(bar)
             .children
             .iter()
-            .map(|&id| &update.nodes[id.index()].1)
+            .filter_map(|&id| update.nodes.iter().find(|(n, _)| *n == node_id(id)))
+            .map(|(_, node)| node)
             .collect();
         let read: Vec<_> = parts
             .iter()
@@ -1020,10 +1133,10 @@ mod tests {
         assert!(runs.iter().all(|r| r.role() == Role::TextRun));
         let children: Vec<NodeId> = (0..runs.len()).map(|n| text_run_id(area, n)).collect();
         assert_eq!(node.map(|n| n.children().to_vec()), Some(children));
-        assert_eq!(text_run_id(area, 2), NodeId(u64::from(area.0) | 3 << 32));
+        assert_eq!(text_run_id(area, 2), NodeId(node_id(area).0 | 3 << 40));
 
-        // A single-line field keeps its one run at `id | 1 << 32`.
-        assert_eq!(text_run_id(field, 0), NodeId(u64::from(field.0) | 1 << 32));
+        // A single-line field keeps its one run at `id | 1 << 40`.
+        assert_eq!(text_run_id(field, 0), NodeId(node_id(field).0 | 1 << 40));
         assert_eq!(find(text_run_id(field, 0)).and_then(Node::value), Some("one"));
         assert!(find(text_run_id(field, 1)).is_none());
     }

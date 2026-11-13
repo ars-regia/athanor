@@ -411,8 +411,8 @@ pub fn paint<C: Canvas>(
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
             }
             // A row with its text at the start edge: tinted with the accent when selected, and
-            // toward the text under the pointer.
-            Kind::ListRow(_) => {
+            // toward the text under the pointer. A heading is neither.
+            Kind::ListRow(_) | Kind::ListHeading(_) => {
                 let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
                 let fill = if selected {
                     Some(mix(t.on_accent, t.accent, SELECTED))
@@ -820,25 +820,22 @@ pub fn paint<C: Canvas>(
     Ok(())
 }
 
-/// The visible widgets in the order they are drawn, each with the topmost insensitive widget
-/// above it or itself: the order of the tree, but with the subtree of each such widget in one
-/// run, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
+/// The visible widgets in the order they are drawn, the order of the tree, each with the
+/// topmost insensitive widget above it or itself: the subtree of each such widget is one run
+/// of it, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
 /// insensitive widget and everything under it as one group.
 fn paint_order(ui: &Ui) -> Vec<(WidgetId, Option<WidgetId>)> {
-    // A parent comes before its children in the arena.
-    let mut faint: Vec<Option<WidgetId>> = Vec::with_capacity(ui.len());
+    let mut faint: Vec<Option<WidgetId>> = vec![None; ui.len()];
+    let mut order = Vec::with_capacity(ui.len());
+    // A parent comes before its children in the order of the tree.
     for id in ui.ids() {
         let widget = &ui.widgets[id];
         let above = widget.parent.and_then(|p| faint[p.index()]);
-        faint.push(above.or((!widget.sensitive).then_some(id)));
+        faint[id.index()] = above.or((!widget.sensitive).then_some(id));
+        if ui.is_visible(id) {
+            order.push((id, faint[id.index()]));
+        }
     }
-    let mut order: Vec<_> = ui
-        .ids()
-        .filter(|&id| ui.is_visible(id))
-        .map(|id| (id, faint[id.index()]))
-        .collect();
-    // Stable: each subtree keeps the order of the tree, and starts where its root stood.
-    order.sort_by_key(|&(id, root)| root.unwrap_or(id));
     order
 }
 
