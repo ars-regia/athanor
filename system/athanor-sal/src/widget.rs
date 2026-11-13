@@ -205,6 +205,18 @@ pub enum Kind {
     Menu,
     /// An item of a [`Kind::Menu`], with its label; activating it raises [`Event::Clicked`].
     MenuItem(String),
+    /// An item of a [`Kind::Menu`] with a mark, as GTK's model buttons: a check or a radio at
+    /// the start edge, or an arrow to a submenu at the end edge, or the arrow back from one at
+    /// the start edge of a submenu's title. When one item of a menu has a check or a radio, the
+    /// labels of all of them start after the room it takes, as GTK's indicator size group. Add it
+    /// with [`Ui::menu_check`], [`Ui::menu_radio`] or [`Ui::submenu`].
+    #[non_exhaustive]
+    MenuEntry {
+        /// The text of the item.
+        label: String,
+        /// What the item shows beside its label and does when activated.
+        mark: Mark,
+    },
     /// A line between groups of a menu's items. It takes no input.
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
@@ -395,6 +407,27 @@ impl Slider {
     }
 }
 
+/// What a [`Kind::MenuEntry`] shows and does, as GTK's model buttons in a sliding
+/// `PopoverMenu`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Mark {
+    /// A check box, ticked when `true`. Activating the item flips it and raises
+    /// [`Event::Toggled`].
+    Check(bool),
+    /// A radio ring, filled when `true`. Activating the item fills it and raises
+    /// [`Event::Toggled`]; the other radios of the menu are the application's to clear, as GTK's
+    /// radio items each have an action of their own.
+    Radio(bool),
+    /// An arrow at the end edge to the submenu `page`, a [`Kind::Menu`] that shares the parent
+    /// of the item's menu. Activating the item, or the right arrow on it, slides to the page,
+    /// which takes the place of the item's menu, and focuses the page's title.
+    Submenu(WidgetId),
+    /// The title of a submenu's page, its label centred and an arrow at the start edge.
+    /// Activating it, or the left arrow on it, slides back to the menu of `item` and focuses it.
+    Back(WidgetId),
+}
+
 /// A button of the title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -473,6 +506,7 @@ impl Widget {
                     | Kind::TextArea(_)
                     | Kind::WindowButton(_)
                     | Kind::MenuItem(_)
+                    | Kind::MenuEntry { .. }
                     | Kind::IconButton { .. }
                     | Kind::LabelledButton { .. }
                     | Kind::ListRow(_)
@@ -803,6 +837,48 @@ impl Ui {
         self.add(parent, Kind::Check { label, active })
     }
 
+    /// Adds to `menu` an item showing `label` and a check box, ticked when `active`. See
+    /// [`Mark::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_check(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Check(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` and a radio ring, filled when `active`. See
+    /// [`Mark::Radio`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_radio(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Radio(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` that opens a submenu, and the submenu's page: a
+    /// hidden [`Kind::Menu`] beside `menu`, under the same parent, whose first row is its title,
+    /// `label` again. Returns the item and the page, to which the submenu's items are added. The
+    /// menus that share a parent are the pages of one popup, each as wide as the widest, as GTK's
+    /// stack of pages; one is shown at a time. See [`Mark::Submenu`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn submenu(&mut self, menu: WidgetId, label: &str) -> (WidgetId, WidgetId) {
+        let parent = self.widgets[menu].parent.unwrap_or(Self::ROOT);
+        let page = self.add(parent, Kind::Menu);
+        self.widgets[page].visible = false;
+        let label = label.to_owned();
+        let mark = Mark::Submenu(page);
+        let item = self.add(menu, Kind::MenuEntry { label: label.clone(), mark });
+        self.add(page, Kind::MenuEntry { label, mark: Mark::Back(item) });
+        (item, page)
+    }
+
     /// Adds a switch named `label`, on when `active`. See [`Kind::Switch`].
     ///
     /// # Panics
@@ -951,6 +1027,10 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::MenuEntry {
+                    mark: Mark::Check(true) | Mark::Radio(true),
+                    ..
+                }
         )
     }
 
@@ -982,6 +1062,13 @@ impl Ui {
                 Some(Event::Toggled(id))
             }
             Kind::Toggle { active: false, .. } if active => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut now) | Mark::Radio(ref mut now),
+                ..
+            } if *now != active => {
+                *now = active;
+                Some(Event::Toggled(id))
+            }
             _ => None,
         }
     }
@@ -1021,6 +1108,7 @@ impl Ui {
             | Kind::Label(t)
             | Kind::Button(t)
             | Kind::MenuItem(t)
+            | Kind::MenuEntry { label: t, .. }
             | Kind::ListRow(t)
             | Kind::Tooltip(t)
             | Kind::Toggle { label: t, .. }
@@ -1589,7 +1677,10 @@ impl Ui {
     pub fn is_flat(&self, id: WidgetId) -> bool {
         let widget = &self.widgets[id];
         match widget.kind {
-            Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::LabelledButton { .. } => true,
+            Kind::MenuItem(_)
+            | Kind::MenuEntry { .. }
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. } => true,
             Kind::Button(_) => widget
                 .parent
                 .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
@@ -1666,6 +1757,10 @@ impl Ui {
         let (min_width, min_height) = (self.min_width, self.min_height);
         let (island_pad, button_min) = (t.island_padding, t.button_min);
         let rtl = self.rtl;
+        let pages = match self.widgets[id].kind {
+            Kind::Menu => self.pages_width(id),
+            _ => 0.0,
+        };
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
         let children = self.visible_children(id);
@@ -1678,7 +1773,8 @@ impl Ui {
         let widget = &mut self.widgets[id];
         let style = widget.style.clone();
         let (w, h) = match &mut widget.kind {
-            Kind::Menu | Kind::List { .. } => {
+            Kind::Menu => (pages, sizes.iter().map(|s| s.1).sum::<f32>()),
+            Kind::List { .. } => {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 (w, sizes.iter().map(|s| s.1).sum::<f32>())
             }
@@ -1786,6 +1882,22 @@ impl Ui {
             | Kind::ListRow(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
+                widget.text = Some(layout);
+                wh
+            }
+            // The mark's room at the start is the menu's to add, as every row of it takes it; a
+            // submenu's arrow at the end is its own.
+            Kind::MenuEntry { label, mark } => {
+                let (mark_w, mark_h) = mark_size(false, size);
+                let arrow = match mark {
+                    Mark::Submenu(_) | Mark::Back(_) => gap + mark_w,
+                    Mark::Check(_) | Mark::Radio(_) => 0.0,
+                };
+                let layout = self.text.layout(label, size, rtl, &style);
+                let wh = (
+                    layout.width() + 2.0 * pad + arrow,
+                    mark_h.max(layout.height()) + pad,
+                );
                 widget.text = Some(layout);
                 wh
             }
@@ -1997,6 +2109,39 @@ impl Ui {
                 Some(Event::Toggled(id))
             }
             Kind::Toggle { .. } => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut active),
+                ..
+            } => {
+                *active = !*active;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Radio(ref mut active),
+                ..
+            } => {
+                *active = true;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Submenu(page),
+                ..
+            } => {
+                // The page's title, its first row, takes the focus, as in GTK.
+                let title = self.widgets[page].children.first().copied();
+                self.slide_to(id, page, title);
+                None
+            }
+            Kind::MenuEntry {
+                mark: Mark::Back(item),
+                ..
+            } => {
+                let menu = self.widgets[item].parent;
+                if let Some(menu) = menu {
+                    self.slide_to(id, menu, Some(item));
+                }
+                None
+            }
             Kind::ListRow(_) => {
                 let list = self.list_of(id);
                 if let Some(Kind::List { selected, .. }) = list.map(|l| &mut self.widgets[l].kind) {
@@ -2493,7 +2638,83 @@ impl Ui {
         }
     }
 
+    /// Whether the focused item is a submenu's, which `key` opens, or a submenu's title, which
+    /// `key` leaves.
+    fn slides_on(&self, key: &Key) -> bool {
+        let mark = match self.focus.map(|id| &self.widgets[id].kind) {
+            Some(Kind::MenuEntry { mark, .. }) => *mark,
+            _ => return false,
+        };
+        matches!(
+            (key, mark),
+            (Key::Right, Mark::Submenu(_)) | (Key::Left, Mark::Back(_))
+        )
+    }
+
+    /// Shows the menu `to` in place of the menu of the item `from`, and focuses `focus` on it:
+    /// a slide between the pages of one popup.
+    fn slide_to(&mut self, from: WidgetId, to: WidgetId, focus: Option<WidgetId>) {
+        let Some(menu) = self.widgets[from].parent else {
+            return;
+        };
+        self.widgets[to].visible = true;
+        self.set_focus(focus);
+        self.widgets[menu].visible = false;
+    }
+
+    /// The room a menu leaves at the start of each row when one of its rows has a check or a
+    /// radio there, as GTK's indicator size group: the mark and the gap after it.
+    pub(crate) fn menu_indent(&self, menu: WidgetId) -> f32 {
+        let marked = self.widgets[menu].children.iter().any(|&c| {
+            let widget = &self.widgets[c];
+            widget.visible
+                && matches!(
+                    widget.kind,
+                    Kind::MenuEntry {
+                        mark: Mark::Check(_) | Mark::Radio(_),
+                        ..
+                    }
+                )
+        });
+        if marked {
+            mark_size(false, self.theme.font_size).0 + self.theme.gap
+        } else {
+            0.0
+        }
+    }
+
+    /// The width of the widest of the menus that share the parent of `menu`, the pages of one
+    /// popup, which GTK's stack makes as wide as each other; the hidden ones are measured here.
+    fn pages_width(&mut self, menu: WidgetId) -> f32 {
+        let pages: Vec<WidgetId> = match self.widgets[menu].parent {
+            Some(parent) => self.widgets[parent]
+                .children
+                .iter()
+                .copied()
+                .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu))
+                .collect(),
+            None => vec![menu],
+        };
+        let mut widest = 0.0_f32;
+        for page in pages {
+            let rows = self.widgets[page].children.clone();
+            let mut w = 0.0_f32;
+            for row in rows {
+                if self.widgets[row].visible {
+                    w = w.max(self.measure(row).0);
+                }
+            }
+            widest = widest.max(w + self.menu_indent(page));
+        }
+        widest
+    }
+
     fn navigate(&mut self, key: Key) -> Option<Event> {
+        // GTK slides to a submenu on the right arrow and back on the left one, whatever the
+        // direction of the text.
+        if self.slides_on(&key) {
+            return self.focus.and_then(|id| self.activate(id));
+        }
         let next = match (key, self.menu()) {
             // Up and down cycle through a menu's items, as in GTK's menus.
             (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
@@ -2968,6 +3189,83 @@ mod tests {
         let third = ui.add(menu, Kind::MenuItem("Quit".into()));
         ui.layout();
         (ui, [menu, first, second, third])
+    }
+
+    #[test]
+    fn a_menus_checks_and_radios_flip_and_fill_as_gtks_model_buttons() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", false);
+        let low = ui.menu_radio(menu, "Low", true);
+        let high = ui.menu_radio(menu, "High", false);
+        ui.layout();
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(ui.is_active(check));
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(!ui.is_active(check));
+        assert_eq!(ui.activate(high), Some(Event::Toggled(high)));
+        assert!(ui.is_active(high));
+        assert!(
+            ui.is_active(low),
+            "the other radios are the application's to clear"
+        );
+        assert_eq!(ui.set_active(low, false), Some(Event::Toggled(low)));
+        assert_eq!(ui.set_active(low, false), None);
+        assert!(ui.is_flat(check));
+    }
+
+    #[test]
+    fn a_submenu_slides_in_on_the_right_arrow_and_out_on_the_left_in_both_directions() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Menu", Theme::default(), rtl);
+            let menu = ui.add(Ui::ROOT, Kind::Menu);
+            let first = ui.add(menu, Kind::MenuItem("Open".into()));
+            let (item, page) = ui.submenu(menu, "Volume");
+            let low = ui.menu_radio(page, "Low", true);
+            ui.layout();
+            assert!(!ui.is_visible(page), "rtl {rtl}: the page starts hidden");
+            ui.set_focus(Some(first));
+            assert_eq!(ui.key(Key::Right), None);
+            assert_eq!(ui.focus(), Some(first), "rtl {rtl}: a plain item opens nothing");
+            ui.set_focus(Some(item));
+            assert_eq!(ui.key(Key::Right), None);
+            let title = ui.widget(page).children[0];
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: the title takes the focus");
+            assert!(ui.is_visible(page) && !ui.is_visible(menu), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Down), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: the arrows stay on the page");
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: only the title leaves");
+            ui.set_focus(Some(title));
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: back on the parent item");
+            assert!(ui.is_visible(menu) && !ui.is_visible(page), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Enter), None);
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: Enter opens it too");
+            assert_eq!(ui.activate(title), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: activating the title returns");
+        }
+    }
+
+    #[test]
+    fn a_menus_pages_are_as_wide_as_the_widest_and_a_check_indents_every_label() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let plain = ui.add(menu, Kind::MenuItem("Open".into()));
+        let (item, page) = ui.submenu(menu, "More");
+        let long = ui.menu_check(page, "A much longer row than the others", false);
+        ui.layout();
+        assert_eq!(ui.menu_indent(menu), 0.0, "no check or radio on the main page");
+        assert!(ui.menu_indent(page) > 0.0);
+        let width = ui.widget(plain).rect.w;
+        assert_eq!(width, ui.widget(item).rect.w);
+        assert_eq!(ui.activate(item), None);
+        ui.layout();
+        assert_eq!(
+            ui.widget(long).rect.w,
+            width,
+            "the hidden page set the main page's width"
+        );
     }
 
     #[test]

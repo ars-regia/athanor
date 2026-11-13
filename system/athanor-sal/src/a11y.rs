@@ -2,7 +2,7 @@
 //! the same paths as the keyboard and the pointer.
 
 use crate::focus::list_stop;
-use crate::widget::{Event, Kind, RootRole, Ui, WidgetId};
+use crate::widget::{Event, Kind, Mark, RootRole, Ui, WidgetId};
 use accesskit::{
     Action, ActionData, ActionRequest, HasPopup, Live, Node, NodeId, Orientation, Rect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
@@ -101,6 +101,28 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::MenuItem(label) => {
             let mut node = Node::new(Role::MenuItem);
             node.set_label(label.as_str());
+            node.add_action(Action::Click);
+            node
+        }
+        // GTK's model buttons: a check or a radio menu item with its state; a submenu's item and
+        // its page's title are menu items, expanded while the page is shown, as GTK sets them.
+        Kind::MenuEntry { label, mark } => {
+            let mut node = Node::new(match mark {
+                Mark::Check(_) => Role::MenuItemCheckBox,
+                Mark::Radio(_) => Role::MenuItemRadio,
+                Mark::Submenu(_) | Mark::Back(_) => Role::MenuItem,
+            });
+            node.set_label(label.as_str());
+            match *mark {
+                Mark::Check(on) | Mark::Radio(on) => {
+                    node.set_toggled(if on { Toggled::True } else { Toggled::False });
+                }
+                Mark::Submenu(page) => {
+                    node.set_has_popup(HasPopup::Menu);
+                    node.set_expanded(ui.is_visible(page));
+                }
+                Mark::Back(_) => node.set_expanded(true),
+            }
             node.add_action(Action::Click);
             node
         }
@@ -737,6 +759,35 @@ mod tests {
             .find(|(n, _)| *n == text_run_id(field, 0))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
+    }
+
+    #[test]
+    fn a_menus_checks_radios_and_submenus_read_as_gtks_model_buttons() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", true);
+        let radio = ui.menu_radio(menu, "Low", false);
+        let (item, page) = ui.submenu(menu, "More");
+        ui.layout();
+        let read = |ui: &Ui, id: WidgetId| {
+            let n = node(ui, id, 1.0);
+            (n.role(), n.label().map(str::to_owned), n.toggled(), n.is_expanded())
+        };
+        assert_eq!(
+            read(&ui, check),
+            (Role::MenuItemCheckBox, Some("Mute".into()), Some(Toggled::True), None)
+        );
+        assert_eq!(
+            read(&ui, radio),
+            (Role::MenuItemRadio, Some("Low".into()), Some(Toggled::False), None)
+        );
+        assert_eq!(read(&ui, item), (Role::MenuItem, Some("More".into()), None, Some(false)));
+        assert_eq!(node(&ui, item, 1.0).has_popup(), Some(HasPopup::Menu));
+        assert_eq!(ui.activate(item), None);
+        let title = ui.widget(page).children[0];
+        assert_eq!(read(&ui, item).3, Some(true));
+        assert_eq!(read(&ui, title), (Role::MenuItem, Some("More".into()), None, Some(true)));
     }
 
     #[test]

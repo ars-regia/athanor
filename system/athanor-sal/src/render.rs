@@ -3,10 +3,10 @@
 
 use crate::text::Brush;
 use crate::driver::Side;
-use crate::theme::Rgba;
+use crate::theme::{Rgba, Theme};
 use crate::widget::{
-    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui, WidgetId,
-    WindowButton,
+    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Mark, Rect as WRect,
+    Ui, WidgetId, WindowButton,
 };
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
@@ -187,6 +187,73 @@ const OTHER_MONTH: f32 = 0.35;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
+/// The box of a check, or the track of a switch, in `mark` with corners of `radius`: the accent
+/// when on, the surface with a border when off, each a little toward its ink under the pointer.
+fn draw_box<C: Canvas>(
+    ctx: &mut C,
+    t: &Theme,
+    mark: WRect,
+    radius: f32,
+    active: bool,
+    hovered: bool,
+) {
+    let (fill, ink) = if active {
+        (t.accent, t.on_accent)
+    } else {
+        (t.surface, t.text)
+    };
+    let fill = if hovered { mix(fill, ink, HOVER) } else { fill };
+    ctx.set_paint(color(fill));
+    ctx.fill_path(&rounded(mark, 0.0, radius));
+    if !active {
+        ctx.set_paint(color(t.border));
+        ctx.set_stroke(Stroke::new(1.0));
+        ctx.stroke_path(&rounded(mark, -0.5, radius));
+    }
+}
+
+/// A check's tick in its box `mark`, drawn as two lines, as the window buttons' marks.
+fn draw_tick<C: Canvas>(ctx: &mut C, t: &Theme, mark: WRect) {
+    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
+    ctx.set_paint(color(t.on_accent));
+    ctx.set_stroke(Stroke::new(1.8));
+    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
+        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
+        ctx.stroke_path(&line.to_path(0.1));
+    }
+}
+
+/// A radio's ring in `mark`, as GTK's radio check button: the chosen one's ring and the dot in it
+/// in the accent.
+fn draw_radio<C: Canvas>(ctx: &mut C, t: &Theme, mark: WRect, active: bool, hovered: bool) {
+    let centre = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
+    let fill = if hovered { mix(t.surface, t.text, HOVER) } else { t.surface };
+    ctx.set_paint(color(fill));
+    ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 2.0)).to_path(0.1));
+    ctx.set_paint(color(if active { t.accent } else { t.border }));
+    ctx.set_stroke(Stroke::new(if active { 2.0 } else { 1.0 }));
+    let ring = f64::from(mark.w / 2.0) - if active { 1.0 } else { 0.5 };
+    ctx.stroke_path(&Circle::new(centre, ring).to_path(0.1));
+    if active {
+        ctx.set_paint(color(t.accent));
+        ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 5.0)).to_path(0.1));
+    }
+}
+
+/// An arrow in the middle of `mark`, a chevron pointing left or right, as GTK's `pan-start` and
+/// `pan-end` icons.
+fn draw_arrow<C: Canvas>(ctx: &mut C, mark: WRect, left: bool, ink: Rgba) {
+    let (cx, cy) = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
+    let arm = f64::from(mark.h) / 5.0;
+    let tip = if left { cx - arm / 2.0 } else { cx + arm / 2.0 };
+    let back = if left { cx + arm / 2.0 } else { cx - arm / 2.0 };
+    ctx.set_paint(color(ink));
+    ctx.set_stroke(Stroke::new(1.5));
+    for end in [cy - arm, cy + arm] {
+        ctx.stroke_path(&Line::new((back, end), (tip, cy)).to_path(0.1));
+    }
+}
+
 fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     let o = f64::from(outset);
     RoundedRect::new(
@@ -348,6 +415,13 @@ pub fn paint<C: Canvas>(
         let heading = match ui.widgets[id].kind {
             Kind::Calendar(_) => ui.widgets[id].children.first().map(|&h| ui.widgets[h].rect),
             _ => None,
+        };
+        // A menu entry's label starts past the marks of its menu, as GTK's indicator size group.
+        let indent = match ui.widgets[id].kind {
+            Kind::MenuItem(_) | Kind::MenuEntry { .. } => {
+                ui.widgets[id].parent.map_or(0.0, |menu| ui.menu_indent(menu))
+            }
+            _ => 0.0,
         };
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
@@ -520,17 +594,45 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer.
-            Kind::MenuItem(_) => {
+            // A flat row with its label at the start edge, after the room its menu leaves for
+            // the marks, filled only under the pointer; a check, a radio or the way back from a
+            // submenu at the start edge, a submenu's arrow at the end edge.
+            Kind::MenuItem(_) | Kind::MenuEntry { .. } => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
+                let inner = WRect {
+                    x: r.x + t.padding,
+                    w: r.w - 2.0 * t.padding,
+                    ..r
+                };
+                let size = mark_size(false, t.font_size);
+                let start = mark_rect(inner, ui.rtl, size, false);
+                let end = mark_rect(inner, ui.rtl, size, true);
+                let hovered = hover == Some(id);
+                let mark = match widget.kind {
+                    Kind::MenuEntry { mark, .. } => Some(mark),
+                    _ => None,
+                };
+                match mark {
+                    Some(Mark::Check(active)) => {
+                        draw_box(ctx, &t, start, start.h / 4.0, active, hovered);
+                        if active {
+                            draw_tick(ctx, &t, start);
+                        }
+                    }
+                    Some(Mark::Radio(active)) => draw_radio(ctx, &t, start, active, hovered),
+                    Some(Mark::Submenu(_)) => draw_arrow(ctx, end, ui.rtl, t.text),
+                    Some(Mark::Back(_)) => draw_arrow(ctx, start, !ui.rtl, t.text),
+                    None => {}
+                }
                 if let Some(layout) = &widget.text {
-                    let x = if ui.rtl {
-                        r.x + r.w - t.padding - layout.width()
-                    } else {
-                        r.x + t.padding
+                    let x = match (mark, ui.rtl) {
+                        // A submenu's title is centred, as GTK's.
+                        (Some(Mark::Back(_)), _) => r.x + (r.w - layout.width()) / 2.0,
+                        (_, true) => inner.x + inner.w - indent - layout.width(),
+                        (_, false) => inner.x + indent,
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
                     draw_text(ctx, resources, layout, at, t.text)?;
@@ -639,22 +741,7 @@ pub fn paint<C: Canvas>(
             } => {
                 let size = mark_size(false, t.font_size);
                 let mark = mark_rect(r, ui.rtl, size, false);
-                let centre = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
-                let fill = if hover == Some(id) {
-                    mix(t.surface, t.text, HOVER)
-                } else {
-                    t.surface
-                };
-                ctx.set_paint(color(fill));
-                ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 2.0)).to_path(0.1));
-                ctx.set_paint(color(if *active { t.accent } else { t.border }));
-                ctx.set_stroke(Stroke::new(if *active { 2.0 } else { 1.0 }));
-                let ring = f64::from(mark.w / 2.0) - if *active { 1.0 } else { 0.5 };
-                ctx.stroke_path(&Circle::new(centre, ring).to_path(0.1));
-                if *active {
-                    ctx.set_paint(color(t.accent));
-                    ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 5.0)).to_path(0.1));
-                }
+                draw_radio(ctx, &t, mark, *active, hover == Some(id));
                 if let Some(layout) = &widget.text {
                     let x = label_x(r, mark, ui.rtl, false, t.gap, layout.width());
                     let y = r.y + (r.h - layout.height()) / 2.0;
@@ -688,38 +775,15 @@ pub fn paint<C: Canvas>(
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
                 let size = mark_size(is_switch, t.font_size);
                 let mark = mark_rect(r, ui.rtl, size, is_switch);
-                let (fill, ink) = if active {
-                    (t.accent, t.on_accent)
-                } else {
-                    (t.surface, t.text)
-                };
-                let fill = if hover == Some(id) {
-                    mix(fill, ink, HOVER)
-                } else {
-                    fill
-                };
                 let radius = if is_switch { mark.h / 2.0 } else { mark.h / 4.0 };
-                ctx.set_paint(color(fill));
-                ctx.fill_path(&rounded(mark, 0.0, radius));
-                if !active {
-                    ctx.set_paint(color(t.border));
-                    ctx.set_stroke(Stroke::new(1.0));
-                    ctx.stroke_path(&rounded(mark, -0.5, radius));
-                }
+                draw_box(ctx, &t, mark, radius, active, hover == Some(id));
                 if is_switch {
                     let knob = knob_rect(mark, ui.rtl, active);
                     let centre = (f64::from(knob.center_x()), f64::from(knob.y + knob.h / 2.0));
                     ctx.set_paint(color(if active { t.on_accent } else { t.border }));
                     ctx.fill_path(&Circle::new(centre, f64::from(knob.w / 2.0)).to_path(0.1));
                 } else if active {
-                    // A tick drawn as two lines, as the window buttons' marks.
-                    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
-                    ctx.set_paint(color(t.on_accent));
-                    ctx.set_stroke(Stroke::new(1.8));
-                    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
-                        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
-                        ctx.stroke_path(&line.to_path(0.1));
-                    }
+                    draw_tick(ctx, &t, mark);
                 }
                 if let Some(layout) = &widget.text {
                     let x = label_x(r, mark, ui.rtl, is_switch, t.gap, layout.width());
