@@ -14,3 +14,6 @@ athanor-style = { path = "../../../../system/athanor-style", default-features = 
 landlock = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
+# The zbus the toolkit's AT-SPI bridge, accesskit_unix, already runs on its own executor, with
+# the blocking API: the workspace's zbus would bring a tokio runtime to this binary.
+zbus = { version = "5.19", default-features = false, features = ["async-io", "blocking-api"] }
