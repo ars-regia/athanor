@@ -23,6 +23,9 @@ pub(crate) const GLYPH: f32 = 20.0;
 pub(crate) const RADIUS: f32 = 18.0;
 /// The second line's size against the theme's font: the `caption` step of VL6.
 const CAPTION: f32 = 0.82;
+/// The most characters the second line asks room for; a longer one ends in an ellipsis inside
+/// the room its tile is given (maintainer decision, 2026-11-13: up to 12 characters).
+const SECOND_CHARS: f32 = 12.0;
 
 /// A tile: see [`Ui::tile`].
 pub struct Tile {
@@ -120,11 +123,13 @@ impl Ui {
     }
 }
 
-/// The tile's size: its padding around the disc and its title, and at least its height. The
-/// second line, as GTK's tile ellipsizes it, asks for no width: it ends in an ellipsis at the
-/// width the tile is placed at, so a long one, a network's name, never widens the tile. The title
-/// takes the widget's style at the `heading` weight; the layouts are kept for drawing, the
-/// title's in the widget's `text`.
+/// The tile's size: its padding around the disc and the wider of its title and its second line,
+/// and at least its height. The second line, which GTK's tile ellipsizes, asks for its width up
+/// to [`SECOND_CHARS`] characters (maintainer decision, 2026-11-13: up to 12 characters), the
+/// same on every pass, and ends in an ellipsis at the width the tile is placed at: a short one,
+/// "Not connected", shows whole, and a long one, a network's name, widens the tile no further.
+/// The title takes the widget's style at the `heading` weight; the layouts are kept for
+/// drawing, the title's in the widget's `text`.
 pub(crate) fn measure(
     tile: &mut Tile,
     text: &mut TextContext,
@@ -145,6 +150,10 @@ pub(crate) fn measure(
     };
     let first = text.layout(&tile.title, size, rtl, &heading);
     let chrome = 2.0 * pad + DISC + gap;
+    let full = text.layout(&tile.subtitle, size, rtl, &caption);
+    let asked = full
+        .width()
+        .min(SECOND_CHARS * wrap::char_width(text, size, &caption));
     let second = match tile.placed {
         Some(placed) => {
             let one = Wrap {
@@ -154,9 +163,9 @@ pub(crate) fn measure(
             let width = (placed - chrome).max(0.0);
             wrap::layout(text, &tile.subtitle, (size, rtl), &caption, &one, width)
         }
-        None => text.layout(&tile.subtitle, size, rtl, &caption),
+        None => full,
     };
-    let w = chrome + first.width();
+    let w = chrome + first.width().max(asked);
     let h = (2.0 * pad + first.height() + second.height()).max(HEIGHT);
     *title = Some(first);
     tile.second = Some(Box::new(second));
@@ -252,9 +261,10 @@ mod tests {
     }
 
     /// GTK's tile ellipsizes its second line at the end: a network's long name ends in an
-    /// ellipsis inside the tile and leaves the row as wide as a short one does.
+    /// ellipsis inside the tile, and past its twelve characters a longer one leaves the row as
+    /// wide as it was.
     #[test]
-    fn a_long_second_line_ends_in_an_ellipsis_and_never_widens_the_row() {
+    fn a_long_second_line_ends_in_an_ellipsis_and_widens_the_row_no_further() {
         let long = "A network whose name runs on for sixty characters or nearly";
         let lay = |subtitle: &str| {
             let mut ui = Ui::new("t", Theme::default(), false);
@@ -264,9 +274,9 @@ mod tests {
             ui.layout();
             (ui, wifi)
         };
-        let (short, _) = lay("Home");
+        let (longer, _) = lay(&format!("{long}, and longer still"));
         let (ui, wifi) = lay(long);
-        assert_eq!(ui.size(), short.size(), "the long name widens nothing");
+        assert_eq!(ui.size(), longer.size(), "past the cap, a longer name widens nothing");
         let r = ui.widget(wifi).rect;
         let room = r.w - 2.0 * ui.theme.padding - super::DISC - ui.theme.gap;
         let Kind::Tile(tile) = &ui.widget(wifi).kind else {
@@ -277,6 +287,57 @@ mod tests {
         assert_eq!(second.len(), 1, "one line");
         assert!(second.width() <= room + 0.5, "{} in {room}", second.width());
         assert!(second.width() > 0.0, "the start of the name and the ellipsis");
+    }
+
+    /// The second line asks for its width up to twelve characters (maintainer decision,
+    /// 2026-11-13): "Not connected" shows whole beside a short title, and a network's long name
+    /// widens the tile to the padding, the disc and twelve characters only, and ends in an
+    /// ellipsis there; another layout keeps the width.
+    #[test]
+    fn the_second_line_asks_for_up_to_twelve_characters() {
+        let lay = |subtitle: &str, min_width: f32| {
+            let mut ui = Ui::new("t", Theme::default(), false);
+            ui.min_width = min_width;
+            let wifi = ui.tile(Ui::ROOT, "Wi-Fi", subtitle, glyph(), true);
+            ui.layout();
+            (ui, wifi)
+        };
+        let second = |ui: &Ui, id| match &ui.widget(id).kind {
+            Kind::Tile(tile) => tile.second.as_deref().map(|l| (l.len(), l.width())),
+            _ => None,
+        };
+        // In a wide window the line is never cut: its whole width.
+        let whole = |subtitle: &str| {
+            let (ui, id) = lay(subtitle, 2000.0);
+            second(&ui, id).expect("laid out").1
+        };
+        let (ui, wifi) = lay("Not connected", 0.0);
+        let shown = second(&ui, wifi).expect("laid out");
+        let full = whole("Not connected");
+        assert_eq!(shown.0, 1);
+        assert!((shown.1 - full).abs() < 0.5, "whole: {shown:?} of {full}");
+
+        // 59 characters and no space to break at, as a network's name can be.
+        let long = "Home_Network_of_the_Flat_on_the_Third_Floor_5GHz_Extended1";
+        assert_eq!(long.chars().count(), 59);
+        let (mut capped, id) = lay(long, 0.0);
+        let r = capped.widget(id).rect;
+        let caption = crate::text::TextStyle {
+            scale: capped.widget(id).style.scale * super::CAPTION,
+            weight: 400,
+            ..capped.widget(id).style.clone()
+        };
+        let size = capped.theme.font_size;
+        let twelve = super::SECOND_CHARS * crate::wrap::char_width(&mut capped.text, size, &caption);
+        let chrome = 2.0 * capped.theme.padding + super::DISC + capped.theme.gap;
+        assert!((r.w - (chrome + twelve)).abs() < 0.5, "{} = {chrome} + {twelve}", r.w);
+        let cut = second(&capped, id).expect("laid out");
+        assert_eq!(cut.0, 1, "one line");
+        assert!(cut.1 <= twelve + 0.5, "inside the cap: {cut:?}");
+        assert!(cut.1 < whole(long) / 2.0, "ends in an ellipsis: {cut:?}");
+        let before = capped.size();
+        capped.layout();
+        assert_eq!(capped.size(), before, "the next pass keeps the width");
     }
 
     /// The second line stays the tile's description over a tooltip, as the GTK panel sets it;
