@@ -4,6 +4,7 @@
 use crate::focus;
 use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
+use crate::wrap::{self, Wrap};
 use parley::Layout;
 use std::cell::Cell;
 use std::fmt;
@@ -262,8 +263,10 @@ pub enum Kind {
         label: String,
         /// Whether this toggle is the active one of its group.
         active: bool,
-        /// Whether assistive technologies read it as a radio button, checked when active, rather
-        /// than as GTK's grouped toggle button, pressed when active. It is drawn the same.
+        /// Whether it is a radio button, checked when active, rather than GTK's grouped toggle
+        /// button, pressed when active: assistive technologies read it so, and it is drawn as
+        /// GTK's radio check button, a ring at the start edge with its label after it, the
+        /// chosen one's ring and the dot in it in the accent.
         radio: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
@@ -290,7 +293,8 @@ pub enum Kind {
     /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
     /// steps. It fills the width of its column or group, or its cell in a row, and takes the
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
-    /// it with [`Ui::slider`], which keeps its range valid.
+    /// it with [`Ui::slider`], which keeps its range valid; change its value with
+    /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
@@ -431,7 +435,7 @@ pub struct Level {
 /// steps. The fields are closed to applications so that the invariants hold: the range is
 /// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
 /// `max`, which is always a value even when the step does not divide the range. Make one with
-/// [`Ui::slider`] and change it with [`Ui::set_value`].
+/// [`Ui::slider`], change its value with [`Ui::set_value`] and its range with [`Ui::set_range`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider {
     pub(crate) name: String,
@@ -442,6 +446,29 @@ pub struct Slider {
 }
 
 impl Slider {
+    /// The slider [`Ui::slider`] adds; `None` for the numbers it refuses.
+    pub(crate) fn new(name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<Slider> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Ui::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(slider)
+    }
+
     /// How many steps `value` is from `min`, the last one being `max`.
     fn last(&self) -> i64 {
         // A hair under the exact quotient, so that a range the step divides does not count
@@ -518,6 +545,8 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
+    /// How a label wraps, see [`Ui::set_wrap`], and the width its last place gave it, if one has.
+    pub(crate) wrap: Option<(Wrap, Option<f32>)>,
 }
 
 impl Widget {
@@ -534,6 +563,7 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
+            wrap: None,
         }
     }
 
@@ -853,9 +883,9 @@ impl Ui {
         self.add(parent, Kind::Toggle { label, active, radio })
     }
 
-    /// Adds a toggle showing `label`, the active one of its group when `active`, which
-    /// assistive technologies read as a radio button: a dialog's choices, where
-    /// [`Ui::toggle`] gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
+    /// Adds a radio button showing `label`, the chosen one of its group when `active`: a
+    /// dialog's choices, drawn and read as GTK's radio check buttons, where [`Ui::toggle`]
+    /// gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
     ///
     /// # Panics
     ///
@@ -1155,24 +1185,7 @@ impl Ui {
         step: f64,
         value: f64,
     ) -> Option<WidgetId> {
-        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
-        if !(finite && min < max && step > 0.0) {
-            return None;
-        }
-        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
-        // counted, so that the index arithmetic and the drawing never leave the numbers.
-        let span = max - min;
-        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
-            return None;
-        }
-        let mut slider = Slider {
-            name: name.to_owned(),
-            value: min,
-            min,
-            max,
-            step,
-        };
-        slider.value = slider.snap(value)?;
+        let slider = Slider::new(name, min, max, step, value)?;
         let id = self.add(parent, Kind::Slider(slider));
         self.contains(id).then_some(id)
     }
@@ -1537,6 +1550,22 @@ impl Ui {
         live
     }
 
+    /// Makes label `id` wrap as [`Wrap`] says, as GTK's `wrap`, `max-width-chars`, `lines` and
+    /// end `ellipsize`, or, with `None`, keep its text on one line again; takes effect from its
+    /// next layout. `false`, and nothing changes, for a widget that is not a label.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_wrap(&mut self, id: WidgetId, wrap: Option<Wrap>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_)) {
+            return false;
+        }
+        widget.wrap = wrap.map(|w| (w, None));
+        true
+    }
+
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
     /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
     /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
@@ -1744,10 +1773,29 @@ impl Ui {
 
     /// Shapes every text and places every widget; returns the window's size in logical pixels.
     pub fn layout(&mut self) -> (f32, f32) {
-        let (w, h) = self.measure(Self::ROOT);
+        let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
+        // Height for width: a wrapping label asks for a width that does not depend on the one its
+        // place gives it, so a second pass breaks its lines at that width and settles the heights.
+        if self.rewrap() {
+            (w, h) = self.measure(Self::ROOT);
+            self.place(Self::ROOT, 0.0, 0.0);
+        }
         self.size = (w, h);
         self.size
+    }
+
+    /// Records the width each wrapping label was placed at; whether one changed.
+    pub(crate) fn rewrap(&mut self) -> bool {
+        let mut changed = false;
+        for widget in &mut self.widgets.0 {
+            let w = Some(widget.rect.w);
+            if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
+                *given = w;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
@@ -1756,7 +1804,7 @@ impl Ui {
         shown.copied().filter(|&c| widgets[c].visible).collect()
     }
 
-    fn measure(&mut self, id: WidgetId) -> (f32, f32) {
+    pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap) = (t.margin, t.section_gap);
@@ -1837,8 +1885,21 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.layout(text, size, rtl, &style);
-                let wh = (layout.width(), layout.height());
+                let (layout, w) = match &widget.wrap {
+                    Some((wrap, given)) => {
+                        let asked = wrap::request(&mut self.text, text, (size, rtl), &style, wrap);
+                        // Before its first place, at the width it asks for.
+                        let at = given.unwrap_or(asked);
+                        let shaped = (size, rtl);
+                        (wrap::layout(&mut self.text, text, shaped, &style, wrap, at), asked)
+                    }
+                    None => {
+                        let layout = self.text.layout(text, size, rtl, &style);
+                        let w = layout.width();
+                        (layout, w)
+                    }
+                };
+                let wh = (w, layout.height());
                 widget.text = Some(layout);
                 wh
             }
@@ -1849,7 +1910,7 @@ impl Ui {
                 (w + 2.0 * pad, sizes.iter().map(|s| s.1).fold(0.0, f32::max) + pad)
             }
             Kind::Button(text)
-            | Kind::Toggle { label: text, .. }
+            | Kind::Toggle { label: text, radio: false, .. }
             | Kind::MenuItem(text)
             | Kind::ListRow(text)
             | Kind::ListHeading(text) => {
@@ -1858,7 +1919,9 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Check { label, .. } | Kind::Switch { label, .. } => {
+            Kind::Check { label, .. }
+            | Kind::Switch { label, .. }
+            | Kind::Toggle { label, radio: true, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
                 let layout = self.text.layout(label, size, rtl, &style);
                 let wh = (
@@ -1983,7 +2046,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) {
+                    ) || self.widgets[c].wrap.is_some()
+                    {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     // An island and a picture take the rest of their column's height too.

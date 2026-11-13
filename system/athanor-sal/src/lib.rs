@@ -15,10 +15,12 @@ pub(crate) mod gpu;
 mod icon;
 mod motion;
 mod popup;
+mod range;
 pub(crate) mod render;
 pub(crate) mod text;
 mod theme;
 mod widget;
+mod wrap;
 
 pub use driver::{run_with, Application, KeyModifiers, LayerOptions, Shell, Side, SurfaceId};
 pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
@@ -26,6 +28,7 @@ pub use motion::{Curve, Motion, Pose};
 pub use render::Error;
 pub use text::TextStyle;
 pub use theme::{Rgba, Theme};
+pub use wrap::Wrap;
 pub use widget::{
     Event, Key, Kind, Level, PointerButton, Rect, RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
 };
