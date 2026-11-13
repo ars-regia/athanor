@@ -413,18 +413,13 @@ pub fn paint<C: Canvas>(
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
                 let side = image.as_ref().map_or(0.0, |_| *size);
-                let text_w = widget.text.as_ref().map_or(0.0, |l| l.width());
-                let both = if image.is_some() && widget.text.is_some() {
-                    t.gap
-                } else {
-                    0.0
-                };
-                let start = r.x + (r.w - side - both - text_w) / 2.0;
-                let (image_x, text_x) = if ui.rtl {
-                    (start + text_w + both, start)
-                } else {
-                    (start, start + side + both)
-                };
+                let (image_x, text_x) = crate::widget::labelled::places(
+                    (r.x, r.w),
+                    image.as_ref().map(|_| side),
+                    widget.text.as_ref().map(|l| l.width()),
+                    t.gap,
+                    ui.rtl,
+                );
                 if let Some(image) = image {
                     let (w, h) = (f64::from(image.width()), f64::from(image.height()));
                     let fit = (f64::from(side) / w).min(f64::from(side) / h);

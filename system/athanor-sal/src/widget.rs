@@ -7,7 +7,7 @@ use crate::theme::Theme;
 use crate::wrap::{self, Wrap};
 use parley::Layout;
 
-mod labelled;
+pub(crate) mod labelled;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
@@ -987,8 +987,9 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
-    /// an icon toggle; the description of an image; what a drop-down is for, its description
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button,
+    /// a labelled button, whose shown text [`Ui::set_shown_text`] sets, or an icon toggle; the
+    /// description of an image; what a drop-down is for, its description
     /// ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text
     /// changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
@@ -1378,9 +1379,9 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
-    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check or a switch,
-    /// from its next layout; a field keeps the body text. `false`, and nothing changes, for a
-    /// scale that is not a finite number above zero.
+    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check, a switch
+    /// or a labelled button's shown text, from its next layout; a field keeps the body text.
+    /// `false`, and nothing changes, for a scale that is not a finite number above zero.
     ///
     /// # Panics
     ///
