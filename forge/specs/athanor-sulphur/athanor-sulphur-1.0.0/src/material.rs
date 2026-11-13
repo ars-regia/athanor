@@ -313,6 +313,7 @@ impl Materials {
     /// Sends each object of `output` its tier, when it changed.
     fn send(&mut self, output: &Output) {
         let tier = self.tier_of(Some(output));
+        crate::background_effect::set_live(output, tier == Tier::M2);
         for (object, of, sent) in &mut self.objects {
             if of.as_ref() == Some(output) && *sent != tier {
                 object.tier(tier.into());

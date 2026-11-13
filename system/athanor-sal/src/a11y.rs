@@ -41,8 +41,12 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
                 RootRole::Window => Role::Window,
                 RootRole::Status => Role::Status,
                 RootRole::AlertDialog => Role::AlertDialog,
+                RootRole::Dialog => Role::Dialog,
             });
             node.set_label(ui.title.as_str());
+            if ui.modal {
+                node.set_modal();
+            }
             node
         }
         Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
@@ -109,6 +113,18 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             } else {
                 Role::Button
             });
+            node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        // An icon toggle: a toggle button, as GTK's ToggleButton, pressed while on.
+        Kind::IconToggle(crate::icon_toggle::IconToggle { label, active, .. }) => {
+            let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.set_toggled(if *active {
                 Toggled::True
@@ -1285,6 +1301,31 @@ mod tests {
         ui.root_role = RootRole::AlertDialog;
         ui.title = "Shut down now?".into();
         assert_eq!(root(&ui), (AtspiRole::Alert, "Shut down now?".into()));
+    }
+
+    /// A dialog's root reads as a modal dialog, and an alert dialog's keeps its role, modal too,
+    /// as GTK's modal windows and alert dialogs do.
+    #[test]
+    fn a_dialog_reads_as_a_modal_dialog() {
+        use accesskit_atspi_common::{Role as AtspiRole, State};
+        let root = |ui: &Ui| {
+            let (adapter, _) = at_spi(ui);
+            let root = adapter.platform_node(adapter.root_id());
+            let modal = root.state().contains(State::Modal);
+            (root.role().expect("a role"), modal)
+        };
+        let mut ui = Ui::new("A dialog", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Close".into()));
+        ui.layout();
+        assert_eq!(root(&ui), (AtspiRole::Frame, false));
+        ui.set_dialog();
+        assert_eq!(root(&ui), (AtspiRole::Dialog, true));
+        let mut alert = Ui::new("Replace the newer layout?", Theme::default(), false);
+        alert.root_role = RootRole::AlertDialog;
+        alert.add(Ui::ROOT, Kind::Button("Replace".into()));
+        alert.layout();
+        alert.set_dialog();
+        assert_eq!(root(&alert), (AtspiRole::Alert, true));
     }
 
     /// The radios of a group read as radio buttons, the active one checked, where the toggles

@@ -196,6 +196,24 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     .to_path(0.1)
 }
 
+/// Draws `image` in the middle of `r`, fitted to a square of `side` logical pixels with its
+/// aspect ratio kept.
+fn draw_icon<C: Canvas>(
+    ctx: &mut C,
+    resources: &mut C::Resources,
+    image: &crate::icon::Image,
+    r: crate::widget::Rect,
+    side: f32,
+) {
+    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+    let side = f64::from(side);
+    let fit = (side / w).min(side / h);
+    let (w, h) = (w * fit, h * fit);
+    let x = f64::from(r.center_x()) - w / 2.0;
+    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+}
+
 fn draw_text<C: Canvas>(
     ctx: &mut C,
     resources: &mut C::Resources,
@@ -592,6 +610,23 @@ pub fn paint<C: Canvas>(
                     );
                     draw_text(ctx, resources, layout, at, ink)?;
                 }
+            }
+            // An icon toggle: raised, as a button, and darker or lighter toward its text while
+            // it is on, without the accent (VL10).
+            Kind::IconToggle(toggle) => {
+                let base = if toggle.active {
+                    mix(t.surface, t.text, crate::icon_toggle::ON)
+                } else {
+                    t.surface
+                };
+                let fill = if hover == Some(id) {
+                    mix(base, t.text, HOVER)
+                } else {
+                    base
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
             }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
