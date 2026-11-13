@@ -2339,7 +2339,10 @@ impl Ui {
             // up or down a scrolled menu, without wrapping, as in GTK's menus.
             (key @ (Key::Home | Key::End | Key::PageUp | Key::PageDown), Some(menu)) => {
                 let items = focus::items(self, menu);
-                let last = items.len().saturating_sub(1);
+                // A menu with no item to focus, all insensitive say, keeps the focus where it is.
+                let Some(last) = items.len().checked_sub(1) else {
+                    return None;
+                };
                 let at = self.focus.and_then(|f| items.iter().position(|&i| i == f));
                 let to = match key {
                     Key::Home => 0,
@@ -2874,6 +2877,19 @@ mod tests {
         assert_eq!(walk(Key::PageUp), Some(0), "no wrap at the top");
         assert_eq!(walk(Key::End), Some(39));
         assert_eq!(walk(Key::PageDown), Some(39), "no wrap at the end");
+    }
+
+    #[test]
+    fn the_page_keys_home_and_end_leave_a_menu_of_insensitive_items_alone() {
+        let (mut ui, [_, first, second, third]) = menu(false);
+        for item in [first, second, third] {
+            ui.set_sensitive(item, false);
+        }
+        ui.layout();
+        for key in [Key::PageDown, Key::PageUp, Key::Home, Key::End] {
+            assert_eq!(ui.key(key.clone()), None, "{key:?}");
+            assert_eq!(ui.focus(), None, "{key:?}");
+        }
     }
 
     #[test]
