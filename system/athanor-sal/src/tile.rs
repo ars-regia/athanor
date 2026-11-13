@@ -319,7 +319,7 @@ mod tests {
         assert!((shown.1 - full).abs() < 0.5, "whole: {shown:?} of {full}");
 
         // 59 characters and no space to break at, as a network's name can be.
-        let long = "Home_Network_of_the_Flat_on_the_Third_Floor_5GHz_Extended1";
+        let long = "Home_Network_of_the_Flat_on_the_Third_Floor_5GHz_Extended_1";
         assert_eq!(long.chars().count(), 59);
         let (mut capped, id) = lay(long, 0.0);
         let r = capped.widget(id).rect;
