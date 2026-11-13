@@ -206,6 +206,29 @@
   "value": ""
  },
  {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Dialoghi",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Dialoghi",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
   "depth": 3,
   "role": "grouping",
   "name": "",
@@ -221,6 +244,17 @@
   "depth": 4,
   "role": "label",
   "name": "Testo",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "label",
+  "name": "Un'etichetta va a capo alla larghezza che la finestra le dà e non chiede più di quaranta caratteri, così una frase lunga non allarga la finestra. Oltre la terza riga finisce con i puntini di sospensione, e un lettore di schermo ne legge comunque ogni parola.",
   "states": [
    "sensitive",
    "showing",
