@@ -405,9 +405,9 @@ pub fn paint<C: Canvas>(
                     ctx.fill_rect(&line);
                 }
             }
-            // A white sheet under its rows, as GTK's list.
+            // The view's sheet under its rows, as GTK's list.
             Kind::List { .. } => {
-                ctx.set_paint(color(t.on_accent));
+                ctx.set_paint(color(t.view));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
             }
             // A row with its text at the start edge: tinted with the accent when selected, and
@@ -415,12 +415,12 @@ pub fn paint<C: Canvas>(
             Kind::ListRow(_) | Kind::ListHeading(_) => {
                 let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
                 let fill = if selected {
-                    Some(mix(t.on_accent, t.accent, SELECTED))
+                    Some(mix(t.view, t.accent, SELECTED))
                 } else {
                     None
                 };
                 let fill = match (fill, hover == Some(id)) {
-                    (fill, true) => Some(mix(fill.unwrap_or(t.on_accent), t.text, HOVER)),
+                    (fill, true) => Some(mix(fill.unwrap_or(t.view), t.text, HOVER)),
                     (fill, false) => fill,
                 };
                 if let Some(fill) = fill {
@@ -735,7 +735,7 @@ pub fn paint<C: Canvas>(
                 ctx.fill_path(&bar(0.0, level.value.min(level.full)));
             }
             Kind::Field(field) | Kind::TextArea(field) => {
-                ctx.set_paint(color(t.on_accent));
+                ctx.set_paint(color(t.view));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
                 ctx.set_paint(color(t.border));
                 ctx.set_stroke(Stroke::new(1.0));
@@ -746,7 +746,7 @@ pub fn paint<C: Canvas>(
                 let layout = field.layout(&mut ui.text).clone();
                 // Text longer than the field stays inside it; the selection is filled under it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
-                ctx.set_paint(color(mix(t.on_accent, t.accent, SELECTED_TEXT)));
+                ctx.set_paint(color(mix(t.view, t.accent, SELECTED_TEXT)));
                 for b in field.selection_boxes() {
                     let (x, y) = (f64::from(x), f64::from(y));
                     ctx.fill_rect(&Rect::new(b.x0 + x, b.y0 + y, b.x1 + x, b.y1 + y));
@@ -961,7 +961,7 @@ mod tests {
         let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
         let field = ui.field(crate::Ui::ROOT, "Name", "abc");
         let t = &ui.theme;
-        let fill = mix(t.on_accent, t.accent, SELECTED_TEXT).0;
+        let fill = mix(t.view, t.accent, SELECTED_TEXT).0;
         let filled = |p: &Pixmap| {
             let pixels = p.data_as_u8_slice().as_chunks::<4>().0;
             pixels.iter().filter(|&&px| px == fill).count()
@@ -1313,7 +1313,12 @@ mod tests {
     #[test]
     fn a_scroll_shows_only_its_viewport_and_an_indicator_at_the_end_edge() -> Result<(), Error> {
         for rtl in [false, true] {
-            let mut ui = crate::Ui::new("Scroll", crate::Theme::default(), rtl);
+            // A dark sheet, apart from the white of text on the accent.
+            let theme = crate::Theme {
+                view: crate::Rgba::rgb(0x21, 0x15, 0x26),
+                ..crate::Theme::default()
+            };
+            let mut ui = crate::Ui::new("Scroll", theme, rtl);
             let scroll = ui.scroll(crate::Ui::ROOT, 100.0);
             let list = ui.list(scroll, "Rows");
             let rows: Vec<_> = (1..=50).map(|n| ui.list_row(list, &format!("Row {n}"))).collect();
@@ -1327,7 +1332,7 @@ mod tests {
             // Inside the viewport the list's sheet shows; in the gap under it, the background,
             // though the list runs on far below.
             let middle = view.x + view.w / 2.0;
-            assert_eq!(at(middle, view.y + 4.0), t.on_accent.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(middle, view.y + 4.0), t.view.0.to_vec(), "rtl {rtl}");
             assert!(ui.widget(rows[49]).rect.y > view.bottom() + t.margin);
             assert_eq!(at(middle, view.bottom() + 2.0), t.background.0.to_vec(), "rtl {rtl}");
             // The indicator sits at the top of the end edge: the right in LTR, the left in RTL.
