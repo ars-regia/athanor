@@ -47,8 +47,9 @@ mod tests {
     fn the_watch_comes_before_the_read_and_changes_follow_the_first_value() {
         use std::cell::RefCell;
         use std::rc::Rc;
+        type Watcher = Box<dyn Fn(Appearance)>;
         let log = Rc::new(RefCell::new(Vec::<String>::new()));
-        let callback: Rc<RefCell<Option<Box<dyn Fn(Appearance)>>>> = Rc::default();
+        let callback: Rc<RefCell<Option<Watcher>>> = Rc::default();
         let (watched, read, sent) = (log.clone(), log.clone(), log.clone());
         let held = callback.clone();
         follow_with(
