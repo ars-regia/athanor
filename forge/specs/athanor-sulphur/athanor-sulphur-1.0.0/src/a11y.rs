@@ -3,6 +3,8 @@
 //! is Athanor's own, `system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml`. The
 //! manager is privileged (OS4): the bar's accessibility module is its one client. The keyboard
 //! aids' requests and events are served here, and the aids themselves are `aids.rs` (AX11).
+//! Version 2 adds `set_reduced_motion`, which the bar sends from GNOME's `enable-animations`
+//! (AX9): it sets the bell's reduced-motion state, in memory only, false until a bar sends it.
 //!
 //! The magnifier scales each output's frame about a focal point, which follows the pointer as
 //! `accessibility_zoom`'s `view_moves` says, and the colour filter is one pass over the frame

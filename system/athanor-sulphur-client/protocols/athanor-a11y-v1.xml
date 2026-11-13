@@ -212,9 +212,9 @@
         enable-animations turned off (doc_accessibility.md AX9). With it enabled, the
         compositor shows what would blink or slide without moving: the focus outline's bell
         is drawn at twice its width instead of blinking (doc_own_stack.md decision 33). The
-        compositor does not read the setting itself and stores nothing: the state is disabled
-        until a client sends it, and a client that bound version 1 cannot send it. The last
-        client's value stands.
+        compositor does not read the setting itself and keeps it in memory only: the state is
+        disabled until a client sends it, and a client that bound version 1 cannot send it.
+        The last client's value stands.
       </description>
       <arg name="active" type="uint" enum="active_state"/>
     </request>

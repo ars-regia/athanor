@@ -60,6 +60,11 @@ fn check_delays(aids: &KeyboardAids) -> Result<(), Error> {
     Ok(())
 }
 
+/// Whether a manager bound at `version` has `set_reduced_motion`.
+fn has_reduced_motion(version: u32) -> bool {
+    version >= REDUCED_MOTION
+}
+
 impl Manager {
     /// Sends every setting of the keyboard aids. The compositor ends a connection that sends a
     /// delay above `MAX_AID_DELAY`, so this refuses it first.
@@ -80,7 +85,7 @@ impl Manager {
     /// request above the bound version ends the connection.
     pub(crate) fn set_reduced_motion(&self, reduced: bool) -> Result<(), Error> {
         match self {
-            Manager::Athanor(manager) if manager.version() >= REDUCED_MOTION => {
+            Manager::Athanor(manager) if has_reduced_motion(manager.version()) => {
                 manager.set_reduced_motion(athanor_state(reduced));
                 Ok(())
             }
@@ -274,6 +279,16 @@ mod tests {
         assert!(check_delays(&aids(MAX_AID_DELAY, MAX_AID_DELAY)).is_ok());
         assert!(check_delays(&aids(MAX_AID_DELAY + 1, 0)).is_err());
         assert!(check_delays(&aids(0, MAX_AID_DELAY + 1)).is_err());
+    }
+
+    /// A request above the bound version ends the connection, so a manager bound at version 1
+    /// is never sent `set_reduced_motion`. This tests the gate only: a wire test needs a
+    /// compositor, and this crate has none (the fixture is in athanor-sulphur, which does not
+    /// depend on this crate).
+    #[test]
+    fn set_reduced_motion_is_sent_only_from_version_2() {
+        assert!(!has_reduced_motion(1));
+        assert!(has_reduced_motion(2));
     }
 
     #[test]

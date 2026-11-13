@@ -230,7 +230,9 @@ most 64 KiB or does not compile leaves the last keymap, with a warning; without 
 keymap is the environment's and the repeat 25 per second after 200 ms.
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
-granted it. The inversion and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron`
+granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
+`enable-animations` (AX9) to stop the bell blinking; the compositor keeps it in memory only,
+false until a bar sends it, and the last value sent stands after the bar exits. The inversion and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron`
 under the state root, read at start and written atomically, in cosmic-comp's format, at each
 change; a file that cannot be read changes nothing and is written over only at the next change,
 and a filter this compositor does not name is kept, sent as `unknown` and not drawn. The
