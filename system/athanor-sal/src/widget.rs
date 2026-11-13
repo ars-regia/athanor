@@ -382,7 +382,7 @@ pub struct Widget {
     pub(crate) visible: bool,
     pub(crate) text: Option<Layout<Brush>>,
     /// How its text is set: see [`Ui::set_text_style`].
-    pub style: TextStyle,
+    pub(crate) style: TextStyle,
     /// `Some` for a widget that opens a popup: whether it is open.
     pub(crate) expanded: Option<bool>,
     pub(crate) tooltip: Option<String>,
@@ -414,6 +414,11 @@ impl Widget {
             align: [crate::Align::Fill; 2],
             wrap: None,
         }
+    }
+
+    /// How its text is set; [`Ui::set_text_style`] changes it.
+    pub fn text_style(&self) -> &TextStyle {
+        &self.style
     }
 
     /// Whether the keyboard can focus the widget: not when it is insensitive itself. An

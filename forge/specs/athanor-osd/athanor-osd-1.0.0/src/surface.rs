@@ -635,7 +635,7 @@ mod tests {
         let built = osd.build(&level(45.0, 100.0), 45.0, 1);
         let (ui, widgets) = built.expect("the level is built");
         assert_eq!(ui.theme.font_size, 22.0);
-        let style = &ui.widget(widgets.number).style;
+        let style = ui.widget(widgets.number).text_style();
         assert_eq!(
             (style.scale, style.weight),
             (sal::size::BODY.scale, sal::size::BODY.weight)
