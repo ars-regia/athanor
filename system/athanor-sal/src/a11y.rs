@@ -220,7 +220,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
-    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
     if let Kind::ListRow(_) = widget.kind {
         children.push(row_label_id(id));

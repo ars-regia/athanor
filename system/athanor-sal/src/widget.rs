@@ -268,7 +268,7 @@ pub enum Kind {
     /// Three children along a line, as GTK's `CenterBox`: the first at the start edge, the
     /// second centred on the whole line, moved aside only when its neighbours need the room,
     /// and the third at the end edge, all at its height. In a column it fills the line. A
-    /// child that is not shown keeps its place empty.
+    /// child that is not shown keeps its place empty, and a child past the third is never shown.
     CenterBox,
 }
 
@@ -1486,12 +1486,24 @@ impl Ui {
     pub fn is_visible(&self, id: WidgetId) -> bool {
         let mut at = Some(id);
         while let Some(w) = at {
-            if !self.widgets[w].visible {
+            if !self.shown(w) {
                 return false;
             }
             at = self.widgets[w].parent;
         }
         true
+    }
+
+    /// Whether `id` is shown in its parent: visible, and not past the third child of a centre
+    /// box, which has no place for it.
+    pub(crate) fn shown(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        widget.visible
+            && widget.parent.is_none_or(|p| {
+                let parent = &self.widgets[p];
+                !matches!(parent.kind, Kind::CenterBox)
+                    || parent.children.iter().take(3).any(|&c| c == id)
+            })
     }
 
     /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
@@ -1549,9 +1561,8 @@ impl Ui {
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
-        let widgets = &self.widgets;
-        let shown = widgets[id].children.iter();
-        shown.copied().filter(|&c| widgets[c].visible).collect()
+        let children = self.widgets[id].children.iter();
+        children.copied().filter(|&c| self.shown(c)).collect()
     }
 
     fn measure(&mut self, id: WidgetId) -> (f32, f32) {

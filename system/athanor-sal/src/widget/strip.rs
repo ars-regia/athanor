@@ -209,4 +209,21 @@ mod tests {
         );
         assert_eq!(e.x, 0.0);
     }
+
+    #[test]
+    fn a_centre_box_has_no_place_for_a_fourth_child_and_never_shows_one() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        let center = ui.add(Ui::ROOT, Kind::CenterBox);
+        let three = ["Start", "Middle", "End"].map(|t| ui.add(center, Kind::Button(t.into())));
+        ui.layout();
+        let width = ui.widget(center).rect.w;
+        let fourth = ui.add(center, Kind::Button("A fourth child, wider than the rest".into()));
+        ui.layout();
+        assert_eq!(ui.widget(center).rect.w, width, "measured as three children");
+        assert!(!ui.is_visible(fourth), "neither drawn nor read");
+        let r = ui.widget(fourth).rect;
+        assert_ne!(ui.hit(r.x + 1.0, r.y + 1.0), Some(fourth), "never hit");
+        assert!(!crate::focus::chain(&ui).contains(&fourth), "never focused");
+        assert!(three.iter().all(|&c| ui.is_visible(c)));
+    }
 }
