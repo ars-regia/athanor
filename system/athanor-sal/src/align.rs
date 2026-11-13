@@ -200,6 +200,34 @@ mod tests {
     }
 
     #[test]
+    fn an_island_that_fills_leaves_room_for_the_flow_after_it_above_the_bottom() {
+        let mut ui = Ui::new("Align", gapped(), false);
+        (ui.min_width, ui.min_height) = (400.0, 300.0);
+        let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+        ui.add(island, Kind::Button("Wi-Fi".into()));
+        let label = ui.add(Ui::ROOT, Kind::Label("Connected".into()));
+        let done = ui.add(Ui::ROOT, Kind::Button("Done".into()));
+        assert_eq!(ui.set_align(done, [Align::End, Align::End]), Some(true));
+        ui.layout();
+        let (i, l, d) = (ui.widget(island).rect, ui.widget(label).rect, ui.widget(done).rect);
+        assert_eq!(d.y + d.h, 290.0, "the button at the bottom");
+        assert_eq!(l.y, i.y + i.h + 6.0, "the label after the island");
+        assert_eq!(l.y + l.h, d.y - 6.0, "the label a gap above the button");
+
+        // Without a widget at the bottom, the flow after the island overflows the column as it
+        // always has: the island takes the whole rest.
+        let mut ui = Ui::new("Align", gapped(), false);
+        (ui.min_width, ui.min_height) = (400.0, 300.0);
+        let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+        ui.add(island, Kind::Button("Wi-Fi".into()));
+        let label = ui.add(Ui::ROOT, Kind::Label("Connected".into()));
+        ui.layout();
+        let (i, l) = (ui.widget(island).rect, ui.widget(label).rect);
+        assert_eq!(i.y + i.h, 290.0, "down to the margin");
+        assert_eq!(l.y, 296.0, "below it");
+    }
+
+    #[test]
     fn widgets_at_the_bottom_follow_one_another_a_gap_apart_and_skip_the_hidden() {
         let mut ui = Ui::new("Align", gapped(), false);
         (ui.min_width, ui.min_height) = (400.0, 300.0);

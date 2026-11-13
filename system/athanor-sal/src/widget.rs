@@ -1746,7 +1746,7 @@ impl Ui {
                 } else {
                     end_y - gap
                 };
-                for &c in children {
+                for (at, &c) in children.iter().enumerate() {
                     let [across, along] = self.widgets[c].align;
                     if across == crate::Align::Fill
                         && matches!(
@@ -1767,12 +1767,23 @@ impl Ui {
                     }
                     // An island takes the rest of its column's height down to the widgets at
                     // the bottom, unless aligned along it; a picture, which takes no alignment
-                    // (Ui::set_align), always does.
+                    // (Ui::set_align), always does. Above a stack at the bottom it leaves room
+                    // for the widgets of the flow after it; without one they overflow below the
+                    // column, as they always have.
                     if along == crate::Align::Fill
                         && matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. })
                     {
+                        let after = if bottom.is_empty() {
+                            0.0
+                        } else {
+                            children[at + 1..]
+                                .iter()
+                                .filter(|&&n| self.widgets[n].align[1] != crate::Align::End)
+                                .map(|&n| self.widgets[n].rect.h + gap)
+                                .sum::<f32>()
+                        };
                         let r = &mut self.widgets[c].rect;
-                        r.h = r.h.max(limit - cy);
+                        r.h = r.h.max(limit - cy - after);
                     }
                     let r = self.widgets[c].rect;
                     // The end edge is the left one in right to left. A widget wider than the
