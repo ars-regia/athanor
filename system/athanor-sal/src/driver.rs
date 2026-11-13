@@ -1956,8 +1956,13 @@ impl App {
         self.forget(id);
     }
 
-    /// Ends the text input and the primary selection of the closed surface `id`.
+    /// Ends the text input and the primary selection of the closed surface `id`; a dialog that
+    /// held the keyboard hands it to the surface it was opened on, while that one is open.
     fn forget(&mut self, id: SurfaceId) {
+        let parent = self.shell.dialogs.take_parent(id);
+        if self.keyboard_focus == Some(id) {
+            self.keyboard_focus = parent.filter(|&parent| self.shell.ui(parent).is_some());
+        }
         self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
@@ -2014,10 +2019,10 @@ impl App {
 
     /// Moves the accessibility adapters' window focus to the surface that takes the keys, after
     /// every event: the open menu's while it holds them, though the compositor may keep the
-    /// keyboard on its parent, then back to the parent once it closes. An adapter emits its
-    /// focus events only while its window is focused.
+    /// keyboard on its parent, then back to the parent once it closes, and a blocked window's
+    /// topmost dialog. An adapter emits its focus events only while its window is focused.
     fn sync_window_focus(&mut self) {
-        let focused = focused_window(self.shell.popup, self.keyboard_focus);
+        let focused = focused_window(self.shell.popup, self.key_target());
         if focused == self.window_focus {
             return;
         }
@@ -2190,11 +2195,17 @@ impl App {
         }
     }
 
+    /// The surface that takes the keys the compositor sends: the one it focused, or the topmost
+    /// dialog that blocks it, which the compositor may never focus.
+    fn key_target(&self) -> Option<SurfaceId> {
+        self.keyboard_focus.map(|id| self.shell.dialogs.topmost(id))
+    }
+
     /// A key held down: as pressed again, with the serial of its press, which the repeat does
     /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
         let focused = self
-            .keyboard_focus
+            .key_target()
             .and_then(|id| self.shell.ui(id))
             .and_then(|ui| Some((ui, ui.focus()?)));
         let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
@@ -2248,10 +2259,10 @@ impl App {
             return;
         }
         // An open menu takes the keys, whichever of the application's surfaces the compositor
-        // sends them to.
+        // sends them to, and a blocked window's topmost dialog takes them from it.
         let target = match self.shell.popup {
             Some(open) if open.menu => Some(open.surface),
-            _ => self.keyboard_focus,
+            _ => self.key_target(),
         };
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return;

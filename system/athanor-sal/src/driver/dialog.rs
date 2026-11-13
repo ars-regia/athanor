@@ -32,6 +32,9 @@ pub(super) enum CloseRequest {
 pub(super) struct Dialogs {
     manager: Option<XdgWmDialogV1>,
     open: Vec<(SurfaceId, SurfaceId)>,
+    /// The dialogs closed and not yet forgotten by the driver, each with the surface it was
+    /// opened on, which takes the keyboard back from it.
+    closed: Vec<(SurfaceId, SurfaceId)>,
 }
 
 impl Dialogs {
@@ -41,6 +44,7 @@ impl Dialogs {
         Self {
             manager: globals.bind(qh, 1..=1, DialogData).ok(),
             open: Vec::new(),
+            closed: Vec::new(),
         }
     }
 
@@ -73,6 +77,26 @@ impl Dialogs {
         self.open.iter().any(|&(_, parent)| parent == id)
     }
 
+    /// The surface that takes the keys the compositor sends to `id`: the dialog opened last on
+    /// it, or the dialog opened last on that one, and so on, as GTK's modal window takes them
+    /// from its parent; `id` when no dialog blocks it. The compositor may never move the
+    /// keyboard to a new dialog.
+    pub(super) fn topmost(&self, id: SurfaceId) -> SurfaceId {
+        match self.open.iter().rev().find(|&&(_, parent)| parent == id) {
+            Some(&(dialog, _)) => self.topmost(dialog),
+            None => id,
+        }
+    }
+
+    /// The surface the closed dialog `dialog` was opened on, once: the driver forgets it.
+    pub(super) fn take_parent(&mut self, dialog: SurfaceId) -> Option<SurfaceId> {
+        let at = self
+            .closed
+            .iter()
+            .position(|&(closed, _)| closed == dialog)?;
+        Some(self.closed.swap_remove(at).1)
+    }
+
     /// What the compositor's request to close the window `id` does.
     pub(super) fn close_request(&self, id: SurfaceId) -> CloseRequest {
         if self.blocked(id) {
@@ -102,6 +126,11 @@ impl Dialogs {
     /// before the surface it was opened on: the order in which they close.
     pub(super) fn close(&mut self, id: SurfaceId, open: &[SurfaceId]) -> Vec<SurfaceId> {
         let order = self.closing_order(id);
+        let closed = self
+            .open
+            .iter()
+            .filter(|(dialog, _)| order.contains(dialog) && open.contains(dialog));
+        self.closed.extend(closed);
         for &surface in &order {
             self.open
                 .retain(|&(dialog, parent)| dialog != surface && parent != surface);
@@ -284,6 +313,39 @@ mod tests {
         assert_eq!(dialogs.close_request(nested), CloseRequest::Dialog);
         dialogs.close(dialog, &[window, dialog, nested]);
         assert_eq!(dialogs.close_request(window), CloseRequest::Exit);
+    }
+
+    /// The keys sent to a blocked window go to its topmost dialog, and a closed dialog's
+    /// parent takes the keyboard back from it, once.
+    #[test]
+    fn the_topmost_dialog_takes_the_keys_and_its_parent_takes_them_back() {
+        let (window, first, nested, second) =
+            (SurfaceId(0), SurfaceId(1), SurfaceId(2), SurfaceId(3));
+        let other = SurfaceId(4);
+        let mut dialogs = Dialogs::default();
+        assert_eq!(dialogs.topmost(window), window);
+        dialogs.opened(first, window);
+        assert_eq!(dialogs.topmost(window), first);
+        dialogs.opened(nested, first);
+        assert_eq!(dialogs.topmost(window), nested);
+        assert_eq!(dialogs.topmost(first), nested);
+        dialogs.opened(second, window);
+        assert_eq!(dialogs.topmost(window), second, "the dialog opened last");
+        assert_eq!(dialogs.topmost(other), other);
+        let open = [window, first, nested, second];
+        assert_eq!(dialogs.close(second, &open), [second]);
+        assert_eq!(dialogs.topmost(window), nested);
+        assert_eq!(dialogs.take_parent(second), Some(window));
+        assert_eq!(dialogs.take_parent(second), None, "once");
+        // The window's close closes the rest, each handing the keys to its parent.
+        assert_eq!(dialogs.close(window, &open), [nested, first, window]);
+        assert_eq!(dialogs.take_parent(nested), Some(first));
+        assert_eq!(dialogs.take_parent(first), Some(window));
+        assert_eq!(dialogs.take_parent(window), None, "not a dialog");
+        // A recorded dialog no longer open is not handed back.
+        dialogs.opened(first, window);
+        dialogs.close(window, &[window]);
+        assert_eq!(dialogs.take_parent(first), None);
     }
 
     #[test]
