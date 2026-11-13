@@ -23,7 +23,7 @@ def case(name, after):
     """The text of rig.sh's `after` case up to its next sibling, from the `name)` label."""
     text = RIG.read_text(encoding="utf-8")
     start = text.index(f"\n{after})\n")
-    match = re.compile(rf"\n    {name}\)\n(.*?)\n        ;;\n", re.DOTALL).search(text, start)
+    match = re.compile(rf"\n    {re.escape(name)}\)\n(.*?)\n        ;;\n", re.DOTALL).search(text, start)
     return match.group(1)
 
 
@@ -39,8 +39,9 @@ class GreeterOnlyUnderCosmicComp(unittest.TestCase):
 
 class AtspiReferences(unittest.TestCase):
     def test_bar_launcher_and_greeter_write_and_compare_their_transcripts(self):
-        for surface in ("bar", "launcher", "greeter"):
-            body = case(surface, "atspi")
+        # The bar's case serves bar-calendar too, the surface's name in $2.
+        for label, surface in (("bar | bar-calendar", "$2"), ("launcher", "launcher"), ("greeter", "greeter")):
+            body = case(label, "atspi")
             name = f"atspi-{surface}${{3:+-$3}}.json"
             self.assertIn(f'ATSPI_TRANSCRIPT="/out/{name}"', body, surface)
             self.assertIn(f"golden/atspi/{name}", body, surface)
