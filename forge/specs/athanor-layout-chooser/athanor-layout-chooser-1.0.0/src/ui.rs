@@ -85,6 +85,8 @@ impl Chooser {
     pub fn new(paths: Paths, look: Look, rtl: bool) -> Self {
         let mut ui = Ui::new(&tr("Layout"), look.theme.clone(), rtl);
         ui.min_width = 420.0;
+        // The GTK chooser's window was not resizable.
+        ui.resizable = false;
         let groups = vec![
             group(
                 &mut ui,
@@ -315,6 +317,8 @@ fn question(look: &Look, rtl: bool, file: &str) -> (Ui, WidgetId) {
     let mut ui = Ui::new(&message, look.theme.clone(), rtl);
     ui.root_role = RootRole::AlertDialog;
     ui.min_width = 300.0;
+    // GTK's alert dialog is a message dialog, which is not resizable.
+    ui.resizable = false;
     let heading = ui.add(Ui::ROOT, Kind::Label(message));
     look.message(&mut ui, heading);
     let detail = tr_with("Athanor keeps the current file as {file}.", "file", file);
