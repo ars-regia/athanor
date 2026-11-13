@@ -119,8 +119,10 @@ pub enum Kind {
         label: String,
         /// Whether this toggle is the active one of its group.
         active: bool,
-        /// Whether assistive technologies read it as a radio button, checked when active, rather
-        /// than as GTK's grouped toggle button, pressed when active. It is drawn the same.
+        /// Whether it is a radio button, checked when active, rather than GTK's grouped toggle
+        /// button, pressed when active: assistive technologies read it so, and it is drawn as
+        /// GTK's radio check button, a ring at the start edge with its label after it, the
+        /// chosen one's ring and the dot in it in the accent.
         radio: bool,
     },
     /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
@@ -147,7 +149,8 @@ pub enum Kind {
     /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
     /// steps. It fills the width of its column or group, or its cell in a row, and takes the
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
-    /// it with [`Ui::slider`], which keeps its range valid.
+    /// it with [`Ui::slider`], which keeps its range valid; change its value with
+    /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
@@ -323,7 +326,7 @@ pub struct Level {
 /// steps. The fields are closed to applications so that the invariants hold: the range is
 /// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
 /// `max`, which is always a value even when the step does not divide the range. Make one with
-/// [`Ui::slider`] and change it with [`Ui::set_value`].
+/// [`Ui::slider`], change its value with [`Ui::set_value`] and its range with [`Ui::set_range`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider {
     pub(crate) name: String,
@@ -334,6 +337,29 @@ pub struct Slider {
 }
 
 impl Slider {
+    /// The slider [`Ui::slider`] adds; `None` for the numbers it refuses.
+    pub(crate) fn new(name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<Slider> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Ui::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(slider)
+    }
+
     /// How many steps `value` is from `min`, the last one being `max`.
     fn last(&self) -> i64 {
         // A hair under the exact quotient, so that a range the step divides does not count
@@ -745,9 +771,9 @@ impl Ui {
         self.add(parent, Kind::Toggle { label, active, radio })
     }
 
-    /// Adds a toggle showing `label`, the active one of its group when `active`, which
-    /// assistive technologies read as a radio button: a dialog's choices, where
-    /// [`Ui::toggle`] gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
+    /// Adds a radio button showing `label`, the chosen one of its group when `active`: a
+    /// dialog's choices, drawn and read as GTK's radio check buttons, where [`Ui::toggle`]
+    /// gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
     ///
     /// # Panics
     ///
@@ -1034,24 +1060,7 @@ impl Ui {
         step: f64,
         value: f64,
     ) -> Option<WidgetId> {
-        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
-        if !(finite && min < max && step > 0.0) {
-            return None;
-        }
-        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
-        // counted, so that the index arithmetic and the drawing never leave the numbers.
-        let span = max - min;
-        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
-            return None;
-        }
-        let mut slider = Slider {
-            name: name.to_owned(),
-            value: min,
-            min,
-            max,
-            step,
-        };
-        slider.value = slider.snap(value)?;
+        let slider = Slider::new(name, min, max, step, value)?;
         Some(self.add(parent, Kind::Slider(slider)))
     }
 
@@ -1772,7 +1781,7 @@ impl Ui {
                 wh
             }
             Kind::Button(text)
-            | Kind::Toggle { label: text, .. }
+            | Kind::Toggle { label: text, radio: false, .. }
             | Kind::MenuItem(text)
             | Kind::ListRow(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
@@ -1780,7 +1789,9 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
-            Kind::Check { label, .. } | Kind::Switch { label, .. } => {
+            Kind::Check { label, .. }
+            | Kind::Switch { label, .. }
+            | Kind::Toggle { label, radio: true, .. } => {
                 let (mark_w, mark_h) = mark_size(is_switch, size);
                 let layout = self.text.layout(label, size, rtl, &style);
                 let wh = (

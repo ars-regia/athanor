@@ -14,10 +14,11 @@ use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHa
 use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
-use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
@@ -25,8 +26,9 @@ use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
 use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+    add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
+    with_states, Barrier, Blocker, BlockerState, BufferAssignment, CompositorClientState,
+    CompositorHandler, CompositorState, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{
     get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
@@ -55,17 +57,32 @@ use smithay::wayland::xdg_activation::{
 };
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 
-/// How many commits one client may hold waiting on a fence. Each holds an event source with a
-/// file descriptor and pins its buffer; a client keeps a few frames in flight per surface, and
-/// one that queues more without its fences signalling is flooding the compositor, which
-/// disconnects it rather than run out of file descriptors.
+/// How many commits one client may have waiting to be applied, whatever they wait on: a fence, a
+/// `wp_commit_timer_v1` timestamp, a FIFO barrier or an earlier commit of the same surface that
+/// waits. Smithay queues them per client without a bound and walks the whole queue at each
+/// commit; a held commit also takes an event source, a fence's with a file descriptor, and pins
+/// its buffer. A client keeps a few frames in flight per surface, and one that queues more is
+/// flooding the compositor, which disconnects it rather than run out of memory, file
+/// descriptors or main-thread time (`queue_commit`, `hold_slot`). The same number bounds, per
+/// surface, the commits a synchronised subsurface keeps for its parent's next commit (`Retained`).
 pub const MAX_HELD_COMMITS: usize = 64;
+
+/// How many commits all of one client's synchronised subsurfaces may keep together, each a copy of
+/// its surface's state held until its parent's next commit (`Retained`). The per-surface bound
+/// alone multiplies by a number of surfaces nothing bounds: a client creating subsurfaces by the
+/// thousand and committing each 64 times would have the compositor keep millions of copies from a
+/// few megabytes of requests. A client commits its synchronised subsurfaces, then their parent,
+/// once a frame, so each keeps one or two commits at a time: 1024 lets sixteen subsurfaces reach
+/// `MAX_HELD_COMMITS` at once, or several hundred keep a frame or two each, while it holds the
+/// copies a flooding client makes to about a thousand, a few megabytes at most.
+pub const MAX_RETAINED_COMMITS: usize = 1024;
 
 /// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
 /// commits. wayland-server sends no `wl_display.error` on `Client::kill`, and `post_error` reads
@@ -73,11 +90,92 @@ pub const MAX_HELD_COMMITS: usize = 64;
 /// no such error: the client sees its socket close, and the reason reaches `disconnected`.
 const NO_MEMORY: u32 = 2;
 
-/// A commit held on a fence: its client, and the event source that waits on the fence.
+/// A commit held on a fence or a timestamp: its client and surface, the event source that
+/// waits, and whether it waits on a timestamp.
 pub struct HeldCommit {
-    client: ClientId,
+    client: Client,
+    surface: ObjectId,
     seq: u64,
     token: RegistrationToken,
+    timed: bool,
+}
+
+/// Counts one commit in its client's `ClientState::queued` from the moment it is committed until
+/// Smithay applies it or drops it: a blocker that never blocks, put on each commit that goes to
+/// the client's queue, and dropped with the transaction that carries it.
+struct Queued(Arc<AtomicUsize>);
+
+/// The same for a commit of a synchronised subsurface, counted in the surface's `Retained`.
+struct Kept(Arc<Retained>);
+
+/// How many commits a synchronised subsurface keeps, each with its own copy of the surface's
+/// state, until a commit of its parent takes them (Smithay 62ec78d, `PrivateSurfaceData::commit`
+/// and `CachedState::commit`). They are the surface's, not the client's queue: they stay after a
+/// `set_desync` until the surface's next commit, and with a destroyed `wl_subsurface`, which
+/// leaves the surface synchronised and without a parent, until the surface has a parent again or
+/// is destroyed. They count per surface against `MAX_HELD_COMMITS`, and with every other
+/// synchronised subsurface's of their client against `MAX_RETAINED_COMMITS`; a destroyed surface
+/// takes them out of the client's count at once, whatever still holds it. Both are only changed on
+/// the compositor's thread, where Smithay drops blockers and calls destruction hooks.
+struct Retained {
+    /// The commits the surface keeps.
+    kept: AtomicUsize,
+    /// Its client's `ClientState::retained`.
+    client: Arc<AtomicUsize>,
+    /// Whether the surface is destroyed, its commits out of `client`.
+    destroyed: AtomicBool,
+}
+
+impl Retained {
+    /// Counts one more commit kept, and returns how many the surface and its client keep.
+    fn keep(&self) -> (usize, usize) {
+        let kept = self.kept.fetch_add(1, Ordering::Relaxed) + 1;
+        if self.destroyed.load(Ordering::Relaxed) {
+            return (kept, 0);
+        }
+        (kept, self.client.fetch_add(1, Ordering::Relaxed) + 1)
+    }
+
+    /// Counts one commit applied or dropped.
+    fn release(&self) {
+        self.kept.fetch_sub(1, Ordering::Relaxed);
+        if !self.destroyed.load(Ordering::Relaxed) {
+            self.client.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Takes the surface's commits out of its client's count, once, when the surface is
+    /// destroyed.
+    fn destroy(&self) {
+        if !self.destroyed.swap(true, Ordering::Relaxed) {
+            self.client
+                .fetch_sub(self.kept.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+}
+
+impl Blocker for Queued {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Queued {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl Blocker for Kept {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Kept {
+    fn drop(&mut self) {
+        self.0.release();
+    }
 }
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
@@ -156,13 +254,26 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
-            state.wait_for_fence(dh, surface)
+            if state.queue_commit(surface) {
+                state.wait_for_fence(dh, surface);
+                state.pace(surface);
+            }
+        });
+        add_destruction_hook::<Self, _>(surface, |state, surface| {
+            if let Some(retained) =
+                with_states(surface, |states| states.data_map.get::<Arc<Retained>>().cloned())
+            {
+                retained.destroy();
+            }
+            state.release_held_of(surface);
+            state.fifo_surfaces.remove(&surface.id());
         });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
         // Also reached outside a dispatch of the clients, when a held commit's fence signals.
         self.request_redraw();
+        self.fifo_committed(surface);
         on_commit_buffer_handler::<Self>(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
@@ -280,58 +391,206 @@ impl State {
         B: Blocker + Send + 'static,
         S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
     {
-        let Some(client) = surface.client() else {
+        let Some((client, seq)) = self.hold_slot(surface) else {
             return;
         };
-        let id = client.id();
-        if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
-            tracing::warn!(
-                ?id,
-                "a client holds too many commits on fences: disconnected"
-            );
-            client.kill(
-                &self.display_handle,
-                ProtocolError {
-                    code: NO_MEMORY,
-                    object_id: 1,
-                    object_interface: "wl_display".into(),
-                    message: format!("more than {MAX_HELD_COMMITS} commits wait on a fence"),
-                },
-            );
+        let owner = client.clone();
+        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
+            state.unhold(&client, seq);
+            Ok(())
+        };
+        let token = self.loop_handle.insert_source(source, unblock);
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, blocker, owner, seq, token, false);
+    }
+
+    /// Holds the pending commit of `surface`, which carries a `wp_commit_timer_v1` timestamp,
+    /// on the barrier `register` makes until `wait` has passed, under the bound of
+    /// `hold_commit`: the barrier is made only once the commit has its place. Every barrier of
+    /// the surface due by then is signalled (`pacing.rs`).
+    pub fn hold_until(
+        &mut self,
+        surface: &WlSurface,
+        wait: Duration,
+        register: impl FnOnce() -> Option<Barrier>,
+    ) {
+        let Some((client, seq)) = self.hold_slot(surface) else {
             return;
+        };
+        let Some(barrier) = register() else {
+            return;
+        };
+        let owner = client.clone();
+        let weak = surface.downgrade();
+        let unblock = move |_, _: &mut (), state: &mut State| {
+            if let Ok(surface) = weak.upgrade() {
+                crate::pacing::timestamps_due(&surface, state.clock.now());
+            }
+            state.unhold(&client, seq);
+            TimeoutAction::Drop
+        };
+        let token = self
+            .loop_handle
+            .insert_source(Timer::from_duration(wait), unblock);
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, barrier, owner, seq, token, true);
+    }
+
+    /// Counts the commit `surface` is making, until it is applied or dropped, and whether it goes
+    /// on: past `MAX_HELD_COMMITS` its client is disconnected instead. A synchronised
+    /// subsurface's commit counts in the subsurface's `Retained`, and its client is also
+    /// disconnected past `MAX_RETAINED_COMMITS` of them; any other counts in its client's queued
+    /// commits. The commits of a surface destroyed since stay in the queue until Smithay next
+    /// looks at it and drops them, so a client at the bound has its queue looked at before it is
+    /// judged.
+    fn queue_commit(&mut self, surface: &WlSurface) -> bool {
+        let Some(client) = surface.client() else {
+            return true;
+        };
+        let Some((queued, retained_by_client)) = client
+            .get_data::<ClientState>()
+            .map(|data| (data.queued.clone(), data.retained.clone()))
+        else {
+            return true;
+        };
+        if is_sync_subsurface(surface) {
+            let retained = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get_or_insert_threadsafe(|| {
+                        Arc::new(Retained {
+                            kept: AtomicUsize::new(0),
+                            client: retained_by_client,
+                            destroyed: AtomicBool::new(false),
+                        })
+                    })
+                    .clone()
+            });
+            let (kept, kept_by_client) = retained.keep();
+            add_blocker(surface, Kept(retained));
+            if kept > MAX_HELD_COMMITS || kept_by_client > MAX_RETAINED_COMMITS {
+                self.flooded(&client, "kept by synchronised subsurfaces");
+                return false;
+            }
+            return true;
+        }
+        let mut waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
+        add_blocker(surface, Queued(queued.clone()));
+        if waiting > MAX_HELD_COMMITS {
+            let dh = self.display_handle.clone();
+            self.client_compositor_state(&client)
+                .blocker_cleared(self, &dh);
+            waiting = queued.load(Ordering::Relaxed);
+        }
+        if waiting > MAX_HELD_COMMITS {
+            self.flooded(&client, "queued");
+            return false;
+        }
+        true
+    }
+
+    /// Disconnects `client`, which has more than its bound of commits `how`.
+    fn flooded(&self, client: &Client, how: &str) {
+        let id = client.id();
+        tracing::warn!(?id, how, "a client has too many commits waiting: disconnected");
+        client.kill(
+            &self.display_handle,
+            ProtocolError {
+                code: NO_MEMORY,
+                object_id: 1,
+                object_interface: "wl_display".into(),
+                message: format!("more than {MAX_HELD_COMMITS} commits are {how}"),
+            },
+        );
+    }
+
+    /// The client of `surface` and a sequence number for one more held commit, or nothing,
+    /// when the surface has no client or its client is disconnected for holding too many.
+    fn hold_slot(&mut self, surface: &WlSurface) -> Option<(Client, u64)> {
+        let client = surface.client()?;
+        let id = client.id();
+        let held = self.held.iter().filter(|held| held.client.id() == id);
+        if held.count() >= MAX_HELD_COMMITS {
+            self.flooded(&client, "held");
+            return None;
         }
         let seq = self.next_held;
         self.next_held += 1;
-        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
-            state.held.retain(|held| held.seq != seq);
-            let dh = state.display_handle.clone();
-            state
-                .client_compositor_state(&client)
-                .blocker_cleared(state, &dh);
-            Ok(())
-        };
-        match self.loop_handle.insert_source(source, unblock) {
+        Some((client, seq))
+    }
+
+    /// Records the held commit `seq` once its event source is in the loop, and blocks it.
+    fn held_on<B: Blocker + Send + 'static>(
+        &mut self,
+        surface: &WlSurface,
+        blocker: B,
+        client: Client,
+        seq: u64,
+        token: Result<RegistrationToken, smithay::reexports::calloop::Error>,
+        timed: bool,
+    ) {
+        match token {
             Ok(token) => {
                 self.held.push(HeldCommit {
-                    client: id,
+                    client,
+                    surface: surface.id(),
                     seq,
                     token,
+                    timed,
                 });
                 add_blocker(surface, blocker);
             }
-            Err(error) => tracing::warn!(error = %error.error, "a fence cannot be waited on"),
+            Err(error) => tracing::warn!(%error, "a held commit cannot be waited on"),
         }
     }
 
-    /// Drops the commits `client` holds on fences, with their event sources.
+    /// The held commit `seq` of `client` is released: its client's blocked commits are tried.
+    fn unhold(&mut self, client: &Client, seq: u64) {
+        self.held.retain(|held| held.seq != seq);
+        let dh = self.display_handle.clone();
+        self.client_compositor_state(client)
+            .blocker_cleared(self, &dh);
+    }
+
+    /// Drops the commits `client` holds on fences and timestamps, with their event sources.
     pub fn release_held(&mut self, client: &ClientId) {
         let loop_handle = &self.loop_handle;
         self.held.retain(|held| {
-            let keep = &held.client != client;
+            let keep = held.client.id() != *client;
             if !keep {
                 loop_handle.remove(held.token);
             }
             keep
+        });
+    }
+
+    /// When `surface` is destroyed: signals at once the timestamps its held commits wait on,
+    /// frees their timers and places, and tries its client's commits once the destruction is
+    /// over. A synchronised subsurface's timed commit waits inside its parent's commit, which
+    /// stays while the parent lives: a timer dropped unsignalled would hold that commit, and the
+    /// parent's after it, until the client goes. A commit held on a fence keeps its event source,
+    /// which releases it when the fence signals, and goes with its client.
+    fn release_held_of(&mut self, surface: &WlSurface) {
+        let id = surface.id();
+        let mut client = None;
+        let loop_handle = &self.loop_handle;
+        self.held.retain(|held| {
+            let keep = !held.timed || held.surface != id;
+            if !keep {
+                loop_handle.remove(held.token);
+                client = Some(held.client.clone());
+            }
+            keep
+        });
+        let Some(client) = client else {
+            return;
+        };
+        crate::pacing::timestamps_due(surface, self.clock.now() + crate::pacing::MAX_TIMED_WAIT);
+        self.loop_handle.insert_idle(move |state| {
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
         });
     }
 
@@ -1465,6 +1724,11 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
         .unwrap_or(enter);
     serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
 }
+
+/// xdg-toplevel-icon (doc_own_stack.md decision 33, standard): the compositor answers the
+/// manager (`toplevel_icon.rs`); each icon passes its requests on to Smithay's, whose checks
+/// need this handler.
+impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
 smithay::delegate_dispatch2!(State);
 
