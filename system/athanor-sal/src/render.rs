@@ -181,6 +181,9 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 const HOVER: f32 = 0.05;
 /// How much of its opacity an insensitive widget keeps: half, as Adwaita's.
 const INSENSITIVE: f32 = 0.5;
+
+/// How much of the text a day of the month before or after keeps, as GTK's dimmed label.
+const OTHER_MONTH: f32 = 0.35;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
 
@@ -341,6 +344,11 @@ pub fn paint<C: Canvas>(
             ctx.push_clip_path(&rounded(c, 0.0, t.radius));
         }
         let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
+        // A calendar's line goes under its heading, its first child.
+        let heading = match ui.widgets[id].kind {
+            Kind::Calendar(_) => ui.widgets[id].children.first().map(|&h| ui.widgets[h].rect),
+            _ => None,
+        };
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
@@ -352,6 +360,48 @@ pub fn paint<C: Canvas>(
             | Kind::Alert(_)
             | Kind::Menu
             | Kind::Scroll { .. } => {}
+            // A line under its heading, as GTK's header border.
+            Kind::Calendar(_) => {
+                if let Some(h) = heading {
+                    let y = f64::from((h.bottom() + t.gap / 2.0).floor());
+                    ctx.set_paint(color(t.border));
+                    ctx.fill_rect(&Rect::new(
+                        f64::from(r.x),
+                        y,
+                        f64::from(r.x + r.w),
+                        y + 1.0,
+                    ));
+                }
+            }
+            Kind::CalendarCell(cell) => {
+                let mark = cell.day.unwrap_or_default();
+                let ink = if mark.selected {
+                    ctx.set_paint(color(t.accent));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                    t.on_accent
+                } else if mark.other {
+                    mix(t.background, t.text, OTHER_MONTH)
+                } else {
+                    t.text
+                };
+                if mark.today && !mark.selected {
+                    ctx.set_paint(color(t.accent));
+                    let y = f64::from(r.bottom()) - 2.0;
+                    ctx.fill_rect(&Rect::new(
+                        f64::from(r.x),
+                        y,
+                        f64::from(r.x + r.w),
+                        y + 2.0,
+                    ));
+                }
+                if let Some(layout) = &widget.text {
+                    let at = (
+                        r.x + (r.w - layout.width()) / 2.0,
+                        r.y + (r.h - layout.height()) / 2.0,
+                    );
+                    draw_text(ctx, resources, layout, at, ink)?;
+                }
+            }
             Kind::Island { .. } => {
                 if let Some(fill) = island {
                     ctx.set_paint(color(t.island));

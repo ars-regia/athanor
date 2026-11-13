@@ -25,6 +25,9 @@ impl Ui {
         if dx == 0 && dy == 0 {
             return None;
         }
+        if let Some(done) = self.calendar_wheel(x, y, dy) {
+            return done;
+        }
         self.hit(x, y).map(|widget| Event::Wheel { widget, dx, dy })
     }
 }

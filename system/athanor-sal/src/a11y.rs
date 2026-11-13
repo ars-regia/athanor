@@ -53,6 +53,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
+        // GTK's calendar reaches AT-SPI as an unnamed panel, which AccessKit's Group is; a
+        // GenericContainer would leave no node at all (accesskit_consumer, filters.rs).
+        Kind::Calendar(_) => Node::new(Role::Group),
         Kind::Alert(name) => {
             let mut node = Node::new(Role::Alert);
             node.set_label(name.as_str());
@@ -68,6 +71,16 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::Label(text) => {
             let mut node = Node::new(Role::Label);
             node.set_value(text.as_str());
+            node
+        }
+        // GTK's day and weekday labels; a day takes the focus, so it is named by its number too.
+        Kind::CalendarCell(cell) => {
+            let mut node = Node::new(Role::Label);
+            node.set_value(cell.text.as_str());
+            if let Some(mark) = cell.day {
+                node.set_label(cell.text.as_str());
+                node.set_selected(mark.selected);
+            }
             node
         }
         Kind::WindowButton(button) => {

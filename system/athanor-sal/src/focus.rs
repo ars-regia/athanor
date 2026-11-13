@@ -18,7 +18,7 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
             out.extend(list_stop(ui, id));
             continue;
         }
-        if ui.widget(id).is_focusable() {
+        if ui.widget(id).is_focusable() && ui.is_calendar_stop(id) {
             out.push(id);
         }
         stack.extend(ui.widget(id).children.iter().rev());

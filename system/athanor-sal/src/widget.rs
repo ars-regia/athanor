@@ -8,9 +8,12 @@ use crate::wrap::{self, Wrap};
 use parley::Layout;
 
 mod alert;
+mod calendar;
 mod labelled;
 mod strip;
 pub(crate) mod wheel;
+
+pub use calendar::{Calendar, CalendarText, Cell, Date};
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
@@ -292,6 +295,17 @@ pub enum Kind {
         /// The text shown after the image; empty shows the image alone.
         text: String,
     },
+    /// A month, as GTK's `Calendar`: a heading with the month and the year, each between
+    /// buttons to the one before and the one after, the weekdays' short names from the
+    /// locale's first, and six weeks of [`Kind::CalendarCell`]s. The days are one stop of the
+    /// focus: the arrows move it between them, Ctrl+Left and Ctrl+Right change the month,
+    /// Ctrl+Up and Ctrl+Down the year, the wheel the month, and Enter, Space or a click select
+    /// the focused day. A change of the selected day raises [`Event::Changed`] for the
+    /// calendar. In a column it fills the line. Add it with [`Ui::calendar`].
+    Calendar(Box<Calendar>),
+    /// A weekday's name or a day of a [`Kind::Calendar`], which makes them; a day takes the
+    /// focus and reads as a label with its number.
+    CalendarCell(Cell),
 }
 
 /// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
@@ -436,6 +450,7 @@ impl Widget {
                     | Kind::IconButton { .. }
                     | Kind::LabelledButton { .. }
                     | Kind::ListRow(_)
+                    | Kind::CalendarCell(Cell { day: Some(_), .. })
             )
     }
 }
@@ -583,6 +598,14 @@ pub enum Key {
     Cut,
     /// Ctrl+V: pastes the clipboard into a field.
     Paste,
+    /// Ctrl+Left: the month before on a calendar; elsewhere the left arrow.
+    ControlLeft,
+    /// Ctrl+Right: the month after on a calendar; elsewhere the right arrow.
+    ControlRight,
+    /// Ctrl+Up: the year before on a calendar; elsewhere the up arrow.
+    ControlUp,
+    /// Ctrl+Down: the year after on a calendar; elsewhere the down arrow.
+    ControlDown,
 }
 
 /// What the root of a surface is to assistive technologies, named by [`Ui::title`]. New roles
@@ -1677,7 +1700,7 @@ impl Ui {
                     content[1] + 2.0 * island_pad + top + bottom,
                 )
             }
-            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
                     Some((bar, rest)) if bar_first => (*bar, rest),
@@ -1739,6 +1762,12 @@ impl Ui {
                     }
                 };
                 let wh = (w, layout.height());
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::CalendarCell(cell) => {
+                let layout = self.text.layout(&cell.text, size, rtl, &style);
+                let wh = calendar::measure_cell(layout.width(), layout.height(), pad);
                 widget.text = Some(layout);
                 wh
             }
@@ -1839,7 +1868,7 @@ impl Ui {
                     }
                 }
             }
-            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
                 let mut cy = y + edge;
                 let mut children = &children[..];
                 if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
@@ -1855,6 +1884,7 @@ impl Ui {
                             | Kind::CenterBox
                             | Kind::Group(_)
                             | Kind::Alert(_)
+                            | Kind::Calendar(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
                             | Kind::Slider(_)
@@ -1942,6 +1972,9 @@ impl Ui {
             return None;
         }
         self.set_focus(Some(id));
+        if let Some(calendar) = self.calendar_of(id) {
+            return self.activate_in_calendar(calendar, id);
+        }
         match self.widgets[id].kind {
             Kind::Button(_)
             | Kind::MenuItem(_)
@@ -2274,6 +2307,17 @@ impl Ui {
         if key == Key::Escape {
             return Some(Event::Escape);
         }
+        if let Some(done) = self.calendar_key(&key) {
+            return done;
+        }
+        // Outside a calendar, Ctrl leaves an arrow what it is.
+        let key = match key {
+            Key::ControlLeft => Key::Left,
+            Key::ControlRight => Key::Right,
+            Key::ControlUp => Key::Up,
+            Key::ControlDown => Key::Down,
+            key => key,
+        };
         let focused = self.focus;
         if let Some(id) = focused {
             let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
