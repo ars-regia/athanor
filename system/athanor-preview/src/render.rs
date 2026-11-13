@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use athanor_unit::text::line;
 
-use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib};
+use gio::prelude::*;
+
+use crate::Picture;
 
 pub const HELPER: &str = "/usr/libexec/athanor-preview-render";
 const MAGIC: &[u8; 5] = b"ATPV1";
@@ -147,7 +148,7 @@ static UNITS: AtomicU64 = AtomicU64::new(0);
 /// Runs the helper in its own unit and returns its bitmap. When `cancellable` fires or the
 /// deadline passes, the unit is stopped, not only systemd-run: the caller may start the
 /// next decode once this returns.
-pub async fn render(file: File, kind: Kind, side: u32, cancellable: &gio::Cancellable) -> Result<gdk::MemoryTexture, RenderError> {
+pub async fn render(file: File, kind: Kind, side: u32, cancellable: &gio::Cancellable) -> Result<Picture, RenderError> {
     let unit = format!("athanor-preview-{}-{}", std::process::id(), UNITS.fetch_add(1, Ordering::Relaxed));
     let launcher = gio::SubprocessLauncher::new(gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_PIPE);
     launcher.take_stdin_fd(Some(OwnedFd::from(file)));
@@ -171,13 +172,7 @@ pub async fn render(file: File, kind: Kind, side: u32, cancellable: &gio::Cancel
         }
     };
     let (width, height, rgba) = decode(&answer)?;
-    Ok(gdk::MemoryTexture::new(
-        width as i32,
-        height as i32,
-        gdk::MemoryFormat::R8g8b8a8Premultiplied,
-        &glib::Bytes::from(rgba),
-        width as usize * 4,
-    ))
+    Ok(Picture { width, height, rgba: glib::Bytes::from(rgba) })
 }
 
 /// How long a stop is retried.
