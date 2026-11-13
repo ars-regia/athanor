@@ -4,6 +4,7 @@
 //! scale 1, an output as it draws itself, and either is copied into the client's wl_shm buffer at
 //! the next frame of the outputs. Nothing is captured while the session is locked (spike Q7).
 
+use crate::background_effect::Blurs;
 use crate::a11y::Look;
 use crate::look::{FilterElement, Filters};
 use crate::marks::Marks;
@@ -249,7 +250,7 @@ pub fn read_back<R, T>(
     marks: &Marks,
 ) -> Result<Vec<u8>, Error>
 where
-    R: Filters + ExportMem + Offscreen<T> + Bind<T>,
+    R: Filters + Blurs + ExportMem + Offscreen<T> + Bind<T>,
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
     FilterElement<R::TextureId>: RenderElement<R>,

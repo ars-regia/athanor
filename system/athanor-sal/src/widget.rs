@@ -4,6 +4,7 @@
 use crate::focus;
 use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
+use crate::wrap::{self, Wrap};
 use parley::Layout;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
@@ -137,12 +138,16 @@ pub enum Kind {
     /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
     /// steps. It fills the width of its column or group, or its cell in a row, and takes the
     /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
-    /// it with [`Ui::slider`], which keeps its range valid.
+    /// it with [`Ui::slider`], which keeps its range valid; change its value with
+    /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
     /// A drop-down, as GTK's `DropDown`: a raised button that shows its chosen item and opens
     /// its items in a menu, where choosing one raises [`Event::Changed`]. Activating it raises
     /// [`Event::Clicked`], which the driver takes to open the menu. Add it with [`Ui::drop_down`].
     DropDown(crate::drop_down::DropDown),
+    /// A raised button that shows only an icon and turns on and off by itself, as a mute
+    /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
+    IconToggle(crate::icon_toggle::IconToggle),
     /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
     /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
     /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
@@ -275,7 +280,7 @@ pub struct Level {
 /// steps. The fields are closed to applications so that the invariants hold: the range is
 /// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
 /// `max`, which is always a value even when the step does not divide the range. Make one with
-/// [`Ui::slider`] and change it with [`Ui::set_value`].
+/// [`Ui::slider`], change its value with [`Ui::set_value`] and its range with [`Ui::set_range`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct Slider {
     pub(crate) name: String,
@@ -286,6 +291,29 @@ pub struct Slider {
 }
 
 impl Slider {
+    /// The slider [`Ui::slider`] adds; `None` for the numbers it refuses.
+    pub(crate) fn new(name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<Slider> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Ui::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(slider)
+    }
+
     /// How many steps `value` is from `min`, the last one being `max`.
     fn last(&self) -> i64 {
         // A hair under the exact quotient, so that a range the step divides does not count
@@ -362,6 +390,8 @@ pub struct Widget {
     /// Whether the widget itself takes input, as GTK's `sensitive` property: see
     /// [`Ui::set_sensitive`].
     pub(crate) sensitive: bool,
+    /// How a label wraps, see [`Ui::set_wrap`], and the width its last place gave it, if one has.
+    pub(crate) wrap: Option<(Wrap, Option<f32>)>,
 }
 
 impl Widget {
@@ -378,6 +408,7 @@ impl Widget {
             tooltip: None,
             description: None,
             sensitive: true,
+            wrap: None,
         }
     }
 
@@ -391,6 +422,7 @@ impl Widget {
                     | Kind::Toggle { .. }
                     | Kind::Check { .. }
                     | Kind::Switch { .. }
+                    | Kind::IconToggle(_)
                     | Kind::Slider(_)
                     | Kind::DropDown(_)
                     | Kind::Field(_)
@@ -411,7 +443,8 @@ pub enum Event {
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
-    /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
+    /// A check button, a switch or an icon toggle was turned on or off; ask [`Ui::is_active`]
+    /// which.
     Toggled(WidgetId),
     /// A slider's value changed; ask [`Ui::value`] what it is.
     Changed(WidgetId),
@@ -545,6 +578,8 @@ pub enum RootRole {
     /// A dialog that asks for an answer before the work goes on: ARIA's `alertdialog`, AT-SPI's
     /// alert.
     AlertDialog,
+    /// A dialog, as GTK's modal windows: ARIA's `dialog`, AT-SPI's dialog.
+    Dialog,
 }
 
 /// One window's widgets, theme, reading direction and keyboard focus.
@@ -570,6 +605,8 @@ pub struct Ui {
     pub(crate) focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     title_bar: Option<WidgetId>,
+    /// A modal dialog's widgets: see [`Ui::set_dialog`].
+    pub(crate) modal: bool,
     size: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
@@ -599,6 +636,7 @@ impl Ui {
             focus: None,
             text: TextContext::default(),
             title_bar: None,
+            modal: false,
             size: (0.0, 0.0),
             hover: None,
             press: None,
@@ -805,9 +843,23 @@ impl Ui {
         root.pop();
         root.insert(0, bar);
         self.add(bar, Kind::Label(self.title.clone()));
-        self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
+        if !self.modal {
+            self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        }
         self.add(bar, Kind::WindowButton(WindowButton::Close));
         self.title_bar = Some(bar);
+    }
+
+    /// Makes these widgets a modal dialog's, as [`crate::Shell::open_dialog`] does: the root
+    /// reads as a modal dialog, an alert dialog's role kept, the title bar has only Close, and
+    /// Escape is [`Event::Window`] with [`WindowButton::Close`], as GTK's dialogs close at
+    /// Escape.
+    pub(crate) fn set_dialog(&mut self) {
+        self.modal = true;
+        if self.root_role == RootRole::Window {
+            self.root_role = RootRole::Dialog;
+        }
     }
 
     /// Whether the point, in logical pixels, is on the title bar: where a press moves the window.
@@ -842,7 +894,7 @@ impl Ui {
     }
 
     /// Whether `id` is a toggle that is the active one of its group, or a check button that is
-    /// checked, or a switch that is on.
+    /// checked, or a switch or an icon toggle that is on.
     ///
     /// # Panics
     ///
@@ -853,14 +905,16 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
         )
     }
 
-    /// Sets the state of the toggle, check button or switch `id` as activating it would, without
-    /// moving the focus, and returns the event the activation raises: [`Event::Toggled`] for a
-    /// check button or a switch, [`Event::Selected`] for a toggle, which becomes the active one
-    /// of its group and releases the others. Only another toggle of its group releases a
-    /// toggle, as a click does, so setting one inactive changes nothing. `None`, and nothing
+    /// Sets the state of the toggle, check button, switch or icon toggle `id` as activating it
+    /// would, without moving the focus, and returns the event the activation raises:
+    /// [`Event::Toggled`] for a check button, a switch or an icon toggle, [`Event::Selected`]
+    /// for a toggle, which becomes the active one of its group and releases the others. Only
+    /// another toggle of its group releases a toggle, as a click does, so setting one inactive
+    /// changes nothing. `None`, and nothing
     /// changes, for another kind and for the state the widget already has. An insensitive
     /// widget is set as well.
     ///
@@ -876,7 +930,11 @@ impl Ui {
             | Kind::Switch {
                 active: ref mut now,
                 ..
-            } => {
+            }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle {
+                active: ref mut now,
+                ..
+            }) => {
                 if *now == active {
                     return None;
                 }
@@ -904,7 +962,8 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider or an icon button;
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
+    /// an icon toggle;
     /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
@@ -928,6 +987,7 @@ impl Ui {
             | Kind::Check { label: t, .. }
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
             | Kind::Picture { description: t, .. } => t,
@@ -961,24 +1021,7 @@ impl Ui {
         step: f64,
         value: f64,
     ) -> Option<WidgetId> {
-        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
-        if !(finite && min < max && step > 0.0) {
-            return None;
-        }
-        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
-        // counted, so that the index arithmetic and the drawing never leave the numbers.
-        let span = max - min;
-        if !(span.is_finite() && span / step <= Self::SLIDER_MAX_STEPS) {
-            return None;
-        }
-        let mut slider = Slider {
-            name: name.to_owned(),
-            value: min,
-            min,
-            max,
-            step,
-        };
-        slider.value = slider.snap(value)?;
+        let slider = Slider::new(name, min, max, step, value)?;
         Some(self.add(parent, Kind::Slider(slider)))
     }
 
@@ -1323,6 +1366,22 @@ impl Ui {
         true
     }
 
+    /// Makes label `id` wrap as [`Wrap`] says, as GTK's `wrap`, `max-width-chars`, `lines` and
+    /// end `ellipsize`, or, with `None`, keep its text on one line again; takes effect from its
+    /// next layout. `false`, and nothing changes, for a widget that is not a label.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_wrap(&mut self, id: WidgetId, wrap: Option<Wrap>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_)) {
+            return false;
+        }
+        widget.wrap = wrap.map(|w| (w, None));
+        true
+    }
+
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
     /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
     /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
@@ -1531,10 +1590,29 @@ impl Ui {
 
     /// Shapes every text and places every widget; returns the window's size in logical pixels.
     pub fn layout(&mut self) -> (f32, f32) {
-        let (w, h) = self.measure(Self::ROOT);
+        let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
+        // Height for width: a wrapping label asks for a width that does not depend on the one its
+        // place gives it, so a second pass breaks its lines at that width and settles the heights.
+        if self.rewrap() {
+            (w, h) = self.measure(Self::ROOT);
+            self.place(Self::ROOT, 0.0, 0.0);
+        }
         self.size = (w, h);
         self.size
+    }
+
+    /// Records the width each wrapping label was placed at; whether one changed.
+    pub(crate) fn rewrap(&mut self) -> bool {
+        let mut changed = false;
+        for widget in &mut self.widgets.0 {
+            let w = Some(widget.rect.w);
+            if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
+                *given = w;
+                changed = true;
+            }
+        }
+        changed
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
@@ -1543,7 +1621,7 @@ impl Ui {
         shown.copied().filter(|&c| widgets[c].visible).collect()
     }
 
-    fn measure(&mut self, id: WidgetId) -> (f32, f32) {
+    pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
         let t = &self.theme;
         let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
         let (margin, section_gap) = (t.margin, t.section_gap);
@@ -1581,6 +1659,11 @@ impl Ui {
             Kind::Picture { .. } => (0.0, 0.0),
             // GTK's box: the padding outside the minimum, across the line of text only.
             Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
+            // A raised button: the padding on every side, and at least the smallest button.
+            Kind::IconToggle(toggle) => {
+                let side = (toggle.size + pad).max(button_min);
+                (side, side)
+            }
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
                 let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
@@ -1624,8 +1707,21 @@ impl Ui {
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
-                let layout = self.text.layout(text, size, rtl, &style);
-                let wh = (layout.width(), layout.height());
+                let (layout, w) = match &widget.wrap {
+                    Some((wrap, given)) => {
+                        let asked = wrap::request(&mut self.text, text, (size, rtl), &style, wrap);
+                        // Before its first place, at the width it asks for.
+                        let at = given.unwrap_or(asked);
+                        let shaped = (size, rtl);
+                        (wrap::layout(&mut self.text, text, shaped, &style, wrap, at), asked)
+                    }
+                    None => {
+                        let layout = self.text.layout(text, size, rtl, &style);
+                        let w = layout.width();
+                        (layout, w)
+                    }
+                };
+                let wh = (w, layout.height());
                 widget.text = Some(layout);
                 wh
             }
@@ -1759,7 +1855,8 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) {
+                    ) || self.widgets[c].wrap.is_some()
+                    {
                         self.widgets[c].rect.w = outer.w - 2.0 * edge;
                     }
                     // An island and a picture take the rest of their column's height too.
@@ -1826,7 +1923,8 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group, a check button or a switch turns over, a list's row becomes its selected one.
+    /// its group, a check button, a switch or an icon toggle turns over, a list's row becomes its
+    /// selected one.
     /// Each takes the focus.
     ///
     /// # Panics
@@ -1842,7 +1940,9 @@ impl Ui {
                 Some(Event::Clicked(id))
             }
             Kind::WindowButton(button) => Some(Event::Window(button)),
-            Kind::Check { ref mut active, .. } | Kind::Switch { ref mut active, .. } => {
+            Kind::Check { ref mut active, .. }
+            | Kind::Switch { ref mut active, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { ref mut active, .. }) => {
                 *active = !*active;
                 Some(Event::Toggled(id))
             }
@@ -2161,8 +2261,13 @@ impl Ui {
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
     /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
-    /// [`Event::Escape`].
+    /// [`Event::Escape`], and in a dialog's widgets the window's Close, but while a focused field
+    /// shows the input method's preedit: the input method's to cancel, as GTK's input method
+    /// filters keys before a dialog's bindings.
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        if key == Key::Escape && self.modal {
+            return (!self.composing()).then_some(Event::Window(WindowButton::Close));
+        }
         if key == Key::Escape {
             return Some(Event::Escape);
         }
@@ -2358,6 +2463,17 @@ impl Ui {
             self.set_focus(next);
         }
         None
+    }
+
+    /// Whether the focused field shows the input method's preedit.
+    fn composing(&self) -> bool {
+        let Some(id) = self.focus else {
+            return false;
+        };
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.is_composing(),
+            _ => false,
+        }
     }
 
     /// Shows the input method's preedit in the focused field, scrolled to its caret.
