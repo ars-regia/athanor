@@ -1547,6 +1547,7 @@ impl Ui {
         let (margin, section_gap) = (t.margin, t.section_gap);
         let (min_width, min_height) = (self.min_width, self.min_height);
         let (island_pad, button_min) = (t.island_padding, t.button_min);
+        let inks = [t.text, t.on_accent];
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
@@ -1585,7 +1586,7 @@ impl Ui {
                 &mut widget.text,
                 (size, pad, gap, rtl),
                 &style,
-                [t.text, t.on_accent],
+                inks,
             ),
             Kind::Island { vertical, margin } => {
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
