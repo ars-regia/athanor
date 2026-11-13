@@ -59,11 +59,11 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   approved by the maintainer with #977.
 - Amended on 2026-11-11: decision 33, with OS17; decision 34, with section 6, step 5 and
   section 8; decision 35, with OS17 and OS20.
-- Amended on 2026-11-13: OS5, the reduced-motion request of `athanor_a11y_v1` version 2, with
-  `doc_accessibility.md` AX9 (maintainer decision, #1104).
 - Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
   cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
   `doc_visual_language.md` (VL13), proposed with #1077.
+- Amended on 2026-11-13: OS5, the reduced-motion request of `athanor_a11y_v1` version 2, with
+  `doc_accessibility.md` AX9 (maintainer decision, #1104).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -321,7 +321,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   carries it yet, so for a real prompt this silence does not hold until one does: cosmic-osd's
   polkit prompt and gcr-prompter's keyring prompt have no mark, and `athanor-polkit-agent`, which
   gets its own with its line, is not built (proposed with revision 3 of `doc_accessibility.md` and
-  approved with it, AX11; amended on 2026-10-30, #865). *Amended on 2026-11-13, maintainer decision:* version 2 of `athanor_a11y_v1` adds the request `reduced_motion(bool)`, which the bar sends from GNOME's `enable-animations` (`doc_accessibility.md` AX9) after it binds and at each change; the compositor sets the bell's reduced-motion state from it and keeps no setting of its own, so until a bar has sent it, or without one, it is false and the bell blinks. A client that bound version 1 has no such request and leaves the state as it is;
+  approved with it, AX11; amended on 2026-10-30, #865). *Amended on 2026-11-13, maintainer decision:* version 2 of `athanor_a11y_v1` adds the request `set_reduced_motion(active_state)`, which the bar sends from GNOME's `enable-animations` (`doc_accessibility.md` AX9) after it binds and at each change; the compositor sets the bell's reduced-motion state from it and reads no setting of its own. It keeps the value in memory only, false until a bar has sent it, so without a bar the bell blinks, and the last value sent stands after the bar exits. A client that bound version 1 has no such request and leaves the state as it is;
 - the magnifier and the colour filters, the compositor's since #864 (`doc_accessibility.md` AX10)
   (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
