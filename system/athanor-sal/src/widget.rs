@@ -408,7 +408,8 @@ pub enum Event {
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
-    /// A check button or a switch was turned on or off; ask [`Ui::is_active`] which.
+    /// A check button, a switch or an icon toggle was turned on or off; ask [`Ui::is_active`]
+    /// which.
     Toggled(WidgetId),
     /// A slider's value changed; ask [`Ui::value`] what it is.
     Changed(WidgetId),
@@ -835,7 +836,7 @@ impl Ui {
     }
 
     /// Whether `id` is a toggle that is the active one of its group, or a check button that is
-    /// checked, or a switch that is on.
+    /// checked, or a switch or an icon toggle that is on.
     ///
     /// # Panics
     ///
@@ -850,11 +851,12 @@ impl Ui {
         )
     }
 
-    /// Sets the state of the toggle, check button or switch `id` as activating it would, without
-    /// moving the focus, and returns the event the activation raises: [`Event::Toggled`] for a
-    /// check button or a switch, [`Event::Selected`] for a toggle, which becomes the active one
-    /// of its group and releases the others. Only another toggle of its group releases a
-    /// toggle, as a click does, so setting one inactive changes nothing. `None`, and nothing
+    /// Sets the state of the toggle, check button, switch or icon toggle `id` as activating it
+    /// would, without moving the focus, and returns the event the activation raises:
+    /// [`Event::Toggled`] for a check button, a switch or an icon toggle, [`Event::Selected`]
+    /// for a toggle, which becomes the active one of its group and releases the others. Only
+    /// another toggle of its group releases a toggle, as a click does, so setting one inactive
+    /// changes nothing. `None`, and nothing
     /// changes, for another kind and for the state the widget already has. An insensitive
     /// widget is set as well.
     ///
@@ -902,7 +904,8 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider or an icon button;
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
+    /// an icon toggle;
     /// the description of an image. Returns [`Event::Edited`] when the text changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
@@ -1815,7 +1818,8 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group, a check button or a switch turns over, a list's row becomes its selected one.
+    /// its group, a check button, a switch or an icon toggle turns over, a list's row becomes its
+    /// selected one.
     /// Each takes the focus.
     ///
     /// # Panics
