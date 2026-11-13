@@ -1788,7 +1788,7 @@ impl Ui {
     /// Records the width each wrapping label was placed at; whether one changed.
     pub(crate) fn rewrap(&mut self) -> bool {
         let mut changed = false;
-        for widget in &mut self.widgets.0 {
+        for widget in &mut self.widgets.slots {
             let w = Some(widget.rect.w);
             if let Some((_, given)) = widget.wrap.as_mut().filter(|(_, given)| *given != w) {
                 *given = w;
