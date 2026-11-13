@@ -160,34 +160,82 @@ const DEFAULT_FONT: &str = "Adwaita Sans 11";
 /// `gtk/gtkcssenumvalue.c`).
 const DEFAULT_POINTS: f64 = 10.0;
 
+/// The range a system font's size is held to, in logical pixels: a size outside it would make
+/// the surfaces unreadable or larger than any output.
+const FONT_PX: std::ops::RangeInclusive<f64> = 4.0..=512.0;
+
 /// The size in logical pixels GTK 4.20 gives body text for `font_name`, a Pango font
 /// description, at `scaling`, GNOME's `text-scaling-factor`, as
 /// `gtk_css_font_size_get_default_px` computes it: a size in points at 96 dots per inch times
 /// the factor, one in pixels (`px`) as written. Pango takes the size from the last word, after
-/// up to two words of `#features` and `@variations` (`pango_font_description_from_string`).
+/// up to two words of `#features` and `@variations`, and a comma ends the family before it
+/// (`pango_font_description_from_string`). A factor that is not a positive number counts as 1,
+/// a size that does not parse as GTK's 10 points, and the result is held to [`FONT_PX`]; each
+/// is logged once, until the keys change.
 fn font_px(font_name: &str, scaling: f64) -> f32 {
-    let mut words = font_name
-        .split(|c: char| c.is_ascii_whitespace() || c == ',')
-        .filter(|word| !word.is_empty())
-        .rev()
-        .peekable();
+    let mut problems = Vec::new();
+    let scaling = if scaling.is_finite() && scaling > 0.0 {
+        scaling
+    } else {
+        problems.push(format!(
+            "text-scaling-factor {scaling} is not a positive number: 1 is used"
+        ));
+        1.0
+    };
+    let mut words = font_name.split_ascii_whitespace().rev().peekable();
     for _ in 0..2 {
         words.next_if(|word| word.starts_with(['#', '@']));
     }
-    let size = words.next().and_then(|word| {
-        let (number, pixels) = match word.strip_suffix("px") {
-            Some(number) => (number, true),
-            None => (word, false),
-        };
-        let size = number.parse::<f64>().ok()?;
-        (size > 0.0 && size <= 1e6).then_some((size, pixels))
-    });
-    let px = match size {
-        Some((size, true)) => size,
-        Some((points, false)) => points * 96.0 * scaling / 72.0,
-        None => DEFAULT_POINTS * 96.0 * scaling / 72.0,
+    let word = words
+        .next()
+        .and_then(|word| word.rsplit(',').next())
+        .unwrap_or("");
+    let (number, pixels) = match word.strip_suffix("px") {
+        Some(number) => (number, true),
+        None => (word, false),
     };
-    px as f32
+    let px = match number.parse::<f64>() {
+        Ok(size) if size.is_finite() && size > 0.0 => {
+            if pixels {
+                size
+            } else {
+                size * 96.0 * scaling / 72.0
+            }
+        }
+        size => {
+            // A word that is no number is the family's, as Pango reads it, and "0" is GTK's
+            // own way of asking for its default: neither is worth a warning.
+            if word.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '-' | '+' | '.'))
+                && size != Ok(0.0)
+            {
+                problems.push(format!(
+                    "the size {word:?} of font-name {font_name:?} does not parse: 10 pt is used"
+                ));
+            }
+            DEFAULT_POINTS * 96.0 * scaling / 72.0
+        }
+    };
+    let held = px.clamp(*FONT_PX.start(), *FONT_PX.end());
+    if held != px {
+        problems.push(format!(
+            "font-name {font_name:?} at a factor of {scaling} gives {px} px: {held} px is used"
+        ));
+    }
+    warn_once(problems.join("; "));
+    held as f32
+}
+
+/// Logs `problem` unless it is the one logged last, so that a store read again with the same
+/// keys does not log it again; an empty `problem` forgets the last one.
+fn warn_once(problem: String) {
+    thread_local! {
+        static LAST: Cell<String> = const { Cell::new(String::new()) };
+    }
+    let last = LAST.take();
+    if !problem.is_empty() && problem != last {
+        tracing::warn!("{problem}");
+    }
+    LAST.set(problem);
 }
 
 impl Default for Appearance {
@@ -731,11 +779,38 @@ mod tests {
             16.0,
             "after variations, features"
         );
+        assert_eq!(
+            px("Inter 12 @wght=450,wdth=100", 1.0),
+            16.0,
+            "a comma does not end a variation"
+        );
+        assert_eq!(
+            px("Inter 12 #tnum=1,liga=0", 1.0),
+            16.0,
+            "a comma does not end a feature"
+        );
         assert_eq!(px("Inter 15px", 2.0), 15.0, "pixels are not scaled");
         // No size, a size of 0 or a word that is not one: GTK's 10 pt.
-        for name in ["", "Inter", "Inter 0", "Inter 0px", "Inter -3", "Inter px"] {
+        for name in [
+            "",
+            "Inter",
+            "Inter 0",
+            "Inter 0px",
+            "Inter -3",
+            "Inter px",
+            "Inter 1e999",
+        ] {
             assert_eq!(px(name, 1.0), 13.333, "{name:?}");
         }
+        // A factor that is not a positive number counts as 1.
+        for scaling in [f64::NAN, f64::INFINITY, 0.0, -2.0] {
+            assert_eq!(px("Adwaita Sans 11", scaling), 14.667, "{scaling}");
+        }
+        // The result is held to 4..=512 px.
+        assert_eq!(px("Inter 1000000", 1.0), 512.0);
+        assert_eq!(px("Inter 0.0001", 1.0), 4.0);
+        assert_eq!(px("Inter 2000px", 1.0), 512.0);
+        assert_eq!(px("Adwaita Sans 11", 1e300), 512.0);
     }
 
     #[test]
