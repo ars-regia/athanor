@@ -449,6 +449,10 @@ mod tests {
         ui.set_sensitive(icon, false);
         assert_eq!(ui.add(icon, Kind::Label("Late".into())), icon);
         assert_eq!(ui.select_row(icon), None);
+        assert!(!ui.set_text_style(icon, crate::text::TextStyle::default()));
+        assert_eq!(ui.slider(icon, "Late", 0.0, 1.0, 0.1, 0.5), None);
+        assert_eq!(ui.level(icon, "Late", 0.5, 1.0, 1.0), None);
+        assert_eq!(ui.len(), size, "nothing was added");
         assert_eq!(ui.widget(row).parent, Some(list));
         assert!(ui.widget(row).children.is_empty());
         assert!(ui.is_visible(row) && ui.is_sensitive(row));

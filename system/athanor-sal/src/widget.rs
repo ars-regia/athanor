@@ -1086,7 +1086,7 @@ impl Ui {
     /// `step` counted from `min` (`max` is always a value, even when the step does not divide
     /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
     /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
-    /// at most [`Ui::SLIDER_MAX_STEPS`] steps.
+    /// at most [`Ui::SLIDER_MAX_STEPS`] steps, and under a removed widget, as [`Ui::add`].
     ///
     /// # Panics
     ///
@@ -1118,12 +1118,14 @@ impl Ui {
             step,
         };
         slider.value = slider.snap(value)?;
-        Some(self.add(parent, Kind::Slider(slider)))
+        let id = self.add(parent, Kind::Slider(slider));
+        self.contains(id).then_some(id)
     }
 
     /// Adds a level named `name` for assistive technologies, from 0 to `max`, drawn in the
     /// warning colour beyond `full`, set to `value` held to 0 to `max`. `None`, and nothing
-    /// added, unless every number is finite and `0 < full <= max`.
+    /// added, unless every number is finite and `0 < full <= max`, and under a removed widget,
+    /// as [`Ui::add`].
     ///
     /// # Panics
     ///
@@ -1146,7 +1148,8 @@ impl Ui {
             full,
             max,
         };
-        Some(self.add(parent, Kind::Level(level)))
+        let id = self.add(parent, Kind::Level(level));
+        self.contains(id).then_some(id)
     }
 
     /// Sets the level `id` to `value`, held to 0 to its maximum. `false`, and nothing changes,
@@ -1449,7 +1452,7 @@ impl Ui {
 
     /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check or a switch,
     /// from its next layout; a field keeps the body text. `false`, and nothing changes, for a
-    /// scale that is not a finite number above zero.
+    /// scale that is not a finite number above zero and for a removed widget.
     ///
     /// # Panics
     ///
@@ -1458,8 +1461,10 @@ impl Ui {
         if !(style.scale.is_finite() && style.scale > 0.0) {
             return false;
         }
+        // Past the arena this panics; on a removed widget it logs, and changes nothing.
+        let live = self.contains(id);
         self.widgets[id].style = style;
-        true
+        live
     }
 
     /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
