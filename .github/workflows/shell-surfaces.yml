@@ -38,6 +38,13 @@ on:
   workflow_call:
   workflow_dispatch:
 
+# A merge into iso-v0 cancels the push run of the merge before it: the newer head holds both
+# changes. Called from pr.yml the group is the caller's "Pull Request-<ref>", apart from
+# "pr-<number>".
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
