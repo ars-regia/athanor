@@ -8,6 +8,7 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
+use crate::background_effect::Blurs;
 use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
@@ -47,7 +48,7 @@ use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, P
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
-    ClientData, ClientId, DisconnectReason, GlobalId,
+    ClientData, ClientId, DisconnectReason, GlobalId, ObjectId,
 };
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
@@ -89,6 +90,7 @@ use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -147,6 +149,10 @@ pub struct State {
     pub gesture: Option<crate::gestures::Kind>,
     /// The windows owed an answer to a decoration request (`decoration.rs`).
     pub decoration_owed: Vec<WlSurface>,
+    /// KDE's server-decoration global, which answers client-side to every request.
+    pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
+    /// The surfaces whose current content has a FIFO barrier not yet cleared (`pacing.rs`).
+    pub fifo_surfaces: HashMap<ObjectId, WlSurface>,
     /// The touch points the seat was told of (`touch.rs`).
     pub touches: crate::touch::Touches,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
@@ -236,6 +242,8 @@ pub struct State {
     pub input_hold: crate::constraints::Held,
     /// xdg_system_bell_v1's bells, shown on the focus outline (decision 33).
     pub bell: crate::bell::Bell,
+    /// The surfaces that set an ext-background-effect-v1 blur region (decision 35).
+    pub blurred: crate::background_effect::Regions,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -388,9 +396,18 @@ impl State {
         crate::gestures::global(&dh);
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
+        let kde_decoration = crate::decoration::kde_global(&dh);
         crate::foreign::global(&dh);
+        // Decision 33, wave 2a. Smithay applies a surface's alpha multiplier to that surface's
+        // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
+        smithay::wayland::fixes::FixesState::new::<Self>(&dh);
+        smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
+        crate::pacing::globals(&dh);
+        crate::toplevel_icon::global(&dh);
         smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
         crate::bell::global(&dh);
+        // Decision 35.
+        crate::background_effect::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -423,6 +440,8 @@ impl State {
             foreign: Default::default(),
             gesture: None,
             decoration_owed: Vec::new(),
+            kde_decoration,
+            fifo_surfaces: HashMap::new(),
             touches: Default::default(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
@@ -467,6 +486,7 @@ impl State {
             inhibitors: HashMap::new(),
             input_hold,
             bell: crate::bell::Bell::default(),
+            blurred: Default::default(),
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
@@ -529,6 +549,8 @@ impl State {
         });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
@@ -542,6 +564,8 @@ impl State {
     pub fn satellite_state(&self) -> Arc<ClientState> {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: true,
             grants: Vec::new(),
@@ -1222,6 +1246,7 @@ impl State {
         for (surface, _) in &popups {
             with_surfaces_surface_tree(surface, scanout);
         }
+        self.fifo_frame_done(output);
         if damaged {
             self.presentation_feedback(output, states).presented(
                 frame_target,
@@ -1448,7 +1473,7 @@ pub fn draw_view<'d, R>(
     look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
-    R: Filters,
+    R: Filters + Blurs,
     R::TextureId: Send + Clone + Texture + 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
@@ -1465,6 +1490,8 @@ where
     };
     // The popups and the lock surface are surfaces as the space's are, above them.
     let mut elements: Vec<Stacked<R>> = Vec::new();
+    // No region is blurred on the lock screen.
+    let mut blurred = None;
     match view {
         View::Space(space, popups, marks) => {
             for (popup, at) in popups {
@@ -1472,10 +1499,12 @@ where
                 elements.extend(surface(renderer, popup, at));
             }
             elements.extend(crate::marks::stack(renderer, space, output, marks));
+            blurred = Some(&*marks.blurred);
         }
         View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
         View::Locked(None) => {}
     }
+    let elements = crate::background_effect::behind(output, blurred, elements);
     crate::look::draw(
         renderer,
         framebuffer,
@@ -1657,6 +1686,10 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 /// What the compositor keeps per client.
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// How many of its commits are queued and not yet applied (`State::queue_commit`).
+    pub queued: Arc<AtomicUsize>,
+    /// How many commits its synchronised subsurfaces keep, all together (`State::queue_commit`).
+    pub retained: Arc<AtomicUsize>,
     gone: channel::Sender<ClientId>,
     /// Whether it is confined: it connected through a security context, as a sandboxed
     /// application does, or through xwayland-satellite's socket.
@@ -1720,6 +1753,7 @@ impl State {
             focused,
             outline,
             edge: self.focus_theme.edge(),
+            blurred: self.blurred.clone(),
         }
     }
 }

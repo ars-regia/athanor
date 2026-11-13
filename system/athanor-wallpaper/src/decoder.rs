@@ -171,6 +171,14 @@ mod tests {
         assert!(protocol::parse_request(&request).is_some());
     }
 
+    /// Writes what follows a header the client refuses: the client may already have
+    /// hung up on reading it, and then the write meets a closed socket.
+    fn write_after_refused(stream: &mut UnixStream, bytes: &[u8]) {
+        if let Err(error) = stream.write_all(bytes) {
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{error}");
+        }
+    }
+
     #[test]
     fn the_frames_asked_are_read() {
         let frames = run("good", &[(2, 1), (1, 1)], |mut stream| {
@@ -195,7 +203,7 @@ mod tests {
             stream
                 .write_all(&protocol::frame_header((1, 2)))
                 .expect("header");
-            stream.write_all(&[0; 8]).expect("pixels");
+            write_after_refused(&mut stream, &[0; 8]);
         });
         assert!(other.is_err(), "{other:?}");
         let short = run("short", &[(2, 1)], |mut stream| {

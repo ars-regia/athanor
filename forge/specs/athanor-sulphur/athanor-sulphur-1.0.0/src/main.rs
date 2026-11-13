@@ -8,6 +8,7 @@
 
 mod a11y;
 mod aids;
+mod background_effect;
 mod bell;
 mod bindings;
 mod blur;
@@ -36,6 +37,7 @@ mod marks;
 mod material;
 mod output_management;
 mod output_power;
+mod pacing;
 mod ready;
 mod screen_filter;
 mod session_calls;
@@ -43,8 +45,9 @@ mod shutdown;
 mod state;
 mod tablet;
 mod tiling;
-mod touch;
+mod toplevel_icon;
 mod toplevel_state;
+mod touch;
 mod xkb_config;
 mod udev;
 mod winit;

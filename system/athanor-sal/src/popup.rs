@@ -177,6 +177,11 @@ impl<T: Copy + PartialEq> Tooltip<T> {
         (hide, target.map(|_| (wait, self.generation)))
     }
 
+    /// The widget whose tooltip shows, or waits to.
+    pub fn target(&self) -> Option<&T> {
+        self.target.as_ref()
+    }
+
     /// A press, a key or a scroll: the shown tooltip hides, and the pending one does not show
     /// until the target changes. Returns whether one was shown.
     pub fn hide(&mut self, now: Instant) -> bool {

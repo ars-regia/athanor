@@ -196,6 +196,24 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     .to_path(0.1)
 }
 
+/// Draws `image` in the middle of `r`, fitted to a square of `side` logical pixels with its
+/// aspect ratio kept.
+fn draw_icon<C: Canvas>(
+    ctx: &mut C,
+    resources: &mut C::Resources,
+    image: &crate::icon::Image,
+    r: crate::widget::Rect,
+    side: f32,
+) {
+    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+    let side = f64::from(side);
+    let fit = (side / w).min(side / h);
+    let (w, h) = (w * fit, h * fit);
+    let x = f64::from(r.center_x()) - w / 2.0;
+    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+}
+
 fn draw_text<C: Canvas>(
     ctx: &mut C,
     resources: &mut C::Resources,
@@ -539,6 +557,38 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, at, t.text)?;
                 }
             }
+            // A radio: one choice of several, drawn as GTK's radio check button rather than as
+            // an on/off toggle, a ring at the start edge and the label after it; the chosen one's
+            // ring and the dot in it take the accent.
+            Kind::Toggle {
+                active,
+                radio: true,
+                ..
+            } => {
+                let size = mark_size(false, t.font_size);
+                let mark = mark_rect(r, ui.rtl, size, false);
+                let centre = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 2.0)).to_path(0.1));
+                ctx.set_paint(color(if *active { t.accent } else { t.border }));
+                ctx.set_stroke(Stroke::new(if *active { 2.0 } else { 1.0 }));
+                let ring = f64::from(mark.w / 2.0) - if *active { 1.0 } else { 0.5 };
+                ctx.stroke_path(&Circle::new(centre, ring).to_path(0.1));
+                if *active {
+                    ctx.set_paint(color(t.accent));
+                    ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 5.0)).to_path(0.1));
+                }
+                if let Some(layout) = &widget.text {
+                    let x = label_x(r, mark, ui.rtl, false, t.gap, layout.width());
+                    let y = r.y + (r.h - layout.height()) / 2.0;
+                    draw_text(ctx, resources, layout, (x, y), t.text)?;
+                }
+            }
             Kind::Button(_) | Kind::Toggle { .. } => {
                 let active = matches!(widget.kind, Kind::Toggle { active: true, .. });
                 let (fill, ink) = if active {
@@ -560,6 +610,23 @@ pub fn paint<C: Canvas>(
                     );
                     draw_text(ctx, resources, layout, at, ink)?;
                 }
+            }
+            // An icon toggle: raised, as a button, and darker or lighter toward its text while
+            // it is on, without the accent (VL10).
+            Kind::IconToggle(toggle) => {
+                let base = if toggle.active {
+                    mix(t.surface, t.text, crate::icon_toggle::ON)
+                } else {
+                    t.surface
+                };
+                let fill = if hover == Some(id) {
+                    mix(base, t.text, HOVER)
+                } else {
+                    base
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
             }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
@@ -972,6 +1039,37 @@ mod tests {
             ui.pointer_leave();
             assert_eq!(hash(&render(&mut ui, 1.0)?), hash(&plain));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_radio_is_a_ring_with_the_accent_dot_only_when_chosen() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Radio", crate::Theme::default(), false);
+        let group = ui.add(crate::Ui::ROOT, crate::Kind::Column);
+        let chosen = ui.radio(group, "Headphones", true);
+        let other = ui.radio(group, "Headset with microphone", false);
+        let pixmap = render(&mut ui, 1.0)?;
+        let t = ui.theme.clone();
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let mark = |id| {
+            let size = mark_size(false, t.font_size);
+            mark_rect(ui.widget(id).rect, false, size, false)
+        };
+        let (on, off) = (mark(chosen), mark(other));
+        let centre = |m: crate::widget::Rect| (m.center_x(), m.y + m.h / 2.0);
+        let (x, y) = centre(on);
+        assert_eq!(at(x, y), t.accent.0.to_vec(), "the chosen radio's dot");
+        let (x, y) = centre(off);
+        assert_eq!(at(x, y), t.surface.0.to_vec(), "no dot in the other");
+        // The ring's left edge, a pixel in: the accent around the chosen one only.
+        assert_eq!(at(on.x + 1.0, on.y + on.h / 2.0), t.accent.0.to_vec());
+        assert_ne!(at(off.x + 1.0, off.y + off.h / 2.0), t.accent.0.to_vec());
+        // Its label follows the ring, as a check button's does, not centred as a toggle's.
+        let label = ui.widget(chosen).text.as_ref().map(|l| l.width());
+        assert!(label.is_some_and(|w| ui.widget(chosen).rect.w >= on.w + t.gap + w));
         Ok(())
     }
 
