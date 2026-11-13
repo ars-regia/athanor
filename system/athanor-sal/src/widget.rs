@@ -4677,6 +4677,39 @@ mod tests {
     }
 
     #[test]
+    fn the_title_bar_takes_no_alignment_and_the_column_aligns_under_it() {
+        let theme = Theme {
+            title_bar_height: Some(39.0),
+            title_bar_style: crate::theme::TitleBarStyle::Bare,
+            ..Theme::default()
+        };
+        let margin = theme.margin;
+        let mut ui = Ui::new("Layout", theme, false);
+        ui.min_height = 300.0;
+        ui.resizable = false;
+        ui.add_title_bar();
+        let bar = ui.title_bar.expect("a title bar");
+        let title = ui.widget(bar).children[0];
+        let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
+        let done = ui.add(Ui::ROOT, Kind::Button("Done".into()));
+        let end = [crate::Align::Fill, crate::Align::End];
+        assert_eq!(ui.set_align(bar, end), None);
+        assert_eq!(ui.set_align(title, end), None);
+        assert_eq!(ui.set_align(done, end), Some(true));
+        ui.layout();
+        let (root, b, l, d) = (
+            ui.widget(Ui::ROOT).rect,
+            ui.widget(bar).rect,
+            ui.widget(label).rect,
+            ui.widget(done).rect,
+        );
+        assert_eq!((b.y, b.h, root.h), (0.0, 39.0, 300.0));
+        assert_eq!(l.y, b.h + margin, "the flow starts under the bar");
+        assert_eq!(d.y + d.h, root.h - margin, "the bottom is the window's");
+        assert_eq!(ui.widget(title).style.weight, 700, "a bare bar's title stays bold");
+    }
+
+    #[test]
     fn only_a_label_takes_an_ink() {
         let mut ui = Ui::new("Ink", Theme::default(), false);
         let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
