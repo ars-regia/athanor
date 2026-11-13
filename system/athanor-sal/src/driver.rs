@@ -418,7 +418,7 @@ fn run_on(
         modifiers: Modifiers::default(),
         // Optional: without them, a field copies and pastes nothing.
         clipboards: clipboard::Clipboards::bind(&globals, &qh),
-        field_menu: None,
+        own_menu: None,
         pressed_at: None,
         tooltip: Tooltip::default(),
         error: None,
@@ -429,9 +429,7 @@ fn run_on(
     while !app.shell.exit {
         event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
-        if let Err(error) = app.shell.draw_dirty() {
-            app.fail(error);
-        }
+        app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
         // earlier `drawn`, is not reported drawn.
         let first_frames = std::mem::take(&mut app.shell.first_frames);
@@ -949,7 +947,14 @@ impl Shell {
             ((right - x) as i32).max(1),
             ((bottom - y) as i32).max(1),
         );
-        let along_x = ConstraintAdjustment::FlipY | ConstraintAdjustment::SlideX;
+        // A menu also slides along its axis, so that one as high as the output stays on it.
+        let along_x = ConstraintAdjustment::FlipY
+            | ConstraintAdjustment::SlideX
+            | if menu {
+                ConstraintAdjustment::SlideY
+            } else {
+                ConstraintAdjustment::empty()
+            };
         let along_y = ConstraintAdjustment::FlipX | ConstraintAdjustment::SlideY;
         let (edge, gravity, adjust) = match side {
             Side::Top => (Edge::Top, Gravity::Top, along_x),
@@ -1178,6 +1183,18 @@ impl Shell {
         }
         Ok(())
     }
+}
+
+/// The height a drop-down's menu may take, in logical pixels: that of `output`, the output of
+/// the drop-down's surface; when it is not known, as for a window or a layer surface the
+/// compositor placed, that of the shortest of `outputs`, which the menu fits on whichever it
+/// opens on; and without any, the surface's own height `own`. Heights of 0 are not known ones.
+fn menu_max_height(output: Option<f32>, outputs: &[f32], own: u32) -> Option<f32> {
+    let known = |h: &f32| *h > 0.0;
+    output
+        .filter(known)
+        .or_else(|| outputs.iter().copied().filter(known).reduce(f32::min))
+        .or_else(|| (own > 0).then_some(own as f32))
 }
 
 /// Calls `lost` on the surface `next` finds in `state` until it finds none, so that one `lost`
@@ -1768,6 +1785,52 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
     }
 }
 
+/// Where an event of a surface's widgets goes, other than a window button's.
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// A field opens its own context menu, whose items the driver does.
+    FieldMenu(WidgetId),
+    /// A drop-down opens its own items, as a menu the driver does too.
+    DropDown(WidgetId),
+    /// An item of the driver's own menu was activated: a menu item, a check or a radio.
+    Chosen(WidgetId),
+    /// The driver keeps it: the application never opened its menus, and gets none of their
+    /// events, such as a context-menu event of an item at a press of the Menu key, nor the click
+    /// of a drop-down with nothing to offer.
+    Kept,
+    /// The application's.
+    Application(Event),
+}
+
+/// Where `event` of `ui` goes; `own` when `ui` is a menu the driver opened.
+fn route(ui: &Ui, event: Event, own: bool) -> Route {
+    let drop_down = |widget: WidgetId| {
+        ui.widgets
+            .get(widget)
+            .is_some_and(|w| matches!(w.kind, Kind::DropDown(_)))
+    };
+    match event {
+        Event::Clicked(item) | Event::Toggled(item) | Event::Selected(item) if own => {
+            Route::Chosen(item)
+        }
+        _ if own => Route::Kept,
+        Event::ContextMenu(widget) if ui.field_text(widget).is_some() => Route::FieldMenu(widget),
+        Event::Clicked(widget) if drop_down(widget) => match ui.chosen(widget) {
+            Some(_) => Route::DropDown(widget),
+            None => Route::Kept,
+        },
+        event => Route::Application(event),
+    }
+}
+
+/// What an item of a menu the driver opened does.
+enum Choice {
+    /// A field's context menu: the edit of this key.
+    Edit(Key),
+    /// A drop-down's items: choose the one at this index.
+    Item(usize),
+}
+
 struct App {
     application: Box<dyn Application>,
     shell: Shell,
@@ -1796,8 +1859,9 @@ struct App {
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
     clipboards: clipboard::Clipboards,
-    /// The context menu open on a field: its popup, and the key each of its items does.
-    field_menu: Option<(SurfaceId, Vec<(WidgetId, Key)>)>,
+    /// The menu the driver opened, a field's context menu or a drop-down's items: its popup,
+    /// and what each of its items does.
+    own_menu: Option<(SurfaceId, Vec<(WidgetId, Choice)>)>,
     /// Where a button is being pressed, while its press is handled: a field's context menu
     /// opens there.
     pressed_at: Option<(f32, f32)>,
@@ -1843,22 +1907,19 @@ impl App {
                 self.shell.exit = true;
                 return;
             }
-            // A field opens its own context menu, whose items the driver does.
-            Some(Event::ContextMenu(widget)) if surface.ui.field_text(widget).is_some() => {
-                self.open_field_menu(id, widget);
+            Some(event) => {
+                let own = self.own_menu.as_ref().is_some_and(|m| m.0 == id);
+                match route(&surface.ui, event, own) {
+                    Route::FieldMenu(widget) => self.open_field_menu(id, widget),
+                    Route::DropDown(widget) => self.open_drop_down(id, widget),
+                    Route::Chosen(item) => self.menu_chosen(item),
+                    Route::Kept => {}
+                    Route::Application(event) => self.application.event(&mut self.shell, id, event),
+                }
             }
-            Some(Event::Clicked(item)) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {
-                self.field_edit(item);
-            }
-            // The field's menu is the driver's: the application never opened it, and gets none
-            // of its events, such as a context-menu event of an item at a press of the Menu key.
-            Some(_) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {}
-            Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
     }
 
     /// Opens the edit menu of field `widget` of `id`, as GTK's entry does: under the pointer for
@@ -1878,19 +1939,54 @@ impl App {
             .shell
             .show_popup(id, widget, self.pressed_at, menu, Side::Bottom, true)
         {
-            Ok(surface) => self.field_menu = Some((surface, items)),
+            Ok(surface) => {
+                let items = items.into_iter().map(|(item, key)| (item, Choice::Edit(key)));
+                self.own_menu = Some((surface, items.collect()));
+            }
             Err(error) => eprintln!("athanor-sal: no context menu for the field: {error}"),
         }
     }
 
-    /// Does what `item` of the open field menu says in its field, once the menu has closed and
-    /// the focus returned to the field, with the serial of the click or the key that chose it.
-    fn field_edit(&mut self, item: WidgetId) {
-        let (Some((surface, items)), Some(open)) = (self.field_menu.take(), self.shell.popup)
+    /// Opens the items of drop-down `widget` of `id` in a menu under it, with the focus on the
+    /// chosen one, as GTK's DropDown does.
+    fn open_drop_down(&mut self, id: SurfaceId, widget: WidgetId) {
+        let max_height = self.shell.surfaces.iter().find(|s| s.id == id).and_then(|from| {
+            let height = |info: &OutputInfo| info.logical_size.map(|(_, h)| h as f32);
+            let output = from.output.as_ref().and_then(|output| {
+                let (_, info) = self.shell.outputs.iter().find(|(o, _)| o == output)?;
+                height(info)
+            });
+            let outputs: Vec<f32> = self.shell.outputs.iter().filter_map(|(_, i)| height(i)).collect();
+            menu_max_height(output, &outputs, from.size.1)
+        });
+        let Some((menu, items)) = self
+            .shell
+            .ui(id)
+            .and_then(|ui| ui.drop_down_menu(widget, max_height))
         else {
             return;
         };
-        let Some((_, key)) = items.into_iter().find(|&(i, _)| i == item) else {
+        let chosen = items.iter().find(|&&(item, _)| menu.is_active(item)).map(|&(item, _)| item);
+        match self.shell.show_popup(id, widget, None, menu, Side::Bottom, true) {
+            Ok(surface) => {
+                if let Some(ui) = self.shell.ui_mut(surface) {
+                    ui.set_focus(chosen);
+                }
+                let items = items.into_iter().map(|(item, index)| (item, Choice::Item(index)));
+                self.own_menu = Some((surface, items.collect()));
+            }
+            Err(error) => eprintln!("athanor-sal: no menu for the drop-down: {error}"),
+        }
+    }
+
+    /// Does what `item` of the driver's open menu says, once the menu has closed and the focus
+    /// returned to its widget: edits the field, or chooses in the drop-down.
+    fn menu_chosen(&mut self, item: WidgetId) {
+        let (Some((surface, items)), Some(open)) = (self.own_menu.take(), self.shell.popup)
+        else {
+            return;
+        };
+        let Some((_, choice)) = items.into_iter().find(|&(i, _)| i == item) else {
             return;
         };
         if open.surface != surface {
@@ -1900,7 +1996,13 @@ impl App {
         let event = self
             .shell
             .get_mut(open.parent)
-            .and_then(|parent| parent.ui.field_edit(open.anchor_in(&parent.ui)?, key));
+            .and_then(|parent| {
+                let anchor = open.anchor_in(&parent.ui)?;
+                match choice {
+                    Choice::Edit(key) => parent.ui.field_edit(anchor, key),
+                    Choice::Item(index) => parent.ui.choose(anchor, index),
+                }
+            });
         self.changed(open.parent, event);
     }
 
@@ -1931,9 +2033,7 @@ impl App {
         match seen {
             Ok(Some(id)) => {
                 self.application.output_changed(&mut self.shell, id, &info);
-                if let Err(error) = self.shell.draw_dirty() {
-                    self.fail(error);
-                }
+                self.draw_dirty();
             }
             Ok(None) => {}
             Err(error) => self.fail(error),
@@ -2065,6 +2165,24 @@ impl App {
             }
         }
         self.window_focus = focused;
+    }
+
+    /// Closes a drop-down's menu whose items the application replaced, as Escape does, then
+    /// draws the surfaces whose widgets changed.
+    fn draw_dirty(&mut self) {
+        if let Some(open) = self.shell.popup {
+            let stale = self
+                .shell
+                .get_mut(open.parent)
+                .is_some_and(|from| std::mem::take(&mut from.ui.stale_popup));
+            if stale {
+                self.own_menu = None;
+                self.close_popup();
+            }
+        }
+        if let Err(error) = self.shell.draw_dirty() {
+            self.fail(error);
+        }
     }
 
     /// Closes the popup open, and redraws the surface it was opened from.
@@ -2221,9 +2339,7 @@ impl App {
             return;
         };
         self.application.keyboard(&mut self.shell, id, focused);
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
     }
 
     /// The surface that takes the keys the compositor sends: the one it focused, or the topmost
@@ -2757,9 +2873,7 @@ impl PointerHandler for App {
                 if let Some(id) = self.shell.find(&event.surface).map(|s| s.id) {
                     let inside = matches!(event.kind, PointerEventKind::Enter { .. });
                     self.application.pointer(&mut self.shell, id, inside);
-                    if let Err(error) = self.shell.draw_dirty() {
-                        self.fail(error);
-                    }
+                    self.draw_dirty();
                 }
             }
             // The press grabs no more once its button is up or the pointer has left, on any
@@ -2822,6 +2936,56 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drop_down_menu_is_bounded_by_its_output_else_the_shortest_one() {
+        assert_eq!(menu_max_height(Some(1080.0), &[720.0, 1080.0], 40), Some(1080.0), "its own");
+        assert_eq!(
+            menu_max_height(None, &[1440.0, 720.0, 1080.0], 40),
+            Some(720.0),
+            "a window, or a layer surface the compositor placed"
+        );
+        assert_eq!(menu_max_height(Some(0.0), &[0.0, 900.0], 40), Some(900.0), "0 is unknown");
+        assert_eq!(menu_max_height(None, &[], 40), Some(40.0), "no output: the surface");
+        assert_eq!(menu_max_height(None, &[0.0], 0), None, "nothing known");
+    }
+
+    /// The path of a choice in a drop-down's menu, as the driver runs it: the item activated in
+    /// the menu, its event routed, then the item's index chosen in the drop-down.
+    #[test]
+    fn an_item_activated_in_a_drop_down_menu_chooses_it_and_a_cancel_chooses_nothing() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Firefox", "Spotify"], 0);
+        let empty = ui.drop_down(Ui::ROOT, "Nothing", &[], 0);
+        let opened = ui.activate(players).map(|event| route(&ui, event, false));
+        assert_eq!(opened, Some(Route::DropDown(players)));
+        let kept = ui.activate(empty).map(|event| route(&ui, event, false));
+        assert_eq!(kept, Some(Route::Kept), "an empty drop-down opens nothing");
+        let Some((mut menu, items)) = ui.drop_down_menu(players, None) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        let (spotify, index) = items[1];
+        let routed = menu.activate(spotify).map(|event| route(&menu, event, true));
+        assert_eq!(routed, Some(Route::Chosen(spotify)));
+        open.closed(&mut ui);
+        assert_eq!(ui.choose(players, index), Some(Event::Changed(players)));
+        assert_eq!(ui.chosen(players), Some(1));
+        // Escape, or a press outside, closes the menu and chooses nothing.
+        let Some((mut menu, _)) = ui.drop_down_menu(players, None) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        assert!(open.dismissed_by(Dismiss::Escape) && open.dismissed_by(Dismiss::Press(0)));
+        assert!(!open.dismissed_by(Dismiss::Press(1)), "a press in the menu");
+        open.closed(&mut ui);
+        assert_eq!(ui.chosen(players), Some(1));
+        assert_eq!(route(&menu, Event::Escape, true), Route::Kept);
+        assert_eq!(
+            route(&ui, Event::Escape, false),
+            Route::Application(Event::Escape)
+        );
+    }
 
     #[test]
     fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
