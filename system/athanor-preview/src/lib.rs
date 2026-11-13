@@ -35,7 +35,9 @@ pub enum Subject {
 pub struct Picture {
     pub width: u32,
     pub height: u32,
-    pub rgba: Vec<u8>,
+    /// Shared, so that a toolkit that keeps the bytes, as GDK's textures do, takes them
+    /// without a copy.
+    pub rgba: glib::Bytes,
 }
 
 /// What the pane shows: from the top, the picture or else the icon, the title, the body and
@@ -101,6 +103,13 @@ impl Preview {
     /// What the pane shows now.
     pub fn card(&self) -> Card {
         self.card.borrow().clone()
+    }
+
+    /// The longest side, in pixels, of a picture drawn at the pane's scale: what a picture
+    /// handed to [`Preview::show`] needs at most.
+    pub fn picture_side(&self) -> u32 {
+        // `set_scale` keeps the scale finite and positive; `render` clamps the side.
+        (f64::from(PICTURE_SIDE) * self.scale.get()).ceil().max(1.0) as u32
     }
 
     /// The scale of the surface that shows the pane, for the pictures decoded after this call.
@@ -287,8 +296,7 @@ impl Preview {
             self.update(|card| card.body = head.unwrap_or_default());
             return;
         };
-        // `set_scale` keeps the scale finite and positive; `render` clamps the side.
-        let side = (f64::from(PICTURE_SIDE) * self.scale.get()).ceil().max(1.0) as u32;
+        let side = self.picture_side();
         *self.queued.borrow_mut() = Some(Job { file: opened, kind: decode, side, path, generation });
         self.pump();
     }
@@ -346,7 +354,7 @@ mod tests {
             let seen = Rc::clone(&seen);
             move |card| seen.borrow_mut().push(card.clone())
         });
-        let picture = Picture { width: 1, height: 1, rgba: vec![1, 2, 3, 255] };
+        let picture = Picture { width: 1, height: 1, rgba: glib::Bytes::from_owned(vec![1u8, 2, 3, 255]) };
         preview.show(Subject::Window { title: "Files".into(), app: "Nautilus".into(), picture: Some(picture.clone()) });
         let card = preview.card();
         assert_eq!((card.title.as_str(), card.body.as_str(), card.facts.as_str()), ("Files", "Nautilus", ""));
@@ -360,6 +368,14 @@ mod tests {
         // show: clear, then the subject, twice; then clear.
         assert_eq!(seen.len(), 5);
         assert!(seen.last().is_some_and(|card| card.title.is_empty() && card.picture.is_none()));
+    }
+
+    #[test]
+    fn a_window_picture_needs_the_side_at_the_panes_scale() {
+        let preview = Preview::new(|_| {});
+        assert_eq!(preview.picture_side(), PICTURE_SIDE);
+        preview.set_scale(1.5);
+        assert_eq!(preview.picture_side(), 768);
     }
 
     #[test]
