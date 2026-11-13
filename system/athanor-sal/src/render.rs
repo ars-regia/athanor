@@ -863,7 +863,9 @@ mod tests {
 
     #[test]
     fn a_window_without_widgets_draws_one_pixel_at_least() -> Result<(), Error> {
-        let mut ui = crate::Ui::new("Hidden", crate::Theme::default(), false);
+        // Without a margin, as a surface whose widgets place themselves by their own margins.
+        let theme = crate::Theme { margin: 0.0, ..crate::Theme::default() };
+        let mut ui = crate::Ui::new("Hidden", theme, false);
         assert_eq!(ui.layout(), (0.0, 0.0));
         assert_eq!(layout(&mut ui, 1.0)?, (1, 1));
         assert_eq!(layout(&mut ui, 2.0)?, (2, 2));
