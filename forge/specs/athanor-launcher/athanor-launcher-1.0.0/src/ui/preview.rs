@@ -51,7 +51,8 @@ impl Widgets {
 
 /// A picture of athanor-preview as a GDK texture.
 fn texture(picture: &Picture) -> gdk::MemoryTexture {
-    // A picture is at most 1024 pixels a side; GDK shares its bytes, without a copy.
+    // A rendered picture is at most 1024 pixels a side, a window's at most the pane's picture
+    // side, 512 at the pane's scale; GDK shares its bytes, without a copy.
     gdk::MemoryTexture::new(
         picture.width as i32,
         picture.height as i32,
