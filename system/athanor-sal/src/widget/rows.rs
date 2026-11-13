@@ -93,8 +93,9 @@ impl Ui {
             .retain(|&(owner, list)| !is_gone(owner) && !is_gone(list));
         // Each id removed is stale from now on, the driver's and the application's included.
         for &id in &gone {
-            let next = self.widgets.free(id);
-            self.free.insert(next);
+            if let Some(next) = self.widgets.free(id) {
+                self.free.insert(next);
+            }
         }
     }
 

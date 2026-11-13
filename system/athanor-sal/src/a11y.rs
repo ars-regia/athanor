@@ -18,7 +18,8 @@ const WIDGET_BITS: u32 = 40;
 
 /// The AccessKit node id of a widget: its slot, and the low 16 bits of its generation above,
 /// so that a node an assistive technology cached for a widget since removed names no widget,
-/// also once another widget takes the slot.
+/// also once another widget takes the slot: the slot is retired before those bits come back
+/// (`Widgets::free`).
 pub fn node_id(id: WidgetId) -> NodeId {
     NodeId(u64::from(id.0) | u64::from(id.1 & 0xffff) << SLOT_BITS)
 }
@@ -685,6 +686,36 @@ mod tests {
         assert_eq!(ui.do_action(&click(node_id(new))), Some(Event::Clicked(new)));
         // A text run's node names no widget, whatever its slot.
         assert_eq!(ui.do_action(&click(text_run_id(new, 0))), None);
+    }
+
+    #[test]
+    fn a_slot_is_retired_before_a_cached_node_could_name_its_next_widget() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let first = ui.add(column, Kind::Button("First".into()));
+        let cached = node_id(first);
+        // 65,535 removals bring the slot's generation to the last whose low 16 bits are its own.
+        let mut last = first;
+        for _ in 0..u16::MAX {
+            ui.remove_children(column);
+            last = ui.add(column, Kind::Button("Again".into()));
+            assert_eq!(last.index(), first.index(), "the slot is reused");
+        }
+        assert_eq!(last.1, u32::from(u16::MAX));
+        // The next removal would bring them back to the first widget's: the slot is retired.
+        ui.remove_children(column);
+        let next = ui.add(column, Kind::Button("Next".into()));
+        assert_ne!(next.index(), first.index(), "a retired slot holds no widget again");
+        assert_eq!(widget_of(&ui, cached), None);
+        ui.layout();
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: cached,
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), None);
+        assert_eq!(widget_of(&ui, node_id(next)), Some(next));
     }
 
     #[test]

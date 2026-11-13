@@ -44,6 +44,10 @@ pub(crate) struct Widgets {
     logged: Cell<Option<WidgetId>>,
 }
 
+/// The generation of a retired slot, which holds no widget again: the first whose low 16 bits,
+/// all an accessibility node carries of it (`a11y::node_id`), are those of generation 0.
+const RETIRED: u32 = 1 << 16;
+
 /// A hidden column without children: the widget of a freed slot, and of a stale id.
 fn dead() -> Widget {
     let mut widget = Widget::new(Kind::Column, None);
@@ -80,9 +84,9 @@ impl Widgets {
         self.slots.get_mut(id.index())
     }
 
-    /// The generation of the slot at `index`, `None` past the arena.
+    /// The generation of the slot at `index`, `None` past the arena and for a retired slot.
     pub(crate) fn generation(&self, index: usize) -> Option<u32> {
-        self.generations.get(index).copied()
+        self.generations.get(index).copied().filter(|&g| g != RETIRED)
     }
 
     /// Adds `widget` in a new slot, of generation 0.
@@ -92,12 +96,15 @@ impl Widgets {
     }
 
     /// Empties the slot of `id` and advances its generation, so that `id` is stale: returns the
-    /// id of the slot's next widget.
-    fn free(&mut self, id: WidgetId) -> WidgetId {
+    /// id of the slot's next widget, or `None` when the slot is retired. A node carries only the
+    /// low 16 bits of the generation, so a slot freed 65,536 times holds no widget again: a node
+    /// an assistive technology cached for any of its widgets never names another. A retired slot
+    /// is in no tree, so it is never freed again.
+    fn free(&mut self, id: WidgetId) -> Option<WidgetId> {
         self.slots[id.index()] = dead();
-        let generation = self.generations[id.index()].wrapping_add(1);
+        let generation = self.generations[id.index()] + 1;
         self.generations[id.index()] = generation;
-        WidgetId(id.0, generation)
+        (generation != RETIRED).then_some(WidgetId(id.0, generation))
     }
 
     /// Logs the use of stale `id`, once for a run of uses.
