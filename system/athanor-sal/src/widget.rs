@@ -463,9 +463,9 @@ pub enum Event {
     /// paste the primary selection instead: a tray's item asks for its secondary activation.
     /// It neither focuses nor activates the widget.
     MiddleClick(WidgetId),
-    /// The wheel turned over a widget where no scroll took it, in 120ths of a step as
-    /// `wl_pointer`'s `axis_value120`, as GTK's scroll controller with discrete steps. See
-    /// [`Ui::pointer_wheel`].
+    /// The wheel turned over a widget where no scroll took it, in whole steps, as GTK's
+    /// scroll controller with discrete steps: a high resolution wheel's turns add up to them.
+    /// See [`Ui::pointer_wheel`].
     #[non_exhaustive]
     Wheel {
         /// The focusable widget under the pointer.
@@ -607,6 +607,9 @@ pub struct Ui {
     size: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
+    /// The widget under the pointer the wheel last turned over, and the turns on each axis,
+    /// in 120ths, that made no whole step yet ([`Ui::pointer_wheel`]).
+    wheel: Option<(WidgetId, [i32; 2])>,
     /// What the fields asked of the clipboards since the driver last took it.
     clips: Vec<Clip>,
     /// The field whose selection these widgets offered last as the primary selection, and its
@@ -635,6 +638,7 @@ impl Ui {
             size: (0.0, 0.0),
             hover: None,
             press: None,
+            wheel: None,
             clips: Vec::new(),
             offered: None,
             announcement: None,
@@ -1889,6 +1893,10 @@ impl Ui {
     /// on a widget made insensitive since moves nothing and starts no drag.
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
+        // The wheel's rest stays with the widget it turned over.
+        if self.wheel.is_some_and(|(over, _)| self.hover != Some(over)) {
+            self.wheel = None;
+        }
         let id = self.press?.widget;
         if !self.is_sensitive(id) {
             return None;
@@ -1914,6 +1922,7 @@ impl Ui {
     /// drag it started ends over no widget.
     pub fn pointer_leave(&mut self) -> Option<Event> {
         self.hover = None;
+        self.wheel = None;
         let press = self.press.take()?;
         press.dragging.then_some(Event::DragEnded {
             from: press.widget,
@@ -1923,7 +1932,9 @@ impl Ui {
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
     /// the widget there and waits for the release to activate it, as GTK's buttons do; the
-    /// secondary button asks for its context menu.
+    /// secondary button asks for its context menu; the middle button gives
+    /// [`Event::MiddleClick`] on a widget that is not a field or a text area, which paste the
+    /// primary selection instead.
     pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
         let id = self.hit(x, y);
         match button {
