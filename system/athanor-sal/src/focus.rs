@@ -51,10 +51,13 @@ pub fn step(ui: &Ui, backwards: bool) -> Option<WidgetId> {
 /// The next item of `menu` after the focused one, or before it when `backwards`, wrapping
 /// around: what the arrows do in a menu.
 pub fn cycle(ui: &Ui, menu: WidgetId, backwards: bool) -> Option<WidgetId> {
-    let items = chain(ui)
-        .into_iter()
-        .filter(|&id| ui.widget(id).parent == Some(menu));
-    wrap(ui, items.collect(), backwards)
+    wrap(ui, items(ui, menu), backwards)
+}
+
+/// The items of `menu` that take the focus, in order: past its separators and insensitive items.
+pub fn items(ui: &Ui, menu: WidgetId) -> Vec<WidgetId> {
+    let items = chain(ui).into_iter();
+    items.filter(|&id| ui.widget(id).parent == Some(menu)).collect()
 }
 
 fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
