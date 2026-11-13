@@ -27,13 +27,14 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
 }
 
 /// The row of the list `id` that takes the focus: its focused row, else its selected row, else
-/// its first; none of its hidden or insensitive rows, and none when `id` is not a list.
+/// its first; none of its hidden or insensitive rows, nor a heading, and none when `id` is not a
+/// list.
 pub fn list_stop(ui: &Ui, id: WidgetId) -> Option<WidgetId> {
     let Kind::List { selected, .. } = ui.widget(id).kind else {
         return None;
     };
     let mut rows = ui.visible_children(id);
-    rows.retain(|&r| ui.widget(r).sensitive);
+    rows.retain(|&r| ui.widget(r).is_focusable());
     let stop = [ui.focus(), selected]
         .into_iter()
         .flatten()
@@ -50,10 +51,13 @@ pub fn step(ui: &Ui, backwards: bool) -> Option<WidgetId> {
 /// The next item of `menu` after the focused one, or before it when `backwards`, wrapping
 /// around: what the arrows do in a menu.
 pub fn cycle(ui: &Ui, menu: WidgetId, backwards: bool) -> Option<WidgetId> {
-    let items = chain(ui)
-        .into_iter()
-        .filter(|&id| ui.widget(id).parent == Some(menu));
-    wrap(ui, items.collect(), backwards)
+    wrap(ui, items(ui, menu), backwards)
+}
+
+/// The items of `menu` that take the focus, in order: past its separators and insensitive items.
+pub fn items(ui: &Ui, menu: WidgetId) -> Vec<WidgetId> {
+    let items = chain(ui).into_iter();
+    items.filter(|&id| ui.widget(id).parent == Some(menu)).collect()
 }
 
 fn wrap(ui: &Ui, chain: Vec<WidgetId>, backwards: bool) -> Option<WidgetId> {
@@ -162,7 +166,7 @@ mod tests {
         (0..times)
             .map(|_| {
                 ui.key(key.clone());
-                ui.focus().unwrap_or(WidgetId(u32::MAX))
+                ui.focus().unwrap_or(WidgetId(u32::MAX, 0))
             })
             .collect()
     }
@@ -203,7 +207,7 @@ mod tests {
         assert_eq!(walk(&mut ui, Key::Down, 3), [field, ok, ok]);
         ui.set_focus(Some(field));
         ui.key(Key::Up);
-        assert!([a, b, c].contains(&ui.focus().unwrap_or(WidgetId(u32::MAX))));
+        assert!([a, b, c].contains(&ui.focus().unwrap_or(WidgetId(u32::MAX, 0))));
 
         let (mut ui, [_, b, c, ..]) = form(false);
         ui.set_focus(Some(b));

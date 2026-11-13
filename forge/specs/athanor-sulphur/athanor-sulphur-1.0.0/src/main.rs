@@ -8,6 +8,7 @@
 
 mod a11y;
 mod aids;
+mod background_effect;
 mod bell;
 mod bindings;
 mod blur;

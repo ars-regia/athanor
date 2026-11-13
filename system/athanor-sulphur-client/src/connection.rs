@@ -27,7 +27,7 @@ use gdk4_wayland::prelude::*;
 use gtk4::gdk;
 use wayland_client::backend::{ObjectId, WaylandError};
 use wayland_client::globals::{registry_queue_init, GlobalList, GlobalListContents};
-#[cfg(feature = "gtk")]
+#[cfg(feature = "capture")]
 use wayland_client::protocol::wl_shm;
 use wayland_client::protocol::{wl_keyboard, wl_output, wl_registry, wl_seat};
 use wayland_client::{
@@ -779,11 +779,11 @@ pub(crate) struct Globals {
     pub(crate) keyboard_layouts: Option<ZcosmicKeyboardLayoutManagerV1>,
     pub(crate) a11y: Option<crate::a11y::Manager>,
     security_context: Option<WpSecurityContextManagerV1>,
-    /// The window pictures, GDK textures: bound only with the `gtk` feature, the capture
-    /// globals at the first capture.
-    #[cfg(feature = "gtk")]
+    /// The window pictures: bound only with the `capture` feature, the capture globals at the
+    /// first capture.
+    #[cfg(feature = "capture")]
     pub(crate) shm: Option<wl_shm::WlShm>,
-    #[cfg(feature = "gtk")]
+    #[cfg(feature = "capture")]
     pub(crate) capture: crate::capture::Globals,
 }
 
@@ -819,7 +819,7 @@ pub(crate) struct State {
     pub(crate) accessibility: Accessibility,
     pub(crate) events: Vec<Event>,
     /// The window pictures in flight, by call.
-    #[cfg(feature = "gtk")]
+    #[cfg(feature = "capture")]
     pub(crate) captures: HashMap<u64, crate::capture::Pending>,
 }
 
@@ -862,9 +862,9 @@ impl State {
             keyboard_layouts: bind(globals, qh, 1..=1),
             a11y: crate::a11y::bind_cosmic(globals, qh),
             security_context: bind(globals, qh, 1..=1),
-            #[cfg(feature = "gtk")]
+            #[cfg(feature = "capture")]
             shm: bind(globals, qh, 1..=1),
-            #[cfg(feature = "gtk")]
+            #[cfg(feature = "capture")]
             capture: crate::capture::Globals::default(),
             seat: bind(globals, qh, 1..=7),
             workspace_manager: bind(globals, qh, 1..=1),
@@ -1203,7 +1203,7 @@ impl Dispatch<ExtForeignToplevelHandleV1, WindowId> for State {
             }
             ext_foreign_toplevel_handle_v1::Event::Closed => {
                 // A capture ends before the handle it was made from does.
-                #[cfg(feature = "gtk")]
+                #[cfg(feature = "capture")]
                 state.captures.retain(|_, capture| {
                     if capture.window != *id {
                         return true;

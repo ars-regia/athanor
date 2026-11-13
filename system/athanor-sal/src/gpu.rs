@@ -277,6 +277,7 @@ impl Painter {
                 | Kind::LabelledButton {
                     image: Some(image), ..
                 }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
                 | Kind::Picture { image, .. } => Some(image.pixmap()),
                 _ => None,
             })
@@ -360,17 +361,11 @@ mod tests {
     use vello_cpu::peniko::ImageAlphaType;
     use vello_cpu::PixelMetadata;
 
-    /// Draws `image` alone on `painter`'s device and reads back the pixel at its centre.
-    fn centre_of(painter: &mut Painter, image: Image) -> Result<[u8; 4], Error> {
+    /// Draws a widget of `kind` alone on `painter`'s device and reads back the pixel at its
+    /// centre.
+    fn centre_of(painter: &mut Painter, kind: Kind) -> Result<[u8; 4], Error> {
         let mut ui = Ui::new("Image", Theme::default(), false);
-        let id = ui.add(
-            Ui::ROOT,
-            Kind::Image {
-                image,
-                size: 32.0,
-                description: String::new(),
-            },
-        );
+        let id = ui.add(Ui::ROOT, kind);
         let (width, height) = layout(&mut ui, 1.0)?;
         let size = wgpu::Extent3d {
             width: u32::from(width),
@@ -444,6 +439,14 @@ mod tests {
         Ok(())
     }
 
+    fn image(image: Image) -> Kind {
+        Kind::Image {
+            image,
+            size: 32.0,
+            description: String::new(),
+        }
+    }
+
     fn solid(rgba: [u8; 4]) -> Image {
         let metadata = PixelMetadata::new(ImageAlphaType::AlphaPremultiplied, false);
         Image {
@@ -464,8 +467,28 @@ mod tests {
         let mut painter = Painter::new(&adapter, TextureFormat::Rgba8Unorm)?;
         let red = [0xcc, 0, 0, 0xff];
         let blue = [0, 0, 0xcc, 0xff];
-        assert_eq!(centre_of(&mut painter, solid(red))?, red);
-        assert_eq!(centre_of(&mut painter, solid(blue))?, blue);
+        assert_eq!(centre_of(&mut painter, image(solid(red)))?, red);
+        assert_eq!(centre_of(&mut painter, image(solid(blue)))?, blue);
+        assert_eq!(painter.resources.images.len(), 1);
+        Ok(())
+    }
+
+    /// An icon toggle's image reaches the atlas, as an icon button's does, and is drawn.
+    #[test]
+    #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
+    fn an_icon_toggles_image_is_uploaded_and_drawn() -> Result<(), Error> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = ready(instance.request_adapter(&Default::default()))??;
+        let mut painter = Painter::new(&adapter, TextureFormat::Rgba8Unorm)?;
+        let red = [0xcc, 0, 0, 0xff];
+        let toggle = Kind::IconToggle(crate::icon_toggle::IconToggle {
+            label: "Do Not Disturb".into(),
+            image: solid(red),
+            size: 32.0,
+            active: false,
+        });
+        assert_eq!(centre_of(&mut painter, toggle)?, red);
         assert_eq!(painter.resources.images.len(), 1);
         Ok(())
     }

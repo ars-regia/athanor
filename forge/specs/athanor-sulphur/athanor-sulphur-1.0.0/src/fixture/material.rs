@@ -107,10 +107,10 @@ fn d35_the_probe_runs_on_a_render_node() {
 }
 
 /// The longest a probe may take in the tests below that do not test the deadline.
-const LONG: Duration = Duration::from_secs(5);
+pub(super) const LONG: Duration = Duration::from_secs(5);
 
 /// Probe times that give `tier`.
-fn times(tier: Tier) -> Probed {
+pub(super) fn times(tier: Tier) -> Probed {
     let (fast, slow) = (Duration::ZERO, Duration::from_secs(1));
     let (scene, dock, full) = match tier {
         Tier::M2 => (fast, fast, fast),
@@ -122,7 +122,7 @@ fn times(tier: Tier) -> Probed {
 
 /// Puts the outputs on a GPU that is not there, whose probe is `prober` and whose probes'
 /// deadline is `deadline`, and measures them again.
-fn on_a_fake_gpu(
+pub(super) fn on_a_fake_gpu(
     run: &mut Running,
     deadline: Duration,
     prober: impl Fn(&Path, &Scene, Instant) -> Result<Probed, String> + Send + Sync + 'static,
@@ -136,7 +136,7 @@ fn on_a_fake_gpu(
 }
 
 /// The `n`th output.
-fn output(run: &Running, n: usize) -> Output {
+pub(super) fn output(run: &Running, n: usize) -> Output {
     run.state
         .space
         .outputs()

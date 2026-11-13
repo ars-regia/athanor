@@ -7,7 +7,7 @@
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        24%{?athanor_content}%{?dist}
+Release:        25%{?athanor_content}%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -57,6 +57,17 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-25
+- Serve ext_background_effect_manager_v1 (doc_own_stack.md decision 35): on an output of
+  tier M2, what lies under a surface's blur region, windows included, is blurred with a dual
+  Kawase blur from half resolution, three passes, saturated in the last one, and drawn under
+  the surface; it is blurred again only when what lies under it changes. On M0 and M1, and
+  in software, the region is drawn as it is. Each blur element keeps its own copy of what
+  lies under it and the blur's levels in the damage tracker's effects cache. An output blurs,
+  front to back, at most eight regions a frame, of at most its own area together, counted
+  before the magnifier scales them, and draws the rest as they are. A copy is freed when its
+  element or its region goes, or when the output drops below M2.
+
 * Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
 - Serve xdg_wm_dialog_v1 (doc_own_stack.md decision 33): a click on the parent of a shown
   modal dialog gives the keyboard to the dialog, which stays above its parent.

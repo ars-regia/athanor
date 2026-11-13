@@ -3,15 +3,15 @@ name = "athanor-preview"
 version = "1.0.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-description = "The launcher's preview pane; untrusted files are decoded by athanor-preview-render"
+description = "What the launcher's preview pane shows; untrusted files are decoded by athanor-preview-render"
 
 [dependencies]
 athanor-i18n = { path = "../athanor-i18n" }
 athanor-search = { path = "../athanor-search" }
 athanor-unit = { path = "../athanor-unit" }
+gio = { workspace = true, features = ["v2_62"] }
 gio-unix = { workspace = true }
 glib = { workspace = true }
-gtk4 = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

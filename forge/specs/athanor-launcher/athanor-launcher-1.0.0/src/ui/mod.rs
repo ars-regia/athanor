@@ -2,6 +2,7 @@
 //! the focused output at each Show (LA5).
 
 mod actions;
+mod preview;
 mod rows;
 
 use std::cell::{Cell, RefCell};
@@ -110,10 +111,10 @@ pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
     list.add_css_class("launcher-results");
     list.update_property(&[gtk4::accessible::Property::Label(&tr("Results"))]);
     let scroll = gtk4::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk4::PolicyType::Never).vexpand(true).build();
-    let preview = Preview::new();
+    let (pane, preview) = preview::new();
     let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
     body.append(&scroll);
-    body.append(preview.widget());
+    body.append(&pane);
     let footer = gtk4::Label::new(Some(&tr("Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close")));
     footer.add_css_class("launcher-footer");
     footer.set_xalign(0.0);

@@ -1974,7 +1974,7 @@ BUDGET = {
     ".unwrap()": 0,
     ".expect(": 0,
     "panic!(": 0,
-    "assert!(": 2,
+    "assert!(": 1,
     "assert_eq!(": 1,
     "assert_ne!(": 0,
     "unreachable!(": 0,

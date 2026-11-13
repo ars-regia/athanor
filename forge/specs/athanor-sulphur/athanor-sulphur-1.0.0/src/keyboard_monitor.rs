@@ -185,14 +185,14 @@ struct Held {
 /// A warning that repeats, said at most once every `HUSH`: a client that floods the bus, or a
 /// signal thread that stalls, does not flood the journal.
 #[derive(Debug, Default)]
-struct Hush {
+pub(crate) struct Hush {
     said: Option<Instant>,
     held: u64,
 }
 
 impl Hush {
     /// Whether to say the warning now, and how many were held back since it was last said.
-    fn now(&mut self) -> Option<u64> {
+    pub(crate) fn now(&mut self) -> Option<u64> {
         let now = Instant::now();
         if self
             .said

@@ -43,6 +43,9 @@ pub struct TextContext {
     pub fonts: FontContext,
     /// The scratch space shaping uses.
     pub layouts: LayoutContext<Brush>,
+    /// The approximate character width of a wrapping label's `max_width_chars`, by font size and
+    /// style: each pair is shaped once.
+    pub(crate) char_widths: Vec<(f32, TextStyle, f32)>,
 }
 
 impl Default for TextContext {
@@ -80,6 +83,7 @@ impl TextContext {
         Self {
             fonts,
             layouts: LayoutContext::new(),
+            char_widths: Vec::new(),
         }
     }
 

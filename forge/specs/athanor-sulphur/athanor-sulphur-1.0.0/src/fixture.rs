@@ -12373,3 +12373,7 @@ mod idle;
 // Decision 33, wave 2a: the standard globals.
 #[cfg(test)]
 mod wave2a;
+
+// Decision 35: ext-background-effect-v1's blur.
+#[cfg(test)]
+mod background_effect;
