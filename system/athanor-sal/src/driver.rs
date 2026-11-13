@@ -72,7 +72,6 @@ use smithay_client_toolkit::{
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -349,11 +348,11 @@ fn run_on(
     event_loop
         .handle()
         .insert_source(receiver, |event, _, app: &mut App| {
-            if let channel::Event::Msg((id, generation, request)) = event {
+            if let channel::Event::Msg((id, request)) = event {
                 let event = app
                     .shell
                     .get_mut(id)
-                    .and_then(|surface| surface.ui.do_published_action(&request, generation));
+                    .and_then(|surface| surface.ui.do_action(&request));
                 app.changed(id, event);
             }
         })
@@ -537,7 +536,7 @@ pub struct Shell {
     layer_shell: Option<LayerShell>,
     fractional_scale: Option<WpFractionalScaleManagerV1>,
     viewporter: Option<WpViewporter>,
-    actions: Sender<Request>,
+    actions: Sender<(SurfaceId, ActionRequest)>,
     next: u64,
     surfaces: Vec<Surface>,
     /// The popup open, at most one.
@@ -694,10 +693,7 @@ impl Shell {
                 if let Ok(mut initial) = surface.initial.lock() {
                     *initial = Some(tree);
                 }
-                if let Ok(mut published) = surface.published.lock() {
-                    published.clone_from(surface.ui.generations());
-                }
-                let mut a11y = adapter(id, &surface.initial, &surface.published, &actions);
+                let mut a11y = adapter(id, &surface.initial, &actions);
                 a11y.update_window_focus_state(surface.window_focused);
                 surface.a11y = Some(a11y);
                 surface.dirty = true;
@@ -850,7 +846,7 @@ impl Shell {
         if matches!(from.shown, Shown::Popup(_)) {
             return Err(format!("no popup of the popup {parent:?}: one is open at a time").into());
         }
-        if anchor.index() >= from.ui.len() {
+        if !from.ui.contains(anchor) {
             return Err(format!("no widget {anchor:?} on {parent:?}").into());
         }
         let r = at.map_or(from.ui.widget(anchor).rect, |(x, y)| Rect {
@@ -1032,8 +1028,7 @@ impl Shell {
         };
         // The first tree comes from the last update drawn.
         let initial = Arc::new(Mutex::new(Some(tree_update(&ui, 1.0))));
-        let published = Arc::new(Mutex::new(ui.generations().clone()));
-        let a11y = Some(adapter(id, &initial, &published, &self.actions));
+        let a11y = Some(adapter(id, &initial, &self.actions));
         // A layer surface asks for its widgets' size before the first configure.
         let size = match &shown {
             Shown::Layer(surface) => {
@@ -1055,7 +1050,6 @@ impl Shell {
             ui,
             a11y,
             initial,
-            published,
             window_focused: false,
             scale: 1.0,
             size,
@@ -1287,9 +1281,6 @@ struct Surface {
     a11y: Option<accesskit_unix::Adapter>,
     /// The tree the adapter activates with; `None` once the surface left the tree.
     initial: Arc<Mutex<Option<TreeUpdate>>>,
-    /// The generation of each slot in the tree last published, which the adapter sends with an
-    /// action request on it: one for a widget removed since is refused.
-    published: Published,
     /// The adapter's window is the focused one, which a new adapter takes over.
     window_focused: bool,
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
@@ -1446,31 +1437,19 @@ impl Surface {
                 a11y.update_if_active(|| update);
             }
         }
-        // After the tree: a request sent in between carries the old generation, and is refused.
-        if let Ok(mut published) = self.published.lock() {
-            published.clone_from(self.ui.generations());
-        }
     }
 }
 
-/// The generation of each widget slot in a surface's tree as last published.
-type Published = Arc<Mutex<BTreeMap<WidgetId, u64>>>;
-
-/// An action request of an assistive technology: its surface, the generation its target's slot
-/// had in the tree last published, and the request.
-type Request = (SurfaceId, u64, ActionRequest);
-
 /// The accessibility adapter of surface `id`, whose first tree is `initial`'s and whose actions
-/// travel on `actions` to the event loop, with their target's generation in `published`.
+/// travel on `actions` to the event loop.
 fn adapter(
     id: SurfaceId,
     initial: &Arc<Mutex<Option<TreeUpdate>>>,
-    published: &Published,
-    actions: &Sender<Request>,
+    actions: &Sender<(SurfaceId, ActionRequest)>,
 ) -> accesskit_unix::Adapter {
     accesskit_unix::Adapter::new(
         Activation(Arc::clone(initial)),
-        Actions(id, Arc::clone(published), actions.clone()),
+        Actions(id, actions.clone()),
         Deactivation,
     )
 }
@@ -1485,21 +1464,13 @@ impl ActivationHandler for Activation {
     }
 }
 
-struct Actions(SurfaceId, Published, Sender<Request>);
+struct Actions(SurfaceId, Sender<(SurfaceId, ActionRequest)>);
 
 impl ActionHandler for Actions {
     fn do_action(&mut self, request: ActionRequest) {
-        let Ok(published) = self.1.lock() else {
-            return;
-        };
-        let generation = u32::try_from(request.target_node.0)
-            .ok()
-            .and_then(|slot| published.get(&WidgetId(slot)).copied())
-            .unwrap_or(0);
-        drop(published);
         // The receiver lives as long as the event loop; once it is gone the driver is ending
         // and there is nothing left to act on.
-        let _ = self.2.send((self.0, generation, request));
+        let _ = self.1.send((self.0, request));
     }
 }
 
@@ -1615,21 +1586,19 @@ impl Ime {
     }
 }
 
-/// A focused field the input method writes to: its surface, its widget, the generation of the
-/// widget's slot, and its content hint. A field removed and another focused in its slot is
-/// another field, enabled again with its own cursor rectangle.
-type ImeField = (SurfaceId, WidgetId, u64, ContentHint);
+/// A focused field the input method writes to: its surface, its widget, and its content hint.
+type ImeField = (SurfaceId, WidgetId, ContentHint);
 
-/// The focused field of `ui` the input method writes to: its widget, the generation of its slot,
-/// its rectangle, and its content hint, multi-line for a text area.
-fn ime_field(ui: &Ui) -> Option<(WidgetId, u64, Rect, ContentHint)> {
+/// The focused field of `ui` the input method writes to: its widget, its rectangle, and its
+/// content hint, multi-line for a text area.
+fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
     let hint = match widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
         _ => ContentHint::None,
     };
-    Some((id, ui.generation(id), widget.rect, hint))
+    Some((id, widget.rect, hint))
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -1746,7 +1715,7 @@ struct App {
     /// opens there.
     pressed_at: Option<(f32, f32)>,
     /// When the tooltip of the widget under the pointer, or focused, shows.
-    tooltip: Tooltip<(SurfaceId, WidgetId, u64)>,
+    tooltip: Tooltip<(SurfaceId, WidgetId)>,
     /// An error raised inside a callback, returned by [`run`].
     error: Option<Error>,
 }
@@ -1892,11 +1861,10 @@ impl App {
             .ime
             .entered
             .and_then(|surface| Some((surface, ime_field(self.shell.ui(surface)?)?)));
-        let enabled = field.map(|(surface, (id, slot, _, hint))| (surface, id, slot, hint));
-        if !self.ime.change(enabled) {
+        if !self.ime.change(field.map(|(surface, (id, _, hint))| (surface, id, hint))) {
             return;
         }
-        if let Some((_, (_, _, r, hint))) = field {
+        if let Some((_, (_, r, hint))) = field {
             text_input.enable();
             text_input.set_content_type(hint, ContentPurpose::Normal);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
@@ -1995,10 +1963,10 @@ impl App {
         }
     }
 
-    /// The widget with a tooltip under the pointer, or newly focused, is now `target`, with the
-    /// generation of its slot ([`Ui::generation`]): the tooltip shown hides, and the target's
-    /// shows after GTK's delay, if the widget is still the one in the slot.
-    fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId, u64)>) {
+    /// The widget with a tooltip under the pointer, or newly focused, is now `target`: the
+    /// tooltip shown hides, and the target's shows after GTK's delay, if the widget was not
+    /// removed since.
+    fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId)>) {
         let (hide, wait) = self.tooltip.point(target, Instant::now());
         if hide {
             self.close_tooltip();
@@ -2024,15 +1992,13 @@ impl App {
         if self.shell.popup.is_some_and(|p| p.menu) {
             return;
         }
-        let Some((id, widget, slot)) = self.tooltip.due(generation) else {
+        let Some((id, widget)) = self.tooltip.due(generation) else {
             return;
         };
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
-        let text = (widget.index() < ui.len()
-            && ui.generation(widget) == slot
-            && ui.is_visible(widget))
+        let text = (ui.contains(widget) && ui.is_visible(widget))
             .then(|| ui.tooltip(widget))
             .flatten();
         let Some(text) = text else {
@@ -2058,11 +2024,10 @@ impl App {
         let event = surface.ui.pointer_motion(x, y);
         let hovered = surface.ui.hovered();
         let target = hovered.filter(|&w| surface.ui.tooltip(w).is_some());
-        let target = target.map(|w| (id, w, surface.ui.generation(w)));
         if event.is_some() || hovered != before || selecting {
             self.changed(id, event);
         }
-        self.point_tooltip(target);
+        self.point_tooltip(target.map(|w| (id, w)));
     }
 
     /// A button pressed on `id`. A press outside the open menu closes it and goes no further,
@@ -2215,11 +2180,10 @@ impl App {
         let event = surface.ui.key(key);
         let after = surface.ui.focus();
         let tip = after.filter(|&w| surface.ui.tooltip(w).is_some());
-        let tip = tip.map(|w| (id, w, surface.ui.generation(w)));
         self.changed(id, event);
         // The keyboard focus shows its widget's tooltip as the pointer does.
         if after != before {
-            self.point_tooltip(tip);
+            self.point_tooltip(tip.map(|w| (id, w)));
         }
     }
 }
@@ -3106,12 +3070,12 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert!(ime.change(Some((a, WidgetId(1), 0, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
         assert!(ime.change(None));
         ime.entered = Some(b);
-        let field = Some((b, WidgetId(1), 0, ContentHint::None));
+        let field = Some((b, WidgetId(1, 0), ContentHint::None));
         assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
         assert!(!ime.change(field));
@@ -3121,10 +3085,10 @@ mod tests {
     fn every_change_of_the_focused_field_enables_the_text_input_again() {
         let a = SurfaceId(1);
         let mut ime = Ime::default();
-        assert!(ime.change(Some((a, WidgetId(1), 0, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // Another field of the same hint, on the same surface.
-        assert!(ime.change(Some((a, WidgetId(2), 0, ContentHint::None))));
-        assert!(!ime.change(Some((a, WidgetId(2), 0, ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+        assert!(!ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
     }
 
     #[test]
@@ -3135,14 +3099,14 @@ mod tests {
         ui.layout();
         ui.set_focus(Some(old));
         let a = SurfaceId(1);
-        let field = |ui: &Ui| ime_field(ui).map(|(id, slot, _, hint)| (a, id, slot, hint));
+        let field = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (a, id, hint));
         let mut ime = Ime::default();
         assert!(ime.change(field(&ui)));
         ui.remove_children(column);
         let new = ui.field(column, "New", "");
         ui.layout();
         ui.set_focus(Some(new));
-        assert_eq!(new, old, "the slot is reused");
+        assert_eq!(new.index(), old.index(), "the slot is reused");
         assert!(ime.change(field(&ui)), "the removed field's cursor rectangle stays");
         assert!(!ime.change(field(&ui)));
     }
@@ -3184,7 +3148,7 @@ mod tests {
         let name = ui.field(Ui::ROOT, "Name", "");
         let notes = ui.text_area(Ui::ROOT, "Notes", "", 3);
         ui.layout();
-        let hint = |ui: &Ui| ime_field(ui).map(|(id, _, _, hint)| (id, hint));
+        let hint = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, hint));
         ui.set_focus(Some(name));
         assert_eq!(hint(&ui), Some((name, ContentHint::None)));
         ui.set_focus(Some(notes));

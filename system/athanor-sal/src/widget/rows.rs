@@ -3,8 +3,7 @@
 //! in the field, the rows removed to fill the list anew, and the selected row as the field's
 //! active descendant for assistive technologies.
 
-use super::{Clip, Event, Kind, Ui, Widget, WidgetId};
-use std::collections::BTreeMap;
+use super::{Clip, Event, Kind, Ui, WidgetId};
 
 impl Ui {
     /// Adds a heading showing `text` at the end of the list `list`, over the rows that follow
@@ -92,32 +91,17 @@ impl Ui {
         });
         self.descendants
             .retain(|&(owner, list)| !is_gone(owner) && !is_gone(list));
+        // Each id removed is stale from now on, the driver's and the application's included.
         for &id in &gone {
-            let mut dead = Widget::new(Kind::Column, None);
-            dead.visible = false;
-            self.widgets[id] = dead;
-            self.free.insert(id);
-            let generation = self.generations.entry(id).or_default();
-            *generation = generation.wrapping_add(1);
+            let next = self.widgets.free(id);
+            self.free.insert(next);
         }
     }
 
-    /// How many times the slot of `id` was freed by [`Ui::remove_children`]. An id kept across
-    /// events, as the driver keeps a paste's field, a tooltip's widget or a menu's button,
-    /// names the same widget while its generation stays the one read when it was kept.
-    pub(crate) fn generation(&self, id: WidgetId) -> u64 {
-        self.generations.get(&id).copied().unwrap_or(0)
-    }
-
-    /// The generation of every slot [`Ui::remove_children`] freed: a slot missing has 0.
-    pub(crate) fn generations(&self) -> &BTreeMap<WidgetId, u64> {
-        &self.generations
-    }
-
-    /// The slot of a removed widget for one added under `parent`, the lowest: any serves, since
-    /// drawing and the pointer follow the order of the tree, not of the arena ([`Ui::ids`]).
-    /// Never `parent`'s own, which [`Ui::add`] refuses to add under while it is free. `None`
-    /// when there is none, or when `parent` names no widget, for [`Ui::add`] to panic on.
+    /// The id of a widget added under `parent` in a removed widget's slot, the lowest: any
+    /// serves, since drawing and the pointer follow the order of the tree, not of the arena
+    /// ([`Ui::ids`]). `None` when there is none, or when `parent` is past the arena, for
+    /// [`Ui::add`] to panic on.
     pub(super) fn reuse(&mut self, parent: WidgetId) -> Option<WidgetId> {
         if parent.index() >= self.widgets.len() {
             return None;
@@ -135,10 +119,16 @@ impl Ui {
     ///
     /// When `owner`, or `list` when it is `Some`, names no widget of this `Ui`.
     pub fn set_active_descendant(&mut self, owner: WidgetId, list: Option<WidgetId>) {
+        // Past the arena panics; a stale id is logged, and kept nowhere.
         let _ = &self.widgets[owner];
-        self.descendants.retain(|&(o, _)| o != owner);
         if let Some(list) = list {
             let _ = &self.widgets[list];
+        }
+        if !self.contains(owner) || list.is_some_and(|list| !self.contains(list)) {
+            return;
+        }
+        self.descendants.retain(|&(o, _)| o != owner);
+        if let Some(list) = list {
             self.descendants.push((owner, list));
         }
     }
@@ -418,11 +408,10 @@ mod tests {
         for key in [Key::SelectAll, Key::Cut, Key::Paste] {
             ui.key(key);
         }
-        let before = ui.generation(field);
         ui.remove_children(form);
         let next = ui.field(form, "Place", "");
-        assert_eq!(next, field, "the slot is reused");
-        assert_ne!(ui.generation(next), before, "and names another widget");
+        assert_eq!(next.index(), field.index(), "the slot is reused");
+        assert_ne!(next, field, "under another id");
         let clips = ui.take_clips();
         assert!(
             !clips.iter().any(|c| matches!(
@@ -435,25 +424,61 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_added_under_a_removed_widget_not_even_in_its_own_slot() {
+    fn nothing_is_added_under_a_removed_widget_and_its_id_never_reaches_the_next() {
         let (mut ui, [_, _, list, heading], _) = results(2, false);
         let size = ui.len();
         ui.remove_children(list);
-        // The heading's slot is the lowest free one: an icon loaded late for it comes back.
-        let Ok(icon) = Image::from_rgba8(1, 1, vec![0, 0, 0, 255]) else {
+        // An icon loaded late for the heading, whose slot is the lowest free one.
+        let Ok(image) = Image::from_rgba8(1, 1, vec![0, 0, 0, 255]) else {
             panic!("a 1 by 1 image");
         };
-        assert_eq!(ui.image(heading, icon, 28.0, ""), heading, "refused");
-        assert_eq!(ui.add(heading, Kind::Label("Late".into())), heading);
+        let icon = ui.image(heading, image, 28.0, "");
+        assert_eq!(icon, heading, "refused, with the stale id");
         assert!(ui.widget(heading).children.is_empty());
         assert_eq!(ui.widget(heading).parent, None, "never its own parent");
         assert!(!ui.is_visible(heading) && ui.is_sensitive(heading));
         ui.layout();
-        // The rows added since fill the slots, the heading's first.
+        // A new row takes the heading's slot, under another id.
         let row = ui.list_row(list, "File");
-        assert_eq!(row, heading);
-        assert_eq!(ui.widget(row).parent, Some(list));
+        assert_eq!(row.index(), heading.index());
+        assert_ne!(row, icon);
         assert_eq!(ui.len(), size, "the tree does not grow");
+        // What the late loader does with its id reaches nothing.
+        ui.set_visible(icon, false);
+        ui.set_sensitive(icon, false);
+        assert_eq!(ui.add(icon, Kind::Label("Late".into())), icon);
+        assert_eq!(ui.select_row(icon), None);
+        assert_eq!(ui.widget(row).parent, Some(list));
+        assert!(ui.widget(row).children.is_empty());
+        assert!(ui.is_visible(row) && ui.is_sensitive(row));
+        assert_eq!(ui.select_row(row), Some(Event::Selected(row)));
+    }
+
+    #[test]
+    fn a_paste_served_after_its_field_was_removed_mid_turn_reaches_no_new_field() {
+        let mut ui = Ui::new("Form", Theme::default(), false);
+        let form = ui.add(Ui::ROOT, Kind::Column);
+        let name = ui.field(form, "Name", "");
+        let place = ui.field(form, "Place", "");
+        ui.layout();
+        // The driver serves its snapshot in order, and the application answers the first
+        // paste's edit by building the form again.
+        let mut rebuilt = Vec::new();
+        for clip in [Clip::Paste(name), Clip::Paste(place)] {
+            let Clip::Paste(id) = clip else {
+                continue;
+            };
+            if ui.paste(id, "text") == Some(Event::Edited(name)) {
+                ui.remove_children(form);
+                rebuilt = vec![ui.field(form, "Name", ""), ui.field(form, "Place", "")];
+                ui.layout();
+            }
+        }
+        let slots: Vec<usize> = rebuilt.iter().map(|id| id.index()).collect();
+        assert_eq!(slots, [name.index(), place.index()], "the slots are reused");
+        for id in rebuilt {
+            assert_eq!(ui.field_text(id).as_deref(), Some(""), "{id:?}");
+        }
     }
 
     #[test]

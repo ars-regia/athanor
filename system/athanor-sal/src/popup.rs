@@ -24,8 +24,6 @@ pub(crate) struct OpenPopup<S> {
     pub parent: S,
     /// The widget of the parent it is placed against.
     pub anchor: WidgetId,
-    /// The generation of the anchor's slot when the popup opened ([`Ui::generation`]).
-    pub anchor_generation: u64,
     /// A menu, which grabs the input and takes the focus; otherwise a tooltip, which does neither.
     pub menu: bool,
 }
@@ -58,7 +56,6 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
             surface,
             parent: parent_surface,
             anchor,
-            anchor_generation: parent.generation(anchor),
             menu,
         }
     }
@@ -66,7 +63,7 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
     /// The anchor in `parent`, while it is the widget the popup opened from: `None` once the
     /// application removed it, whatever took its slot since.
     pub fn anchor_in(&self, parent: &Ui) -> Option<WidgetId> {
-        (parent.generation(self.anchor) == self.anchor_generation).then_some(self.anchor)
+        parent.contains(self.anchor).then_some(self.anchor)
     }
 
     /// Whether `input` closes the popup: Escape or a press outside closes a menu; a tooltip
@@ -264,8 +261,7 @@ mod tests {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: WidgetId(5),
-            anchor_generation: 0,
+            anchor: WidgetId(5, 0),
             menu: true,
         };
         assert!(menu.dismissed_by(Dismiss::Escape));
@@ -337,7 +333,7 @@ mod tests {
         // The application rebuilds the row while the menu is open.
         parent.remove_children(apps);
         let next = parent.add(apps, Kind::Button("Terminal".into()));
-        assert_eq!(next, app, "the slot is reused");
+        assert_eq!(next.index(), app.index(), "the slot is reused");
         parent.set_focus(None);
         open.closed(&mut parent);
         assert_eq!(open.anchor_in(&parent), None);
@@ -353,8 +349,7 @@ mod tests {
         let menu = OpenPopup {
             surface: 2,
             parent: 1,
-            anchor: WidgetId(5),
-            anchor_generation: 0,
+            anchor: WidgetId(5, 0),
             menu: true,
         };
         let tooltip = OpenPopup {

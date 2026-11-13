@@ -400,9 +400,6 @@ impl App {
     /// Reads the clipboard's text, or the primary selection's, into `widget` of `id`, as the
     /// event loop finds it readable. An empty clipboard, or one without text, pastes nothing.
     fn paste(&mut self, id: SurfaceId, widget: WidgetId, primary: bool) {
-        let Some(generation) = self.shell.ui(id).map(|ui| ui.generation(widget)) else {
-            return;
-        };
         let clipboards = &self.clipboards;
         let pipe = if primary {
             let offer = clipboards.primary_device.as_ref();
@@ -433,7 +430,7 @@ impl App {
             |app| &mut app.clipboards.pending,
             pipe,
             PASTE_TIMEOUT,
-            move |app, text| app.pasted(id, (widget, generation), &text),
+            move |app, text| app.pasted(id, widget, &text),
         );
         if let Err(error) = read {
             eprintln!("athanor-sal: nothing pasted: {error}");
@@ -441,12 +438,12 @@ impl App {
     }
 
     /// Puts the text read from a clipboard into `widget` of `id`, unless the widget was removed
-    /// while the text was read: its slot's generation is no longer `generation`.
-    fn pasted(&mut self, id: SurfaceId, (widget, generation): (WidgetId, u64), text: &str) {
+    /// while the text was read: its id is then stale, and the field in its slot takes nothing.
+    fn pasted(&mut self, id: SurfaceId, widget: WidgetId, text: &str) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        if surface.ui.generation(widget) != generation {
+        if !surface.ui.contains(widget) {
             eprintln!("athanor-sal: nothing pasted: its field was removed");
             return;
         }
@@ -597,13 +594,13 @@ mod tests {
         let clips = vec![
             Clip::Copy("late".into()),
             Clip::Unselect,
-            Clip::Cut(WidgetId(2), "cut".into()),
-            Clip::Paste(WidgetId(3)),
+            Clip::Cut(WidgetId(2, 0), "cut".into()),
+            Clip::Paste(WidgetId(3, 0)),
             Clip::Copy("later".into()),
         ];
         assert_eq!(
             outside_input(clips),
-            [Clip::Unselect, Clip::Paste(WidgetId(3))]
+            [Clip::Unselect, Clip::Paste(WidgetId(3, 0))]
         );
     }
 

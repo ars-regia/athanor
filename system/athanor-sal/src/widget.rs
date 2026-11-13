@@ -5,14 +5,20 @@ use crate::focus;
 use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::Theme;
 use parley::Layout;
+use std::cell::Cell;
 
 mod rows;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id is
 /// meaningful only in the `Ui` that returned it: another `Ui` reads it as one of its own widgets,
 /// or as none, and a method given an id that names no widget panics, as its `# Panics` says.
+///
+/// The id names its widget's slot in the `Ui` and the slot's generation. Once
+/// [`Ui::remove_children`] removes the widget the id is stale, also after another widget takes
+/// the slot: a method given it does nothing, and logs it, or returns `None` where it returns an
+/// `Option`; it never reaches the widget in the slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WidgetId(pub(crate) u32);
+pub struct WidgetId(pub(crate) u32, pub(crate) u32);
 
 impl WidgetId {
     /// The widget's place in its `Ui`'s arena.
@@ -23,27 +29,120 @@ impl WidgetId {
 
 /// The widgets of a [`Ui`], in the order they were added, indexed by their ids. A type of the
 /// crate's own, so that indexing by [`WidgetId`] stays out of the public API.
-pub(crate) struct Widgets(Vec<Widget>);
+///
+/// Indexed by a stale id, it gives a hidden column without children, and takes what is written
+/// to it into a widget that nothing reads: so a method of [`Ui`] given a stale id does nothing.
+pub(crate) struct Widgets {
+    slots: Vec<Widget>,
+    /// The generation of each slot, which [`Widgets::free`] advances.
+    generations: Vec<u32>,
+    /// What a stale id reads.
+    dead: Widget,
+    /// What a stale id writes, emptied at every write.
+    scratch: Widget,
+    /// The stale id last logged: a method that indexes it several times logs it once.
+    logged: Cell<Option<WidgetId>>,
+}
+
+/// A hidden column without children: the widget of a freed slot, and of a stale id.
+fn dead() -> Widget {
+    let mut widget = Widget::new(Kind::Column, None);
+    widget.visible = false;
+    widget
+}
+
+impl Widgets {
+    fn new(root: Widget) -> Self {
+        Self {
+            slots: vec![root],
+            generations: vec![0],
+            dead: dead(),
+            scratch: dead(),
+            logged: Cell::new(None),
+        }
+    }
+
+    /// Whether `id` names a widget, as it is now: neither stale nor past the arena.
+    pub(crate) fn contains(&self, id: WidgetId) -> bool {
+        self.generations.get(id.index()) == Some(&id.1)
+    }
+
+    /// The widget `id` names, `None` when it is stale or past the arena.
+    pub(crate) fn get(&self, id: WidgetId) -> Option<&Widget> {
+        self.contains(id).then(|| &self.slots[id.index()])
+    }
+
+    /// The widget `id` names, `None` when it is stale or past the arena.
+    pub(crate) fn get_mut(&mut self, id: WidgetId) -> Option<&mut Widget> {
+        if !self.contains(id) {
+            return None;
+        }
+        self.slots.get_mut(id.index())
+    }
+
+    /// The generation of the slot at `index`, `None` past the arena.
+    pub(crate) fn generation(&self, index: usize) -> Option<u32> {
+        self.generations.get(index).copied()
+    }
+
+    /// Adds `widget` in a new slot, of generation 0.
+    fn push(&mut self, widget: Widget) {
+        self.slots.push(widget);
+        self.generations.push(0);
+    }
+
+    /// Empties the slot of `id` and advances its generation, so that `id` is stale: returns the
+    /// id of the slot's next widget.
+    fn free(&mut self, id: WidgetId) -> WidgetId {
+        self.slots[id.index()] = dead();
+        let generation = self.generations[id.index()].wrapping_add(1);
+        self.generations[id.index()] = generation;
+        WidgetId(id.0, generation)
+    }
+
+    /// Logs the use of stale `id`, once for a run of uses.
+    fn stale(&self, id: WidgetId) {
+        if self.logged.replace(Some(id)) != Some(id) {
+            eprintln!("athanor-sal: {id:?} names a removed widget: nothing done");
+        }
+    }
+}
 
 impl std::ops::Deref for Widgets {
     type Target = [Widget];
 
     fn deref(&self) -> &[Widget] {
-        &self.0
+        &self.slots
     }
 }
 
 impl std::ops::Index<WidgetId> for Widgets {
     type Output = Widget;
 
+    /// # Panics
+    ///
+    /// When `id` is past the arena.
     fn index(&self, id: WidgetId) -> &Widget {
-        &self.0[id.index()]
+        let widget = &self.slots[id.index()];
+        if self.generations[id.index()] == id.1 {
+            return widget;
+        }
+        self.stale(id);
+        &self.dead
     }
 }
 
 impl std::ops::IndexMut<WidgetId> for Widgets {
+    /// # Panics
+    ///
+    /// When `id` is past the arena.
     fn index_mut(&mut self, id: WidgetId) -> &mut Widget {
-        &mut self.0[id.index()]
+        if self.generations[id.index()] == id.1 {
+            return &mut self.slots[id.index()];
+        }
+        self.stale(id);
+        self.scratch = dead();
+        &mut self.scratch
     }
 }
 
@@ -581,10 +680,9 @@ pub struct Ui {
     pub(crate) announcement: Option<String>,
     /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
     pub(crate) pose: crate::motion::Pose,
-    /// The slots of the widgets [`Ui::remove_children`] removed, which [`Ui::add`] fills again.
+    /// The ids of the next widgets of the slots [`Ui::remove_children`] freed, which
+    /// [`Ui::add`] fills again.
     free: std::collections::BTreeSet<WidgetId>,
-    /// How many times each slot [`Ui::remove_children`] freed was freed: see [`Ui::generation`].
-    generations: std::collections::BTreeMap<WidgetId, u64>,
     /// The widgets whose active descendant is the selected row of a list, by the widget: see
     /// [`Ui::set_active_descendant`].
     pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
@@ -594,7 +692,7 @@ impl Ui {
     /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
     pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
         Self {
-            widgets: Widgets(vec![Widget::new(Kind::Column, None)]),
+            widgets: Widgets::new(Widget::new(Kind::Column, None)),
             title: title.to_owned(),
             root_role: RootRole::Window,
             theme,
@@ -612,13 +710,12 @@ impl Ui {
             announcement: None,
             pose: crate::motion::Pose::REST,
             free: std::collections::BTreeSet::new(),
-            generations: std::collections::BTreeMap::new(),
             descendants: Vec::new(),
         }
     }
 
     /// The root column every widget descends from.
-    pub const ROOT: WidgetId = WidgetId(0);
+    pub const ROOT: WidgetId = WidgetId(0, 0);
     /// The most steps a slider may have between its minimum and its maximum.
     pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
     /// The longest text a field takes from outside the keyboard, in characters.
@@ -630,15 +727,15 @@ impl Ui {
     /// Adds `kind` as the last child of `parent`.
     ///
     /// Under a widget that [`Ui::remove_children`] removed, as an icon loaded late for a row
-    /// removed since, nothing is added: the refusal is logged, and the id returned is `parent`'s,
-    /// a removed slot that a later `add` may fill, under which nothing is added either.
+    /// removed since, nothing is added: the refusal is logged, and the id returned is `parent`,
+    /// stale, so that nothing done with it reaches the widget that takes its slot.
     ///
     /// # Panics
     ///
-    /// When `parent` names no widget of this `Ui`, or when the `Ui` already holds 2³² widgets,
-    /// as many as a `WidgetId` can name.
+    /// When `parent` is past the widgets of this `Ui`, or when the `Ui` already holds 2²⁴
+    /// widgets, as many as an accessibility node of the widget names.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
-        if self.free.contains(&parent) {
+        if parent.index() < self.widgets.len() && !self.widgets.contains(parent) {
             eprintln!("athanor-sal: nothing added under {parent:?}, a removed widget");
             return parent;
         }
@@ -648,11 +745,11 @@ impl Ui {
             return id;
         }
         let next = self.widgets.len();
-        assert!(next <= u32::MAX as usize, "a Ui holds at most 2^32 widgets");
-        let id = WidgetId(next as u32);
+        assert!(next < 1 << 24, "a Ui holds at most 2^24 widgets");
+        let id = WidgetId(next as u32, 0);
         // The parent first: an id that names no widget panics before the arena changes.
         self.widgets[parent].children.push(id);
-        self.widgets.0.push(Widget::new(kind, Some(parent)));
+        self.widgets.push(Widget::new(kind, Some(parent)));
         id
     }
 
@@ -829,6 +926,12 @@ impl Ui {
         self.add(bar, Kind::WindowButton(WindowButton::Minimize));
         self.add(bar, Kind::WindowButton(WindowButton::Close));
         self.title_bar = Some(bar);
+    }
+
+    /// Whether `id` names a widget of this `Ui` as it is now: not one [`Ui::remove_children`]
+    /// removed.
+    pub(crate) fn contains(&self, id: WidgetId) -> bool {
+        self.widgets.contains(id)
     }
 
     /// Whether the point, in logical pixels, is on the title bar: where a press moves the window.
@@ -2008,7 +2111,7 @@ impl Ui {
     /// entry gives up the primary selection it owns when its selection ends.
     pub(crate) fn take_clips(&mut self) -> Vec<Clip> {
         if let Some((id, text)) = &self.offered {
-            let kept = match self.widgets.get(id.index()).map(|w| &w.kind) {
+            let kept = match self.widgets.get(*id).map(|w| &w.kind) {
                 Some(Kind::Field(field) | Kind::TextArea(field)) => {
                     field.selected_text().as_ref() == Some(text)
                 }
@@ -2028,7 +2131,7 @@ impl Ui {
     /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes or is insensitive takes none, and a
     /// paste with no text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
-        let multiline = matches!(self.widgets.get(id.index())?.kind, Kind::TextArea(_));
+        let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
         if !self.is_sensitive(id) {
             return None;
         }
@@ -2055,11 +2158,10 @@ impl Ui {
     /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
     /// field that composes, is insensitive, or whose selection is no longer `text`, keeps it.
     pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
-        if self.widgets.get(id.index()).is_none() || !self.is_sensitive(id) {
+        if self.widgets.get(id).is_none() || !self.is_sensitive(id) {
             return None;
         }
-        let (Kind::Field(field) | Kind::TextArea(field)) =
-            &mut self.widgets.0.get_mut(id.index())?.kind
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets.get_mut(id)?.kind
         else {
             return None;
         };
@@ -2093,7 +2195,7 @@ impl Ui {
         id: WidgetId,
         can_paste: bool,
     ) -> Option<(Ui, Vec<(WidgetId, Key)>)> {
-        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id.index())?.kind
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind
         else {
             return None;
         };
@@ -2124,7 +2226,7 @@ impl Ui {
     /// back from the menu. The menu's Delete deletes the selection only, never the character
     /// after the caret.
     pub(crate) fn field_edit(&mut self, id: WidgetId, key: Key) -> Option<Event> {
-        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id.index())?.kind
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind
         else {
             return None;
         };
@@ -3966,7 +4068,7 @@ mod tests {
         ui.compose("x", None);
         assert_eq!(ui.paste(name, "y"), None);
         assert_eq!(ui.paste(Ui::ROOT, "y"), None);
-        assert_eq!(ui.paste(WidgetId(u32::MAX), "y"), None);
+        assert_eq!(ui.paste(WidgetId(u32::MAX, 0), "y"), None);
     }
 
     #[test]
@@ -4191,7 +4293,7 @@ mod tests {
             None,
             "a button is no field"
         );
-        assert_eq!(ui.field_edit(WidgetId(u32::MAX), Key::SelectAll), None);
+        assert_eq!(ui.field_edit(WidgetId(u32::MAX, 0), Key::SelectAll), None);
     }
 
     #[test]

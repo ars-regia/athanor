@@ -163,7 +163,7 @@ mod tests {
         (0..times)
             .map(|_| {
                 ui.key(key.clone());
-                ui.focus().unwrap_or(WidgetId(u32::MAX))
+                ui.focus().unwrap_or(WidgetId(u32::MAX, 0))
             })
             .collect()
     }
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(walk(&mut ui, Key::Down, 3), [field, ok, ok]);
         ui.set_focus(Some(field));
         ui.key(Key::Up);
-        assert!([a, b, c].contains(&ui.focus().unwrap_or(WidgetId(u32::MAX))));
+        assert!([a, b, c].contains(&ui.focus().unwrap_or(WidgetId(u32::MAX, 0))));
 
         let (mut ui, [_, b, c, ..]) = form(false);
         ui.set_focus(Some(b));
