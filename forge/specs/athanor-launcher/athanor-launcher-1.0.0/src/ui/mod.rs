@@ -1,7 +1,12 @@
-//! The launcher's content: the query, the rows and the preview, moved onto the surface of
-//! the focused output at each Show (LA5).
+//! The launcher's surfaces (LA5), drawn with Athanor's own toolkit: one layer surface per
+//! output, kept for the output's life. Hidden, it is a 1×1 background surface that takes no
+//! input and no keyboard and is out of the accessibility tree; at each Show the surface of the
+//! focused output becomes an overlay over the whole output, with the panel of the query, the
+//! rows and the preview. GLib's callbacks only queue a change, which `turn` applies with the
+//! shell in hand.
 
 mod actions;
+mod look;
 mod preview;
 mod rows;
 
@@ -10,331 +15,354 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use athanor_sulphur_client::{outputs, Client, WindowId};
 use athanor_launcher::keys::{self, Command, Key};
 use athanor_launcher::list::{self, Line};
+use athanor_launcher::menu::Choice;
 use athanor_launcher::place;
 use athanor_launcher::query::Memory;
-use athanor_preview::Preview;
+use athanor_preview::{Card, Preview};
+use athanor_sal::driver::{
+    Anchor, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell, SurfaceId,
+};
+use athanor_sal::{Event, Key as SalKey, KeyModifiers, Kind, Ui, WidgetId, Wrap};
 use athanor_search::apps::Catalog;
 use athanor_search::engine::Engine;
 use athanor_search::files::Files;
+use athanor_search::item::Hit;
 use athanor_search::providers;
 use athanor_search::windows::WindowEntry;
 use athanor_style::appearance::{self, Appearance};
-use gtk4::prelude::*;
-use gtk4::{gdk, gio, glib};
+use athanor_sulphur_client::{Client, WindowId};
+use gio::glib;
+use gio::prelude::*;
 
+use crate::bus;
 use crate::i18n::{is_rtl, tr, tr_with};
-use crate::surface::Surface;
+use look::Look;
+use preview::Icons;
 
 /// The selection settles this long before the preview draws it (LA6), so arrow keys stay
 /// fluid. An estimate (open doubt 3).
 const PREVIEW_DELAY: Duration = Duration::from_millis(100);
-
-const CSS: &str = "
-.launcher-surface { background: transparent; }
-.launcher { border-radius: 16px; padding: 12px; }
-.launcher-query { font-size: 1.4em; min-height: 44px; }
-.launcher-results { min-width: 420px; }
-.preview { min-width: 320px; padding: 12px; }
-.section-title { font-size: 0.85em; opacity: 0.7; padding: 8px 8px 2px; }
-.row-subtitle { font-size: 0.85em; opacity: 0.7; }
-row:selected .row-subtitle { opacity: 1; }
-.launcher-footer { font-size: 0.85em; opacity: 0.7; padding-top: 8px; }
-";
+/// The layer shell namespace the compositors and the rig know the launcher by.
+const NAMESPACE: &str = "athanor-launcher";
+/// The panel's width, as the GTK launcher's.
+const WIDTH: f32 = 760.0;
+/// The icon theme the rows and the preview draw with.
+const ICON_THEME: &str = "Adwaita";
 
 pub struct Options {
     pub usage_path: PathBuf,
     pub given_up: bool,
+    /// The rig's captures and launcher_e2e.py: shown at start with this query, as athanor-bar's
+    /// ATHANOR_BAR_OPEN opens a popover. The rig has no way to type.
+    pub show: Option<String>,
+}
+
+/// What GLib's callbacks tell the launcher, applied at the next turn.
+enum Change {
+    /// `os.athanor.Launcher1.Show`.
+    Toggle,
+    /// The engine's rows for the query.
+    Lines(Vec<Line>),
+    /// The preview's card for the selection.
+    Card(Card),
+    /// The selection settled.
+    DrawPreview,
+    /// The choices of the selected row, for its menu.
+    Menu {
+        row: WidgetId,
+        hit: Hit,
+        choices: Vec<Choice>,
+    },
+    /// A choice of the menu ran: the menu closes once its copy is served.
+    CloseMenu,
+    /// A copy that closes the launcher: it hides once the copy is served.
+    Hide,
+    Appearance(Appearance),
+    Apps,
+}
+
+type Queue = Rc<RefCell<Vec<Change>>>;
+
+/// A GLib timeout that can be replaced. The slot holds the id until the timeout fires and
+/// takes it then, so a fired timeout is never removed: GLib aborts on that.
+#[derive(Default)]
+struct Slot(Rc<RefCell<Option<glib::SourceId>>>);
+
+impl Slot {
+    fn start(&self, after: Duration, queue: &Queue, change: impl FnOnce() -> Change + 'static) {
+        self.cancel();
+        let (slot, queue) = (self.0.clone(), queue.clone());
+        let id = glib::timeout_add_local_once(after, move || {
+            slot.borrow_mut().take();
+            queue.borrow_mut().push(change());
+        });
+        self.0.replace(Some(id));
+    }
+
+    fn cancel(&self) {
+        let pending = self.0.borrow_mut().take();
+        if let Some(id) = pending {
+            id.remove();
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.cancel();
+    }
+}
+
+/// The widgets of the panel shown, and the surface size it was laid out for.
+#[derive(Clone, Copy)]
+struct Panel {
+    island: WidgetId,
+    field: WidgetId,
+    list: WidgetId,
+    pane: WidgetId,
+    size: (f32, f32),
+}
+
+/// The open menu of a row.
+struct Menu {
+    popup: SurfaceId,
+    hit: Hit,
+    items: Vec<(WidgetId, Choice)>,
 }
 
 pub struct Launcher {
-    app: gtk4::Application,
-    display: gdk::Display,
-    client: Option<Client>,
+    client: Option<Rc<Client>>,
     engine: Engine,
     preview: Rc<Preview>,
-    surfaces: RefCell<Vec<Surface>>,
-    /// The monitor of the surface the launcher is shown on.
-    shown: RefCell<Option<gdk::Monitor>>,
-    content: gtk4::Box,
-    entry: gtk4::Entry,
-    list: gtk4::ListBox,
-    scroll: gtk4::ScrolledWindow,
-    menu: RefCell<Option<gtk4::Popover>>,
-    lines: RefCell<Vec<Line>>,
+    look: Look,
+    rtl: bool,
+    icons: Icons,
+    /// The surfaces, in the order their outputs were announced, with their outputs.
+    outs: Vec<(SurfaceId, OutputInfo)>,
+    /// The surface the launcher is shown on.
+    shown: Option<SurfaceId>,
+    panel: Option<Panel>,
+    menu: Option<Menu>,
+    lines: Vec<Line>,
+    /// The widget of each line, at its index.
+    rows: Vec<WidgetId>,
     /// The windows of the last Show, at the index their hits carry.
-    windows: RefCell<Vec<WindowId>>,
-    memory: RefCell<Memory>,
-    pending_preview: RefCell<Option<glib::SourceId>>,
+    windows: Vec<WindowId>,
+    memory: Memory,
+    queue: Queue,
+    preview_timer: Slot,
     /// Bumped by every selection, so a late window capture is dropped.
-    selection: Cell<u64>,
-    /// A context singleton: it lives, and keeps its handler, only while held.
-    apps_monitor: gio::AppInfoMonitor,
+    selection: Rc<Cell<u64>>,
     /// False after the crash loop gave up: no search provider is called then.
     discover_providers: bool,
+    start_query: Option<String>,
+    /// When the Show being drawn was asked for, logged at its first frame.
+    asked: Option<Instant>,
+    /// A context singleton: it lives, and keeps its handler, only while held.
+    _apps_monitor: gio::AppInfoMonitor,
+    _owner: gio::OwnerId,
 }
 
-pub fn start(app: &gtk4::Application, options: &Options) -> Rc<Launcher> {
-    let Some(display) = gdk::Display::default() else {
-        tracing::error!("athanor-launcher: no display");
-        std::process::exit(1);
-    };
-    if is_rtl() {
-        gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
-    }
-    appearance::load(&display, &Appearance::read());
-    let provider = gtk4::CssProvider::new();
-    provider.load_from_string(CSS);
-    gtk4::style_context_add_provider_for_display(&display, &provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
-    let client = match Client::connect(&display) {
-        Ok(client) => {
-            // The open windows among the results, their actions and their pictures.
-            if let Err(err) = client.watch_windows() {
-                tracing::warn!(error = %err, "the windows are not followed");
-            }
-            Some(client)
-        }
-        Err(err) => {
-            tracing::error!(error = %err, "no compositor client; windows, launching and the focused output are unavailable");
-            None
-        }
-    };
-    // Search providers are discovered at each Show, not here.
-    let files = if options.given_up { None } else { Some(Files::new()) };
-
-    let entry = gtk4::Entry::builder().placeholder_text(tr("Search")).hexpand(true).build();
-    entry.add_css_class("launcher-query");
-    entry.update_property(&[gtk4::accessible::Property::Label(&tr("Search"))]);
-    let list = gtk4::ListBox::builder().selection_mode(gtk4::SelectionMode::Single).activate_on_single_click(true).build();
-    list.add_css_class("launcher-results");
-    list.update_property(&[gtk4::accessible::Property::Label(&tr("Results"))]);
-    let scroll = gtk4::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk4::PolicyType::Never).vexpand(true).build();
-    let (pane, preview) = preview::new();
-    let body = gtk4::Box::new(gtk4::Orientation::Horizontal, 12);
-    body.append(&scroll);
-    body.append(&pane);
-    let footer = gtk4::Label::new(Some(&tr("Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close")));
-    footer.add_css_class("launcher-footer");
-    footer.set_xalign(0.0);
-    let content = gtk4::Box::builder()
-        .orientation(gtk4::Orientation::Vertical)
-        .spacing(8)
-        .halign(gtk4::Align::Center)
-        .valign(gtk4::Align::Start)
-        .margin_top(place::TOP_MARGIN)
-        .width_request(760)
-        .height_request(place::MAX_HEIGHT)
-        .build();
-    content.add_css_class("launcher");
-    content.add_css_class("background");
-    content.append(&entry);
-    content.append(&body);
-    content.append(&footer);
-
-    let launcher = Rc::new_cyclic(|weak: &std::rc::Weak<Launcher>| {
-        let weak = weak.clone();
-        let engine = Engine::new(options.usage_path.clone(), files, Vec::new(), move |rows| {
-            if let Some(launcher) = weak.upgrade() {
-                launcher.fill(&list::lines(rows));
-            }
-        });
-        engine.set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
-        Launcher {
-            app: app.clone(),
-            display: display.clone(),
-            client,
-            engine,
-            preview,
-            surfaces: RefCell::default(),
-            shown: RefCell::default(),
-            content,
-            entry,
-            list,
-            scroll,
-            menu: RefCell::default(),
-            lines: RefCell::default(),
-            windows: RefCell::default(),
-            memory: RefCell::default(),
-            pending_preview: RefCell::default(),
-            selection: Cell::new(0),
-            apps_monitor: gio::AppInfoMonitor::get(),
-            discover_providers: !options.given_up,
-        }
+/// The size of `output` in logical pixels.
+fn logical_size(output: &OutputInfo) -> (f32, f32) {
+    let (width, height) = output.logical_size.unwrap_or_else(|| {
+        let scale = output.scale_factor.max(1);
+        output
+            .modes
+            .iter()
+            .find(|mode| mode.current)
+            .map_or((0, 0), |mode| {
+                (mode.dimensions.0 / scale, mode.dimensions.1 / scale)
+            })
     });
-    launcher.connect();
-    launcher.sync_surfaces();
-    // The rig's captures and launcher_e2e.py (Task 16): shown at start with this query, as
-    // athanor-bar's ATHANOR_BAR_OPEN opens a popover. The rig has no way to type.
-    if let Some(query) = std::env::var("ATHANOR_LAUNCHER_SHOW").ok().filter(|query| !query.is_empty()) {
-        launcher.show();
-        launcher.entry.set_text(&query);
-        launcher.entry.set_position(-1);
-    }
-    launcher
+    (width as f32, height as f32)
 }
 
-fn key(value: gdk::Key) -> Key {
-    match value {
-        gdk::Key::Escape => Key::Escape,
-        gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::ISO_Enter => Key::Enter,
-        gdk::Key::Tab | gdk::Key::ISO_Left_Tab => Key::Tab,
-        gdk::Key::Up | gdk::Key::KP_Up => Key::Up,
-        gdk::Key::Down | gdk::Key::KP_Down => Key::Down,
-        gdk::Key::Page_Up | gdk::Key::KP_Page_Up => Key::PageUp,
-        gdk::Key::Page_Down | gdk::Key::KP_Page_Down => Key::PageDown,
-        gdk::Key::c | gdk::Key::C => Key::C,
+fn scale(output: &OutputInfo) -> u16 {
+    u16::try_from(output.scale_factor.clamp(1, 16)).unwrap_or(1)
+}
+
+/// The hidden surface: a 1×1 background surface without input or keyboard.
+fn hidden() -> LayerOptions {
+    let mut options = LayerOptions::new(Layer::Background);
+    options.namespace = NAMESPACE.to_owned();
+    options.input_region = Some(Vec::new());
+    options
+}
+
+/// The shown surface: an overlay over the whole output that takes the keyboard.
+fn shown() -> LayerOptions {
+    let mut options = LayerOptions::new(Layer::Overlay);
+    options.namespace = NAMESPACE.to_owned();
+    options.anchor = Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT;
+    options.keyboard = KeyboardInteractivity::Exclusive;
+    options
+}
+
+fn empty(look: &Look, rtl: bool) -> Ui {
+    let mut ui = Ui::new("", look.panel.clone(), rtl);
+    ui.min_width = 1.0;
+    ui.min_height = 1.0;
+    ui
+}
+
+/// The panel's widgets on a surface `size` large, the panel `height` tall at the top margin
+/// and centred, with a viewport `scroll` tall onto the rows.
+fn skeleton(look: &Look, rtl: bool, size: (f32, f32), height: f32, scroll: f32) -> (Ui, Panel) {
+    let mut ui = Ui::new("", look.panel.clone(), rtl);
+    (ui.min_width, ui.min_height) = size;
+    let side = ((size.0 - WIDTH) / 2.0).max(0.0);
+    let top = place::TOP_MARGIN as f32;
+    let bottom = (size.1 - top - height).max(0.0);
+    let island = ui.island(Ui::ROOT, true, [top, side, bottom, side]);
+    let field = ui.field(island, &tr("Search"), "");
+    let body = ui.add(island, Kind::Row);
+    let viewport = ui.scroll(body, scroll);
+    let list = ui.list(viewport, &tr("Results"));
+    let pane = ui.add(body, Kind::Column);
+    let footer = ui.add(
+        island,
+        Kind::Label(tr(
+            "Enter to open · Ctrl+Enter to show in folder · Ctrl+C to copy · Tab for actions · Esc to close",
+        )),
+    );
+    ui.set_text_style(footer, rows::caption());
+    ui.set_wrap(footer, Some(Wrap::default()));
+    let panel = Panel {
+        island,
+        field,
+        list,
+        pane,
+        size,
+    };
+    (ui, panel)
+}
+
+/// The panel on a surface `size` large, `height` tall: the viewport takes what the query and
+/// the footer leave, as the GTK list's scrolled window expands.
+fn panel(look: &Look, rtl: bool, size: (f32, f32), height: f32) -> (Ui, Panel) {
+    let (mut probe, parts) = skeleton(look, rtl, size, height, 0.0);
+    probe.layout();
+    let around = probe.island_fill(parts.island).map_or(0.0, |fill| fill.h);
+    skeleton(look, rtl, size, height, (height - around).max(0.0))
+}
+
+/// What the launcher reads of a key of the toolkit's.
+fn key(key: &SalKey) -> Key {
+    match key {
+        SalKey::Escape => Key::Escape,
+        SalKey::Enter => Key::Enter,
+        SalKey::Tab | SalKey::BackTab => Key::Tab,
+        SalKey::Up => Key::Up,
+        SalKey::Down => Key::Down,
+        SalKey::PageUp => Key::PageUp,
+        SalKey::PageDown => Key::PageDown,
+        // Ctrl+C comes as the toolkit's copy.
+        SalKey::Copy => Key::C,
         _ => Key::Other,
     }
 }
 
 impl Launcher {
-    fn connect(self: &Rc<Self>) {
-        let weak = Rc::downgrade(self);
-        self.entry.connect_changed(move |entry| {
-            if let Some(launcher) = weak.upgrade() {
-                launcher.engine.query(&entry.text());
-            }
-        });
-        let keys = gtk4::EventControllerKey::new();
-        keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        let weak = Rc::downgrade(self);
-        keys.connect_key_pressed(move |_, value, _, state| {
-            let Some(launcher) = weak.upgrade() else {
-                return glib::Propagation::Proceed;
-            };
-            let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
-            match keys::command(key(value), ctrl, launcher.entry.selection_bounds().is_some(), launcher.menu_open()) {
-                Command::Pass => glib::Propagation::Proceed,
-                Command::Hide => {
-                    launcher.hide();
-                    glib::Propagation::Stop
-                }
-                Command::Move(delta) => {
-                    launcher.step(delta);
-                    glib::Propagation::Stop
-                }
-                Command::Menu => {
-                    launcher.open_menu();
-                    glib::Propagation::Stop
-                }
-                Command::MenuMove(delta) => {
-                    launcher.move_menu(delta);
-                    glib::Propagation::Stop
-                }
-                Command::MenuRun => {
-                    launcher.run_menu();
-                    glib::Propagation::Stop
-                }
-                Command::MenuClose => {
-                    launcher.close_menu();
-                    glib::Propagation::Stop
-                }
-                Command::Run(choice) => {
-                    if let Some(hit) = launcher.selected_hit() {
-                        launcher.run(hit, choice);
-                    }
-                    glib::Propagation::Stop
-                }
-            }
-        });
-        self.content.add_controller(keys);
-        let weak = Rc::downgrade(self);
-        self.list.connect_row_activated(move |_, row| {
-            let Some(launcher) = weak.upgrade() else { return };
-            let hit = usize::try_from(row.index()).ok().and_then(|index| launcher.lines.borrow().get(index).and_then(Line::hit).cloned());
-            if let Some(hit) = hit {
-                launcher.run(hit, athanor_launcher::menu::Choice::Open);
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.list.connect_row_selected(move |_, _| {
-            if let Some(launcher) = weak.upgrade() {
-                // The menu belongs to the row it opened on: Enter must never run its choice for another.
-                launcher.close_menu();
-                launcher.schedule_preview();
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.apps_monitor.connect_changed(move |_| {
-            if let Some(launcher) = weak.upgrade() {
-                launcher.engine.set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
-            }
-        });
-        let weak = Rc::downgrade(self);
-        outputs::watch(&self.display, move |_| {
-            if let Some(launcher) = weak.upgrade() {
-                launcher.sync_surfaces();
-            }
-        });
-        let display = self.display.clone();
-        appearance::watch(move |current| appearance::load(&display, &current));
-    }
-
-    fn monitors(&self) -> Vec<gdk::Monitor> {
-        let monitors = self.display.monitors();
-        (0..monitors.n_items()).filter_map(|index| monitors.item(index).and_downcast::<gdk::Monitor>()).collect()
-    }
-
-    /// One surface per output, reused on the same monitor object; a surface whose output
-    /// left is abandoned, and hides the launcher if it showed it (Review Focus 4).
-    fn sync_surfaces(self: &Rc<Self>) {
-        let mut old = self.surfaces.take();
-        let mut surfaces = Vec::new();
-        for monitor in self.monitors() {
-            match old.iter().position(|surface| surface.monitor == monitor && surface.alive()) {
-                Some(pos) => surfaces.push(old.remove(pos)),
-                None => surfaces.push(self.surface(&monitor)),
-            }
-        }
-        for leftover in old {
-            if self.shown.borrow().as_ref() == Some(&leftover.monitor) {
-                self.forget_shown();
-            }
-            leftover.abandon();
-        }
-        self.surfaces.replace(surfaces);
-    }
-
-    fn surface(self: &Rc<Self>, monitor: &gdk::Monitor) -> Surface {
-        let surface = Surface::new(&self.app, monitor);
-        // A click outside the panel hides the launcher (LA5). A hidden surface has an empty
-        // input region and receives none.
-        let click = gtk4::GestureClick::new();
-        let weak = Rc::downgrade(self);
-        click.connect_pressed(move |gesture, _, x, y| {
-            let (Some(launcher), Some(window)) = (weak.upgrade(), gesture.widget()) else { return };
-            let inside = window
-                .pick(x, y, gtk4::PickFlags::DEFAULT)
-                .is_some_and(|picked| picked == *launcher.content.upcast_ref::<gtk4::Widget>() || picked.is_ancestor(&launcher.content));
-            if !inside {
-                launcher.hide();
-            }
-        });
-        surface.window.add_controller(click);
-        surface
-    }
-
-    pub fn toggle(self: &Rc<Self>) {
-        if self.shown.borrow().is_some() {
-            self.hide();
+    pub fn new(options: Options, client: Option<Client>) -> Launcher {
+        let queue: Queue = Rc::default();
+        // Search providers are discovered at each Show, not here.
+        let files = if options.given_up {
+            None
         } else {
-            self.show();
+            Some(Files::new())
+        };
+        let lines = queue.clone();
+        let engine = Engine::new(options.usage_path, files, Vec::new(), move |rows| {
+            lines.borrow_mut().push(Change::Lines(list::lines(rows)));
+        });
+        engine.set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
+        let cards = queue.clone();
+        let preview = Preview::new(move |card| cards.borrow_mut().push(Change::Card(card.clone())));
+        let watched = queue.clone();
+        appearance::watch(move |current| watched.borrow_mut().push(Change::Appearance(current)));
+        let apps_monitor = gio::AppInfoMonitor::get();
+        let watched = queue.clone();
+        apps_monitor.connect_changed(move |_| watched.borrow_mut().push(Change::Apps));
+        let toggles = queue.clone();
+        let owner = bus::own(
+            move || toggles.borrow_mut().push(Change::Toggle),
+            || {
+                if let Err(err) = athanor_unit::notify::notify_ready() {
+                    tracing::warn!(error = %err, "cannot tell systemd the launcher is ready");
+                }
+            },
+        );
+        let look = look::look(&Appearance::read());
+        Launcher {
+            client: client.map(Rc::new),
+            engine,
+            preview,
+            icons: Icons::new(ICON_THEME, look.panel.text),
+            look,
+            rtl: is_rtl(),
+            outs: Vec::new(),
+            shown: None,
+            panel: None,
+            menu: None,
+            lines: Vec::new(),
+            rows: Vec::new(),
+            windows: Vec::new(),
+            memory: Memory::default(),
+            queue,
+            preview_timer: Slot::default(),
+            selection: Rc::new(Cell::new(0)),
+            discover_providers: !options.given_up,
+            start_query: options.show.filter(|query| !query.is_empty()),
+            asked: None,
+            _apps_monitor: apps_monitor,
+            _owner: owner,
         }
     }
 
-    fn show(self: &Rc<Self>) {
+    /// The output `surface` is on.
+    fn output_of(&self, surface: SurfaceId) -> Option<&OutputInfo> {
+        self.outs
+            .iter()
+            .find(|(id, _)| *id == surface)
+            .map(|(_, output)| output)
+    }
+
+    fn toggle(&mut self, shell: &mut Shell) {
+        if self.shown.is_some() {
+            self.hide(shell);
+        } else {
+            self.show(shell);
+        }
+    }
+
+    fn show(&mut self, shell: &mut Shell) {
         let asked = Instant::now();
-        let windows = self.client.as_ref().map(Client::windows).unwrap_or_default();
-        let surfaces = self.surfaces.borrow();
-        let connectors: Vec<Option<String>> = surfaces.iter().map(|surface| surface.monitor.connector().map(|name| name.to_string())).collect();
-        let activated = windows.iter().find(|window| window.state.activated).map(|window| window.outputs.as_slice());
-        let Some(surface) = surfaces.get(place::focused_output(activated, &connectors)) else {
+        let windows = self
+            .client
+            .as_ref()
+            .map(|client| client.windows())
+            .unwrap_or_default();
+        let connectors: Vec<Option<String>> = self
+            .outs
+            .iter()
+            .map(|(_, output)| output.name.clone())
+            .collect();
+        let activated = windows
+            .iter()
+            .find(|window| window.state.activated)
+            .map(|window| window.outputs.as_slice());
+        let Some((surface, output)) = self
+            .outs
+            .get(place::focused_output(activated, &connectors))
+            .cloned()
+        else {
             tracing::error!("no output to show the launcher on");
             return;
         };
-        self.windows.replace(windows.iter().map(|window| window.id).collect());
+        self.windows = windows.iter().map(|window| window.id).collect();
         self.engine.set_windows(
             windows
                 .iter()
@@ -355,91 +383,441 @@ impl Launcher {
         // A few small files: an application installed or removed since the last Show adds or
         // drops its provider without a restart.
         if self.discover_providers {
-            self.engine.set_providers(providers::discover(&providers::dirs()));
+            self.engine
+                .set_providers(providers::discover(&providers::dirs()));
         }
-        self.content.set_height_request(place::panel_height(surface.monitor.geometry().height()));
-        surface.show(self.content.upcast_ref());
-        self.shown.replace(Some(surface.monitor.clone()));
-        let text = self.memory.borrow_mut().shown(asked).unwrap_or_default();
-        self.entry.set_text(&text);
-        self.entry.grab_focus();
-        self.entry.select_region(0, -1);
-        // §5 item 1: from the Show call to the first frame-clock tick after present, which is
-        // before the frame is painted.
-        surface.window.add_tick_callback(move |_, _| {
-            tracing::info!(ms = u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX), "shown");
-            glib::ControlFlow::Break
-        });
+        self.preview.set_scale(f64::from(scale(&output)));
+        self.shown = Some(surface);
+        let text = self.memory.shown(asked).unwrap_or_default();
+        self.build(shell, surface, &text, logical_size(&output));
+        if let Err(err) = shell.set_layer(surface, &shown()) {
+            tracing::error!(error = %err, "cannot show the launcher's surface");
+        }
+        if let Err(err) = shell.set_accessible(surface, true) {
+            tracing::error!(error = %err, "the launcher's surface is not in the accessibility tree");
+        }
+        // The query kept from the last Show is selected, so typing replaces it.
+        if let (Some(ui), Some(panel)) = (shell.ui_mut(surface), self.panel) {
+            ui.set_focus(Some(panel.field));
+            ui.key(SalKey::SelectAll);
+        }
+        if !text.is_empty() {
+            self.engine.query(&text);
+        }
+        self.asked = Some(asked);
     }
 
-    pub fn hide(&self) {
-        let Some(monitor) = self.shown.borrow().clone() else { return };
-        self.memory.borrow_mut().hidden(&self.entry.text(), Instant::now());
-        self.forget_shown();
-        if let Some(surface) = self.surfaces.borrow().iter().find(|surface| surface.monitor == monitor) {
-            surface.hide();
+    /// Lays the panel out on `surface`, `size` large, with `text` in the query, the rows and
+    /// the card of now, and the selection kept.
+    fn build(&mut self, shell: &mut Shell, surface: SurfaceId, text: &str, size: (f32, f32)) {
+        let Some(output) = self.output_of(surface) else {
+            return;
+        };
+        let (height, scale) = (
+            place::panel_height(logical_size(output).1 as i32) as f32,
+            scale(output),
+        );
+        let selected = self.selected_id(shell);
+        // The menu is a popup of a row about to be replaced.
+        self.close_menu(shell);
+        let (mut ui, panel) = panel(&self.look, self.rtl, size, height);
+        ui.set_field_text(panel.field, text);
+        ui.set_focus(Some(panel.field));
+        // A screen reader follows the selected row while the query keeps the focus (LA7).
+        ui.set_active_descendant(panel.field, Some(panel.list));
+        self.rows = self
+            .lines
+            .iter()
+            .map(|line| rows::row(&mut ui, panel.list, &mut self.icons, scale, line))
+            .collect();
+        preview::draw(
+            &mut ui,
+            panel.pane,
+            &self.preview.card(),
+            &mut self.icons,
+            scale,
+        );
+        ui.layout();
+        if let Some(row) =
+            list::reselect(&self.lines, selected.as_deref()).and_then(|index| self.rows.get(index))
+        {
+            ui.select_row(*row);
+        }
+        let Some(current) = shell.ui_mut(surface) else {
+            return;
+        };
+        *current = ui;
+        self.panel = Some(panel);
+    }
+
+    pub(super) fn hide(&mut self, shell: &mut Shell) {
+        let Some(surface) = self.shown else { return };
+        let text = self
+            .panel
+            .and_then(|panel| shell.ui(surface).and_then(|ui| ui.field_text(panel.field)))
+            .unwrap_or_default();
+        self.memory.hidden(&text, Instant::now());
+        self.forget_shown(shell);
+        if let Some(ui) = shell.ui_mut(surface) {
+            *ui = empty(&self.look, self.rtl);
+        }
+        if let Err(err) = shell.set_layer(surface, &hidden()) {
+            tracing::error!(error = %err, "cannot hide the launcher's surface");
+        }
+        if let Err(err) = shell.set_accessible(surface, false) {
+            tracing::error!(error = %err, "the hidden launcher stays in the accessibility tree");
         }
     }
 
-    /// Everything a hide undoes, except the surface itself: the menu, the query (an empty
-    /// query cancels every source still running, LA4) and the preview.
-    fn forget_shown(&self) {
-        self.shown.replace(None);
-        if let Some(menu) = self.menu.take() {
-            menu.popdown();
-        }
-        if let Some(source) = self.pending_preview.take() {
-            source.remove();
-        }
-        self.entry.set_text("");
+    /// Everything a hide undoes but the surface itself: the menu, the query (an empty query
+    /// cancels every source still running, LA4) and the preview.
+    fn forget_shown(&mut self, shell: &mut Shell) {
+        self.close_menu(shell);
+        self.shown = None;
+        self.panel = None;
+        self.asked = None;
+        self.rows.clear();
+        self.preview_timer.cancel();
+        self.engine.query("");
         self.preview.clear();
     }
 
-    fn fill(&self, lines: &[Line]) {
-        // The popover is parented to a row that is about to be removed.
-        if let Some(menu) = self.menu.take() {
-            menu.popdown();
-            menu.unparent();
-        }
-        let selected = self.selected_hit().map(|hit| if hit.key.is_empty() { hit.title } else { hit.key });
-        self.list.remove_all();
-        for line in lines {
-            self.list.append(&rows::row(line));
-        }
-        self.lines.replace(lines.to_vec());
-        if let Some(row) = list::reselect(lines, selected.as_deref()).and_then(|index| self.list.row_at_index(index as i32)) {
-            self.list.select_row(Some(&row));
-        }
-        let count = lines.iter().filter(|line| line.hit().is_some()).count();
-        if !self.entry.text().is_empty() {
-            self.list.announce(
-                &tr_with("Results: {count}", "count", &count.to_string()),
-                gtk4::AccessibleAnnouncementPriority::Medium,
-            );
-        }
-    }
-
-    fn selected_index(&self) -> Option<usize> {
-        self.list.selected_row().and_then(|row| usize::try_from(row.index()).ok())
-    }
-
-    fn selected_hit(&self) -> Option<athanor_search::item::Hit> {
-        self.selected_index().and_then(|index| self.lines.borrow().get(index).and_then(Line::hit).cloned())
-    }
-
-    fn step(&self, delta: i32) {
-        let target = list::step(&self.lines.borrow(), self.selected_index(), delta);
-        let Some(row) = target.and_then(|index| self.list.row_at_index(index as i32)) else { return };
-        self.list.select_row(Some(&row));
-        // The entry keeps the focus, so the list does not scroll by itself.
-        if let Some(bounds) = row.compute_bounds(&self.list) {
-            let adjustment = self.scroll.vadjustment();
-            let (top, bottom) = (f64::from(bounds.y()), f64::from(bounds.y() + bounds.height()));
-            if top < adjustment.value() {
-                adjustment.set_value(top);
-            } else if bottom > adjustment.value() + adjustment.page_size() {
-                adjustment.set_value(bottom - adjustment.page_size());
+    fn focus_query(&self, shell: &mut Shell) {
+        if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
+            if let Some(ui) = shell.ui_mut(surface) {
+                ui.set_focus(Some(panel.field));
             }
+        }
+    }
+
+    fn fill(&mut self, shell: &mut Shell, lines: Vec<Line>) {
+        let selected = self.selected_id(shell);
+        // The menu is a popup of a row about to be removed.
+        self.close_menu(shell);
+        self.lines = lines;
+        let (Some(surface), Some(panel)) = (self.shown, self.panel) else {
+            return;
+        };
+        let Some(scale) = self.output_of(surface).map(scale) else {
+            return;
+        };
+        let Some(ui) = shell.ui_mut(surface) else {
+            return;
+        };
+        ui.remove_children(panel.list);
+        self.rows = self
+            .lines
+            .iter()
+            .map(|line| rows::row(ui, panel.list, &mut self.icons, scale, line))
+            .collect();
+        ui.layout();
+        if let Some(row) =
+            list::reselect(&self.lines, selected.as_deref()).and_then(|index| self.rows.get(index))
+        {
+            ui.select_row(*row);
+        }
+        if ui
+            .field_text(panel.field)
+            .is_some_and(|text| !text.is_empty())
+        {
+            let count = self
+                .lines
+                .iter()
+                .filter(|line| line.hit().is_some())
+                .count();
+            ui.announce(&tr_with("Results: {count}", "count", &count.to_string()));
+        }
+        // The rows were replaced: the selected one is drawn again, or the pane emptied.
+        self.schedule_preview();
+    }
+
+    fn selected_index(&self, shell: &Shell) -> Option<usize> {
+        let (surface, panel) = (self.shown?, self.panel?);
+        let row = shell.ui(surface)?.selected(panel.list)?;
+        self.rows.iter().position(|id| *id == row)
+    }
+
+    fn selected_row(&self, shell: &Shell) -> Option<WidgetId> {
+        self.selected_index(shell)
+            .and_then(|index| self.rows.get(index).copied())
+    }
+
+    fn selected_hit(&self, shell: &Shell) -> Option<Hit> {
+        self.selected_index(shell)
+            .and_then(|index| self.lines.get(index)?.hit().cloned())
+    }
+
+    /// What `list::reselect` finds the selected row by in the next answer.
+    fn selected_id(&self, shell: &Shell) -> Option<String> {
+        self.selected_index(shell)
+            .and_then(|index| self.lines.get(index)?.id().map(str::to_owned))
+    }
+
+    fn step(&mut self, shell: &mut Shell, delta: i32) {
+        let Some(target) = list::step(&self.lines, self.selected_index(shell), delta) else {
+            return;
+        };
+        let (Some(surface), Some(row)) = (self.shown, self.rows.get(target).copied()) else {
+            return;
+        };
+        let Some(ui) = shell.ui_mut(surface) else {
+            return;
+        };
+        // The query keeps the focus; the list scrolls the row into view.
+        if ui.select_row(row).is_some() {
+            // The menu belongs to the row it opened on: Enter must never run its choice for
+            // another.
+            self.close_menu(shell);
+            self.schedule_preview();
+        }
+    }
+
+    fn draw_card(&mut self, shell: &mut Shell, card: &Card) {
+        let (Some(surface), Some(panel)) = (self.shown, self.panel) else {
+            return;
+        };
+        let Some(scale) = self.output_of(surface).map(scale) else {
+            return;
+        };
+        if let Some(ui) = shell.ui_mut(surface) {
+            preview::draw(ui, panel.pane, card, &mut self.icons, scale);
+            ui.layout();
+        }
+    }
+
+    /// The compositor configured the surface to another size than the panel was laid out for:
+    /// the panel is laid out again, centred on it.
+    fn follow_size(&mut self, shell: &mut Shell) {
+        let (Some(surface), Some(panel)) = (self.shown, self.panel) else {
+            return;
+        };
+        let Some(ui) = shell.ui(surface) else { return };
+        let size = (ui.min_width, ui.min_height);
+        if size == panel.size {
+            return;
+        }
+        let text = ui.field_text(panel.field).unwrap_or_default();
+        self.build(shell, surface, &text, size);
+    }
+
+    fn apply(&mut self, shell: &mut Shell, change: Change) {
+        match change {
+            Change::Toggle => self.toggle(shell),
+            Change::Lines(lines) => self.fill(shell, lines),
+            Change::Card(card) => self.draw_card(shell, &card),
+            Change::DrawPreview => self.draw_preview(shell),
+            Change::Menu { row, hit, choices } => self.show_menu(shell, row, hit, choices),
+            Change::CloseMenu => self.close_menu(shell),
+            Change::Hide => self.hide(shell),
+            Change::Appearance(current) => {
+                self.look = look::look(&current);
+                self.icons.reset(self.look.panel.text);
+                if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
+                    let text = shell
+                        .ui(surface)
+                        .and_then(|ui| ui.field_text(panel.field))
+                        .unwrap_or_default();
+                    self.build(shell, surface, &text, panel.size);
+                }
+            }
+            Change::Apps => {
+                self.engine
+                    .set_catalog(Catalog::read(athanor_sulphur_client::SETTINGS_PAGE_PREFIX));
+                self.icons.reset(self.look.panel.text);
+            }
+        }
+    }
+}
+
+impl Application for Launcher {
+    /// Every output keeps a hidden surface for its life.
+    fn output(&mut self, _output: &OutputInfo) -> Option<(Ui, LayerOptions)> {
+        Some((empty(&self.look, self.rtl), hidden()))
+    }
+
+    fn output_changed(&mut self, shell: &mut Shell, surface: SurfaceId, output: &OutputInfo) {
+        match self.outs.iter_mut().find(|(id, _)| *id == surface) {
+            Some((_, known)) => *known = output.clone(),
+            None => {
+                self.outs.push((surface, output.clone()));
+                // A hidden surface is out of the tree, as a hidden GTK window.
+                if let Err(err) = shell.set_accessible(surface, false) {
+                    tracing::warn!(error = %err, "the hidden launcher stays in the accessibility tree");
+                }
+            }
+        }
+    }
+
+    fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
+        if let Some(menu) = self.menu.as_ref().filter(|menu| menu.popup == surface) {
+            if let Event::Clicked(item) = event {
+                let picked = menu
+                    .items
+                    .iter()
+                    .find(|(id, _)| *id == item)
+                    .map(|(_, choice)| choice.clone());
+                if let Some(choice) = picked {
+                    let hit = menu.hit.clone();
+                    // Closed at the turn, once a copy of the choice's is served.
+                    self.queue.borrow_mut().push(Change::CloseMenu);
+                    self.run(shell, surface, hit, choice);
+                }
+            }
+            return;
+        }
+        let (Some(shown), Some(panel)) = (self.shown, self.panel) else {
+            return;
+        };
+        if surface != shown {
+            return;
+        }
+        match event {
+            Event::Edited(field) if field == panel.field => {
+                let text = shell
+                    .ui(surface)
+                    .and_then(|ui| ui.field_text(field))
+                    .unwrap_or_default();
+                self.engine.query(&text);
+            }
+            // A click on a row opens it, as the GTK list activates on a single click.
+            Event::Selected(row) => {
+                let hit = self
+                    .rows
+                    .iter()
+                    .position(|id| *id == row)
+                    .and_then(|index| self.lines.get(index)?.hit().cloned());
+                if let Some(hit) = hit {
+                    self.run(shell, surface, hit, Choice::Open);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// A press beside the panel hides the launcher (LA5).
+    fn pressed(&mut self, shell: &mut Shell, surface: SurfaceId, at: (f32, f32)) {
+        let (Some(shown), Some(panel)) = (self.shown, self.panel) else {
+            return;
+        };
+        let inside = shell
+            .ui(surface)
+            .and_then(|ui| ui.island_fill(panel.island))
+            .is_some_and(|fill| fill.contains(at.0, at.1));
+        if surface == shown && !inside {
+            self.hide(shell);
+        }
+    }
+
+    fn key(
+        &mut self,
+        shell: &mut Shell,
+        surface: SurfaceId,
+        pressed: &SalKey,
+        modifiers: KeyModifiers,
+    ) -> bool {
+        if self.menu.as_ref().is_some_and(|menu| menu.popup == surface) {
+            // The menu moves and runs by itself; Tab closes it, as in the GTK launcher.
+            if keys::command(key(pressed), modifiers.ctrl, false, true) == Command::MenuClose {
+                self.close_menu(shell);
+                return true;
+            }
+            return false;
+        }
+        let (Some(shown), Some(panel)) = (self.shown, self.panel) else {
+            return false;
+        };
+        if surface != shown {
+            return false;
+        }
+        let selection = shell
+            .ui(surface)
+            .and_then(|ui| ui.field_selection(panel.field))
+            .is_some_and(|text| !text.is_empty());
+        match keys::command(key(pressed), modifiers.ctrl, selection, false) {
+            Command::Pass | Command::MenuMove(_) | Command::MenuRun | Command::MenuClose => false,
+            Command::Hide => {
+                self.hide(shell);
+                true
+            }
+            Command::Move(delta) => {
+                self.step(shell, delta);
+                true
+            }
+            Command::Menu => {
+                self.open_menu(shell);
+                true
+            }
+            Command::Run(choice) => {
+                if let Some(hit) = self.selected_hit(shell) {
+                    self.run(shell, surface, hit, choice);
+                }
+                true
+            }
+        }
+    }
+
+    fn turn(&mut self, shell: &mut Shell) {
+        // The client reads its own connection: once it stops, the window list freezes and no
+        // launch can go through the security context. End, so that systemd restarts it.
+        if self
+            .client
+            .as_ref()
+            .is_some_and(|client| client.is_closed())
+        {
+            shell.fail("the compositor client's connection closed".into());
+            return;
+        }
+        self.outs.retain(|(id, _)| shell.ui(*id).is_some());
+        if self.shown.is_some_and(|id| shell.ui(id).is_none()) {
+            self.forget_shown(shell);
+        }
+        // A menu closed by Escape, a press outside it or the compositor: the query takes the
+        // focus back from the row.
+        if self.menu.is_some() && shell.popup_parent().is_none() {
+            self.menu = None;
+            self.focus_query(shell);
+        }
+        if !self.outs.is_empty() {
+            if let Some(query) = self.start_query.take() {
+                self.show(shell);
+                if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
+                    if let Some(ui) = shell.ui_mut(surface) {
+                        ui.set_field_text(panel.field, &query);
+                    }
+                    self.engine.query(&query);
+                }
+            }
+        }
+        // A change may queue another, as the preview's card after a selection: the queue is
+        // emptied before the frame is drawn.
+        loop {
+            let changes = std::mem::take(&mut *self.queue.borrow_mut());
+            if changes.is_empty() {
+                break;
+            }
+            for change in changes {
+                self.apply(shell, change);
+            }
+        }
+        self.follow_size(shell);
+    }
+
+    /// §5 item 1: from the Show call to the panel's first frame.
+    fn drawn(&mut self, _shell: &mut Shell, surface: SurfaceId) {
+        if self.shown == Some(surface) {
+            if let Some(asked) = self.asked.take() {
+                tracing::info!(
+                    ms = u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "shown"
+                );
+            }
+        }
+    }
+
+    fn closed(&mut self, shell: &mut Shell, surface: SurfaceId) {
+        self.outs.retain(|(id, _)| *id != surface);
+        if self.shown == Some(surface) {
+            self.forget_shown(shell);
         }
     }
 }

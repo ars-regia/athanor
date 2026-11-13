@@ -32,7 +32,7 @@
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
-#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
@@ -43,7 +43,7 @@
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
-#   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|toolkit-chooser|gallery>   every interactive widget has a role and a name
@@ -920,8 +920,7 @@ build-launcher)
                      cargo test --locked $packages
                      cargo build --release --locked $packages
                  done
-                 install -m 0755 /out/target/release/athanor-launcher /out/target/release/athanor-preview-render /out/bin/
-                 python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-launcher'
+                 install -m 0755 /out/target/release/athanor-launcher /out/target/release/athanor-preview-render /out/bin/'
     ;;
 dock-roundtrip)
     # BR7's knob none and the bar preset take the surface off screen, and visible brings it
@@ -1062,12 +1061,11 @@ launcher-window-preview)
         /repo/forge/test/shell/golden/launcher-window-preview /out launcher-window-preview
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock|launcher>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
     bar) binary=athanor-bar ;;
     dock) binary=athanor-dock ;;
-    launcher) binary=athanor-launcher ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
         exit 2

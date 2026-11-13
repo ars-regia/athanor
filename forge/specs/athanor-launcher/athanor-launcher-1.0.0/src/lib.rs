@@ -16,7 +16,6 @@ pub const DEVICE_WRITES: [&str; 2] = ["/dev/dri", "/dev/null"];
 mod tests {
     use super::DEVICE_WRITES;
     use athanor_unit::{dirs, sandbox};
-    use gtk4::gio;
     use std::path::Path;
 
     /// Under the launcher's own write grants, a child with silenced output starts.

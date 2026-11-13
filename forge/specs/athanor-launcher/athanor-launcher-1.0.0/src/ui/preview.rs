@@ -1,108 +1,150 @@
-//! The preview pane's GTK widgets (LA6): they draw the card athanor-preview hands over at each
-//! change. Every text is set as plain text, never as markup.
+//! The preview pane (LA6): it draws the card athanor-preview hands over at each change, in a
+//! column beside the results. Every text is set as plain text.
 
-use std::rc::Rc;
+use std::collections::HashMap;
+use std::path::Path;
 
-use athanor_preview::{Card, Picture, Preview};
-use gtk4::prelude::*;
-use gtk4::gdk;
+use athanor_preview::Card;
+use athanor_sal::{IconTheme, Image, Kind, Rgba, Ui, WidgetId, Wrap, FALLBACK_ICON};
+use gio::prelude::*;
 
-struct Widgets {
-    picture: gtk4::Picture,
-    icon: gtk4::Image,
-    title: gtk4::Label,
-    body: gtk4::Label,
-    facts: gtk4::Label,
+/// The square the picture is drawn in, as tall as the GTK pane's picture.
+const PICTURE: f32 = 220.0;
+/// The icon of a card without a picture, as the GTK pane's.
+const ICON: u16 = 96;
+
+/// Themed icons as images, kept by their names, size and scale until the look changes.
+pub struct Icons {
+    theme: IconTheme,
+    /// What a symbolic icon is tinted with: the panel's text.
+    ink: Rgba,
+    cache: HashMap<(String, u16, u16), Option<Image>>,
 }
 
-fn label(class: &str) -> gtk4::Label {
-    let label = gtk4::Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .selectable(false)
-        .use_markup(false)
-        .build();
-    label.add_css_class(class);
-    label
-}
-
-fn set(label: &gtk4::Label, text: &str) {
-    label.set_text(text);
-    label.set_visible(!text.is_empty());
-}
-
-impl Widgets {
-    fn draw(&self, card: &Card) {
-        match &card.picture {
-            Some(picture) => self.picture.set_paintable(Some(&texture(picture))),
-            None => self.picture.set_paintable(None::<&gdk::Paintable>),
+impl Icons {
+    pub fn new(theme: &str, ink: Rgba) -> Icons {
+        Icons {
+            theme: IconTheme::system(theme),
+            ink,
+            cache: HashMap::new(),
         }
-        self.picture.set_visible(card.picture.is_some());
-        if let Some(icon) = &card.icon {
-            self.icon.set_from_gicon(icon);
+    }
+
+    /// Forgets the images, tinted with the old ink.
+    pub fn reset(&mut self, ink: Rgba) {
+        self.ink = ink;
+        self.cache.clear();
+    }
+
+    /// The first of `icon`'s names the theme has, at `size` logical pixels and `scale`, or the
+    /// theme's fallback, as GTK draws a themed icon. `None` when neither is found or the file
+    /// does not read; only a themed icon has names (LA9).
+    pub fn image(&mut self, icon: &gio::Icon, size: u16, scale: u16) -> Option<Image> {
+        let names: Vec<String> = icon
+            .downcast_ref::<gio::ThemedIcon>()
+            .map(|themed| themed.names().iter().map(ToString::to_string).collect())
+            .unwrap_or_default();
+        let key = (names.join("\n"), size, scale);
+        if let Some(image) = self.cache.get(&key) {
+            return image.clone();
         }
-        self.icon
-            .set_visible(card.icon.is_some() && card.picture.is_none());
-        set(&self.title, &card.title);
-        set(&self.body, &card.body);
-        set(&self.facts, &card.facts);
+        let path = names
+            .iter()
+            .map(String::as_str)
+            .chain([FALLBACK_ICON])
+            .find_map(|name| self.theme.lookup(name, size, scale));
+        let image = path.and_then(|path| {
+            match Image::from_file(&path, size.saturating_mul(scale.max(1))) {
+                Ok(image) if symbolic(&path) => Some(image.tinted(self.ink)),
+                Ok(image) => Some(image),
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %err, "the icon does not read");
+                    None
+                }
+            }
+        });
+        self.cache.insert(key, image.clone());
+        image
     }
 }
 
-/// A picture of athanor-preview as a GDK texture.
-fn texture(picture: &Picture) -> gdk::MemoryTexture {
-    // A picture is at most 1024 pixels a side; GDK shares its bytes, without a copy.
-    gdk::MemoryTexture::new(
-        picture.width as i32,
-        picture.height as i32,
-        gdk::MemoryFormat::R8g8b8a8Premultiplied,
-        &picture.rgba,
-        picture.width as usize * 4,
-    )
+/// A symbolic icon takes the colour of the text, as GTK recolours it.
+fn symbolic(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem.ends_with("-symbolic"))
 }
 
-/// The pane and the preview that fills it.
-pub(super) fn new() -> (gtk4::Box, Rc<Preview>) {
-    let root = gtk4::Box::new(gtk4::Orientation::Vertical, 8);
-    root.add_css_class("preview");
-    root.set_accessible_role(gtk4::AccessibleRole::Region);
-    let picture = gtk4::Picture::builder()
-        .can_shrink(true)
-        .content_fit(gtk4::ContentFit::Contain)
-        .height_request(220)
-        .build();
-    let icon = gtk4::Image::builder().pixel_size(96).build();
-    let (title, body, facts) = (
-        label("preview-title"),
-        label("preview-body"),
-        label("preview-facts"),
-    );
-    body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    for widget in [
-        picture.upcast_ref::<gtk4::Widget>(),
-        icon.upcast_ref(),
-        title.upcast_ref(),
-        body.upcast_ref(),
-        facts.upcast_ref(),
-    ] {
-        root.append(widget);
+/// A label of the pane: plain text that wraps at the pane's width.
+fn label(ui: &mut Ui, pane: WidgetId, text: &str) {
+    if text.is_empty() {
+        return;
     }
-    let widgets = Widgets {
-        picture,
-        icon,
-        title,
-        body,
-        facts,
-    };
-    widgets.draw(&Card::default());
-    let preview = Preview::new(move |card| widgets.draw(card));
-    // The scale sizes the pictures decoded from now on.
-    let weak = Rc::downgrade(&preview);
-    root.connect_scale_factor_notify(move |root| {
-        if let Some(preview) = weak.upgrade() {
-            preview.set_scale(f64::from(root.scale_factor()));
+    let label = ui.add(pane, Kind::Label(text.to_owned()));
+    ui.set_wrap(label, Some(Wrap::default()));
+}
+
+/// Fills `pane` with `card`: the picture, or else the icon, then the title, the body and the
+/// facts, each only when it has something to show, as the GTK pane hides an empty label.
+pub fn draw(ui: &mut Ui, pane: WidgetId, card: &Card, icons: &mut Icons, scale: u16) {
+    ui.remove_children(pane);
+    if let Some(picture) = &card.picture {
+        match Image::from_premultiplied_rgba8(picture.width, picture.height, picture.rgba.to_vec())
+        {
+            Ok(image) => {
+                ui.image(pane, image, PICTURE, "");
+            }
+            Err(err) => tracing::warn!(error = %err, "the preview's picture is not an image"),
         }
-    });
-    preview.set_scale(f64::from(root.scale_factor()));
-    (root, preview)
+    } else if let Some(image) = card
+        .icon
+        .as_ref()
+        .and_then(|icon| icons.image(icon, ICON, scale))
+    {
+        ui.image(pane, image, f32::from(ICON), "");
+    }
+    label(ui, pane, &card.title);
+    label(ui, pane, &card.body);
+    label(ui, pane, &card.facts);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use athanor_sal::Theme;
+
+    #[test]
+    fn an_empty_text_adds_no_label_and_a_card_drawn_again_replaces_the_last() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let pane = ui.add(Ui::ROOT, Kind::Column);
+        let mut icons = Icons::new("Adwaita", Rgba([0, 0, 0, 255]));
+        let card = Card {
+            title: "Files".into(),
+            body: String::new(),
+            facts: "2 KB".into(),
+            ..Card::default()
+        };
+        draw(&mut ui, pane, &card, &mut icons, 1);
+        draw(&mut ui, pane, &card, &mut icons, 1);
+        let labels: Vec<String> = ui
+            .widget(pane)
+            .children
+            .iter()
+            .filter_map(|&id| match &ui.widget(id).kind {
+                Kind::Label(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(labels, ["Files", "2 KB"]);
+    }
+
+    #[test]
+    fn a_symbolic_icon_is_told_by_its_file_name() {
+        assert!(symbolic(Path::new(
+            "/usr/share/icons/Adwaita/symbolic/apps/a-symbolic.svg"
+        )));
+        assert!(!symbolic(Path::new(
+            "/usr/share/icons/hicolor/48x48/apps/a.png"
+        )));
+    }
 }

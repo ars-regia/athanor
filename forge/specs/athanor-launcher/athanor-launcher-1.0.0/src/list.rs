@@ -27,7 +27,7 @@ impl Line {
 
     /// What identifies the row across answers: the usage key, or the title for rows that
     /// have none.
-    fn id(&self) -> Option<&str> {
+    pub fn id(&self) -> Option<&str> {
         self.hit().map(|hit| if hit.key.is_empty() { hit.title.as_str() } else { hit.key.as_str() })
     }
 }

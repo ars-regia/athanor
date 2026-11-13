@@ -34,8 +34,8 @@ pub enum Command {
 /// Rows a page key moves over.
 pub const PAGE: i32 = 5;
 
-/// The menu is a popover without a grab (the compositor ends a grab that a key press asked
-/// for, cosmic-comp), so the keyboard stays with the entry and these keys drive the menu.
+/// The menu is a popup that takes the keyboard and moves and runs by itself; of the keys it
+/// receives, the launcher reads only the ones that close it.
 pub fn command(key: Key, ctrl: bool, query_has_selection: bool, menu_open: bool) -> Command {
     if menu_open {
         match key {

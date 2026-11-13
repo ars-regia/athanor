@@ -93,11 +93,17 @@ def tree(Atspi):
     return [(role, name, shown) for role, name, shown, _ in walk(app, Atspi)] if app is not None else []
 
 
+# The preview pane: GTK's unnamed Region reaches AT-SPI as "filler"; the toolkit's pane is a
+# generic container, "section", which is what Core-AAM 1.2 prescribes for a region without a
+# name (it is not exposed as a landmark, and a generic element maps to ROLE_SECTION).
+PANE_ROLES = {"filler", "section"}
+
+
 def region_holds(Atspi, text):
-    """True when a showing "filler" (GTK's Region role) has `text` as a label below it."""
+    """True when a showing preview pane (PANE_ROLES) has `text` as a label below it."""
     nodes = walk(find_application(Atspi, "athanor-launcher", 1), Atspi)
     for index, (role, _, shown, depth) in enumerate(nodes):
-        if role != "filler" or not shown:
+        if role not in PANE_ROLES or not shown:
             continue
         for r, name, _, below in nodes[index + 1:]:
             if below <= depth:
@@ -189,7 +195,7 @@ def stage_tree(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
     check("Results list", named(Atspi, "list", "Results"), str(tree(Atspi)))
-    # GTK's Region role reaches at-spi as "filler"; the preview's own labels sit beside it.
+    # The pane's own labels sit below it (PANE_ROLES).
     check("preview region", region_holds(Atspi, "A window of the shell rig"), str(tree(Atspi)))
     # The menu's "Actions" list is not checked: the rig has no way to press Tab (no virtual
     # keyboard, and Atspi key synthesis does not reach a Wayland client).

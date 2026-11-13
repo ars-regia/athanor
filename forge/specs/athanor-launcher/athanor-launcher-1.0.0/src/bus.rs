@@ -2,8 +2,6 @@
 //! shown. Super calls it through cosmic-comp's `Launcher` system action, the bar's launcher
 //! module through `Opener::Launcher`; the bus starts the unit when it is down.
 
-use gtk4::gio;
-
 pub const NAME: &str = "os.athanor.Launcher1";
 pub const PATH: &str = "/os/athanor/Launcher1";
 /// The system action written into cosmic-comp's shortcuts at start.
