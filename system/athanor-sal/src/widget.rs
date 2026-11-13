@@ -50,6 +50,13 @@ pub(crate) struct Widgets {
 /// all an accessibility node carries of it (`a11y::node_id`), are those of generation 0.
 const RETIRED: u32 = 1 << 16;
 
+/// The id [`Ui::add`] returns when the `Ui` is full: the root's slot, whose generation is always
+/// 0, since the root is never removed, under the last generation, so that it is always stale.
+const REFUSED: WidgetId = WidgetId(0, u32::MAX);
+
+/// The most widgets a `Ui` holds, as many as an accessibility node of a widget names.
+const MAX_WIDGETS: usize = 1 << 24;
+
 /// A hidden column without children: the widget of a freed slot, and of a stale id.
 fn dead() -> Widget {
     let mut widget = Widget::new(Kind::Column, None);
@@ -737,12 +744,14 @@ impl Ui {
     ///
     /// Under a widget that [`Ui::remove_children`] removed, as an icon loaded late for a row
     /// removed since, nothing is added: the refusal is logged, and the id returned is `parent`,
-    /// stale, so that nothing done with it reaches the widget that takes its slot.
+    /// stale, so that nothing done with it reaches the widget that takes its slot. In a `Ui`
+    /// that already holds 2²⁴ widgets, as many as an accessibility node of a widget names, with
+    /// no removed widget's slot to fill, nothing is added either: the refusal is logged, and the
+    /// id returned is stale.
     ///
     /// # Panics
     ///
-    /// When `parent` is past the widgets of this `Ui`, or when the `Ui` already holds 2²⁴
-    /// widgets, as many as an accessibility node of the widget names.
+    /// When `parent` is past the widgets of this `Ui`.
     pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
         if parent.index() < self.widgets.len() && !self.widgets.contains(parent) {
             eprintln!("athanor-sal: nothing added under {parent:?}, a removed widget");
@@ -754,10 +763,14 @@ impl Ui {
             return id;
         }
         let next = self.widgets.len();
-        assert!(next < 1 << 24, "a Ui holds at most 2^24 widgets");
+        // The parent first: an id past the arena panics before the arena changes.
+        let parent_children = &mut self.widgets[parent].children;
+        if next >= MAX_WIDGETS {
+            eprintln!("athanor-sal: nothing added under {parent:?}: the Ui is full");
+            return REFUSED;
+        }
         let id = WidgetId(next as u32, 0);
-        // The parent first: an id that names no widget panics before the arena changes.
-        self.widgets[parent].children.push(id);
+        parent_children.push(id);
         self.widgets.push(Widget::new(kind, Some(parent)));
         id
     }
