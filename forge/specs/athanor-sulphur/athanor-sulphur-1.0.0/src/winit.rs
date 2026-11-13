@@ -112,6 +112,7 @@ impl State {
                     &output,
                     age,
                     view,
+                    Vec::new(),
                     &mut nested.damage_tracker,
                     look,
                 );
