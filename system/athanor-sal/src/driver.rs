@@ -270,10 +270,12 @@ pub trait Application {
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
 
-    /// The first frame of `surface` was committed: called in the turn of the event loop that
-    /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
-    /// compositor may withhold from a surface it does not show. Where a `Type=notify`
-    /// service tells systemd it is ready. Not called for a surface closed by then.
+    /// The first frame of `surface` was committed, or the first after
+    /// [`Shell::report_next_frame`]: called in the turn of the event loop that drew it, after
+    /// [`Application::turn`], so that nothing waits on a frame callback the compositor may
+    /// withhold from a surface it does not show. Where a `Type=notify` service tells systemd it
+    /// is ready, and a surface kept open and shown again times its showing. Not called for a
+    /// surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
     /// The motion of `surface` ([`Shell::animate`]) reached its end pose, which the surface keeps:
@@ -595,6 +597,15 @@ impl Shell {
     /// tells, and a dock's Type=notify waits for. `false` once it is closed.
     pub fn drawn(&self, id: SurfaceId) -> bool {
         self.surfaces.iter().any(|s| s.id == id && s.drawn)
+    }
+
+    /// Reports the next frame `id` commits through [`Application::drawn`], as its first frame
+    /// is: for a surface kept open and shown again, whose showing is timed to the frame that
+    /// shows it. A surface closed by then is not reported; nothing for an `id` not open.
+    pub fn report_next_frame(&mut self, id: SurfaceId) {
+        if let Some(surface) = self.get_mut(id) {
+            surface.report = true;
+        }
     }
 
     /// The widgets of `id`, which the driver draws again after the event.
@@ -1132,6 +1143,7 @@ impl Shell {
             output: None,
             configured: false,
             drawn: false,
+            report: false,
             frame_pending: false,
             redraw: false,
             dirty: false,
@@ -1176,9 +1188,11 @@ impl Shell {
     fn draw_dirty(&mut self) -> Result<(), Error> {
         for surface in &mut self.surfaces {
             if surface.dirty {
-                let first = !surface.drawn;
+                let (first, was_pending) = (!surface.drawn, surface.frame_pending);
                 surface.draw(&mut self.pool, &self.qh)?;
-                if first && surface.drawn {
+                let after = (surface.drawn, surface.frame_pending);
+                if reported(first, surface.report, was_pending, after) {
+                    surface.report = false;
                     self.first_frames.push(surface.id);
                 }
             }
@@ -1193,6 +1207,15 @@ fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl
     while let Some(surface) = next(state) {
         lost(state, surface);
     }
+}
+
+/// Whether a draw reports its surface through [`Application::drawn`]: its first frame since its
+/// first configure, `drawn` after it, or, while [`Shell::report_next_frame`] asked to `report`,
+/// a frame it committed: none was pending before, and one is after. A draw while a frame is
+/// pending only lays out; the frame callback marks the surface for the draw that commits.
+fn reported(first: bool, report: bool, was_pending: bool, after: (bool, bool)) -> bool {
+    let (drawn, pending) = after;
+    (first && drawn) || (report && !was_pending && pending)
 }
 
 /// Calls `call` on each of `surfaces` that `open` finds open in `state` when its turn comes, so
@@ -1385,6 +1408,8 @@ struct Surface {
     configured: bool,
     /// A frame was committed since the first configure.
     drawn: bool,
+    /// The next frame committed is reported drawn ([`Shell::report_next_frame`]).
+    report: bool,
     /// A frame is committed and its callback has not come: the next one waits for it, so that
     /// drawing never runs ahead of the compositor, which throttles a covered surface.
     frame_pending: bool,
@@ -3127,6 +3152,21 @@ mod tests {
         );
         assert_eq!(state.1, [1], "a surface closed at the application's asking was lost");
         assert_eq!(state.0, [(3, 8)]);
+    }
+
+    #[test]
+    fn a_frame_is_reported_first_and_when_asked_once_committed() {
+        // The first frame, whether or not the draw committed it.
+        assert!(reported(true, false, false, (true, true)));
+        assert!(!reported(true, false, false, (false, false)), "not configured yet");
+        // Later frames only when asked, and only a draw that committed one.
+        assert!(!reported(false, false, false, (true, true)));
+        assert!(reported(false, true, false, (true, true)));
+        assert!(
+            !reported(false, true, true, (true, true)),
+            "a draw while a frame is pending only lays out"
+        );
+        assert!(!reported(false, true, false, (true, false)), "nothing committed");
     }
 
     #[test]
