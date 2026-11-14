@@ -1731,8 +1731,8 @@ def check_shipped():
     exempt_file = ROOT / "experimental" / "EXEMPT"
     exempt = set()
     if exempt_file.exists():
-        exempt = {l.strip() for l in read(exempt_file).split("\n")
-                  if l.strip() and not l.startswith("#")}
+        exempt = {ln.strip() for ln in read(exempt_file).split("\n")
+                  if ln.strip() and not ln.startswith("#")}
 
     built = crates_built_by_specs()
     for m in members:
@@ -3805,7 +3805,9 @@ def sandbox_grant_problems(relative, code, read_grants):
     """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
     other than a dirs::Checked or dirs::CheckedNode."""
     found = []
-    line = lambda pos: code.count("\n", 0, pos) + 1
+    def line(pos):
+        return code.count("\n", 0, pos) + 1
+
     for match in PATH_BENEATH.finditer(code):
         if any(start <= match.start() < end for start, end in read_grants):
             continue

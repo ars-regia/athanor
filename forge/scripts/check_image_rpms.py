@@ -112,7 +112,7 @@ def check(rpm_lines, specs):
 
 
 def main():
-    lines = [l for l in sys.stdin.read().splitlines() if l.strip()]
+    lines = [ln for ln in sys.stdin.read().splitlines() if ln.strip()]
     if not lines:
         print("no installed package on stdin", file=sys.stderr)
         return 2

@@ -122,9 +122,9 @@ check base="HEAD":
     just check-rust
     just check-deny
 
-# The static half of the gate: workflow lint, Justfile syntax, unused dependencies (cargo-machete),
-# every verify.py check, the kernel profile, the Calmo palette and the suites of forge/test/iso
-# (about 2 minutes on a runner).
+# The static half of the gate: workflow lint, ruff check (ruff.toml), Justfile syntax, unused
+# dependencies (cargo-machete), every verify.py check, the kernel profile, the Calmo palette and
+# the suites of forge/test/iso (about 2 minutes on a runner).
 [group('QA & Security')]
 check-static base="HEAD":
     #!/usr/bin/env bash
@@ -132,6 +132,8 @@ check-static base="HEAD":
     command -v actionlint >/dev/null || { echo "check: actionlint is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
     command -v shellcheck >/dev/null || { echo "check: shellcheck is not on PATH; actionlint would skip the run: blocks" >&2; exit 1; }
     actionlint -no-color -pyflakes=
+    command -v ruff >/dev/null || { echo "check: ruff is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    ruff check --no-cache
     just check-syntax
     just check-machete
     python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
