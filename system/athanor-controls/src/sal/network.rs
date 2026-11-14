@@ -16,7 +16,7 @@ use athanor_services::network::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use super::widgets::{switch_row, Failure};
+use super::widgets::{column, switch_row, Failure};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -330,13 +330,13 @@ impl Page {
     /// returns the column. A page built again, in a new [`Ui`], leaves the old one's widgets;
     /// a password prompt it was showing stays, with its field empty.
     pub fn build(&mut self, ui: &mut Ui, parent: WidgetId) -> WidgetId {
-        let page = ui.add(parent, Kind::Column);
-        let list = ui.add(page, Kind::Column);
+        let page = column(ui, parent);
+        let list = column(ui, page);
         let wired = ui.add(list, Kind::Label(String::new()));
         let wifi = switch_row(ui, list, &tr("Wi-Fi"), false);
         let scroll = ui.scroll(list, MAX_LIST_HEIGHT);
-        let networks = ui.add(scroll, Kind::Column);
-        let vpns = ui.add(list, Kind::Column);
+        let networks = column(ui, scroll);
+        let vpns = column(ui, list);
         let airplane = self
             .airplane_switch
             .then(|| switch_row(ui, list, &tr("Airplane mode"), false));
@@ -365,7 +365,7 @@ impl Page {
             .collect();
         drop(state);
 
-        let password = ui.add(page, Kind::Column);
+        let password = column(ui, page);
         let title = ui.add(password, Kind::Label(String::new()));
         let retry = ui.add(
             password,

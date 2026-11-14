@@ -14,6 +14,14 @@ pub fn switch_row(ui: &mut Ui, parent: WidgetId, text: &str, active: bool) -> Wi
     ui.switch(parent, text, active)
 }
 
+/// A column of a page, as wide as its parent, as a GTK box fills its parent across: its
+/// switches reach the end edge and its sliders the whole width.
+pub fn column(ui: &mut Ui, parent: WidgetId) -> WidgetId {
+    let column = ui.add(parent, athanor_sal::Kind::Column);
+    ui.set_fill(column, true);
+    column
+}
+
 /// The note under a page's content that says an action the person took did not complete. It
 /// shows until the page is hidden, and assistive technologies announce it.
 pub struct Failure {
@@ -69,6 +77,20 @@ mod tests {
         assert!(ui.is_visible(failure.note));
         failure.hide(&mut ui);
         assert!(!ui.is_visible(failure.note));
+    }
+
+    #[test]
+    fn a_page_column_is_as_wide_as_its_parent_and_its_switch_reaches_the_end_edge() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        ui.min_width = 400.0;
+        let page = column(&mut ui, Ui::ROOT);
+        let section = column(&mut ui, page);
+        let switch = switch_row(&mut ui, section, "Wi-Fi", true);
+        ui.layout();
+        let width = ui.widget(Ui::ROOT).rect.w - 2.0 * Theme::default().margin;
+        for id in [page, section, switch] {
+            assert_eq!(ui.widget(id).rect.w, width);
+        }
     }
 
     #[test]

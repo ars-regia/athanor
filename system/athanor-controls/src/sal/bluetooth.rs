@@ -10,7 +10,7 @@ use athanor_sal::{Event, TextStyle, Ui, WidgetId};
 use athanor_services::bluetooth::{BluetoothCommand, BluetoothState, Device};
 use tokio::sync::mpsc;
 
-use super::widgets::{switch_row, Failure};
+use super::widgets::{column, switch_row, Failure};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -128,7 +128,7 @@ impl Page {
     /// Adds the page's widgets as a column under `parent`, showing the model's state, and
     /// returns the column. A page built again, in a new [`Ui`], leaves the old one's widgets.
     pub fn build(&mut self, ui: &mut Ui, parent: WidgetId) -> WidgetId {
-        let page = ui.add(parent, athanor_sal::Kind::Column);
+        let page = column(ui, parent);
         let power = switch_row(ui, page, &tr("Bluetooth"), false);
         ui.set_text_style(
             power,
@@ -137,7 +137,7 @@ impl Page {
                 ..TextStyle::default()
             },
         );
-        let paired = ui.add(page, athanor_sal::Kind::Column);
+        let paired = column(ui, page);
         let devices = self
             .service
             .state

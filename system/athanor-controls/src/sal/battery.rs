@@ -10,7 +10,7 @@ use athanor_sal::{Event, Kind, TextStyle, Ui, WidgetId};
 use athanor_services::battery::{self, BatteryCommand, BatteryState, Profiles};
 use tokio::sync::mpsc;
 
-use super::widgets::Failure;
+use super::widgets::{column, Failure};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::tr;
@@ -124,14 +124,14 @@ impl Page {
             weight: 600,
             ..TextStyle::default()
         };
-        let page = ui.add(parent, Kind::Column);
-        let summary = ui.add(page, Kind::Column);
+        let page = column(ui, parent);
+        let summary = column(ui, page);
         let charge = ui.add(summary, Kind::Label(String::new()));
         ui.set_text_style(charge, title());
         let note = ui.add(summary, Kind::Label(String::new()));
 
         // Columns, not groups: the GTK page's boxes give assistive technologies no group.
-        let profiles_section = ui.add(page, Kind::Column);
+        let profiles_section = column(ui, page);
         let heading = ui.add(profiles_section, Kind::Label(tr("Power mode")));
         ui.set_text_style(heading, title());
         let profiles = battery::PROFILE_NAMES
@@ -144,7 +144,7 @@ impl Page {
             })
             .collect();
 
-        let brightness_section = ui.add(page, Kind::Column);
+        let brightness_section = column(ui, page);
         let heading = ui.add(brightness_section, Kind::Label(tr("Screen brightness")));
         ui.set_text_style(heading, title());
         let brightness = ui

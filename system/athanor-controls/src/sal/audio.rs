@@ -10,7 +10,7 @@ use athanor_services::audio::{self, AudioCommand, AudioState, Device};
 use athanor_services::media::MediaCommand;
 use tokio::sync::mpsc;
 
-use super::widgets::{switch_row, Failure};
+use super::widgets::{column, switch_row, Failure};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -131,13 +131,13 @@ impl Channel {
             Direction::Output => (tr("Output"), tr("Output volume"), tr("Mute output")),
             Direction::Input => (tr("Input"), tr("Input volume"), tr("Mute microphone")),
         };
-        let section = ui.add(parent, Kind::Column);
+        let section = column(ui, parent);
         let label = ui.add(section, Kind::Label(heading));
         ui.set_text_style(label, title());
         let slider = ui.slider(section, &slider, 0.0, 100.0, 1.0, 0.0);
         let mute = switch_row(ui, section, &mute, false);
         let shown = rows(direction.devices(state), direction.default(state));
-        let list = ui.add(section, Kind::Column);
+        let list = column(ui, section);
         let devices = shown
             .iter()
             .map(|(name, label, in_use)| {
@@ -334,7 +334,7 @@ impl Page {
             weight: 600,
             ..TextStyle::default()
         };
-        let page = ui.add(parent, Kind::Column);
+        let page = column(ui, parent);
         let (output, input) = {
             let state = self.service.state.borrow();
             (
@@ -343,7 +343,7 @@ impl Page {
             )
         };
 
-        let column = ui.add(page, Kind::Column);
+        let column = column(ui, page);
         let track = ui.add(column, Kind::Label(String::new()));
         ui.set_text_style(track, title());
         let artist = ui.add(column, Kind::Label(String::new()));
