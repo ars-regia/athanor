@@ -3,7 +3,7 @@
 //! The GTK pages' `expose_choose_action` has no counterpart: every toggle and radio of
 //! athanor-sal carries AT-SPI's Click action, which chooses it as a click would.
 
-use athanor_sal::{Ui, WidgetId};
+use athanor_sal::{Image, Rgba, TextStyle, Ui, WidgetId};
 
 use crate::i18n::tr;
 
@@ -12,6 +12,50 @@ use crate::i18n::tr;
 /// row's `LabelledBy` relation names its switch. `Event::Toggled` carries the id it returns.
 pub fn switch_row(ui: &mut Ui, parent: WidgetId, text: &str, active: bool) -> WidgetId {
     ui.switch(parent, text, active)
+}
+
+/// What the surface holding a page draws the GTK pages' styles with: the icons of its theme,
+/// and the size and ink of calmo's `bar-popover-note`, a page's secondary line.
+pub struct Look<'a> {
+    /// The icon `name` at [`Look::icon_size`]; `None` when the theme lacks it, and the row then
+    /// shows its text alone.
+    pub icon: Box<dyn FnMut(&'static str) -> Option<Image> + 'a>,
+    /// The side of a row's icon, in logical pixels, as GTK's image in a row.
+    pub icon_size: f32,
+    /// A secondary line's size and weight.
+    pub caption: TextStyle,
+    /// A secondary line's ink.
+    pub secondary: Rgba,
+}
+
+impl Look<'_> {
+    /// Draws `label` as a secondary line, as GTK's `bar-popover-note`.
+    pub fn note(&self, ui: &mut Ui, label: WidgetId) {
+        ui.set_text_style(label, self.caption.clone());
+        ui.set_ink(label, Some(self.secondary));
+    }
+
+    /// A look with no icons and smaller secondary lines, for the pages' tests.
+    #[cfg(test)]
+    pub(crate) fn plain() -> Look<'static> {
+        Look {
+            icon: Box::new(|_| None),
+            icon_size: 16.0,
+            caption: TextStyle {
+                scale: 0.82,
+                ..TextStyle::default()
+            },
+            secondary: Rgba([0, 0, 0, 255]),
+        }
+    }
+}
+
+/// The weight of calmo's `bar-popover-title`, a page's heading.
+pub fn heading() -> TextStyle {
+    TextStyle {
+        weight: 600,
+        ..TextStyle::default()
+    }
 }
 
 /// A column of a page, as wide as its parent, as a GTK box fills its parent across: its

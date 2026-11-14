@@ -16,7 +16,7 @@ use athanor_services::network::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use super::widgets::{column, switch_row, Failure};
+use super::widgets::{column, heading, switch_row, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -219,16 +219,22 @@ fn network_name(network: &Network) -> String {
     }
 }
 
-/// The networks the rows show, with the strength left out: a row is built again when anything
-/// else changes, not on every strength update of an access point, which would take the keyboard
-/// focus off a row.
-fn shape(state: Option<&NetworkState>) -> (String, Vec<Network>) {
+/// The networks the rows show, each with the icon of its strength and the strength left out: a
+/// row is built again when its icon or anything else changes, not on every strength update of
+/// an access point, which would take the keyboard focus off a row.
+fn shape(state: Option<&NetworkState>) -> (String, Vec<(&'static str, Network)>) {
     let Some(wifi) = state.and_then(|state| state.wifi.as_ref()) else {
         return (String::new(), Vec::new());
     };
-    let networks = wifi.networks.iter().map(|network| Network {
-        strength: 0,
-        ..network.clone()
+    let networks = wifi.networks.iter().map(|network| {
+        let icon = network::signal_icon(network.strength);
+        (
+            icon,
+            Network {
+                strength: 0,
+                ..network.clone()
+            },
+        )
     });
     (wifi.device.clone(), networks.collect())
 }
@@ -246,6 +252,8 @@ struct Ids {
     /// with.
     device: String,
     rows: Vec<(WidgetId, Network)>,
+    /// The icon of each row's strength.
+    icons: Vec<&'static str>,
     vpn_rows: Vec<(WidgetId, Vpn)>,
     password: WidgetId,
     title: WidgetId,
@@ -327,12 +335,16 @@ impl Page {
     }
 
     /// Adds the page's widgets as a column under `parent`, showing the model's state, and
-    /// returns the column. A page built again, in a new [`Ui`], leaves the old one's widgets;
-    /// a password prompt it was showing stays, with its field empty.
-    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId) -> WidgetId {
+    /// returns the column, its rows with `look`'s icons. A page built again, in a new [`Ui`],
+    /// leaves the old one's widgets; a password prompt it was showing stays, with its field
+    /// empty.
+    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, look: &mut Look) -> WidgetId {
         let page = column(ui, parent);
         let list = column(ui, page);
+        let title = ui.add(list, Kind::Label(tr("Network")));
+        ui.set_text_style(title, heading());
         let wired = ui.add(list, Kind::Label(String::new()));
+        look.note(ui, wired);
         let wifi = switch_row(ui, list, &tr("Wi-Fi"), false);
         let scroll = ui.scroll(list, MAX_LIST_HEIGHT);
         let networks = column(ui, scroll);
@@ -345,10 +357,14 @@ impl Page {
 
         let state = self.service.state.borrow();
         let (device, wanted) = shape(state.as_ref());
+        let icons = wanted.iter().map(|(icon, _)| *icon).collect();
         let rows = wanted
             .into_iter()
-            .map(|network| {
-                let row = ui.add(networks, Kind::Button(network_name(&network)));
+            .map(|(icon, network)| {
+                // The strength's icon, then the name, as the GTK row's box.
+                let name = network_name(&network);
+                let icon = (look.icon)(icon);
+                let row = ui.labelled_button(networks, &name, icon, look.icon_size, &name);
                 let usable = network.security != Security::Other
                     || network.saved.is_some()
                     || network.active.is_some();
@@ -367,10 +383,12 @@ impl Page {
 
         let password = column(ui, page);
         let title = ui.add(password, Kind::Label(String::new()));
+        ui.set_text_style(title, heading());
         let retry = ui.add(
             password,
             Kind::Label(tr("The password was not accepted. Try again.")),
         );
+        look.note(ui, retry);
         let field = ui.password(password, &tr("Password"));
         let buttons = ui.add(password, Kind::Row);
         let cancel = ui.add(buttons, Kind::Button(tr("Cancel")));
@@ -387,6 +405,7 @@ impl Page {
             airplane,
             device,
             rows,
+            icons,
             vpn_rows,
             password,
             title,
@@ -426,7 +445,7 @@ impl Page {
             let (device, wanted) = shape(state.as_ref());
             let vpns = state.as_ref().map_or(&[][..], |s| s.vpns.as_slice());
             ids.device != device
-                || !ids.rows.iter().map(|(_, n)| n).eq(wanted.iter())
+                || !ids.rows.iter().map(|(_, n)| n).zip(&ids.icons).eq(wanted.iter().map(|(i, n)| (n, i)))
                 || !ids.vpn_rows.iter().map(|(_, v)| v).eq(vpns.iter())
         });
         if rebuild {
@@ -645,7 +664,7 @@ impl Drop for Page {
 
 #[cfg(test)]
 mod tests {
-    use athanor_sal::Theme;
+    use athanor_sal::{Image, Theme};
     use athanor_services::network::Wifi;
 
     use super::*;
@@ -697,7 +716,7 @@ mod tests {
         service.changed();
         let mut page = Page::with(Rc::new(service), true);
         let mut ui = Ui::new("t", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
         (page, received, ui)
     }
 
@@ -721,6 +740,32 @@ mod tests {
     }
 
     #[test]
+    fn a_row_shows_the_icon_of_its_strength_before_its_name() {
+        let mut strong = network("Athanor Lab", Security::Open);
+        strong.strength = 90;
+        let (mut page, _received, _) = page(state(vec![strong], vec![]));
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        let mut look = Look {
+            icon: Box::new({
+                let asked = asked.clone();
+                move |name| {
+                    asked.borrow_mut().push(name);
+                    Image::from_rgba8(1, 1, vec![0; 4]).ok()
+                }
+            }),
+            ..Look::plain()
+        };
+        let mut ui = Ui::new("t", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &mut look);
+        assert_eq!(*asked.borrow(), ["network-wireless-signal-excellent-symbolic"]);
+        let row = ids(&page).rows[0].0;
+        assert!(matches!(
+            &ui.widget(row).kind,
+            Kind::LabelledButton { image: Some(_), text, .. } if text == "Athanor Lab"
+        ));
+    }
+
+    #[test]
     fn the_rows_are_built_from_the_state_in_its_order() {
         let mut lab = network("Athanor Lab", Security::Personal { sae: false });
         lab.link = Link::Connected;
@@ -740,8 +785,8 @@ mod tests {
             .rows
             .iter()
             .map(|(row, _)| match &ui.widget(*row).kind {
-                Kind::Button(name) => name.clone(),
-                _ => unreachable!("a button"),
+                Kind::LabelledButton { label, text, .. } if label == text => text.clone(),
+                _ => unreachable!("a button named by its text"),
             })
             .collect();
         assert_eq!(
@@ -756,6 +801,7 @@ mod tests {
         assert!(!ui.is_sensitive(ids.rows[3].0));
         assert!(ui.is_visible(ids.wifi) && ui.is_active(ids.wifi));
         assert!(ui.is_visible(ids.wired) && ui.is_visible(ids.list));
+        assert_eq!(ui.widget(ids.wired).text_style(), &Look::plain().caption);
         assert!(!ui.is_visible(ids.password));
         assert!(matches!(&ui.widget(ids.vpn_rows[0].0).kind, Kind::Check { label, .. } if label == "Office VPN"));
     }
@@ -906,7 +952,7 @@ mod tests {
         service.offer(offered, reply);
         assert!(page.wants_open() && !page.wants_open());
         let mut ui = Ui::new("t", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
         assert!(ui.is_visible(ids(&page).password));
         assert!(ids(&page).airplane.is_none());
         page.closed(&mut ui);
@@ -949,10 +995,15 @@ mod tests {
             page(state(vec![network("Cafe", Security::Open)], vec![]));
         assert_eq!(page.turn(&mut ui), Turn::Unchanged);
         let mut stronger = network("Cafe", Security::Open);
-        stronger.strength = 20;
+        stronger.strength = 60;
         page.service.state.replace(Some(state(vec![stronger], vec![])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Updated);
+        let mut weaker = network("Cafe", Security::Open);
+        weaker.strength = 20;
+        page.service.state.replace(Some(state(vec![weaker], vec![])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild, "the row's icon changed");
         page.service.state.replace(Some(state(
             vec![network("Cafe", Security::Open), network("New", Security::Open)],
             vec![],
@@ -962,7 +1013,7 @@ mod tests {
         page.service.failed();
         page.service.changed();
         let mut fresh = Ui::new("t", Theme::default(), false);
-        page.build(&mut fresh, Ui::ROOT);
+        page.build(&mut fresh, Ui::ROOT, &mut Look::plain());
         assert_eq!(page.turn(&mut fresh), Turn::Unchanged);
     }
 }

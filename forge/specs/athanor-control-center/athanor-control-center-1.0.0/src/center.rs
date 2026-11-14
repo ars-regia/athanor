@@ -227,7 +227,8 @@ impl Center {
         // Keep the keyboard where it was across a rebuild of the same view, as GTK's widgets
         // kept it; else the first control.
         let kept = shell.ui(surface).and_then(focus_path);
-        self.panel.build(&mut ui, content, &mut self.icons);
+        let secondary = Rgba(sal::palette(&self.appearance).ink2);
+        self.panel.build(&mut ui, content, &mut self.icons, secondary);
         if let Some(slot) = shell.ui_mut(surface) {
             *slot = ui;
             let target = if focus { self.panel.first() } else { None };

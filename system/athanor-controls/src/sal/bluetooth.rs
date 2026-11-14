@@ -6,11 +6,11 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use athanor_sal::{Event, TextStyle, Ui, WidgetId};
+use athanor_sal::{Event, Ui, WidgetId};
 use athanor_services::bluetooth::{BluetoothCommand, BluetoothState, Device};
 use tokio::sync::mpsc;
 
-use super::widgets::{column, switch_row, Failure};
+use super::widgets::{column, heading, switch_row, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -126,17 +126,12 @@ impl Page {
     }
 
     /// Adds the page's widgets as a column under `parent`, showing the model's state, and
-    /// returns the column. A page built again, in a new [`Ui`], leaves the old one's widgets.
-    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId) -> WidgetId {
+    /// returns the column, its rows with `look`'s icons. A page built again, in a new [`Ui`],
+    /// leaves the old one's widgets.
+    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, look: &mut Look) -> WidgetId {
         let page = column(ui, parent);
         let power = switch_row(ui, page, &tr("Bluetooth"), false);
-        ui.set_text_style(
-            power,
-            TextStyle {
-                weight: 600,
-                ..TextStyle::default()
-            },
-        );
+        ui.set_text_style(power, heading());
         let paired = column(ui, page);
         let devices = self
             .service
@@ -148,7 +143,10 @@ impl Page {
         let rows = devices
             .into_iter()
             .map(|device| {
-                let row = ui.add(paired, athanor_sal::Kind::Button(device_name(&device)));
+                // The kind's icon, then the name, as the GTK row's box.
+                let name = device_name(&device);
+                let icon = (look.icon)(device.icon);
+                let row = ui.labelled_button(paired, &name, icon, look.icon_size, &name);
                 (row, device)
             })
             .collect();
@@ -277,14 +275,14 @@ mod tests {
         let state = state(vec![device("Headphones", true), device("Keyboard", false)]);
         let (mut page, mut received) = page(state);
         let mut ui = Ui::new("t", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
         let Some(ids) = &page.ids else {
             unreachable!("built");
         };
         let (power, headphones, keyboard) = (ids.power, ids.rows[0].0, ids.rows[1].0);
         assert!(ui.is_active(power));
         assert!(
-            matches!(&ui.widget(headphones).kind, Kind::Button(t) if t == "Headphones, connected")
+            matches!(&ui.widget(headphones).kind, Kind::LabelledButton { text, .. } if text == "Headphones, connected")
         );
         let toggled = ui.activate(power);
         assert!(toggled.is_some_and(|event| page.event(&mut ui, &event)));
@@ -307,7 +305,7 @@ mod tests {
     fn a_device_that_comes_or_goes_rebuilds_the_page_and_a_refusal_shows_the_note() {
         let (mut page, _received) = page(state(vec![device("Keyboard", false)]));
         let mut ui = Ui::new("t", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
         assert_eq!(page.turn(&mut ui), Turn::Unchanged);
         page.service.failed();
         assert_eq!(page.turn(&mut ui), Turn::Updated);

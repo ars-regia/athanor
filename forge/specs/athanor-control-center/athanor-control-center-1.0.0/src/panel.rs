@@ -10,9 +10,10 @@ use std::rc::Rc;
 use athanor_control_center::tiles::{present, Present, Snapshot};
 use athanor_control_center::Page;
 use athanor_controls::sal::audio::{self, MediaIcons};
+use athanor_controls::sal::widgets::Look;
 use athanor_controls::sal::{battery, bluetooth, network, Turn};
 use athanor_controls::{bridge, Services};
-use athanor_sal::{Event, Kind, TextStyle, Ui, WidgetId};
+use athanor_sal::{Event, Kind, Rgba, TextStyle, Ui, WidgetId};
 use athanor_services::audio::{self as audio_model, AudioCommand, AudioState};
 use athanor_services::battery::{self as battery_model, BatteryCommand, BatteryState};
 use athanor_services::bluetooth::{BluetoothCommand, BluetoothState};
@@ -208,6 +209,17 @@ fn style(step: sal::Step) -> TextStyle {
     }
 }
 
+/// What a page is drawn with: the theme's icons at a button's size, and secondary lines in the
+/// caption's size and `secondary`'s ink, as calmo's `bar-popover-note`.
+fn look(icons: &mut Icons, secondary: Rgba) -> Look<'_> {
+    Look {
+        icon: Box::new(|name| icons.get(name, Icons::BUTTON)),
+        icon_size: Icons::BUTTON,
+        caption: style(sal::size::CAPTION),
+        secondary,
+    }
+}
+
 fn send<T>(tx: Option<&tokio::sync::mpsc::UnboundedSender<T>>, command: T) {
     if let Some(tx) = tx {
         if tx.send(command).is_err() {
@@ -316,13 +328,14 @@ impl Panel {
             .collect()
     }
 
-    /// Adds the view's widgets under `parent`, drawn from the models' states.
-    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, icons: &mut Icons) {
+    /// Adds the view's widgets under `parent`, drawn from the models' states, a page's secondary
+    /// lines in `secondary`'s ink.
+    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, icons: &mut Icons, secondary: Rgba) {
         self.ids = None;
         self.back = None;
         match self.view {
             View::Panel => self.build_panel(ui, parent, icons),
-            View::Page(page) => self.build_page(ui, parent, page, icons),
+            View::Page(page) => self.build_page(ui, parent, page, icons, secondary),
         }
         self.changed.set(false);
         self.draw(ui, icons);
@@ -448,7 +461,14 @@ impl Panel {
         })
     }
 
-    fn build_page(&mut self, ui: &mut Ui, parent: WidgetId, page: Page, icons: &mut Icons) {
+    fn build_page(
+        &mut self,
+        ui: &mut Ui,
+        parent: WidgetId,
+        page: Page,
+        icons: &mut Icons,
+        secondary: Rgba,
+    ) {
         let header = ui.inline(parent, [0.0; 2]);
         let back_name = tr("Back");
         let back = match icons.get("go-previous-symbolic", Icons::BUTTON) {
@@ -473,13 +493,13 @@ impl Panel {
                 let page = pages
                     .network
                     .get_or_insert_with(|| network::Page::without_airplane(services));
-                page.build(ui, parent);
+                page.build(ui, parent, &mut look(icons, secondary));
             }
             Page::Bluetooth => {
                 let page = pages
                     .bluetooth
                     .get_or_insert_with(|| bluetooth::Page::new(services));
-                page.build(ui, parent);
+                page.build(ui, parent, &mut look(icons, secondary));
             }
             Page::Audio => {
                 let media = media_icons(icons);

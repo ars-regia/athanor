@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use athanor_control_center::rfkill::{self, Event as RfkillEvent};
-use athanor_sal::{Key, Theme};
+use athanor_sal::{Key, Rgba, Theme};
 use athanor_services::audio::Device as Sink;
 use athanor_services::battery::{Backlight, Battery, Charge, Profiles};
 use athanor_services::media::{MediaCommand, Player, Track};
@@ -90,7 +90,7 @@ fn settle(context: &glib::MainContext) {
 fn view(panel: &mut Panel, icons: &mut Icons) -> Ui {
     let mut ui = Ui::new("Control center", Theme::default(), false);
     let content = ui.add(Ui::ROOT, Kind::Group("Control center".into()));
-    panel.build(&mut ui, content, icons);
+    panel.build(&mut ui, content, icons, Rgba([0, 0, 0, 255]));
     ui
 }
 
