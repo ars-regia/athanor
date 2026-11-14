@@ -1,0 +1,26 @@
+#!/usr/bin/python3
+# ruleid: unconditional-security-pass-script
+def verify_policy(path):
+    return True
+
+
+class Zone:
+    # ruleid: unconditional-security-pass-script
+    def is_trusted(self, name):
+        return True
+
+    # ok: unconditional-security-pass-script
+    def is_enabled(self):
+        return True
+
+
+# ok: unconditional-security-pass-script
+def validate(path):
+    if not path.exists():
+        return False
+    return True
+
+
+# ok: unconditional-security-pass-script
+def handle_signal(signum, frame):
+    return True

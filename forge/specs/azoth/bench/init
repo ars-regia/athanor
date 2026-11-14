@@ -4,7 +4,7 @@
 # Duration of each test from k7.seconds on the command line (default 30).
 mount -t proc proc /proc
 mount -t sysfs sys /sys
-mount -t devtmpfs dev /dev 2> /dev/null
+grep -q ' /dev devtmpfs ' /proc/mounts || mount -t devtmpfs dev /dev
 exec > /dev/console 2>&1
 
 seconds=$(sed -n 's/.*k7\.seconds=\([0-9]*\).*/\1/p' /proc/cmdline)
@@ -31,7 +31,7 @@ echo "K7 schbench_rps_p50 ${rps:-nan} rps"
 # fio with the null ioengine: fio's I/O path without a disk, one job per CPU; read IOPS
 # from the minimal format (field 8). Higher is better.
 iops=$(fio --name=null --ioengine=null --rw=randread --bs=4k --size=1G --time_based --runtime="$seconds" \
-  --numjobs="$cpus" --group_reporting --minimal 2> /dev/null | awk -F';' 'NR == 1 { print $8 }')
+  --numjobs="$cpus" --group_reporting --minimal | awk -F';' 'NR == 1 { print $8 }')
 echo "K7 fio_null_read_iops ${iops:-nan} iops"
 
 # netperf on loopback: TCP_STREAM throughput (Mbit/s) and TCP_RR transactions per second.
@@ -41,9 +41,9 @@ echo "K7 fio_null_read_iops ${iops:-nan} iops"
 # its errors reach the serial console, and it is waited for instead of a timed sleep.
 ip addr add 10.99.0.1/32 dev lo
 netserver -D -p 12865 &
-i=0; until netstat -tln 2> /dev/null | grep -q ':12865 '; do i=$((i + 1)); [ "$i" -ge 10 ] && break; sleep 1; done
-tp=$(netperf -H 127.0.0.1 -p 12865 -t TCP_STREAM -l "$seconds" -P 0 -- -o throughput 2> /dev/null | tail -n 1)
-rr=$(netperf -H 127.0.0.1 -p 12865 -t TCP_RR -l "$seconds" -P 0 -- -o transaction_rate 2> /dev/null | tail -n 1)
+i=0; until netstat -tln | grep -q ':12865 '; do i=$((i + 1)); [ "$i" -ge 10 ] && break; sleep 1; done
+tp=$(netperf -H 127.0.0.1 -p 12865 -t TCP_STREAM -l "$seconds" -P 0 -- -o throughput | tail -n 1)
+rr=$(netperf -H 127.0.0.1 -p 12865 -t TCP_RR -l "$seconds" -P 0 -- -o transaction_rate | tail -n 1)
 echo "K7 netperf_tcp_stream_mbps ${tp:-nan} Mbit/s"
 echo "K7 netperf_tcp_rr_tps ${rr:-nan} tps"
 

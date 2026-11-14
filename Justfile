@@ -122,8 +122,9 @@ check base="HEAD":
     just check-rust
     just check-deny
 
-# The static half of the gate: workflow lint, Justfile syntax, every verify.py check, the kernel
-# profile, the Calmo palette and the suites of forge/test/iso (about 2 minutes on a runner).
+# The static half of the gate: workflow lint, Justfile syntax, every verify.py check, Semgrep on
+# the rules of .semgrep/ (check-semgrep), the kernel profile, the Calmo palette and the suites of
+# forge/test/iso (about 2 minutes on a runner).
 [group('QA & Security')]
 check-static base="HEAD":
     #!/usr/bin/env bash
@@ -133,12 +134,30 @@ check-static base="HEAD":
     actionlint -no-color -pyflakes=
     just check-syntax
     python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
+    just check-semgrep
     python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
     python3 -B system/athanor-style/calmo/contrast.py
     python3 -B system/athanor-style/calmo/generate.py --check
     # These suites hold no TestCase: their own main() runs the cases, and discovery would find none.
     python3 -B forge/test/iso/test_verdict.py
     python3 -B forge/test/iso/test_report.py
+
+# Semgrep CE on the local rules of .semgrep/ (doc_pipeline.md PL28): the project invariants no
+# verify.py check enforces. Their own tests run first, then the scan of the repository, red on
+# any finding. Only local rules, no metrics and no version check: semgrep reaches no network.
+# No per-file timeout either, so that a slow file is scanned instead of skipped.
+[group('QA & Security')]
+check-semgrep:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v semgrep >/dev/null || { echo "check: semgrep is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    # semgrep --test passes a rule that has no test file, so every rule needs one beside it.
+    for rule in .semgrep/rules/*.yaml; do
+        tests=("${rule%.yaml}".*)
+        [ "${#tests[@]}" -gt 1 ] || { echo "check: $rule has no test file (${rule%.yaml}.<ext>)" >&2; exit 1; }
+    done
+    semgrep --test --metrics=off --disable-version-check .semgrep/
+    semgrep scan --metrics=off --disable-version-check --error --timeout 0 --config .semgrep/ .
 
 # The Python unit tests, in two shards that together cover every test directory of the
 # repository: `system` is system/tests (about 3 minutes on a runner), `other` is every other

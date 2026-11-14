@@ -74,6 +74,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
+        env:
+          ATHANOR_INSTALL_SEMGREP: "1"
         run: |
           set -euo pipefail
           bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"

@@ -1,0 +1,54 @@
+# AGENTS.md, "No hidden failures": a shell line that discards stderr, or swallows a failure with
+# `|| true`. scripts/verify.py shell-failures holds a budget for the trees of its SHELL_BUDGETS,
+# which are excluded here; this rule covers every other shell script, the shipped ones under
+# forge/specs included. A file is shell when its first line is a shell shebang or a
+# `# shellcheck shell=` directive, whatever its name or mode: semgrep's own bash detection
+# skips a script without an extension that is not executable, as the SOURCES of the specs are.
+# `kill -0 PID 2> /dev/null` asks whether a process lives and is not a hidden failure (PROBE in
+# verify.py). The finding pattern is verify.py's HIDDEN_FAILURE, kept to one line at a time.
+# Limits: semgrep reads the text, not the shell, so a `#` inside quotes still starts a comment
+# here (`echo "a # b" || true` is missed), and the body of a here-document is read as code (a
+# false positive, which an exemption below then names).
+rules:
+  - id: hidden-failure
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      This line hides a failure (AGENTS.md, "No hidden failures"): send the output to a log, or
+      report the error on stderr and handle it.
+    paths:
+      exclude:
+        - /forge/build/
+        - /forge/builder/
+        - /forge/scripts/
+        - /forge/test/
+        - /forge/tools/
+        - /scripts/
+        - /system/
+    patterns:
+      - pattern-regex: '(?s)\A(?:#![^\n]*\b(?:ba|da)?sh\b|# shellcheck shell=).*'
+      - pattern-regex: '2>[>|]?\s*["'']?/dev/null["'']?|&>>?\s*["'']?/dev/null["'']?|>&\s*["'']?/dev/null["'']?|>\|?\s*["'']?/dev/null["'']?\s+2>&1|2>&-|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])|\{\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)\s*;?\s*\}|\(\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)\s*;?\s*\))|\|\|(?!\s*[{(])[^;|&\n]*(?:;|&&)\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])|\|\|\s*[{(][^;|&\n]*;\s*(?:true|:)\s*;?\s*[})]|2>&1\s*\|\|\s*(?:break|continue)\b'
+      - pattern-not-regex: '(?m)(?:^|\s)#.*$'
+      - pattern-not-regex: 'kill\s+-0\s+\S+\s+2>\s*["'']?/dev/null["'']?'
+      # Deliberate. A probe whose exit status is the answer: azoth/build.sh applies() tells
+      # whether a patch applies, and applies_verbose() prints git's diagnostics when it does not.
+      - pattern-not-regex: 'g apply --cached --check "\$1" 2> /dev/null && \(cd "\$WORK/b" && git apply --check "\$1" 2> /dev/null\)'
+      # Deliberate. azoth/nvidia.sh cc_option(), Kbuild's cc-option: clang refusing a flag is
+      # the answer, and its error for each flag it refuses is noise.
+      - pattern-not-regex: 'clang -Werror "\$@" -c -x c /dev/null -o /dev/null 2> /dev/null'
+      # Deliberate. athanor-usbguard-hook: doc_lock_and_prompts.md LP4 declares that its unlock
+      # call fails silently for a user outside `wheel`, whose session would otherwise not start,
+      # until athanor-usbguard-policy replaces the hook (LP18 step 10). Only that call.
+      - pattern-not-regex: 'unlock\)\n(?:[ \t]*#[^\n]*\n)*[ \t]*usbguard set-parameter InsertedDevicePolicy apply-policy 2>/dev/null \|\| true'
+      # Deliberate. athanor-greeter-session export_from(): a missing environment file is a
+      # normal case, and the function returns with nothing to export (the greeter's start path,
+      # which AGENTS.md reserves to the maintainer).
+      - pattern-not-regex: '\[ -r "\$file" \] \|\| return 0'
+      # Not fixed here: lines of the signing, key and MOK scripts, which AGENTS.md reserves to
+      # the maintainer ("Stop and ask before editing"): the test MOK of azoth/boot.sh and
+      # azoth/signer/run.sh, cert_field() of azoth/sign-kernel.sh, the test vector keys of
+      # athanor-update, and verify_gpg() of azoth/build.sh. Each waits for that decision.
+      - pattern-not-regex: "-subj '/CN=Athanor OS K3 test MOK/' -keyout \\S+ -out \\S+ 2> /dev/null"
+      - pattern-not-regex: 'openssl x509 -in "\$1" -noout "-\$2" -nameopt RFC2253 2> /dev/null'
+      - pattern-not-regex: 'openssl ec -in \S+ -pubout -out \S+ 2> /dev/null'
+      - pattern-not-regex: 'gpg --homedir "\$home" --batch --status-fd 1 --verify "\$2" "\$3" 2>/dev/null'
