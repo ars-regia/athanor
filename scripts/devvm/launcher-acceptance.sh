@@ -221,6 +221,10 @@ indexed() { in_session localsearch search "$1" | grep -qF "$2"; }
 
 stage_deploy() {
     mkdir -p "$SHOTS"
+    # The compositor the run measures, as the documents that cite the run name it.
+    local compositor
+    compositor=$(guest_ssh rpm -q cosmic-comp) || fail "rpm -q cosmic-comp found no compositor package"
+    echo "compositor: $compositor"
     "$HERE/deploy.sh" \
         "$BIN/athanor-launcher:/usr/bin/athanor-launcher" \
         "$BIN/athanor-preview-render:/usr/libexec/athanor-preview-render" \
