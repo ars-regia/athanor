@@ -85,14 +85,15 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             // A column as a group is, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Alert);
             node.set_label(name.as_str());
-            node.set_orientation(Orientation::Vertical);
+            node.set_orientation(group_orientation(widget));
             node
         }
         Kind::Group(name) => {
-            // A group stacks its children as a column, and says so as GTK's vertical box does.
+            // A group stacks its children as a column, and says so as GTK's vertical box does,
+            // unless the application lays it out as a row (Ui::set_horizontal).
             let mut node = Node::new(Role::Group);
             node.set_label(name.as_str());
-            node.set_orientation(Orientation::Vertical);
+            node.set_orientation(group_orientation(widget));
             node
         }
         Kind::Label(text) => {
@@ -372,6 +373,15 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
             (text_run_id(id, n), run)
         })
         .collect()
+}
+
+/// The orientation a group or an alert says: see [`Ui::set_horizontal`].
+fn group_orientation(widget: &crate::widget::Widget) -> Orientation {
+    if widget.horizontal {
+        Orientation::Horizontal
+    } else {
+        Orientation::Vertical
+    }
 }
 
 /// The texts widget `id` shows as labels inside it: a list heading's, a list row's unless it

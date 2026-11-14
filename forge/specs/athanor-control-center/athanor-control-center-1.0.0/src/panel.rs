@@ -379,6 +379,8 @@ impl Panel {
         }
         let footer = ui.inline(parent, [0.0; 2]);
         let battery = ui.add(footer, Kind::Group(String::new()));
+        // Its icon and level make a row, as the GTK panel's horizontal box.
+        ui.set_horizontal(battery, true);
         ui.set_fill(battery, true);
         let level = ui.inline(battery, [0.0; 2]);
         let battery_icon = match icons.get("battery-missing-symbolic", Icons::BUTTON) {

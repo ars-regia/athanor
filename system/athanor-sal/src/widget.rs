@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 mod alert;
 mod exact_value;
+mod horizontal;
 pub(crate) mod labelled;
 mod rows;
 mod strip;
@@ -608,6 +609,8 @@ pub struct Widget {
     /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
     /// [`Ui::set_fill`].
     pub(crate) fill: bool,
+    /// Whether a group or an alert says it is horizontal: see [`Ui::set_horizontal`].
+    pub(crate) horizontal: bool,
     /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
     /// shown a cell.
     pub(crate) slots: usize,
@@ -635,6 +638,7 @@ impl Widget {
             min_w: 0.0,
             ink: None,
             fill: false,
+            horizontal: false,
             slots: 0,
             natural_w: 0.0,
         }
