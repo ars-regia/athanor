@@ -814,8 +814,9 @@ fn draw_slider(
     let Some((percent, muted, icon)) = state else {
         return;
     };
-    // A value set from the model is not the person's: its event is dropped.
-    let _ = ui.set_value(row.slider, percent);
+    // A value set from the model is not the person's: its event is dropped. It is kept as the
+    // sound server gives it, off the slider's steps, as gtk_range_set_value keeps it.
+    let _ = ui.set_exact_value(row.slider, percent);
     if let Some(image) = icons.get(icon, Icons::BUTTON) {
         if let Some(id) = row.mute.or(row.icon) {
             ui.set_image(id, Some(image));

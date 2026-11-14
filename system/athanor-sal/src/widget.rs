@@ -11,6 +11,7 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 mod alert;
+mod exact_value;
 pub(crate) mod labelled;
 mod rows;
 mod strip;

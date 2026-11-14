@@ -168,7 +168,8 @@ impl Channel {
         self.chosen = chosen.map(|device| device.name.clone());
         if let Some(device) = chosen {
             if let Some(slider) = self.slider {
-                ui.set_value(slider, device.percent);
+                // As the sound server gives it, off the steps, as gtk_range_set_value keeps it.
+                ui.set_exact_value(slider, device.percent);
             }
             if ui.is_active(self.mute) != device.muted {
                 ui.set_active(self.mute, device.muted);
