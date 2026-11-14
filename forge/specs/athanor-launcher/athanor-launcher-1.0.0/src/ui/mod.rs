@@ -293,11 +293,45 @@ fn query_panel(
 }
 
 /// What the launcher reads of a key of the toolkit's.
+/// The query's text and range as they are, for the panel laid out again: a rebuild keeps both.
+/// While an input method composes there is no range, and the caret goes to the start.
+fn kept_query(ui: &Ui, field: WidgetId) -> (String, (usize, usize)) {
+    let text = ui.field_text(field).unwrap_or_default();
+    let range = ui.field_range(field).unwrap_or_default();
+    (text, range)
+}
+
+/// The range of a query selected whole, as the one kept from the last Show is: typing
+/// replaces it.
+fn whole(text: &str) -> (usize, usize) {
+    (0, text.len())
+}
+
 /// Sets `query` as the field's text and returns what the field kept, which is what is
 /// searched: the field drops what a typed query cannot hold, so the search agrees with it.
 fn put_query(ui: &mut Ui, field: WidgetId, query: &str) -> String {
     ui.set_field_text(field, query);
     ui.field_text(field).unwrap_or_default()
+}
+
+/// What a turn opens once an output is known.
+#[derive(Debug, PartialEq)]
+enum Opening {
+    /// A Toggle that waited for the first output.
+    Show,
+    /// The start switch's query, which shows the launcher too, a Toggle that waited with it.
+    Query(String),
+}
+
+fn opening(waiting: &mut Waiting, start_query: &mut Option<String>, has_output: bool) -> Option<Opening> {
+    if !has_output {
+        return None;
+    }
+    let waited = waiting.served(true);
+    match start_query.take() {
+        Some(query) => Some(Opening::Query(query)),
+        None => waited.then_some(Opening::Show),
+    }
 }
 
 fn key(key: &SalKey) -> Key {
@@ -442,7 +476,7 @@ impl Launcher {
         self.shown = Some(surface);
         // The query kept from the last Show is selected, so typing replaces it.
         let text = self.memory.shown(asked).unwrap_or_default();
-        self.build(shell, surface, &text, (0, text.len()), logical_size(&output));
+        self.build(shell, surface, &text, whole(&text), logical_size(&output));
         if let Err(err) = shell.set_layer(surface, &shown()) {
             tracing::error!(error = %err, "cannot show the launcher's surface");
         }
@@ -671,9 +705,7 @@ impl Launcher {
     /// Show.
     fn rebuild(&mut self, shell: &mut Shell, surface: SurfaceId, panel: Panel, size: (f32, f32)) {
         let Some(ui) = shell.ui(surface) else { return };
-        let text = ui.field_text(panel.field).unwrap_or_default();
-        // While an input method composes there is none: the caret goes to the start.
-        let range = ui.field_range(panel.field).unwrap_or_default();
+        let (text, range) = kept_query(ui, panel.field);
         self.build(shell, surface, &text, range, size);
     }
 
@@ -861,11 +893,9 @@ impl Application for Launcher {
             self.menu = None;
             self.focus_query(shell);
         }
-        if self.waiting.served(!self.outs.is_empty()) {
-            self.show(shell);
-        }
-        if !self.outs.is_empty() {
-            if let Some(query) = self.start_query.take() {
+        match opening(&mut self.waiting, &mut self.start_query, !self.outs.is_empty()) {
+            Some(Opening::Show) => self.show(shell),
+            Some(Opening::Query(query)) => {
                 self.show(shell);
                 if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
                     if let Some(ui) = shell.ui_mut(surface) {
@@ -874,6 +904,7 @@ impl Application for Launcher {
                     }
                 }
             }
+            None => {}
         }
         // A change may queue another, as the preview's card after a selection: the queue is
         // emptied before the frame is drawn.
@@ -932,6 +963,26 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_opens_what_waited_for_the_first_output() {
+        let (mut waiting, mut start) = (Waiting::default(), None);
+        assert_eq!(opening(&mut waiting, &mut start, true), None, "nothing waits");
+        assert!(!waiting.toggle(false));
+        assert_eq!(opening(&mut waiting, &mut start, false), None, "no output yet");
+        assert_eq!(opening(&mut waiting, &mut start, true), Some(Opening::Show));
+        assert_eq!(opening(&mut waiting, &mut start, true), None, "once");
+
+        let mut start = Some("firefox".to_string());
+        assert_eq!(opening(&mut waiting, &mut start, false), None);
+        assert_eq!(opening(&mut waiting, &mut start, true), Some(Opening::Query("firefox".into())));
+        assert_eq!(start, None, "the start query is taken once");
+
+        let mut start = Some("calc".to_string());
+        assert!(!waiting.toggle(false));
+        assert_eq!(opening(&mut waiting, &mut start, true), Some(Opening::Query("calc".into())));
+        assert_eq!(opening(&mut waiting, &mut start, true), None, "the Toggle was served with it");
+    }
+
+    #[test]
     fn the_start_query_searched_is_the_one_the_field_kept() {
         let look = look::look(&Appearance::default());
         let (mut ui, panel) = panel(&look, false, (1280.0, 800.0), 500.0);
@@ -950,8 +1001,7 @@ mod tests {
         for key in edit {
             first.key(key.clone());
         }
-        let text = first.field_text(before.field).unwrap_or_default();
-        let range = first.field_range(before.field).unwrap_or_default();
+        let (text, range) = kept_query(&first, before.field);
         let (again, after) = query_panel(&look, false, (1280.0, 760.0), 480.0, &text, range);
         (first, before, again, after)
     }
@@ -988,7 +1038,7 @@ mod tests {
 
     #[test]
     fn the_query_kept_from_the_last_show_is_selected_whole_and_stays_so() {
-        let (first, before, mut again, after) = laid_out_again("firefox", (0, 7), &[]);
+        let (first, before, mut again, after) = laid_out_again("firefox", whole("firefox"), &[]);
         assert_eq!(first.field_selection(before.field).as_deref(), Some("firefox"));
         assert_eq!(again.field_selection(after.field).as_deref(), Some("firefox"));
         again.key(SalKey::Text("g".into()));
