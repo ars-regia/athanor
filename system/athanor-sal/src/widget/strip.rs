@@ -105,7 +105,7 @@ impl Ui {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Kind, Theme, Ui};
+    use crate::{Kind, Rect, Theme, Ui};
 
     fn theme() -> Theme {
         Theme {
@@ -238,11 +238,11 @@ mod tests {
         ui.layout();
         assert_eq!(ui.widget(center).rect.w, width, "measured as three children");
         assert!(!ui.is_visible(fourth), "neither drawn nor read");
-        // No point of the window hits it, wherever its measure left its rectangle.
-        let (w, h) = ui.layout();
-        let points = (0..w as u32).flat_map(|x| (0..h as u32).map(move |y| (x as f32, y as f32)));
-        let hit: Vec<_> = points.filter(|&(x, y)| ui.hit(x, y) == Some(fourth)).collect();
-        assert!(hit.is_empty(), "never hit, but at {:?}", hit.first());
+        // Even with a rectangle of its own, below the others, no point of it hits it.
+        let below = ui.widget(center).rect;
+        let y = below.y + below.h + 10.0;
+        ui.widgets[fourth].rect = Rect { x: 0.0, y, w: 50.0, h: 20.0 };
+        assert_eq!(ui.hit(10.0, y + 10.0), None, "never hit");
         assert!(!crate::focus::chain(&ui).contains(&fourth), "never focused");
         assert!(three.iter().all(|&c| ui.is_visible(c)));
     }
