@@ -7,6 +7,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
 spec = importlib.util.spec_from_file_location("verify", SCRIPT)
@@ -80,7 +81,8 @@ class CheckCargoLocksTest(unittest.TestCase):
             subprocess.run(["git", "add", "."], cwd=root, check=True, env=env)
             saved, verify.ROOT = verify.ROOT, root
             try:
-                result = verify.check_cargo_locks()
+                with mock.patch.dict(os.environ, env, clear=True):
+                    result = verify.check_cargo_locks()
             finally:
                 verify.ROOT = saved
         self.assertEqual(len(result.problems), 1, result.problems)
