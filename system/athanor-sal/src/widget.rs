@@ -688,6 +688,14 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
+    /// The primary button was pressed on no widget and on the root outside every shown child of
+    /// it, an island's transparent margin included, on any surface but a popup. A surface over
+    /// the whole output that draws its panel in a child of the root closes the panel at it, as
+    /// the control center does (doc_control_center.md CC9). A normal window or a dialog raises
+    /// it too, at a press on its bare background: it is not a request to close, and such a
+    /// surface ignores it, since the compositor's own focus and the window's close button say
+    /// when it goes.
+    PressedOutside,
     /// The middle button was pressed on a widget that is not a field or a text area, which
     /// paste the primary selection instead: a tray's item asks for its secondary activation.
     /// It neither focuses nor activates the widget.
@@ -833,6 +841,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// Whether the driver shows it in a popup, where a press outside the root's children is
+    /// still on the menu and raises no [`Event::PressedOutside`].
+    pub(crate) popup: bool,
     /// Whether the compositor may make the window larger than its widgets, as GTK's
     /// `resizable`: when false, the window's maximum size is its minimum. True by default.
     pub resizable: bool,
@@ -878,6 +889,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            popup: false,
             resizable: true,
             stale_popup: false,
             focus: None,
@@ -1922,6 +1934,22 @@ impl Ui {
         })
     }
 
+    /// Whether the point is on the root outside every shown child of it, outside a popup. An
+    /// island covers its fill only, so its transparent margin is outside it, as GTK's pick
+    /// passes over a widget's margin; an island with no child shown covers nothing.
+    fn outside_children(&self, x: f32, y: f32) -> bool {
+        let covers = |c: WidgetId| match self.widgets[c].kind {
+            Kind::Island { .. } => self.island_fill(c).is_some_and(|r| r.contains(x, y)),
+            _ => self.widgets[c].rect.contains(x, y),
+        };
+        !self.popup
+            && self.widgets[Self::ROOT]
+                .children
+                .iter()
+                .filter(|&&c| self.is_visible(c))
+                .all(|&c| !covers(c))
+    }
+
     /// The window's size in logical pixels, after [`Ui::layout`].
     pub fn size(&self) -> (f32, f32) {
         self.size
@@ -2496,10 +2524,10 @@ impl Ui {
     }
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
-    /// the widget there and waits for the release to activate it, as GTK's buttons do; the
-    /// secondary button asks for its context menu; the middle button gives
-    /// [`Event::MiddleClick`] on a widget that is not a field or a text area, which paste the
-    /// primary selection instead.
+    /// the widget there and waits for the release to activate it, as GTK's buttons do, and raises
+    /// [`Event::PressedOutside`] on the root outside its shown children; the secondary button
+    /// asks for its context menu; the middle button gives [`Event::MiddleClick`] on a widget
+    /// that is not a field or a text area, which paste the primary selection instead.
     pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
         let id = self.hit(x, y);
         match button {
@@ -2511,6 +2539,9 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
+                if id.is_none() && self.outside_children(x, y) {
+                    return Some(Event::PressedOutside);
+                }
                 // A field puts its caret at the press; a slider takes its value from it, and
                 // from the drag that follows.
                 let id = id.filter(|&id| !self.point_in_field(id, x, y, false))?;
@@ -4543,6 +4574,75 @@ mod tests {
             ui.click(start, y);
             assert_eq!(selected(&ui, name), None, "rtl {rtl}");
             assert_eq!(ui.field_text(name).as_deref(), Some("abcdef"));
+        }
+    }
+
+
+    #[test]
+    fn a_press_on_the_root_outside_its_children_is_reported_and_one_inside_is_not() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.min_width = 400.0;
+        ui.min_height = 300.0;
+        let panel = ui.add(Ui::ROOT, Kind::Group("Panel".into()));
+        ui.add(panel, Kind::Label("Wi-Fi".into()));
+        let button = ui.add(panel, Kind::Button("Settings".into()));
+        ui.layout();
+        let p = ui.widget(panel).rect;
+        let (inside, outside) = ((p.x + 1.0, p.y + 1.0), (p.x + 1.0, p.y + p.h + 10.0));
+        assert!(ui.hit(inside.0, inside.1).is_none(), "on the group, not on a widget");
+        assert!(outside.1 < 300.0 && !p.contains(outside.0, outside.1));
+        for (at, raised) in [(inside, None), (outside, Some(Event::PressedOutside))] {
+            assert_eq!(ui.pointer_press(at.0, at.1, PointerButton::Primary), raised);
+            ui.pointer_release(at.0, at.1, PointerButton::Primary);
+        }
+        assert_eq!(
+            ui.pointer_press(outside.0, outside.1, PointerButton::Secondary),
+            None,
+            "only the primary button"
+        );
+        ui.pointer_release(outside.0, outside.1, PointerButton::Secondary);
+        let r = ui.widget(button).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
+        // A popup raises none: popup.rs, where the driver's path marks it.
+    }
+
+    /// The control center's panel is an island on the root, at the end of the line: a press on
+    /// the island's transparent margin is outside it, as GTK's pick passes over a margin, and one
+    /// on its fill is not, in either direction. A hidden child of the root covers nothing.
+    #[test]
+    fn a_press_on_an_islands_margin_or_where_a_hidden_child_was_is_outside() {
+        let press = |ui: &mut Ui, (x, y): (f32, f32)| {
+            let event = ui.pointer_press(x, y, PointerButton::Primary);
+            ui.pointer_release(x, y, PointerButton::Primary);
+            event
+        };
+        for rtl in [false, true] {
+            let mut ui = Ui::new("t", Theme::default(), rtl);
+            ui.min_width = 400.0;
+            ui.min_height = 300.0;
+            let island = ui.island(Ui::ROOT, true, [8.0; 4]);
+            assert!(ui.set_align(island, [crate::Align::End, crate::Align::Start]).is_some());
+            ui.add(island, Kind::Label("Wi-Fi".into()));
+            let old = ui.add(Ui::ROOT, Kind::Group("Old".into()));
+            ui.add(old, Kind::Label("Gone".into()));
+            ui.layout();
+            let (outer, fill) = (ui.widget(island).rect, ui.island_fill(island));
+            let Some(fill) = fill else {
+                unreachable!("an island with a label shown fills");
+            };
+            assert_eq!(fill.x > 200.0, !rtl, "the end of the line, rtl {rtl}");
+            let margin = (fill.x - 4.0, fill.y + 1.0);
+            assert!(outer.contains(margin.0, margin.1) && !fill.contains(margin.0, margin.1));
+            let on_fill = (fill.x + 1.0, fill.y + 1.0);
+            assert_eq!(press(&mut ui, on_fill), None, "rtl {rtl}");
+            assert_eq!(press(&mut ui, margin), Some(Event::PressedOutside), "rtl {rtl}");
+            let o = ui.widget(old).rect;
+            let was = (o.x + 1.0, o.y + 1.0);
+            assert!(!fill.contains(was.0, was.1));
+            assert_eq!(press(&mut ui, was), None, "on a shown group, rtl {rtl}");
+            ui.set_visible(old, false);
+            assert_eq!(ui.widget(old).rect, o, "the hidden group keeps its rectangle");
+            assert_eq!(press(&mut ui, was), Some(Event::PressedOutside), "rtl {rtl}");
         }
     }
 
