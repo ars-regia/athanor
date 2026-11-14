@@ -41,6 +41,12 @@ from golden_report import exemptions
 # heard together, as an entry's line that ends in that utterance; neither alone, nor a line after
 # anything else, a single-line field's line included.
 #
+# But for the query the launcher's Orca recipe types itself (rig.sh, `orca launcher`): a field
+# holding it is an entry, and Orca says an entry's text in the same utterance as its role, where
+# GTK's GtkText is a text whose line Orca says after it (maintainer decision, 2026-11-13, a
+# Core-AAM role). So a field's line followed by that query, and only by it, may be heard as one
+# entry utterance that ends in it.
+#
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` and
 # `enable` keys of its strings.tsv) with the role and the state words together is rewritten: a real check box,
@@ -77,6 +83,7 @@ SWITCH_SPEECH = {
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
+TYPED = "cc window."
 
 # Focus that returns from a dialog. When a dialog closes, GTK moves the focus to the window's
 # control, then makes the window active, then sends window:activate, and Orca says the window's
@@ -156,7 +163,7 @@ def compare(reference, transcript, exempt=None):
     for field, after in pairwise(reference):
         for role, said in SAME_FIELD_ROLE.items():
             label = field.removesuffix(f" {role}.")
-            if label == field or label not in gallery_labels("notes"):
+            if label == field or not (after == TYPED or label in gallery_labels("notes")):
                 continue
             joined = f"{label} {said} {after}"
             if joined in spoken:

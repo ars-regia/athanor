@@ -484,6 +484,15 @@ impl TextField {
         self.driver(cx).select_all();
     }
 
+    /// Puts the selection's anchor and focus at byte offsets `anchor` and `focus` of the text,
+    /// each clamped to it; an offset inside a character leaves that end where it was.
+    pub(crate) fn select_bytes(&mut self, cx: &mut TextContext, anchor: usize, focus: usize) {
+        let len = self.text().len();
+        let mut driver = self.driver(cx);
+        driver.move_to_byte(anchor.min(len));
+        driver.extend_selection_to_byte(focus.min(len));
+    }
+
     /// Puts the caret at the point of the layout nearest `(x, y)`, as a press does.
     pub(crate) fn press_at(&mut self, cx: &mut TextContext, x: f32, y: f32) {
         self.driver(cx).move_to_point(x, y);

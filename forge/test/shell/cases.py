@@ -76,7 +76,7 @@ GALLERY_PAGES = {
     "buttons": 5,
     "choices": 3,
     "values": 1,
-    "lists": 1,
+    "lists": 2,
     "text": 1,
     "states": 1,
     "dialogs": 1,

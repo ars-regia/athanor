@@ -44,8 +44,8 @@ fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
     (node_id(id) == node).then_some(id)
 }
 
-/// The node of a list row's label, beside the widgets' ids: a row has no text runs, so it takes
-/// the id of a first one.
+/// The node of a list row's label, beside the widgets' ids: a row is neither a label nor a field
+/// and has no text runs, so it takes the id of a first one.
 pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
@@ -282,9 +282,11 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::ListRow(text) => {
             let mut node = Node::new(Role::ListBoxOption);
             node.set_label(text.as_str());
-            // As GTK's rows, selected or not once the list has a selection, and neither before.
-            if let Some(selected) = widget.parent.and_then(|list| ui.selected(list)) {
-                node.set_selected(selected == id);
+            // As the rows of GTK's single-selection ListBox: selectable from the start, so
+            // selected or not before the first selection as after it.
+            let in_list = |&list: &WidgetId| matches!(ui.widget(list).kind, Kind::List { .. });
+            if let Some(list) = widget.parent.filter(in_list) {
+                node.set_selected(ui.selected(list) == Some(id));
             }
             node.add_action(Action::Click);
             node
@@ -325,6 +327,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     if id == Ui::ROOT && ui.announcement.is_some() {
         children.push(ANNOUNCEMENT);
     }
+    if let Kind::Label(_) = &widget.kind {
+        children.push(text_run_id(id, 0));
+    }
     if let Kind::Field(field) | Kind::TextArea(field) = &widget.kind {
         let lines = field.line_ranges();
         children.extend((0..lines.len()).map(|n| text_run_id(id, n)));
@@ -343,27 +348,32 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
 }
 
 /// A field's committed text as one run per line as it is seen, which AT-SPI's Text and
-/// EditableText interfaces read: AccessKit offers them only for a text input with runs. A line
-/// that ends in a newline holds it.
+/// EditableText interfaces read: AccessKit offers them only for a text input or a label with
+/// runs. A line that ends in a newline holds it. A label's text is one run, so that it offers
+/// the Text interface as GTK's labels do: Orca reads a focused list row's labels through it,
+/// past the one its name repeats (`_generate_descendants`, Orca 49).
 fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
-    let (Kind::Field(field) | Kind::TextArea(field)) = &ui.widget(id).kind else {
-        return Vec::new();
+    let run = |n: usize, line: &str| {
+        let mut run = Node::new(Role::TextRun);
+        let lengths: Vec<u8> = line.chars().map(|c| c.len_utf8() as u8).collect();
+        run.set_value(line);
+        run.set_character_lengths(lengths);
+        // ponytail: every run has its widget's bounds; the line's own, when a screen reader
+        // asks where a character is.
+        run.set_bounds(bounds(ui, id, scale));
+        (text_run_id(id, n), run)
     };
-    let text = field.text();
-    let lines = field.line_ranges().into_iter().enumerate();
-    lines
-        .map(|(n, range)| {
-            let line = text.get(range).unwrap_or_default();
-            let mut run = Node::new(Role::TextRun);
-            let lengths: Vec<u8> = line.chars().map(|c| c.len_utf8() as u8).collect();
-            run.set_value(line);
-            run.set_character_lengths(lengths);
-            // ponytail: every run has the field's bounds; the line's own, when a screen reader
-            // asks where a character is.
-            run.set_bounds(bounds(ui, id, scale));
-            (text_run_id(id, n), run)
-        })
-        .collect()
+    match &ui.widget(id).kind {
+        Kind::Label(text) => vec![run(0, text.as_str())],
+        Kind::Field(field) | Kind::TextArea(field) => {
+            let text = field.text();
+            let lines = field.line_ranges().into_iter().enumerate();
+            lines
+                .map(|(n, range)| run(n, text.get(range).unwrap_or_default()))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// The text widget `id` shows as a label inside it: a list heading's, a list row's unless it
@@ -609,9 +619,11 @@ mod tests {
         ui.set_visible(hidden, false);
         ui.layout();
         let mut update = tree_update(&ui, 1.0);
-        // Every visible widget, and the field's text run.
-        let visible = ui.ids().filter(|&id| ui.is_visible(id)).count();
-        assert_eq!(update.nodes.len(), visible + 1);
+        // Every visible widget, the field's text run and each label's.
+        let visible: Vec<WidgetId> = ui.ids().filter(|&id| ui.is_visible(id)).collect();
+        let label = |id: &&WidgetId| matches!(ui.widget(**id).kind, Kind::Label(_));
+        let labels = visible.iter().filter(label).count();
+        assert_eq!(update.nodes.len(), visible.len() + 1 + labels);
         assert!(update.nodes.iter().all(|(n, _)| *n != node_id(hidden)));
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
 
@@ -1032,6 +1044,20 @@ mod tests {
     }
 
     #[test]
+    fn every_row_is_selectable_before_the_first_selection() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Fruit");
+        let rows = [ui.list_row(list, "Apple"), ui.list_row(list, "Pear")];
+        ui.layout();
+        assert_eq!(ui.selected(list), None);
+        let update = tree_update(&ui, 1.0);
+        for row in rows {
+            // GTK's rows carry the selectable state, unselected, before any row is chosen.
+            assert_eq!(update.nodes[row.index()].1.is_selected(), Some(false));
+        }
+    }
+
+    #[test]
     fn a_list_in_a_scroll_reads_as_gtks() {
         let mut ui = Ui::new("Lists", Theme::default(), false);
         let scroll = ui.scroll(Ui::ROOT, 100.0);
@@ -1041,8 +1067,6 @@ mod tests {
             .map(|name| ui.list_row(list, name))
             .collect();
         ui.layout();
-        let unselected = tree_update(&ui, 1.0);
-        assert_eq!(unselected.nodes[rows[0].index()].1.is_selected(), None);
         assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
         ui.key(crate::Key::End);
         let update = tree_update(&ui, 1.0);
@@ -1633,6 +1657,35 @@ mod tests {
         let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
         let heard = heard.lock().expect("not poisoned");
         assert_eq!(heard.announcements, [polite.clone(), polite]);
+    }
+
+    /// A row's labels offer AT-SPI's Text interface, as GTK's labels do: Orca reads a focused
+    /// list row's second line only through it (`_get_presentable_descendants`, Orca 49), and
+    /// their runs stay out of the AT-SPI tree.
+    #[test]
+    fn a_label_offers_the_text_interface_as_gtks() {
+        use accesskit_atspi_common::PlatformNode;
+        fn find(node: &PlatformNode, name: &str) -> Option<PlatformNode> {
+            if node.name().ok()? == name {
+                return Some(node.clone());
+            }
+            (0..node.child_count().ok()?).find_map(|i| {
+                let child = node.relative(node.child_at_index(usize::try_from(i).ok()?).ok()??);
+                find(&child, name)
+            })
+        }
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let row = ui.list_row(list, "Row 1");
+        let column = ui.add(row, Kind::Column);
+        ui.add(column, Kind::Label("Row 1".into()));
+        ui.add(column, Kind::Label("A second line".into()));
+        ui.layout();
+        let (adapter, _) = at_spi(&ui);
+        let root = adapter.platform_node(adapter.root_id());
+        let line = find(&root, "A second line").expect("the label reaches AT-SPI");
+        assert_eq!(line.supports_text().ok(), Some(true));
+        assert_eq!(line.child_count().ok(), Some(0), "its run is not a node of AT-SPI");
     }
 
     impl Bridge for accesskit_atspi_common::Adapter {

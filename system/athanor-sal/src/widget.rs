@@ -357,7 +357,10 @@ pub enum Kind {
     /// keyboard reaches it only through its list. A row may hold widgets of its own, added under
     /// it as under any parent: an image and a group of labels, say. They are then laid side by
     /// side from the start edge with the theme's gap, each centred across the row, and its text
-    /// is not drawn: it is only the name assistive technologies read.
+    /// is not drawn: it is only the name assistive technologies read. The last of them takes the
+    /// rest of the row when it is a column, a group or a wrapping label, as a GTK box gives an
+    /// ellipsized label its natural width: its labels then end in an ellipsis only where the row
+    /// is too narrow for them.
     ListRow(String),
     /// A heading among the rows of a [`Kind::List`], with its text at the start edge, as a GTK
     /// row that is neither selectable nor activatable: the keyboard and the pointer pass over
@@ -1569,6 +1572,49 @@ impl Ui {
         }
     }
 
+    /// The selected text of the field `id`: `None` if it is not a field, if its selection is
+    /// only the caret, or while the input method composes. Where Ctrl+C copies something else
+    /// unless the user selected text in the field, as the launcher's result (doc_launcher.md,
+    /// LA5), [`crate::driver::Application::key`] reads it before the field takes the key.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_selection(&self, id: WidgetId) -> Option<String> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
+            _ => None,
+        }
+    }
+
+    /// The selection of the field `id` as the byte offsets of its anchor and focus, one
+    /// offset twice for the caret: `None` if it is not a field, or while the input method
+    /// composes. [`Ui::set_field_range`] puts it back, as on a field built again.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_range(&self, id: WidgetId) -> Option<(usize, usize)> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selection(),
+            _ => None,
+        }
+    }
+
+    /// Puts the selection of the field `id` at the byte offsets `(anchor, focus)` of its text,
+    /// clamped to it, and scrolls the caret into view. Nothing happens to a widget that is not
+    /// a field.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_field_range(&mut self, id: WidgetId, (anchor, focus): (usize, usize)) {
+        if let Kind::Field(field) | Kind::TextArea(field) = &mut self.widgets[id].kind {
+            field.select_bytes(&mut self.text, anchor, focus);
+            field.scroll_to_caret(&mut self.text);
+        }
+    }
+
     /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
     /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
     /// expands it while its menu is open.
@@ -2175,9 +2221,18 @@ impl Ui {
                     cy += self.widgets[c].rect.h;
                 }
             }
-            // A row's widgets from the start edge, inside its padding, centred across it.
+            // A row's widgets from the start edge, inside its padding, centred across it; the
+            // last takes the rest of the row when it holds text that wraps or ellipsizes.
             Kind::ListRow(_) => {
                 let pad = self.theme.padding;
+                if let Some((&last, rest)) = children.split_last() {
+                    let fills = matches!(self.widgets[last].kind, Kind::Column | Kind::Group(_))
+                        || self.widgets[last].wrap.is_some();
+                    if fills {
+                        let used = rest.iter().map(|&c| self.widgets[c].rect.w + gap).sum::<f32>();
+                        self.widgets[last].rect.w = (outer.w - 2.0 * pad - used).max(0.0);
+                    }
+                }
                 let mut cx = if self.rtl { x + outer.w - pad } else { x + pad };
                 for c in children {
                     let r = self.widgets[c].rect;
@@ -4464,10 +4519,35 @@ mod tests {
 
     /// The selected text of field `id`, if any.
     fn selected(ui: &Ui, id: WidgetId) -> Option<String> {
-        match &ui.widgets[id].kind {
-            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
-            _ => None,
-        }
+        ui.field_selection(id)
+    }
+
+    #[test]
+    fn a_fields_range_is_read_and_put_back_with_its_direction() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Column);
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abcd");
+        ui.key(Key::Left);
+        assert_eq!(ui.field_range(name), Some((3, 3)), "the caret");
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.field_range(name), Some((3, 2)), "anchor, then focus");
+        ui.set_field_range(name, (1, 3));
+        assert_eq!(ui.field_range(name), Some((1, 3)), "forwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("bc"));
+        ui.set_field_range(name, (3, 2));
+        assert_eq!(ui.field_range(name), Some((3, 2)), "backwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("c"));
+        // What is typed goes where the range put the caret.
+        ui.set_field_range(name, (2, 2));
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abxcd"));
+        ui.set_field_range(name, (1, 99));
+        assert_eq!(ui.field_range(name), Some((1, 5)), "clamped to the text");
+        assert_eq!(ui.field_range(other), None, "not a field");
+        ui.set_field_range(other, (0, 1));
     }
 
     #[test]
@@ -4495,6 +4575,8 @@ mod tests {
         assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
         assert_eq!(ui.key(Key::SelectLeft), Some(Event::Changed(id)));
         assert_eq!(ui.value(id), Some(6.0));
+        // Only a field has a selection.
+        assert_eq!(ui.field_selection(id), None);
     }
 
     #[test]
@@ -4964,6 +5046,37 @@ mod tests {
         assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
         ui.set_sensitive(name, true);
         assert_eq!(ui.cut(name, "abc"), Some(Event::Edited(name)));
+    }
+
+    #[test]
+    fn a_list_rows_last_column_takes_the_rest_of_the_row() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let list = ui.list(column, "Rows");
+        let wide = ui.add(column, Kind::Label("x".repeat(80)));
+        let row = ui.list_row(list, "CC Window, Application");
+        let icon = ui.add(row, Kind::Label("Icon".into()));
+        let text = ui.add(row, Kind::Column);
+        let title = ui.add(text, Kind::Label("CC Window".into()));
+        let wrap = Wrap {
+            lines: std::num::NonZeroU32::new(1),
+            ..Wrap::default()
+        };
+        ui.set_wrap(title, Some(wrap));
+        let button_row = ui.list_row(list, "Other");
+        let button = ui.add(button_row, Kind::Button("Go".into()));
+        ui.layout();
+        let t = Theme::default();
+        let (r, i, c) = (ui.widget(row).rect, ui.widget(icon).rect, ui.widget(text).rect);
+        assert!(ui.widget(wide).rect.w > 200.0, "the list is wide");
+        assert_eq!(c.x + c.w, r.x + r.w - t.padding, "the column reaches the end padding");
+        assert_eq!(c.x, i.x + i.w + t.gap);
+        assert_eq!(ui.widget(title).rect.w, c.w, "its label is given the whole column");
+        let full = ui.widget(title).text.as_ref().map(|l| l.width());
+        let one_line = ui.text.layout("CC Window", t.font_size, false, &TextStyle::default());
+        assert_eq!(full, Some(one_line.width()), "and shows its whole text");
+        let b = ui.widget(button).rect;
+        assert!(b.w < 100.0, "a button keeps its own width: {}", b.w);
     }
 
     #[test]

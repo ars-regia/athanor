@@ -71,8 +71,11 @@ States toggle button not pressed.
 tab
 Dialogs toggle button not pressed.
 tab
-A list List with 50 items
+Replace the rows button.
+tab
+A list List with 51 items
 Row 1.
+A second line.
 tab
 Screen reader off.
 Screen reader on.

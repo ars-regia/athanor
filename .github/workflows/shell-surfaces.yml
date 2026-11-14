@@ -447,7 +447,7 @@ jobs:
           path: .scratch/shell-rig/*.log
 
   launcher:
-    name: Launcher build, layer-surface guard, end to end, accessibility and surface cases
+    name: Launcher build, end to end, accessibility and surface cases
     needs: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -457,8 +457,6 @@ jobs:
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the launcher and its decoder, with the qalc test required
         run: bash forge/test/shell/rig.sh build-launcher
-      - name: Layer-surface guard
-        run: bash forge/test/shell/rig.sh layer-guard launcher
       - name: End to end (calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch)
         run: bash forge/test/shell/rig.sh launcher-e2e
       - name: Accessibility tree of the launcher

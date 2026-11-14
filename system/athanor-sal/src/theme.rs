@@ -26,9 +26,11 @@ pub struct Theme {
     pub text: Rgba,
     /// The colour of the active toggle and of the primary marks.
     pub accent: Rgba,
-    /// Text and marks drawn on the accent, and the sheet of what holds content: text fields,
-    /// lists and the rows they fill, a slider's knob.
+    /// Text and marks drawn on the accent, and a slider's knob.
     pub on_accent: Rgba,
+    /// The sheet of what holds content: text fields, lists and the rows they fill, as GTK's
+    /// `view_bg_color`. A dark variant sets it dark, under its light text.
+    pub view: Rgba,
     /// The outline of controls.
     pub border: Rgba,
     /// The title bar the window draws itself: Calmo's `bar` token, light variant.
@@ -98,6 +100,7 @@ impl Default for Theme {
             text: Rgba::rgb(0x24, 0x1f, 0x31),
             accent: Rgba::rgb(0x81, 0x3d, 0x9c),
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
+            view: Rgba::rgb(0xff, 0xff, 0xff),
             border: Rgba::rgb(0xc0, 0xbf, 0xbc),
             title_bar: Rgba::rgb(0xfb, 0xfc, 0xfd),
             focus: Rgba::rgb(0x81, 0x3d, 0x9c),

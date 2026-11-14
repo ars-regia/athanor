@@ -7,9 +7,8 @@
 # 2-5), starts what it opens behind a security context in its own unit (item 6), survives
 # localsearch stopped (item 7), shows hostile names as text and contains a decoder that
 # crashes or loops (item 8), stays within 80 MB PSS (item 10), survives hot-plug
-# without a restart (one window kept per output removal for the process's life, as the bar and
-# the dock do: a window that has shown keeps about 3.4 MB after its output leaves, so the 8 MB
-# PSS gate allows two such removals; Review Focus 4), keeps the keyboard focus right when it
+# without a restart (the surface of an output that leaves is destroyed, shown or hidden, and
+# four unplugs stay within an 8 MB PSS gate; Review Focus 4), keeps the keyboard focus right when it
 # toggles its layer surfaces (stage focus), and runs without files and providers after a crash loop (SH8).
 # Needs Athanor's cosmic-comp (the layer-surface focus patch, forge/specs/cosmic-comp) in the
 # guest. Before any stage the script checks the guest's /usr/bin/cosmic-comp: either the
@@ -118,9 +117,10 @@ fresh_start() {
 type_keys() { guest_ssh "sudo python3 - $(printf '%q ' "$@")" < "$HERE/keyboard_type.py"; }
 
 # What the shown launcher's accessibility tree holds (launcher_rows.py): the sections are the
-# rows, the labels, the labels below a Region and the lists and shown images.
+# rows, the labels, the labels outside any list (the preview's) and the lists with the
+# preview title's offset.
 rows() { in_session python3 - < "$HERE/launcher_rows.py"; }
-section() { # section N: the rows (1), labels (2), region labels (3) or lists and images (4)
+section() { # section N: the rows (1), labels (2), preview labels (3) or lists and the title offset (4)
     awk -v n="$1" 'BEGIN { s = 1 } /^(--|==|##)$/ { s++; next } s == n && $0 != ""'
 }
 has_row() { rows | section 1 | grep -qxF -- "$1"; }
@@ -188,6 +188,17 @@ guest_put() { # guest_put PATH
 # The VM, the files and the units this script put in the guest, marked so cleanup removes
 # only those.
 mark() { guest_ssh "mkdir -p $STATE_DIR && touch $STATE_DIR/$1"; }
+a11y_enabled() { in_session busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled; }
+# The toolkit's accessibility tree (AccessKit) is built only while the accessibility bus says
+# it is enabled, as when a screen reader runs; GTK's was always there. The stages read the
+# tree, so every run but a lone cleanup turns it on, marked first: cleanup turns it off again
+# whatever ends the run.
+require_a11y() {
+    [[ $(a11y_enabled) == "b true" ]] && return
+    mark a11y-enabled
+    in_session busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true ||
+        fail "the accessibility bus cannot be enabled"
+}
 marked() { guest_ssh "test -e $STATE_DIR/$1"; }
 
 now() { in_session date +%s; }
@@ -210,6 +221,10 @@ indexed() { in_session localsearch search "$1" | grep -qF "$2"; }
 
 stage_deploy() {
     mkdir -p "$SHOTS"
+    # The compositor the run measures, as the documents that cite the run name it.
+    local compositor
+    compositor=$(guest_ssh rpm -q cosmic-comp) || fail "rpm -q cosmic-comp found no compositor package"
+    echo "compositor: $compositor"
     "$HERE/deploy.sh" \
         "$BIN/athanor-launcher:/usr/bin/athanor-launcher" \
         "$BIN/athanor-preview-render:/usr/libexec/athanor-preview-render" \
@@ -336,20 +351,22 @@ stage_search() {
     [[ $(unit is-active) == active ]] || fresh_start
     search fx "Firefox, Application"
     [[ $(first_row) == "Firefox, Application" ]] || fail "'fx': first row is '$(first_row)' (item 2)"
-    # F27: the preview's role and the results list are in the accessibility tree.
-    rows | section 4 | grep -qxF "list: Results" || fail "no Results list in: $(rows | section 4 | tr '\n' '|')"
-    wait_until 8 has_region_text '^Firefox$' || fail "no preview of Firefox under a Region: $(rows | section 3 | tr '\n' '|')"
-    # Task 16's fix 1: Tab opens the actions, which the tree names "Actions" (the rig cannot press Tab).
+    # F27: the results list and the preview's text are in the accessibility tree. The
+    # toolkit's list is ARIA's listbox, which Core-AAM 1.2 maps to "list box" (#982); its pane
+    # is a generic container, which AccessKit leaves out, so the preview is its labels.
+    rows | section 4 | grep -qxF "list box: Results" || fail "no Results list in: $(rows | section 4 | tr '\n' '|')"
+    wait_until 8 has_region_text '^Firefox$' || fail "no preview of Firefox outside the list: $(rows | section 3 | tr '\n' '|')"
+    # Task 16's fix 1: Tab opens the actions, a menu in a popup named "Actions" (the rig cannot press Tab).
     type_keys @tab
-    wait_until 5 eval "rows | section 4 | grep -qxF 'list: Actions'" ||
-        fail "Tab did not show a list named Actions: $(rows | section 4 | tr '\n' '|')"
+    wait_until 5 eval "rows | section 4 | grep -qxF 'menu: Actions'" ||
+        fail "Tab did not show a menu named Actions: $(rows | section 4 | tr '\n' '|')"
     # cosmic-comp ends a popup grab that a key press asked for within 100 ms: the menu has no
     # grab, so it is still there after a second, Down moves it, and Escape closes only it.
     sleep 1
-    rows | section 4 | grep -qxF "list: Actions" || fail "the menu is gone a second after Tab: $(rows | section 4 | tr '\n' '|')"
+    rows | section 4 | grep -qxF "menu: Actions" || fail "the menu is gone a second after Tab: $(rows | section 4 | tr '\n' '|')"
     type_keys @down
     type_keys @escape
-    wait_until 5 eval "! rows | section 4 | grep -qxF 'list: Actions'" || fail "Escape did not close the menu"
+    wait_until 5 eval "! rows | section 4 | grep -qxF 'menu: Actions'" || fail "Escape did not close the menu"
     shown || fail "Escape closed the launcher along with its menu"
     close_launcher || fail "the launcher does not close after the menu"
     flatpaks=$(in_session flatpak list --app --columns=application)
@@ -784,10 +801,9 @@ decode_one() { # decode_one QUERY NAME KIND
     wait_until 12 sampler_done || fail "$2: the sampler did not finish"
     units_alive || fail "$2: a decoder unit is still alive: $(in_session "systemctl --user list-units --all --no-legend --plain 'athanor-preview-*'")"
     [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "$2: the launcher's MainPID changed from $pid"
-    # The file card: its title is the file name, and no picture is shown (a picture is at
-    # least 220 px high, the file's icon 96).
+    # The file card: its title is the file name, and no picture is shown.
     rows | section 3 | grep -qxF "$2" || fail "$2: the preview does not show the card's title: $(rows | section 3 | tr '\n' '|')"
-    if rows | section 4 | grep -E '^image: [0-9]+x[0-9]+$' | awk -Fx '{ if ($2 >= 200) found = 1 } END { exit !found }'; then
+    if preview_picture_shown; then
         fail "$2: a picture is shown: $(rows | section 4 | tr '\n' '|')"
     fi
     echo "decoder $3 ($2): unit journal:"
@@ -883,9 +899,10 @@ launcher_memory() {
     in_session "awk '/^Pss:/ { p = \$2 } /^Pss_Anon:/ { a = \$2 } /^Pss_File:/ { f = \$2 } /^Pss_Shmem:/ { m = \$2 } END { print p, a, f, m }' /proc/$(unit show -p MainPID --value)/smaps_rollup"
 }
 
-# True when the preview shows a decoded picture: the file card's icon is 96 px high, a picture
-# at least 220.
-preview_picture_shown() { rows | section 4 | grep -E '^image: [0-9]+x[0-9]+$' | awk -Fx '{ if ($2 >= 200) found = 1 } END { exit !found }'; }
+# True when the preview shows a decoded picture. The toolkit leaves an image without a
+# description out of the tree, so the picture is read from where the title sits: below a
+# 220 px picture, or below the file card's 96 px icon (at the dev VM's scale of 1).
+preview_picture_shown() { rows | section 4 | sed -n 's/^title offset: //p' | awk '{ if ($1 >= 200) found = 1 } END { exit !found }'; }
 
 # One successful decode: the file is selected and its picture is shown.
 preview_decoded() { # preview_decoded QUERY NAME
@@ -969,30 +986,31 @@ stage_memory() {
 }
 
 HEAD2=/sys/class/drm/card1-Virtual-2/status
+SECOND_OUTPUT=Virtual-2
 
 # The second virtio head: status on or off, then a change uevent, which cosmic-comp needs
 # to see the output come or go (the forced status alone raises none).
 second_head() { # second_head on|off|detect
     guest_ssh "echo $1 | sudo tee $HEAD2 > /dev/null && sudo udevadm trigger --action=change /sys/class/drm/card1"
 }
-launcher_surfaces() { in_session python3 - < "$HERE/launcher_surfaces.py"; }
+launcher_pss() { in_session "awk '/^Pss:/ { print \$2 }' /proc/$(unit show -p MainPID --value)/smaps_rollup"; }
 # The compositor lists exactly N outputs: a removal has been processed.
 outputs_are() { [[ $(in_session "wayland-info | grep -c \"interface: 'wl_output'\"") == "$1" ]]; }
-surface_lines_are() { [[ $(launcher_surfaces | wc -l) == "$1" ]]; }
-# The surfaces of the launcher that are 1x1 with no child, and those that hold the panel.
-count_hidden() { launcher_surfaces | awk '$1 == "1x1" && $4 == 0 { n++ } END { print n + 0 }'; }
-# The line numbers (creation order of the windows) of the surfaces that hold the panel.
-panel_lines() { launcher_surfaces | awk '$1 != "1x1" && $4 > 0 { printf "%s%d", sep, NR; sep = " " }'; }
-launcher_pss() { in_session "awk '/^Pss:/ { print \$2 }' /proc/$(unit show -p MainPID --value)/smaps_rollup"; }
-count_panels() { launcher_surfaces | awk '$1 != "1x1" && $4 > 0 { n++ } END { print n + 0 }'; }
+# The connector the launcher last showed on since $1, from its "shown" line.
+shown_on() { launcher_journal "$1" | sed -n 's/^shown ms=[0-9]* output="\{0,1\}\([^" ]*\).*/\1/p' | tail -n 1; }
+shown_on_is() { [[ $(shown_on "$1") == "$2" ]]; }
+same_process() { [[ $(unit show -p MainPID --value) == "$1" ]]; }
 
 # An output that comes and goes: the launcher keeps its process, shows on the output of the
-# activated window, keeps a 1x1 surface without input on the other, and never destroys a
-# departed output's surface (cosmic-comp 1.8.0 closes the connection of a client that does).
+# activated window, and loses the surface of an output that leaves, shown or hidden: the
+# toolkit's driver destroys it when the output goes (output_destroyed). The GTK launcher
+# kept an empty window instead, because cosmic-comp 1.8.0 closed the connection of a client
+# that destroyed a departed output's layer surface; the unchanged MainPID after each removal
+# is what shows that the compositor no longer does.
 stage_hotplug() {
-    local pid restarts a=/tmp/athanor-launcher-acceptance-window-a pss0 pss1 pss2 pss3 total
+    local pid restarts a=/tmp/athanor-launcher-acceptance-window-a pss0 pss1 pss2 pss3 since cycle
     guest_ssh "test -e $HEAD2" || fail "one head: start the dev VM with GPU_OUTPUTS=2 (devvm.env)"
-    fresh_start # abandoned windows are counted below, so the process starts without any
+    fresh_start
     pid=$(unit show -p MainPID --value)
     restarts=$(unit show -p NRestarts --value)
     close_launcher || fail "the launcher does not close"
@@ -1000,67 +1018,70 @@ stage_hotplug() {
     printf '%s\n' '#!/bin/sh' "printf '\\033]0;%s\\007' \"\$1\"" 'head -c 4 > "$2"' 'exec sleep 600' | guest_put "$TERM_SCRIPT"
     start_term acceptance-hotplug $a
     sleep 3
-    # One show first, the control: with the window on the only output the launcher shows on
-    # the only window. What a first show loads (the panel, the icons, the renderer) is a cost
-    # per process, not per unplug, so it is in the baseline.
+    # One show first, the control: with one output the launcher shows on it. What a first show
+    # loads (the panel, the icons, the renderer) is a cost per process, not per unplug, so it
+    # is in the baseline.
+    since=$(now)
     open_launcher
-    [[ $(panel_lines) == 1 ]] || fail "the window on the only output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want 1"
+    wait_until 5 eval "[[ -n \$(shown_on $since) ]]" || fail "the shown line names no output: $(launcher_journal "$since" | tail -n 3)"
+    [[ $(shown_on "$since") != "$SECOND_OUTPUT" ]] || fail "the launcher showed on $SECOND_OUTPUT before that output was connected"
     close_launcher || fail "the launcher does not close"
     sleep 5
     pss0=$(launcher_pss)
-    # Two cycles with the launcher hidden: each leaves one empty window (Surface::abandon) and
-    # nothing else.
-    local cycle
+    # Two cycles with the launcher hidden: the hidden surface of the output that leaves goes.
     for cycle in 1 2; do
         second_head on
-        wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, two outputs: $(launcher_surfaces | tr '\n' '|')"
+        wait_until 20 outputs_are 2 || fail "cycle $cycle: the compositor does not list the second output"
         second_head off
         wait_until 20 outputs_are 1 || fail "cycle $cycle: the compositor still lists two outputs"
-        wait_until 20 surface_lines_are $((1 + cycle)) || fail "cycle $cycle, one output and abandoned windows: $(launcher_surfaces | tr '\n' '|')"
+        sleep 2
+        same_process "$pid" || fail "cycle $cycle: MainPID changed from $pid when the hidden launcher's output left"
     done
+    hidden || fail "the launcher shows after two hidden cycles: $(surfaces) surfaces"
     pss1=$(launcher_pss)
     # The third cycle, with the launcher shown on the output that leaves.
     second_head on
-    wait_until 20 surface_lines_are 4 || fail "two outputs, two abandoned windows: $(launcher_surfaces | wc -l) launcher surfaces: $(launcher_surfaces | tr '\n' '|')"
+    wait_until 20 outputs_are 2 || fail "the compositor does not list the second output"
     # Then a window on the second output: the pointer is moved across (a uinput relative mouse;
     # an absolute one maps onto the first output only) and cosmic-comp maps the next window
     # where the pointer is. The compositor's move shortcut does not reach the window from a
-    # uinput keyboard. The launcher follows the activated window to the newest surface, the one
-    # made for the second output; the surfaces come in the order the windows were created.
+    # uinput keyboard. The launcher follows the activated window to the second output.
     guest_ssh "sudo python3 - 3000" < "$HERE/pointer_move.py"
     start_term acceptance-hotplug-second /tmp/athanor-launcher-acceptance-window-b
     sleep 3
+    since=$(now)
     open_launcher
-    total=$(launcher_surfaces | wc -l)
-    wait_until 10 eval "[[ \$(panel_lines) == $total && \$(count_panels) == 1 ]]" ||
-        fail "with the window on the second output: the panel is on line '$(panel_lines)' of $(launcher_surfaces | tr '\n' '|'), want line $total alone"
-    echo "hotplug: surfaces with the window on the second output: $(launcher_surfaces | tr '\n' '|')"
+    wait_until 5 shown_on_is "$since" "$SECOND_OUTPUT" ||
+        fail "with the window on the second output, the launcher showed on '$(shown_on "$since")', want $SECOND_OUTPUT"
+    [[ $(surfaces) == 1 ]] || fail "with the window on the second output: $(surfaces) launcher surfaces show the panel, want 1"
     "$HERE/screenshot.sh" "$SHOTS/hotplug-second-output.png" > /dev/null
     second_head off
     wait_until 20 outputs_are 1 || fail "the compositor still lists two outputs after the last one left"
-    wait_until 20 hidden || fail "the launcher is still shown after the output left: $(launcher_surfaces | tr '\n' '|')"
-    # The window of an output that left is emptied and kept, never destroyed (cosmic-comp closes
-    # the connection of a client that destroys it): one live surface and one abandoned window
-    # per output that left, which is the ceiling Surface::abandon declares.
-    wait_until 20 surface_lines_are 4 || fail "one output and three abandoned windows: $(launcher_surfaces | tr '\n' '|')"
-    [[ $(count_panels) == 0 ]] || fail "a surface still shows the panel after the output left: $(launcher_surfaces | tr '\n' '|')"
-    [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "MainPID changed from $pid when the output left"
+    wait_until 20 hidden || fail "the launcher is still shown after its output left: $(surfaces) surfaces"
+    sleep 2
+    same_process "$pid" || fail "MainPID changed from $pid when the shown launcher's output left"
+    # Super shows it again, on the output that is left.
+    since=$(now)
+    open_launcher
+    wait_until 5 eval "[[ -n \$(shown_on $since) && \$(shown_on $since) != $SECOND_OUTPUT ]]" ||
+        fail "after its output left, the launcher showed on '$(shown_on "$since")'"
+    close_launcher || fail "the launcher does not close"
     sleep 5
     pss2=$(launcher_pss)
     second_head on
-    wait_until 20 surface_lines_are 5 || fail "second_head on again (two outputs, three abandoned windows): $(launcher_surfaces | tr '\n' '|')"
-    [[ $(unit show -p MainPID --value) == "$pid" ]] || fail "MainPID changed from $pid when the output came back"
+    wait_until 20 outputs_are 2 || fail "the compositor does not list the second output again"
+    same_process "$pid" || fail "MainPID changed from $pid when the output came back"
     [[ $(unit show -p NRestarts --value) == "$restarts" ]] || fail "NRestarts went from $restarts to $(unit show -p NRestarts --value)"
     unit_active || fail "not active after hotplug: $(unit show -p Result --value)"
     end_terms
     in_session "rm -f $a /tmp/athanor-launcher-acceptance-window-b"
     second_head off
     wait_until 20 outputs_are 1 || fail "the compositor still lists two outputs at the end"
-    wait_until 20 surface_lines_are 5 || fail "one output at the end (four abandoned windows): $(launcher_surfaces | tr '\n' '|')"
     sleep 5
+    same_process "$pid" || fail "MainPID changed from $pid at the last unplug"
     pss3=$(launcher_pss)
-    # Review Focus 4 is read as bounded per unplug, no growth per show: three cycles, the last
-    # one shown, may add no more than 8 MB.
+    # Review Focus 4 is read as bounded per unplug, no growth per show: four unplugs, one of
+    # them shown, may add no more than 8 MB.
     echo "hotplug: launcher PSS $pss0 kB at the start, $pss1 kB after two cycles, $pss2 kB after the shown one, $pss3 kB after the fourth unplug"
     ((pss3 - pss0 <= 8 * 1024)) || fail "PSS grew from $pss0 to $pss3 kB over the unplug cycles (limit 8192 kB)"
 }
@@ -1145,6 +1166,9 @@ stage_cleanup() {
     if marked super-marker; then
         step "restoring the Super marker" in_session "mkdir -p \$(dirname $SUPER_MARKER) && touch $SUPER_MARKER && rm $STATE_DIR/super-marker"
     fi
+    if marked a11y-enabled; then
+        step "turning the accessibility bus off again" in_session "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b false && rm $STATE_DIR/a11y-enabled"
+    fi
     if marked set-session-class; then
         step "stopping localsearch" in_session "systemctl --user stop localsearch-3.service"
         step "unsetting XDG_SESSION_CLASS" in_session "systemctl --user unset-environment XDG_SESSION_CLASS; rm -f $STATE_DIR/set-session-class"
@@ -1173,6 +1197,10 @@ if [[ ${run[*]} != cleanup ]]; then
     require_patched_compositor
 fi
 trap cleanup_on_exit EXIT
+if [[ ${run[*]} != cleanup ]]; then
+    STAGE=precondition
+    require_a11y
+fi
 for STAGE in "${run[@]}"; do
     "stage_$STAGE"
     echo "PASS $STAGE"
