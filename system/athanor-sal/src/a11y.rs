@@ -247,10 +247,14 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_orientation(Orientation::Horizontal);
             node
         }
-        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines.
+        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines. A
+        // password field is password text, as GTK's PasswordEntry, and its value and text runs
+        // are its masks (password.rs).
         Kind::Field(field) | Kind::TextArea(field) => {
             let mut node = Node::new(if matches!(widget.kind, Kind::TextArea(_)) {
                 Role::MultilineTextInput
+            } else if field.is_password() {
+                Role::PasswordInput
             } else {
                 Role::TextInput
             });
@@ -1320,6 +1324,104 @@ mod tests {
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 1))));
         ui.key(crate::Key::SelectRight);
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
+    }
+
+    /// A password field reaches AT-SPI as GTK's PasswordEntry does, password text, and nothing
+    /// AT-SPI reads or hears of it, its name, its text, its value or the events of its edits,
+    /// holds a character of what was typed (doc_accessibility.md, AX4).
+    #[test]
+    fn a_password_field_gives_at_spi_no_character_of_its_text() {
+        use accesskit::{ActionHandler, ActionRequest};
+        use accesskit_atspi_common::{
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, Granularity, InterfaceSet,
+            Role as AtspiRole, WindowBounds,
+        };
+        type Events = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+        struct Recorder(Events);
+        impl AdapterCallback for Recorder {
+            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn emit_event(&self, _: &Adapter, event: Event) {
+                let mut events = self.0.lock().expect("not poisoned");
+                events.push(format!("{event:?}"));
+            }
+        }
+        struct NoActions;
+        impl ActionHandler for NoActions {
+            fn do_action(&mut self, _: ActionRequest) {}
+        }
+        // Characters no name, number or debug text of the tree holds, so any found leaked.
+        const SECRET: &str = "ŽƷ¶ŧ€";
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        let events = Events::default();
+        let mut adapter = Adapter::new(
+            &AppContext::new(None),
+            Recorder(events.clone()),
+            tree_update(&ui, 1.0),
+            true,
+            WindowBounds::default(),
+            NoActions,
+        );
+        ui.commit("ŽƷ");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("¶ŧx");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.key(crate::widget::Key::Backspace);
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("€");
+        adapter.update(tree_update(&ui, 1.0));
+        assert_eq!(ui.password_text(field), Some(SECRET));
+
+        let root = adapter.platform_node(adapter.root_id());
+        let node = (0..root.child_count().expect("children"))
+            .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+            .map(|child| root.relative(child))
+            .find(|child| child.name().ok().as_deref() == Some("Password"))
+            .expect("the field reaches AT-SPI");
+        assert_eq!(node.role().expect("a role"), AtspiRole::PasswordText);
+        assert_eq!(node.character_count().expect("a text"), 5);
+        let text = node.text(0, -1).expect("a text");
+        assert_eq!(text, "●●●●●");
+        let values: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value().map(str::to_owned))
+            .collect();
+        assert!(values.contains(&text), "the field's value is its masks");
+        // What Orca reads character by character, word by word and line by line
+        // (doc_accessibility.md, AX4), and every node's label and description.
+        let mut strings = Vec::new();
+        for granularity in [Granularity::Char, Granularity::Word, Granularity::Line] {
+            for offset in 0..5 {
+                let (said, ..) = node.string_at_offset(offset, granularity).expect("a string");
+                strings.push(said);
+            }
+        }
+        assert!(strings.iter().any(|said| said == "●"), "a character is a mask");
+        let labels: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.description()])
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        assert!(labels.iter().any(|label| label == "Password"), "{labels:?}");
+
+        let events = events.lock().expect("not poisoned");
+        assert!(!events.is_empty(), "the edits are heard");
+        let heard = [node.name().expect("a name"), text]
+            .into_iter()
+            .chain(values)
+            .chain(strings)
+            .chain(labels)
+            .chain(events.iter().cloned());
+        for said in heard {
+            let leaked: Vec<char> = SECRET.chars().filter(|&c| said.contains(c)).collect();
+            assert!(leaked.is_empty(), "{leaked:?} reached AT-SPI in {said:?}");
+        }
     }
 
     /// Through the AT-SPI bridge itself: a menu button reads as expandable, and expanded while

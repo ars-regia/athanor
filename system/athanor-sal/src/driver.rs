@@ -1740,11 +1740,25 @@ type ImeField = (SurfaceId, WidgetId, ContentHint);
 fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
-    let hint = match widget.kind {
+    let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // An input method neither shows, learns nor suggests what a password field is given.
+        Kind::Field(field) if field.is_password() => {
+            ContentHint::HiddenText | ContentHint::SensitiveData
+        }
         _ => ContentHint::None,
     };
     Some((id, widget.rect, hint))
+}
+
+/// The content type a field asks the input method for: a password's for hidden text.
+fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
+    let purpose = if hint.contains(ContentHint::HiddenText) {
+        ContentPurpose::Password
+    } else {
+        ContentPurpose::Normal
+    };
+    (hint, purpose)
 }
 
 /// The events of text-input-v3 that take effect together at its next `done`.
@@ -1752,7 +1766,8 @@ fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
 struct Pending {
     /// The preedit and its cursor, a byte range in it.
     preedit: Option<(String, Option<(usize, usize)>)>,
-    commit: Option<String>,
+    /// Overwritten when dropped: it may be a password field's text.
+    commit: Option<zeroize::Zeroizing<String>>,
 }
 
 /// The preedit without what a single-line field drops from it, the newline included, with its
@@ -1773,7 +1788,7 @@ fn printable_preedit(
         })
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
-    (crate::text::printable(text, false), cursor)
+    (String::from(crate::text::printable(text, false).as_str()), cursor)
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1817,7 +1832,9 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                     .zip(usize::try_from(cursor_end).ok());
                 app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
             }
-            Event::CommitString { text } => app.ime.pending.commit = text,
+            Event::CommitString { text } => {
+                app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
+            }
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
@@ -2097,7 +2114,8 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(hint, ContentPurpose::Normal);
+            let (hint, purpose) = content_type(hint);
+            text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -3521,9 +3539,10 @@ mod tests {
             commits: 2,
             ..Ime::default()
         };
-        ime.pending.commit = Some("a".into());
+        ime.pending.commit = Some(zeroize::Zeroizing::new("a".into()));
         let (pending, current) = ime.done(1);
-        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        let commit = pending.commit.as_ref().map(|text| text.as_str());
+        assert_eq!((commit, current), (Some("a"), false));
         assert!(
             ime.pending.commit.is_none(),
             "a stale done still applies its text"
@@ -3608,6 +3627,22 @@ mod tests {
         assert!(!field.is_composing());
         assert_eq!(field.shown(), "ab");
         assert!(!ui.end_composition(), "a second end changed the field");
+    }
+
+    /// An input method neither shows, learns nor suggests a password: the field asks for hidden,
+    /// sensitive text of a password, and a plain field for none of it.
+    #[test]
+    fn a_password_field_asks_for_hidden_sensitive_text_of_a_password() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let password = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, content_type(hint)));
+        ui.set_focus(Some(password));
+        let hidden = ContentHint::HiddenText | ContentHint::SensitiveData;
+        assert_eq!(asked(&ui), Some((password, (hidden, ContentPurpose::Password))));
+        ui.set_focus(Some(name));
+        assert_eq!(asked(&ui), Some((name, (ContentHint::None, ContentPurpose::Normal))));
     }
 
     #[test]

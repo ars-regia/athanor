@@ -671,6 +671,7 @@ dependencies = [
  "wayland-client",
  "wgpu",
  "yeslogic-fontconfig-sys",
+ "zeroize",
 ]
 
 [[package]]
