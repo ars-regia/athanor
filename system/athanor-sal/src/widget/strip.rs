@@ -178,6 +178,28 @@ mod tests {
     }
 
     #[test]
+    fn a_child_of_an_inline_or_a_centre_box_keeps_its_least_width() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Strip", theme(), rtl);
+            ui.min_width = 800.0;
+            let inline = ui.inline(Ui::ROOT, [0.0, 0.0]);
+            let a = ui.add(inline, Kind::Button("A".into()));
+            let center = ui.add(Ui::ROOT, Kind::CenterBox);
+            let [_, middle, _] =
+                ["Start", "Middle", "End"].map(|t| ui.add(center, Kind::Button(t.into())));
+            for id in [a, middle] {
+                assert!(ui.set_min_width(id, 120.0));
+            }
+            ui.layout();
+            for id in [a, middle] {
+                assert_eq!(ui.widget(id).rect.w, 120.0, "{rtl}: {id:?}");
+            }
+            let (b, m) = (ui.widget(center).rect, ui.widget(middle).rect);
+            assert!((m.x + m.w / 2.0 - (b.x + b.w / 2.0)).abs() < 0.01, "{rtl}: still centred");
+        }
+    }
+
+    #[test]
     fn a_huge_padding_still_gives_a_finite_size() {
         for padding in [[2e38, 0.0], [0.0, 2e38], [f32::MAX, f32::MAX]] {
             let mut ui = Ui::new("Strip", theme(), false);
