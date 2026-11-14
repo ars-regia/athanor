@@ -31,6 +31,11 @@ const SETTINGS: &str = "com.system76.CosmicSettings.desktop";
 /// How often the media section's position moves while a track plays.
 const TICK: Duration = Duration::from_secs(1);
 
+/// The GTK surfaces' text (calmo's `window.athanor-surface`): Inter at 13 px, as the layout
+/// chooser's.
+const FONT_FAMILY: &str = "Inter";
+const BODY: f32 = 13.0;
+
 /// What reaches the surfaces from outside the toolkit's loop.
 pub enum Input {
     /// `Show` on the bus: the panel, or the page named.
@@ -435,7 +440,7 @@ fn hidden(appearance: &Appearance) -> Ui {
 
 /// The panel's colours and measures from the toolkit's tokens (VL10): the shell's neutral
 /// surface and ink, the accent's foreground on an active tile's disc and on the focus ring,
-/// the panel radius and a 12 px padding (CC4).
+/// the panel radius and a 12 px padding (CC4), in the GTK surfaces' font.
 fn theme(appearance: &Appearance) -> Theme {
     let palette = sal::palette(appearance);
     let mut theme = Theme::default();
@@ -447,6 +452,8 @@ fn theme(appearance: &Appearance) -> Theme {
     theme.border = Rgba(palette.line);
     theme.warning = Rgba(palette.warn);
     theme.focus = Rgba(palette.acc_fg);
+    theme.font_family = Some(FONT_FAMILY.into());
+    theme.font_size = BODY;
     theme.margin = 0.0;
     theme.gap = sal::space::M;
     theme.island = Rgba(palette.surf);
@@ -517,5 +524,7 @@ mod tests {
         assert_eq!(theme.island_padding, 12.0);
         assert_eq!(theme.background.0[3], 0, "transparent around the panel");
         assert_eq!(theme.focus, theme.accent, "purple on the focus ring");
+        assert_eq!(theme.font_family.as_deref(), Some("Inter"), "the GTK surfaces' font");
+        assert_eq!(theme.font_size, 13.0);
     }
 }
