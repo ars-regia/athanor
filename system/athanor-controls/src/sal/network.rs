@@ -347,6 +347,7 @@ impl Page {
         look.note(ui, wired);
         let wifi = switch_row(ui, list, &tr("Wi-Fi"), false);
         let scroll = ui.scroll(list, MAX_LIST_HEIGHT);
+        ui.set_natural_height(scroll, true);
         let networks = column(ui, scroll);
         let vpns = column(ui, list);
         let airplane = self
@@ -779,7 +780,7 @@ mod tests {
             ],
             vec![vpn("Office VPN", None)],
         );
-        let (page, _received, ui) = page(state);
+        let (page, _received, mut ui) = page(state);
         let ids = ids(&page);
         let names: Vec<_> = ids
             .rows
@@ -802,6 +803,8 @@ mod tests {
         assert!(ui.is_visible(ids.wifi) && ui.is_active(ids.wifi));
         assert!(ui.is_visible(ids.wired) && ui.is_visible(ids.list));
         assert_eq!(ui.widget(ids.wired).text_style(), &Look::plain().caption);
+        ui.layout();
+        assert!(ui.widget(ids.scroll).rect.h < MAX_LIST_HEIGHT, "as tall as its rows");
         assert!(!ui.is_visible(ids.password));
         assert!(matches!(&ui.widget(ids.vpn_rows[0].0).kind, Kind::Switch { label, .. } if label == "Office VPN"));
     }
