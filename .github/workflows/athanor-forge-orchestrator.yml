@@ -92,6 +92,8 @@ jobs:
       has_changes: ${{ steps.brain.outputs.has_changes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
@@ -158,6 +160,8 @@ jobs:
       kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Resolve the kernel artifacts and the cycle (system/kernel-artifacts.sh)
         id: artifacts
@@ -269,6 +273,8 @@ jobs:
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Require ready (system/kernel-artifacts.sh)
         run: bash system/kernel-artifacts.sh require-ready

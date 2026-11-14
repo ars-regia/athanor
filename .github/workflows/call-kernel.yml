@@ -51,6 +51,8 @@ jobs:
       registry: ${{ steps.artifacts.outputs.registry }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Registry (system/kernel-artifacts.sh)
         run: echo "IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth" >> "$GITHUB_ENV"
@@ -171,6 +173,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Build the kernel builder image
         # Rootless podman on the WSL runner has no systemd session: crun cannot create
@@ -226,6 +230,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         if: ${{ needs.inputs.outputs.reuse != 'true' }}
