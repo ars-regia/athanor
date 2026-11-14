@@ -56,8 +56,8 @@ use smithay_client_toolkit::{
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
-            cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
+            cursor_shape::CursorShapeManager, AxisScroll, PointerEvent, PointerEventKind,
+            PointerHandler, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -2900,12 +2900,15 @@ impl PointerHandler for App {
                             .pointer_release(at.0, at.1, PointerButton::Primary);
                         self.changed(id, event);
                     }
-                    // wl_pointer's axis values are in surface coordinates: logical pixels.
-                    PointerEventKind::Axis { vertical, .. } => {
-                        let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+                    PointerEventKind::Axis {
+                        horizontal,
+                        vertical,
+                        ..
+                    } => {
+                        let (changed, event) = axis(&mut surface.ui, at, horizontal, vertical);
                         self.hide_tooltip();
-                        if moved {
-                            self.changed(id, None);
+                        if changed {
+                            self.changed(id, event);
                         }
                     }
                     _ => {}
@@ -2928,6 +2931,30 @@ impl PointerHandler for App {
             }
         }
     }
+}
+
+/// The wheel or the touchpad turned at `at` on `ui`: the innermost scroll or text area under
+/// the pointer takes the vertical axis, whether or not it moves, as GTK's scrolled window does,
+/// and the widget under it gets what no scroll took, each axis on its own, as whole steps
+/// ([`Ui::pointer_wheel`]). Whether the widgets changed, and the event.
+fn axis(
+    ui: &mut Ui,
+    at: (f32, f32),
+    horizontal: AxisScroll,
+    vertical: AxisScroll,
+) -> (bool, Option<Event>) {
+    // wl_pointer's axis values are in surface coordinates: logical pixels.
+    let taken = ui.scroll_under(at.0, at.1).is_some();
+    let moved = ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+    let steps = crate::widget::wheel::steps;
+    let dx = steps(horizontal.value120, horizontal.discrete);
+    let dy = if taken {
+        0
+    } else {
+        steps(vertical.value120, vertical.discrete)
+    };
+    let event = ui.pointer_wheel(at.0, at.1, dx, dy);
+    (moved || event.is_some(), event)
 }
 
 impl ShmHandler for App {
@@ -2981,6 +3008,84 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use wayland_client::protocol::wl_registry;
+
+    #[test]
+    fn a_turn_no_scroll_takes_reaches_the_widget_as_whole_steps_and_each_axis_apart() {
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        for n in 0..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        let item = ui.add(Ui::ROOT, Kind::Button("Item".into()));
+        ui.layout();
+        let r = ui.widget(item).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        let turn = |value120, absolute| AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        };
+        let none = AxisScroll::default();
+        // A high resolution wheel sends a quarter of a notch per event.
+        for _ in 0..3 {
+            assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (false, None));
+        }
+        let step = Event::Wheel { widget: item, dx: 0, dy: 1 };
+        assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (true, Some(step)));
+        // The deprecated discrete count, from an older compositor.
+        let old = AxisScroll {
+            discrete: -1,
+            ..turn(0, -15.0)
+        };
+        let up = Event::Wheel { widget: item, dx: 0, dy: -1 };
+        assert_eq!(axis(&mut ui, at, none, old), (true, Some(up)));
+        // Over the scroll, the scroll takes the vertical axis, and the horizontal one is kept.
+        let s = ui.widget(scroll).rect;
+        let over = (s.x + 1.0, s.y + 1.0);
+        let (moved, event) = axis(&mut ui, over, turn(120, 15.0), turn(120, 15.0));
+        assert!(moved, "the scroll follows");
+        assert!(
+            matches!(event, Some(Event::Wheel { dx: 1, dy: 0, .. })),
+            "the vertical turn the scroll took reaches no widget: {event:?}"
+        );
+    }
+
+    /// A turn of `value120` 120ths of a notch, `absolute` logical pixels.
+    fn turn(value120: i32, absolute: f64) -> AxisScroll {
+        AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        }
+    }
+
+    #[test]
+    fn a_scroll_at_its_end_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        // At offset 0, a turn up over a button inside moves nothing and reaches no widget.
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let first = ui.add(scroll, Kind::Button("Line 0".into()));
+        for n in 1..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        ui.layout();
+        let r = ui.widget(first).rect;
+        assert_eq!(axis(&mut ui, (r.x + 1.0, r.y + 1.0), none, turn(-120, -15.0)), (false, None));
+    }
+
+    #[test]
+    fn a_scroll_whose_content_fits_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 400.0);
+        let only = ui.add(scroll, Kind::Button("Only".into()));
+        ui.layout();
+        let r = ui.widget(only).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        assert_eq!(axis(&mut ui, at, none, turn(120, 15.0)), (false, None));
+        assert_eq!(axis(&mut ui, at, none, turn(-120, -15.0)), (false, None));
+    }
 
     #[test]
     fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
