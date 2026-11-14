@@ -1356,6 +1356,41 @@ def check_attestation_absent():
     return r
 
 
+def stale_lock_problems(locks, manifests):
+    """A Cargo.lock beside a Cargo.toml with no [workspace] table of its own is never read: cargo
+    takes the lock of the workspace root, and a crate the root excludes cannot inherit from it.
+    `locks` are paths relative to the root; `manifests` maps a lock's Cargo.toml to its text, or
+    to None when there is none, as beside a spec's source archive. A vendored crate keeps the
+    lock it was published with."""
+    out = []
+    for lock in sorted(locks):
+        if "/vendor/" in f"/{lock}":
+            continue
+        manifest = manifests.get(str(Path(lock).with_name("Cargo.toml")))
+        if manifest is not None and "workspace" not in tomllib.loads(manifest):
+            out.append(f"{lock}: no workspace root beside it, so cargo never reads it and its "
+                       f"pins only raise advisories; delete it")
+    return out
+
+
+@check("cargo-locks", "Every Cargo.lock belongs to a workspace root, so its pins are the ones built")
+def check_cargo_locks():
+    r = Result()
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    locks = [p for p in listed.stdout.split("\0") if p]
+    manifests = {}
+    for lock in locks:
+        manifest = Path(lock).with_name("Cargo.toml")
+        manifests[str(manifest)] = read(ROOT / manifest) if (ROOT / manifest).is_file() else None
+    for problem in stale_lock_problems(locks, manifests):
+        r.fail(problem)
+    return r
+
+
 @check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
 def check_paths():
     r = Result()
