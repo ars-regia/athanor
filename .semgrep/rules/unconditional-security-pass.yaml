@@ -1,0 +1,46 @@
+# AGENTS.md, "No fake security": a function whose name says it verifies, validates, authorises
+# or trusts (a whole segment of its name: `handle_signal` is not `sign`), and whose whole body
+# answers yes. A placeholder `Ok(true)` in a security path is a
+# defect. No verify.py check reads function bodies. Test code may stub such a function, so
+# tests are left out.
+rules:
+  - id: unconditional-security-pass
+    languages: [rust]
+    severity: ERROR
+    message: >-
+      $F answers yes unconditionally (AGENTS.md, "No fake security"): verify for real, or remove
+      the function and say what is missing.
+    paths:
+      exclude:
+        - tests/
+        - fuzz/
+    patterns:
+      # Any visibility. A body that is only `true`, `Ok(true)` or `Ok(())`: semgrep matches a
+      # `return x;` pattern on a tail expression `x` as well.
+      - pattern-either:
+          - pattern: 'fn $F(...) -> $R { return true; }'
+          - pattern: 'fn $F(...) -> $R { return Ok(true); }'
+          - pattern: 'fn $F(...) -> $R { return Ok(()); }'
+      - pattern-not-inside: |
+          mod tests { ... }
+      - metavariable-regex:
+          metavariable: $F
+          regex: '.*?(?:^|(?<=_)|(?<=[a-z0-9])(?=[A-Z]))(?:(?i:verif|auth|attest|trust|permit|seal|passw|token|cred)[a-z]*|(?i:valid)(?:ate|ates|ated|ating|ation|ator|ity)?|(?i:sign)(?:s|ed|er|ers|ing|ature|atures)?|(?i:allow)(?:s|ed|ing|list)?|(?i:polkit))(?=_|$|[A-Z0-9])'
+
+  - id: unconditional-security-pass-python
+    languages: [python]
+    severity: ERROR
+    message: >-
+      $F answers yes unconditionally (AGENTS.md, "No fake security"): verify for real, or remove
+      the function and say what is missing.
+    paths:
+      exclude:
+        - tests/
+        - 'test_*.py'
+    patterns:
+      - pattern: |
+          def $F(...):
+              return True
+      - metavariable-regex:
+          metavariable: $F
+          regex: '.*?(?:^|(?<=_)|(?<=[a-z0-9])(?=[A-Z]))(?:(?i:verif|auth|attest|trust|permit|seal|passw|token|cred)[a-z]*|(?i:valid)(?:ate|ates|ated|ating|ation|ator|ity)?|(?i:sign)(?:s|ed|er|ers|ing|ature|atures)?|(?i:allow)(?:s|ed|ing|list)?|(?i:polkit))(?=_|$|[A-Z0-9])'

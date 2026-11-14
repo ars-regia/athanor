@@ -553,7 +553,10 @@ the mutants that the tests of `athanor-sal` and the platform crates under `syste
 catch, and fails only when the run itself fails. cargo-machete fails a pull request that declares a dependency no source uses.
 `just check` also runs zizmor offline over the workflows and local actions, for
 template injection, broad token permissions, persisted checkout credentials, unpinned actions
-and dangerous triggers. (SSDF PW.7, PW.8; Scorecard SAST.)
+and dangerous triggers.
+Semgrep CE runs in the same gate on the repository's own rules of `.semgrep/`, each
+with its test, for invariants no `verify.py` check enforces, and with no registry, metrics or
+network. (SSDF PW.7, PW.8; Scorecard SAST.)
 
 ### 4.8 Acceptance, VSA and promotion
 
