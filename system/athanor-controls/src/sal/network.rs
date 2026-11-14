@@ -297,6 +297,9 @@ pub struct Page {
     /// Whether the page is on screen: built, and not closed since.
     shown: bool,
     asking: Option<Asked>,
+    /// What the prompt's field holds, put back when the page is built again in a new [`Ui`],
+    /// as GTK's entry kept its text while the page updated in place. Overwritten when dropped.
+    typed: Zeroizing<String>,
     close: bool,
 }
 
@@ -321,6 +324,7 @@ impl Page {
             ids: None,
             shown: false,
             asking: None,
+            typed: Zeroizing::default(),
             close: false,
         }
     }
@@ -344,8 +348,8 @@ impl Page {
 
     /// Adds the page's widgets as a column under `parent`, showing the model's state, and
     /// returns the column, its rows with `look`'s icons. A page built again, in a new [`Ui`],
-    /// leaves the old one's widgets; a password prompt it was showing stays, with its field
-    /// empty.
+    /// leaves the old one's widgets; a password prompt it was showing stays, with what was
+    /// typed in its field.
     pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, look: &mut Look) -> WidgetId {
         let page = column(ui, parent);
         let list = column(ui, page);
@@ -399,6 +403,9 @@ impl Page {
         );
         look.note(ui, retry);
         let field = ui.password(password, &tr("Password"));
+        if self.asking.is_some() {
+            ui.set_field_text(field, &self.typed);
+        }
         let buttons = ui.add(password, Kind::Row);
         let cancel = ui.add(buttons, Kind::Button(tr("Cancel")));
         let connect = ui.add(buttons, Kind::Button(tr("Connect")));
@@ -510,7 +517,11 @@ impl Page {
             }
             Hit::Vpn(vpn, id) => self.service.switch_vpn(&vpn, ui.is_active(id)),
             Hit::Network(network, device) => self.pressed(ui, &network, &device),
-            Hit::Field => self.show_prompt(ui),
+            Hit::Field => {
+                let typed = self.ids.as_ref().and_then(|ids| ui.password_text(ids.field));
+                self.typed = Zeroizing::new(typed.unwrap_or_default().to_owned());
+                self.show_prompt(ui);
+            }
             Hit::Connect => self.submit(ui),
             Hit::Cancel => {
                 self.abandon(ui);
@@ -592,7 +603,7 @@ impl Page {
         // The one owned copy, which moves into the command or the reply and is overwritten
         // wherever it drops.
         let password = ui.password_text(field).map(|p| Zeroizing::new(p.to_owned()));
-        ui.set_field_text(field, "");
+        self.clear_field(ui);
         match asked.ask {
             Ask::Join { network } => self.service.send(NetworkCommand::Join { network, password }),
             Ask::Secrets => self.service.answer(password),
@@ -611,7 +622,8 @@ impl Page {
         self.show_prompt(ui);
     }
 
-    fn clear_field(&self, ui: &mut Ui) {
+    fn clear_field(&mut self, ui: &mut Ui) {
+        self.typed = Zeroizing::default();
         if let Some(ids) = &self.ids {
             ui.set_field_text(ids.field, "");
         }
@@ -999,6 +1011,42 @@ mod tests {
             Err(oneshot::error::TryRecvError::Closed)
         ));
         assert_eq!(ui.password_text(ids(&page).field), Some("correct"), "the join's prompt stays");
+    }
+
+    #[test]
+    fn a_rebuild_while_the_prompt_is_open_keeps_what_was_typed() {
+        let (mut page, mut received, mut ui) = page(state(
+            vec![network("Home Network", Security::Personal { sae: false })],
+            vec![],
+        ));
+        let row = ids(&page).rows[0].0;
+        click(&mut page, &mut ui, row);
+        type_password(&mut page, &mut ui, "correct horse");
+        // A network came: the surface builds the page again in a new Ui.
+        page.service.state.replace(Some(state(
+            vec![
+                network("Home Network", Security::Personal { sae: false }),
+                network("Lab", Security::Open),
+            ],
+            vec![],
+        )));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+        let mut ui = Ui::new("t", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+        let field = ids(&page).field;
+        assert!(ui.is_visible(ids(&page).password), "the prompt stays");
+        assert_eq!(ui.password_text(field), Some("correct horse"));
+        let connect = ids(&page).connect;
+        click(&mut page, &mut ui, connect);
+        match received.try_recv() {
+            Ok(NetworkCommand::Join { password, .. }) => {
+                assert_eq!(password.as_ref().map(|p| p.as_str()), Some("correct horse"));
+            }
+            other => unreachable!("a join, not {other:?}"),
+        }
+        // Sent: the next prompt starts empty.
+        assert!(page.typed.is_empty());
     }
 
     #[test]
