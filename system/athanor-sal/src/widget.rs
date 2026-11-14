@@ -1861,14 +1861,20 @@ impl Ui {
         })
     }
 
-    /// Whether the point is on the root outside every shown child of it, outside a popup.
+    /// Whether the point is on the root outside every shown child of it, outside a popup. An
+    /// island covers its fill only, so its transparent margin is outside it, as GTK's pick
+    /// passes over a widget's margin; an island with no child shown covers nothing.
     fn outside_children(&self, x: f32, y: f32) -> bool {
+        let covers = |c: WidgetId| match self.widgets[c].kind {
+            Kind::Island { .. } => self.island_fill(c).is_some_and(|r| r.contains(x, y)),
+            _ => self.widgets[c].rect.contains(x, y),
+        };
         !self.popup
             && self.widgets[Self::ROOT]
                 .children
                 .iter()
                 .filter(|&&c| self.is_visible(c))
-                .all(|&c| !self.widgets[c].rect.contains(x, y))
+                .all(|&c| !covers(c))
     }
 
     /// The window's size in logical pixels, after [`Ui::layout`].
@@ -4492,6 +4498,46 @@ mod tests {
         let r = ui.widget(button).rect;
         assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
         // A popup raises none: popup.rs, where the driver's path marks it.
+    }
+
+    /// The control center's panel is an island on the root, at the end of the line: a press on
+    /// the island's transparent margin is outside it, as GTK's pick passes over a margin, and one
+    /// on its fill is not, in either direction. A hidden child of the root covers nothing.
+    #[test]
+    fn a_press_on_an_islands_margin_or_where_a_hidden_child_was_is_outside() {
+        let press = |ui: &mut Ui, (x, y): (f32, f32)| {
+            let event = ui.pointer_press(x, y, PointerButton::Primary);
+            ui.pointer_release(x, y, PointerButton::Primary);
+            event
+        };
+        for rtl in [false, true] {
+            let mut ui = Ui::new("t", Theme::default(), rtl);
+            ui.min_width = 400.0;
+            ui.min_height = 300.0;
+            let island = ui.island(Ui::ROOT, true, [8.0; 4]);
+            assert!(ui.set_align(island, [crate::Align::End, crate::Align::Start]).is_some());
+            ui.add(island, Kind::Label("Wi-Fi".into()));
+            let old = ui.add(Ui::ROOT, Kind::Group("Old".into()));
+            ui.add(old, Kind::Label("Gone".into()));
+            ui.layout();
+            let (outer, fill) = (ui.widget(island).rect, ui.island_fill(island));
+            let Some(fill) = fill else {
+                unreachable!("an island with a label shown fills");
+            };
+            assert_eq!(fill.x > 200.0, !rtl, "the end of the line, rtl {rtl}");
+            let margin = (fill.x - 4.0, fill.y + 1.0);
+            assert!(outer.contains(margin.0, margin.1) && !fill.contains(margin.0, margin.1));
+            let on_fill = (fill.x + 1.0, fill.y + 1.0);
+            assert_eq!(press(&mut ui, on_fill), None, "rtl {rtl}");
+            assert_eq!(press(&mut ui, margin), Some(Event::PressedOutside), "rtl {rtl}");
+            let o = ui.widget(old).rect;
+            let was = (o.x + 1.0, o.y + 1.0);
+            assert!(!fill.contains(was.0, was.1));
+            assert_eq!(press(&mut ui, was), None, "on a shown group, rtl {rtl}");
+            ui.set_visible(old, false);
+            assert_eq!(ui.widget(old).rect, o, "the hidden group keeps its rectangle");
+            assert_eq!(press(&mut ui, was), Some(Event::PressedOutside), "rtl {rtl}");
+        }
     }
 
     #[test]
