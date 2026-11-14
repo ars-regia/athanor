@@ -72,7 +72,12 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             }
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+        Kind::Column
+        | Kind::Row
+        | Kind::TitleBar
+        | Kind::Island { .. }
+        | Kind::Inline { .. }
+        | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
         Kind::Group(name) => {
@@ -310,7 +315,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
-    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
     if shown_label(ui, id).is_some() {
         children.push(row_label_id(id));

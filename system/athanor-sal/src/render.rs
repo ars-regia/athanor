@@ -362,7 +362,13 @@ pub fn paint<C: Canvas>(
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
-            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
+            Kind::Column
+            | Kind::Row
+            | Kind::Inline { .. }
+            | Kind::CenterBox
+            | Kind::Group(_)
+            | Kind::Menu
+            | Kind::Scroll { .. } => {}
             Kind::Island { .. } => {
                 if let Some(fill) = island {
                     ctx.set_paint(color(t.island));
@@ -1468,6 +1474,27 @@ mod tests {
             assert_ne!(at(edge, view.bottom() - 8.0), t.border.0.to_vec(), "rtl {rtl}");
         }
         Ok(())
+    }
+
+    #[test]
+    fn the_fourth_child_of_a_centre_box_is_neither_read_nor_drawn() {
+        let mut ui = crate::Ui::new("Strip", crate::Theme::default(), false);
+        let center = ui.add(crate::Ui::ROOT, Kind::CenterBox);
+        for text in ["Start", "Middle", "End", "Fourth"] {
+            ui.add(center, Kind::Button(text.into()));
+        }
+        ui.layout();
+        let children = ui.widget(center).children.clone();
+        let (three, fourth) = (&children[..3], children[3]);
+        let tree = crate::a11y::tree_update(&ui, 1.0);
+        let node = |id| tree.nodes.iter().find(|(n, _)| *n == crate::a11y::node_id(id));
+        let read = node(center).map(|(_, n)| n.children().to_vec());
+        let three_read: Vec<_> = three.iter().map(|&c| crate::a11y::node_id(c)).collect();
+        assert_eq!(read, Some(three_read), "the centre box reads its first three children");
+        assert!(node(fourth).is_none(), "no node of its own");
+        let drawn: Vec<_> = paint_order(&ui).into_iter().map(|(id, _)| id).collect();
+        assert!(three.iter().all(|c| drawn.contains(c)));
+        assert!(!drawn.contains(&fourth), "not drawn");
     }
 
     /// The pixel of `p` at logical `(x, y)`, drawn at scale 1.

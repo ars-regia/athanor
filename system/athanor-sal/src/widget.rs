@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 pub(crate) mod labelled;
 mod rows;
+mod strip;
 pub(crate) mod wheel;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
@@ -431,6 +432,19 @@ pub enum Kind {
         /// focus, as the GTK dock's inset shadow.
         indicator: Option<crate::driver::Side>,
     },
+    /// Its children side by side in reading order, each at its own width and all at its
+    /// height, as a GTK box that is not homogeneous: a bar's group of buttons. `padding` is
+    /// kept free left and right, then above and below. Add it with [`Ui::inline`].
+    #[non_exhaustive]
+    Inline {
+        /// The room kept free inside its edges, horizontal then vertical, on both sides.
+        padding: [f32; 2],
+    },
+    /// Three children along a line, as GTK's `CenterBox`: the first at the start edge, the
+    /// second centred on the whole line, moved aside only when its neighbours need the room,
+    /// and the third at the end edge, all at its height. In a column it fills the line. A
+    /// child that is not shown keeps its place empty, and a child past the third is never shown.
+    CenterBox,
     /// A flat button that shows an image beside a text, as a GTK button holding a box of an
     /// image and a label: named by its label for assistive technologies, which read the text
     /// it shows as a label inside it. Activating it raises [`Event::Clicked`]. Its content
@@ -1847,12 +1861,24 @@ impl Ui {
     pub fn is_visible(&self, id: WidgetId) -> bool {
         let mut at = Some(id);
         while let Some(w) = at {
-            if !self.widgets[w].visible {
+            if !self.shown(w) {
                 return false;
             }
             at = self.widgets[w].parent;
         }
         true
+    }
+
+    /// Whether `id` is shown in its parent: visible, and not past the third child of a centre
+    /// box, which has no place for it.
+    pub(crate) fn shown(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        widget.visible
+            && widget.parent.is_none_or(|p| {
+                let parent = &self.widgets[p];
+                !matches!(parent.kind, Kind::CenterBox)
+                    || parent.children.iter().take(3).any(|&c| c == id)
+            })
     }
 
     /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
@@ -1935,9 +1961,8 @@ impl Ui {
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
-        let widgets = &self.widgets;
-        let shown = widgets[id].children.iter();
-        shown.copied().filter(|&c| widgets[c].visible).collect()
+        let children = self.widgets[id].children.iter();
+        children.copied().filter(|&c| self.shown(c)).collect()
     }
 
     pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
@@ -2031,6 +2056,8 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::CenterBox => strip::measure_center(&sizes),
             Kind::LabelledButton {
                 image, size: side, text, ..
             } => {
@@ -2143,6 +2170,8 @@ impl Ui {
         let outer = self.widgets[id].rect;
         let children = self.visible_children(id);
         match self.widgets[id].kind {
+            Kind::Inline { padding } => self.place_inline(id, x, y, padding),
+            Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
                 let n = children.len().max(1) as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
@@ -2257,6 +2286,7 @@ impl Ui {
                         && (matches!(
                         self.widgets[c].kind,
                         Kind::Row
+                            | Kind::CenterBox
                             | Kind::Group(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
