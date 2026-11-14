@@ -122,8 +122,9 @@ check base="HEAD":
     just check-rust
     just check-deny
 
-# The static half of the gate: workflow lint, Justfile syntax, every verify.py check, the kernel
-# profile, the Calmo palette and the suites of forge/test/iso (about 2 minutes on a runner).
+# The static half of the gate: workflow lint, Justfile syntax, unused dependencies (cargo-machete),
+# every verify.py check, the kernel profile, the Calmo palette and the suites of forge/test/iso
+# (about 2 minutes on a runner).
 [group('QA & Security')]
 check-static base="HEAD":
     #!/usr/bin/env bash
