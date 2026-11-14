@@ -21,7 +21,7 @@ wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], opt
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
 wayland-client = "0.31"
 # Overwrites the text of a password field when it changes or goes (password.rs).
-zeroize = { workspace = true }
+zeroize = "1.8.1"
 
 [features]
 # ATHANOR_SAL_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
