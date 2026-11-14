@@ -2172,7 +2172,8 @@ impl Ui {
                             | Kind::Picture { .. }
                     ) || self.widgets[c].wrap.is_some())
                     {
-                        self.widgets[c].rect.w = inner;
+                        // Never below its least width (Ui::set_min_width), as GTK's width-request.
+                        self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
                     }
                     // An island takes the rest of its column's height down to the widgets at
                     // the bottom, unless aligned along it; a picture, which takes no alignment
@@ -5172,6 +5173,39 @@ mod tests {
             ui.widgets[group].rect.w = 200.0;
             ui.place(group, r.x, r.y);
             assert_eq!(ui.widget(label).rect.w, 400.0, "{rtl}: its least width");
+        }
+    }
+
+    /// A widget that fills a column narrower than its least width (Ui::set_min_width), as a row
+    /// cell can make it, keeps that width too, and overflows at the end edge only.
+    #[test]
+    fn a_filling_widget_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            let Some(slider) = ui.slider(group, "Volume", 0.0, 100.0, 1.0, 50.0) else {
+                panic!("{rtl}: a slider");
+            };
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Fill, crate::Align::Fill]), Some(false));
+            for id in [label, slider] {
+                assert!(ui.set_min_width(id, 400.0));
+            }
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            for id in [label, slider] {
+                let w = ui.widget(id).rect;
+                assert_eq!(w.w, 400.0, "{rtl}: {id:?} keeps its least width");
+                if rtl {
+                    assert_eq!(w.x + w.w, c.x + c.w, "{rtl}: from the right edge");
+                } else {
+                    assert_eq!(w.x, c.x, "{rtl}: from the left edge");
+                }
+            }
         }
     }
 }
