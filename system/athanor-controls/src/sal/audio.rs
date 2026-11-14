@@ -146,7 +146,10 @@ impl Channel {
                 } else {
                     label.clone()
                 };
-                (name.clone(), ui.add(list, Kind::Button(text)))
+                // Across the page, its text centred, as GTK's button with a label.
+                let row = ui.add(list, Kind::Button(text));
+                ui.set_fill(row, true);
+                (name.clone(), row)
             })
             .collect();
         Channel {
@@ -355,7 +358,12 @@ impl Page {
         ui.set_text_style(track, title());
         let artist = ui.add(column, Kind::Label(String::new()));
         look.note(ui, artist);
-        let controls = ui.add(column, Kind::Row);
+        // The buttons centred under the track, as the GTK box at `halign` Center: the middle of
+        // a centre box, whose start is an empty place.
+        let centre = ui.add(column, Kind::CenterBox);
+        let start = ui.add(centre, Kind::Label(String::new()));
+        ui.set_visible(start, false);
+        let controls = ui.inline(centre, [0.0; 2]);
         let names = [tr("Previous track"), tr("Pause"), tr("Next track")];
         let (buttons, faces) = match icons {
             Some(icons) => {
@@ -534,6 +542,28 @@ mod tests {
             Kind::Label(text) | Kind::Button(text) => text,
             _ => "",
         }
+    }
+
+    #[test]
+    fn the_device_rows_fill_the_page_and_the_media_controls_are_centred() {
+        let (mut page, _) = page();
+        publish(&page, speakers_and_headset());
+        let mut ui = Ui::new("Sound", Theme::default(), false);
+        ui.min_width = 400.0;
+        let column = page.build(&mut ui, Ui::ROOT, None, &Look::plain());
+        let Some(ids) = &page.ids else {
+            unreachable!("built");
+        };
+        ui.set_visible(ids.media.column, true);
+        ui.layout();
+        let width = ui.widget(column).rect.w;
+        for (_, row) in &ids.output.devices {
+            assert_eq!(ui.widget(*row).rect.w, width, "a device row across the page");
+        }
+        let (first, last) = (ui.widget(ids.media.previous).rect, ui.widget(ids.media.next).rect);
+        let media = ui.widget(ids.media.column).rect;
+        let middle = (first.x + last.x + last.w) / 2.0;
+        assert!((middle - (media.x + media.w / 2.0)).abs() < 0.5, "the controls centred");
     }
 
     #[test]
