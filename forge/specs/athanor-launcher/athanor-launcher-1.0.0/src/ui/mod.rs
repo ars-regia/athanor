@@ -293,6 +293,13 @@ fn query_panel(
 }
 
 /// What the launcher reads of a key of the toolkit's.
+/// Sets `query` as the field's text and returns what the field kept, which is what is
+/// searched: the field drops what a typed query cannot hold, so the search agrees with it.
+fn put_query(ui: &mut Ui, field: WidgetId, query: &str) -> String {
+    ui.set_field_text(field, query);
+    ui.field_text(field).unwrap_or_default()
+}
+
 fn key(key: &SalKey) -> Key {
     match key {
         SalKey::Escape => Key::Escape,
@@ -862,9 +869,9 @@ impl Application for Launcher {
                 self.show(shell);
                 if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
                     if let Some(ui) = shell.ui_mut(surface) {
-                        ui.set_field_text(panel.field, &query);
+                        let text = put_query(ui, panel.field, &query);
+                        self.engine.query(&text);
                     }
-                    self.engine.query(&query);
                 }
             }
         }
@@ -922,6 +929,17 @@ mod tests {
 
         assert!(waiting.toggle(true), "with an output it runs now");
         assert!(!waiting.served(true), "and nothing waits");
+    }
+
+    #[test]
+    fn the_start_query_searched_is_the_one_the_field_kept() {
+        let look = look::look(&Appearance::default());
+        let (mut ui, panel) = panel(&look, false, (1280.0, 800.0), 500.0);
+        let searched = put_query(&mut ui, panel.field, "fire\nfox");
+        assert_eq!(ui.field_text(panel.field).as_deref(), Some(searched.as_str()));
+        assert!(!searched.contains('\n'), "{searched:?}");
+        let long = "a".repeat(Ui::FIELD_MAX_CHARS + 5);
+        assert_eq!(put_query(&mut ui, panel.field, &long).len(), Ui::FIELD_MAX_CHARS);
     }
 
     /// The query of a panel laid out at a first size, after `edit`, and of the panel laid out
