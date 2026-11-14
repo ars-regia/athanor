@@ -1792,6 +1792,14 @@ fn printable_preedit(
     (crate::text::printable(text, false), cursor)
 }
 
+/// Overwrites the text of a key that no field took: it may be a character of a password.
+/// `Ui::key` does the same for the keys it takes.
+fn forget(key: &mut Key) {
+    if let Key::Text(text) = key {
+        zeroize::Zeroize::zeroize(text);
+    }
+}
+
 /// The user data of the text-input-v3 objects.
 struct TextInput;
 
@@ -2428,7 +2436,7 @@ impl App {
     }
 
     fn key(&mut self, event: KeyEvent) {
-        let key = match event.keysym {
+        let mut key = match event.keysym {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
@@ -2454,7 +2462,8 @@ impl App {
             Keysym::Menu => Key::Menu,
             _ => match event.utf8 {
                 Some(text) if !text.chars().any(char::is_control) => Key::Text(text),
-                _ => return,
+                Some(text) => return forget(&mut Key::Text(text)),
+                None => return,
             },
         };
         self.hide_tooltip();
@@ -2474,17 +2483,17 @@ impl App {
             _ => self.key_target(),
         };
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
-            return;
+            return forget(&mut key);
         };
         let modifiers = KeyModifiers::from(self.modifiers);
         if self.shell.get_mut(id).is_some()
             && self.application.key(&mut self.shell, id, &key, modifiers)
         {
             self.changed(id, None);
-            return;
+            return forget(&mut key);
         }
         let Some(surface) = self.shell.get_mut(id) else {
-            return;
+            return forget(&mut key);
         };
         let before = surface.ui.focus();
         let event = surface.ui.key(key);
@@ -3658,6 +3667,16 @@ mod tests {
         assert_eq!(hint(&ui), Some((name, ContentHint::None)));
         ui.set_focus(Some(notes));
         assert_eq!(hint(&ui), Some((notes, ContentHint::Multiline)));
+    }
+
+    #[test]
+    fn a_key_no_field_takes_is_overwritten() {
+        let mut typed = Key::Text("h".into());
+        forget(&mut typed);
+        assert_eq!(typed, Key::Text(String::new()));
+        let mut tab = Key::Tab;
+        forget(&mut tab);
+        assert_eq!(tab, Key::Tab);
     }
 
     #[test]
