@@ -1,5 +1,5 @@
-# Configuration of zizmor, the workflow linter of `just check` (scripts/ci/zizmor.sh,
-# doc_pipeline.md PL28). An exemption of one line stays beside it as `# zizmor: ignore[...]`,
+# Configuration of zizmor, the workflow linter of `just check` (the check-static recipe of the
+# Justfile, doc_pipeline.md PL28). An exemption of one line stays beside it as `# zizmor: ignore[...]`,
 # with its reason; this file holds only what applies to every workflow.
 rules:
   # The `uses: $/...` form it asks for is rejected by actionlint (1.7.9 in CI, 1.7.12 checked),

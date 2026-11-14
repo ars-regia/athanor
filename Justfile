@@ -131,6 +131,9 @@ check-static base="HEAD":
     command -v actionlint >/dev/null || { echo "check: actionlint is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
     command -v shellcheck >/dev/null || { echo "check: shellcheck is not on PATH; actionlint would skip the run: blocks" >&2; exit 1; }
     actionlint -no-color -pyflakes=
+    command -v zizmor >/dev/null || { echo "check: zizmor is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    # Offline: the online audits would call the GitHub API, and the gate must not depend on it.
+    zizmor --offline --no-progress --config .github/zizmor.yml .github/workflows .github/actions
     just check-syntax
     python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
     python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
