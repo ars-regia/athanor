@@ -2381,6 +2381,7 @@ impl Ui {
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
                     ) || self.widgets[c].wrap.is_some()
+                        || self.widgets[c].fill
                         || self.inline_fills(c))
                     {
                         // Never below its least width (Ui::set_min_width), as GTK's width-request.

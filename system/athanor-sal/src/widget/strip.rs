@@ -149,8 +149,10 @@ impl Ui {
 
     /// Makes widget `id` take a share of the width its inline has to spare, as GTK's `hexpand`:
     /// the children of an inline that fill split equally what the others leave of its width, and
-    /// an inline with a child shown that fills takes the width of its column or group. Elsewhere
-    /// it changes nothing. Whether it changed; call [`Ui::layout`] afterwards.
+    /// an inline with a child shown that fills takes the width of its column or group. In a
+    /// column or a group it takes their width, as a GTK box's child of any kind fills its box
+    /// across, unless aligned ([`Ui::set_align`]). Elsewhere it changes nothing. Whether it
+    /// changed; call [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
@@ -233,6 +235,27 @@ mod tests {
             }
             assert_eq!(s.y, i.y + 2.0);
         }
+    }
+
+    #[test]
+    fn a_widget_set_to_fill_takes_the_width_of_its_column() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        ui.min_width = 400.0;
+        let page = ui.add(Ui::ROOT, Kind::Column);
+        let list = ui.add(page, Kind::Column);
+        let wifi = ui.switch(list, "Wi-Fi", false);
+        let row = ui.add(page, Kind::Button("Speakers".into()));
+        let narrow = ui.add(page, Kind::Column);
+        ui.add(narrow, Kind::Label("Short".into()));
+        for id in [page, list, row] {
+            assert!(ui.set_fill(id, true));
+        }
+        ui.layout();
+        assert_eq!(ui.widget(page).rect.w, 400.0, "the root's width");
+        for id in [list, wifi, row] {
+            assert_eq!(ui.widget(id).rect.w, 400.0, "filled across, the switch to the end edge");
+        }
+        assert!(ui.widget(narrow).rect.w < 400.0, "a column not set to fill keeps its width");
     }
 
     #[test]
