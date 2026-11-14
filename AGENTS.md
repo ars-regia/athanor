@@ -16,9 +16,10 @@ as RPMs; the Rust crates of the shell and of the platform services form one Carg
 ## Checks
 
 `just check` is the gate every pull request passes (`Justfile`). It requires `actionlint`,
-`shellcheck`, `cargo-deny`, `semgrep`, `skopeo`, `cosign` and `registry` from `scripts/ci/install-tools.sh`;
+`shellcheck`, `cargo-deny`, `semgrep`, `skopeo`, `cosign` and `registry` from `scripts/ci/install-tools.sh`,
+semgrep only when `ATHANOR_INSTALL_SEMGREP=1 scripts/ci/install-tools.sh DIR` installs it;
 without `ksvalidator` (pykickstart) `verify.py kickstart` notes it. It runs `just check-syntax`,
-every `verify.py` check, the kernel profile, the Calmo palette, every `test_*.py` directory, the
+every `verify.py` check, Semgrep on the rules of `.semgrep/`, the kernel profile, the Calmo palette, every `test_*.py` directory, the
 Rust workspace and `just check-deny` (`deny.toml`). Before a push, run what you changed:
 
 | Check | Command |
