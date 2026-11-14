@@ -21,8 +21,8 @@ gtk = [
 # the switch: no GTK crate in its tree. GLib's main context runs in the toolkit's loop.
 toolkit = [
   "dep:athanor-sal",
+  "athanor-apps/sal",
   "dep:gio",
-  "dep:gio-unix",
   "dep:wayland-client",
   "athanor-sulphur-client/calloop",
 ]
@@ -36,7 +36,6 @@ athanor-style = { path = "../../../../system/athanor-style", default-features = 
 athanor-sal = { path = "../../../../system/athanor-sal", optional = true }
 athanor-unit = { path = "../../../../system/athanor-unit" }
 gio = { workspace = true, optional = true }
-gio-unix = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 gtk4 = { workspace = true, optional = true }
 gtk4-layer-shell = { workspace = true, optional = true }

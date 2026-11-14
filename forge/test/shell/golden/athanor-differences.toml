@@ -7,7 +7,7 @@
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: at scale 1.5 both compositors place a window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)
 #   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
-#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)
+#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)
 #
 # Decision 28 of doc_own_stack.md hides controls under the own compositor until their replacement
 # comes: one entry per case and hidden control, covering its absence and the move it causes, for
@@ -318,32 +318,32 @@ issue = 743
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
@@ -2340,3 +2340,84 @@ issue = 835
 case = "layout-float-bottom-visible-1o-1.0-port"
 cause = "decision 28 hides the dock's application library button"
 issue = 836
+
+# The layout chooser drawn with athanor-sal against the GTK chooser's goldens, by the item of
+# docs/spikes/t1-own-toolkit.md task 4 (the toolkit's look, then GTK's): closed, or recorded with
+# its reason. golden_report.py reads only the [[difference]] table above.
+
+[[gtk-difference]]
+surface = "chooser"
+item = 1
+what = "no compositor border or shadow around the window"
+state = "recorded"
+reason = "cosmic-comp draws the outline and clips the window, and athanor-sulphur draws no shadow (#737); the client draws neither, as the GTK chooser draws none of its own under cosmic-comp (maintainer decision, 2026-11-12)"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 2
+what = "a white title bar with a regular title and round grey buttons"
+state = "recorded"
+reason = "closed but for the bar's colour: TitleBarStyle::Bare gives the bold title and the bare buttons of GTK's header bar; the bar takes VL10's bar token, where the GTK chooser drew GTK's built-in header bar colour, which no Calmo token names (doc_visual_language.md VL1, VL10): maintainer decision, 2026-11-13: on the port to Sal, the Calmo palette prevails over Adwaita's header-bar colour; this applies to every Sal window. Its height is GTK's through Theme::title_bar_height: 39 px at scale 1 from the top of the window to the bar's bottom border, as the GTK goldens draw it"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 3
+what = "headings in regular weight and dark ink"
+state = "closed"
+reason = "the headings are Calmo's small size, 11.5 px, semi-bold, in ink2, as .layout-group-title"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 4
+what = "toggles with a grey fill, no border, a radius of about 6 and a height of 30"
+state = "closed"
+reason = "the toggles take button.layout-choice's surf2 fill, 1 px line border, radius 8, minimum height 34 and 14 px padding"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 5
+what = "the selected purple differs slightly"
+state = "closed"
+reason = "the accent is the appearance's, through athanor_style::sal::palette, the GTK chooser's 145, 65, 172"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 6
+what = "an off-white background"
+state = "recorded"
+reason = "the window and its toggles take VL10's surf and surf2, which the generator retuned for the toolkit only: light surf is 254, 253, 254 where the GTK sheet keeps #fdfdfe, and dark surf is 42, 27, 47, tinted purple, where it keeps #1b1e2f; the GTK shell keeps its tables until it is removed (doc_visual_language.md VL1, VL10)"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 7
+what = "the system sans"
+state = "recorded"
+reason = "closed but for the font features: Theme::font_family sets Calmo's family, Inter, ahead of the system's sans-serif. The GTK sheet also sets the features tnum and cv11 on every text, which draw a single-storey a and a spaced hyphen; VL10 keeps only tnum for the toolkit, through a numeric class, so the toolkit draws Inter's double-storey a, and the chooser shows no numbers"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 8
+what = "wider buttons and larger padding, the German window about 650 px wide"
+state = "recorded"
+reason = "closed but for 3 px: the toggles take the GTK chooser's 14 px padding and the window its 420 px default width. The German window stays 3 px narrower at scale 1, 616 px against 619, a residue of the text widths that is recorded, not traced further"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 9
+what = "no dark variant"
+state = "closed"
+reason = "the theme follows the appearance's variant, as the GTK chooser's Calmo sheet did"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 10
+what = "right to left, rows of 42 px"
+state = "closed"
+reason = "#987 made the Latin font lead the sans-serif family under Arabic and Hebrew"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 11
+what = "the window sits lower on the screen"
+state = "closed"
+reason = "#941 placed the toolkit's windows as cosmic-comp places GTK's, and a toolkit window gives its minimum size as GTK does, so cosmic-comp centres a window wider than the size it first suggests, as the German one at scale 1.5"
