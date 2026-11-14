@@ -1731,7 +1731,7 @@ def check_shipped():
     exempt_file = ROOT / "experimental" / "EXEMPT"
     exempt = set()
     if exempt_file.exists():
-        exempt = {l.strip() for l in read(exempt_file).split("\n")
+        exempt = {ln.strip() for ln in read(exempt_file).split("\n")
                   if l.strip() and not l.startswith("#")}
 
     built = crates_built_by_specs()

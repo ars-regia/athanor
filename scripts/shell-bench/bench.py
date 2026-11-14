@@ -79,7 +79,7 @@ def stage_facts(m, args):
     return {
         "cpu": m.run("grep -m1 'model name' /proc/cpuinfo").decode().split(":", 1)[1].strip(),
         "memory_kb": int(m.run("grep MemTotal /proc/meminfo").split()[1]),
-        "gpus": [l for l in m.run("lspci -nn").decode().splitlines() if re.search(r"VGA|3D", l)],
+        "gpus": [ln for ln in m.run("lspci -nn").decode().splitlines() if re.search(r"VGA|3D", ln)],
         "kernel": m.run("uname -r").decode().strip(),
         "image": status["image"]["image"],
         "digest": status["imageDigest"],

@@ -57,7 +57,7 @@ class Notice(unittest.TestCase):
     def test_the_banner_fragment_is_a_link_in_etc_to_that_file(self):
         # agetty reads /etc/issue.d (and /run/issue.d, util-linux 2.41.5, #560); the unit writes only its
         # runtime directory, so the fragment is a link in /etc, named *.issue, that points into it.
-        lines = [l for l in (SOURCES / "usr/lib/tmpfiles.d/athanor-recovery.conf").read_text().splitlines() if l and not l.startswith("#")]
+        lines = [ln for ln in (SOURCES / "usr/lib/tmpfiles.d/athanor-recovery.conf").read_text().splitlines() if ln and not ln.startswith("#")]
         self.assertEqual(lines, ["d /etc/issue.d 0755 root root -",
                                  "L /etc/issue.d/50-athanor-recovery.issue - - - - /run/athanor-recovery/recovery.issue"])
 

@@ -143,7 +143,7 @@ class CommittedLocks(unittest.TestCase):
         build = (AZOTH / "build.sh").read_text()
         self.assertIn('die() { echo "build.sh: $*" >&2; exit 1; }', build)
         for lock in ("cachyos-files.list says", "cachyos-protected.sha256 says", "differ from derived.config"):
-            line = next(l for l in build.splitlines() if lock in l and "die " in l)
+            line = next(ln for ln in build.splitlines() if lock in ln and "die " in ln)
             self.assertIn('die "refresh needed: ', line)
         bump = (AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text()
         self.assertIn("grep -q '^build.sh: refresh needed: ' prep.log", bump)

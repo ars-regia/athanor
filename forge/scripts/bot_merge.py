@@ -193,7 +193,7 @@ def check(kind, pr, sha, gh):
         raise Refused(f"head moved past the checked commit {sha}")
     if not BRANCH[kind].fullmatch(view["headRefName"]):
         raise Refused(f"branch {view['headRefName']} is not the {kind} bot's")
-    if kind == "system" and "system-bump" not in {l["name"] for l in view["labels"]}:
+    if kind == "system" and "system-bump" not in {ln["name"] for ln in view["labels"]}:
         raise Refused("has no system-bump label")
 
     repo = (
