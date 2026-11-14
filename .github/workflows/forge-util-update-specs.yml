@@ -36,11 +36,11 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # The bots App token stays in the checkout: create-pull-request pushes the branch with it.
-      - name: Checkout Repository # zizmor: ignore[artipacked]
+      # create-pull-request sets up its own credentials from its token input, so none persist here.
+      - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # fetch_sources.sh --pin expands the Source URLs with rpmspec.
       - name: Install rpmspec
