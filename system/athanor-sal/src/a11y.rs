@@ -46,6 +46,7 @@ fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
 
 /// The node of a list row's label, beside the widgets' ids: a row is neither a label nor a field
 /// and has no text runs, so it takes the id of a first one.
+#[cfg(test)]
 pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
