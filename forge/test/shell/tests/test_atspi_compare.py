@@ -112,6 +112,44 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("radio button", "Balanced")])
         self.assertEqual(failures, ["label 'Default': missing"])
 
+    def test_a_dark_variant_of_the_matrix_expects_the_dark_mode_tile_on(self):
+        # The maintainer decided on 2026-11-14 that the Dark mode tile alone follows the
+        # variant's scheme; the reference is the light one.
+        reference = [
+            node("panel", "Control center"),
+            dict(node("toggle button", "Dark mode"), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Dark mode"), depth=3),
+            dict(node("label", "Off"), depth=3),
+            dict(node("label", "Off"), depth=1),
+        ]
+
+        def read(tile, second):
+            return [
+                node("panel", "Control center"),
+                dict(node("toggle button", "Dark mode", tile), depth=1),
+                dict(node("label", second), depth=2),
+                dict(node("label", "Off"), depth=1),
+            ]
+
+        on, off = read(["pressed"], "On"), read([], "Off")
+        for variant in ("dark@1.0", "hc-dark@1.5"):
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertEqual(failures, [], variant)
+            # A dark variant whose tile says it is off fails.
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(
+                failures,
+                ["toggle button 'Dark mode': state 'pressed' missing", "label 'On': missing"],
+                variant,
+            )
+        # A light variant, or a walk outside the matrix, whose tile says it is on fails.
+        for variant in ("light@1.0", "hc-light@1.25", ""):
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(failures, [], variant)
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertIn("label 'Off': missing", failures, variant)
+
     def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
         reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
         lines, failures = compare.compare(reference, [node("button", "Close")])

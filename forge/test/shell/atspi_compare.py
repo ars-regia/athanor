@@ -17,9 +17,13 @@ transcript holds fails, and so does an exemption that names no element of the re
 --gallery compares the gallery's trees, one per page of cases.py gallery-pages, each in
 atspi-gallery-<page>[-it].json of both directories; a page with no reference or no transcript
 fails (gallery_problems).
+
+ATSPI_VARIANT is the variant of AX17's matrix the transcript was read in, as rig.sh's
+RIG_ATSPI_VARIANT (<appearance>@<scale>); in a dark one the reference reads as for_variant says.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -53,6 +57,12 @@ SAME_ROLE = [
     {"text", "entry"},
     {"list", "list box"},
 ]
+# The control center's Dark mode tile says the colour scheme the scene is seeded with, and the
+# reference is the GTK panel's in the light scheme: in a dark variant of AX17's matrix that tile,
+# and nothing else, is expected on, pressed and with "On" as its second line (maintainer decision,
+# 2026-11-14). The matrix runs in English.
+DARK_VARIANTS = {"dark", "hc-dark"}
+DARK_TILE = ("toggle button", "Dark mode")
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button, and extended the rule to check boxes on
 # 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too, and to a label at any
@@ -141,6 +151,25 @@ def spoken(nodes):
         if node["role"] == "label" and (parent, node["name"]) in switches
     }
     return [node for node in out if id(node) not in beside]
+
+
+def for_variant(reference, variant):
+    """The reference as the matrix's `variant` (<appearance>@<scale>, or empty outside the
+    matrix) reads it: in a dark variant the Dark mode tile is pressed and its "Off" says "On"
+    (DARK_VARIANTS); any other variant reads the reference as it is."""
+    if variant.split("@")[0] not in DARK_VARIANTS:
+        return reference
+    out, tile = [], None
+    for node in reference:
+        if tile is not None and node["depth"] <= tile:
+            tile = None
+        if (node["role"], node["name"]) == DARK_TILE:
+            node = dict(node, states=sorted(set(node["states"]) | {"pressed"}))
+            tile = node["depth"]
+        elif tile is not None and (node["role"], node["name"]) == ("label", "Off"):
+            node = dict(node, name="On")
+        out.append(node)
+    return out
 
 
 def gallery_switch(reference_role, role, name):
@@ -285,6 +314,7 @@ def main(argv):
         reference, transcript = (
             json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[:2]
         )
+        reference = for_variant(reference, os.environ.get("ATSPI_VARIANT", ""))
         exempt = {}
         if own:
             preset, dock, lang = (None if v == "-" else v for v in own[1:])

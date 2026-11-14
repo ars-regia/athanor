@@ -1382,7 +1382,9 @@ atspi)
                 dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-control-center-$page" -- \
                 bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --client $(printf %q "$bin") --fixtures ${session_unit[*]}"
             surface_not_closed atspi control-center "atspi-control-center-$page"
-            in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            # The variant says the scheme the Dark mode tile reports (atspi_compare.for_variant).
+            in_rig "$(rig_image)" env ATSPI_VARIANT="${RIG_ATSPI_VARIANT:-}" \
+                python3 -B /repo/forge/test/shell/atspi_compare.py \
                 "/repo/forge/test/shell/golden/atspi/$transcript" "/out/$transcript"
         done <<<"$listing"
         ;;
