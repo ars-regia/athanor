@@ -91,11 +91,15 @@ class RustAuditTest(unittest.TestCase):
         jobs = yaml.safe_load(MAINTENANCE.read_text())["jobs"]
         self.assertEqual(jobs["rust-advisories"]["uses"], "./.github/workflows/rust-security-audit.yml")
         alert = jobs["alert"]
-        self.assertEqual(set(alert["needs"]), set(jobs) - {"alert"})
-        self.assertIn("always()", alert["if"])
-        self.assertIn("github.event_name == 'schedule'", alert["if"])
+        # The hours-long mutants job has an alert job of its own, so the first one does not wait for it.
+        alert_mutants = jobs["alert-mutants"]
+        self.assertEqual(set(alert["needs"]), set(jobs) - {"alert", "alert-mutants", "mutants"})
+        self.assertEqual(set(alert_mutants["needs"]), {"mutants"})
+        for job in (alert, alert_mutants):
+            self.assertIn("always()", job["if"])
+            self.assertIn("github.event_name == 'schedule'", job["if"])
         writers = {n for n, j in jobs.items() if j.get("permissions", {}).get("issues") == "write"}
-        self.assertEqual(writers, {"alert"})
+        self.assertEqual(writers, {"alert", "alert-mutants"})
 
     def test_push_filter_matches_the_rust_audit_area(self):
         push = yaml.safe_load(AUDIT.read_text())[True]["push"]

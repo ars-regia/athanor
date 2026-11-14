@@ -2,8 +2,8 @@ name: Alert on a failed scheduled job
 description: >-
   PL51 (docs/architecture/doc_pipeline.md): opens or updates one ci-alert issue per job of the
   workflow that failed or was cancelled, and closes it once the job succeeds again. Use it in
-  the workflow's last job, on a GitHub-hosted runner, with `needs:` naming every other job,
-  `if: always()` and `permissions: issues: write`, after a checkout of the repository.
+  a last job of the workflow, on a GitHub-hosted runner, with `needs:` naming the jobs it
+  reports (every other job, or those of a long job's own alert job), `if: always()` and `permissions: issues: write`, after a checkout of the repository.
 inputs:
   needs:
     description: The workflow's needs context, as toJSON(needs).
