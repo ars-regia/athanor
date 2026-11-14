@@ -91,9 +91,10 @@ impl Ui {
         Some(Event::Edited(id))
     }
 
-    /// Replaces the image labelled button or icon button `id` shows, or takes a labelled
-    /// button's away with `None`; `false`, and nothing changes, for another kind or for `None`
-    /// on an icon button. Call [`Ui::layout`] afterwards.
+    /// Replaces the image labelled button, icon button, icon toggle, tile or image `id` shows,
+    /// or takes a labelled button's away with `None`; `false`, and nothing changes, for another
+    /// kind or for `None` on any but a labelled button, which alone shows none. Call
+    /// [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
@@ -101,7 +102,13 @@ impl Ui {
     pub fn set_image(&mut self, id: WidgetId, now: Option<Image>) -> bool {
         match (&mut self.widgets[id].kind, now) {
             (Kind::LabelledButton { image, .. }, now) => *image = now,
-            (Kind::IconButton { image, .. }, Some(now)) => *image = now,
+            (
+                Kind::IconButton { image, .. }
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
+                | Kind::Tile(crate::tile::Tile { image, .. })
+                | Kind::Image { image, .. },
+                Some(now),
+            ) => *image = now,
             _ => return false,
         }
         true
@@ -234,6 +241,31 @@ mod tests {
         assert!(ui.set_image(icon, Some(image())));
         assert!(!ui.set_image(icon, None), "an icon button keeps an image");
         assert!(!ui.set_image(Ui::ROOT, Some(image())));
+    }
+
+    /// An icon toggle, a tile and an image take a new image as an icon button does: the
+    /// control center's tiles and buttons follow their model's icon.
+    #[test]
+    fn an_icon_toggle_a_tile_and_an_image_take_a_new_image() {
+        let wide = || crate::icon::Image {
+            pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(2, 1)),
+        };
+        let shown = |kind: &Kind| match kind {
+            Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
+            | Kind::Tile(crate::tile::Tile { image, .. })
+            | Kind::Image { image, .. } => Some(image.pixmap.width()),
+            _ => None,
+        };
+        let mut ui = Ui::new("Control center", theme(), false);
+        let toggle = ui.icon_toggle(Ui::ROOT, "Mute", image(), 16.0, false);
+        let tile = ui.tile(Ui::ROOT, "Wi-Fi", "Home", image(), true);
+        let picture = ui.image(Ui::ROOT, image(), 16.0, "Battery");
+        for id in [toggle, tile, picture] {
+            assert!(!ui.set_image(id, None), "{id:?} keeps an image");
+            assert_eq!(shown(&ui.widget(id).kind), Some(1));
+            assert!(ui.set_image(id, Some(wide())));
+            assert_eq!(shown(&ui.widget(id).kind), Some(2), "{id:?}");
+        }
     }
 
     #[test]
