@@ -5,8 +5,10 @@ Release:        7%{?athanor_content}%{?dist}
 Summary:        The Athanor layout chooser
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gettext
-Requires:       gtk4 athanor-calmo athanor-bar
+# Sal links fontconfig and, for its keyboard, libxkbcommon; the appearance store is GIO's.
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel gettext
+# Calmo's font, Inter, comes with athanor-calmo.
+Requires:       athanor-calmo athanor-bar
 
 %description
 A small window with three presets (Island, Bar, Essential) and two knobs (panel

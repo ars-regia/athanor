@@ -9093,12 +9093,13 @@ fn os9_a_virtual_pointer_coming_and_going_is_no_activity() {
 }
 
 /// A capture source of output `index`, named by `local`'s own `wl_output` of it, and a session
-/// of it that has its constraints.
+/// of it with `options` that has its constraints.
 fn output_session(
     local: &mut Local,
     run: &mut Running,
     copy: &ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
     index: usize,
+    options: ext_image_copy_capture_manager_v1::Options,
 ) -> (
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
     ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
@@ -9116,12 +9117,7 @@ fn output_session(
         .expect("the output's global");
     let output: wl_output::WlOutput = local.registry.bind(name, version.min(4), &qh, ());
     let source = sources.create_source(&output, &qh, ());
-    let session = copy.create_session(
-        &source,
-        ext_image_copy_capture_manager_v1::Options::empty(),
-        &qh,
-        (),
-    );
+    let session = copy.create_session(&source, options, &qh, ());
     local.pump(run, "the session has its constraints", |client, _| {
         client.capture_size.is_some()
     });
@@ -9152,7 +9148,13 @@ fn os9_an_output_is_captured_by_a_granted_client() {
     let mut bar = Local::connect(&mut run, None);
     let shm: wl_shm::WlShm = bar.bind(1);
     let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
-    let (_source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (_source, session) = output_session(
+        &mut bar,
+        &mut run,
+        &copy,
+        1,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+    );
     let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
     assert_eq!(
         bar.client.capture_size,
@@ -9191,6 +9193,87 @@ fn os9_an_output_is_captured_by_a_granted_client() {
     run.stop();
 }
 
+/// Output `index` as `bar` captures it, through a new session with `options`, in the client's
+/// B, G, R, A.
+fn captured_output(
+    bar: &mut Local,
+    run: &mut Running,
+    copy: &ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+    index: usize,
+    options: ext_image_copy_capture_manager_v1::Options,
+) -> Vec<u8> {
+    let shm: wl_shm::WlShm = bar.bind(1);
+    let (_source, session) = output_session(bar, run, copy, index, options);
+    let (w, h) = (OUTPUTS[index].width, OUTPUTS[index].height);
+    let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
+    bar.client.captured = None;
+    let frame = session.create_frame(&bar.queue.handle(), ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, w, h);
+    frame.capture();
+    bar.pump(run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(bar.client.captured, Some(Ok(())), "the frame is ready");
+    contents(&file, usize::try_from(w * h * 4).expect("size"))
+}
+
+/// An output is captured with the pointer only when the session asks for cursors
+/// (`paint_cursors` of ext-image-copy-capture-v1, #744). With the pointer at 40,30 of output 0,
+/// a session with the option has the theme's fallback square there, 12 pixels a side at scale
+/// 1, and every other pixel as the fixture reads the output back; a session without it, and a
+/// session of output 1, where the pointer is not, have the output as the fixture reads it back.
+#[test]
+fn os9_an_output_capture_draws_the_pointer_when_asked() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    run.state.cursor = crate::cursor::Cursor::new("athanor-no-such-theme", 24);
+    let first = run.state.space.outputs().next().expect("output 0").clone();
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let pointed = area.loc + Point::from((40, 30));
+    run.state.pointer_to(pointed.to_f64(), InputTime::now());
+    let mut bar = Local::connect(&mut run, None);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
+    let read_back = |run: &mut Running, index: usize| -> Vec<u8> {
+        run.state
+            .capture(index)
+            .expect("frame of the output")
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b, a]| [b, g, r, a])
+            .collect()
+    };
+
+    let plain = read_back(&mut run, 0);
+    let without = captured_output(&mut bar, &mut run, &copy, 0, Options::empty());
+    assert!(without == plain, "no pointer without paint_cursors");
+
+    let with = captured_output(&mut bar, &mut run, &copy, 0, Options::PaintCursors);
+    let width = usize::try_from(OUTPUTS[0].width).expect("width");
+    let square = |x: usize, y: usize| (40..52).contains(&x) && (30..42).contains(&y);
+    let fallback = crate::cursor::FALLBACK_RGBA;
+    for (at, (pixel, under)) in with
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(plain.as_chunks::<4>().0)
+        .enumerate()
+    {
+        let (x, y) = (at % width, at / width);
+        if square(x, y) {
+            assert_eq!(pixel, &fallback, "the pointer's square at {x},{y}");
+        } else {
+            assert_eq!(pixel, under, "the output at {x},{y}");
+        }
+    }
+
+    let plain = read_back(&mut run, 1);
+    let elsewhere = captured_output(&mut bar, &mut run, &copy, 1, Options::PaintCursors);
+    assert!(elsewhere == plain, "no pointer on an output it is not on");
+    run.stop();
+}
+
 /// While the session is locked no output is captured (OS4, register row 10). A frame asked for
 /// in the same flush as the lock fails, its session is stopped, and the buffer keeps its own
 /// bytes; a new session of the output is refused.
@@ -9201,7 +9284,13 @@ fn os9_output_capture_is_refused_while_locked() {
     let shm: wl_shm::WlShm = bar.bind(1);
     let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = bar.bind(1);
-    let (source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (source, session) = output_session(
+        &mut bar,
+        &mut run,
+        &copy,
+        1,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+    );
     let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
     let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
 

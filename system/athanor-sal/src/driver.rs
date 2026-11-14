@@ -427,7 +427,7 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
+        dispatch(&mut event_loop, &conn, wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
@@ -1110,7 +1110,16 @@ impl Shell {
                 size
             }
             Shown::Popup(_) => logical_size(&ui),
-            Shown::Window(_) => (0, 0),
+            // A window gives its widgets' size as its minimum before the first configure, as
+            // GTK does: a compositor that suggests a smaller first size, as cosmic-comp does on
+            // a small output, would otherwise place the window for a width it never takes.
+            Shown::Window(window) => {
+                layout(&mut ui, 1.0)?;
+                let size = logical_size(&ui);
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&ui, size));
+                size
+            }
         };
         self.next += 1;
         self.surfaces.push(Surface {
@@ -1220,6 +1229,25 @@ fn each_open<T, S: Copy>(
     }
 }
 
+/// One turn of `event_loop`, then an error if the compositor ended `conn`, so that the process
+/// exits and its unit's `Restart=` applies (#1129). calloop-wayland-source returns an end of file,
+/// but only logs a protocol error, and the dead socket then wakes the loop at every turn with
+/// nothing to dispatch. The error names the protocol error's code and object, and its message
+/// where the backend keeps one: libwayland's keeps none. Every caller of [`run`] logs it before
+/// it exits.
+fn dispatch<D>(
+    event_loop: &mut EventLoop<'static, D>,
+    conn: &Connection,
+    timeout: Option<Duration>,
+    data: &mut D,
+) -> Result<(), Error> {
+    let turn = event_loop.dispatch(timeout, data);
+    if let Some(error) = conn.backend().last_error() {
+        return Err(format!("the compositor ended the Wayland connection: {error}").into());
+    }
+    Ok(turn?)
+}
+
 /// How long the loop waits for an event: not at all while a surface is queued `pending` for the
 /// next turn, which no event is coming to wake, and until one arrives otherwise.
 fn wait(pending: bool) -> Option<std::time::Duration> {
@@ -1325,6 +1353,12 @@ fn requested(size: (u32, u32), stretch: (bool, bool)) -> (u32, u32) {
     )
 }
 
+/// The maximum size of a window whose widgets take `size`: that size when the window is not
+/// resizable, as GTK sets a fixed window's on Wayland, and none otherwise.
+fn max_size(ui: &Ui, size: (u32, u32)) -> Option<(u32, u32)> {
+    (!ui.resizable).then_some(size)
+}
+
 /// The widgets' size in whole logical pixels, never empty.
 fn logical_size(ui: &Ui) -> (u32, u32) {
     let (w, h) = ui.size();
@@ -1382,7 +1416,7 @@ struct Surface {
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
-    /// The logical size last asked of a layer surface.
+    /// The logical size last asked of a layer surface, or given as a window's minimum.
     size: (u32, u32),
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
@@ -1501,15 +1535,23 @@ impl Surface {
     }
 
     /// Sets, for the next commit, how the buffer drawn at `scale` maps onto the surface, and a
-    /// layer surface's size when its widgets' changed.
+    /// layer surface's size, or a window's minimum size, when its widgets' changed.
     fn place(&mut self) {
         let size = logical_size(&self.ui);
-        if let Shown::Layer(surface) = &self.shown {
-            let asked = requested(size, self.stretch);
-            if asked != self.size {
-                surface.set_size(asked.0, asked.1);
-                self.size = asked;
+        match &self.shown {
+            Shown::Layer(surface) => {
+                let asked = requested(size, self.stretch);
+                if asked != self.size {
+                    surface.set_size(asked.0, asked.1);
+                    self.size = asked;
+                }
             }
+            Shown::Window(window) if size != self.size => {
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&self.ui, size));
+                self.size = size;
+            }
+            _ => {}
         }
         match &self.fractional {
             Some((_, viewport)) => {
@@ -2936,6 +2978,17 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use wayland_client::protocol::wl_registry;
+
+    #[test]
+    fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
+        let mut ui = Ui::new("Fixed", crate::Theme::default(), false);
+        assert_eq!(max_size(&ui, (420, 300)), None, "a window is resizable by default");
+        ui.resizable = false;
+        assert_eq!(max_size(&ui, (420, 300)), Some((420, 300)));
+    }
 
     #[test]
     fn a_drop_down_menu_is_bounded_by_its_output_else_the_shortest_one() {
@@ -3476,5 +3529,89 @@ mod tests {
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    /// A client that dispatches nothing: the registry it asks for gives the compositor an object
+    /// to raise a protocol error on.
+    struct Client;
+
+    impl wayland_client::Dispatch<wl_registry::WlRegistry, ()> for Client {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    /// An event loop on the client end of a socket pair, as the driver runs one on the
+    /// compositor's socket, its registry as object 2, and the server end, which has read the
+    /// request for it.
+    fn on_socket_pair(
+    ) -> Result<(EventLoop<'static, Client>, Connection, wl_registry::WlRegistry, UnixStream), Error>
+    {
+        let (client, mut server) = UnixStream::pair()?;
+        let conn = Connection::from_socket(client)?;
+        let queue = conn.new_event_queue::<Client>();
+        let registry = conn.display().get_registry(&queue.handle(), ());
+        conn.flush()?;
+        // Read, so that closing the server end ends the stream instead of resetting it.
+        server.read_exact(&mut [0; 12])?;
+        let event_loop = EventLoop::try_new()?;
+        WaylandSource::new(conn.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|e| e.error.to_string())?;
+        Ok((event_loop, conn, registry, server))
+    }
+
+    /// The error of the first of a hundred turns of the loop that fails, if one does.
+    fn first_error(event_loop: &mut EventLoop<'static, Client>, conn: &Connection) -> Option<String> {
+        (0..100).find_map(|_| {
+            let turn = dispatch(event_loop, conn, Some(Duration::from_millis(10)), &mut Client);
+            turn.err().map(|error| error.to_string())
+        })
+    }
+
+    #[test]
+    fn the_loop_ends_with_the_protocol_error_that_ended_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, registry, mut server) = on_socket_pair()?;
+        assert_eq!(registry.id().protocol_id(), 2);
+        // wl_display.error(wl_registry 2, code 3, "invalid size"), then the compositor closes.
+        // Not on wl_display itself: libwayland reports its codes as an errno, ENOMEM for 2.
+        let text = b"invalid size\0\0\0\0";
+        let mut message = Vec::new();
+        for word in [1, (8 + 12 + text.len() as u32) << 16, 2, 3, 13] {
+            message.extend_from_slice(&u32::to_ne_bytes(word));
+        }
+        message.extend_from_slice(text);
+        server.write_all(&message)?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        let ended = "the compositor ended the Wayland connection: \
+                     Protocol error 3 on object wl_registry@2";
+        // The Rust backend keeps the message; libwayland's does not. Which one runs is not Sal's
+        // to choose: any crate built with it may turn on wayland-backend's client_system, as Sal's
+        // `gpu` feature does, and Cargo unifies features across a build, so both forms are right.
+        let message = format!("{ended}: invalid size");
+        assert!(
+            error.as_deref() == Some(&message) || error.as_deref() == Some(ended),
+            "{error:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_loop_ends_when_the_compositor_closes_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, _registry, server) = on_socket_pair()?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        assert!(
+            error.as_deref().is_some_and(|e| e.starts_with("the compositor ended the Wayland")),
+            "{error:?}"
+        );
+        Ok(())
     }
 }

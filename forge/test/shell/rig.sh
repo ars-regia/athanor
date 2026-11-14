@@ -315,8 +315,8 @@ capture_layout() {
     done < <(python3 -B "$rig/cases.py" layout --outputs "${RIG_LAYOUT_OUTPUTS:-1}")
 }
 
-# The chooser's test catalogs, German and the right-to-left pseudo-language, made from the GTK
-# chooser's: both choosers read them.
+# The chooser's test catalogs, German and the right-to-left pseudo-language, made from the
+# chooser's: the shipped chooser and the T1 example read them.
 stage_chooser_catalogs() {
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
@@ -328,8 +328,9 @@ stage_chooser_catalogs() {
         msgfmt -o /out/locale/chooser/rtl.mo /out/chooser-pseudo-rtl.po'
 }
 
-# ATHANOR_CHOOSER_BIN runs another chooser in the GTK chooser's scenes, athanor-sal's
-# (doc_own_stack.md, T1 task 4); its captures then differ from the GTK goldens by design.
+# The chooser draws with athanor-sal since its port; golden/athanor-differences.toml records
+# how it differs from the GTK chooser it replaced ([[gtk-difference]]). ATHANOR_CHOOSER_BIN runs
+# another chooser in the same scenes.
 capture_chooser() {
     unit_words "${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}"
     stage_chooser_catalogs
@@ -1176,10 +1177,11 @@ atspi)
         ;;
     chooser)
         # 8 interactive widgets under the float preset: three styles, two panel edges, three docks.
-        # ATHANOR_CHOOSER_BIN runs another chooser, athanor-sal's (doc_own_stack.md, T1), in
-        # the same scene. The transcript, every node's role, name, states and value, must hold
-        # all the reference holds: the GTK chooser's, recorded (OS8).
-        # To record it again, copy <out>/atspi-chooser[-it].json of a GTK run into golden/atspi/.
+        # ATHANOR_CHOOSER_BIN runs another chooser in the same scene. The transcript, every
+        # node's role, name, states and value, must hold all the reference holds: the GTK
+        # chooser's, recorded before the chooser was ported to athanor-sal (OS8). GTK's chooser
+        # is gone, so the reference is not recorded again; a change of the chooser's tree
+        # changes it by hand, in the pull request that says why.
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
         unit_words "$bin"
         transcript=atspi-chooser${3:+-$3}.json
@@ -1331,7 +1333,8 @@ orca)
     fi
     # doc_own_stack.md, OS8: Orca's speech transcript for a scripted walk through a surface, in
     # English and in Italian, must hold every utterance of the GTK surface's, recorded first in
-    # golden/orca/. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
+    # golden/orca/; the chooser's was recorded before its port to athanor-sal and is not recorded
+    # again. ATHANOR_CHOOSER_BIN and ATHANOR_DOCK_BIN run another chooser and another dock,
     # athanor-sal's. The rig stage installs Orca and wtype; the published rig carries them since
     # the image pinned by #974, and shell-surfaces.yml compares every transcript (#954).
     # To record it again, copy <out>/orca-<surface>[-it].txt of a GTK run into golden/orca/.

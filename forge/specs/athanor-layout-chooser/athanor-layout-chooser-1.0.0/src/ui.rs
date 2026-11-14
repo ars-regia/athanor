@@ -1,21 +1,20 @@
 //! The layout chooser window (doc_shell.md, SH6-SH8): three groups of toggle buttons. A
 //! pick writes the user document; the translator, watching it, applies it.
 
-use std::rc::Rc;
-
-use athanor_layout::document::{DocumentError, Key};
+use athanor_layout::document::{Document, DocumentError, Key};
 use athanor_layout::loader::{self, Paths, Resolved, UserState};
 use athanor_layout::preset::{DockKnob, PanelEdge, Preset};
 use athanor_layout::user::{self, Change};
-use athanor_style::appearance::{self, Appearance};
-use gtk4::accessible::Relation;
-use gtk4::prelude::*;
-use gtk4::{
-    AccessibleRole, AlertDialog, Application, ApplicationWindow, Box as GtkBox, Label, Orientation,
-    ToggleButton,
+use athanor_sal::driver::Role;
+use athanor_sal::{
+    Application, Event, Kind, RootRole, Shell, SurfaceId, Ui, WidgetId, WindowButton, Wrap,
 };
 
 use crate::i18n::{tr, tr_with};
+use crate::look::Look;
+
+/// The application id, as the name of the chooser's `.desktop` file.
+pub const APP_ID: &str = "os.athanor.Layout";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroupState {
@@ -54,147 +53,245 @@ pub fn status_line(resolved: &Resolved) -> Option<String> {
 /// One labelled group of choices.
 struct Group {
     key: Key,
-    row: GtkBox,
-    note: Label,
+    row: WidgetId,
+    note: WidgetId,
     /// Each button with the change it makes.
-    buttons: Vec<(ToggleButton, Change)>,
+    buttons: Vec<(WidgetId, Change)>,
 }
 
-struct Chooser {
+/// The question asked before a newer document is replaced, while its dialog is open.
+struct Question {
+    dialog: SurfaceId,
+    replace: WidgetId,
+    document: Document,
+    schema: i64,
+}
+
+/// The chooser's window and what it acts on.
+pub struct Chooser {
     paths: Paths,
-    window: ApplicationWindow,
+    look: Look,
+    /// The window's widgets until the driver opens them.
+    ui: Option<Ui>,
+    /// The window, once drawn.
+    window: Option<SurfaceId>,
     groups: Vec<Group>,
-    status: Label,
+    status: WidgetId,
+    question: Option<Question>,
 }
 
-pub fn build_ui(app: &Application, paths: Paths) {
-    if crate::i18n::is_rtl() {
-        gtk4::Widget::set_default_direction(gtk4::TextDirection::Rtl);
+impl Chooser {
+    /// The window for the layout in force, in the catalogue's direction.
+    pub fn new(paths: Paths, look: Look, rtl: bool) -> Self {
+        let mut ui = Ui::new(&tr("Layout"), look.theme.clone(), rtl);
+        ui.min_width = 420.0;
+        // The GTK chooser's window was not resizable.
+        ui.resizable = false;
+        let groups = vec![
+            group(
+                &mut ui,
+                &look,
+                Key::Preset,
+                &tr("Style"),
+                &[
+                    (tr("Island"), Change::Preset(Preset::Float)),
+                    (tr("Bar"), Change::Preset(Preset::Bar)),
+                    (tr("Essential"), Change::Preset(Preset::Minimal)),
+                ],
+            ),
+            group(
+                &mut ui,
+                &look,
+                Key::Panel,
+                &tr("Panel"),
+                &[
+                    (tr("Top"), Change::Panel(PanelEdge::Top)),
+                    (tr("Bottom"), Change::Panel(PanelEdge::Bottom)),
+                ],
+            ),
+            group(
+                &mut ui,
+                &look,
+                Key::Dock,
+                &tr("Dock"),
+                &[
+                    (tr("Visible"), Change::Dock(DockKnob::Visible)),
+                    (tr("Auto-hide"), Change::Dock(DockKnob::AutoHide)),
+                    (tr("None"), Change::Dock(DockKnob::Off)),
+                ],
+            ),
+        ];
+        let status = wrapping_note(&mut ui, &look, Ui::ROOT);
+        let mut chooser = Self {
+            paths,
+            look,
+            ui: None,
+            window: None,
+            groups,
+            status,
+            question: None,
+        };
+        chooser.refresh(&mut ui);
+        chooser.ui = Some(ui);
+        chooser
     }
-    let window = ApplicationWindow::builder()
-        .application(app)
-        .title(tr("Layout"))
-        .default_width(420)
-        .resizable(false)
-        .build();
-    window.add_css_class("athanor-surface");
-    window.add_css_class("athanor-layout");
 
-    let display = gtk4::prelude::WidgetExt::display(&window);
-    appearance::load(&display, &Appearance::read());
+    /// The window's widgets before the driver opens them, for the tests.
+    #[cfg(test)]
+    fn ui(&self) -> Option<&Ui> {
+        self.ui.as_ref()
+    }
 
-    let content = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(18)
-        .margin_top(24)
-        .margin_bottom(24)
-        .margin_start(24)
-        .margin_end(24)
-        .build();
-    let groups = vec![
-        group(
-            &content,
-            Key::Preset,
-            &tr("Style"),
-            &[
-                (tr("Island"), Change::Preset(Preset::Float)),
-                (tr("Bar"), Change::Preset(Preset::Bar)),
-                (tr("Essential"), Change::Preset(Preset::Minimal)),
-            ],
-        ),
-        group(
-            &content,
-            Key::Panel,
-            &tr("Panel"),
-            &[
-                (tr("Top"), Change::Panel(PanelEdge::Top)),
-                (tr("Bottom"), Change::Panel(PanelEdge::Bottom)),
-            ],
-        ),
-        group(
-            &content,
-            Key::Dock,
-            &tr("Dock"),
-            &[
-                (tr("Visible"), Change::Dock(DockKnob::Visible)),
-                (tr("Auto-hide"), Change::Dock(DockKnob::AutoHide)),
-                (tr("None"), Change::Dock(DockKnob::Off)),
-            ],
-        ),
-    ];
-    let status = Label::builder()
-        .wrap(true)
-        .xalign(0.0)
-        .css_classes(["layout-status"])
-        .visible(false)
-        .build();
-    content.append(&status);
-    window.set_child(Some(&content));
+    /// Shows the layout in force, as the loader resolves it now.
+    fn refresh(&self, ui: &mut Ui) {
+        let resolved = loader::resolve(&self.paths);
+        for group in &self.groups {
+            let state = group_state(&resolved, group.key);
+            ui.set_visible(group.row, state != GroupState::Hidden);
+            ui.set_sensitive(group.row, state == GroupState::Open);
+            let note = match state {
+                GroupState::Locked => tr("Set by your administrator."),
+                GroupState::Hidden => tr("The bar holds the running applications."),
+                GroupState::Open => String::new(),
+            };
+            ui.set_text(group.note, &note);
+            ui.set_visible(group.note, state != GroupState::Open);
+            for (button, change) in &group.buttons {
+                // Set without a pick; the active toggle releases the others of its row.
+                let active = match change {
+                    Change::Preset(preset) => resolved.layout.preset() == *preset,
+                    Change::Panel(panel) => resolved.layout.panel() == *panel,
+                    Change::Dock(dock) => resolved.layout.dock() == *dock,
+                };
+                if active {
+                    ui.set_active(*button, true);
+                }
+            }
+        }
+        let line = status_line(&resolved);
+        ui.set_text(self.status, line.as_deref().unwrap_or(""));
+        ui.set_visible(self.status, line.is_some());
+        ui.layout();
+    }
 
-    let chooser = Rc::new(Chooser {
-        paths,
-        window,
-        groups,
-        status,
-    });
-    for group in &chooser.groups {
-        for (button, change) in &group.buttons {
-            // A strong reference: nothing else outlives build_ui, so a weak one never
-            // upgrades. GTK drops the handler, and the cycle with it, when the window is
-            // disposed.
-            let (chooser, change) = (Rc::clone(&chooser), *change);
-            button.connect_clicked(move |_| chooser.pick(change));
+    /// The change the toggle `id` makes, when it is one of the groups'.
+    fn change(&self, id: WidgetId) -> Option<Change> {
+        self.groups
+            .iter()
+            .flat_map(|group| &group.buttons)
+            .find(|(button, _)| *button == id)
+            .map(|(_, change)| *change)
+    }
+
+    fn pick(&mut self, shell: &mut Shell, window: SurfaceId, change: Change) {
+        let pending = user::prepare(&self.paths, change);
+        let Some(schema) = pending.replaces_newer else {
+            self.save(shell, window, &pending.document, None);
+            return;
+        };
+        let file = user::write_target(&self.paths.user_file)
+            .map(|target| user::backup_path(&target, schema).display().to_string())
+            .unwrap_or_else(|_| format!("layout.toml.{schema}"));
+        let rtl = shell.ui(window).is_some_and(|ui| ui.rtl);
+        let (ui, replace) = question(&self.look, rtl, &file);
+        match shell.open_dialog(window, ui) {
+            Ok(dialog) => {
+                self.question = Some(Question {
+                    dialog,
+                    replace,
+                    document: pending.document,
+                    schema,
+                });
+            }
+            Err(error) => {
+                // Nothing is saved without an answer: the window goes back to the layout in force.
+                tracing::error!(%error, "cannot ask before replacing the newer layout document");
+                if let Some(ui) = shell.ui_mut(window) {
+                    self.refresh(ui);
+                }
+            }
         }
     }
-    chooser.refresh();
-    chooser.window.present();
+
+    /// The answer to the question: Replace saves and keeps the newer file; Cancel, Escape and
+    /// closing the dialog keep the layout in force.
+    fn answer(&mut self, shell: &mut Shell, window: SurfaceId, event: Event) {
+        let replace = match event {
+            Event::Clicked(id) => self.question.as_ref().is_some_and(|q| q.replace == id),
+            Event::Window(WindowButton::Close) => false,
+            _ => return,
+        };
+        let Some(question) = self.question.take() else {
+            return;
+        };
+        shell.close(question.dialog);
+        if replace {
+            self.save(shell, window, &question.document, Some(question.schema));
+        } else if let Some(ui) = shell.ui_mut(window) {
+            self.refresh(ui);
+        }
+    }
+
+    fn save(&self, shell: &mut Shell, window: SurfaceId, document: &Document, keep: Option<i64>) {
+        let saved = user::save(&self.paths.user_file, document, keep);
+        let Some(ui) = shell.ui_mut(window) else {
+            return;
+        };
+        // The translator follows the file; the window shows what was just saved.
+        self.refresh(ui);
+        if let Err(err) = saved {
+            tracing::error!(error = %err, "cannot save the layout document");
+            let line = tr_with(
+                "The layout could not be saved: {error}",
+                "error",
+                &err.to_string(),
+            );
+            ui.set_text(self.status, &line);
+            ui.set_visible(self.status, true);
+            ui.layout();
+        }
+    }
 }
 
-/// One labelled group: a title, a row of toggle buttons, a note under it.
-fn group(content: &GtkBox, key: Key, title: &str, choices: &[(String, Change)]) -> Group {
-    let container = GtkBox::builder()
-        .orientation(Orientation::Vertical)
-        .spacing(8)
-        .accessible_role(AccessibleRole::Group)
-        .build();
-    let heading = Label::builder()
-        .label(title)
-        .xalign(0.0)
-        .css_classes(["layout-group-title"])
-        .build();
-    container.update_relation(&[Relation::LabelledBy(&[heading.upcast_ref()])]);
-    let row = GtkBox::builder()
-        .orientation(Orientation::Horizontal)
-        .spacing(8)
-        .homogeneous(true)
-        .build();
-    let buttons: Vec<(ToggleButton, Change)> = choices
+impl Application for Chooser {
+    fn start(&mut self) -> Vec<(Ui, Role)> {
+        let role = Role::Window {
+            app_id: APP_ID.into(),
+        };
+        self.ui.take().map(|ui| (ui, role)).into_iter().collect()
+    }
+
+    fn drawn(&mut self, _: &mut Shell, surface: SurfaceId) {
+        self.window.get_or_insert(surface);
+    }
+
+    fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
+        let Some(window) = self.window else {
+            return;
+        };
+        if self.question.as_ref().is_some_and(|q| q.dialog == surface) {
+            self.answer(shell, window, event);
+        } else if let Event::Selected(id) = event {
+            if let Some(change) = self.change(id) {
+                self.pick(shell, window, change);
+            }
+        }
+    }
+}
+
+/// One labelled group: a heading, a row of toggle buttons, a note under it.
+fn group(ui: &mut Ui, look: &Look, key: Key, title: &str, choices: &[(String, Change)]) -> Group {
+    let container = ui.add(Ui::ROOT, Kind::Group(title.into()));
+    let heading = ui.add(container, Kind::Label(title.into()));
+    look.heading(ui, heading);
+    let row = ui.add(container, Kind::Row);
+    // One choice per row, as radio buttons behave: pressing the active one keeps it.
+    let buttons = choices
         .iter()
-        .map(|(label, change)| {
-            let button = ToggleButton::builder()
-                .label(label)
-                .css_classes(["layout-choice"])
-                .build();
-            row.append(&button);
-            (button, *change)
-        })
+        .enumerate()
+        .map(|(i, (label, change))| (ui.toggle(row, label, i == 0), *change))
         .collect();
-    // One choice per group, as radio buttons behave: pressing the active one keeps it.
-    if let Some((first, _)) = buttons.first() {
-        for (button, _) in &buttons[1..] {
-            button.set_group(Some(first));
-        }
-    }
-    let note = Label::builder()
-        .xalign(0.0)
-        .wrap(true)
-        .css_classes(["layout-note"])
-        .visible(false)
-        .build();
-    container.append(&heading);
-    container.append(&row);
-    container.append(&note);
-    content.append(&container);
+    let note = wrapping_note(ui, look, container);
     Group {
         key,
         row,
@@ -203,87 +300,36 @@ fn group(content: &GtkBox, key: Key, title: &str, choices: &[(String, Change)]) 
     }
 }
 
-impl Chooser {
-    /// Shows the layout in force, as the loader resolves it now.
-    fn refresh(&self) {
-        let resolved = loader::resolve(&self.paths);
-        for group in &self.groups {
-            let state = group_state(&resolved, group.key);
-            group.row.set_visible(state != GroupState::Hidden);
-            group.row.set_sensitive(state == GroupState::Open);
-            match state {
-                GroupState::Locked => group.note.set_label(&tr("Set by your administrator.")),
-                GroupState::Hidden => group
-                    .note
-                    .set_label(&tr("The bar holds the running applications.")),
-                GroupState::Open => group.note.set_label(""),
-            }
-            group.note.set_visible(state != GroupState::Open);
-            for (button, change) in &group.buttons {
-                // Set without emitting `clicked`: a refresh is not a pick.
-                let active = match change {
-                    Change::Preset(preset) => resolved.layout.preset() == *preset,
-                    Change::Panel(panel) => resolved.layout.panel() == *panel,
-                    Change::Dock(dock) => resolved.layout.dock() == *dock,
-                };
-                button.set_active(active);
-            }
-        }
-        let line = status_line(&resolved);
-        self.status.set_visible(line.is_some());
-        self.status.set_label(line.as_deref().unwrap_or(""));
-    }
+/// A hidden label under `parent` that wraps at the width it is given, as GTK's wrapping label.
+fn wrapping_note(ui: &mut Ui, look: &Look, parent: WidgetId) -> WidgetId {
+    let note = ui.add(parent, Kind::Label(String::new()));
+    ui.set_wrap(note, Some(Wrap::default()));
+    look.note(ui, note);
+    ui.set_visible(note, false);
+    note
+}
 
-    fn pick(self: &Rc<Self>, change: Change) {
-        let pending = user::prepare(&self.paths, change);
-        let Some(schema) = pending.replaces_newer else {
-            self.save(&pending.document, None);
-            return;
-        };
-        let file = user::write_target(&self.paths.user_file)
-            .map(|target| user::backup_path(&target, schema).display().to_string())
-            .unwrap_or_else(|_| format!("layout.toml.{schema}"));
-        let dialog = AlertDialog::builder()
-            .modal(true)
-            .message(tr("Replace the newer layout?"))
-            .detail(tr_with(
-                "Athanor keeps the current file as {file}.",
-                "file",
-                &file,
-            ))
-            .buttons([tr("Cancel"), tr("Replace")])
-            .cancel_button(0)
-            .default_button(0)
-            .build();
-        let chooser = Rc::clone(self);
-        dialog.choose(
-            Some(&self.window),
-            gtk4::gio::Cancellable::NONE,
-            move |answer| {
-                if matches!(answer, Ok(1)) {
-                    chooser.save(&pending.document, Some(schema));
-                } else {
-                    chooser.refresh();
-                }
-            },
-        );
-    }
-
-    fn save(&self, document: &athanor_layout::document::Document, keep_newer: Option<i64>) {
-        if let Err(err) = user::save(&self.paths.user_file, document, keep_newer) {
-            tracing::error!(error = %err, "cannot save the layout document");
-            self.refresh();
-            self.status.set_label(&tr_with(
-                "The layout could not be saved: {error}",
-                "error",
-                &err.to_string(),
-            ));
-            self.status.set_visible(true);
-            return;
-        }
-        // The translator follows the file; the window shows what was just saved.
-        self.refresh();
-    }
+/// The question before a newer document is replaced, as GTK's alert dialog asks it: the
+/// message, the file kept, then Cancel, which has the focus, and Replace. Returns the dialog's
+/// widgets and its Replace button.
+fn question(look: &Look, rtl: bool, file: &str) -> (Ui, WidgetId) {
+    let message = tr("Replace the newer layout?");
+    let mut ui = Ui::new(&message, look.theme.clone(), rtl);
+    ui.root_role = RootRole::AlertDialog;
+    ui.min_width = 300.0;
+    // GTK's alert dialog is a message dialog, which is not resizable.
+    ui.resizable = false;
+    let heading = ui.add(Ui::ROOT, Kind::Label(message));
+    look.message(&mut ui, heading);
+    let detail = tr_with("Athanor keeps the current file as {file}.", "file", file);
+    let detail = ui.add(Ui::ROOT, Kind::Label(detail));
+    ui.set_wrap(detail, Some(Wrap::default()));
+    let row = ui.add(Ui::ROOT, Kind::Row);
+    let cancel = ui.add(row, Kind::Button(tr("Cancel")));
+    let replace = ui.add(row, Kind::Button(tr("Replace")));
+    ui.set_focus(Some(cancel));
+    ui.layout();
+    (ui, replace)
 }
 
 #[cfg(test)]
@@ -292,6 +338,7 @@ mod tests {
     use athanor_layout::document::{Document, DocumentError};
     use athanor_layout::loader::UserState;
     use athanor_layout::preset::{DockKnob, Layout, PanelEdge, Preset};
+    use athanor_style::appearance::Appearance;
     use std::collections::BTreeSet;
 
     fn resolved(layout: Layout, mandatory: &[Key], user: UserState) -> Resolved {
@@ -358,5 +405,80 @@ mod tests {
         assert!(status_line(&resolved(float(), &[], newer))
             .expect("a line")
             .contains('3'));
+    }
+
+    /// Paths under a fresh directory, holding `user` as the user document when given.
+    fn paths(name: &str, user: Option<&str>) -> Paths {
+        let root = std::env::temp_dir().join(format!(
+            "athanor-layout-chooser-{name}-{}",
+            std::process::id()
+        ));
+        // A directory left by an earlier run of this test would carry its document.
+        if root.exists() {
+            std::fs::remove_dir_all(&root).expect("remove the old test directory");
+        }
+        let paths = Paths {
+            vendor_dir: root.join("vendor"),
+            policy_dir: root.join("policy"),
+            user_file: root.join("athanor/layout.toml"),
+        };
+        std::fs::create_dir_all(root.join("athanor")).expect("create the config directory");
+        if let Some(text) = user {
+            std::fs::write(&paths.user_file, text).expect("write the user document");
+        }
+        paths
+    }
+
+    fn chooser(paths: Paths) -> Chooser {
+        Chooser::new(paths, crate::look::look(&Appearance::default()), false)
+    }
+
+    #[test]
+    fn the_window_shows_the_layout_in_force() {
+        let chooser = chooser(paths(
+            "in-force",
+            Some("schema = 1\n[output.\"*\"]\npreset = \"bar\"\npanel = \"bottom\"\n"),
+        ));
+        let ui = chooser.ui().expect("the window's widgets");
+        let active: Vec<_> = chooser
+            .groups
+            .iter()
+            .flat_map(|group| &group.buttons)
+            .filter(|(button, _)| ui.is_active(*button))
+            .map(|(_, change)| *change)
+            .collect();
+        assert_eq!(
+            active,
+            [
+                Change::Preset(Preset::Bar),
+                Change::Panel(PanelEdge::Bottom),
+                Change::Dock(DockKnob::Off),
+            ]
+        );
+        let dock = &chooser.groups[2];
+        assert!(!ui.is_visible(dock.row), "the bar has no dock knob");
+        assert!(ui.is_visible(dock.note));
+        assert!(!ui.is_visible(chooser.status));
+    }
+
+    #[test]
+    fn a_newer_document_is_explained_on_the_status_line() {
+        let chooser = chooser(paths("newer", Some("schema = 99\n")));
+        let ui = chooser.ui().expect("the window's widgets");
+        assert!(ui.is_visible(chooser.status));
+    }
+
+    #[test]
+    fn the_question_has_cancel_focused_and_replace_second() {
+        let (ui, replace) = question(
+            &crate::look::look(&Appearance::default()),
+            false,
+            "layout.toml.99",
+        );
+        assert_eq!(ui.root_role, RootRole::AlertDialog);
+        let cancel = ui.focus().expect("a focused button");
+        assert_ne!(cancel, replace);
+        assert!(matches!(ui.widget(cancel).kind, Kind::Button(ref t) if t == "Cancel"));
+        assert!(matches!(ui.widget(replace).kind, Kind::Button(ref t) if t == "Replace"));
     }
 }

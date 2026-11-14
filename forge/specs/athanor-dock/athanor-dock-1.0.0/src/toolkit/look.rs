@@ -25,7 +25,8 @@ pub fn look(appearance: &Appearance) -> Look {
     dock.border = Rgba(palette.line);
     dock.title_bar = Rgba(palette.bar);
     dock.focus = Rgba(palette.acc_fg);
-    dock.font_size = 13.0;
+    // The system font's size: the menus' text follows the user's font (VL6).
+    dock.font_size = appearance.font_size;
     dock.padding = 8.0;
     dock.margin = 0.0;
     dock.gap = 2.0;
@@ -71,5 +72,15 @@ mod tests {
         assert_eq!(look.dock.island_radius, sal::radius::DOCK);
         assert_eq!(look.dock.radius + sal::space::S, look.dock.island_radius);
         assert_eq!(look.dock.radius, 16.0, "VL7: highlights of 16 px at a 6 px inset");
+    }
+
+    #[test]
+    fn the_text_is_the_system_fonts_size() {
+        let large = Appearance {
+            font_size: 22.0,
+            ..Appearance::default()
+        };
+        let look = look(&large);
+        assert_eq!((look.dock.font_size, look.menu.font_size), (22.0, 22.0));
     }
 }

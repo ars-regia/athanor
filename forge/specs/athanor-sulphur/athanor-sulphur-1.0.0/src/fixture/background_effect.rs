@@ -576,6 +576,7 @@ fn d35_a_capture_leaves_the_screens_blur_as_it_was() {
         &crate::capture::Target::Output(first.clone()),
         &run.state.space,
         &marks,
+        None,
     );
     assert!(captured.is_ok(), "the capture: {:?}", captured.err());
     assert_eq!(blurs(&first), blurred + 1, "the capture blurs for itself");
