@@ -704,6 +704,7 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus 6.2.1",
+ "zeroize",
 ]
 
 [[package]]

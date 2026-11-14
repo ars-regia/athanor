@@ -16,3 +16,5 @@ libpulse-binding = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }
+# The password of a join or of a GetSecrets answer, overwritten as it drops (network.rs).
+zeroize = { workspace = true }

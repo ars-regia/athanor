@@ -13,6 +13,7 @@ use std::rc::Rc;
 use athanor_sal::{Event, Kind, Ui, WidgetId};
 use athanor_services::network::{
     self, Link, Network, NetworkCommand, NetworkState, PasswordPage, PasswordPrompt, Security, Vpn,
+    Zeroizing,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -40,7 +41,7 @@ struct Service {
     /// Counts the actions that did not complete: the model refused them or had ended.
     failures: Cell<u64>,
     /// A request of NetworkManager the person has not answered.
-    pending: RefCell<Option<oneshot::Sender<Option<String>>>>,
+    pending: RefCell<Option<oneshot::Sender<Option<Zeroizing<String>>>>>,
     /// The password page of `pending`, until a page takes it up.
     offered: RefCell<Option<PasswordPage>>,
     /// Whether [`Page::wants_open`] has said so for `offered`.
@@ -145,7 +146,11 @@ impl Service {
     }
 
     /// Holds a request for a page, unless one is held: its serial.
-    fn offer(&self, page: PasswordPage, reply: oneshot::Sender<Option<String>>) -> Option<u64> {
+    fn offer(
+        &self,
+        page: PasswordPage,
+        reply: oneshot::Sender<Option<Zeroizing<String>>>,
+    ) -> Option<u64> {
         if self.pending.borrow().is_some() {
             return None;
         }
@@ -159,12 +164,15 @@ impl Service {
     }
 
     /// Answers the pending request: the password, or a cancel.
-    fn answer(&self, password: Option<String>) {
+    fn answer(&self, password: Option<Zeroizing<String>>) {
         let Some(reply) = self.pending.take() else {
             return;
         };
-        // The model has stopped waiting when the send fails.
-        reply.send(password).ok();
+        // The model stopped waiting, as its timeout ended the request: the password comes back
+        // in the error and is overwritten as it drops.
+        if reply.send(password).is_err() {
+            tracing::warn!("the network model no longer waited for the password page's answer");
+        }
     }
 
     /// The model no longer waits for request `serial`: the page closes its prompt.
@@ -580,8 +588,9 @@ impl Page {
         let Some(asked) = self.asking.take() else {
             return;
         };
-        // The one owned copy, which moves into the command or the reply.
-        let password = ui.password_text(field).map(str::to_owned);
+        // The one owned copy, which moves into the command or the reply and is overwritten
+        // wherever it drops.
+        let password = ui.password_text(field).map(|p| Zeroizing::new(p.to_owned()));
         ui.set_field_text(field, "");
         match asked.ask {
             Ask::Join { network } => self.service.send(NetworkCommand::Join { network, password }),
@@ -871,7 +880,7 @@ mod tests {
         match received.try_recv() {
             Ok(NetworkCommand::Join { network, password }) => {
                 assert_eq!(network.label, "Home Network");
-                assert_eq!(password.as_deref(), Some("shortcorrect horse"));
+                assert_eq!(password.as_ref().map(|p| p.as_str()), Some("shortcorrect horse"));
             }
             other => unreachable!("a join, not {other:?}"),
         }
@@ -900,14 +909,14 @@ mod tests {
         match received.try_recv() {
             Ok(NetworkCommand::Join { network, password }) => {
                 assert_eq!(network.label, "Home Network");
-                assert_eq!(password.as_deref(), Some("short horse"));
+                assert_eq!(password.as_ref().map(|p| p.as_str()), Some("short horse"));
             }
             other => unreachable!("a join, not {other:?}"),
         }
         assert!(page.wants_close());
     }
 
-    fn secrets_page() -> (Page, Ui, oneshot::Receiver<Option<String>>) {
+    fn secrets_page() -> (Page, Ui, oneshot::Receiver<Option<Zeroizing<String>>>) {
         let (mut page, _received, mut ui) = page(state(vec![], vec![]));
         let (reply, answer) = oneshot::channel();
         let offered = PasswordPage {
@@ -929,6 +938,43 @@ mod tests {
         (page, ui, answer)
     }
 
+    /// Counts the warnings logged while it is the default subscriber.
+    struct Warnings(std::sync::atomic::AtomicUsize);
+
+    impl tracing::Subscriber for Warnings {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    #[test]
+    fn an_answer_the_model_no_longer_waits_for_is_logged_and_the_prompt_closes() {
+        let (mut page, mut ui, answer) = secrets_page();
+        // The model's timeout ended the request before the person connected.
+        drop(answer);
+        type_password(&mut page, &mut ui, "correct horse");
+        let warnings = std::sync::Arc::new(Warnings(Default::default()));
+        let connect = ids(&page).connect;
+        tracing::subscriber::with_default(std::sync::Arc::clone(&warnings), || {
+            click(&mut page, &mut ui, connect);
+        });
+        assert_eq!(warnings.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(page.service.pending.take().is_none());
+        assert!(page.wants_close());
+    }
+
     #[test]
     fn a_request_of_networkmanager_shows_the_prompt_and_connect_answers_it() {
         let (mut page, mut ui, mut answer) = secrets_page();
@@ -940,7 +986,7 @@ mod tests {
         ));
         type_password(&mut page, &mut ui, "correct horse");
         click(&mut page, &mut ui, connect);
-        assert!(matches!(answer.try_recv(), Ok(Some(p)) if p == "correct horse"));
+        assert!(matches!(answer.try_recv(), Ok(Some(p)) if p.as_str() == "correct horse"));
         assert_eq!(ui.password_text(ids(&page).field), Some(""));
         assert!(page.wants_close());
     }

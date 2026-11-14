@@ -26,6 +26,9 @@ use zbus::message::Header;
 use zbus::proxy::MethodFlags;
 use zbus::{Array, ObjectPath, Variant};
 use zbus::{Connection, DBusError, Message, Proxy};
+/// The password a page sends, from its field up to the D-Bus call that carries it: overwritten
+/// as it drops, wherever it drops.
+pub use zeroize::Zeroizing;
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
 use crate::props::{self, Objects, Props};
@@ -542,7 +545,7 @@ pub enum NetworkCommand {
     /// device of the last state.
     Join {
         network: Network,
-        password: Option<String>,
+        password: Option<Zeroizing<String>>,
     },
     Activate {
         connection: String,
@@ -589,7 +592,7 @@ pub struct PasswordPrompt {
     pub request: SecretsRequest,
     /// The password the person typed, or `None` when they cancelled. Dropping the sender
     /// answers `NoSecrets`.
-    pub reply: oneshot::Sender<Option<String>>,
+    pub reply: oneshot::Sender<Option<Zeroizing<String>>>,
     /// Completes with `()` when the agent no longer waits (NetworkManager cancelled the
     /// request or left, or no one answered in time): close the page. Beyond the plan's
     /// fields; without it the page would outlive a cancelled request. Completes with an
@@ -1136,7 +1139,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                 .device
                 .as_deref()
                 .ok_or_else(|| failure("no Wi-Fi device"))?;
-            let args = add_and_activate(&network, password.as_deref(), device)
+            let args = add_and_activate(&network, password.as_ref().map(|p| p.as_str()), device)
                 .ok_or_else(|| failure("not an object path"))?;
             let call = async {
                 Proxy::new(&context.connection, NM, NM_PATH, NM)
@@ -2221,7 +2224,7 @@ mod tests {
         rig.commands
             .send(NetworkCommand::Join {
                 network: lab,
-                password: Some("correct horse".into()),
+                password: Some(Zeroizing::new("correct horse".into())),
             })
             .unwrap();
         rig.commands
@@ -2304,11 +2307,18 @@ mod tests {
         };
         let command = NetworkCommand::Join {
             network,
-            password: Some("hunter2".into()),
+            password: Some(Zeroizing::new("hunter2".into())),
         };
         let shown = format!("{command:?}");
         assert!(!shown.contains("hunter2"), "{shown}");
         assert!(shown.contains("Lab"));
+        // A join's and an answer's password are overwritten as they drop, wherever they drop.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &Option<T>) {}
+        if let NetworkCommand::Join { password, .. } = &command {
+            overwritten(password);
+        }
+        fn answered<T: zeroize::ZeroizeOnDrop>(_: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>) {}
+        answered(|prompt| prompt.reply);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2321,7 +2331,7 @@ mod tests {
         rig.commands
             .send(NetworkCommand::Join {
                 network: lab,
-                password: Some("correct horse".into()),
+                password: Some(Zeroizing::new("correct horse".into())),
             })
             .unwrap();
         rig.commands.send(NetworkCommand::Wireless(false)).unwrap();
@@ -2368,7 +2378,7 @@ mod tests {
         let refused = get_secrets(&stranger, &rig.client, 0x1).await.unwrap();
         assert_eq!(outcome(&refused), DENIED);
         // The first request is still open: the stranger's cancel did not withdraw it.
-        prompt.reply.send(Some("hunter2hunter2".into())).unwrap();
+        prompt.reply.send(Some(Zeroizing::new("hunter2hunter2".into()))).unwrap();
         let reply = asked.await.unwrap().unwrap();
         let answer: BTreeMap<String, Props> = reply.body().deserialize().unwrap();
         assert_eq!(
