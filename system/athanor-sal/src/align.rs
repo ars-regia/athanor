@@ -32,10 +32,10 @@ impl Ui {
     ///
     /// - `Some(true)`: the alignment changed.
     /// - `Some(false)`: the widget already has this alignment.
-    /// - `None`: ignored, and nothing changes: only a [`Kind::Column`], the root included, and
-    ///   a [`Kind::Group`] read their children's alignment, so the root itself, the title bar,
-    ///   a child of any other widget and a [`Kind::Picture`], whose size comes from its column
-    ///   alone, take none.
+    /// - `None`: ignored, and nothing changes: only a [`Kind::Column`], the root included, a
+    ///   [`Kind::Group`] and a [`Kind::Alert`], laid out as a group, read their children's
+    ///   alignment, so the root itself, the title bar, a child of any other widget and a
+    ///   [`Kind::Picture`], whose size comes from its column alone, take none.
     ///
     /// # Panics
     ///
@@ -43,7 +43,7 @@ impl Ui {
     pub fn set_align(&mut self, id: WidgetId, align: [Align; 2]) -> Option<bool> {
         let widget = &self.widgets[id];
         let parent = &self.widgets[widget.parent?].kind;
-        if !matches!(parent, Kind::Column | Kind::Group(_))
+        if !matches!(parent, Kind::Column | Kind::Group(_) | Kind::Alert(_))
             || matches!(widget.kind, Kind::Picture { .. })
             || self.title_bar == Some(id)
         {
@@ -118,6 +118,28 @@ mod tests {
             assert_eq!(r.x + r.w, 390.0, "{along:?}");
             let y = if along == Align::End { 290.0 - r.h } else { 10.0 };
             assert_eq!(r.y, y, "{along:?}");
+        }
+    }
+
+    #[test]
+    fn a_child_of_an_alert_takes_its_alignment_as_in_a_group() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", theme(), rtl);
+            ui.min_width = 300.0;
+            let alert = ui.alert(Ui::ROOT, "Battery low");
+            let text = ui.add(alert, Kind::Label("Plug in the charger".into()));
+            let end = ui.add(alert, Kind::Button("Dismiss".into()));
+            assert_eq!(ui.set_align(end, [Align::End, Align::Fill]), Some(true));
+            ui.layout();
+            let (a, t, e) = (ui.widget(alert).rect, ui.widget(text).rect, ui.widget(end).rect);
+            assert_eq!(e.y, t.y + t.h, "in order");
+            assert!(e.w < a.w, "its own width");
+            if rtl {
+                assert_eq!(e.x, a.x, "rtl {rtl}");
+            } else {
+                assert_eq!(e.x + e.w, a.x + a.w, "rtl {rtl}");
+            }
+            assert_eq!(ui.set_align(end, [Align::End, Align::Fill]), Some(false));
         }
     }
 

@@ -252,7 +252,8 @@ pub enum Kind {
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
     /// A column with an accessible name that assistive technologies read as an alert, as GTK's
-    /// `alert` role: laid out as a [`Kind::Group`]. Add it with [`Ui::alert`].
+    /// `alert` role: laid out as a [`Kind::Group`]. It sets no live priority, so showing it
+    /// announces nothing by itself; [`Ui::announce`] speaks. Add it with [`Ui::alert`].
     Alert(String),
     /// A line of text that takes no input.
     Label(String),
@@ -388,9 +389,9 @@ pub enum Kind {
     /// is drawn with "zoom": scaled by one factor until it covers its rectangle in physical
     /// pixels, the overflow cut equally on both sides. It takes no input and adds nothing to its
     /// column's size, so a layer surface anchored on all four edges takes the size the
-    /// compositor configures. It takes a size only as a child of a [`Kind::Column`] or a
-    /// [`Kind::Group`], the root's included: elsewhere it is 0 by 0 and not drawn. Add it with
-    /// [`Ui::picture`].
+    /// compositor configures. It takes a size only as a child of a [`Kind::Column`], the root
+    /// included, a [`Kind::Group`] or a [`Kind::Alert`]: elsewhere it is 0 by 0 and not drawn.
+    /// Add it with [`Ui::picture`].
     #[non_exhaustive]
     Picture {
         /// The pixels, from [`crate::Image::from_rgba8`].
