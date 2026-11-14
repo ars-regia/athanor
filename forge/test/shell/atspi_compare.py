@@ -213,7 +213,8 @@ def compare(reference, transcript, exempt=None, indicator=False):
             lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
             continue
         # Among the nodes of its name, the one of its role, then one of a role said alike (a
-        # toolkit's frame and its panel may share the name of GTK's grouping), then any.
+        # toolkit's frame and its panel may share the name of GTK's grouping), then any
+        # (maintainer decision, 2026-11-14).
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = (
             next((node for node in named if node["role"] == ref["role"]), None)

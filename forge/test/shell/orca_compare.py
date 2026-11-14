@@ -70,7 +70,8 @@ def gallery_labels(*keys):
 
 
 # The switches of the control center's pages (system/athanor-controls): Wi-Fi on the network page,
-# the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids.
+# the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids
+# (maintainer decision, 2026-11-14).
 CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone")
 CONTROL_CENTER_PO = (
     Path(__file__).resolve().parents[3]
@@ -101,7 +102,8 @@ def control_center_labels(*msgids):
 
 
 # A VPN's switch is named by its NetworkManager connection, not by a catalog: the fixture's
-# (forge/test/shell/system_fixtures.py), the same in every language.
+# (forge/test/shell/system_fixtures.py), the same in every language (maintainer decision,
+# 2026-11-14).
 CONTROL_CENTER_FIXTURE_SWITCHES = ("Office VPN",)
 
 
