@@ -656,6 +656,26 @@ impl TextField {
 mod tests {
     use super::*;
 
+    /// An edit the masks and the hidden text cannot agree on, here one that leaves the caret
+    /// before what it inserted, empties both, in either direction: the field never keeps a
+    /// secret its masks do not count, nor one the person did not type.
+    #[test]
+    fn a_password_edit_the_masks_cannot_follow_empties_the_field() {
+        for rtl in [false, true] {
+            let mut cx = TextContext::default();
+            let mut field = TextField::password("Password", 15.0, rtl);
+            field.insert(&mut cx, "abc");
+            assert_eq!(field.password_text(), Some("abc"), "rtl {rtl}");
+            field.select_all(&mut cx);
+            field.edit_password(&mut cx, "xyz", |driver, masks| {
+                driver.insert_or_replace_selection(masks);
+                driver.move_to_text_start();
+            });
+            assert_eq!(field.password_text(), Some(""), "rtl {rtl}");
+            assert_eq!(field.editor.text().chars().count(), 0, "rtl {rtl}");
+        }
+    }
+
     /// The caret's byte offset, its line, and its horizontal position.
     fn caret_at(cx: &mut TextContext, field: &mut TextField) -> (usize, usize, f64) {
         let index = field.editor.raw_selection().focus().index();

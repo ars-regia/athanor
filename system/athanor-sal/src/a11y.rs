@@ -1304,7 +1304,7 @@ mod tests {
     fn a_password_field_gives_at_spi_no_character_of_its_text() {
         use accesskit::{ActionHandler, ActionRequest};
         use accesskit_atspi_common::{
-            Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet,
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, Granularity, InterfaceSet,
             Role as AtspiRole, WindowBounds,
         };
         type Events = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
@@ -1362,12 +1362,32 @@ mod tests {
             .filter_map(|(_, node)| node.value().map(str::to_owned))
             .collect();
         assert!(values.contains(&text), "the field's value is its masks");
+        // What Orca reads character by character, word by word and line by line
+        // (doc_accessibility.md, AX4), and every node's label and description.
+        let mut strings = Vec::new();
+        for granularity in [Granularity::Char, Granularity::Word, Granularity::Line] {
+            for offset in 0..5 {
+                let (said, ..) = node.string_at_offset(offset, granularity).expect("a string");
+                strings.push(said);
+            }
+        }
+        assert!(strings.iter().any(|said| said == "●"), "a character is a mask");
+        let labels: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.description()])
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        assert!(labels.iter().any(|label| label == "Password"), "{labels:?}");
 
         let events = events.lock().expect("not poisoned");
         assert!(!events.is_empty(), "the edits are heard");
         let heard = [node.name().expect("a name"), text]
             .into_iter()
             .chain(values)
+            .chain(strings)
+            .chain(labels)
             .chain(events.iter().cloned());
         for said in heard {
             let leaked: Vec<char> = SECRET.chars().filter(|&c| said.contains(c)).collect();

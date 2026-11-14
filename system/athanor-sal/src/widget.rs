@@ -4481,6 +4481,35 @@ mod tests {
         }
     }
 
+    /// A drag across a password field selects its masks and offers no primary selection, in
+    /// either direction: nothing of it leaves by the mouse either (doc_accessibility.md, AX4).
+    #[test]
+    fn a_drag_across_a_password_field_offers_no_primary_selection() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Wi-Fi", Theme::default(), rtl);
+            let field = ui.password(Ui::ROOT, "Password");
+            let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(field));
+            ui.commit("Zq7#é");
+            ui.set_focus(Some(other));
+            ui.take_clips();
+            let r = ui.widget(field).rect;
+            let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+            assert_eq!(ui.pointer_press(start, y, PointerButton::Primary), None);
+            assert!(ui.selecting(), "rtl {rtl}");
+            assert_eq!(ui.pointer_motion(end, y), None);
+            assert_eq!(ui.pointer_release(end, y, PointerButton::Primary), None);
+            let Kind::Field(text) = &ui.widget(field).kind else {
+                unreachable!("a password field is a field");
+            };
+            assert!(text.has_selection(), "the drag selected the masks, rtl {rtl}");
+            assert_eq!(ui.offered, None, "rtl {rtl}");
+            assert!(ui.take_clips().is_empty(), "rtl {rtl}");
+            assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        }
+    }
+
     /// A password field (doc_accessibility.md, AX4) keeps what is typed, and gives out only its
     /// masks: the field's text, its selection, the clipboards and the input method's preedit
     /// never hold a character of it. Text is pasted in.

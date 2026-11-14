@@ -1751,6 +1751,16 @@ fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     Some((id, widget.rect, hint))
 }
 
+/// The content type a field asks the input method for: a password's for hidden text.
+fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
+    let purpose = if hint.contains(ContentHint::HiddenText) {
+        ContentPurpose::Password
+    } else {
+        ContentPurpose::Normal
+    };
+    (hint, purpose)
+}
+
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
@@ -2104,11 +2114,7 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            let purpose = if hint.contains(ContentHint::HiddenText) {
-                ContentPurpose::Password
-            } else {
-                ContentPurpose::Normal
-            };
+            let (hint, purpose) = content_type(hint);
             text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
@@ -3516,6 +3522,22 @@ mod tests {
         assert!(!field.is_composing());
         assert_eq!(field.shown(), "ab");
         assert!(!ui.end_composition(), "a second end changed the field");
+    }
+
+    /// An input method neither shows, learns nor suggests a password: the field asks for hidden,
+    /// sensitive text of a password, and a plain field for none of it.
+    #[test]
+    fn a_password_field_asks_for_hidden_sensitive_text_of_a_password() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let password = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, content_type(hint)));
+        ui.set_focus(Some(password));
+        let hidden = ContentHint::HiddenText | ContentHint::SensitiveData;
+        assert_eq!(asked(&ui), Some((password, (hidden, ContentPurpose::Password))));
+        ui.set_focus(Some(name));
+        assert_eq!(asked(&ui), Some((name, (ContentHint::None, ContentPurpose::Normal))));
     }
 
     #[test]
