@@ -5,7 +5,8 @@
 use super::{Kind, Ui, WidgetId};
 
 /// The most padding [`Ui::inline`] keeps on each side: a quarter of the largest `f32`, so
-/// that both sides take at most half of it and leave the other half for the content.
+/// that both sides take at most half of it and leave the other half for the inline's content.
+/// It bounds one inline only: a container that adds up several children can still overflow.
 const PADDING_MAX: f32 = f32::MAX / 4.0;
 
 /// The size of an inline whose children measure `sizes`: their widths and the gaps between
@@ -97,7 +98,9 @@ impl Ui {
     /// Adds an inline: its children side by side in reading order at their own widths, with
     /// `padding` logical pixels kept free left and right, then above and below; a padding that
     /// is not a finite length of at least 0 counts as 0, and one past a quarter of the largest
-    /// `f32` as that quarter, so that both sides and the content add up to a finite size.
+    /// `f32` as that quarter, so that this inline's padding and content add up to a finite
+    /// size. A container that adds up several children, such as a column or a centre box
+    /// holding several inlines with such a padding, can still add up to an infinite size.
     /// See [`Kind::Inline`].
     ///
     /// # Panics
