@@ -405,6 +405,34 @@ pub fn paint<C: Canvas>(
                     ctx.fill_rect(&line);
                 }
             }
+            // Flat as an icon button, its image then its text centred together, mirrored in
+            // right to left.
+            Kind::LabelledButton { image, size, .. } => {
+                if hover == Some(id) {
+                    ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
+                let side = image.as_ref().map_or(0.0, |_| *size);
+                let (image_x, text_x) = crate::widget::labelled::places(
+                    (r.x, r.w),
+                    image.as_ref().map(|_| side),
+                    widget.text.as_ref().map(|l| l.width()),
+                    t.gap,
+                    ui.rtl,
+                );
+                if let Some(image) = image {
+                    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                    let fit = (f64::from(side) / w).min(f64::from(side) / h);
+                    let (w, h) = (w * fit, h * fit);
+                    let x = f64::from(image_x + side / 2.0) - w / 2.0;
+                    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+                    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+                }
+                if let Some(layout) = &widget.text {
+                    let at = (text_x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+            }
             // A white sheet under its rows, as GTK's list.
             Kind::List { .. } => {
                 ctx.set_paint(color(t.on_accent));
