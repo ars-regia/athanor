@@ -12,6 +12,6 @@ rules:
         - Justfile
         - '*.just'
     patterns:
-      - pattern-regex: '\|\|\s*(?:true|:)(?![\w-])|2>\s*/dev/null|&>>?\s*/dev/null|>\s*/dev/null\s+2>&1|2>&-'
+      - pattern-regex: '2>[>|]?\s*["'']?/dev/null["'']?|&>>?\s*["'']?/dev/null["'']?|>&\s*["'']?/dev/null["'']?|>\|?\s*["'']?/dev/null["'']?\s+2>&1|2>&-|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])|\{\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)\s*;?\s*\}|\(\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)\s*;?\s*\))|\|\|(?!\s*[{(])[^;|&\n]*(?:;|&&)\s*(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])|\|\|\s*[{(][^;|&\n]*;\s*(?:true|:)\s*;?\s*[})]|2>&1\s*\|\|\s*(?:break|continue)\b'
       - pattern-not-regex: '(?m)(?:^|\s)#.*$'
-      - pattern-not-regex: 'kill\s+-0\s+\S+\s+2>\s*/dev/null'
+      - pattern-not-regex: 'kill\s+-0\s+\S+\s+2>\s*["'']?/dev/null["'']?'
