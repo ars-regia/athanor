@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        11%{?athanor_content}%{?dist}
+Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
@@ -55,12 +55,6 @@ rm -rf locale-build
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
-* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
-- The panel and its four pages are drawn with athanor-sal on a layer surface of its own
-  (doc_own_stack.md OS8): no GTK, gtk4-layer-shell or libadwaita in the process, so the
-  layer-shell shim's link-order check goes. Names, roles, states, keys, the bus interface
-  and the settings are those of the GTK panel.
-
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Landlock grants the control center's writes by descriptors athanor_unit::dirs opened and
   checked (#1052): a directory that is a link or another user's is left out with a warning,
