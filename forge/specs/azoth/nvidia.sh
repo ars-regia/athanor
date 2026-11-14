@@ -117,7 +117,7 @@ build() {
     open)
       step "open modules $NVIDIA_OPEN_VERSION, commit $NVIDIA_OPEN_COMMIT"
       git -c advice.detachedHead=false clone -q --depth 1 --branch "$NVIDIA_OPEN_VERSION" \
-        https://github.com/NVIDIA/open-gpu-kernel-modules "$WORK/src" 2> /dev/null
+        https://github.com/NVIDIA/open-gpu-kernel-modules "$WORK/src"
       [[ $(git -C "$WORK/src" rev-parse HEAD) == "$NVIDIA_OPEN_COMMIT" ]] \
         || unpinned "tag $NVIDIA_OPEN_VERSION does not point to the pinned commit $NVIDIA_OPEN_COMMIT"
       src="$WORK/src"; kodir="$src/kernel-open"; version=$NVIDIA_OPEN_VERSION
