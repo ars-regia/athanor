@@ -1793,12 +1793,15 @@ fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
     (hint, purpose)
 }
 
+/// A preedit and its cursor, a byte range in it. Overwritten when dropped.
+type Preedit = (zeroize::Zeroizing<String>, Option<(usize, usize)>);
+
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
     /// The preedit and its cursor, a byte range in it. Overwritten when dropped: a password
     /// field never shows it, but the input method sends it all the same.
-    preedit: Option<(zeroize::Zeroizing<String>, Option<(usize, usize)>)>,
+    preedit: Option<Preedit>,
     /// Overwritten when dropped: it may be a password field's text.
     commit: Option<zeroize::Zeroizing<String>>,
 }
@@ -1809,7 +1812,7 @@ struct Pending {
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
-) -> (zeroize::Zeroizing<String>, Option<(usize, usize)>) {
+) -> Preedit {
     let kept = |at: usize| {
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
@@ -3751,8 +3754,10 @@ mod tests {
     fn the_preedit_is_overwritten_wherever_it_drops() {
         // A password field shows no preedit, but the input method sends one all the same.
         fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
-        let mut pending = Pending::default();
-        pending.preedit = Some((zeroize::Zeroizing::new("hunter2".into()), None));
+        let pending = Pending {
+            preedit: Some((zeroize::Zeroizing::new("hunter2".into()), None)),
+            ..Pending::default()
+        };
         if let Some((preedit, _)) = &pending.preedit {
             overwritten(preedit);
         }
