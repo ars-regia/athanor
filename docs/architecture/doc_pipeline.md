@@ -548,7 +548,7 @@ alert of PL51; findings without a fix are listed in the weekly statistics.
 
 **PL28. Static analysis runs on every pull request** through `just check` (clippy, ruff,
 shellcheck, actionlint, cargo deny) and CodeQL runs weekly for Rust, Python and the
-workflows. (SSDF PW.7, PW.8; Scorecard SAST.)
+workflows. cargo-machete fails a pull request that declares a dependency no source uses. (SSDF PW.7, PW.8; Scorecard SAST.)
 
 ### 4.8 Acceptance, VSA and promotion
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the pinned tools `just check` needs on a machine that lacks them (the GitHub
-# runner of pr.yml): just, actionlint and cargo-deny from their release archives, each verified against
+# runner of pr.yml): just, actionlint, cargo-deny and cargo-machete from their release archives, each verified against
 # its SHA-256 before it is unpacked, cosign and the registry (distribution) that the real-cosign
 # attest check runs against (scripts/ci/cosign-attest-check.sh), and pykickstart (ksvalidator) and PyYAML in a virtual
 # environment, every Python package verified by the hashes of requirements-build.txt and
@@ -29,6 +29,8 @@ COSIGN_INSTALLER=756fe2d284c7292c4e9b62c8a28f1e5629c59532
 COSIGN_VERSION=v3.1.4
 COSIGN_URL=https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64
 COSIGN_SHA256=424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+CARGO_MACHETE_URL=https://github.com/bnjbvr/cargo-machete/releases/download/v0.9.2/cargo-machete-v0.9.2-x86_64-unknown-linux-musl.tar.gz
+CARGO_MACHETE_SHA256=48200087f54c55aabcd4db4af1e25742b49846c02a1b1bfa134711945b35b2e9
 REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0.0/registry_3.0.0_linux_amd64.tar.gz
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
 
@@ -53,6 +55,9 @@ tar -xzf "$dir/download/actionlint.tar.gz" -C "$dir/bin" actionlint
 fetch "$CARGO_DENY_URL" "$CARGO_DENY_SHA256" "$dir/download/cargo-deny.tar.gz"
 tar -xzf "$dir/download/cargo-deny.tar.gz" -C "$dir/bin" --strip-components=1 \
     cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
+fetch "$CARGO_MACHETE_URL" "$CARGO_MACHETE_SHA256" "$dir/download/cargo-machete.tar.gz"
+tar -xzf "$dir/download/cargo-machete.tar.gz" -C "$dir/bin" --strip-components=1 \
+    cargo-machete-v0.9.2-x86_64-unknown-linux-musl/cargo-machete
 fetch "$COSIGN_URL" "$COSIGN_SHA256" "$dir/download/cosign"
 install -m 0755 "$dir/download/cosign" "$dir/bin/cosign"
 fetch "$REGISTRY_URL" "$REGISTRY_SHA256" "$dir/download/registry.tar.gz"
