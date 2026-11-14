@@ -60,6 +60,10 @@ impl Ui {
     /// it as in any wider widget. A width that is not finite, or not above 0, is none. Whether
     /// it changed; call [`Ui::layout`] afterwards.
     ///
+    /// The floor holds where a [`Kind::Column`], the root included, or a [`Kind::Group`] places
+    /// the widget; a row, a menu, a list, a scroll and an island place it at the width they give
+    /// it, which may be narrower.
+    ///
     /// # Panics
     ///
     /// When `id` names no widget of this `Ui`.
