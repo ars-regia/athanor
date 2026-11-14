@@ -585,6 +585,8 @@ pub struct Widget {
     /// How a label wraps, see [`Ui::set_wrap`], the width its last place gave it, if one has,
     /// and the narrowest it can be, its longest word, as its last measure found it.
     pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
+    /// The least width it measures, as GTK's `width-request`: see [`Ui::set_min_width`].
+    pub(crate) min_w: f32,
     /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
 }
@@ -605,6 +607,7 @@ impl Widget {
             sensitive: true,
             align: [crate::Align::Fill; 2],
             wrap: None,
+            min_w: 0.0,
             ink: None,
         }
     }
@@ -2095,6 +2098,7 @@ impl Ui {
             }
             Kind::TextArea(area) => (field_width, area.view_height(&mut self.text) + pad),
         };
+        let w = w.max(widget.min_w);
         widget.rect.w = w;
         widget.rect.h = h;
         (w, h)
@@ -2220,8 +2224,10 @@ impl Ui {
                     // narrower column breaks into more lines, never below its longest word.
                     let inner = outer.w - 2.0 * edge;
                     if let Some(&(_, _, least)) = self.widgets[c].wrap.as_ref() {
+                        // Nor below its least width (Ui::set_min_width), as GTK's width-request.
+                        let floor = least.max(self.widgets[c].min_w);
                         let r = &mut self.widgets[c].rect;
-                        r.w = r.w.min(inner).max(least);
+                        r.w = r.w.min(inner).max(floor);
                     }
                     if across == crate::Align::Fill
                         && (matches!(
@@ -2240,7 +2246,8 @@ impl Ui {
                             | Kind::Picture { .. }
                     ) || self.widgets[c].wrap.is_some())
                     {
-                        self.widgets[c].rect.w = inner;
+                        // Never below its least width (Ui::set_min_width), as GTK's width-request.
+                        self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
                     }
                     // An island takes the rest of its column's height down to the widgets at
                     // the bottom, unless aligned along it; a picture, which takes no alignment
@@ -5224,6 +5231,58 @@ mod tests {
             let least = ui.widget(label).wrap.as_ref().map_or(0.0, |w| w.2);
             assert!(least > 1.0);
             assert_eq!(ui.widget(label).rect.w, least, "{rtl}: its longest word");
+        }
+    }
+
+    /// A wrapping label aligned across in a column narrower than its least width
+    /// (Ui::set_min_width), as a row cell can make it, keeps that width, as GTK's width-request.
+    #[test]
+    fn an_aligned_wrapping_label_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Start, crate::Align::Fill]), Some(true));
+            assert!(ui.set_min_width(label, 400.0));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            assert_eq!(ui.widget(label).rect.w, 400.0, "{rtl}: its least width");
+        }
+    }
+
+    /// A widget that fills a column narrower than its least width (Ui::set_min_width), as a row
+    /// cell can make it, keeps that width too, and overflows at the end edge only.
+    #[test]
+    fn a_filling_widget_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            let Some(slider) = ui.slider(group, "Volume", 0.0, 100.0, 1.0, 50.0) else {
+                panic!("{rtl}: a slider");
+            };
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Fill, crate::Align::Fill]), Some(false));
+            for id in [label, slider] {
+                assert!(ui.set_min_width(id, 400.0));
+            }
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            for id in [label, slider] {
+                let w = ui.widget(id).rect;
+                assert_eq!(w.w, 400.0, "{rtl}: {id:?} keeps its least width");
+                if rtl {
+                    assert_eq!(w.x + w.w, c.x + c.w, "{rtl}: from the right edge");
+                } else {
+                    assert_eq!(w.x, c.x, "{rtl}: from the left edge");
+                }
+            }
         }
     }
 }
