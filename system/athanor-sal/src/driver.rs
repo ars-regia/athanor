@@ -1764,8 +1764,9 @@ fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
-    /// The preedit and its cursor, a byte range in it.
-    preedit: Option<(String, Option<(usize, usize)>)>,
+    /// The preedit and its cursor, a byte range in it. Overwritten when dropped: a password
+    /// field never shows it, but the input method sends it all the same.
+    preedit: Option<(zeroize::Zeroizing<String>, Option<(usize, usize)>)>,
     /// Overwritten when dropped: it may be a password field's text.
     commit: Option<zeroize::Zeroizing<String>>,
 }
@@ -1776,7 +1777,7 @@ struct Pending {
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
-) -> (String, Option<(usize, usize)>) {
+) -> (zeroize::Zeroizing<String>, Option<(usize, usize)>) {
     let kept = |at: usize| {
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
@@ -1788,7 +1789,7 @@ fn printable_preedit(
         })
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
-    (String::from(crate::text::printable(text, false).as_str()), cursor)
+    (crate::text::printable(text, false), cursor)
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1830,7 +1831,8 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 let cursor = usize::try_from(cursor_begin)
                     .ok()
                     .zip(usize::try_from(cursor_end).ok());
-                app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
+                app.ime.pending.preedit =
+                    Some((zeroize::Zeroizing::new(text.unwrap_or_default()), cursor));
             }
             Event::CommitString { text } => {
                 app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
@@ -3605,7 +3607,7 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        ime.pending.preedit = Some(("ni".into(), None));
+        ime.pending.preedit = Some((zeroize::Zeroizing::new("ni".into()), None));
         assert_eq!(ime.leave(), Some(a));
         assert_eq!(ime.entered, None);
         // The first done after the next enter applies nothing from before the leave.
@@ -3663,12 +3665,27 @@ mod tests {
         // "a\tbç": the tab goes, so the cursor after "b" (byte 3) moves to byte 2.
         assert_eq!(
             printable_preedit("a\tb\u{e7}", Some((3, 5))),
-            ("ab\u{e7}".to_owned(), Some((2, 4)))
+            (zeroize::Zeroizing::new("ab\u{e7}".to_owned()), Some((2, 4)))
         );
-        assert_eq!(printable_preedit("ab", None), ("ab".to_owned(), None));
+        assert_eq!(
+            printable_preedit("ab", None),
+            (zeroize::Zeroizing::new("ab".to_owned()), None)
+        );
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    #[test]
+    fn the_preedit_is_overwritten_wherever_it_drops() {
+        // A password field shows no preedit, but the input method sends one all the same.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let mut pending = Pending::default();
+        pending.preedit = Some((zeroize::Zeroizing::new("hunter2".into()), None));
+        if let Some((preedit, _)) = &pending.preedit {
+            overwritten(preedit);
+        }
+        overwritten(&printable_preedit("hunter2", None).0);
     }
 
     /// A client that dispatches nothing: the registry it asks for gives the compositor an object
