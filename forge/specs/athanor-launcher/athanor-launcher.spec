@@ -6,7 +6,7 @@ Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel libxkbcommon-devel gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel libxkbcommon-devel gettext binutils python3
 # localsearch's client library (athanor-search), poppler and cairo (the decoder), and what
 # glycin links (the decoder).
 BuildRequires:  tinysparql-devel poppler-glib-devel cairo-devel libseccomp-devel fontconfig-devel
@@ -38,6 +38,10 @@ for catalog in forge/specs/athanor-launcher/athanor-launcher-1.0.0/po/*.po; do
     mkdir -p "locale-build/$lang/LC_MESSAGES"
     msgfmt --check --output-file="locale-build/$lang/LC_MESSAGES/athanor-launcher.mo" "$catalog"
 done
+
+%check
+# Drawn with Sal: neither GTK nor its layer-shell shim may come back among DT_NEEDED.
+python3 -B forge/scripts/check_shim_link_order.py --without-gtk target/release/athanor-launcher
 
 %install
 install -D -m 0755 target/release/athanor-launcher %{buildroot}/usr/bin/athanor-launcher

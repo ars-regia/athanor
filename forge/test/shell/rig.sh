@@ -32,7 +32,7 @@
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
-#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin
+#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check (no GTK)
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
@@ -924,7 +924,8 @@ build-launcher)
                      cargo test --locked $packages
                      cargo build --release --locked $packages
                  done
-                 install -m 0755 /out/target/release/athanor-launcher /out/target/release/athanor-preview-render /out/bin/'
+                 install -m 0755 /out/target/release/athanor-launcher /out/target/release/athanor-preview-render /out/bin/
+                 python3 -B forge/scripts/check_shim_link_order.py --without-gtk /out/bin/athanor-launcher'
     ;;
 dock-roundtrip)
     # BR7's knob none and the bar preset take the surface off screen, and visible brings it
