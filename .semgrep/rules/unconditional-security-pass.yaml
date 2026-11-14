@@ -23,7 +23,7 @@ rules:
           mod tests { ... }
       - metavariable-regex:
           metavariable: $F
-          regex: &security '(?i).*(?:verif|valid|auth|attest|trust|allow|permit|sign|seal|polkit|passw|token|cred)'
+          regex: '(?i).*(?:verif|valid|auth|attest|trust|allow|permit|sign|seal|polkit|passw|token|cred)'
 
   - id: unconditional-security-pass-python
     languages: [python]
@@ -41,5 +41,4 @@ rules:
               return True
       - metavariable-regex:
           metavariable: $F
-          regex: *security
-
+          regex: '(?i).*(?:verif|valid|auth|attest|trust|allow|permit|sign|seal|polkit|passw|token|cred)'

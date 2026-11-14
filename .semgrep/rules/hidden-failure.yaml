@@ -45,4 +45,3 @@ rules:
       - pattern-not-regex: 'openssl x509 -in "\$1" -noout "-\$2" -nameopt RFC2253 2> /dev/null'
       - pattern-not-regex: 'openssl ec -in \S+ -pubout -out \S+ 2> /dev/null'
       - pattern-not-regex: 'gpg --homedir "\$home" --batch --status-fd 1 --verify "\$2" "\$3" 2>/dev/null'
-
