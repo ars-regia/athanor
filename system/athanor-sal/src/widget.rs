@@ -4491,15 +4491,7 @@ mod tests {
         ui.pointer_release(outside.0, outside.1, PointerButton::Secondary);
         let r = ui.widget(button).rect;
         assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
-        // A popup's menu takes the press, wherever it falls in it.
-        let mut menu = Ui::new("t", Theme::default(), false);
-        menu.popup = true;
-        menu.min_width = 200.0;
-        menu.min_height = 200.0;
-        let list = menu.add(Ui::ROOT, Kind::Menu);
-        menu.add(list, Kind::Button("Spotify".into()));
-        menu.layout();
-        assert_eq!(menu.pointer_press(199.0, 199.0, PointerButton::Primary), None);
+        // A popup raises none: popup.rs, where the driver's path marks it.
     }
 
     #[test]

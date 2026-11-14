@@ -38,8 +38,9 @@ pub(crate) enum Dismiss<S> {
 }
 
 impl<S: Copy + PartialEq> OpenPopup<S> {
-    /// Records `popup`, opened from `anchor` of `parent`: a menu expands its button and puts the
-    /// focus on its first item, as GTK's popover does when it shows.
+    /// Records `popup`, opened from `anchor` of `parent`, and marks it a popup, which raises no
+    /// [`Event::PressedOutside`]: a menu expands its button and puts the focus on its first item,
+    /// as GTK's popover does when it shows.
     pub fn opened(
         parent_surface: S,
         anchor: WidgetId,
@@ -48,6 +49,7 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
         popup: &mut Ui,
         menu: bool,
     ) -> Self {
+        popup.popup = true;
         if menu {
             parent.set_expanded(anchor, true);
             popup.set_focus(focus::step(popup, false));
@@ -205,8 +207,33 @@ impl<T: Copy + PartialEq> Tooltip<T> {
 mod tests {
     use super::*;
     use crate::theme::Theme;
-    use crate::widget::{Event, Key, Kind, Ui};
+    use crate::widget::{Event, Key, Kind, PointerButton, Ui};
     use std::time::{Duration, Instant};
+
+    /// Every popup the driver opens goes through [`OpenPopup::opened`], which marks it: a press
+    /// on the bare part of a menu or a tooltip then raises no press outside, which the
+    /// application would take for one outside its panel.
+    #[test]
+    fn an_opened_popup_raises_no_press_outside() {
+        for menu in [true, false] {
+            let mut parent = Ui::new("t", Theme::default(), false);
+            let anchor = parent.add(Ui::ROOT, Kind::Button("Player".into()));
+            let mut popup = Ui::new("t", Theme::default(), false);
+            popup.min_width = 200.0;
+            popup.min_height = 200.0;
+            let list = popup.add(Ui::ROOT, Kind::Menu);
+            popup.add(list, Kind::Button("Spotify".into()));
+            popup.layout();
+            let press = |popup: &mut Ui| {
+                let event = popup.pointer_press(199.0, 199.0, PointerButton::Primary);
+                popup.pointer_release(199.0, 199.0, PointerButton::Primary);
+                event
+            };
+            assert_eq!(press(&mut popup), Some(Event::PressedOutside), "not yet opened");
+            let _open = OpenPopup::opened(0, anchor, 1, &mut parent, &mut popup, menu);
+            assert_eq!(press(&mut popup), None, "menu {menu}");
+        }
+    }
 
     #[test]
     fn a_tooltip_waits_gtks_hover_delay_then_browses_at_its_short_one() {

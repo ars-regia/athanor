@@ -990,7 +990,6 @@ impl Shell {
         from.dirty = true;
         // A tooltip takes no pointer: it never stands between the pointer and its widget.
         let input = (!menu).then(Vec::new);
-        ui.popup = true;
         match self.adopt(ui, Shown::Popup(popup), fractional, input, (false, false)) {
             Ok(id) => {
                 self.popup = Some(open);
