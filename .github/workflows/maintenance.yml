@@ -184,6 +184,8 @@ jobs:
           persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
+        env:
+          ATHANOR_INSTALL_MUTANTS: "1"
         run: |
           set -euo pipefail
           bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
@@ -191,10 +193,11 @@ jobs:
 
       - name: Mutate the crate
         env:
+          MUTANTS_CRATE: ${{ matrix.crate }}
           MUTANTS_IN_RIG: "1"
           MUTANTS_OUT: ${{ runner.temp }}/mutants
           MUTANTS_EXTRA: --shard ${{ matrix.shard || '0/1' }}
-        run: bash scripts/ci/mutants.sh "${{ matrix.crate }}"
+        run: bash scripts/ci/mutants.sh "$MUTANTS_CRATE"
 
       - name: Keep the report
         if: always()
@@ -212,7 +215,27 @@ jobs:
     # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
     # success closes it. A job of its own on a GitHub runner, after the others whatever their
     # result.
-    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql, mutants]
+    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql]
+    if: ${{ always() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/alert
+        with:
+          needs: ${{ toJSON(needs) }}
+
+  # The same alert for the mutants jobs, in a job of its own: they run for hours, and the alert above
+  # must not wait for them. ci_alert.py keys each issue by workflow and job name, so the two jobs
+  # never open or close each other's issues.
+  alert-mutants:
+    needs: [mutants]
     if: ${{ always() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
