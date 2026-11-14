@@ -1389,7 +1389,7 @@ def stale_lock_problems(locks, manifests):
     return out
 
 
-@check("cargo-locks", "Every Cargo.lock belongs to a workspace root, so its pins are the ones built")
+@check("cargo-locks", "No Cargo.lock beside a crate that inherits from a parent workspace, where cargo never reads it")
 def check_cargo_locks():
     r = Result()
     listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
