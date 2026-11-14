@@ -2914,9 +2914,10 @@ impl PointerHandler for App {
     }
 }
 
-/// The wheel or the touchpad turned at `at` on `ui`: the innermost scroll under the pointer
-/// takes the vertical axis, and the widget under it gets what no scroll took, each axis on its
-/// own, as whole steps ([`Ui::pointer_wheel`]). Whether the widgets changed, and the event.
+/// The wheel or the touchpad turned at `at` on `ui`: the innermost scroll or text area under
+/// the pointer takes the vertical axis, whether or not it moves, as GTK's scrolled window does,
+/// and the widget under it gets what no scroll took, each axis on its own, as whole steps
+/// ([`Ui::pointer_wheel`]). Whether the widgets changed, and the event.
 fn axis(
     ui: &mut Ui,
     at: (f32, f32),
@@ -2924,10 +2925,11 @@ fn axis(
     vertical: AxisScroll,
 ) -> (bool, Option<Event>) {
     // wl_pointer's axis values are in surface coordinates: logical pixels.
+    let taken = ui.scroll_under(at.0, at.1).is_some();
     let moved = ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
     let steps = crate::widget::wheel::steps;
     let dx = steps(horizontal.value120, horizontal.discrete);
-    let dy = if moved {
+    let dy = if taken {
         0
     } else {
         steps(vertical.value120, vertical.discrete)
@@ -3024,6 +3026,35 @@ mod tests {
             matches!(event, Some(Event::Wheel { dx: 1, dy: 0, .. })),
             "the vertical turn the scroll took reaches no widget: {event:?}"
         );
+    }
+
+    #[test]
+    fn a_scroll_takes_the_vertical_turn_at_its_end_and_when_its_content_fits() {
+        let turn = |value120, absolute| AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        };
+        let none = AxisScroll::default();
+        // At offset 0, a turn up over a button inside moves nothing and reaches no widget.
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let first = ui.add(scroll, Kind::Button("Line 0".into()));
+        for n in 1..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        ui.layout();
+        let r = ui.widget(first).rect;
+        assert_eq!(axis(&mut ui, (r.x + 1.0, r.y + 1.0), none, turn(-120, -15.0)), (false, None));
+        // A scroll whose content fits takes the turn too.
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 400.0);
+        let only = ui.add(scroll, Kind::Button("Only".into()));
+        ui.layout();
+        let r = ui.widget(only).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        assert_eq!(axis(&mut ui, at, none, turn(120, 15.0)), (false, None));
+        assert_eq!(axis(&mut ui, at, none, turn(-120, -15.0)), (false, None));
     }
 
     #[test]

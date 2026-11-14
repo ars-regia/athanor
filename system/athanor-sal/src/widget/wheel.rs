@@ -1,6 +1,6 @@
-//! The wheel and the middle button on a widget that is not a scroll or a field: what GTK's
-//! scroll controller with discrete steps, and a click gesture on the middle button, give a
-//! status notifier item of the bar's tray.
+//! The wheel over a widget where no scroll or text area takes the turn: what GTK's scroll
+//! controller with discrete steps gives a status notifier item of the bar's tray. The middle
+//! button is [`Event::MiddleClick`], in the widget module.
 
 use super::{Event, Ui};
 

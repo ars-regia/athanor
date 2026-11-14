@@ -645,9 +645,10 @@ pub enum Event {
     /// paste the primary selection instead: a tray's item asks for its secondary activation.
     /// It neither focuses nor activates the widget.
     MiddleClick(WidgetId),
-    /// The wheel turned over a widget where no scroll took it, in whole steps, as GTK's
-    /// scroll controller with discrete steps: a high resolution wheel's turns add up to them.
-    /// See [`Ui::pointer_wheel`].
+    /// The wheel turned over a widget, in whole steps, as GTK's scroll controller with
+    /// discrete steps: a high resolution wheel's turns add up to them. A scroll or a text area
+    /// under the pointer takes the vertical turn, even at its limit or when its content fits,
+    /// and the event then carries no vertical step. See [`Ui::pointer_wheel`].
     #[non_exhaustive]
     Wheel {
         /// The focusable widget under the pointer.
@@ -1482,6 +1483,20 @@ impl Ui {
         if !dy.is_finite() {
             return false;
         }
+        let Some(scroll) = self.scroll_under(x, y) else {
+            return false;
+        };
+        let moved = self.scroll_by(scroll, dy);
+        if moved {
+            self.hover = self.hit(x, y);
+        }
+        moved
+    }
+
+    /// The innermost scroll or text area under the point, in logical pixels, that would take
+    /// the vertical turn of a wheel there, as GTK's scrolled window claims it even at its limit
+    /// or when its content fits.
+    pub(crate) fn scroll_under(&self, x: f32, y: f32) -> Option<WidgetId> {
         let under = self.ids().filter(|&id| {
             matches!(self.widgets[id].kind, Kind::Scroll { .. } | Kind::TextArea(_))
                 && self.widgets[id].rect.contains(x, y)
@@ -1493,14 +1508,7 @@ impl Ui {
         let depth = |id: WidgetId| {
             std::iter::successors(Some(id), |&w| self.widgets[w].parent).count()
         };
-        let Some(scroll) = under.max_by_key(|&id| depth(id)) else {
-            return false;
-        };
-        let moved = self.scroll_by(scroll, dy);
-        if moved {
-            self.hover = self.hit(x, y);
-        }
-        moved
+        under.max_by_key(|&id| depth(id))
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
