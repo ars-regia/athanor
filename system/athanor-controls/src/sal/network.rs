@@ -483,6 +483,8 @@ impl Page {
                 None => return false,
             },
             Event::Edited(id) if id == ids.field => Hit::Field,
+            // Enter in the field connects, as the GTK entry's `activate` did.
+            Event::Activated(id) if id == ids.field => Hit::Connect,
             Event::Clicked(id) if id == ids.connect => Hit::Connect,
             Event::Clicked(id) if id == ids.cancel => Hit::Cancel,
             Event::Clicked(id) => match ids.rows.iter().find(|(row, _)| *row == id) {
@@ -876,6 +878,33 @@ mod tests {
         assert_eq!(ui.password_text(field), Some(""));
         assert!(ui.is_visible(ids(&page).list));
         assert!(page.wants_close() && !page.wants_close());
+    }
+
+    #[test]
+    fn enter_in_the_password_field_connects_once_the_password_is_acceptable() {
+        let (mut page, mut received, mut ui) = page(state(
+            vec![network("Home Network", Security::Personal { sae: false })],
+            vec![],
+        ));
+        let row = ids(&page).rows[0].0;
+        click(&mut page, &mut ui, row);
+        type_password(&mut page, &mut ui, "short");
+        let enter = ui.key(athanor_sal::Key::Enter);
+        assert_eq!(enter, Some(Event::Activated(ids(&page).field)));
+        assert!(enter.is_some_and(|event| page.event(&mut ui, &event)));
+        assert!(received.try_recv().is_err(), "a short WPA password is not sent");
+        assert!(ui.is_visible(ids(&page).password), "the prompt stays");
+        type_password(&mut page, &mut ui, " horse");
+        let enter = ui.key(athanor_sal::Key::Enter);
+        assert!(enter.is_some_and(|event| page.event(&mut ui, &event)));
+        match received.try_recv() {
+            Ok(NetworkCommand::Join { network, password }) => {
+                assert_eq!(network.label, "Home Network");
+                assert_eq!(password.as_deref(), Some("short horse"));
+            }
+            other => unreachable!("a join, not {other:?}"),
+        }
+        assert!(page.wants_close());
     }
 
     fn secrets_page() -> (Page, Ui, oneshot::Receiver<Option<String>>) {
