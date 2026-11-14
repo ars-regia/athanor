@@ -292,7 +292,6 @@ fn query_panel(
     (ui, panel)
 }
 
-/// What the launcher reads of a key of the toolkit's.
 /// The query's text and range as they are, for the panel laid out again: a rebuild keeps both.
 /// While an input method composes there is no range, and the caret goes to the start.
 fn kept_query(ui: &Ui, field: WidgetId) -> (String, (usize, usize)) {
@@ -334,6 +333,7 @@ fn opening(waiting: &mut Waiting, start_query: &mut Option<String>, has_output: 
     }
 }
 
+/// What the launcher reads of a key of the toolkit's.
 fn key(key: &SalKey) -> Key {
     match key {
         SalKey::Escape => Key::Escape,
