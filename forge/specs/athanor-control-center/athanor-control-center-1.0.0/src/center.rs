@@ -212,8 +212,8 @@ impl Center {
     fn rebuild(&mut self, shell: &mut Shell, surface: SurfaceId, focus: bool) {
         let scale = self.outputs.get(&surface).map_or(1, |output| output.scale);
         let theme = theme(&self.appearance);
-        self.icons.set(scale, theme.text);
         let rtl = is_rtl();
+        self.icons.set(scale, theme.text, rtl);
         let mut ui = Ui::new(&tr("Control center"), theme, rtl);
         let island = ui.island(Ui::ROOT, true, [GAP as f32; 4]);
         let place = anchor(self.layout.layout().panel(), rtl);
