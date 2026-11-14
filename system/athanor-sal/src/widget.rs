@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 pub(crate) mod labelled;
 mod rows;
 mod strip;
+pub(crate) mod wheel;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
 /// the widget's slot in the `Ui` and the slot's generation, and is meaningful only in the `Ui`
@@ -594,6 +595,8 @@ pub struct Widget {
     /// How a label wraps, see [`Ui::set_wrap`], the width its last place gave it, if one has,
     /// and the narrowest it can be, its longest word, as its last measure found it.
     pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
+    /// The least width it measures, as GTK's `width-request`: see [`Ui::set_min_width`].
+    pub(crate) min_w: f32,
     /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
 }
@@ -614,6 +617,7 @@ impl Widget {
             sensitive: true,
             align: [crate::Align::Fill; 2],
             wrap: None,
+            min_w: 0.0,
             ink: None,
         }
     }
@@ -684,6 +688,23 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
+    /// The middle button was pressed on a widget that is not a field or a text area, which
+    /// paste the primary selection instead: a tray's item asks for its secondary activation.
+    /// It neither focuses nor activates the widget.
+    MiddleClick(WidgetId),
+    /// The wheel turned over a widget, in whole steps, as GTK's scroll controller with
+    /// discrete steps: a high resolution wheel's turns add up to them. A scroll or a text area
+    /// under the pointer takes the vertical turn, even at its limit or when its content fits,
+    /// and the event then carries no vertical step. See [`Ui::pointer_wheel`].
+    #[non_exhaustive]
+    Wheel {
+        /// The focusable widget under the pointer.
+        widget: WidgetId,
+        /// To the right when positive.
+        dx: i32,
+        /// Down when positive.
+        dy: i32,
+    },
 }
 
 /// A pointer button, as the driver maps it from the evdev codes.
@@ -826,6 +847,9 @@ pub struct Ui {
     size: (f32, f32),
     hover: Option<WidgetId>,
     press: Option<Press>,
+    /// The widget under the pointer the wheel last turned over, and the turns on each axis,
+    /// in 120ths, that made no whole step yet ([`Ui::pointer_wheel`]).
+    wheel: Option<(WidgetId, [i32; 2])>,
     /// What the fields asked of the clipboards since the driver last took it.
     clips: Vec<Clip>,
     /// The field whose selection these widgets offered last as the primary selection, and its
@@ -863,6 +887,7 @@ impl Ui {
             size: (0.0, 0.0),
             hover: None,
             press: None,
+            wheel: None,
             clips: Vec::new(),
             offered: None,
             announcement: None,
@@ -1513,6 +1538,20 @@ impl Ui {
         if !dy.is_finite() {
             return false;
         }
+        let Some(scroll) = self.scroll_under(x, y) else {
+            return false;
+        };
+        let moved = self.scroll_by(scroll, dy);
+        if moved {
+            self.hover = self.hit(x, y);
+        }
+        moved
+    }
+
+    /// The innermost scroll or text area under the point, in logical pixels, that would take
+    /// the vertical turn of a wheel there, as GTK's scrolled window claims it even at its limit
+    /// or when its content fits.
+    pub(crate) fn scroll_under(&self, x: f32, y: f32) -> Option<WidgetId> {
         let under = self.ids().filter(|&id| {
             matches!(self.widgets[id].kind, Kind::Scroll { .. } | Kind::TextArea(_))
                 && self.widgets[id].rect.contains(x, y)
@@ -1524,14 +1563,7 @@ impl Ui {
         let depth = |id: WidgetId| {
             std::iter::successors(Some(id), |&w| self.widgets[w].parent).count()
         };
-        let Some(scroll) = under.max_by_key(|&id| depth(id)) else {
-            return false;
-        };
-        let moved = self.scroll_by(scroll, dy);
-        if moved {
-            self.hover = self.hit(x, y);
-        }
-        moved
+        under.max_by_key(|&id| depth(id))
     }
 
     /// The text of the field `id`, or `None` if it is not a field.
@@ -2117,6 +2149,7 @@ impl Ui {
             }
             Kind::TextArea(area) => (field_width, area.view_height(&mut self.text) + pad),
         };
+        let w = w.max(widget.min_w);
         widget.rect.w = w;
         widget.rect.h = h;
         (w, h)
@@ -2244,8 +2277,10 @@ impl Ui {
                     // narrower column breaks into more lines, never below its longest word.
                     let inner = outer.w - 2.0 * edge;
                     if let Some(&(_, _, least)) = self.widgets[c].wrap.as_ref() {
+                        // Nor below its least width (Ui::set_min_width), as GTK's width-request.
+                        let floor = least.max(self.widgets[c].min_w);
                         let r = &mut self.widgets[c].rect;
-                        r.w = r.w.min(inner).max(least);
+                        r.w = r.w.min(inner).max(floor);
                     }
                     if across == crate::Align::Fill
                         && (matches!(
@@ -2264,7 +2299,8 @@ impl Ui {
                             | Kind::Picture { .. }
                     ) || self.widgets[c].wrap.is_some())
                     {
-                        self.widgets[c].rect.w = inner;
+                        // Never below its least width (Ui::set_min_width), as GTK's width-request.
+                        self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
                     }
                     // An island takes the rest of its column's height down to the widgets at
                     // the bottom, unless aligned along it; a picture, which takes no alignment
@@ -2422,6 +2458,10 @@ impl Ui {
     /// on a widget made insensitive since moves nothing and starts no drag.
     pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
         self.hover = self.hit(x, y);
+        // The wheel's rest stays with the widget it turned over.
+        if self.wheel.is_some_and(|(over, _)| self.hover != Some(over)) {
+            self.wheel = None;
+        }
         let id = self.press?.widget;
         if !self.is_sensitive(id) {
             return None;
@@ -2447,6 +2487,7 @@ impl Ui {
     /// drag it started ends over no widget.
     pub fn pointer_leave(&mut self) -> Option<Event> {
         self.hover = None;
+        self.wheel = None;
         let press = self.press.take()?;
         press.dragging.then_some(Event::DragEnded {
             from: press.widget,
@@ -2456,7 +2497,9 @@ impl Ui {
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
     /// the widget there and waits for the release to activate it, as GTK's buttons do; the
-    /// secondary button asks for its context menu.
+    /// secondary button asks for its context menu; the middle button gives
+    /// [`Event::MiddleClick`] on a widget that is not a field or a text area, which paste the
+    /// primary selection instead.
     pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
         let id = self.hit(x, y);
         match button {
@@ -2480,7 +2523,9 @@ impl Ui {
                 let field = |id: &WidgetId| {
                     matches!(self.widgets[*id].kind, Kind::Field(_) | Kind::TextArea(_))
                 };
-                let id = id.filter(field)?;
+                let Some(id) = id.filter(field) else {
+                    return id.map(Event::MiddleClick);
+                };
                 self.set_focus(Some(id));
                 self.point_in_field(id, x, y, false);
                 self.clips.push(Clip::PastePrimary(id));
@@ -4634,9 +4679,10 @@ mod tests {
         assert_eq!(ui.take_clips(), [Clip::PastePrimary(name)]);
         ui.paste(name, "x");
         assert_eq!(ui.field_text(name).as_deref(), Some("abcx"));
-        // Elsewhere it does nothing.
+        // Elsewhere it pastes nothing, and raises the widget's own middle click.
         let o = ui.widget(other).rect;
-        assert_eq!(ui.pointer_press(o.x + 1.0, o.y + 1.0, PointerButton::Middle), None);
+        let pressed = ui.pointer_press(o.x + 1.0, o.y + 1.0, PointerButton::Middle);
+        assert_eq!(pressed, Some(Event::MiddleClick(other)));
         assert_eq!(ui.focus(), Some(name));
         assert!(ui.take_clips().is_empty());
     }
@@ -5248,6 +5294,58 @@ mod tests {
             let least = ui.widget(label).wrap.as_ref().map_or(0.0, |w| w.2);
             assert!(least > 1.0);
             assert_eq!(ui.widget(label).rect.w, least, "{rtl}: its longest word");
+        }
+    }
+
+    /// A wrapping label aligned across in a column narrower than its least width
+    /// (Ui::set_min_width), as a row cell can make it, keeps that width, as GTK's width-request.
+    #[test]
+    fn an_aligned_wrapping_label_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Start, crate::Align::Fill]), Some(true));
+            assert!(ui.set_min_width(label, 400.0));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            assert_eq!(ui.widget(label).rect.w, 400.0, "{rtl}: its least width");
+        }
+    }
+
+    /// A widget that fills a column narrower than its least width (Ui::set_min_width), as a row
+    /// cell can make it, keeps that width too, and overflows at the end edge only.
+    #[test]
+    fn a_filling_widget_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            let Some(slider) = ui.slider(group, "Volume", 0.0, 100.0, 1.0, 50.0) else {
+                panic!("{rtl}: a slider");
+            };
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Fill, crate::Align::Fill]), Some(false));
+            for id in [label, slider] {
+                assert!(ui.set_min_width(id, 400.0));
+            }
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            for id in [label, slider] {
+                let w = ui.widget(id).rect;
+                assert_eq!(w.w, 400.0, "{rtl}: {id:?} keeps its least width");
+                if rtl {
+                    assert_eq!(w.x + w.w, c.x + c.w, "{rtl}: from the right edge");
+                } else {
+                    assert_eq!(w.x, c.x, "{rtl}: from the left edge");
+                }
+            }
         }
     }
 }

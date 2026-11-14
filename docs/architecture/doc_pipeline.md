@@ -278,7 +278,7 @@ flowchart LR
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
 ```
 
-### 3.5 Today's 33 workflows
+### 3.5 Today's 32 workflows
 
 | Workflow                         | Target                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -302,7 +302,6 @@ flowchart LR
 | `kernel-weekly.yml`              | merged into `maintenance.yml` (weekly)                                                             |
 | `maintenance.yml`                | kept (PR #264, the daily settings drift check of PL52); gains the scheduled jobs merged into it (PB12) |
 | `nix-registry-bump.yml`          | merged into `bots.yml`                                                                             |
-| `nix-vanguard.yml`               | deleted: its triggers name a branch without a release role and `just check` covers the flake      |
 | `nvidia-build.yml`               | merged into `call-kernel.yml`                                                                      |
 | `nvidia-kmod.yml`                | since PR #265 the boot and publication of the signed modules and `azoth-boot`: becomes `call-kernel-publish.yml`, whose identity `system/kernel-artifacts.sh` then trusts (PL12, D43) |
 | `pr.yml`                         | kept (PR #266); gains the image check and the shell surfaces (PB11, PB12)                         |
