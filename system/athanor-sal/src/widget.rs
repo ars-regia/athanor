@@ -698,6 +698,9 @@ pub enum Event {
     Changed(WidgetId),
     /// A field's committed text changed, or [`Ui::set_text`] changed a widget's text.
     Edited(WidgetId),
+    /// Enter was pressed in a single-line field, as GTK's `GtkEntry::activate`: the form it
+    /// belongs to may submit. A text area breaks the line instead.
+    Activated(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
     /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
@@ -2848,7 +2851,8 @@ impl Ui {
     /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
-    /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
+    /// and never leave it, as GTK's `TextView`; Enter in a single-line field is
+    /// [`Event::Activated`]. Escape, focused widget or not, is
     /// [`Event::Escape`], and in a dialog's widgets the window's Close, but while a focused field
     /// shows the input method's preedit: the input method's to cancel, as GTK's input method
     /// filters keys before a dialog's bindings.
@@ -2874,6 +2878,7 @@ impl Ui {
                         field.insert(cx, "\n");
                         true
                     }
+                    Key::Enter => return Some(Event::Activated(id)),
                     Key::Backspace => {
                         field.backspace(cx);
                         true
@@ -4596,6 +4601,29 @@ mod tests {
             Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
             _ => None,
         }
+    }
+
+    #[test]
+    fn enter_activates_a_single_line_field_and_breaks_a_text_areas_line() {
+        let mut ui = Ui::new("Join", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        let secret = ui.password(Ui::ROOT, "Password");
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        ui.set_focus(Some(name));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"), "Enter types nothing");
+        ui.set_focus(Some(secret));
+        ui.commit("hunter2");
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(secret)));
+        assert_eq!(ui.password_text(secret), Some("hunter2"));
+        ui.set_focus(Some(area));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Edited(area)));
+        assert_eq!(ui.field_text(area).as_deref(), Some("\n"));
+        // A press activates nothing: only Enter submits, as in GTK's entries.
+        let r = ui.widget(name).rect;
+        ui.pointer_press(r.x + 1.0, r.y + 1.0, PointerButton::Primary);
+        assert_eq!(ui.pointer_release(r.x + 1.0, r.y + 1.0, PointerButton::Primary), None);
     }
 
     #[test]
