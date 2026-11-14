@@ -45,3 +45,8 @@ wayland-client = { workspace = true }
 # The fixture binds the unstable protocols: tablet, pointer gestures, decoration, foreign.
 wayland-protocols = { workspace = true, features = ["unstable"] }
 wayland-protocols-wlr = { workspace = true }
+
+[package.metadata.cargo-machete]
+# bitflags: the code wayland_scanner::generate_client_code! expands names `bitflags::bitflags!` for the bitfield enums.
+# calloop: only turns on the `signals` feature of Smithay's calloop, which shutdown.rs reaches through smithay::reexports.
+ignored = ["bitflags", "calloop"]
