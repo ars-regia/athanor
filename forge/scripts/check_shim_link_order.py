@@ -41,6 +41,11 @@ def problems(libraries):
 
 
 def gtk_libraries(libraries):
+    if not libraries:
+        return [
+            "readelf lists no NEEDED entry: not a dynamically linked binary, so its direct"
+            " dependencies, the only ones checked, cannot be read"
+        ]
     return [
         f"{name} is a direct dependency of a surface drawn without GTK"
         for name in libraries
