@@ -74,12 +74,14 @@ pub struct Failure {
 }
 
 impl Failure {
-    /// Adds the note, hidden, as the last child of `page`, the page's column.
-    pub fn new(ui: &mut Ui, page: WidgetId) -> Failure {
+    /// Adds the note, hidden, as the last child of `page`, the page's column, a secondary line
+    /// of `look`.
+    pub fn new(ui: &mut Ui, page: WidgetId, look: &Look) -> Failure {
         let note = ui.add(
             page,
             athanor_sal::Kind::Label(tr("The action did not complete.")),
         );
+        look.note(ui, note);
         ui.set_visible(note, false);
         Failure { page, note }
     }
@@ -109,7 +111,7 @@ mod tests {
     fn the_note_shows_only_on_a_page_on_screen_and_hides_with_it() {
         let mut ui = Ui::new("Test", Theme::default(), false);
         let page = ui.add(Ui::ROOT, athanor_sal::Kind::Column);
-        let failure = Failure::new(&mut ui, page);
+        let failure = Failure::new(&mut ui, page, &Look::plain());
         assert!(!ui.is_visible(failure.note));
 
         ui.set_visible(page, false);

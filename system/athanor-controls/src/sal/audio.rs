@@ -10,7 +10,7 @@ use athanor_services::audio::{self, AudioCommand, AudioState, Device};
 use athanor_services::media::MediaCommand;
 use tokio::sync::mpsc;
 
-use super::widgets::{column, switch_row, Failure};
+use super::widgets::{column, switch_row, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -329,7 +329,14 @@ impl Page {
 
     /// Adds the page's widgets as a column under `parent`, showing the models' state, and
     /// returns the column. `icons` draws the media buttons; without it they show their names.
-    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, icons: Option<MediaIcons>) -> WidgetId {
+    /// The artist and a failure's note are secondary lines of `look`.
+    pub fn build(
+        &mut self,
+        ui: &mut Ui,
+        parent: WidgetId,
+        icons: Option<MediaIcons>,
+        look: &Look,
+    ) -> WidgetId {
         let title = || TextStyle {
             weight: 600,
             ..TextStyle::default()
@@ -347,6 +354,7 @@ impl Page {
         let track = ui.add(column, Kind::Label(String::new()));
         ui.set_text_style(track, title());
         let artist = ui.add(column, Kind::Label(String::new()));
+        look.note(ui, artist);
         let controls = ui.add(column, Kind::Row);
         let names = [tr("Previous track"), tr("Pause"), tr("Next track")];
         let (buttons, faces) = match icons {
@@ -371,7 +379,7 @@ impl Page {
             ui.set_tooltip(*button, Some(name));
         }
         let [previous, play, next] = buttons;
-        let failure = Failure::new(ui, page);
+        let failure = Failure::new(ui, page, look);
         self.ids = Some(Ids {
             output,
             input,
@@ -534,7 +542,7 @@ mod tests {
         assert!(page.face().is_none(), "no device: the surface hides its button");
         publish(&page, speakers_and_headset());
         let mut ui = Ui::new("Sound", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT, None);
+        page.build(&mut ui, Ui::ROOT, None, &Look::plain());
         let Some(ids) = &page.ids else {
             unreachable!("built");
         };
@@ -563,7 +571,7 @@ mod tests {
         let (mut page, mut received) = page();
         publish(&page, speakers_and_headset());
         let mut ui = Ui::new("Sound", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT, None);
+        page.build(&mut ui, Ui::ROOT, None, &Look::plain());
         let Some(ids) = &page.ids else {
             unreachable!("built");
         };

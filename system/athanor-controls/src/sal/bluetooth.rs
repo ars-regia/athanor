@@ -150,7 +150,7 @@ impl Page {
                 (row, device)
             })
             .collect();
-        let failure = Failure::new(ui, page);
+        let failure = Failure::new(ui, page, look);
         self.ids = Some(Ids {
             power,
             paired,

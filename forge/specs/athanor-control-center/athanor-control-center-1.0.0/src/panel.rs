@@ -506,13 +506,13 @@ impl Panel {
                 let page = pages
                     .audio
                     .get_or_insert_with(|| audio::Page::new(services));
-                page.build(ui, parent, media);
+                page.build(ui, parent, media, &look(icons, secondary));
             }
             Page::Battery => {
                 let page = pages
                     .battery
                     .get_or_insert_with(|| battery::Page::new(services));
-                page.build(ui, parent);
+                page.build(ui, parent, &look(icons, secondary));
                 page.opened(ui);
             }
         }

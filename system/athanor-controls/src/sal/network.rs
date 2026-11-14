@@ -395,7 +395,7 @@ impl Page {
         let connect = ui.add(buttons, Kind::Button(tr("Connect")));
         ui.set_visible(password, false);
 
-        let failure = Failure::new(ui, page);
+        let failure = Failure::new(ui, page, look);
         self.ids = Some(Ids {
             list,
             wired,

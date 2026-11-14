@@ -10,7 +10,7 @@ use athanor_sal::{Event, Kind, TextStyle, Ui, WidgetId};
 use athanor_services::battery::{self, BatteryCommand, BatteryState, Profiles};
 use tokio::sync::mpsc;
 
-use super::widgets::{column, Failure};
+use super::widgets::{column, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::tr;
@@ -118,8 +118,9 @@ impl Page {
     }
 
     /// Adds the page's widgets as a column under `parent`, showing the model's state, and
-    /// returns the column. A page built again, in a new [`Ui`], leaves the old one's widgets.
-    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId) -> WidgetId {
+    /// returns the column, the time left and a failure's note as secondary lines of `look`. A
+    /// page built again, in a new [`Ui`], leaves the old one's widgets.
+    pub fn build(&mut self, ui: &mut Ui, parent: WidgetId, look: &Look) -> WidgetId {
         let title = || TextStyle {
             weight: 600,
             ..TextStyle::default()
@@ -129,6 +130,7 @@ impl Page {
         let charge = ui.add(summary, Kind::Label(String::new()));
         ui.set_text_style(charge, title());
         let note = ui.add(summary, Kind::Label(String::new()));
+        look.note(ui, note);
 
         // Columns, not groups: the GTK page's boxes give assistive technologies no group.
         let profiles_section = column(ui, page);
@@ -156,7 +158,7 @@ impl Page {
                 1.0,
                 50.0,
             );
-        let failure = Failure::new(ui, page);
+        let failure = Failure::new(ui, page, look);
         self.ids = Some(Ids {
             charge,
             note,
@@ -316,7 +318,7 @@ mod tests {
     fn the_page_shows_the_charge_the_profiles_offered_and_the_brightness() {
         let (mut page, _) = page();
         let mut ui = Ui::new("Battery", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &Look::plain());
         assert_eq!(page.turn(&mut ui), Turn::Unchanged, "nothing new");
         publish(&page, laptop());
         assert_eq!(page.turn(&mut ui), Turn::Updated);
@@ -325,6 +327,7 @@ mod tests {
         };
         assert!(matches!(&ui.widget(ids.charge).kind, Kind::Label(t) if t == "72 %"));
         assert!(matches!(&ui.widget(ids.note).kind, Kind::Label(t) if t == "3 h 20 min left"));
+        assert_eq!(ui.widget(ids.note).text_style(), &Look::plain().caption);
         let shown: Vec<_> = ids
             .profiles
             .iter()
@@ -361,7 +364,7 @@ mod tests {
     fn the_persons_choices_go_to_the_model_and_a_refusal_shows_the_note() {
         let (mut page, mut received) = page();
         let mut ui = Ui::new("Battery", Theme::default(), false);
-        page.build(&mut ui, Ui::ROOT);
+        page.build(&mut ui, Ui::ROOT, &Look::plain());
         publish(&page, laptop());
         page.turn(&mut ui);
         let Some(ids) = &page.ids else {
