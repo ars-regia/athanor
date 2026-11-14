@@ -227,12 +227,6 @@ fn shown() -> LayerOptions {
     options
 }
 
-/// Whether the field `field` of `ui` holds a query that is selected whole.
-fn selected_whole(ui: &Ui, field: WidgetId) -> bool {
-    ui.field_text(field)
-        .is_some_and(|text| !text.is_empty() && ui.field_selection(field) == Some(text))
-}
-
 fn empty(look: &Look, rtl: bool) -> Ui {
     let mut ui = Ui::new("", look.panel.clone(), rtl);
     ui.min_width = 1.0;
@@ -279,6 +273,23 @@ fn panel(look: &Look, rtl: bool, size: (f32, f32), height: f32) -> (Ui, Panel) {
     probe.layout();
     let around = probe.island_fill(parts.island).map_or(0.0, |fill| fill.h);
     skeleton(look, rtl, size, height, (height - around).max(0.0))
+}
+
+/// The panel as [`panel`] lays it out, with `text` in the focused query and its selection at
+/// the byte offsets `range` of its anchor and focus.
+fn query_panel(
+    look: &Look,
+    rtl: bool,
+    size: (f32, f32),
+    height: f32,
+    text: &str,
+    range: (usize, usize),
+) -> (Ui, Panel) {
+    let (mut ui, panel) = panel(look, rtl, size, height);
+    ui.set_field_text(panel.field, text);
+    ui.set_focus(Some(panel.field));
+    ui.set_field_range(panel.field, range);
+    (ui, panel)
 }
 
 /// What the launcher reads of a key of the toolkit's.
@@ -422,8 +433,9 @@ impl Launcher {
         }
         self.preview.set_scale(f64::from(scale(&output)));
         self.shown = Some(surface);
+        // The query kept from the last Show is selected, so typing replaces it.
         let text = self.memory.shown(asked).unwrap_or_default();
-        self.build(shell, surface, &text, logical_size(&output));
+        self.build(shell, surface, &text, (0, text.len()), logical_size(&output));
         if let Err(err) = shell.set_layer(surface, &shown()) {
             tracing::error!(error = %err, "cannot show the launcher's surface");
         }
@@ -433,20 +445,23 @@ impl Launcher {
         if let Err(err) = shell.set_accessible(surface, true) {
             tracing::error!(error = %err, "the launcher's surface is not in the accessibility tree");
         }
-        // The query kept from the last Show is selected, so typing replaces it.
-        if let (Some(ui), Some(panel)) = (shell.ui_mut(surface), self.panel) {
-            ui.set_focus(Some(panel.field));
-            ui.key(SalKey::SelectAll);
-        }
         if !text.is_empty() {
             self.engine.query(&text);
         }
         self.asked = Some(asked);
     }
 
-    /// Lays the panel out on `surface`, `size` large, with `text` in the query, the rows and
-    /// the card of now, and the selection kept.
-    fn build(&mut self, shell: &mut Shell, surface: SurfaceId, text: &str, size: (f32, f32)) {
+    /// Lays the panel out on `surface`, `size` large, with `text` in the query and its
+    /// selection at the byte offsets `range`, the rows and the card of now, and the selected
+    /// row kept.
+    fn build(
+        &mut self,
+        shell: &mut Shell,
+        surface: SurfaceId,
+        text: &str,
+        range: (usize, usize),
+        size: (f32, f32),
+    ) {
         let Some(output) = self.output_of(surface) else {
             return;
         };
@@ -457,9 +472,7 @@ impl Launcher {
         let selected = self.selected_id(shell);
         // The menu is a popup of a row about to be replaced.
         self.close_menu(shell);
-        let (mut ui, panel) = panel(&self.look, self.rtl, size, height);
-        ui.set_field_text(panel.field, text);
-        ui.set_focus(Some(panel.field));
+        let (mut ui, panel) = query_panel(&self.look, self.rtl, size, height, text, range);
         if self.following {
             ui.set_active_descendant(panel.field, Some(panel.list));
         }
@@ -645,19 +658,16 @@ impl Launcher {
         self.rebuild(shell, surface, panel, size);
     }
 
-    /// Lays the shown panel out again at `size`, with its query. A query selected whole, as
-    /// the one kept from the last Show is, stays selected, so typing still replaces it: in a
-    /// session the surface's first configure is smaller than the output, by the bar's
-    /// exclusive zone, and comes after the Show.
+    /// Lays the shown panel out again at `size`, with its query where it was: its caret and
+    /// its selection stay, so typing goes on as before. In a session the surface's first
+    /// configure is smaller than the output, by the bar's exclusive zone, and comes after the
+    /// Show.
     fn rebuild(&mut self, shell: &mut Shell, surface: SurfaceId, panel: Panel, size: (f32, f32)) {
         let Some(ui) = shell.ui(surface) else { return };
         let text = ui.field_text(panel.field).unwrap_or_default();
-        let whole = selected_whole(ui, panel.field);
-        self.build(shell, surface, &text, size);
-        if let (true, Some(ui), Some(panel)) = (whole, shell.ui_mut(surface), self.panel) {
-            ui.set_focus(Some(panel.field));
-            ui.key(SalKey::SelectAll);
-        }
+        // While an input method composes there is none: the caret goes to the start.
+        let range = ui.field_range(panel.field).unwrap_or_default();
+        self.build(shell, surface, &text, range, size);
     }
 
     fn apply(&mut self, shell: &mut Shell, change: Change) {
@@ -897,7 +907,6 @@ impl Application for Launcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_sal::Theme;
 
     #[test]
     fn a_toggle_before_any_output_shows_the_launcher_at_the_first_one() {
@@ -915,15 +924,56 @@ mod tests {
         assert!(!waiting.served(true), "and nothing waits");
     }
 
+    /// The query of a panel laid out at a first size, after `edit`, and of the panel laid out
+    /// again at a second size from its text and range, as a rebuild does.
+    fn laid_out_again(text: &str, range: (usize, usize), edit: &[SalKey]) -> (Ui, Panel, Ui, Panel) {
+        let look = look::look(&Appearance::default());
+        let (mut first, before) = query_panel(&look, false, (1280.0, 800.0), 500.0, text, range);
+        for key in edit {
+            first.key(key.clone());
+        }
+        let text = first.field_text(before.field).unwrap_or_default();
+        let range = first.field_range(before.field).unwrap_or_default();
+        let (again, after) = query_panel(&look, false, (1280.0, 760.0), 480.0, &text, range);
+        (first, before, again, after)
+    }
+
+    // A field has no Home or End: the caret moves by the arrows.
+    const RIGHT: SalKey = SalKey::Right;
+    const SELECT_LEFT: SalKey = SalKey::SelectLeft;
+
     #[test]
-    fn a_query_is_selected_whole_only_when_all_of_it_is() {
-        let mut ui = Ui::new("t", Theme::default(), false);
-        let field = ui.field(Ui::ROOT, "Search", "");
-        assert!(!selected_whole(&ui, field), "an empty field");
-        ui.set_field_text(field, "firefox");
-        ui.set_focus(Some(field));
-        assert!(!selected_whole(&ui, field), "the caret only");
-        ui.key(SalKey::SelectAll);
-        assert!(selected_whole(&ui, field));
+    fn a_rebuild_keeps_the_querys_caret_and_selection() {
+        let cases: [(&str, &[SalKey], (usize, usize)); 4] = [
+            ("the caret in the middle", &[RIGHT; 5], (5, 5)),
+            ("a partial selection", &[RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, RIGHT, SELECT_LEFT, SELECT_LEFT], (7, 5)),
+            ("the caret at the end", &[RIGHT; 7], (7, 7)),
+            ("the caret at the start", &[], (0, 0)),
+        ];
+        for (case, edit, range) in cases {
+            let (first, before, mut again, after) = laid_out_again("firefox", (0, 0), edit);
+            assert_eq!(first.field_range(before.field), Some(range), "{case}: the edit");
+            assert_eq!(again.field_range(after.field), Some(range), "{case}");
+            assert_eq!(
+                again.field_selection(after.field),
+                first.field_selection(before.field),
+                "{case}"
+            );
+            again.key(SalKey::Text("X".into()));
+            let typed = {
+                let (start, end) = (range.0.min(range.1), range.0.max(range.1));
+                format!("{}X{}", &"firefox"[..start], &"firefox"[end..])
+            };
+            assert_eq!(again.field_text(after.field), Some(typed), "{case}: typing goes on");
+        }
+    }
+
+    #[test]
+    fn the_query_kept_from_the_last_show_is_selected_whole_and_stays_so() {
+        let (first, before, mut again, after) = laid_out_again("firefox", (0, 7), &[]);
+        assert_eq!(first.field_selection(before.field).as_deref(), Some("firefox"));
+        assert_eq!(again.field_selection(after.field).as_deref(), Some("firefox"));
+        again.key(SalKey::Text("g".into()));
+        assert_eq!(again.field_text(after.field).as_deref(), Some("g"), "typing replaces it");
     }
 }
