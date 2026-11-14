@@ -7,7 +7,9 @@
 # requirements.txt. DIR becomes that environment: put DIR/bin first on PATH, and python3 then
 # has PyYAML for the D43 lint of verify.py workflows. The archives stay in DIR/download.
 #
-# Usage: install-tools.sh DIR
+# cargo-mutants joins them when ATHANOR_INSTALL_MUTANTS=1.
+#
+# Usage: [ATHANOR_INSTALL_MUTANTS=1] install-tools.sh DIR
 set -euo pipefail
 
 dir=${1:?usage: install-tools.sh DIR}
@@ -35,6 +37,11 @@ RUFF_URL=https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-
 RUFF_SHA256=85e76bbb60e708a22624b31efb227e8bdaa6978177b93c146d352de4caf37ba1
 REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0.0/registry_3.0.0_linux_amd64.tar.gz
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
+# cargo-mutants, which the weekly mutation job runs (scripts/ci/mutants.sh); it is not part of
+# `just check`, so it is installed only when ATHANOR_INSTALL_MUTANTS=1. The digest matches the one
+# GitHub reports for the release asset.
+CARGO_MUTANTS_URL=https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz
+CARGO_MUTANTS_SHA256=dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e
 
 # fetch URL SHA256 FILE: downloads URL to FILE and fails unless FILE has digest SHA256.
 # curl's own --retry gives up within seconds; a GitHub release download answered 504 for
@@ -67,3 +74,7 @@ fetch "$COSIGN_URL" "$COSIGN_SHA256" "$dir/download/cosign"
 install -m 0755 "$dir/download/cosign" "$dir/bin/cosign"
 fetch "$REGISTRY_URL" "$REGISTRY_SHA256" "$dir/download/registry.tar.gz"
 tar -xzf "$dir/download/registry.tar.gz" -C "$dir/bin" registry
+if [ "${ATHANOR_INSTALL_MUTANTS:-}" = 1 ]; then
+    fetch "$CARGO_MUTANTS_URL" "$CARGO_MUTANTS_SHA256" "$dir/download/cargo-mutants.tar.gz"
+    tar -xzf "$dir/download/cargo-mutants.tar.gz" -C "$dir/bin" cargo-mutants
+fi

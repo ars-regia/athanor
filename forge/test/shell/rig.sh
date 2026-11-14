@@ -28,7 +28,8 @@
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
 #   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
-#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
+#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through;
+#                           RIG_CARGO_MUTANTS=<path> mounts that cargo-mutants binary (scripts/ci/mutants.sh)
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
@@ -826,6 +827,7 @@ cargo)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        ${RIG_CARGO_MUTANTS:+-v "$RIG_CARGO_MUTANTS:/usr/local/bin/cargo-mutants:ro"} \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
 toolkit-gpu)

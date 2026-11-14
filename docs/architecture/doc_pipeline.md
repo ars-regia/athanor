@@ -185,7 +185,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks; *amended on 2026-11-11 by the maintainer:* and Smithay, weekly); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
 | `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green, no NVIDIA lock moves and the kernel closes no Fedora security advisory (PL55), and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
-| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard, CodeQL |
+| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard, CodeQL, cargo-mutants (its own `alert-mutants` job) |
 
 ### 3.2 Reusable stages and composite actions
 
@@ -548,7 +548,9 @@ alert of PL51; findings without a fix are listed in the weekly statistics.
 
 **PL28. Static analysis runs on every pull request** through `just check` (clippy, ruff,
 shellcheck, actionlint, cargo deny) and CodeQL runs weekly for Rust, Python and the
-workflows. cargo-machete fails a pull request that declares a dependency no source uses. (SSDF PW.7, PW.8; Scorecard SAST.)
+workflows; a weekly cargo-mutants job in `maintenance.yml` (`scripts/ci/mutants.sh`) reports
+the mutants that the tests of `athanor-sal` and the platform crates under `system/` do not
+catch, and fails only when the run itself fails. cargo-machete fails a pull request that declares a dependency no source uses. (SSDF PW.7, PW.8; Scorecard SAST.)
 
 ### 4.8 Acceptance, VSA and promotion
 
@@ -1141,8 +1143,9 @@ no job restores is removed, and the
 ## 8. Observability
 
 **PL51. A scheduled run that fails is seen.** Every scheduled workflow ends with a job that
-runs the `alert` composite action on a GitHub-hosted runner once every other job has ended,
-whatever its result, so that a job whose runner was lost or that timed out is seen as well.
+runs the `alert` composite action on a GitHub-hosted runner once the jobs it reports have ended,
+whatever their result (every other job; the hours-long `mutants` job of `maintenance.yml` has an
+`alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
 it on the next success. No scheduled failure stays silent. Today `kernel-weekly.yml` and
 `maintenance.yml` end with that job; the other scheduled workflows gain it with PB2 (section
