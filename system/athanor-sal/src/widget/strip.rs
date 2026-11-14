@@ -25,6 +25,22 @@ pub(super) fn measure_center(sizes: &[(f32, f32)]) -> (f32, f32) {
     (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
 }
 
+/// The x and the width of a child that runs from `start` to `end` along a strip at `x`,
+/// `width` wide, in reading order: mirrored in right to left, each edge measured from its own
+/// side of the strip, and an edge at 0 or at `width` placed on the strip's edge itself.
+pub(super) fn mirrored(x: f32, width: f32, start: f32, end: f32, rtl: bool) -> (f32, f32) {
+    let w = end - start;
+    if !rtl {
+        return (x + start, w);
+    }
+    if end == width {
+        // The far end in reading order is the left edge.
+        (x, width - start)
+    } else {
+        (x + (width - end), w)
+    }
+}
+
 /// Where the middle child of a centre box `width` wide starts, `w` wide between a start
 /// child `start` wide and an end child `end` wide: centred on the whole box, and moved aside
 /// only as far as the start and end children need, as GTK's `CenterBox`.
@@ -40,22 +56,36 @@ impl Ui {
         let gap = self.theme.gap;
         let outer = self.widgets[id].rect;
         let h = (outer.h - 2.0 * pad[1]).max(0.0);
-        let mut cx = if self.rtl {
-            x + outer.w - pad[0]
+        // The children that fill split what the others leave of the width, as GTK's hexpand.
+        // Each from the width its measure gave it, so that placing again without a measure,
+        // as a scroll does, gives the same widths.
+        let shown = self.visible_children(id);
+        let inner = (outer.w - 2.0 * pad[0]).max(0.0);
+        let fills = shown.iter().filter(|&&c| self.widgets[c].fill).count();
+        let gaps = gap * shown.len().saturating_sub(1) as f32;
+        let used = shown.iter().map(|&c| self.widgets[c].natural_w).sum::<f32>() + gaps;
+        let spare = inner - used;
+        let share = if fills > 0 && spare > 0.0 {
+            spare / fills as f32
         } else {
-            x + pad[0]
+            0.0
         };
-        for c in self.visible_children(id) {
-            let w = self.widgets[c].rect.w;
-            self.widgets[c].rect.h = h;
-            if self.rtl {
-                cx -= w;
-                self.place(c, cx, y + pad[1]);
-                cx -= gap;
+        let last = shown.len().saturating_sub(1);
+        let mut start = 0.0;
+        for (at, &c) in shown.iter().enumerate() {
+            let widget = &self.widgets[c];
+            let w = widget.natural_w + if widget.fill { share } else { 0.0 };
+            // With a share given out, the last child ends on the inner edge itself.
+            let end = if share > 0.0 && at == last {
+                inner
             } else {
-                self.place(c, cx, y + pad[1]);
-                cx += w + gap;
-            }
+                start + w
+            };
+            let (cx, cw) = mirrored(x + pad[0], inner, start, end, self.rtl);
+            self.widgets[c].rect.w = cw;
+            self.widgets[c].rect.h = h;
+            self.place(c, cx, y + pad[1]);
+            start += w + gap;
         }
     }
 
@@ -116,11 +146,52 @@ impl Ui {
         });
         self.add(parent, Kind::Inline { padding })
     }
+
+    /// Makes widget `id` take a share of the width its inline has to spare, as GTK's `hexpand`:
+    /// the children of an inline that fill split equally what the others leave of its width, and
+    /// an inline with a child shown that fills takes the width of its column or group. Elsewhere
+    /// it changes nothing. Whether it changed; call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_fill(&mut self, id: WidgetId, fill: bool) -> bool {
+        let widget = &mut self.widgets[id];
+        let changed = widget.fill != fill;
+        widget.fill = fill;
+        changed
+    }
+
+    /// Splits row `id` into at least `slots` equal cells, as the columns of a homogeneous GTK
+    /// grid: with fewer children shown, the cells past them stay empty at the end edge. 0 gives
+    /// each child shown a cell. Whether it changed: `false` for a widget that is not a row. Call
+    /// [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_slots(&mut self, id: WidgetId, slots: usize) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Row) || widget.slots == slots {
+            return false;
+        }
+        widget.slots = slots;
+        true
+    }
+
+    /// Whether `id` is an inline with a child shown that fills, which takes its column's width.
+    pub(super) fn inline_fills(&self, id: WidgetId) -> bool {
+        matches!(self.widgets[id].kind, Kind::Inline { .. })
+            && self.widgets[id]
+                .children
+                .iter()
+                .any(|&c| self.widgets[c].fill && self.widgets[c].visible)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Kind, Rect, Theme, Ui};
+    use crate::{Kind, Rect, Theme, Ui, WidgetId};
 
     fn theme() -> Theme {
         Theme {
@@ -203,6 +274,41 @@ mod tests {
     }
 
     #[test]
+    fn a_child_that_fills_takes_the_spare_width_and_its_inline_the_columns() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Strip", theme(), rtl);
+            ui.min_width = 400.0;
+            let plain = ui.inline(Ui::ROOT, [0.0, 0.0]);
+            let alone = ui.add(plain, Kind::Button("Alone".into()));
+            let inline = ui.inline(Ui::ROOT, [4.0, 0.0]);
+            let mute = ui.add(inline, Kind::Button("Mute".into()));
+            let volume = ui.slider(inline, "Volume", 0.0, 100.0, 1.0, 50.0);
+            let open = ui.add(inline, Kind::Button("Open".into()));
+            let Some(volume) = volume else {
+                unreachable!("a valid range");
+            };
+            assert!(ui.set_fill(volume, true));
+            assert!(!ui.set_fill(volume, true), "already filling");
+            ui.layout();
+            let (p, a) = (ui.widget(plain).rect, ui.widget(alone).rect);
+            assert_eq!(p.w, a.w, "no child fills: the inline keeps its width");
+            let (i, m, v, o) = (
+                ui.widget(inline).rect,
+                ui.widget(mute).rect,
+                ui.widget(volume).rect,
+                ui.widget(open).rect,
+            );
+            assert_eq!(i.w, 400.0, "it takes the column's width");
+            assert_eq!(m.w + v.w + o.w + 2.0 * 2.0 + 8.0, 400.0, "no width left");
+            if rtl {
+                assert_eq!((m.x + m.w, o.x), (396.0, 4.0));
+            } else {
+                assert_eq!((m.x, o.x + o.w), (4.0, 396.0));
+            }
+        }
+    }
+
+    #[test]
     fn a_huge_padding_still_gives_a_finite_size() {
         for padding in [[2e38, 0.0], [0.0, 2e38], [f32::MAX, f32::MAX]] {
             let mut ui = Ui::new("Strip", theme(), false);
@@ -214,6 +320,23 @@ mod tests {
             assert!(finite(ui.widget(child).rect), "{padding:?}");
             assert!(w.is_finite() && h.is_finite(), "{padding:?}");
         }
+    }
+
+    #[test]
+    fn a_row_with_slots_keeps_a_cell_for_each_slot() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        ui.min_width = 202.0;
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let only = ui.add(row, Kind::Button("Wi-Fi".into()));
+        assert!(ui.set_slots(row, 2));
+        assert!(!ui.set_slots(row, 2), "already two");
+        assert!(!ui.set_slots(only, 2), "not a row");
+        ui.layout();
+        assert_eq!(ui.widget(only).rect.w, 100.0, "half the row, less the gap");
+        assert_eq!(ui.widget(only).rect.x, 0.0);
+        assert!(ui.set_slots(row, 0));
+        ui.layout();
+        assert_eq!(ui.widget(only).rect.w, 202.0, "one cell for its one child");
     }
 
     #[test]
@@ -300,5 +423,187 @@ mod tests {
         assert_eq!(ui.hit(probe.0, probe.1), None, "never hit");
         assert!(!crate::focus::chain(&ui).contains(&fourth), "never focused");
         assert!(three.iter().all(|&c| ui.is_visible(c)));
+    }
+
+    /// Whether two sums of floats agree: an edge computed as x + w carries their rounding.
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 1e-3
+    }
+
+    /// An inline of `labels` under a root `width` wide, the ones `fill` names filling.
+    fn filled(width: f32, theme: Theme, rtl: bool, labels: &[(&str, bool)]) -> (Ui, WidgetId, Vec<WidgetId>) {
+        let mut ui = Ui::new("Strip", theme, rtl);
+        ui.min_width = width;
+        let inline = ui.inline(Ui::ROOT, [4.0, 0.0]);
+        let children = labels
+            .iter()
+            .map(|&(label, fill)| {
+                let child = ui.add(inline, Kind::Button(label.into()));
+                ui.set_fill(child, fill);
+                child
+            })
+            .collect();
+        ui.layout();
+        (ui, inline, children)
+    }
+
+    #[test]
+    fn several_children_that_fill_split_the_spare_equally() {
+        for rtl in [false, true] {
+            let (ui, inline, c) = filled(
+                400.0,
+                theme(),
+                rtl,
+                &[("A", true), ("Plain", false), ("A longer one", true)],
+            );
+            let mut alone = Ui::new("Strip", theme(), rtl);
+            let natural: Vec<f32> = ["A", "A longer one"]
+                .iter()
+                .map(|label| {
+                    let id = alone.add(Ui::ROOT, Kind::Button((*label).into()));
+                    alone.layout();
+                    alone.widget(id).rect.w
+                })
+                .collect();
+            let (a, p, b) = (ui.widget(c[0]).rect, ui.widget(c[1]).rect, ui.widget(c[2]).rect);
+            assert!((a.w - natural[0] - (b.w - natural[1])).abs() < 1e-3, "equal shares");
+            assert!((a.w + p.w + b.w + 2.0 * 2.0 + 8.0 - 400.0).abs() < 1e-3);
+            let i = ui.widget(inline).rect;
+            if rtl {
+                assert!(close(a.x + a.w, i.x + i.w - 4.0));
+                assert_eq!(b.x, i.x + 4.0, "the last child on the left edge");
+            } else {
+                assert_eq!(a.x, i.x + 4.0);
+                assert!(close(b.x + b.w, i.x + i.w - 4.0));
+            }
+        }
+    }
+
+    #[test]
+    fn children_that_all_fill_end_on_both_edges() {
+        let (ui, inline, c) = filled(300.0, theme(), false, &[("One", true), ("Two", true), ("Three", true)]);
+        let i = ui.widget(inline).rect;
+        let (first, last) = (ui.widget(c[0]).rect, ui.widget(c[2]).rect);
+        assert_eq!(first.x, i.x + 4.0);
+        assert!(close(last.x + last.w, i.x + i.w - 4.0));
+    }
+
+    #[test]
+    fn no_spare_width_leaves_a_filling_child_at_its_own() {
+        let (mut ui, inline, c) = filled(0.0, theme(), false, &[("Mute", false), ("Volume", true)]);
+        let natural = ui.widget(c[1]).rect.w;
+        assert_eq!(ui.widget(inline).rect.w, ui.widget(c[0]).rect.w + natural + 2.0 + 8.0, "no spare");
+        // Narrower than its children: they keep their widths and overflow, never shrink.
+        ui.widgets[inline].rect.w = 10.0;
+        ui.place_inline(inline, 0.0, 0.0, [4.0, 0.0]);
+        assert_eq!(ui.widget(c[1]).rect.w, natural);
+        assert!(ui.widget(c[0]).rect.w > 0.0);
+    }
+
+    #[test]
+    fn a_hidden_child_that_fills_leaves_its_share_to_the_others() {
+        let (mut ui, inline, c) = filled(400.0, theme(), false, &[("A", true), ("B", true), ("C", false)]);
+        ui.set_visible(c[0], false);
+        ui.layout();
+        let (b, last, i) = (ui.widget(c[1]).rect, ui.widget(c[2]).rect, ui.widget(inline).rect);
+        assert_eq!(b.x, i.x + 4.0, "the hidden child keeps no room");
+        assert!(close(last.x + last.w, i.x + i.w - 4.0));
+        assert!((b.w + last.w + 2.0 + 8.0 - 400.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn fractional_widths_still_end_on_the_inner_edge_in_both_directions() {
+        let theme = Theme {
+            gap: 2.7,
+            margin: 0.0,
+            ..Theme::default()
+        };
+        for width in [300.1, 333.3, 357.7, 400.3, 411.9, 512.7] {
+            for rtl in [false, true] {
+                let (ui, inline, c) = filled(
+                    width,
+                    theme.clone(),
+                    rtl,
+                    &[("Mute", false), ("Volume", true), ("Seek", true), ("Open the page", false)],
+                );
+                let i = ui.widget(inline).rect;
+                let (first, last) = (ui.widget(c[0]).rect, ui.widget(c[3]).rect);
+                if rtl {
+                    assert!(close(first.x + first.w, i.x + i.w - 4.0), "{width}");
+                    assert_eq!(last.x, i.x + 4.0, "{width}: the last child on the left edge");
+                } else {
+                    assert_eq!(first.x, i.x + 4.0, "{width}");
+                    assert!(close(last.x + last.w, i.x + i.w - 4.0), "{width}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn placing_again_without_a_measure_keeps_the_widths() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        ui.min_width = 333.3;
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let inline = ui.inline(scroll, [4.0, 0.0]);
+        let mute = ui.add(inline, Kind::Button("Mute".into()));
+        let volume = ui.add(inline, Kind::Button("Volume".into()));
+        ui.set_fill(volume, true);
+        for n in 0..20 {
+            ui.add(scroll, Kind::Label(format!("Line {n}")));
+        }
+        ui.layout();
+        let before = (ui.widget(mute).rect.w, ui.widget(volume).rect.w);
+        for _ in 0..50 {
+            ui.scroll_by(scroll, 1.3);
+        }
+        assert_eq!((ui.widget(mute).rect.w, ui.widget(volume).rect.w), before);
+    }
+
+    #[test]
+    fn a_row_with_more_children_than_slots_gives_each_a_cell() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        ui.min_width = 304.0;
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        ui.set_slots(row, 2);
+        let cells: Vec<_> = ["A", "B", "C"].iter().map(|l| ui.add(row, Kind::Button((*l).into()))).collect();
+        ui.layout();
+        let widths: Vec<f32> = cells.iter().map(|&c| ui.widget(c).rect.w).collect();
+        assert_eq!(widths, vec![100.0; 3]);
+        let last = ui.widget(cells[2]).rect;
+        assert_eq!(last.x + last.w, 304.0);
+    }
+
+    #[test]
+    fn slots_wider_than_the_row_give_empty_cells_never_negative_ones() {
+        let mut ui = Ui::new("Strip", theme(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        ui.set_slots(row, 4);
+        let only = ui.add(row, Kind::Button("A".into()));
+        ui.layout();
+        ui.widgets[row].rect.w = 5.0;
+        ui.place(row, 0.0, 0.0);
+        let r = ui.widget(only).rect;
+        assert_eq!(r.w, 0.0);
+        assert!(r.x.is_finite());
+    }
+
+    #[test]
+    fn a_row_with_slots_in_right_to_left_starts_at_the_right_edge() {
+        for width in [202.0, 333.3, 411.9] {
+            let mut ui = Ui::new("Strip", Theme { gap: 2.7, margin: 0.0, ..Theme::default() }, true);
+            ui.min_width = width;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            ui.set_slots(row, 3);
+            let cells: Vec<_> = ["A", "B", "C"].iter().map(|l| ui.add(row, Kind::Button((*l).into()))).collect();
+            ui.set_visible(cells[2], false);
+            ui.layout();
+            let (first, second) = (ui.widget(cells[0]).rect, ui.widget(cells[1]).rect);
+            assert!(close(first.x + first.w, width), "the first cell at the right edge");
+            assert!(second.x + second.w < first.x, "the second to its left");
+            assert!(second.x > 0.0, "the third cell stays empty at the left");
+            ui.set_visible(cells[2], true);
+            ui.layout();
+            assert_eq!(ui.widget(cells[2]).rect.x, 0.0, "{width}: the last cell on the left edge");
+        }
     }
 }
