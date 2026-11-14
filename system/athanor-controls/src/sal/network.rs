@@ -556,13 +556,14 @@ impl Page {
     }
 
     /// Takes the request of NetworkManager that waits for a page. The prompt of a network the
-    /// person is joining stays: the request is answered as canceled.
+    /// person is joining stays: the request's reply is dropped, which NetworkManager hears as
+    /// NoSecrets, as the GTK page's `return` dropped it; the person canceled nothing.
     fn take_offer(&mut self) {
         let Some(page) = self.service.offered.take() else {
             return;
         };
         if self.asking.is_some() {
-            self.service.answer(None);
+            self.service.pending.take();
             return;
         }
         self.asking = Some(Asked {
@@ -973,6 +974,31 @@ mod tests {
         assert_eq!(warnings.0.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert!(page.service.pending.take().is_none());
         assert!(page.wants_close());
+    }
+
+    #[test]
+    fn a_request_while_the_person_joins_a_network_is_dropped_not_canceled() {
+        let (mut page, _received, mut ui) = page(state(
+            vec![network("Home Network", Security::Personal { sae: false })],
+            vec![],
+        ));
+        let row = ids(&page).rows[0].0;
+        click(&mut page, &mut ui, row);
+        type_password(&mut page, &mut ui, "correct");
+        let (reply, mut answer) = oneshot::channel();
+        let offered = PasswordPage {
+            label: "Other".to_owned(),
+            security: Security::Personal { sae: false },
+            retry: false,
+        };
+        assert_eq!(page.service.offer(offered, reply), Some(1));
+        page.turn(&mut ui);
+        // Dropped, as the GTK page did: NetworkManager hears NoSecrets, not UserCanceled.
+        assert!(matches!(
+            answer.try_recv(),
+            Err(oneshot::error::TryRecvError::Closed)
+        ));
+        assert_eq!(ui.password_text(ids(&page).field), Some("correct"), "the join's prompt stays");
     }
 
     #[test]
