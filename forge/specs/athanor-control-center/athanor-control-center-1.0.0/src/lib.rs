@@ -99,8 +99,8 @@ pub fn focused_output(activated: Option<&[String]>, outputs: &[Option<String>]) 
 pub struct Grants {
     /// Directories written below: the control center's own state, its runtime directory,
     /// dconf's (GSettings maps its shared-memory flag there to read the appearance), the
-    /// cache (fontconfig's), the unit's private `/tmp`, the launch sockets, and the
-    /// directories of the COSMIC theme that the dark-mode tile writes.
+    /// cache (fontconfig's), the launch sockets, and the directories of the COSMIC theme that
+    /// the dark-mode tile writes. No `/tmp`: GTK wrote there at start, Sal does not.
     pub write: Vec<PathBuf>,
     /// Device nodes opened for writing.
     pub devices: Vec<PathBuf>,
@@ -116,7 +116,6 @@ pub fn grants(dirs: &Dirs, state: &Path, theme_dirs: &[PathBuf], rfkill: bool) -
         dirs.runtime.join("dconf"),
         launch_dir(dirs),
         dirs.cache.clone(),
-        PathBuf::from("/tmp"),
     ];
     write.extend_from_slice(theme_dirs);
     // /dev/rfkill is CC8's. Sal draws with vello_cpu into shared memory: no DRM node.
@@ -260,7 +259,6 @@ mod tests {
             "/run/user/1000/dconf",
             "/run/user/1000/athanor",
             "/home/u/.cache",
-            "/tmp",
         ]
         .map(String::from)
         .to_vec();
@@ -321,7 +319,7 @@ mod tests {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
         let grants = grants(&dirs(), state, &[], false);
         assert!(grants.devices.is_empty(), "{:?}", grants.devices);
-        assert_eq!(grants.write.len(), 6, "no theme directory to grant either");
+        assert_eq!(grants.write.len(), 5, "no theme directory to grant either");
     }
 
     /// The ruleset the grants build is enforceable and confines a thread: a write outside the
