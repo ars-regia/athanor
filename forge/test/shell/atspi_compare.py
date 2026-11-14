@@ -62,8 +62,10 @@ BUTTONS = {"button", "push button", "toggle button", "check box"}
 # button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
 # switch, a sibling that repeats its name, where the toolkit's switch draws both as one widget:
 # that label counts as part of the switch. Both rules hold only for a check box that names a
-# switch of the gallery (the `switch` and `enable` keys of its strings.tsv): a real check box,
-# whatever its label, said as a toggle button still fails. Nor does AccessKit give a toggle button
+# switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
+# center (orca_compare.CONTROL_CENTER_SWITCHES; maintainer, 2026-11-14), whose toggle button is the
+# role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box, whatever its label, said as a
+# toggle button still fails. Nor does AccessKit give a toggle button
 # the `checkable` state (accesskit_atspi_common 0.21.0, node.rs:336, which adds it only to a
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").

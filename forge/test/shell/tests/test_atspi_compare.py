@@ -192,6 +192,23 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual(failures, ["label 'Option one': missing"])
 
+    def test_a_control_center_switch_and_the_label_beside_it_are_a_toggle_button(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        for name in ("Mute microphone", "Silenzia il microfono"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable", "checked"]), depth=1),
+            ]
+            lines, failures = compare.compare(
+                reference, [node("toggle button", name, ["pressed"])]
+            )
+            self.assertEqual((len(lines), failures), (1, []))
+        _, failures = compare.compare(
+            [node("check box", "Speakers")], [node("toggle button", "Speakers")]
+        )
+        self.assertEqual(failures, ["check box 'Speakers': role 'toggle button'"])
+
     def test_a_list_box_is_a_list(self):
         reference = [node("list", "A list", ["focusable", "showing"])]
         lines, failures = compare.compare(reference, [node("list box", "A list", ["focusable", "showing"])])
