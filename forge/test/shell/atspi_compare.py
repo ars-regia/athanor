@@ -56,9 +56,11 @@ SAME_ROLE = [
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button, and extended the rule to check boxes on
 # 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too, and to a label at any
-# depth inside the button on 2026-11-14: the GTK panel's tile holds its title in a box in a box. A
-# label under any other parent is its own element, as the title under the window.
-BUTTONS = {"button", "push button", "toggle button", "check box"}
+# depth inside the button on 2026-11-14: the GTK panel's tile holds its title in a box in a box,
+# and to radio buttons on 2026-11-14: a GtkCheckButton in a group is a radio button that holds its
+# label the same way. A label under any other parent is its own element, as the title under the
+# window.
+BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"}
 # A switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
 # switch, a sibling that repeats its name, where the toolkit's switch draws both as one widget:

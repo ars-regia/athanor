@@ -102,6 +102,16 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual((len(lines), failures), (1, []))
 
+    def test_a_label_that_repeats_its_radio_buttons_name_is_the_radio_button(self):
+        # The maintainer extended the rule to radio buttons on 2026-11-14.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Balanced"), depth=1)]
+        lines, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual((len(lines), failures), (1, []))
+        # A label inside the radio button that repeats no name of it stays its own element.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Default"), depth=1)]
+        _, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual(failures, ["label 'Default': missing"])
+
     def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
         reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
         lines, failures = compare.compare(reference, [node("button", "Close")])
