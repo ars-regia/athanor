@@ -1732,7 +1732,7 @@ def check_shipped():
     exempt = set()
     if exempt_file.exists():
         exempt = {ln.strip() for ln in read(exempt_file).split("\n")
-                  if l.strip() and not l.startswith("#")}
+                  if ln.strip() and not ln.startswith("#")}
 
     built = crates_built_by_specs()
     for m in members:
