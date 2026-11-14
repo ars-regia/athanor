@@ -213,8 +213,8 @@ jobs:
 
   alert:
     # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
-    # success closes it. A job of its own on a GitHub runner, after the others whatever their
-    # result.
+    # success closes it. A job of its own on a GitHub runner, after every job but `mutants`, which
+    # `alert-mutants` reports, whatever their result.
     needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql]
     if: ${{ always() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
