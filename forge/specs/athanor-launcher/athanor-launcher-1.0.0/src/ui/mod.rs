@@ -825,12 +825,14 @@ impl Application for Launcher {
         self.follow_size(shell);
     }
 
-    /// §5 item 1: from the Show call to the panel's first frame.
+    /// §5 item 1: from the Show call to the panel's first frame, with the output it is on.
     fn drawn(&mut self, _shell: &mut Shell, surface: SurfaceId) {
         if self.shown == Some(surface) {
             if let Some(asked) = self.asked.take() {
+                let output = self.output_of(surface).and_then(|output| output.name.as_deref());
                 tracing::info!(
                     ms = u64::try_from(asked.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    output = output.unwrap_or(""),
                     "shown"
                 );
             }
