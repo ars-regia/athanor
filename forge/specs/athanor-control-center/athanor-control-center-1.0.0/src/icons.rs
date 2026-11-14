@@ -1,6 +1,7 @@
 //! The symbolic icons the panel draws, read once for each size and scale and drawn in the
 //! text's colour, as GTK recolours them.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use athanor_sal::{IconTheme, Image, Rgba};
@@ -51,15 +52,10 @@ impl Icons {
         let (theme, scale, tint) = (&self.theme, self.scale, self.tint);
         // The sizes are the tokens' few whole numbers.
         let size = size as u16;
-        // In a right-to-left reading the theme's `-rtl` variant comes first, as GTK's lookup
-        // takes it: a back arrow points to the reading's start.
-        let mirrored = self.rtl.then(|| format!("{name}-rtl"));
+        let rtl = self.rtl;
         self.images
             .entry((name, size))
-            .or_insert_with(|| match mirrored
-                .and_then(|name| theme.image(&name, size, scale).ok())
-                .map_or_else(|| theme.image(name, size, scale), Ok)
-            {
+            .or_insert_with(|| match theme.image(&reading(theme, name, size, scale, rtl), size, scale) {
                 Ok(image) => Some(image.tinted(tint)),
                 Err(error) => {
                     tracing::warn!(icon = name, %error, "the panel's icon is unavailable");
@@ -67,5 +63,47 @@ impl Icons {
                 }
             })
             .clone()
+    }
+}
+
+/// The name `name` is read under: in a right-to-left reading the theme's `-rtl` variant when
+/// it has one, as GTK's lookup takes it, so that a back arrow points to the reading's start.
+/// The theme's image draws a fallback for a name it lacks, so the variant is looked up first.
+fn reading<'a>(theme: &IconTheme, name: &'a str, size: u16, scale: u16, rtl: bool) -> Cow<'a, str> {
+    let mirrored = format!("{name}-rtl");
+    if rtl && theme.lookup(&mirrored, size, scale).is_some() {
+        Cow::Owned(mirrored)
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A right-to-left reading takes the `-rtl` variant the theme has, and the plain name of an
+    /// icon that has none: the theme's fallback is no variant.
+    #[test]
+    fn a_right_to_left_reading_takes_the_variant_the_theme_has() -> std::io::Result<()> {
+        let root = std::env::temp_dir().join(format!("athanor-cc-icons-{}", std::process::id()));
+        let apps = root.join("t/apps");
+        std::fs::create_dir_all(&apps)?;
+        std::fs::write(
+            root.join("t/index.theme"),
+            "[Icon Theme]\nDirectories=apps\n[apps]\nSize=16\nType=Fixed\n",
+        )?;
+        for name in ["back", "back-rtl", "radio"] {
+            std::fs::write(apps.join(format!("{name}.svg")), "<svg/>")?;
+        }
+        let theme = IconTheme::new(vec![root.clone()], "t");
+        let names = [
+            reading(&theme, "back", 16, 1, true),
+            reading(&theme, "radio", 16, 1, true),
+            reading(&theme, "back", 16, 1, false),
+        ];
+        std::fs::remove_dir_all(&root)?;
+        assert_eq!(names, ["back-rtl", "radio", "back"]);
+        Ok(())
     }
 }
