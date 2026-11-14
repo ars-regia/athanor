@@ -15,13 +15,9 @@ rules:
         - tests/
         - fuzz/
     patterns:
-      # Any visibility. A body that is only `true`, `Ok(true)` or `Ok(())`, returned or not.
+      # Any visibility. A body that is only `true`, `Ok(true)` or `Ok(())`: semgrep matches a
+      # `return x;` pattern on a tail expression `x` as well.
       - pattern-either:
-          - patterns:
-              - pattern: 'fn $F(...) -> $R { $V }'
-              - metavariable-regex:
-                  metavariable: $V
-                  regex: '^(?:Ok\(\s*(?:true|\(\s*\))\s*\)|true)$'
           - pattern: 'fn $F(...) -> $R { return true; }'
           - pattern: 'fn $F(...) -> $R { return Ok(true); }'
           - pattern: 'fn $F(...) -> $R { return Ok(()); }'
