@@ -93,7 +93,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        Kind::Button(label) | Kind::IconButton { label, .. } => {
+        Kind::Button(label)
+        | Kind::IconButton { label, .. }
+        | Kind::LabelledButton { label, .. } => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
@@ -141,6 +143,27 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
                 (false, _) => Role::Button,
             });
             node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        // A tile: a toggle button, as GTK's ToggleButton, pressed while on, and described by its
+        // second line, as the GTK panel's tiles are.
+        Kind::Tile(crate::tile::Tile {
+            title: label,
+            subtitle,
+            active,
+            ..
+        }) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(label.as_str());
+            if !subtitle.is_empty() {
+                node.set_description(subtitle.as_str());
+            }
             node.set_toggled(if *active {
                 Toggled::True
             } else {
@@ -282,13 +305,16 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_has_popup(HasPopup::Menu);
         node.set_expanded(expanded);
     }
-    if let Some(description) = ui.description(id) {
+    // A tile's second line stays its description over a tooltip, as the GTK panel sets the
+    // description after the tooltip its name gives.
+    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty());
+    if let Some(description) = ui.description(id).filter(|_| !second_line) {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if has_row_label(ui, id) {
+    if shown_label(ui, id).is_some() {
         children.push(row_label_id(id));
     }
     if id == Ui::ROOT && ui.announcement.is_some() {
@@ -343,17 +369,24 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
     }
 }
 
-/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
-/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
-fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    if !has_row_label(ui, id) {
-        return None;
+/// The text widget `id` shows as a label inside it: a list heading's, a list row's unless it
+/// shows widgets of its own, and a labelled button's when it shows one.
+fn shown_label(ui: &Ui, id: WidgetId) -> Option<&str> {
+    match &ui.widget(id).kind {
+        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => Some(text),
+        Kind::LabelledButton { text, .. } if !text.is_empty() => Some(text),
+        _ => None,
     }
-    let (Kind::ListRow(text) | Kind::ListHeading(text)) = &ui.widget(id).kind else {
-        return None;
-    };
+}
+
+/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
+/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label. A
+/// labelled button's text is a label inside it the same way, as the GtkLabel of a GTK button
+/// whose name is set apart.
+fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
+    let text = shown_label(ui, id)?;
     let mut label = Node::new(Role::Label);
-    label.set_value(text.as_str());
+    label.set_value(text);
     label.set_bounds(bounds(ui, id, scale));
     Some((row_label_id(id), label))
 }

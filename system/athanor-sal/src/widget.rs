@@ -10,6 +10,7 @@ use std::cell::Cell;
 use std::fmt;
 use std::time::{Duration, Instant};
 
+pub(crate) mod labelled;
 mod rows;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
@@ -296,6 +297,10 @@ pub enum Kind {
     /// it with [`Ui::slider`], which keeps its range valid; change its value with
     /// [`Ui::set_value`] and its range with [`Ui::set_range`].
     Slider(Slider),
+    /// A tile of the control center: a toggle of its own with an icon in a disc, a title and a
+    /// second line, 64 logical pixels tall at least (VL7). It fills the width of its column or
+    /// group, or its cell in a row, and raises [`Event::Toggled`]. Add it with [`Ui::tile`].
+    Tile(crate::tile::Tile),
     /// A drop-down, as GTK's `DropDown`: a raised button that shows its chosen item and opens
     /// its items in a menu, where choosing one raises [`Event::Changed`]. Activating it raises
     /// [`Event::Clicked`], which the driver takes to open the menu. Add it with [`Ui::drop_down`].
@@ -427,6 +432,24 @@ pub enum Kind {
         /// A line in the accent colour along this side, for an application that holds the
         /// focus, as the GTK dock's inset shadow.
         indicator: Option<crate::driver::Side>,
+    },
+    /// A flat button that shows an image beside a text, as a GTK button holding a box of an
+    /// image and a label: named by its label for assistive technologies, which read the text
+    /// it shows as a label inside it. Activating it raises [`Event::Clicked`]. Its content
+    /// is centred, the image at the start, the theme's gap between the two; it is at least
+    /// the theme's `button_min` on each side, with the theme's padding added left and right,
+    /// as [`Kind::IconButton`]. Its text takes [`Ui::set_text_style`]. Add it with
+    /// [`Ui::labelled_button`].
+    #[non_exhaustive]
+    LabelledButton {
+        /// The name assistive technologies read.
+        label: String,
+        /// The image, drawn in a square of `size` logical pixels; none shows the text alone.
+        image: Option<crate::icon::Image>,
+        /// The side of the image's square, in logical pixels.
+        size: f32,
+        /// The text shown after the image; empty shows the image alone.
+        text: String,
     },
 }
 
@@ -599,6 +622,7 @@ impl Widget {
                     | Kind::Toggle { .. }
                     | Kind::Check { .. }
                     | Kind::Switch { .. }
+                    | Kind::Tile(_)
                     | Kind::IconToggle(_)
                     | Kind::Slider(_)
                     | Kind::DropDown(_)
@@ -607,6 +631,7 @@ impl Widget {
                     | Kind::WindowButton(_)
                     | Kind::MenuItem(_)
                     | Kind::IconButton { .. }
+                    | Kind::LabelledButton { .. }
                     | Kind::ListRow(_)
             )
     }
@@ -620,8 +645,8 @@ pub enum Event {
     Clicked(WidgetId),
     /// A toggle became the active one of its group.
     Selected(WidgetId),
-    /// A check button, a switch or an icon toggle was turned on or off; ask [`Ui::is_active`]
-    /// which.
+    /// A check button, a switch, a tile or an icon toggle was turned on or off; ask
+    /// [`Ui::is_active`] which.
     Toggled(WidgetId),
     /// A slider's value changed; ask [`Ui::value`] what it is.
     Changed(WidgetId),
@@ -1121,7 +1146,7 @@ impl Ui {
     }
 
     /// Whether `id` is a toggle that is the active one of its group, or a check button that is
-    /// checked, or a switch or an icon toggle that is on.
+    /// checked, or a switch, a tile or an icon toggle that is on.
     ///
     /// # Panics
     ///
@@ -1132,16 +1157,17 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::Tile(crate::tile::Tile { active: true, .. })
                 | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
         )
     }
 
-    /// Sets the state of the toggle, check button, switch or icon toggle `id` as activating it
-    /// would, without moving the focus, and returns the event the activation raises:
-    /// [`Event::Toggled`] for a check button, a switch or an icon toggle, [`Event::Selected`]
-    /// for a toggle, which becomes the active one of its group and releases the others. Only
-    /// another toggle of its group releases a toggle, as a click does, so setting one inactive
-    /// changes nothing. `None`, and nothing
+    /// Sets the state of the toggle, check button, switch, tile or icon toggle `id` as
+    /// activating it would, without moving the focus, and returns the event the activation
+    /// raises: [`Event::Toggled`] for a check button, a switch, a tile or an icon toggle,
+    /// [`Event::Selected`] for a toggle, which becomes the active one of its group and releases
+    /// the others. Only another toggle of its group releases a toggle, as a click does, so
+    /// setting one inactive changes nothing. `None`, and nothing
     /// changes, for another kind and for the state the widget already has. An insensitive
     /// widget is set as well.
     ///
@@ -1158,6 +1184,10 @@ impl Ui {
                 active: ref mut now,
                 ..
             }
+            | Kind::Tile(crate::tile::Tile {
+                active: ref mut now,
+                ..
+            })
             | Kind::IconToggle(crate::icon_toggle::IconToggle {
                 active: ref mut now,
                 ..
@@ -1189,8 +1219,9 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button or
-    /// an icon toggle; the description of an image; what a drop-down is for, its description
+    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button,
+    /// a labelled button, whose shown text [`Ui::set_shown_text`] sets, or an icon toggle; the
+    /// title of a tile; the description of an image; what a drop-down is for, its description
     /// ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text
     /// changed. `None`,
     /// and nothing changes, for the same text, for a field or a text area, whose text
@@ -1216,6 +1247,8 @@ impl Ui {
             | Kind::Check { label: t, .. }
             | Kind::Switch { label: t, .. }
             | Kind::IconButton { label: t, .. }
+            | Kind::Tile(crate::tile::Tile { title: t, .. })
+            | Kind::LabelledButton { label: t, .. }
             | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
             | Kind::List { name: t, .. }
             | Kind::Image { description: t, .. }
@@ -1626,9 +1659,10 @@ impl Ui {
         widget.description.as_deref().or(widget.tooltip.as_deref())
     }
 
-    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check or a switch,
-    /// from its next layout; a field keeps the body text. `false`, and nothing changes, for a
-    /// scale that is not a finite number above zero and for a removed widget.
+    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check, a switch
+    /// or a labelled button's shown text, from its next layout; a field keeps the body text.
+    /// `false`, and nothing changes, for a scale that is not a finite number above zero and for
+    /// a removed widget.
     ///
     /// # Panics
     ///
@@ -1844,7 +1878,7 @@ impl Ui {
     pub fn is_flat(&self, id: WidgetId) -> bool {
         let widget = &self.widgets[id];
         match widget.kind {
-            Kind::MenuItem(_) | Kind::IconButton { .. } => true,
+            Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::LabelledButton { .. } => true,
             Kind::Button(_) => widget
                 .parent
                 .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
@@ -1887,7 +1921,8 @@ impl Ui {
         let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
         // Height for width: a wrapping label asks for a width that does not depend on the one its
-        // place gives it, so a second pass breaks its lines at that width and settles the heights.
+        // place gives it, so a second pass breaks its lines at that width and settles the heights;
+        // a tile's second line ends in an ellipsis at its place's width the same way.
         if self.rewrap() {
             (w, h) = self.measure(Self::ROOT);
             self.place(Self::ROOT, 0.0, 0.0);
@@ -1896,12 +1931,16 @@ impl Ui {
         self.size
     }
 
-    /// Records the width each wrapping label was placed at; whether one changed.
+    /// Records the width each wrapping label and each tile was placed at; whether one changed.
     pub(crate) fn rewrap(&mut self) -> bool {
         let mut changed = false;
         for widget in &mut self.widgets.slots {
             let w = Some(widget.rect.w);
-            if let Some((_, given, _)) = widget.wrap.as_mut().filter(|(_, given, _)| *given != w) {
+            let given = match &mut widget.kind {
+                Kind::Tile(tile) => Some(&mut tile.placed),
+                _ => widget.wrap.as_mut().map(|(_, given, _)| given),
+            };
+            if let Some(given) = given.filter(|given| **given != w) {
                 *given = w;
                 changed = true;
             }
@@ -1921,6 +1960,7 @@ impl Ui {
         let (margin, section_gap) = (t.margin, t.section_gap);
         let (min_width, min_height) = (self.min_width, self.min_height);
         let (island_pad, button_min) = (t.island_padding, t.button_min);
+        let inks = [t.text, t.on_accent];
         let (control_border, control_min) = (t.control_border, t.control_min_height);
         let rtl = self.rtl;
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
@@ -1954,6 +1994,14 @@ impl Ui {
             Kind::Picture { .. } => (0.0, 0.0),
             // GTK's box: the padding outside the minimum, across the line of text only.
             Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
+            Kind::Tile(tile) => crate::tile::measure(
+                tile,
+                &mut self.text,
+                &mut widget.text,
+                (size, pad, gap, rtl),
+                &style,
+                inks,
+            ),
             // A raised button: the padding on every side, and at least the smallest button.
             Kind::IconToggle(toggle) => {
                 let side = (toggle.size + pad).max(button_min);
@@ -1997,6 +2045,20 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::LabelledButton {
+                image, size: side, text, ..
+            } => {
+                let shown = (!text.is_empty()).then(|| self.text.layout(text, size, rtl, &style));
+                let wh = labelled::measure(
+                    image.as_ref().map(|_| *side),
+                    shown.as_ref().map(|l| (l.width(), l.height())),
+                    gap,
+                    pad,
+                    button_min,
+                );
+                widget.text = shown;
+                wh
+            }
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 let w = widest * sizes.len() as f32 + spacing;
@@ -2218,6 +2280,7 @@ impl Ui {
                             | Kind::Group(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
+                            | Kind::Tile(_)
                             | Kind::Slider(_)
                             | Kind::Level(_)
                             | Kind::Scroll { .. }
@@ -2316,8 +2379,8 @@ impl Ui {
     }
 
     /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
-    /// its group, a check button, a switch or an icon toggle turns over, a list's row becomes its
-    /// selected one.
+    /// its group, a check button, a switch, a tile or an icon toggle turns over, a list's row
+    /// becomes its selected one.
     /// Each takes the focus.
     ///
     /// # Panics
@@ -2329,12 +2392,15 @@ impl Ui {
         }
         self.set_focus(Some(id));
         match self.widgets[id].kind {
-            Kind::Button(_) | Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::DropDown(_) => {
-                Some(Event::Clicked(id))
-            }
+            Kind::Button(_)
+            | Kind::MenuItem(_)
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. }
+            | Kind::DropDown(_) => Some(Event::Clicked(id)),
             Kind::WindowButton(button) => Some(Event::Window(button)),
             Kind::Check { ref mut active, .. }
             | Kind::Switch { ref mut active, .. }
+            | Kind::Tile(crate::tile::Tile { ref mut active, .. })
             | Kind::IconToggle(crate::icon_toggle::IconToggle { ref mut active, .. }) => {
                 *active = !*active;
                 Some(Event::Toggled(id))
