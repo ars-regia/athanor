@@ -161,6 +161,13 @@ class CompareTest(unittest.TestCase):
             [f"{reference!r}: missing"],
         )
 
+    def test_the_vpn_of_the_control_center_fixture_is_heard_as_a_switch(self):
+        lines, failures = compare.compare(
+            ["Office VPN check box not checked."], ["Office VPN toggle button not pressed."]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Office VPN toggle button not pressed.'", lines[0])
+
     def test_a_control_center_switch_the_catalog_lacks_is_named(self):
         compare.control_center_labels.cache_clear()
         try:

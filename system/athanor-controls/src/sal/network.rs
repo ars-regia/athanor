@@ -377,7 +377,7 @@ impl Page {
             .map(|state| state.vpns.clone())
             .unwrap_or_default()
             .into_iter()
-            .map(|vpn| (ui.check(vpns, &vpn.label, vpn.link != Link::Idle), vpn))
+            .map(|vpn| (switch_row(ui, vpns, &vpn.label, vpn.link != Link::Idle), vpn))
             .collect();
         drop(state);
 
@@ -803,7 +803,7 @@ mod tests {
         assert!(ui.is_visible(ids.wired) && ui.is_visible(ids.list));
         assert_eq!(ui.widget(ids.wired).text_style(), &Look::plain().caption);
         assert!(!ui.is_visible(ids.password));
-        assert!(matches!(&ui.widget(ids.vpn_rows[0].0).kind, Kind::Check { label, .. } if label == "Office VPN"));
+        assert!(matches!(&ui.widget(ids.vpn_rows[0].0).kind, Kind::Switch { label, .. } if label == "Office VPN"));
     }
 
     #[test]

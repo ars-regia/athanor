@@ -45,8 +45,9 @@ from golden_report import exemptions
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a line that
 # names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the
-# control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs; maintainer,
-# 2026-11-14) with the role and the state words together is rewritten: a real check box, whatever
+# control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of its
+# fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) with the role and the state
+# words together is rewritten: a real check box, whatever
 # its label, spoken as a toggle button still fails.
 
 
@@ -99,8 +100,17 @@ def control_center_labels(*msgids):
     return texts
 
 
+# A VPN's switch is named by its NetworkManager connection, not by a catalog: the fixture's
+# (forge/test/shell/system_fixtures.py), the same in every language.
+CONTROL_CENTER_FIXTURE_SWITCHES = ("Office VPN",)
+
+
 def switch_labels():
-    return gallery_labels("switch", "enable") + control_center_labels(*CONTROL_CENTER_SWITCHES)
+    return (
+        gallery_labels("switch", "enable")
+        + control_center_labels(*CONTROL_CENTER_SWITCHES)
+        + list(CONTROL_CENTER_FIXTURE_SWITCHES)
+    )
 
 
 SWITCH_SPEECH = {
