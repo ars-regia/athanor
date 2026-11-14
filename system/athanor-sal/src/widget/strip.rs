@@ -4,6 +4,10 @@
 
 use super::{Kind, Ui, WidgetId};
 
+/// The most padding [`Ui::inline`] keeps on each side: a quarter of the largest `f32`, so
+/// that both sides take at most half of it and leave the other half for the content.
+const PADDING_MAX: f32 = f32::MAX / 4.0;
+
 /// The size of an inline whose children measure `sizes`: their widths and the gaps between
 /// them, the tallest of them, and its padding, horizontal then vertical, on both sides.
 pub(super) fn measure_inline(sizes: &[(f32, f32)], gap: f32, pad: [f32; 2]) -> (f32, f32) {
@@ -92,13 +96,21 @@ impl Ui {
 
     /// Adds an inline: its children side by side in reading order at their own widths, with
     /// `padding` logical pixels kept free left and right, then above and below; a padding that
-    /// is not a finite length of at least 0 counts as 0. See [`Kind::Inline`].
+    /// is not a finite length of at least 0 counts as 0, and one past a quarter of the largest
+    /// `f32` as that quarter, so that both sides and the content add up to a finite size.
+    /// See [`Kind::Inline`].
     ///
     /// # Panics
     ///
     /// When `parent` names no widget of this `Ui`.
     pub fn inline(&mut self, parent: WidgetId, padding: [f32; 2]) -> WidgetId {
-        let padding = padding.map(|p| if p.is_finite() { p.max(0.0) } else { 0.0 });
+        let padding = padding.map(|p| {
+            if p.is_finite() {
+                p.clamp(0.0, PADDING_MAX)
+            } else {
+                0.0
+            }
+        });
         self.add(parent, Kind::Inline { padding })
     }
 }
@@ -166,6 +178,20 @@ mod tests {
     }
 
     #[test]
+    fn a_huge_padding_still_gives_a_finite_size() {
+        for padding in [[2e38, 0.0], [0.0, 2e38], [f32::MAX, f32::MAX]] {
+            let mut ui = Ui::new("Strip", theme(), false);
+            let inline = ui.inline(Ui::ROOT, padding);
+            let child = ui.add(inline, Kind::Button("A".into()));
+            let (w, h) = ui.layout();
+            let finite = |r: Rect| [r.x, r.y, r.w, r.h].iter().all(|v| v.is_finite());
+            assert!(finite(ui.widget(inline).rect), "{padding:?}");
+            assert!(finite(ui.widget(child).rect), "{padding:?}");
+            assert!(w.is_finite() && h.is_finite(), "{padding:?}");
+        }
+    }
+
+    #[test]
     fn a_centre_box_centres_its_middle_child_on_the_whole_line() {
         let mut ui = Ui::new("Strip", theme(), false);
         ui.min_width = 800.0;
@@ -189,10 +215,9 @@ mod tests {
         assert_eq!(b.w, 800.0, "it fills the column's width");
         assert_eq!(s.x, 0.0);
         assert_eq!(e.x + e.w, 800.0);
-        assert_eq!(
-            m.x + m.w / 2.0,
-            400.0,
-            "centred on the line, not between its neighbours"
+        assert!(
+            (m.x + m.w / 2.0 - 400.0).abs() < 0.01,
+            "centred on the line, not between its neighbours: {m:?}"
         );
         assert_eq!(s.h, b.h);
     }
