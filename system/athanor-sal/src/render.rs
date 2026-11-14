@@ -362,7 +362,12 @@ pub fn paint<C: Canvas>(
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
-            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
+            Kind::Column
+            | Kind::Row
+            | Kind::Group(_)
+            | Kind::Alert(_)
+            | Kind::Menu
+            | Kind::Scroll { .. } => {}
             Kind::Island { .. } => {
                 if let Some(fill) = island {
                     ctx.set_paint(color(t.island));
