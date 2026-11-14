@@ -18,4 +18,4 @@ rules:
       - pattern-regex: '(?m)^[ \t]*def[ \t]+(?P<F>\w+)\([^)]*\)[^:\n]*:[ \t]*\n[ \t]+return[ \t]+True[ \t]*$'
       - metavariable-regex:
           metavariable: $F
-          regex: '(?i).*(?:verif|valid|auth|attest|trust|allow|permit|sign|seal|polkit|passw|token|cred)'
+          regex: '.*?(?:^|(?<=_)|(?<=[a-z0-9])(?=[A-Z]))(?:(?i:verif|auth|attest|trust|permit|seal|passw|token|cred)[a-z]*|(?i:valid)(?:ate|ates|ated|ating|ation|ator|ity)?|(?i:sign)(?:s|ed|er|ers|ing|ature|atures)?|(?i:allow)(?:s|ed|ing|list)?|(?i:polkit))(?=_|$|[A-Z0-9])'

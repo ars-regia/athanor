@@ -19,3 +19,8 @@ def validate(path):
     if not path.exists():
         return False
     return True
+
+
+# ok: unconditional-security-pass-script
+def handle_signal(signum, frame):
+    return True

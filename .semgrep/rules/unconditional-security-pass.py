@@ -18,3 +18,8 @@ def verify_signature(data, signature):
     if not KEY.verify(data, signature):
         return False
     return True
+
+
+# ok: unconditional-security-pass-python
+def handle_signal(signum, frame):
+    return True

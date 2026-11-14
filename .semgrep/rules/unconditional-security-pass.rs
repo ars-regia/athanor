@@ -15,6 +15,36 @@ impl Policy {
     }
 }
 
+// ruleid: unconditional-security-pass
+fn check_password(_user: &str, _password: &str) -> Result<(), Error> {
+    Ok(())
+}
+
+// ruleid: unconditional-security-pass
+fn is_signed(_path: &Path) -> bool {
+    return true;
+}
+
+// ruleid: unconditional-security-pass
+fn validate_seal(_seal: &Seal) -> Result<(), Error> {
+    return Ok(());
+}
+
+// ruleid: unconditional-security-pass
+fn isTrusted(_peer: &Peer) -> bool {
+    true
+}
+
+// ok: unconditional-security-pass
+fn handle_signal(_signal: i32) -> bool {
+    true
+}
+
+// ok: unconditional-security-pass
+fn invalidate_cache(&mut self) -> Result<(), Error> {
+    Ok(())
+}
+
 // ok: unconditional-security-pass
 fn verify_signature_real(data: &[u8], signature: &[u8]) -> bool {
     key().verify(data, signature).is_ok()
