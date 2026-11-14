@@ -1356,20 +1356,36 @@ def check_attestation_absent():
     return r
 
 
+def inherits_from_workspace(table):
+    """True if a manifest table takes any key from a parent workspace (`x = { workspace = true }`
+    or `x.workspace = true`, at any depth)."""
+    return isinstance(table, dict) and (
+        table.get("workspace") is True or any(inherits_from_workspace(v) for v in table.values()))
+
+
 def stale_lock_problems(locks, manifests):
-    """A Cargo.lock beside a Cargo.toml with no [workspace] table of its own is never read: cargo
-    takes the lock of the workspace root, and a crate the root excludes cannot inherit from it.
-    `locks` are paths relative to the root; `manifests` maps a lock's Cargo.toml to its text, or
-    to None when there is none, as beside a spec's source archive. A vendored crate keeps the
-    lock it was published with."""
+    """A Cargo.lock beside a crate that inherits from a parent workspace and has no [workspace]
+    table of its own is never read: cargo builds the crate with the parent's lock, or, when the
+    parent excludes it, cannot build it at all. A crate that inherits nothing is its own root and
+    keeps its lock. `locks` are paths relative to the root; `manifests` maps a lock's Cargo.toml
+    to its text, or to None when there is none, as beside a spec's source archive. A vendored
+    crate keeps the lock it was published with."""
     out = []
     for lock in sorted(locks):
         if "/vendor/" in f"/{lock}":
             continue
-        manifest = manifests.get(str(Path(lock).with_name("Cargo.toml")))
-        if manifest is not None and "workspace" not in tomllib.loads(manifest):
-            out.append(f"{lock}: no workspace root beside it, so cargo never reads it and its "
-                       f"pins only raise advisories; delete it")
+        name = str(Path(lock).with_name("Cargo.toml"))
+        text = manifests.get(name)
+        if text is None:
+            continue
+        try:
+            manifest = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            out.append(f"{name}: not valid TOML ({e})")
+            continue
+        if "workspace" not in manifest and inherits_from_workspace(manifest):
+            out.append(f"{lock}: its crate inherits from a parent workspace, so cargo never reads "
+                       f"this lock and its pins only raise advisories; delete it")
     return out
 
 
