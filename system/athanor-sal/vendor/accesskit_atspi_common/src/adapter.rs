@@ -322,6 +322,11 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
     }
 
     fn focus_moved(&mut self, old_node: Option<&NodeRef>, new_node: Option<&NodeRef>) {
+        if let Some(node) = new_node {
+            self.adapter
+                .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
+            self.emit_text_selection_change(None, node);
+        }
         if let (None, Some(new_node)) = (old_node, new_node) {
             if let Some(root_window) = root_window(new_node.tree_state) {
                 self.adapter.window_activated(&NodeWrapper(&root_window));
@@ -330,11 +335,6 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
             if let Some(root_window) = root_window(old_node.tree_state) {
                 self.adapter.window_deactivated(&NodeWrapper(&root_window));
             }
-        }
-        if let Some(node) = new_node {
-            self.adapter
-                .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
-            self.emit_text_selection_change(None, node);
         }
         if let Some(node) = old_node {
             self.adapter

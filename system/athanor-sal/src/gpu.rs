@@ -274,6 +274,9 @@ impl Painter {
             .flat_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. }
                 | Kind::IconButton { image, .. }
+                | Kind::LabelledButton {
+                    image: Some(image), ..
+                }
                 | Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
                 | Kind::Picture { image, .. } => vec![image.pixmap()],
                 // Both of a tile's glyphs, so that turning it over draws one already uploaded.

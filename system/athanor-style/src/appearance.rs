@@ -3,7 +3,9 @@
 //!
 //! The store is the GNOME keys `color-scheme`, `accent-color` and `high-contrast`, plus
 //! the two keys of `org.athanor.desktop.appearance` GNOME has no key for. A change written
-//! by any tool is the user's choice; nothing here keeps a copy that could disagree.
+//! by any tool is the user's choice; nothing here keeps a copy that could disagree. The
+//! system font's size is read from GNOME's `font-name` and `text-scaling-factor`, the keys
+//! GTK reads (VL6); `apply` never writes them.
 //!
 //! GIO aborts the process on a schema or a key it cannot find, and a panic is a loss of
 //! service here, so every schema and key is looked up before it is touched. One that is
@@ -132,7 +134,7 @@ impl AccentMode {
 }
 
 /// The user's appearance, as the store holds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Appearance {
     pub dark: bool,
     pub high_contrast: bool,
@@ -145,6 +147,97 @@ pub struct Appearance {
     /// GNOME's `enable-animations`: false is reduced motion (VL9). A store without the key
     /// keeps the animations on.
     pub animations: bool,
+    /// The size of body text in logical pixels: the size of GNOME's `font-name` at its
+    /// `text-scaling-factor`, as GTK sets it (VL6). The toolkit's type scale,
+    /// `sal::size`, multiplies it. A store without the keys reads as GTK's own default,
+    /// Adwaita Sans 11 at a factor of 1: 14.67 px.
+    pub font_size: f32,
+}
+
+/// GTK 4.20's `font-name` when the store has none (`gdk/wayland/gdksettings-wayland.c`).
+const DEFAULT_FONT: &str = "Adwaita Sans 11";
+/// GTK's size in points for a `font-name` that gives none or 0 (`DEFAULT_FONT_SIZE_PT` of
+/// `gtk/gtkcssenumvalue.c`).
+const DEFAULT_POINTS: f64 = 10.0;
+
+/// The range a system font's size is held to, in logical pixels: a size outside it would make
+/// the surfaces unreadable or larger than any output.
+const FONT_PX: std::ops::RangeInclusive<f64> = 4.0..=512.0;
+
+/// The size in logical pixels GTK 4.20 gives body text for `font_name`, a Pango font
+/// description, at `scaling`, GNOME's `text-scaling-factor`, as
+/// `gtk_css_font_size_get_default_px` computes it: a size in points at 96 dots per inch times
+/// the factor, one in pixels (`px`) as written. Pango takes the size from the last word, after
+/// up to two words of `#features` and `@variations`, and a comma ends the family before it
+/// (`pango_font_description_from_string`). A factor that is not a positive number counts as 1,
+/// a size that does not parse as GTK's 10 points, and the result is held to [`FONT_PX`]. Returns
+/// the size and what was corrected, empty when nothing was; [`warn_once`] logs it.
+fn font_px(font_name: &str, scaling: f64) -> (f32, String) {
+    let mut problems = Vec::new();
+    let scaling = if scaling.is_finite() && scaling > 0.0 {
+        scaling
+    } else {
+        problems.push(format!(
+            "text-scaling-factor {scaling} is not a positive number: 1 is used"
+        ));
+        1.0
+    };
+    let mut words = font_name.split_ascii_whitespace().rev().peekable();
+    for _ in 0..2 {
+        words.next_if(|word| word.starts_with(['#', '@']));
+    }
+    let word = words
+        .next()
+        .and_then(|word| word.rsplit(',').next())
+        .unwrap_or("");
+    let (number, pixels) = match word.strip_suffix("px") {
+        Some(number) => (number, true),
+        None => (word, false),
+    };
+    let px = match number.parse::<f64>() {
+        Ok(size) if size.is_finite() && size > 0.0 => {
+            if pixels {
+                size
+            } else {
+                size * 96.0 * scaling / 72.0
+            }
+        }
+        size => {
+            // A word that is no number is the family's, as Pango reads it, and "0" is GTK's
+            // own way of asking for its default: neither is worth a warning.
+            if word.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '-' | '+' | '.'))
+                && size != Ok(0.0)
+            {
+                problems.push(format!(
+                    "the size {word:?} of font-name {font_name:?} does not parse: 10 pt is used"
+                ));
+            }
+            DEFAULT_POINTS * 96.0 * scaling / 72.0
+        }
+    };
+    let held = px.clamp(*FONT_PX.start(), *FONT_PX.end());
+    if held != px {
+        problems.push(format!(
+            "font-name {font_name:?} at a factor of {scaling} gives {px} px: {held} px is used"
+        ));
+    }
+    (held as f32, problems.join("; "))
+}
+
+/// Logs `problem`, a correction of the system font's size, unless it is the one the last store
+/// read made, so that a store read again with the same keys does not log it again; an empty
+/// `problem`, a read with nothing to correct, forgets the last one. Returns whether it logged.
+fn warn_once(problem: String) -> bool {
+    thread_local! {
+        static LAST: Cell<String> = const { Cell::new(String::new()) };
+    }
+    let last = LAST.take();
+    let new = !problem.is_empty() && problem != last;
+    if new {
+        tracing::warn!("{problem}");
+    }
+    LAST.set(problem);
+    new
 }
 
 impl Default for Appearance {
@@ -157,6 +250,7 @@ impl Default for Appearance {
             accent_mode: AccentMode::Fixed,
             accent_computed: None,
             animations: true,
+            font_size: font_px(DEFAULT_FONT, 1.0).0,
         }
     }
 }
@@ -184,6 +278,10 @@ impl Store {
 
     fn boolean(&self, key: &str) -> Option<bool> {
         self.schema.has_key(key).then(|| self.settings.boolean(key))
+    }
+
+    fn double(&self, key: &str) -> Option<f64> {
+        self.schema.has_key(key).then(|| self.settings.double(key))
     }
 
     fn set_string(&self, key: &str, value: &str) -> io::Result<()> {
@@ -267,6 +365,17 @@ impl Stores {
                 .as_ref()
                 .and_then(|store| store.boolean("enable-animations"))
                 .unwrap_or(default.animations),
+            font_size: {
+                let (size, problem) = font_px(
+                    interface("font-name").as_deref().unwrap_or(DEFAULT_FONT),
+                    self.interface
+                        .as_ref()
+                        .and_then(|store| store.double("text-scaling-factor"))
+                        .unwrap_or(1.0),
+                );
+                warn_once(problem);
+                size
+            },
         }
     }
 
@@ -654,6 +763,74 @@ mod tests {
         for bad in ["", "9141ac", "#9141a", "#9141acff", "#9141ag", "#+141ac"] {
             assert_eq!(Rgb::from_hex(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_correction_of_the_font_size_is_logged_once_until_the_keys_change() {
+        // As `Stores::read` does: the defaults first, then the store's keys.
+        let read = |name| {
+            let _ = Appearance::default();
+            warn_once(font_px(name, 1.0).1)
+        };
+        assert!(read("Inter 1000000"), "a size held to the range is logged");
+        assert!(!read("Inter 1000000"), "the same keys read again are not");
+        assert!(!read("Inter 12"), "a valid size is not");
+        assert!(read("Inter 1000000"), "the bad size, back, is logged again");
+        assert!(read("Inter 0.0001"), "another bad size is logged");
+    }
+
+    #[test]
+    fn the_font_size_is_gtks_from_the_font_name_and_the_scaling_factor() {
+        let px = |name, scaling| (font_px(name, scaling).0 * 1000.0).round() / 1000.0;
+        assert_eq!(px("Adwaita Sans 11", 1.0), 14.667, "11 pt at 96 dpi");
+        assert_eq!(
+            Appearance::default().font_size,
+            font_px("Adwaita Sans 11", 1.0).0
+        );
+        assert_eq!(
+            px("Adwaita Sans 11", 1.25),
+            18.333,
+            "text-scaling-factor scales points"
+        );
+        assert_eq!(px("Inter Bold Italic 13.5", 1.0), 18.0);
+        assert_eq!(px("Cantarell,Sans 12", 1.0), 16.0);
+        assert_eq!(
+            px("Inter 12 @wght=450 #tnum=1", 1.0),
+            16.0,
+            "after variations, features"
+        );
+        assert_eq!(
+            px("Inter 12 @wght=450,wdth=100", 1.0),
+            16.0,
+            "a comma does not end a variation"
+        );
+        assert_eq!(
+            px("Inter 12 #tnum=1,liga=0", 1.0),
+            16.0,
+            "a comma does not end a feature"
+        );
+        assert_eq!(px("Inter 15px", 2.0), 15.0, "pixels are not scaled");
+        // No size, a size of 0 or a word that is not one: GTK's 10 pt.
+        for name in [
+            "",
+            "Inter",
+            "Inter 0",
+            "Inter 0px",
+            "Inter -3",
+            "Inter px",
+            "Inter 1e999",
+        ] {
+            assert_eq!(px(name, 1.0), 13.333, "{name:?}");
+        }
+        // A factor that is not a positive number counts as 1.
+        for scaling in [f64::NAN, f64::INFINITY, 0.0, -2.0] {
+            assert_eq!(px("Adwaita Sans 11", scaling), 14.667, "{scaling}");
+        }
+        // The result is held to 4..=512 px.
+        assert_eq!(px("Inter 1000000", 1.0), 512.0);
+        assert_eq!(px("Inter 0.0001", 1.0), 4.0);
+        assert_eq!(px("Inter 2000px", 1.0), 512.0);
+        assert_eq!(px("Adwaita Sans 11", 1e300), 512.0);
     }
 
     #[test]
