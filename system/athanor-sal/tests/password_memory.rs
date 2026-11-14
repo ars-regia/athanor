@@ -2,6 +2,10 @@
 //! This test binary's allocator hands out zeroed blocks and searches every block it takes back
 //! for the start of the secret, while the search is armed.
 
+// A test-only allocator is the only way to see that no freed block holds a copy of the secret;
+// it only delegates to the system's allocator and reads the blocks it is handed.
+#![allow(unsafe_code)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
