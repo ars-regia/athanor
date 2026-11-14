@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 mod alert;
 mod exact_value;
 mod horizontal;
+mod spacing;
 pub(crate) mod labelled;
 mod rows;
 mod strip;
@@ -611,6 +612,8 @@ pub struct Widget {
     pub(crate) fill: bool,
     /// Whether a group or an alert says it is horizontal: see [`Ui::set_horizontal`].
     pub(crate) horizontal: bool,
+    /// The room a column keeps between its children: see [`Ui::set_spacing`].
+    pub(crate) spacing: Option<f32>,
     /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
     /// shown a cell.
     pub(crate) slots: usize,
@@ -639,6 +642,7 @@ impl Widget {
             ink: None,
             fill: false,
             horizontal: false,
+            spacing: None,
             slots: 0,
             natural_w: 0.0,
         }
@@ -2062,7 +2066,7 @@ impl Ui {
         let spacing = gap * children.len().saturating_sub(1) as f32;
         let slots = self.widgets[id].slots;
         let between = match self.widgets[id].kind {
-            Kind::Column => section_gap,
+            Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
             _ => gap,
         };
         let widget = &mut self.widgets[id];
@@ -2248,7 +2252,7 @@ impl Ui {
             0.0
         };
         let gap = match self.widgets[id].kind {
-            Kind::Column => self.theme.section_gap,
+            Kind::Column => self.widgets[id].spacing.unwrap_or(self.theme.section_gap),
             _ => self.theme.gap,
         };
         let outer = self.widgets[id].rect;
