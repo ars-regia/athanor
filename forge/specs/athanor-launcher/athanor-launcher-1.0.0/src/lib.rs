@@ -5,6 +5,7 @@ pub mod list;
 pub mod menu;
 pub mod place;
 pub mod query;
+pub mod thumbnail;
 
 /// Device nodes the launcher may open for writing, besides the directories of its Landlock
 /// ruleset. `/dev/null` is what GSubprocess opens for STDOUT_SILENCE and STDERR_SILENCE

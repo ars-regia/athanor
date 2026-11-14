@@ -1,12 +1,15 @@
 //! ext-image-copy-capture-v1 of a window, named through ext-foreign-toplevel-list-v1 and the
 //! toplevel capture source (doc_own_stack.md, C1 task 4), or of an output, named by its
 //! wl_output through the output capture source (OS9 task 2). A window is drawn off screen at
-//! scale 1, an output as it draws itself, and either is copied into the client's wl_shm buffer at
-//! the next frame of the outputs. Nothing is captured while the session is locked (spike Q7).
+//! scale 1, an output as it draws itself, with the pointer when the session asks for cursors
+//! (`paint_cursors`), and either is copied into the client's wl_shm buffer at the next frame of
+//! the outputs. Nothing is captured while the session is locked (spike Q7).
 
+use crate::background_effect::Blurs;
 use crate::a11y::Look;
+use crate::cursor::{pointer_on, Cursor};
 use crate::look::{FilterElement, Filters};
-use crate::marks::Marks;
+use crate::marks::{Marks, Stacked};
 use crate::state::{draw_view, Backend, State, View};
 use crate::Error;
 use smithay::backend::renderer::damage::OutputDamageTracker;
@@ -15,9 +18,10 @@ use smithay::backend::renderer::element::{AsRenderElements, RenderElement};
 use smithay::backend::renderer::gles::GlesTexture;
 use smithay::backend::renderer::{Bind, ExportMem, Offscreen, Texture};
 use smithay::desktop::{Space, Window};
+use smithay::input::pointer::CursorImageStatus;
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::protocol::{wl_buffer::WlBuffer, wl_shm};
-use smithay::utils::{Buffer, Point, Rectangle, Size, Transform};
+use smithay::utils::{Buffer, Logical, Point, Rectangle, Size, Transform};
 use smithay::wayland::foreign_toplevel_list::{
     ForeignToplevelHandle, ForeignToplevelListHandler, ForeignToplevelListState,
 };
@@ -47,6 +51,14 @@ enum Captured {
     Window(String),
     /// An output, which the source does not keep alive.
     Output(WeakOutput),
+}
+
+/// The pointer a capture of an output draws: the cursor theme, the cursor the pointer shows and
+/// where the pointer is, in the space's coordinates.
+pub struct Pointer<'a> {
+    pub cursor: &'a mut Cursor,
+    pub status: CursorImageStatus,
+    pub location: Point<f64, Logical>,
 }
 
 /// What a capture source names, as it stands now.
@@ -212,14 +224,28 @@ impl State {
                 continue;
             };
             let marks = self.marks();
+            let status = self.shown_cursor();
+            // The pointer only when the session asks for cursors, `paint_cursors`.
+            let pointer = self
+                .seat
+                .get_pointer()
+                .filter(|_| session.draw_cursor())
+                .map(|pointer| Pointer {
+                    cursor: &mut self.cursor,
+                    status,
+                    location: pointer.current_location(),
+                });
             let read = match &mut self.backend {
-                Backend::Headless(headless) => headless.read_back(&target, &self.space, &marks),
-                Backend::Drm(drm) => drm.read_back(&target, &self.space, &marks),
+                Backend::Headless(headless) => {
+                    headless.read_back(&target, &self.space, &marks, pointer)
+                }
+                Backend::Drm(drm) => drm.read_back(&target, &self.space, &marks, pointer),
                 Backend::Nested(nested) => read_back::<_, GlesTexture>(
                     nested.backend.renderer(),
                     &target,
                     &self.space,
                     &marks,
+                    pointer,
                 ),
             };
             match read.and_then(|pixels| copy_into(&frame.buffer(), width, height, &pixels)) {
@@ -240,16 +266,18 @@ impl State {
 }
 
 /// Draws `what` off screen and reads its pixels back, `READ_FORMAT`, row by row from the top: a
-/// window at scale 1, an output as it draws `space`, whole, without the magnifier and the
-/// colour filters, which are the user's view and not the screen's contents (AX10).
+/// window at scale 1, an output as it draws `space`, whole, with `pointer` when it is on that
+/// output, and without the magnifier and the colour filters, which are the user's view and not
+/// the screen's contents (AX10).
 pub fn read_back<R, T>(
     renderer: &mut R,
     what: &Target,
     space: &Space<Window>,
     marks: &Marks,
+    pointer: Option<Pointer<'_>>,
 ) -> Result<Vec<u8>, Error>
 where
-    R: Filters + ExportMem + Offscreen<T> + Bind<T>,
+    R: Filters + Blurs + ExportMem + Offscreen<T> + Bind<T>,
     R::TextureId: Send + Clone + Texture + 'static,
     R::Error: 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
@@ -259,6 +287,8 @@ where
     let mut buffer = renderer.create_buffer(READ_FORMAT, size)?;
     let mut target = renderer.bind(&mut buffer)?;
     match what {
+        // ponytail: a window is captured without the pointer, whatever `paint_cursors` says; draw
+        // it over the window when a client streams one with the cursor (the portal, task 7).
         Target::Window(window) => {
             // The window's geometry, without its shadow, starts at the buffer's origin.
             let location = (Point::default() - window.geometry().loc).to_physical(1);
@@ -271,14 +301,16 @@ where
             result.sync.wait()?;
         }
         Target::Output(output) => {
-            // ponytail: never the pointer, whatever the session's `paint_cursors`; draw it when
-            // a client asks for it (the portal, task 7).
+            let pointer: Vec<Stacked<R>> = pointer
+                .map(|p| pointer_on(renderer, p.cursor, &p.status, p.location, space, output))
+                .unwrap_or_default();
             let mut tracker = OutputDamageTracker::from_output(output);
             // ponytail: without the input method's popups; pass them in when a capture needs them.
             let view = View::Space(space, &[], marks);
             let look = Look::default();
-            let result = draw_view(renderer, &mut target, output, 0, view, &mut tracker, look)
-                .map_err(|error| format!("{error:?}"))?;
+            let result =
+                draw_view(renderer, &mut target, output, 0, view, pointer, &mut tracker, look)
+                    .map_err(|error| format!("{error:?}"))?;
             result.sync.wait()?;
         }
     }

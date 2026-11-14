@@ -9,8 +9,10 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 [features]
 default = ["gtk"]
 # The connection made from GDK's display, its monitors as the outputs, and the window
-# pictures as GDK textures. Without it the client connects from a plain Wayland connection.
-gtk = ["dep:gtk4", "dep:gdk4-wayland", "athanor-style/gtk"]
+# pictures also as GDK textures. Without it the client connects from a plain Wayland connection.
+gtk = ["dep:gtk4", "dep:gdk4-wayland", "athanor-style/gtk", "capture"]
+# The window pictures as pixels and their wl_shm format, without GDK.
+capture = []
 # GLib's default main context as a calloop source, for an application whose loop is calloop's.
 calloop = ["dep:calloop", "dep:nix"]
 

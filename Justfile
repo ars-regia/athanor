@@ -191,6 +191,9 @@ check-rust:
     export ATHANOR_REQUIRE_QALC=1
     bash forge/test/shell/rig.sh cargo test --locked --workspace --exclude athanor-preview-render
     bash forge/test/shell/rig.sh cargo test --locked -p athanor-preview-render
+    # The launcher takes athanor-sulphur-client's capture without its GTK half; the workspace
+    # unifies the GTK feature in, so only a command of its own builds that combination.
+    bash forge/test/shell/rig.sh cargo test --locked -p athanor-sulphur-client --no-default-features --features capture
     bash forge/test/shell/rig.sh cargo rustdoc --locked -p athanor-sal -- -D warnings
     bash forge/test/shell/rig.sh cargo test --locked --manifest-path system/athanor-sal/gallery/Cargo.toml
 
