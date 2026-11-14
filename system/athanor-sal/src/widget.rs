@@ -10,6 +10,7 @@ use std::cell::Cell;
 use std::fmt;
 use std::time::{Duration, Instant};
 
+mod alert;
 pub(crate) mod labelled;
 mod rows;
 mod strip;
@@ -253,6 +254,10 @@ pub enum Kind {
     Row,
     /// A column with an accessible name, for a heading and the controls it names.
     Group(String),
+    /// A column with an accessible name that assistive technologies read as an alert, as GTK's
+    /// `alert` role: laid out as a [`Kind::Group`]. It sets no live priority, so showing it
+    /// announces nothing by itself; [`Ui::announce`] speaks. Add it with [`Ui::alert`].
+    Alert(String),
     /// A line of text that takes no input.
     Label(String),
     /// A button with a label; activating it raises [`Event::Clicked`].
@@ -391,9 +396,9 @@ pub enum Kind {
     /// is drawn with "zoom": scaled by one factor until it covers its rectangle in physical
     /// pixels, the overflow cut equally on both sides. It takes no input and adds nothing to its
     /// column's size, so a layer surface anchored on all four edges takes the size the
-    /// compositor configures. It takes a size only as a child of a [`Kind::Column`] or a
-    /// [`Kind::Group`], the root's included: elsewhere it is 0 by 0 and not drawn. Add it with
-    /// [`Ui::picture`].
+    /// compositor configures. It takes a size only as a child of a [`Kind::Column`], the root
+    /// included, a [`Kind::Group`] or a [`Kind::Alert`]: elsewhere it is 0 by 0 and not drawn.
+    /// Add it with [`Ui::picture`].
     #[non_exhaustive]
     Picture {
         /// The pixels, from [`crate::Image::from_rgba8`].
@@ -1310,12 +1315,11 @@ impl Ui {
 
     /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
     /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
-    /// item, a list's row or a tooltip; the name of a group, a list, a slider, an icon button,
-    /// a labelled button, whose shown text [`Ui::set_shown_text`] sets, or an icon toggle; the
-    /// title of a tile; the description of an image; what a drop-down is for, its description
-    /// ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text
-    /// changed. `None`,
-    /// and nothing changes, for the same text, for a field or a text area, whose text
+    /// item, a list's row or a tooltip; the name of a group, an alert, a list, a slider, an icon
+    /// button, a labelled button, whose shown text [`Ui::set_shown_text`] sets, or an icon
+    /// toggle; the title of a tile; the description of an image; what a drop-down is for, its
+    /// description ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text changed.
+    /// `None`, and nothing changes, for the same text, for a field or a text area, whose text
     /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
     /// takes, and for a widget that has no text. Call [`Ui::layout`] afterwards.
     ///
@@ -1328,6 +1332,7 @@ impl Ui {
         }
         let now = match &mut self.widgets[id].kind {
             Kind::Group(t)
+            | Kind::Alert(t)
             | Kind::Label(t)
             | Kind::Button(t)
             | Kind::MenuItem(t)
@@ -2102,7 +2107,7 @@ impl Ui {
                     content[1] + 2.0 * island_pad + top + bottom,
                 )
             }
-            Kind::Column | Kind::Group(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
                     Some((bar, rest)) if bar_first => (*bar, rest),
@@ -2310,7 +2315,7 @@ impl Ui {
                     }
                 }
             }
-            Kind::Column | Kind::Group(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
                 let mut cy = y + edge;
                 let mut children = &children[..];
                 if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
@@ -2360,6 +2365,7 @@ impl Ui {
                         Kind::Row
                             | Kind::CenterBox
                             | Kind::Group(_)
+                            | Kind::Alert(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
                             | Kind::Tile(_)
