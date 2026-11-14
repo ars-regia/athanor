@@ -3028,13 +3028,17 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_scroll_takes_the_vertical_turn_at_its_end_and_when_its_content_fits() {
-        let turn = |value120, absolute| AxisScroll {
+    /// A turn of `value120` 120ths of a notch, `absolute` logical pixels.
+    fn turn(value120: i32, absolute: f64) -> AxisScroll {
+        AxisScroll {
             absolute,
             value120,
             ..AxisScroll::default()
-        };
+        }
+    }
+
+    #[test]
+    fn a_scroll_at_its_end_takes_the_vertical_turn() {
         let none = AxisScroll::default();
         // At offset 0, a turn up over a button inside moves nothing and reaches no widget.
         let mut ui = Ui::new("Tray", Theme::default(), false);
@@ -3046,7 +3050,11 @@ mod tests {
         ui.layout();
         let r = ui.widget(first).rect;
         assert_eq!(axis(&mut ui, (r.x + 1.0, r.y + 1.0), none, turn(-120, -15.0)), (false, None));
-        // A scroll whose content fits takes the turn too.
+    }
+
+    #[test]
+    fn a_scroll_whose_content_fits_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
         let mut ui = Ui::new("Tray", Theme::default(), false);
         let scroll = ui.scroll(Ui::ROOT, 400.0);
         let only = ui.add(scroll, Kind::Button("Only".into()));
