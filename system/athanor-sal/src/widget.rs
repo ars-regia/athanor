@@ -1517,6 +1517,34 @@ impl Ui {
         }
     }
 
+    /// The selection of the field `id` as the byte offsets of its anchor and focus, one
+    /// offset twice for the caret: `None` if it is not a field, or while the input method
+    /// composes. [`Ui::set_field_range`] puts it back, as on a field built again.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_range(&self, id: WidgetId) -> Option<(usize, usize)> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selection(),
+            _ => None,
+        }
+    }
+
+    /// Puts the selection of the field `id` at the byte offsets `(anchor, focus)` of its text,
+    /// clamped to it, and scrolls the caret into view. Nothing happens to a widget that is not
+    /// a field.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_field_range(&mut self, id: WidgetId, (anchor, focus): (usize, usize)) {
+        if let Kind::Field(field) | Kind::TextArea(field) = &mut self.widgets[id].kind {
+            field.select_bytes(&mut self.text, anchor, focus);
+            field.scroll_to_caret(&mut self.text);
+        }
+    }
+
     /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
     /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
     /// expands it while its menu is open.
@@ -4375,6 +4403,34 @@ mod tests {
     /// The selected text of field `id`, if any.
     fn selected(ui: &Ui, id: WidgetId) -> Option<String> {
         ui.field_selection(id)
+    }
+
+    #[test]
+    fn a_fields_range_is_read_and_put_back_with_its_direction() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Column);
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abcd");
+        ui.key(Key::Left);
+        assert_eq!(ui.field_range(name), Some((3, 3)), "the caret");
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.field_range(name), Some((3, 2)), "anchor, then focus");
+        ui.set_field_range(name, (1, 3));
+        assert_eq!(ui.field_range(name), Some((1, 3)), "forwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("bc"));
+        ui.set_field_range(name, (3, 2));
+        assert_eq!(ui.field_range(name), Some((3, 2)), "backwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("c"));
+        // What is typed goes where the range put the caret.
+        ui.set_field_range(name, (2, 2));
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abxcd"));
+        ui.set_field_range(name, (1, 99));
+        assert_eq!(ui.field_range(name), Some((1, 5)), "clamped to the text");
+        assert_eq!(ui.field_range(other), None, "not a field");
+        ui.set_field_range(other, (0, 1));
     }
 
     #[test]
