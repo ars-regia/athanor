@@ -36,8 +36,8 @@ pub use text::TextStyle;
 pub use theme::{Rgba, Theme, TitleBarStyle};
 pub use wrap::Wrap;
 pub use widget::{
-    Calendar, CalendarText, Cell, Date, Event, Key, Kind, Level, Mark, PointerButton, Rect,
-    RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
+    Calendar, CalendarText, Cell, Date, Event, Key, Kind, Level, Mark, PointerButton, Priority,
+    Rect, RootRole, Slider, Ui, Widget, WidgetId, WindowButton,
 };
 
 #[cfg(test)]

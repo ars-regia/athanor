@@ -207,6 +207,18 @@ impl std::ops::IndexMut<WidgetId> for Widgets {
     }
 }
 
+/// How urgently assistive technologies speak an announcement ([`Ui::announce`]), as GTK's
+/// `GtkAccessibleAnnouncementPriority` and AT-SPI's politeness.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Priority {
+    /// After what the screen reader is saying: GTK's low and medium priorities.
+    #[default]
+    Polite,
+    /// At once, interrupting what the screen reader is saying: GTK's high priority, for what
+    /// needs attention now, such as a critical notification.
+    Assertive,
+}
+
 /// A rectangle in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -898,8 +910,8 @@ pub struct Ui {
     /// The field whose selection these widgets offered last as the primary selection, and its
     /// text, until the selection ends.
     offered: Option<(WidgetId, String)>,
-    /// The text [`Ui::announce`] asked for, until the driver publishes it.
-    pub(crate) announcement: Option<String>,
+    /// The text [`Ui::announce`] asked for and its priority, until the driver publishes it.
+    pub(crate) announcement: Option<(String, Priority)>,
     /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
     pub(crate) pose: crate::motion::Pose,
     /// The ids of the next widgets of the slots [`Ui::remove_children`] freed, which
@@ -1037,13 +1049,13 @@ impl Ui {
         self.add(parent, Kind::Toggle { label, active, radio })
     }
 
-    /// Announces `text` to assistive technologies at polite priority, once, as a live region of
-    /// the root that leaves the tree as soon as it is announced, so no stale text stays behind:
-    /// what `gtk_accessible_announce` does. Takes effect when the driver next publishes the
-    /// tree, with the next frame; a later call before then replaces the text. A surface out of
-    /// the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
-    pub fn announce(&mut self, text: &str) {
-        self.announcement = Some(text.to_owned());
+    /// Announces `text` to assistive technologies at `priority`, once, as a live region of the
+    /// root that leaves the tree as soon as it is announced, so no stale text stays behind: what
+    /// `gtk_accessible_announce` does. Takes effect when the driver next publishes the tree, with
+    /// the next frame; a later call before then replaces the text and its priority. A surface out
+    /// of the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
+    pub fn announce(&mut self, text: &str, priority: Priority) {
+        self.announcement = Some((text.to_owned(), priority));
     }
 
     /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].

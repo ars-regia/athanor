@@ -2,7 +2,7 @@
 //! the same paths as the keyboard and the pointer.
 
 use crate::focus::list_stop;
-use crate::widget::{Event, Kind, Mark, RootRole, Ui, WidgetId};
+use crate::widget::{Event, Kind, Mark, Priority, RootRole, Ui, WidgetId};
 use accesskit::{
     Action, ActionData, ActionRequest, HasPopup, Live, Node, NodeId, Orientation, Rect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
@@ -436,13 +436,17 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
-/// The announcement of [`Ui::announce`]: a polite live region, which the AT-SPI bridge announces
-/// as the node is added (`accesskit_atspi_common`, `adapter.rs`, `add_node`).
+/// The announcement of [`Ui::announce`]: a live region, polite or assertive as its priority,
+/// which the AT-SPI bridge announces as the node is added (`accesskit_atspi_common`,
+/// `adapter.rs`, `add_node`).
 fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
-    let text = ui.announcement.as_deref()?;
+    let (text, priority) = ui.announcement.as_ref()?;
     let mut node = Node::new(Role::Label);
-    node.set_value(text);
-    node.set_live(Live::Polite);
+    node.set_value(text.as_str());
+    node.set_live(match priority {
+        Priority::Polite => Live::Polite,
+        Priority::Assertive => Live::Assertive,
+    });
     node.set_bounds(bounds(ui, Ui::ROOT, scale));
     Some((ANNOUNCEMENT, node))
 }
@@ -1645,7 +1649,7 @@ mod tests {
         };
         let before = children(&adapter);
         for _ in 0..2 {
-            ui.announce("Volume 45 percent");
+            ui.announce("Volume 45 percent", Priority::Polite);
             let updates = tree_updates(&mut ui, 1.0);
             assert_eq!(updates.len(), 2);
             for update in updates {
@@ -1660,6 +1664,32 @@ mod tests {
         let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
         let heard = heard.lock().expect("not poisoned");
         assert_eq!(heard.announcements, [polite.clone(), polite]);
+    }
+
+    /// An assertive announcement reaches AT-SPI as assertive, which interrupts the screen reader:
+    /// a critical notification's (doc_bar.md BR4, doc_notification_center.md NC11,
+    /// doc_accessibility.md AX6). The priority goes with its text: a later polite one is polite.
+    #[test]
+    fn an_assertive_announcement_is_heard_as_assertive() {
+        let mut ui = Ui::new("Notifications", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Label("Battery".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi(&ui);
+        for (text, priority) in [
+            ("Battery critically low", Priority::Assertive),
+            ("Battery charging", Priority::Polite),
+        ] {
+            ui.announce(text, priority);
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        let heard = heard.lock().expect("not poisoned");
+        let expected = [
+            ("Battery critically low".to_owned(), "Assertive".to_owned()),
+            ("Battery charging".to_owned(), "Polite".to_owned()),
+        ];
+        assert_eq!(heard.announcements, expected);
     }
 
     impl Bridge for accesskit_atspi_common::Adapter {
@@ -1680,10 +1710,10 @@ mod tests {
         ui.add(Ui::ROOT, Kind::Button("Mute".into()));
         ui.layout();
         let (mut adapter, heard) = at_spi(&ui);
-        ui.announce("Volume 45 percent");
+        ui.announce("Volume 45 percent", Priority::Polite);
         leave(&mut adapter, &Mutex::new(None), &mut ui, 1.0, false);
         assert!(ui.announcement.is_none(), "the next adapter would announce it");
-        ui.announce("Volume 50 percent");
+        ui.announce("Volume 50 percent", Priority::Polite);
         let tree = rejoining(&mut ui, 1.0);
         assert!(tree.nodes.iter().all(|(id, _)| *id != ANNOUNCEMENT));
         let (mut adapter, again) = at_spi(&ui);

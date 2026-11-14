@@ -456,7 +456,7 @@ impl Application for Osd {
                 Input::View(View::Announce(text)) => {
                     let shown = self.surfaces.iter().find(|(_, s)| s.shown.is_some());
                     if let Some(ui) = shown.and_then(|(id, _)| shell.ui_mut(*id)) {
-                        ui.announce(&text);
+                        ui.announce(&text, athanor_sal::Priority::Polite);
                     }
                 }
                 Input::Fail(error) => shell.fail(error.into()),
