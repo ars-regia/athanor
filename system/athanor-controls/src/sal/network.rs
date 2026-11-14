@@ -405,6 +405,8 @@ impl Page {
         let field = ui.password(password, &tr("Password"));
         if self.asking.is_some() {
             ui.set_field_text(field, &self.typed);
+            // A single-line field's caret stays at its start; what is typed next goes after.
+            ui.set_field_range(field, (usize::MAX, usize::MAX));
         }
         let buttons = ui.add(password, Kind::Row);
         let cancel = ui.add(buttons, Kind::Button(tr("Cancel")));
@@ -1037,11 +1039,14 @@ mod tests {
         let field = ids(&page).field;
         assert!(ui.is_visible(ids(&page).password), "the prompt stays");
         assert_eq!(ui.password_text(field), Some("correct horse"));
+        // Typing goes on at the end of what was kept, not before it.
+        type_password(&mut page, &mut ui, "!");
+        assert_eq!(ui.password_text(field), Some("correct horse!"));
         let connect = ids(&page).connect;
         click(&mut page, &mut ui, connect);
         match received.try_recv() {
             Ok(NetworkCommand::Join { password, .. }) => {
-                assert_eq!(password.as_ref().map(|p| p.as_str()), Some("correct horse"));
+                assert_eq!(password.as_ref().map(|p| p.as_str()), Some("correct horse!"));
             }
             other => unreachable!("a join, not {other:?}"),
         }
