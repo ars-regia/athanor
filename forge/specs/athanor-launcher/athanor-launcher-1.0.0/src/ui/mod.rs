@@ -115,6 +115,28 @@ impl Drop for Slot {
     }
 }
 
+/// A Toggle that came while no output was known: the bus name is owned before the compositor
+/// announces one, so the Show of a D-Bus activation, or the first Super press after a restart,
+/// can come first. It is served at the first output.
+#[derive(Default)]
+struct Waiting(bool);
+
+impl Waiting {
+    /// Whether a Toggle runs now. Without an output it waits, and a second one cancels it, as
+    /// the hide after a show would.
+    fn toggle(&mut self, has_output: bool) -> bool {
+        if !has_output {
+            self.0 = !self.0;
+        }
+        has_output
+    }
+
+    /// Whether the launcher shows now for a Toggle that waited.
+    fn served(&mut self, has_output: bool) -> bool {
+        has_output && std::mem::take(&mut self.0)
+    }
+}
+
 /// The widgets of the panel shown, and the surface size it was laid out for.
 #[derive(Clone, Copy)]
 struct Panel {
@@ -158,6 +180,7 @@ pub struct Launcher {
     /// False after the crash loop gave up: no search provider is called then.
     discover_providers: bool,
     start_query: Option<String>,
+    waiting: Waiting,
     /// When the Show being drawn was asked for, logged at its first frame.
     asked: Option<Instant>,
     /// Whether a screen reader follows the selected row: from the first arrow until the query
@@ -325,6 +348,7 @@ impl Launcher {
             selection: Rc::new(Cell::new(0)),
             discover_providers: !options.given_up,
             start_query: options.show.filter(|query| !query.is_empty()),
+            waiting: Waiting::default(),
             asked: None,
             following: false,
             _apps_monitor: apps_monitor,
@@ -638,7 +662,11 @@ impl Launcher {
 
     fn apply(&mut self, shell: &mut Shell, change: Change) {
         match change {
-            Change::Toggle => self.toggle(shell),
+            Change::Toggle => {
+                if self.waiting.toggle(!self.outs.is_empty()) {
+                    self.toggle(shell);
+                }
+            }
             Change::Lines(lines) => self.fill(shell, lines),
             Change::Card(card) => self.draw_card(shell, &card),
             Change::DrawPreview => self.draw_preview(shell),
@@ -816,6 +844,9 @@ impl Application for Launcher {
             self.menu = None;
             self.focus_query(shell);
         }
+        if self.waiting.served(!self.outs.is_empty()) {
+            self.show(shell);
+        }
         if !self.outs.is_empty() {
             if let Some(query) = self.start_query.take() {
                 self.show(shell);
@@ -867,6 +898,22 @@ impl Application for Launcher {
 mod tests {
     use super::*;
     use athanor_sal::Theme;
+
+    #[test]
+    fn a_toggle_before_any_output_shows_the_launcher_at_the_first_one() {
+        let mut waiting = Waiting::default();
+        assert!(!waiting.toggle(false), "no output: it waits");
+        assert!(!waiting.served(false), "still none");
+        assert!(waiting.served(true), "the first output shows the launcher");
+        assert!(!waiting.served(true), "once");
+
+        assert!(!waiting.toggle(false));
+        assert!(!waiting.toggle(false), "a second Toggle cancels the first");
+        assert!(!waiting.served(true));
+
+        assert!(waiting.toggle(true), "with an output it runs now");
+        assert!(!waiting.served(true), "and nothing waits");
+    }
 
     #[test]
     fn a_query_is_selected_whole_only_when_all_of_it_is() {
