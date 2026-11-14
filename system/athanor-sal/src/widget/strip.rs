@@ -234,15 +234,20 @@ mod tests {
         let three = ["Start", "Middle", "End"].map(|t| ui.add(center, Kind::Button(t.into())));
         ui.layout();
         let width = ui.widget(center).rect.w;
+        // Room in the window below the box, for a rectangle of the fourth child's own.
+        ui.min_height = ui.widget(center).rect.h + 40.0;
         let fourth = ui.add(center, Kind::Button("A fourth child, wider than the rest".into()));
-        ui.layout();
+        let (w, h) = ui.layout();
         assert_eq!(ui.widget(center).rect.w, width, "measured as three children");
         assert!(!ui.is_visible(fourth), "neither drawn nor read");
-        // Even with a rectangle of its own, below the others, no point of it hits it.
+        // Even with a rectangle of its own, in the room below the others, no point of it hits it.
         let below = ui.widget(center).rect;
         let y = below.y + below.h + 10.0;
         ui.widgets[fourth].rect = Rect { x: 0.0, y, w: 50.0, h: 20.0 };
-        assert_eq!(ui.hit(10.0, y + 10.0), None, "never hit");
+        let probe = (10.0, y + 10.0);
+        let window = Rect { x: 0.0, y: 0.0, w, h };
+        assert!(window.contains(probe.0, probe.1), "{probe:?} inside the window {window:?}");
+        assert_eq!(ui.hit(probe.0, probe.1), None, "never hit");
         assert!(!crate::focus::chain(&ui).contains(&fourth), "never focused");
         assert!(three.iter().all(|&c| ui.is_visible(c)));
     }
