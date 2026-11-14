@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Start the duration budget clock
         run: python3 scripts/ci/job_budget.py start "$RUNNER_TEMP/lint-started"
       - name: Install actionlint 1.7.9 (checksum-verified, kept off PATH)

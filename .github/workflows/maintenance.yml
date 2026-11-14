@@ -62,7 +62,7 @@ jobs:
       # App's permissions, which are read-only; the action cannot request the Variables
       # permission by name, so narrowing the token here would drop it.
       - id: app-token
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0 # zizmor: ignore[github-app]
         with:
           client-id: ${{ vars.SETTINGS_APP_CLIENT_ID }}
           private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}

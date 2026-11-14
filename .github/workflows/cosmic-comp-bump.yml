@@ -42,7 +42,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 

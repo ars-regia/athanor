@@ -51,6 +51,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: ❄️ Install Nix (Bedrock Cache)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -111,12 +113,12 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
-          nix run --inputs-from .. nixpkgs#cosign -- login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+          nix run --inputs-from .. nixpkgs#cosign -- login "${REGISTRY}" -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
           img_prefix="athanor-forge"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
+          IMAGE_LOWER=$(echo "${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
           nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
@@ -130,7 +132,7 @@ jobs:
 
       - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: crash-logs-${{ matrix.package }}
           path: |

@@ -66,6 +66,8 @@ jobs:
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: One open kernel bump PR at a time
         id: open
@@ -118,6 +120,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -232,7 +236,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 
@@ -304,7 +309,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 

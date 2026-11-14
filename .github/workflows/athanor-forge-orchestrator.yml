@@ -40,15 +40,9 @@ on:
 # No workflow-level env: this workflow holds the signing jobs, beside which D43 allows only
 # plain values (scripts/verify.py, SIGN_JOB_ENV); each job sets what it reads.
 
-permissions:
-  contents: write
-  packages: write
-  pull-requests: write
-  id-token: write
-  # NVIDIA kmod, called below, attests its modules and reads the run list for its
-  # retention: a called workflow cannot exceed the permissions of its caller.
-  attestations: write
-  actions: read
+# Nothing at the workflow level: each job grants what it and the workflow it calls use, and a
+# called workflow cannot exceed the permissions of its caller.
+permissions: {}
 
 # A newer run waits instead of cancelling one that may be pushing or signing images; GitHub
 # keeps only the newest waiting run of the group (docs/architecture/doc_build_ordering.md, O6).
@@ -68,6 +62,8 @@ jobs:
   # the called workflows have no lint of their own: each used to repeat it, about 2 minutes
   # apiece on the critical path (docs/architecture/doc_pipeline.md, PL44).
   lint:
+    permissions:
+      contents: read
     uses: ./.github/workflows/call-lint.yml
 
   orchestrator-brain:
@@ -83,6 +79,8 @@ jobs:
     # = 1875 s = 31.25 min. Checkout and hashing 35 packages take under 2 min: 40 minutes
     # leaves about 7 minutes of margin.
     timeout-minutes: 40
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: forge
@@ -92,6 +90,8 @@ jobs:
       has_changes: ${{ steps.brain.outputs.has_changes }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
@@ -119,6 +119,10 @@ jobs:
 
   build-builder:
     needs: [lint]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     uses: ./.github/workflows/call-build-builder.yml
 
   kernel-artifacts:
@@ -158,6 +162,8 @@ jobs:
       kernel_digest: ${{ steps.artifacts.outputs.kernel_digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Resolve the kernel artifacts and the cycle (system/kernel-artifacts.sh)
         id: artifacts
@@ -207,6 +213,8 @@ jobs:
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
@@ -269,6 +277,8 @@ jobs:
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Require ready (system/kernel-artifacts.sh)
         run: bash system/kernel-artifacts.sh require-ready
@@ -312,6 +322,10 @@ jobs:
 
   dag-compile:
     needs: [orchestrator-brain, build-builder]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     uses: ./.github/workflows/call-dag-compile.yml
     with:
       dag_packages: ${{ needs.orchestrator-brain.outputs.dag_packages }}
@@ -325,6 +339,11 @@ jobs:
     # this job.
     needs: [orchestrator-brain, dag-compile, build-builder, kernel-artifacts, kernel-artifacts-final]
     if: ${{ !cancelled() && needs.orchestrator-brain.result == 'success' && needs.kernel-artifacts-final.result == 'success' && needs.build-builder.result == 'success' && (needs.dag-compile.result == 'success' || needs.dag-compile.result == 'skipped') }}
+    # contents: write for dag-system-image of call-system-image.yml.
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
     uses: ./.github/workflows/call-system-image.yml
     with:
       builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}

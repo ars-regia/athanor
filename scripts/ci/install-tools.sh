@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Installs the pinned tools `just check` needs on a machine that lacks them (the GitHub
-# runner of pr.yml): just, actionlint and cargo-deny from their release archives, each verified against
+# runner of pr.yml): just, actionlint, zizmor and cargo-deny from their release archives, each verified against
 # its SHA-256 before it is unpacked, cosign and the registry (distribution) that the real-cosign
 # attest check runs against (scripts/ci/cosign-attest-check.sh), and pykickstart (ksvalidator) and PyYAML in a virtual
 # environment, every Python package verified by the hashes of requirements-build.txt and
@@ -17,6 +17,8 @@ JUST_URL=https://github.com/casey/just/releases/download/1.57.0/just-1.57.0-x86_
 JUST_SHA256=45b548094283cb9739af8f13273b8cddeee869f5b4ef2bb631b1f311cb566155
 ACTIONLINT_URL=https://github.com/rhysd/actionlint/releases/download/v1.7.9/actionlint_1.7.9_linux_amd64.tar.gz
 ACTIONLINT_SHA256=233b280d05e100837f4af1433c7b40a5dcb306e3aa68fb4f17f8a7f45a7df7b4
+ZIZMOR_URL=https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz
+ZIZMOR_SHA256=d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99
 CARGO_DENY_URL=https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
 CARGO_DENY_SHA256=9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
 # The cosign the workflows install and the check runs: the version that sigstore/cosign-installer
@@ -50,6 +52,8 @@ fetch "$JUST_URL" "$JUST_SHA256" "$dir/download/just.tar.gz"
 fetch "$ACTIONLINT_URL" "$ACTIONLINT_SHA256" "$dir/download/actionlint.tar.gz"
 tar -xzf "$dir/download/just.tar.gz" -C "$dir/bin" just
 tar -xzf "$dir/download/actionlint.tar.gz" -C "$dir/bin" actionlint
+fetch "$ZIZMOR_URL" "$ZIZMOR_SHA256" "$dir/download/zizmor.tar.gz"
+tar -xzf "$dir/download/zizmor.tar.gz" -C "$dir/bin" zizmor
 fetch "$CARGO_DENY_URL" "$CARGO_DENY_SHA256" "$dir/download/cargo-deny.tar.gz"
 tar -xzf "$dir/download/cargo-deny.tar.gz" -C "$dir/bin" --strip-components=1 \
     cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
