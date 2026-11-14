@@ -678,6 +678,37 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, at, ink)?;
                 }
             }
+            // A tile: the controls' fill, its icon's disc in the accent only while it is on
+            // (VL10), and the title over the second line after the disc.
+            Kind::Tile(tile) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, crate::tile::RADIUS));
+                let disc = crate::tile::disc(r, t.padding, ui.rtl);
+                // The glyph is in the ink of the disc: Tile::glyph.
+                let disc_fill = if tile.active {
+                    t.accent
+                } else {
+                    mix(t.surface, t.text, 2.0 * HOVER)
+                };
+                let centre = (f64::from(disc.center_x()), f64::from(disc.y + disc.h / 2.0));
+                ctx.set_paint(color(disc_fill));
+                ctx.fill_path(&Circle::new(centre, f64::from(disc.w / 2.0)).to_path(0.1));
+                if let Some(glyph) = tile.glyph() {
+                    draw_icon(ctx, resources, glyph, disc, crate::tile::GLYPH);
+                }
+                if let (Some(first), Some(second)) = (&widget.text, &tile.second) {
+                    let top = r.y + (r.h - first.height() - second.height()) / 2.0;
+                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, first.width());
+                    draw_text(ctx, resources, first, (x, top), t.text)?;
+                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, second.width());
+                    draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
+                }
+            }
             // An icon toggle: raised, as a button, and darker or lighter toward its text while
             // it is on, without the accent (VL10).
             Kind::IconToggle(toggle) => {
@@ -831,12 +862,14 @@ pub fn paint<C: Canvas>(
         }
         if focus == Some(id) {
             // A list row's and a menu item's ring stays inside it, where the list's or menu's
-            // edge and a scroll's viewport do not cut it.
+            // edge and a scroll's viewport do not cut it. A tile's follows its larger corners.
             let parent = ui.widgets[id].parent.map(|p| &ui.widgets[p].kind);
             let inside = matches!(ui.widgets[id].kind, Kind::ListRow(_))
                 || matches!(parent, Some(Kind::Menu));
             let (outset, radius) = if inside {
                 (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
+            } else if matches!(ui.widgets[id].kind, Kind::Tile(_)) {
+                (t.focus_width, crate::tile::RADIUS)
             } else {
                 (t.focus_width, t.radius)
             };

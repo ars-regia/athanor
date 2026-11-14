@@ -40,7 +40,7 @@ const CHAR_WIDTHS: usize = 16;
 /// its mean digit. It depends on the size and the style only, so each pair is shaped once per
 /// [`TextContext`], up to [`CHAR_WIDTHS`] pairs. A size that is not a finite number has no
 /// width: 0, not kept, so `max_width_chars` asks for nothing.
-fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> f32 {
+pub(crate) fn char_width(cx: &mut TextContext, size: f32, style: &TextStyle) -> f32 {
     if !(size * style.scale).is_finite() {
         return 0.0;
     }

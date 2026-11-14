@@ -271,15 +271,17 @@ impl Painter {
     fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
         let wanted: Vec<&Arc<Pixmap>> = ui
             .ids()
-            .filter_map(|id| match &ui.widget(id).kind {
+            .flat_map(|id| match &ui.widget(id).kind {
                 Kind::Image { image, .. }
                 | Kind::IconButton { image, .. }
                 | Kind::LabelledButton {
                     image: Some(image), ..
                 }
                 | Kind::IconToggle(crate::icon_toggle::IconToggle { image, .. })
-                | Kind::Picture { image, .. } => Some(image.pixmap()),
-                _ => None,
+                | Kind::Picture { image, .. } => vec![image.pixmap()],
+                // Both of a tile's glyphs, so that turning it over draws one already uploaded.
+                Kind::Tile(tile) => tile.glyphs.iter().flat_map(|g| &g.tinted).map(|i| i.pixmap()).collect(),
+                _ => Vec::new(),
             })
             .collect();
         let resources = &mut self.resources;
@@ -490,6 +492,29 @@ mod tests {
         });
         assert_eq!(centre_of(&mut painter, toggle)?, red);
         assert_eq!(painter.resources.images.len(), 1);
+        Ok(())
+    }
+
+    /// A tile's glyphs, off and on, reach the atlas, as an icon button's image does. The glyph
+    /// sits in the disc, off the tile's centre, so only the upload is read.
+    #[test]
+    #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
+    fn a_tiles_glyphs_are_uploaded() -> Result<(), Error> {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let adapter = ready(instance.request_adapter(&Default::default()))??;
+        let mut painter = Painter::new(&adapter, TextureFormat::Rgba8Unorm)?;
+        let tile = Kind::Tile(crate::tile::Tile {
+            title: "Wi-Fi".into(),
+            subtitle: "Home".into(),
+            image: solid([0xcc, 0, 0, 0xff]),
+            active: true,
+            second: None,
+            placed: None,
+            glyphs: None,
+        });
+        centre_of(&mut painter, tile)?;
+        assert_eq!(painter.resources.images.len(), 2);
         Ok(())
     }
 }
