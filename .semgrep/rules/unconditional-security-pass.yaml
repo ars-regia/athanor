@@ -1,0 +1,45 @@
+# AGENTS.md, "No fake security": a function whose name says it verifies, validates, authorises
+# or trusts, and whose whole body answers yes. A placeholder `Ok(true)` in a security path is a
+# defect. No verify.py check reads function bodies. Test code may stub such a function, so
+# tests are left out.
+rules:
+  - id: unconditional-security-pass
+    languages: [rust]
+    severity: ERROR
+    message: >-
+      $F answers yes unconditionally (AGENTS.md, "No fake security"): verify for real, or remove
+      the function and say what is missing.
+    paths:
+      exclude:
+        - tests/
+        - fuzz/
+    patterns:
+      # Any visibility; `{ return true; }` is left to clippy's needless_return.
+      - pattern: 'fn $F(...) -> $R { $V }'
+      - metavariable-regex:
+          metavariable: $V
+          regex: '^(?:Ok\(\s*true\s*\)|true)$'
+      - pattern-not-inside: |
+          mod tests { ... }
+      - metavariable-regex:
+          metavariable: $F
+          regex: &security '(?i).*(?:verif|valid|auth|attest|trust|allow|permit|sign|seal|polkit|passw|token|cred)'
+
+  - id: unconditional-security-pass-python
+    languages: [python]
+    severity: ERROR
+    message: >-
+      $F answers yes unconditionally (AGENTS.md, "No fake security"): verify for real, or remove
+      the function and say what is missing.
+    paths:
+      exclude:
+        - tests/
+        - 'test_*.py'
+    patterns:
+      - pattern: |
+          def $F(...):
+              return True
+      - metavariable-regex:
+          metavariable: $F
+          regex: *security
+

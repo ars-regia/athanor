@@ -1,0 +1,17 @@
+# The recipes of the Justfile are shell too, and no verify.py check reads them: the patterns of
+# hidden-failure.yaml, applied to the Justfile.
+rules:
+  - id: hidden-failure-justfile
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      This recipe line hides a failure (AGENTS.md, "No hidden failures"): send the output to a
+      log, or report the error on stderr and handle it.
+    paths:
+      include:
+        - /Justfile
+        - '*.just'
+    patterns:
+      - pattern-regex: '\|\|\s*(?:true|:)(?![\w-])|2>\s*/dev/null|&>>?\s*/dev/null|>\s*/dev/null\s+2>&1|2>&-'
+      - pattern-not-regex: '(?m)(?:^|\s)#.*$'
+      - pattern-not-regex: 'kill\s+-0\s+\S+\s+2>\s*/dev/null'

@@ -6,6 +6,9 @@
 # environment, every Python package verified by the hashes of requirements-build.txt and
 # requirements.txt. DIR becomes that environment: put DIR/bin first on PATH, and python3 then
 # has PyYAML for the D43 lint of verify.py workflows. The archives stay in DIR/download.
+# Semgrep CE has an environment of its own, DIR/semgrep, from the hashes of
+# requirements-semgrep.txt, so that its dependencies cannot move those pins; DIR/bin/semgrep
+# runs it.
 #
 # Usage: install-tools.sh DIR
 set -euo pipefail
@@ -45,6 +48,9 @@ python3 -m venv "$dir"
 # hash, and the archive is built against it instead of a backend pip would fetch unverified.
 "$dir/bin/pip" install --quiet --require-hashes --only-binary=:all: -r "$here/requirements-build.txt"
 "$dir/bin/pip" install --quiet --require-hashes --no-build-isolation -r "$here/requirements.txt"
+python3 -m venv "$dir/semgrep"
+"$dir/semgrep/bin/pip" install --quiet --require-hashes --only-binary=:all: -r "$here/requirements-semgrep.txt"
+ln -s "$dir/semgrep/bin/semgrep" "$dir/bin/semgrep"
 mkdir -p "$dir/download"
 fetch "$JUST_URL" "$JUST_SHA256" "$dir/download/just.tar.gz"
 fetch "$ACTIONLINT_URL" "$ACTIONLINT_SHA256" "$dir/download/actionlint.tar.gz"

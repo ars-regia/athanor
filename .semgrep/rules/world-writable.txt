@@ -1,0 +1,37 @@
+# Shell, in a script, a recipe or a spec.
+# ruleid: world-writable
+chmod 777 "$dir"
+# ruleid: world-writable
+chmod -R 0777 "$dir"
+# ruleid: world-writable
+chmod 1777 "$dir"
+# ruleid: world-writable
+chmod 666 "$file"
+# ruleid: world-writable
+chmod o+w "$file"
+# ruleid: world-writable
+chmod a+rwx "$file"
+# ok: world-writable
+chmod 0755 "$dir"
+# ok: world-writable
+chmod 640 "$file"
+# ok: world-writable
+chmod u+w,go-w "$file"
+# ok: world-writable
+chmod +x "$file"
+# Rust.
+# ruleid: world-writable
+fs::set_permissions(&path, fs::Permissions::from_mode(0o777))?;
+# ruleid: world-writable
+OpenOptions::new().create(true).mode(0o666).open(&path)?;
+# ok: world-writable
+fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
+# ok: world-writable
+let bits = metadata.permissions().mode() & 0o777;
+# Python.
+# ruleid: world-writable
+os.chmod(path, 0o777)
+# ruleid: world-writable
+os.makedirs(path, 0o777, exist_ok=True)
+# ok: world-writable
+os.chmod(path, 0o600)
