@@ -1777,7 +1777,7 @@ fn printable_preedit(
         })
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
-    (crate::text::printable(text, false), cursor)
+    (String::from(crate::text::printable(text, false).as_str()), cursor)
 }
 
 /// The user data of the text-input-v3 objects.

@@ -20,9 +20,21 @@ pub(crate) fn mask(count: usize) -> String {
     std::iter::repeat_n(MASK, count).collect()
 }
 
+/// The characters of `text` that `keep` takes, at most `max` of them, in a buffer of `text`'s
+/// size that is overwritten when dropped. It never grows, so no buffer it outgrew is freed
+/// holding the start of a password field's text, as one collected from the characters would be.
+pub(crate) fn kept(text: &str, max: usize, keep: impl Fn(char) -> bool) -> Zeroizing<String> {
+    let mut kept = Zeroizing::new(String::with_capacity(text.len()));
+    for c in text.chars().filter(|&c| keep(c)).take(max) {
+        kept.push(c);
+    }
+    kept
+}
+
 /// The secret a password field holds. Every change builds the new text in a buffer of exactly
-/// its size and drops the old one, which [`Zeroizing`] overwrites: no reallocation leaves a copy
-/// of the secret behind in freed memory.
+/// its size and drops the old one, which [`Zeroizing`] overwrites, and every text typed, pasted,
+/// committed or set reaches it through [`kept`]: no reallocation leaves a copy of the secret
+/// behind in freed memory.
 #[derive(Default)]
 pub(crate) struct Secret(Zeroizing<String>);
 
@@ -74,6 +86,18 @@ impl fmt::Debug for Secret {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A collect from a filter grows its buffer by doubling, so the 8 and 16 byte buffers it
+    /// frees hold the start of the text; the kept characters are built in one buffer instead.
+    #[test]
+    fn the_kept_characters_are_built_in_one_buffer_of_the_texts_size() {
+        let text = "correct horse battery staple\u{7}";
+        let all = kept(text, usize::MAX, |c| !c.is_control());
+        assert_eq!(all.as_str(), "correct horse battery staple");
+        assert_eq!(all.capacity(), text.len());
+        let first = kept(text, 7, |_| true);
+        assert_eq!((first.as_str(), first.capacity()), ("correct", text.len()));
+    }
 
     #[test]
     fn a_splice_replaces_characters_not_bytes() {

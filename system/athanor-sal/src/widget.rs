@@ -2507,12 +2507,9 @@ impl Ui {
             return None;
         }
         // Overwritten when dropped: it may be a password field's text.
-        let text: zeroize::Zeroizing<String> = zeroize::Zeroizing::new(
-            text.chars()
-                .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-                .take(Self::FIELD_MAX_CHARS)
-                .collect(),
-        );
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
         // Inserting nothing would delete the selection.
         if text.is_empty() {
             return None;
@@ -2914,7 +2911,7 @@ impl Ui {
             return None;
         };
         // Overwritten when dropped: it may be a password field's text.
-        let text = zeroize::Zeroizing::new(printable(text, multiline));
+        let text = printable(text, multiline);
         field.commit(&mut self.text, &text);
         field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
@@ -2933,12 +2930,9 @@ impl Ui {
             return None;
         };
         // Overwritten when dropped: it may be a password field's text.
-        let text: zeroize::Zeroizing<String> = zeroize::Zeroizing::new(
-            text.chars()
-                .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-                .take(Self::FIELD_MAX_CHARS)
-                .collect(),
-        );
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
         field.set_text(&text);
         if multiline {
             // As a GTK text view's, where a single-line field's caret stays at its start.

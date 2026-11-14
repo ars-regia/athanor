@@ -172,9 +172,10 @@ pub(crate) fn keeps(c: char, multiline: bool) -> bool {
     (!c.is_control() || (multiline && c == '\n')) && !matches!(c, '\u{2028}' | '\u{2029}')
 }
 
-/// `text` with only the characters a field [`keeps`].
-pub(crate) fn printable(text: &str, multiline: bool) -> String {
-    text.chars().filter(|&c| keeps(c, multiline)).collect()
+/// `text` with only the characters a field [`keeps`], in a buffer overwritten when dropped: it
+/// may be a password field's text.
+pub(crate) fn printable(text: &str, multiline: bool) -> zeroize::Zeroizing<String> {
+    crate::password::kept(text, usize::MAX, |c| keeps(c, multiline))
 }
 
 /// A text field: Parley's editor, with the input method's preedit kept apart from the committed
@@ -244,7 +245,7 @@ impl TextField {
         text: &str,
         edit: impl FnOnce(&mut parley::PlainEditorDriver<'_, Brush>, &str),
     ) {
-        let kept = zeroize::Zeroizing::new(printable(text, false));
+        let kept = printable(text, false);
         let inserted = kept.chars().count();
         let before = self.editor.text().chars().count();
         edit(&mut self.driver(cx), &mask(inserted));
@@ -383,7 +384,7 @@ impl TextField {
     pub fn set_text(&mut self, text: &str) {
         self.column = None;
         if let Some(hidden) = self.hidden.as_mut() {
-            let kept = zeroize::Zeroizing::new(printable(text, false));
+            let kept = printable(text, false);
             self.editor.set_text(&mask(kept.chars().count()));
             hidden.set(&kept);
             return;
