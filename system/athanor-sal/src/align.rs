@@ -166,6 +166,25 @@ mod tests {
         }
     }
 
+
+    /// A wrapping label keeps its least width beside a narrow neighbour: its column measures it
+    /// at that width, so the column is never narrower than the label, aligned or not.
+    #[test]
+    fn a_wrapping_label_keeps_its_least_width_in_its_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", theme(), rtl);
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let column = ui.add(row, Kind::Column);
+            let label = ui.add(column, Kind::Label("Wi-Fi and Bluetooth".into()));
+            ui.add(row, Kind::Button("x".into()));
+            assert!(ui.set_wrap(label, Some(crate::Wrap::default())));
+            ui.set_align(label, [Align::Start, Align::Start]);
+            assert!(ui.set_min_width(label, 400.0));
+            ui.layout();
+            assert_eq!(ui.widget(label).rect.w, 400.0);
+            assert!(ui.widget(column).rect.w >= 400.0, "the column holds it");
+        }
+    }
     #[test]
     fn a_nested_column_places_its_child_at_its_end_and_the_rest_in_order() {
         for rtl in [false, true] {
