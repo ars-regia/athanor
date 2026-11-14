@@ -26,7 +26,7 @@
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
-#   rig.sh build-control-center   clippy, tests (the panel's on a display) and release build of athanor-control-center (with athanor-services and athanor-controls) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-control-center   clippy, tests and release build of athanor-control-center (with athanor-services and the Sal pages of athanor-controls) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
@@ -911,12 +911,16 @@ build-control-center)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-services -p athanor-controls -p athanor-control-center --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-services -p athanor-control-center --bins --lib \
-                 && forge/test/shell/with-display.sh cargo test --locked -p athanor-control-center --bins \
+        bash -c 'cargo clippy --locked -p athanor-services -p athanor-control-center --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-controls --no-default-features --features sal --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-services -p athanor-control-center \
+                 && cargo test --locked -p athanor-controls --no-default-features --features sal \
                  && cargo build --release --locked -p athanor-control-center \
                  && install -m 0755 /out/target/release/athanor-control-center /out/bin/ \
-                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-control-center'
+                 && needed=$(readelf -d /out/bin/athanor-control-center) \
+                 && if grep -E "\(NEEDED\).*lib(gtk|gdk|adwaita)" <<<"$needed"; then \
+                        echo "rig.sh: athanor-control-center links GTK (doc_own_stack.md OS8)" >&2; exit 1; \
+                    fi'
     ;;
 build-dock)
     mkdir -p "$out/bin" "$out/target"

@@ -1,12 +1,13 @@
 %global debug_package %{nil}
 Name:           athanor-control-center
 Version:        1.0.0
-Release:        10%{?athanor_content}%{?dist}
+Release:        11%{?athanor_content}%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
-Requires:       gtk4 gtk4-layer-shell athanor-calmo
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel pulseaudio-libs-devel gettext
+# Inter, the interface font, and the symbolic icons the panel draws.
+Requires:       athanor-calmo adwaita-icon-theme
 
 %description
 One resident layer-shell panel for quick settings, opened by the bar's button and by Super+C
@@ -44,10 +45,6 @@ mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
 rm -rf locale-build
 
-%check
-# doc_shell.md, SH4: the layer-shell shim must load before libwayland-client and GTK.
-python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control-center
-
 %files
 /usr/bin/athanor-control-center
 /usr/lib/systemd/user/athanor-control-center.service
@@ -58,6 +55,12 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-control-center.mo
 
 %changelog
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-11
+- The panel and its four pages are drawn with athanor-sal on a layer surface of its own
+  (doc_own_stack.md OS8): no GTK, gtk4-layer-shell or libadwaita in the process, so the
+  layer-shell shim's link-order check goes. Names, roles, states, keys, the bus interface
+  and the settings are those of the GTK panel.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-10
 - Landlock grants the control center's writes by descriptors athanor_unit::dirs opened and
   checked (#1052): a directory that is a link or another user's is left out with a warning,

@@ -6,22 +6,23 @@ license = "GPL-3.0-or-later"
 description = "The Athanor control center: one resident layer-shell panel opened by the bar's button and Super+C (doc_control_center.md)"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
+# doc_own_stack.md OS8: Sal, the pages of athanor-controls drawn with it, the compositor client
+# and the style without GTK. GLib's main context, which the bus name, the rfkill reads and the
+# models' bridge run on, is driven by the compositor client's calloop source.
 [dependencies]
-athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }
-athanor-controls = { path = "../../../../system/athanor-controls" }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["calloop"] }
+athanor-controls = { path = "../../../../system/athanor-controls", default-features = false, features = ["sal"] }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-sal = { path = "../../../../system/athanor-sal" }
 athanor-services = { path = "../../../../system/athanor-services" }
-athanor-style = { path = "../../../../system/athanor-style" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
 athanor-unit = { path = "../../../../system/athanor-unit" }
+gio = { workspace = true }
 gio-unix = { workspace = true }
 glib = { workspace = true }
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
 # O_NONBLOCK for /dev/rfkill, which std does not name.
 libc = { workspace = true }
-tracing = { workspace = true }
-
-[dev-dependencies]
-# The channels of a `Services` built by hand, as athanor-controls' own page tests do.
 tokio = { workspace = true }
+tracing = { workspace = true }
+wayland-client = { workspace = true }

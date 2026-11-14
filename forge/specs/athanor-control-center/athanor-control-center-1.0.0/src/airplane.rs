@@ -8,8 +8,8 @@ use std::os::fd::OwnedFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::rc::Rc;
 
-use gtk4::gio::prelude::InputStreamExtManual;
-use gtk4::glib;
+use gio::prelude::InputStreamExtManual;
+use gio::glib;
 
 use athanor_control_center::rfkill::{self, Event, Radios, EVENT_SIZE};
 

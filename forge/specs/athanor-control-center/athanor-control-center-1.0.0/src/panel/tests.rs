@@ -1,26 +1,22 @@
-//! The panel on a display, from the state of the models, driven the way the person drives it
-//! (ST7). GTK may be started on one thread only, so the cases share one test.
-//!
-//! Without a display the test says so and passes, unless `ATHANOR_REQUIRE_DISPLAY` is set:
-//! `forge/test/shell/with-display.sh` sets it, so a gate cannot pass without having run.
+//! The panel from the state of the models, driven the way the person drives it (ST7): the
+//! widgets are Sal's, so no display is needed. Each test runs on a main context of its own,
+//! where the models' bridge and the rfkill stream run.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::fs::OpenOptions;
 use std::io::Read;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use athanor_control_center::rfkill::{self, Event};
-use athanor_services::audio::{AudioCommand, AudioState, Device as Sink};
-use athanor_services::battery::{Backlight, Battery, BatteryCommand, BatteryState, Charge, Profiles};
-use athanor_services::bluetooth::{BluetoothCommand, BluetoothState};
-use athanor_services::media::{MediaCommand, MediaState, Player, Track};
-use athanor_services::network::{NetworkCommand, NetworkState, Wifi};
-use gtk4::glib;
+use athanor_control_center::rfkill::{self, Event as RfkillEvent};
+use athanor_sal::{Key, Theme};
+use athanor_services::audio::Device as Sink;
+use athanor_services::battery::{Backlight, Battery, Charge, Profiles};
+use athanor_services::media::{MediaCommand, Player, Track};
+use athanor_services::network::Wifi;
 use tokio::sync::{mpsc, watch};
 
-use super::airplane::Rfkill;
 use super::*;
 
 struct Rig {
@@ -74,54 +70,72 @@ fn rig() -> Rig {
     }
 }
 
-fn settle() {
-    let context = glib::MainContext::default();
+/// Runs `test` with a main context of its own as the thread's default, as the tests run on
+/// threads of their own.
+fn on_context(test: impl FnOnce(&glib::MainContext)) {
+    let context = glib::MainContext::new();
+    context
+        .with_thread_default(|| test(&context))
+        .expect("a new context is free to own");
+}
+
+/// Lets the models' bridge and the rfkill stream run until they wait.
+fn settle(context: &glib::MainContext) {
     for _ in 0..50 {
         while context.iteration(false) {}
     }
 }
 
-/// Every widget under `root`, in document order, that is on screen: a hidden tile and a stack page
-/// that is not the visible one are not mapped.
-fn shown(root: &gtk4::Widget) -> Vec<gtk4::Widget> {
+/// The view built in a new `Ui`, as the surface builds it.
+fn view(panel: &mut Panel, icons: &mut Icons) -> Ui {
+    let mut ui = Ui::new("Control center", Theme::default(), false);
+    let content = ui.add(Ui::ROOT, Kind::Group("Control center".into()));
+    panel.build(&mut ui, content, icons);
+    ui
+}
+
+/// Every widget of `ui` that is shown, in reading order.
+fn shown(ui: &Ui) -> Vec<WidgetId> {
     let mut found = Vec::new();
-    let mut stack = vec![root.clone()];
-    while let Some(widget) = stack.pop() {
-        if !widget.is_mapped() {
+    let mut stack = vec![Ui::ROOT];
+    while let Some(id) = stack.pop() {
+        if !ui.is_visible(id) {
             continue;
         }
-        found.push(widget.clone());
-        let mut child = widget.last_child();
-        while let Some(previous) = child {
-            stack.push(previous.clone());
-            child = previous.prev_sibling();
-        }
+        found.push(id);
+        stack.extend(ui.widget(id).children.iter().rev());
     }
     found
 }
 
-fn says(root: &gtk4::Widget, text: &str) -> bool {
-    shown(root)
-        .iter()
-        .filter_map(|widget| widget.downcast_ref::<gtk4::Label>())
-        .any(|label| label.text() == text)
+/// The text a widget shows or is named by.
+fn text(ui: &Ui, id: WidgetId) -> Option<&str> {
+    match &ui.widget(id).kind {
+        Kind::Label(t) | Kind::Button(t) | Kind::Group(t) => Some(t),
+        Kind::Tile(tile) => Some(&tile.title),
+        Kind::IconButton { label, .. } => Some(label),
+        Kind::IconToggle(toggle) => Some(&toggle.label),
+        Kind::Image { description, .. } => Some(description),
+        _ => None,
+    }
 }
 
-/// The tile's toggle: the toggle button that has `text` on it.
-fn tile(root: &gtk4::Widget, text: &str) -> gtk4::ToggleButton {
-    shown(root)
-        .into_iter()
-        .filter_map(|widget| widget.downcast::<gtk4::ToggleButton>().ok())
-        .find(|button| says(button.upcast_ref(), text))
-        .unwrap_or_else(|| panic!("no tile says {text:?}"))
+fn says(ui: &Ui, wanted: &str) -> bool {
+    shown(ui).into_iter().any(|id| text(ui, id) == Some(wanted))
 }
 
-fn arrows(root: &gtk4::Widget) -> Vec<gtk4::Button> {
-    shown(root)
+/// The shown widget named `wanted`.
+fn named(ui: &Ui, wanted: &str) -> WidgetId {
+    shown(ui)
         .into_iter()
-        .filter_map(|widget| widget.downcast::<gtk4::Button>().ok())
-        .filter(|button| button.icon_name().as_deref() == Some("go-next-symbolic"))
-        .collect()
+        .find(|&id| text(ui, id) == Some(wanted))
+        .unwrap_or_else(|| panic!("nothing shown is named {wanted:?}"))
+}
+
+/// What the person's activation of `id` makes the panel do.
+fn press(panel: &mut Panel, ui: &mut Ui, id: WidgetId) -> Action {
+    let event = ui.activate(id).expect("the widget takes the activation");
+    panel.event(ui, &event)
 }
 
 fn wifi_state() -> NetworkState {
@@ -205,22 +219,31 @@ fn player() -> Player {
         position_us: Some(10_000_000),
         length_us: Some(200_000_000),
         // Not an image: the cover cannot be decoded and the player's icon stands in.
-        art: Some(athanor_services::media::Art::Data(Arc::from(&b"not a picture"[..]))),
+        art: Some(athanor_services::media::Art::Data(Arc::from(
+            &b"not a picture"[..],
+        ))),
     }
 }
 
-/// A regular file standing for /dev/rfkill: it holds one radio the kernel announced, and
-/// takes what the tile writes.
+/// A regular file standing for /dev/rfkill: it holds the radios the kernel announced, and
+/// takes what the tile writes. Each call has a file of its own, as the tests run at once.
 fn fake_rfkill(radios: usize) -> (Rc<Rfkill>, PathBuf) {
-    let path = std::env::temp_dir().join(format!("athanor-rfkill-{}", std::process::id()));
-    let add = |idx| Event {
+    thread_local!(static NEXT: Cell<u32> = const { Cell::new(0) });
+    let n = NEXT.with(|next| next.replace(next.get() + 1));
+    let thread = format!("{:?}", std::thread::current().id())
+        .replace(|c: char| !c.is_ascii_alphanumeric(), "");
+    let name = format!("athanor-rfkill-{}-{thread}-{n}", std::process::id());
+    let path = std::env::temp_dir().join(name);
+    let add = |idx| RfkillEvent {
         idx,
         kind: 1,
         op: rfkill::OP_ADD,
         soft: false,
         hard: false,
     };
-    let events: Vec<u8> = (0..radios as u32).flat_map(|idx| add(idx).encode()).collect();
+    let events: Vec<u8> = (0..radios as u32)
+        .flat_map(|idx| add(idx).encode())
+        .collect();
     std::fs::write(&path, events).expect("the fake rfkill is written");
     let file = OpenOptions::new()
         .read(true)
@@ -230,258 +253,317 @@ fn fake_rfkill(radios: usize) -> (Rc<Rfkill>, PathBuf) {
     (Rfkill::new(file), path)
 }
 
-fn hooks() -> Hooks {
-    Hooks {
-        open_settings: Box::new(|| {}),
-        set_dark: Box::new(|_| Ok(())),
-    }
-}
+#[test]
+fn the_tiles_follow_their_models_and_send_the_persons_presses() {
+    on_context(|context| {
+        let mut rig = rig();
+        let (rfkill, path) = fake_rfkill(1);
+        let mut icons = Icons::new(Theme::default().text);
+        let mut panel = Panel::new(Some(rig.services.clone()), Some(rfkill), false);
+        settle(context);
+        let mut ui = view(&mut panel, &mut icons);
 
-/// Every control the person can use, in the order Tab reaches them: the buttons, the toggles,
-/// the scales and the drop-downs that are shown.
-fn tab_order(window: &gtk4::Window) -> Vec<gtk4::Widget> {
-    GtkWindowExt::set_focus(window, None::<&gtk4::Widget>);
-    let mut order = Vec::new();
-    for _ in 0..60 {
-        if !window.child_focus(gtk4::DirectionType::TabForward) {
-            break;
-        }
-        let Some(focus) = GtkWindowExt::focus(window) else { break };
-        if order.contains(&focus) {
-            break;
-        }
-        order.push(focus);
-    }
-    order
-}
+        // A model that has not answered builds nothing for it (BR3).
+        assert!(!says(&ui, "Wi-Fi"));
+        assert!(!says(&ui, "Bluetooth"));
+        assert!(!says(&ui, "Power mode"));
+        // Dark mode and airplane mode do not depend on a model.
+        assert!(says(&ui, "Dark mode"));
+        assert!(says(&ui, "Airplane mode"));
 
-fn interactive(root: &gtk4::Widget) -> Vec<gtk4::Widget> {
-    shown(root)
-        .into_iter()
-        .filter(|widget| {
-            widget.is::<gtk4::Button>()
-                || widget.is::<gtk4::ToggleButton>()
-                || widget.is::<gtk4::Scale>()
-                || widget.is::<gtk4::DropDown>()
-        })
-        .collect()
-}
+        rig.network.send(Some(wifi_state())).unwrap();
+        rig.bluetooth.send(Some(bluetooth_state())).unwrap();
+        rig.audio.send(audio_state()).unwrap();
+        rig.battery.send(battery_state()).unwrap();
+        settle(context);
+        assert_eq!(
+            panel.turn(&mut ui, &mut icons),
+            Action::Rebuild,
+            "new tiles"
+        );
+        let mut ui = view(&mut panel, &mut icons);
+        assert!(says(&ui, "Wi-Fi") && says(&ui, "Bluetooth") && says(&ui, "Power mode"));
+        assert!(says(&ui, "80%"), "the battery level is in the footer");
+        assert_eq!(panel.turn(&mut ui, &mut icons), Action::Done, "nothing new");
+        assert_eq!(
+            panel.first(),
+            Some(named(&ui, "Wi-Fi")),
+            "the keyboard starts on it"
+        );
 
-fn the_tiles(mut rig: Rig) -> Rig {
-    let (rfkill, path) = fake_rfkill(1);
-    let panel = Panel::new(Some(rig.services.clone()), Some(rfkill), hooks());
-    let window = gtk4::Window::new();
-    window.set_child(Some(&panel.widget()));
-    window.present();
-    panel.set_shown(true);
-    let root = panel.widget();
-    settle();
+        // A tile is a toggle that follows the press, and sends it.
+        let wifi = named(&ui, "Wi-Fi");
+        assert!(ui.is_active(wifi));
+        assert_eq!(press(&mut panel, &mut ui, wifi), Action::Done);
+        assert!(!ui.is_active(wifi), "the pressed state follows the press");
+        assert!(matches!(
+            rig.network_commands.try_recv(),
+            Ok(NetworkCommand::Wireless(false))
+        ));
+        // The panel registers no agent, for NetworkManager or for BlueZ, and sends no other command.
+        assert!(
+            rig.network_commands.try_recv().is_err(),
+            "no RegisterAgent for NetworkManager"
+        );
+        assert!(
+            rig.bluetooth_commands.try_recv().is_err(),
+            "no agent for BlueZ"
+        );
+        let bluetooth = named(&ui, "Bluetooth");
+        press(&mut panel, &mut ui, bluetooth);
+        assert!(matches!(
+            rig.bluetooth_commands.try_recv(),
+            Ok(BluetoothCommand::Power(false))
+        ));
 
-    // A model that has not answered builds nothing for it (BR3).
-    assert!(!says(&root, "Wi-Fi"));
-    assert!(!says(&root, "Bluetooth"));
-    assert!(!says(&root, "Power mode"));
-    // Dark mode and airplane mode do not depend on a model.
-    assert!(says(&root, "Dark mode"));
-    assert!(says(&root, "Airplane mode"));
+        // The power-mode tile steps to the next profile the service offers, and shows the
+        // profile the service reports until it reports another.
+        let profile = named(&ui, "Power mode");
+        press(&mut panel, &mut ui, profile);
+        assert!(
+            matches!(rig.battery_commands.try_recv(), Ok(BatteryCommand::SetProfile(p)) if p == "performance")
+        );
+        assert!(!ui.is_active(profile));
 
-    rig.network.send(Some(wifi_state())).unwrap();
-    rig.bluetooth.send(Some(bluetooth_state())).unwrap();
-    rig.audio.send(audio_state()).unwrap();
-    rig.battery.send(battery_state()).unwrap();
-    settle();
-    assert!(says(&root, "Wi-Fi") && says(&root, "Bluetooth") && says(&root, "Power mode"));
-    assert!(says(&root, "80%"), "the battery level is in the footer");
+        // Airplane mode writes struct rfkill_event of RFKILL_OP_CHANGE_ALL.
+        let airplane = named(&ui, "Airplane mode");
+        press(&mut panel, &mut ui, airplane);
+        let mut written = Vec::new();
+        std::fs::File::open(&path)
+            .unwrap()
+            .read_to_end(&mut written)
+            .unwrap();
+        assert_eq!(written[8..], rfkill::block_all(true).encode());
+        std::fs::remove_file(&path).ok();
 
-    // A tile is a toggle with an accessible name and the pressed state.
-    let wifi = tile(&root, "Wi-Fi");
-    assert!(wifi.is_active());
-    assert!(a11y::is_named(&wifi, "Wi-Fi"));
-    assert!(!a11y::is_named(&wifi, "Bluetooth"), "a wrong name is not accepted");
-    assert!(gtk4::test_accessible_has_state(&wifi, gtk4::AccessibleState::Pressed));
-    wifi.emit_clicked();
-    settle();
-    assert!(!wifi.is_active(), "the pressed state follows the press");
-    assert!(gtk4::test_accessible_has_state(&wifi, gtk4::AccessibleState::Pressed));
-    assert!(matches!(rig.network_commands.try_recv(), Ok(NetworkCommand::Wireless(false))));
-    // The panel registers no agent, for NetworkManager or for BlueZ, and sends no other command.
-    assert!(rig.network_commands.try_recv().is_err(), "no RegisterAgent for NetworkManager");
-    assert!(rig.bluetooth_commands.try_recv().is_err(), "no agent for BlueZ");
-    tile(&root, "Bluetooth").emit_clicked();
-    settle();
-    assert!(matches!(rig.bluetooth_commands.try_recv(), Ok(BluetoothCommand::Power(false))));
+        // Dark mode is the surface's to apply.
+        let dark = named(&ui, "Dark mode");
+        assert_eq!(press(&mut panel, &mut ui, dark), Action::SetDark(true));
 
-    // The power-mode tile steps to the next profile the service offers.
-    tile(&root, "Power mode").emit_clicked();
-    settle();
-    assert!(matches!(rig.battery_commands.try_recv(), Ok(BatteryCommand::SetProfile(p)) if p == "performance"));
+        // The sliders send the person's change in whole percents, to the device in use.
+        let ids = panel.ids.as_ref().expect("the panel is built");
+        let (output, input, brightness) = (
+            ids.output.as_ref().expect("an output slider"),
+            ids.input.as_ref().expect("an input slider"),
+            ids.brightness.as_ref().expect("a brightness slider"),
+        );
+        let (output, mute, input, brightness) = (
+            output.slider,
+            output.mute.expect("a mute toggle"),
+            input.slider,
+            brightness.slider,
+        );
+        assert_eq!(ui.value(output), Some(40.0), "the model's state is drawn");
+        assert_eq!(ui.value(input), Some(70.0));
+        assert_eq!(ui.value(brightness), Some(50.0));
+        let event = ui.set_value(output, 55.0).expect("the slider moves");
+        panel.event(&mut ui, &event);
+        assert!(matches!(
+            rig.audio_commands.try_recv(),
+            Ok(AudioCommand::Volume {
+                sink: true,
+                percent: 55,
+                ..
+            })
+        ));
+        press(&mut panel, &mut ui, mute);
+        assert!(matches!(
+            rig.audio_commands.try_recv(),
+            Ok(AudioCommand::Mute {
+                sink: true,
+                on: true,
+                ..
+            })
+        ));
+        let event = ui.set_value(brightness, 30.0).expect("the slider moves");
+        panel.event(&mut ui, &event);
+        assert!(matches!(
+            rig.battery_commands.try_recv(),
+            Ok(BatteryCommand::SetBrightness { raw: 30, .. })
+        ));
 
-    // Airplane mode writes struct rfkill_event of RFKILL_OP_CHANGE_ALL.
-    tile(&root, "Airplane mode").emit_clicked();
-    settle();
-    let mut written = Vec::new();
-    std::fs::File::open(&path).unwrap().read_to_end(&mut written).unwrap();
-    assert_eq!(written[8..], rfkill::block_all(true).encode());
-    std::fs::remove_file(&path).ok();
-
-    // The sliders send the person's change in whole percents, to the device in use.
-    let scales: Vec<gtk4::Scale> = shown(&root)
-        .into_iter()
-        .filter_map(|widget| widget.downcast::<gtk4::Scale>().ok())
-        .collect();
-    assert_eq!(scales.len(), 3, "output, input and brightness");
-    for (scale, name) in scales.iter().zip(["Output volume", "Input volume", "Brightness"]) {
-        assert!(a11y::is_named(scale, name), "the scale of {name}");
-    }
-    assert_eq!(scales[0].value(), 40.0, "the model's state is drawn");
-    scales[0].set_value(55.0);
-    settle();
-    assert!(matches!(rig.audio_commands.try_recv(), Ok(AudioCommand::Volume { sink: true, percent: 55, .. })));
-    scales[2].set_value(30.0);
-    settle();
-    assert!(matches!(rig.battery_commands.try_recv(), Ok(BatteryCommand::SetBrightness { raw: 30, .. })));
-
-    // An arrow opens the tile's page; Back returns to the panel.
-    let arrows_before = arrows(&root).len();
-    assert!(arrows_before >= 4, "Wi-Fi, Bluetooth, power mode and sound have a page");
-    arrows(&root)[0].emit_clicked();
-    settle();
-    assert_eq!(panel.stack.visible_child_name().as_deref(), Some("network"));
-    let back = shown(&root)
-        .into_iter()
-        .filter_map(|widget| widget.downcast::<gtk4::Button>().ok())
-        .find(|button| button.icon_name().as_deref() == Some("go-previous-symbolic"))
-        .expect("a page has a Back button");
-    assert!(a11y::is_named(&back, "Back"));
-    back.emit_clicked();
-    settle();
-    assert_eq!(panel.stack.visible_child_name().as_deref(), Some(PANEL));
-
-    // The Bluetooth page does not pair yet: with a device nearby and a discovery running, it
-    // offers no "Nearby devices", asks BlueZ for no discovery, and so has nothing to pair.
-    rig.bluetooth
-        .send(Some(BluetoothState {
-            powered: true,
-            discovering: true,
-            nearby: vec![athanor_services::bluetooth::Device {
-                path: "/dev9".to_owned(),
-                label: "Unpaired speaker".to_owned(),
-                icon: "audio-headset-symbolic",
-                paired: false,
-                connected: false,
-            }],
-            ..bluetooth_state()
-        }))
-        .unwrap();
-    settle();
-    arrows(&root)[1].emit_clicked();
-    settle();
-    assert_eq!(panel.stack.visible_child_name().as_deref(), Some("bluetooth"));
-    assert!(!says(&root, "Nearby devices") && !says(&root, "Unpaired speaker"));
-    assert!(!says(&root, "Pair"), "no pairing entry");
-    while let Ok(command) = rig.bluetooth_commands.try_recv() {
-        assert!(!matches!(command, BluetoothCommand::Discovery(_) | BluetoothCommand::Pair(_)));
-    }
-    panel.show(None);
-    settle();
-
-    // The panel has a name, and a state it announces when it opens.
-    assert_eq!(panel.main.root.accessible_role(), gtk4::AccessibleRole::Group);
-    assert!(a11y::is_labelled(&panel.main.root), "a container has a label and no tooltip");
-
-    // Everything the person can use is reached with Tab.
-    let order = tab_order(&window);
-    for widget in interactive(&root) {
-        assert!(order.contains(&widget), "Tab does not reach {widget:?}");
-    }
-    window.destroy();
-    rig
-}
-
-fn the_media(mut rig: Rig) -> Rig {
-    let panel = Panel::new(Some(rig.services.clone()), None, hooks());
-    let window = gtk4::Window::new();
-    window.set_child(Some(&panel.widget()));
-    window.present();
-    panel.set_shown(true);
-    let root = panel.widget();
-    settle();
-    assert!(!says(&root, "A song"), "no player, no media section");
-    assert!(!says(&root, "Airplane mode"), "no /dev/rfkill, no airplane tile");
-    // A device that reports no radio is no airplane tile either.
-    let (empty, empty_path) = fake_rfkill(0);
-    let bare = Panel::new(Some(rig.services.clone()), Some(empty), hooks());
-    let bare_window = gtk4::Window::new();
-    bare_window.set_child(Some(&bare.widget()));
-    bare_window.present();
-    settle();
-    assert!(!says(&bare.widget(), "Airplane mode"), "no radio, no airplane tile");
-    bare_window.destroy();
-    std::fs::remove_file(&empty_path).ok();
-
-    rig.media
-        .send(MediaState {
-            players: vec![player()],
-            current: Some(0),
-            refused: 0,
-            settled: true,
-        })
-        .unwrap();
-    settle();
-    assert!(says(&root, "A song") && says(&root, "An artist"));
-    let button = |icon: &str| {
-        shown(&root)
+        // Everything the person can use is reached with Tab.
+        let usable: Vec<WidgetId> = shown(&ui)
             .into_iter()
-            .filter_map(|widget| widget.downcast::<gtk4::Button>().ok())
-            .find(|button| button.icon_name().as_deref() == Some(icon))
-            .unwrap_or_else(|| panic!("no {icon} button"))
-    };
-    for (icon, name) in [
-        ("media-skip-backward-symbolic", "Previous track"),
-        ("media-playback-pause-symbolic", "Pause"),
-        ("media-skip-forward-symbolic", "Next track"),
-    ] {
-        assert!(a11y::is_named(&button(icon), name), "{icon} is {name}");
-    }
-    button("media-playback-pause-symbolic").emit_clicked();
-    button("media-skip-forward-symbolic").emit_clicked();
-    settle();
-    assert!(matches!(rig.media_commands.try_recv(), Ok(MediaCommand::PlayPause)));
-    assert!(matches!(rig.media_commands.try_recv(), Ok(MediaCommand::Next)));
-    // What a player controls cannot panic the panel: a negative length, a position at the end
-    // of the integers, a seek to the far ends.
-    let mut hostile = player();
-    hostile.length_us = Some(-5);
-    hostile.position_us = Some(i64::MAX);
-    rig.media
-        .send(MediaState {
-            players: vec![hostile],
-            current: Some(0),
-            refused: 0,
-            settled: true,
-        })
-        .unwrap();
-    settle();
-    panel.main.media.seek_to(1e30);
-    panel.main.media.seek_to(-1e30);
-    panel.main.media.set_shown(true);
-    settle();
-    // A cover that cannot be decoded is the icon, not a hole.
-    assert!(panel.main.media.art.paintable().is_some());
-    window.destroy();
-    rig
+            .filter(|&id| {
+                matches!(
+                    ui.widget(id).kind,
+                    Kind::Tile(_) | Kind::IconButton { .. } | Kind::IconToggle(_) | Kind::Slider(_)
+                )
+            })
+            .collect();
+        let mut reached = Vec::new();
+        ui.set_focus(None);
+        for _ in 0..2 * usable.len() + 2 {
+            ui.key(Key::Tab);
+            reached.extend(ui.focus());
+        }
+        for id in &usable {
+            assert!(
+                reached.contains(id),
+                "Tab does not reach {:?}",
+                text(&ui, *id)
+            );
+        }
+
+        // An arrow opens the tile's page; Back returns to the panel.
+        let arrow = named(&ui, "Open the Wi-Fi page");
+        assert_eq!(press(&mut panel, &mut ui, arrow), Action::Rebuild);
+        assert_eq!(panel.view(), View::Page(Page::Network));
+        let mut ui = view(&mut panel, &mut icons);
+        let back = named(&ui, "Back");
+        assert_eq!(panel.first(), Some(back), "the keyboard starts on Back");
+        assert_eq!(press(&mut panel, &mut ui, back), Action::Rebuild);
+        assert_eq!(panel.view(), View::Panel);
+        let mut ui = view(&mut panel, &mut icons);
+        let sound = named(&ui, "Open the Sound page");
+        assert_eq!(press(&mut panel, &mut ui, sound), Action::Rebuild);
+        assert_eq!(panel.view(), View::Page(Page::Audio));
+        panel.show(None);
+        let mut ui = view(&mut panel, &mut icons);
+
+        // The Bluetooth page does not pair yet: with a device nearby and a discovery running, it
+        // offers no "Nearby devices", asks BlueZ for no discovery, and so has nothing to pair.
+        rig.bluetooth
+            .send(Some(BluetoothState {
+                powered: true,
+                discovering: true,
+                nearby: vec![athanor_services::bluetooth::Device {
+                    path: "/dev9".to_owned(),
+                    label: "Unpaired speaker".to_owned(),
+                    icon: "audio-headset-symbolic",
+                    paired: false,
+                    connected: false,
+                }],
+                ..bluetooth_state()
+            }))
+            .unwrap();
+        settle(context);
+        panel.turn(&mut ui, &mut icons);
+        let arrow = named(&ui, "Open the Bluetooth page");
+        assert_eq!(press(&mut panel, &mut ui, arrow), Action::Rebuild);
+        let mut ui = view(&mut panel, &mut icons);
+        panel.turn(&mut ui, &mut icons);
+        assert!(!says(&ui, "Nearby devices") && !says(&ui, "Unpaired speaker"));
+        assert!(!says(&ui, "Pair"), "no pairing entry");
+        while let Ok(command) = rig.bluetooth_commands.try_recv() {
+            assert!(!matches!(
+                command,
+                BluetoothCommand::Discovery(_) | BluetoothCommand::Pair(_)
+            ));
+        }
+        panel.closed(&mut ui);
+
+        // The footer's Settings button opens Settings, and is named for it.
+        panel.show(None);
+        let mut ui = view(&mut panel, &mut icons);
+        let settings = named(&ui, "Settings");
+        assert_eq!(ui.tooltip(settings), Some("Settings"));
+        assert_eq!(press(&mut panel, &mut ui, settings), Action::OpenSettings);
+    });
 }
 
 #[test]
-fn the_panel_draws_its_models_and_sends_the_persons_actions() {
-    if gtk4::init().is_err() {
+fn the_media_section_and_the_airplane_tile_need_what_they_show() {
+    on_context(|context| {
+        let mut rig = rig();
+        let mut icons = Icons::new(Theme::default().text);
+        let mut panel = Panel::new(Some(rig.services.clone()), None, false);
+        settle(context);
+        let mut ui = view(&mut panel, &mut icons);
+        assert!(!says(&ui, "A song"), "no player, no media section");
         assert!(
-            std::env::var_os("ATHANOR_REQUIRE_DISPLAY").is_none(),
-            "ATHANOR_REQUIRE_DISPLAY is set and GTK found no display"
+            !says(&ui, "Airplane mode"),
+            "no /dev/rfkill, no airplane tile"
         );
-        eprintln!("no display: the panel tests were skipped");
-        return;
-    }
-    let rig = the_tiles(rig());
-    the_media(rig);
+        // A device that reports no radio is no airplane tile either.
+        let (empty, empty_path) = fake_rfkill(0);
+        let mut bare = Panel::new(Some(rig.services.clone()), Some(empty), false);
+        settle(context);
+        let bare_ui = view(&mut bare, &mut icons);
+        assert!(
+            !says(&bare_ui, "Airplane mode"),
+            "no radio, no airplane tile"
+        );
+        std::fs::remove_file(&empty_path).ok();
+
+        rig.media
+            .send(MediaState {
+                players: vec![player()],
+                current: Some(0),
+                refused: 0,
+                settled: true,
+            })
+            .unwrap();
+        settle(context);
+        assert_eq!(
+            panel.turn(&mut ui, &mut icons),
+            Action::Done,
+            "the same tiles"
+        );
+        assert!(says(&ui, "A song") && says(&ui, "An artist"));
+        // A cover that cannot be decoded is the icon, not a hole.
+        assert!(says(&ui, "Cover"));
+        let previous = named(&ui, "Previous track");
+        let pause = named(&ui, "Pause");
+        let next = named(&ui, "Next track");
+        assert_eq!(press(&mut panel, &mut ui, pause), Action::Done);
+        press(&mut panel, &mut ui, next);
+        press(&mut panel, &mut ui, previous);
+        assert!(matches!(
+            rig.media_commands.try_recv(),
+            Ok(MediaCommand::PlayPause)
+        ));
+        assert!(matches!(
+            rig.media_commands.try_recv(),
+            Ok(MediaCommand::Next)
+        ));
+        assert!(matches!(
+            rig.media_commands.try_recv(),
+            Ok(MediaCommand::Previous)
+        ));
+
+        // What a player controls cannot panic the panel: a negative length, a position at the end
+        // of the integers, a seek to the far ends.
+        let mut hostile = player();
+        hostile.length_us = Some(-5);
+        hostile.position_us = Some(i64::MAX);
+        rig.media
+            .send(MediaState {
+                players: vec![hostile],
+                current: Some(0),
+                refused: 0,
+                settled: true,
+            })
+            .unwrap();
+        settle(context);
+        panel.turn(&mut ui, &mut icons);
+        panel.media.seek_to(1e30);
+        panel.media.seek_to(-1e30);
+        panel.tick(&mut ui);
+    });
+}
+
+#[test]
+fn without_the_models_only_dark_mode_shows_and_a_page_says_it_is_unavailable() {
+    on_context(|_| {
+        let mut icons = Icons::new(Theme::default().text);
+        let mut panel = Panel::new(None, None, true);
+        let mut ui = view(&mut panel, &mut icons);
+        let tiles: Vec<&str> = shown(&ui)
+            .into_iter()
+            .filter(|&id| matches!(ui.widget(id).kind, Kind::Tile(_)))
+            .filter_map(|id| text(&ui, id))
+            .collect();
+        assert_eq!(tiles, ["Dark mode"]);
+        assert!(
+            ui.is_active(named(&ui, "Dark mode")),
+            "dark as the compositor keeps it"
+        );
+        panel.set_dark(Some(&mut ui), false);
+        assert!(!ui.is_active(named(&ui, "Dark mode")));
+        panel.show(Some(Page::Battery));
+        ui = view(&mut panel, &mut icons);
+        assert!(says(&ui, "The Power page is not available yet."));
+    });
 }
