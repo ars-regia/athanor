@@ -188,6 +188,7 @@ guest_put() { # guest_put PATH
 # The VM, the files and the units this script put in the guest, marked so cleanup removes
 # only those.
 mark() { guest_ssh "mkdir -p $STATE_DIR && touch $STATE_DIR/$1"; }
+a11y_enabled() { in_session busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled; }
 marked() { guest_ssh "test -e $STATE_DIR/$1"; }
 
 now() { in_session date +%s; }
@@ -220,6 +221,14 @@ stage_deploy() {
     in_session systemctl --user daemon-reload
     in_session busctl --user call org.freedesktop.DBus / org.freedesktop.DBus ReloadConfig > /dev/null
     unit cat > /dev/null || fail "systemctl --user cat athanor-launcher.service found no unit"
+    # The toolkit's accessibility tree (AccessKit) is built only while the accessibility bus
+    # says it is enabled, as when a screen reader runs; GTK's was always there. Every stage
+    # reads the tree, so the run turns it on and cleanup puts it back.
+    if [[ $(a11y_enabled) != "b true" ]]; then
+        in_session busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true ||
+            fail "the accessibility bus cannot be enabled"
+        mark a11y-enabled
+    fi
     # The user's copy of system_actions is removed at cleanup only when it did not exist.
     if ! in_session "test -e $SHORTCUTS/system_actions"; then
         mark no-system-actions
@@ -1150,6 +1159,9 @@ stage_cleanup() {
     fi
     if marked super-marker; then
         step "restoring the Super marker" in_session "mkdir -p \$(dirname $SUPER_MARKER) && touch $SUPER_MARKER && rm $STATE_DIR/super-marker"
+    fi
+    if marked a11y-enabled; then
+        step "turning the accessibility bus off again" in_session "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b false && rm $STATE_DIR/a11y-enabled"
     fi
     if marked set-session-class; then
         step "stopping localsearch" in_session "systemctl --user stop localsearch-3.service"
