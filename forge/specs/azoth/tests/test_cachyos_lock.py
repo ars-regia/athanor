@@ -217,7 +217,9 @@ class LockFunctions(unittest.TestCase):
             files, protected = r.stdout.split("-- protected\n")
             self.assertEqual(files, "-- files\nM  Makefile\nM  fs/x.c\nD  mm/gone.c\n"
                                     "M  mm/link\nA  mm/new.o\nM  mm/slub.c\n")
-            sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
+            def sha(text):
+                return hashlib.sha256(text.encode()).hexdigest()
+
             self.assertEqual(protected.splitlines(), [
                 f"100755 {sha('m' + chr(10))}  Makefile",
                 "000000 deleted  mm/gone.c",

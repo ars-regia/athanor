@@ -3805,7 +3805,9 @@ def sandbox_grant_problems(relative, code, read_grants):
     """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
     other than a dirs::Checked or dirs::CheckedNode."""
     found = []
-    line = lambda pos: code.count("\n", 0, pos) + 1
+    def line(pos):
+        return code.count("\n", 0, pos) + 1
+
     for match in PATH_BENEATH.finditer(code):
         if any(start <= match.start() < end for start, end in read_grants):
             continue
