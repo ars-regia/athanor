@@ -370,7 +370,7 @@ class TierDigests(unittest.TestCase):
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertIn(f"the base branch '{base}' is not a branch name", r.stderr)
                 log = self.dir / "calls.log"
-                tools = [json.loads(l)[0] for l in log.read_text().splitlines()] if log.exists() else []
+                tools = [json.loads(ln)[0] for ln in log.read_text().splitlines()] if log.exists() else []
                 self.assertEqual(tools, [])
                 self.assertFalse(self.out.exists())
 
@@ -382,7 +382,7 @@ class TierDigests(unittest.TestCase):
                 self.publish("ghcr.io/ars-regia", **DIGESTS)
                 r = self.resolve("resolve")
                 self.assertEqual(r.returncode, 0, r.stderr)
-                calls = [json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines()]
+                calls = [json.loads(ln) for ln in (self.dir / "calls.log").read_text().splitlines()]
                 self.assertNotIn("gh", [c[0] for c in calls])
 
     def test_a_pull_request_into_iso_v0_reads_latest_and_trusts_no_other_branch_signed(self):

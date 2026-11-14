@@ -17,3 +17,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracker-rs = { workspace = true }
+
+[package.metadata.cargo-machete]
+# Renamed crate: the code uses it as `tracker`.
+ignored = ["tracker-rs"]

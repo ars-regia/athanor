@@ -550,7 +550,7 @@ alert of PL51; findings without a fix are listed in the weekly statistics.
 shellcheck, actionlint, cargo deny) and CodeQL runs weekly for Rust, Python and the
 workflows; a weekly cargo-mutants job in `maintenance.yml` (`scripts/ci/mutants.sh`) reports
 the mutants that the tests of `athanor-sal` and the platform crates under `system/` do not
-catch, and fails only when the run itself fails. (SSDF PW.7, PW.8; Scorecard SAST.)
+catch, and fails only when the run itself fails. cargo-machete fails a pull request that declares a dependency no source uses. (SSDF PW.7, PW.8; Scorecard SAST.)
 
 ### 4.8 Acceptance, VSA and promotion
 

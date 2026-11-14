@@ -40,7 +40,7 @@ SCRIPTS = (
 def stages(text):
     """[(stage name, [instruction, ...])], the global ARGs first under the name ''. Continuation
     lines are joined; comment lines are dropped, as the Containerfile parser drops them."""
-    result, current, pending = [("", [])], [], ""
+    result, pending = [("", [])], ""
     for line in text.splitlines():
         if line.lstrip().startswith("#") or not line.strip():
             continue

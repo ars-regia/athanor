@@ -50,7 +50,9 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("cosmic-comp", why)
 
     def test_a_rig_without_wl_clipboard_is_refused(self):
-        which = lambda tool: None if tool.startswith("wl-") else tool
+        def which(tool):
+            return None if tool.startswith("wl-") else tool
+
         why = check.refusal({}, which=which)
         self.assertIn("wl-copy, wl-paste", why)
 

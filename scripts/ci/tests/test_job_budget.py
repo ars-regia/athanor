@@ -33,7 +33,9 @@ class JobBudget(unittest.TestCase):
 
     def test_the_command_line_exits_non_zero_past_the_budget(self):
         script = str(CI / "job_budget.py")
-        run = lambda *a: subprocess.run([sys.executable, "-B", script, *a], capture_output=True, text=True)
+        def run(*a):
+            return subprocess.run([sys.executable, "-B", script, *a], capture_output=True, text=True)
+
         self.assertEqual(run("start", str(self.stamp)).returncode, 0)
         self.assertEqual(run("check", str(self.stamp), "10").returncode, 0)
         self.assertEqual(run("check", str(self.stamp), "-1").returncode, 1)

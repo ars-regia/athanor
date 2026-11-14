@@ -236,7 +236,7 @@ case $(wc -l < {count}) in
         return done
 
     def written(self):
-        return [l for l in self.rules.read_text().splitlines() if not l.startswith("#")]
+        return [ln for ln in self.rules.read_text().splitlines() if not ln.startswith("#")]
 
     def test_admits_webcam_reader_bluetooth_and_hub(self):
         self.device("1-1", "0c45", "6a10", [("0e", "01", "00"), ("0e", "02", "00")], "CAM1")
@@ -868,7 +868,7 @@ fi
 
 class BaselineUnchangedTest(unittest.TestCase):
     def test_baseline_is_unchanged(self):
-        rules = [l for l in (SOURCES / 'rules.d/10-athanor-baseline.conf').read_text().splitlines() if l and not l.startswith("#")]
+        rules = [ln for ln in (SOURCES / 'rules.d/10-athanor-baseline.conf').read_text().splitlines() if ln and not ln.startswith("#")]
         self.assertEqual(
             rules,
             [

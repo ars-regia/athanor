@@ -16,7 +16,7 @@ INSTALL_PATHS = ("system/athanor-install.ks", "system/disk_config/iso.toml", "fo
 
 
 def active_lines(path):
-    return [l.strip() for l in (ROOT / path).read_text().splitlines() if l.strip() and not l.lstrip().startswith("#")]
+    return [ln.strip() for ln in (ROOT / path).read_text().splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
 
 
 class NewInstallTest(unittest.TestCase):
@@ -24,13 +24,13 @@ class NewInstallTest(unittest.TestCase):
         for path in INSTALL_PATHS:
             lines = active_lines(path)
             self.assertIn("services --disabled=sshd", lines, path)
-            self.assertFalse([l for l in lines if l.startswith("services") and re.search(r"--enabled=\S*sshd", l)], path)
+            self.assertFalse([ln for ln in lines if ln.startswith("services") and re.search(r"--enabled=\S*sshd", ln)], path)
 
     def test_every_install_path_keeps_the_image_firewall(self):
         # Any other `firewall` line makes Anaconda run firewall-offline-cmd, which adds ssh to the
         # default zone and leaves a local public.xml that hides the image's zone for good.
         for path in INSTALL_PATHS:
-            lines = [l for l in active_lines(path) if l.split()[0] == "firewall"]
+            lines = [ln for ln in active_lines(path) if ln.split()[0] == "firewall"]
             self.assertEqual(lines, ["firewall --use-system-defaults"], path)
 
 
@@ -38,7 +38,7 @@ class ExistingMachineTest(unittest.TestCase):
     def test_no_shipped_preset_disables_sshd(self):
         for preset in ROOT.glob("forge/specs/*/SOURCES/**/system-preset/*.preset"):
             self.assertFalse(
-                [l for l in active_lines(preset.relative_to(ROOT)) if re.fullmatch(r"disable\s+(sshd\S*|\*)", l)],
+                [ln for ln in active_lines(preset.relative_to(ROOT)) if re.fullmatch(r"disable\s+(sshd\S*|\*)", ln)],
                 preset.name,
             )
 

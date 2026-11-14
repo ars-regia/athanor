@@ -182,7 +182,9 @@ class Promote(Tool):
         for name, between in (("at plan", None), ("at apply", True)):
             with self.subTest(name=name):
                 self.published()
-                other = lambda: self.set_tag(f"{base}:promoted-412", digest(9))
+                def other():
+                    self.set_tag(f"{base}:promoted-412", digest(9))
+
                 if between is None:
                     other()
                 r, copies = self.promote(between=other if between else None)
