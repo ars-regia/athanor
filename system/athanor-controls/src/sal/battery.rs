@@ -134,6 +134,7 @@ impl Page {
 
         // Columns, not groups: the GTK page's boxes give assistive technologies no group.
         let profiles_section = column(ui, page);
+        ui.set_spacing(profiles_section, look.radio_gap);
         let heading = ui.add(profiles_section, Kind::Label(tr("Power mode")));
         ui.set_text_style(heading, title());
         let profiles = battery::PROFILE_NAMES

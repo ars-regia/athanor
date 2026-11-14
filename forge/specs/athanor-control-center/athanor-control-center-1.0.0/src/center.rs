@@ -528,4 +528,15 @@ mod tests {
         assert_eq!(theme.font_family.as_deref(), Some("Inter"), "the GTK surfaces' font");
         assert_eq!(theme.font_size, 13.0);
     }
+
+    #[test]
+    fn the_power_modes_are_28_px_apart_as_the_gtk_page() {
+        let mut ui = Ui::new("Battery", theme(&Appearance::default()), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        ui.set_spacing(column, Some(crate::panel::RADIO_GAP));
+        let [first, second] = ["Balanced", "Power saver"].map(|t| ui.radio(column, t, false));
+        ui.layout();
+        let pitch = ui.widget(second).rect.y - ui.widget(first).rect.y;
+        assert!((pitch - 28.0).abs() < 0.5, "{pitch} px apart");
+    }
 }

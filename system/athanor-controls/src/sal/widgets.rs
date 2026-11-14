@@ -26,6 +26,8 @@ pub struct Look<'a> {
     pub caption: TextStyle,
     /// A secondary line's ink.
     pub secondary: Rgba,
+    /// The room between a page's radio rows, `None` for the theme's section gap.
+    pub radio_gap: Option<f32>,
 }
 
 impl Look<'_> {
@@ -46,6 +48,7 @@ impl Look<'_> {
                 ..TextStyle::default()
             },
             secondary: Rgba([0, 0, 0, 255]),
+            radio_gap: None,
         }
     }
 }

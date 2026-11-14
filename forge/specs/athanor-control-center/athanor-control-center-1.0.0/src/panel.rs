@@ -209,14 +209,19 @@ fn style(step: sal::Step) -> TextStyle {
     }
 }
 
-/// What a page is drawn with: the theme's icons at a button's size, and secondary lines in the
-/// caption's size and `secondary`'s ink, as calmo's `bar-popover-note`.
+/// The room between the power mode's radio rows, for GTK's 28 px apart: a radio is its 15.75 px
+/// line of Inter at 13 px and the theme's padding of 10 tall.
+pub(crate) const RADIO_GAP: f32 = 2.25;
+
+/// What a page is drawn with: the theme's icons at a button's size, secondary lines in the
+/// caption's size and `secondary`'s ink, as calmo's `bar-popover-note`, and GTK's radio rows.
 fn look(icons: &mut Icons, secondary: Rgba) -> Look<'_> {
     Look {
         icon: Box::new(|name| icons.get(name, Icons::BUTTON)),
         icon_size: Icons::BUTTON,
         caption: style(sal::size::CAPTION),
         secondary,
+        radio_gap: Some(RADIO_GAP),
     }
 }
 
