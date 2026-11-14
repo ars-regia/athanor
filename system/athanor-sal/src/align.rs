@@ -65,10 +65,12 @@ impl Ui {
     /// When `id` names no widget of this `Ui`.
     pub fn set_min_width(&mut self, id: WidgetId, width: f32) -> bool {
         let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+        // A stale id writes to a widget nothing reads: it changes nothing.
+        let live = self.contains(id);
         let widget = &mut self.widgets[id];
         let changed = widget.min_w != width;
         widget.min_w = width;
-        changed
+        live && changed
     }
 }
 
@@ -164,6 +166,20 @@ mod tests {
                 assert_eq!(ui.widget(island).rect.w, natural, "{width}");
             }
         }
+    }
+
+    /// A stale id (Ui::remove_children) changes nothing, as the WidgetId contract says.
+    #[test]
+    fn a_least_width_on_a_removed_widget_changes_nothing() {
+        let mut ui = Ui::new("Align", theme(), false);
+        let group = ui.add(Ui::ROOT, Kind::Group("Wi-Fi".into()));
+        let button = ui.add(group, Kind::Button("Connect".into()));
+        ui.remove_children(group);
+        assert!(!ui.set_min_width(button, 400.0));
+        let again = ui.add(group, Kind::Button("Connect".into()));
+        assert_ne!(again, button, "the slot's next widget");
+        ui.layout();
+        assert!(ui.widget(again).rect.w < 400.0, "the slot's next widget is untouched");
     }
 
     #[test]
