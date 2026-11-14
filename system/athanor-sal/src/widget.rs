@@ -14,6 +14,7 @@ mod alert;
 mod exact_value;
 mod horizontal;
 mod spacing;
+mod natural;
 pub(crate) mod labelled;
 mod rows;
 mod strip;
@@ -614,6 +615,9 @@ pub struct Widget {
     pub(crate) horizontal: bool,
     /// The room a column keeps between its children: see [`Ui::set_spacing`].
     pub(crate) spacing: Option<f32>,
+    /// Whether a scroll is as tall as its content, up to its height: see
+    /// [`Ui::set_natural_height`].
+    pub(crate) natural: bool,
     /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
     /// shown a cell.
     pub(crate) slots: usize,
@@ -643,6 +647,7 @@ impl Widget {
             fill: false,
             horizontal: false,
             spacing: None,
+            natural: false,
             slots: 0,
             natural_w: 0.0,
         }
@@ -2065,6 +2070,7 @@ impl Ui {
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
         let slots = self.widgets[id].slots;
+        let natural = self.widgets[id].natural;
         let between = match self.widgets[id].kind {
             Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
             _ => gap,
@@ -2082,7 +2088,7 @@ impl Ui {
                 // A height set through `Ui::add` is checked here; NaN falls to 0 in `max`.
                 *height = if height.is_finite() { height.max(0.0) } else { 0.0 };
                 *offset = offset.min(content - *height).max(0.0);
-                (w, *height)
+                (w, if natural { content.min(*height) } else { *height })
             }
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
