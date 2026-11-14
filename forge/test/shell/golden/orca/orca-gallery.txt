@@ -1,53 +1,107 @@
 Screen reader on.
 Gallery
 Buttons toggle button pressed.
+space
 Choices toggle button not pressed.
+tab
 Values toggle button not pressed.
+tab
 Lists toggle button not pressed.
+tab
 Text toggle button not pressed.
+tab
 States toggle button not pressed.
+tab
+Dialogs toggle button not pressed.
+tab
 A button button.
+tab
 One toggle button pressed.
+tab
 Two toggle button not pressed.
+tab
 Three toggle button not pressed.
+tab
 Name text.
+tab
 Screen reader off.
 Screen reader on.
 Gallery
 Choices toggle button pressed.
+space
 Values toggle button not pressed.
+tab
 Lists toggle button not pressed.
+tab
 Text toggle button not pressed.
+tab
 States toggle button not pressed.
+tab
+Dialogs toggle button not pressed.
+tab
 Option one check box checked.
+tab
 Option two check box not checked.
+tab
 A switch check box checked.
+tab
 Screen reader off.
 Screen reader on.
 Gallery
 Values toggle button pressed.
+space
 Lists toggle button not pressed.
+tab
 Text toggle button not pressed.
+tab
 States toggle button not pressed.
+tab
+Dialogs toggle button not pressed.
+tab
 A slider horizontal slider 50 50 percent.
+tab
 Screen reader off.
 Screen reader on.
 Gallery
 Lists toggle button pressed.
+space
 Text toggle button not pressed.
+tab
 States toggle button not pressed.
+tab
+Dialogs toggle button not pressed.
+tab
 A list List with 50 items
 Row 1.
+tab
 Screen reader off.
 Screen reader on.
 Gallery
 Text toggle button pressed.
+space
 States toggle button not pressed.
+tab
+Dialogs toggle button not pressed.
+tab
 Notes text.
 The caret starts here.
+tab
 Screen reader off.
 Screen reader on.
 Gallery
 States toggle button pressed.
+space
+Dialogs toggle button not pressed.
+tab
 Enable the button check box not checked.
+tab
+Screen reader off.
+Screen reader on.
+A dialog A dialog holds its window until it is closed.
+Close button.
+space
+Gallery
+Dialogs toggle button pressed.
+Open a dialog button.
+tab
 Screen reader off.

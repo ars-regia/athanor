@@ -288,7 +288,10 @@ class GalleryTest(unittest.TestCase):
             self.assertTrue(failures[0].startswith("choices: no reference "))
             self.assertTrue(failures[1].startswith("states: no transcript "))
             # The English trees are other files.
-            self.assertEqual(len(compare.gallery_problems(references, transcripts, "en")[1]), 12)
+            self.assertEqual(
+                len(compare.gallery_problems(references, transcripts, "en")[1]),
+                2 * len(compare.GALLERY_PAGES),
+            )
 
 
 class HiddenTest(unittest.TestCase):

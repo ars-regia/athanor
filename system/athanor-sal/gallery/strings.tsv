@@ -19,6 +19,12 @@ row	Row	Riga
 page.text	Text	Testo
 notes	Notes	Note
 notes.text	Lines wrap at the width of the area, as in the text view of GTK.\nThe caret starts here.	Le righe vanno a capo alla larghezza dell'area, come nella vista di testo di GTK.\nIl cursore parte da qui.
+wrap	A label wraps at the width its window gives it and asks for no more than forty characters, so a long sentence does not make its window wide. Past its third line it ends with an ellipsis, and a screen reader still reads every word of it.	Un'etichetta va a capo alla larghezza che la finestra le dà e non chiede più di quaranta caratteri, così una frase lunga non allarga la finestra. Oltre la terza riga finisce con i puntini di sospensione, e un lettore di schermo ne legge comunque ogni parola.
 page.states	States	Stati
 enable	Enable the button	Abilita il pulsante
 waiting	Waits for the switch	Attende l'interruttore
+page.dialogs	Dialogs	Dialoghi
+dialog.open	Open a dialog	Apri una finestra di dialogo
+dialog.title	A dialog	Una finestra di dialogo
+dialog.text	A dialog holds its window until it is closed.	Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
+dialog.close	Close	Chiudi

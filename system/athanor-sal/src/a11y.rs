@@ -100,7 +100,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        Kind::Button(label) | Kind::IconButton { label, .. } => {
+        Kind::Button(label)
+        | Kind::IconButton { label, .. }
+        | Kind::LabelledButton { label, .. } => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
@@ -148,6 +150,27 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
                 (false, _) => Role::Button,
             });
             node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        // A tile: a toggle button, as GTK's ToggleButton, pressed while on, and described by its
+        // second line, as the GTK panel's tiles are.
+        Kind::Tile(crate::tile::Tile {
+            title: label,
+            subtitle,
+            active,
+            ..
+        }) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(label.as_str());
+            if !subtitle.is_empty() {
+                node.set_description(subtitle.as_str());
+            }
             node.set_toggled(if *active {
                 Toggled::True
             } else {
@@ -287,13 +310,16 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_has_popup(HasPopup::Menu);
         node.set_expanded(expanded);
     }
-    if let Some(description) = ui.description(id) {
+    // A tile's second line stays its description over a tooltip, as the GTK panel sets the
+    // description after the tooltip its name gives.
+    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty());
+    if let Some(description) = ui.description(id).filter(|_| !second_line) {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if has_row_label(ui, id) {
+    if shown_label(ui, id).is_some() {
         children.push(row_label_id(id));
     }
     if id == Ui::ROOT && ui.announcement.is_some() {
@@ -340,17 +366,24 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
         .collect()
 }
 
-/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
-/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
-fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    if !has_row_label(ui, id) {
-        return None;
+/// The text widget `id` shows as a label inside it: a list heading's, a list row's unless it
+/// shows widgets of its own, and a labelled button's when it shows one.
+fn shown_label(ui: &Ui, id: WidgetId) -> Option<&str> {
+    match &ui.widget(id).kind {
+        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => Some(text),
+        Kind::LabelledButton { text, .. } if !text.is_empty() => Some(text),
+        _ => None,
     }
-    let (Kind::ListRow(text) | Kind::ListHeading(text)) = &ui.widget(id).kind else {
-        return None;
-    };
+}
+
+/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
+/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label. A
+/// labelled button's text is a label inside it the same way, as the GtkLabel of a GTK button
+/// whose name is set apart.
+fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
+    let text = shown_label(ui, id)?;
     let mut label = Node::new(Role::Label);
-    label.set_value(text.as_str());
+    label.set_value(text);
     label.set_bounds(bounds(ui, id, scale));
     Some((row_label_id(id), label))
 }
@@ -1360,6 +1393,9 @@ mod tests {
         announcements: Vec<(String, String)>,
         /// The windows deactivated, by name.
         deactivated: Vec<String>,
+        /// The focus gained, the window state made active and the windows activated, in the
+        /// order the bus heard them: `focused`, `active` and `activate <name>`.
+        activation: Vec<String>,
         /// The nodes with interfaces registered on the bus, and their interfaces' bits.
         registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
     }
@@ -1374,7 +1410,7 @@ mod tests {
         use accesskit::{ActionHandler, ActionRequest};
         use accesskit_atspi_common::{
             Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, ObjectEvent,
-            WindowBounds, WindowEvent,
+            State, WindowBounds, WindowEvent,
         };
         struct Recorder(Bus);
         impl AdapterCallback for Recorder {
@@ -1403,6 +1439,19 @@ mod tests {
                         event: WindowEvent::Deactivated,
                         ..
                     } => heard.deactivated.push(name),
+                    Event::Window {
+                        name,
+                        event: WindowEvent::Activated,
+                        ..
+                    } => heard.activation.push(format!("activate {name}")),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Focused, true),
+                        ..
+                    } => heard.activation.push("focused".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Active, true),
+                        ..
+                    } => heard.activation.push("active".into()),
                     _ => {}
                 }
             }
@@ -1594,6 +1643,23 @@ mod tests {
         fn apply(&mut self, update: TreeUpdate) {
             self.update(update);
         }
+    }
+
+    /// A window taking the keyboard back, as one does when its dialog closes, reports the focus
+    /// of the widget that takes it before the window's activation, as GTK 4.20 does: Orca then
+    /// says the window's name and role, not its name alone (#1123; the second change of
+    /// `vendor/accesskit_atspi_common`).
+    #[test]
+    fn a_window_taking_the_keyboard_back_reports_the_focus_before_its_activation() {
+        let mut ui = Ui::new("Gallery", Theme::default(), false);
+        let button = ui.add(Ui::ROOT, Kind::Button("Open the dialog".into()));
+        ui.layout();
+        ui.set_focus(Some(button));
+        let (mut adapter, heard) = at_spi(&ui);
+        assert!(heard.lock().expect("not poisoned").activation.is_empty());
+        adapter.update_window_focus_state(true);
+        let heard = heard.lock().expect("not poisoned");
+        assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
     }
 
     /// An announcement asked for before a surface leaves the accessibility tree and not yet
