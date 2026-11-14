@@ -168,6 +168,18 @@ def check_workflows():
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
+        # 1f. A workflow that runs on its own sets the token's permissions, or it gets the
+        # repository default (CodeQL actions/missing-workflow-permissions, 2026-11-14). A
+        # reusable workflow takes them from its caller.
+        if yaml is None:
+            r.fail(f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked")
+            continue
+        doc = yaml.safe_load(read(wf))
+        events = triggers(doc) if isinstance(doc, dict) else set()
+        if events != {"workflow_call"} and "permissions" not in (doc or {}):
+            r.fail(f"{wf.name}: no top-level permissions, so the token gets the repository "
+                   f"default (triggers: {', '.join(sorted(events)) or 'none'})")
+
     # 1e. D43: signing keys only in sign-only jobs
     for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
         r.fail(problem)
