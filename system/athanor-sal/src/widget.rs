@@ -2152,8 +2152,10 @@ impl Ui {
                     // narrower column breaks into more lines, never below its longest word.
                     let inner = outer.w - 2.0 * edge;
                     if let Some(&(_, _, least)) = self.widgets[c].wrap.as_ref() {
+                        // Nor below its least width (Ui::set_min_width), as GTK's width-request.
+                        let floor = least.max(self.widgets[c].min_w);
                         let r = &mut self.widgets[c].rect;
-                        r.w = r.w.min(inner).max(least);
+                        r.w = r.w.min(inner).max(floor);
                     }
                     if across == crate::Align::Fill
                         && (matches!(
