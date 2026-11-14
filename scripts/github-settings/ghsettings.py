@@ -448,13 +448,13 @@ def export_labels(repo):
     return sorted(
         (
             {
-                "name": l["name"],
-                "color": l["color"],
-                "description": l.get("description") or "",
+                "name": label["name"],
+                "color": label["color"],
+                "description": label.get("description") or "",
             }
-            for l in gh_list(f"repos/{repo}/labels")
+            for label in gh_list(f"repos/{repo}/labels")
         ),
-        key=lambda l: l["name"],
+        key=lambda label: label["name"],
     )
 
 
@@ -713,19 +713,19 @@ def plan_environments(repo, have, want):
 
 
 def plan_labels(repo, have, want):
-    old = {l["name"]: l for l in have}
-    new = {l["name"]: l for l in want}
+    old = {label["name"]: label for label in have}
+    new = {label["name"]: label for label in want}
     calls = [
-        ("POST", f"repos/{repo}/labels", l) for n, l in new.items() if n not in old
+        ("POST", f"repos/{repo}/labels", label) for n, label in new.items() if n not in old
     ]
     calls += [
         (
             "PATCH",
             f"repos/{repo}/labels/{q(n)}",
-            {"color": l["color"], "description": l["description"]},
+            {"color": label["color"], "description": label["description"]},
         )
-        for n, l in new.items()
-        if n in old and old[n] != l
+        for n, label in new.items()
+        if n in old and old[n] != label
     ]
     calls += [
         Call(
@@ -923,10 +923,10 @@ def compare(path, want, live):
             return
         key = _entry_key(want, live)
         if key:
-            w, l = {x[key]: x for x in want}, {x[key]: x for x in live}
-            yield from _membership(path, w, l)
-            for name in sorted(w.keys() & l.keys(), key=json.dumps):
-                yield from compare(f"{path}[{name}]", w[name], l[name])
+            w, lv = {x[key]: x for x in want}, {x[key]: x for x in live}
+            yield from _membership(path, w, lv)
+            for name in sorted(w.keys() & lv.keys(), key=json.dumps):
+                yield from compare(f"{path}[{name}]", w[name], lv[name])
             return
     if want != live:
         yield f"{path}: file {_show(want)}, live {_show(live)}"

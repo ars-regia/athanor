@@ -25,8 +25,8 @@ FEDORA = "registry.fedoraproject.org/fedora:43"
 def patch(removed, added):
     return "\n".join(
         ["@@ -1,3 +1,3 @@", " Name: x"]
-        + [f"-{l}" for l in removed]
-        + [f"+{l}" for l in added]
+        + [f"-{ln}" for ln in removed]
+        + [f"+{ln}" for ln in added]
     )
 
 
@@ -107,7 +107,7 @@ class BotMergeTest(unittest.TestCase):
             headRefName=branch,
             headRefOid=SHA,
             isCrossRepository=False,
-            labels=[{"name": l} for l in labels],
+            labels=[{"name": ln} for ln in labels],
             changedFiles=len(files),
         )
         data.update(view)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Installs the pinned tools `just check` needs on a machine that lacks them (the GitHub
 # runner of pr.yml): just, actionlint and cargo-deny from their release archives, each verified against
-# its SHA-256 before it is unpacked, cosign and the registry (distribution) that the real-cosign
+# its SHA-256 before it is unpacked, ruff the same way, cosign and the registry (distribution) that the real-cosign
 # attest check runs against (scripts/ci/cosign-attest-check.sh), and pykickstart (ksvalidator) and PyYAML in a virtual
 # environment, every Python package verified by the hashes of requirements-build.txt and
 # requirements.txt. DIR becomes that environment: put DIR/bin first on PATH, and python3 then
@@ -29,6 +29,8 @@ COSIGN_INSTALLER=756fe2d284c7292c4e9b62c8a28f1e5629c59532
 COSIGN_VERSION=v3.1.4
 COSIGN_URL=https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-amd64
 COSIGN_SHA256=424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
+RUFF_URL=https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-unknown-linux-musl.tar.gz
+RUFF_SHA256=85e76bbb60e708a22624b31efb227e8bdaa6978177b93c146d352de4caf37ba1
 REGISTRY_URL=https://github.com/distribution/distribution/releases/download/v3.0.0/registry_3.0.0_linux_amd64.tar.gz
 REGISTRY_SHA256=61c9a2c0d5981a78482025b6b69728521fbc78506d68b223d4a2eb825de5ca3d
 
@@ -53,6 +55,9 @@ tar -xzf "$dir/download/actionlint.tar.gz" -C "$dir/bin" actionlint
 fetch "$CARGO_DENY_URL" "$CARGO_DENY_SHA256" "$dir/download/cargo-deny.tar.gz"
 tar -xzf "$dir/download/cargo-deny.tar.gz" -C "$dir/bin" --strip-components=1 \
     cargo-deny-0.20.2-x86_64-unknown-linux-musl/cargo-deny
+fetch "$RUFF_URL" "$RUFF_SHA256" "$dir/download/ruff.tar.gz"
+tar -xzf "$dir/download/ruff.tar.gz" -C "$dir/bin" --strip-components=1 \
+    ruff-x86_64-unknown-linux-musl/ruff
 fetch "$COSIGN_URL" "$COSIGN_SHA256" "$dir/download/cosign"
 install -m 0755 "$dir/download/cosign" "$dir/bin/cosign"
 fetch "$REGISTRY_URL" "$REGISTRY_SHA256" "$dir/download/registry.tar.gz"

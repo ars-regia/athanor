@@ -6,7 +6,6 @@ fails here, not skips, where they are missing."""
 import os
 import pathlib
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest

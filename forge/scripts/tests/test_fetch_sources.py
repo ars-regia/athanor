@@ -44,7 +44,7 @@ class FetchSources(unittest.TestCase):
     def remote_spec(self):
         self.stub("rpmspec", "echo 'Source0: https://example.invalid/a.tar.gz'\n")
         # curl -o <file> <url>: write the payload to the -o target.
-        self.stub("curl", f'while [ "$1" != -o ]; do shift; done; printf "payload\\n" > "$2"\n')
+        self.stub("curl", 'while [ "$1" != -o ]; do shift; done; printf "payload\\n" > "$2"\n')
 
     def test_rpmspec_failure_fails_the_script(self):
         self.stub("rpmspec", "echo 'error: bad spec' >&2\nexit 1\n")
