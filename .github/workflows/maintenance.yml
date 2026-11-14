@@ -1,9 +1,10 @@
 # Scheduled maintenance (doc_pipeline.md section 3.1). Today it holds the daily settings
 # drift check of PL52, the daily check of the evidence copies off GitHub (#401), the
 # daily check that :stable was promoted (#405) and the daily rescan of the Rust advisories
-# and, on Mondays, the weekly CodeQL scan of Rust, Python and the workflows (PL28, PB8); the other
+# and, on Mondays, the weekly CodeQL scan of Rust, Python and the workflows (PL28, PB8) and the
+# weekly cargo-mutants run (PL28, scripts/ci/mutants.sh); the other
 # maintenance jobs move here with PB12. The Monday cron fires a run of its own, in which only
-# CodeQL runs; the daily jobs skip it. A failed or cancelled scheduled job opens
+# CodeQL and the mutants run; the daily jobs skip it. A failed or cancelled scheduled job opens
 # or updates its ci-alert issue (PL51).
 name: Maintenance
 
@@ -141,11 +142,77 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
 
+  # Mutation testing (PL28): cargo-mutants changes the code of one crate at a time and reports the
+  # mutants no test catches. It runs in the build stage of the shell rig, like check-rust, and takes
+  # hours, so it is not part of `just check`; athanor-sal is split into shards that run side by side.
+  # scripts/ci/mutants.sh treats cargo-mutants' exit statuses 2 (missed) and 3 (timeouts) as a
+  # finished run: the report is the result, and the job fails only when the run itself failed.
+  mutants:
+    if: ${{ github.event.schedule == '23 6 * * 1' || github.event_name == 'workflow_dispatch' }}
+    name: Mutants (${{ matrix.crate }} ${{ matrix.shard || '0/1' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - athanor-auth
+          - athanor-bus-api
+          - athanor-edid
+          - athanor-i18n
+          - athanor-idle
+          - athanor-layout
+          - athanor-portal
+          - athanor-services
+          - athanor-sessiond
+          - athanor-trust-state
+          - athanor-unit
+        include:
+          - { crate: athanor-sal, shard: "0/8" }
+          - { crate: athanor-sal, shard: "1/8" }
+          - { crate: athanor-sal, shard: "2/8" }
+          - { crate: athanor-sal, shard: "3/8" }
+          - { crate: athanor-sal, shard: "4/8" }
+          - { crate: athanor-sal, shard: "5/8" }
+          - { crate: athanor-sal, shard: "6/8" }
+          - { crate: athanor-sal, shard: "7/8" }
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Pinned tools (scripts/ci/install-tools.sh)
+        run: |
+          set -euo pipefail
+          bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
+          echo "$RUNNER_TEMP/tools/bin" >> "$GITHUB_PATH"
+
+      - name: Mutate the crate
+        env:
+          MUTANTS_IN_RIG: "1"
+          MUTANTS_OUT: ${{ runner.temp }}/mutants
+          MUTANTS_EXTRA: --shard ${{ matrix.shard || '0/1' }}
+        run: bash scripts/ci/mutants.sh "${{ matrix.crate }}"
+
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mutants-${{ strategy.job-index }}
+          path: |
+            ${{ runner.temp }}/mutants/summary.txt
+            ${{ runner.temp }}/mutants/mutants.out/*.txt
+            ${{ runner.temp }}/mutants/mutants.out/outcomes.json
+          if-no-files-found: ignore
+          retention-days: 30
+
   alert:
     # PL51: a failed or cancelled scheduled job opens or updates its ci-alert issue, and a
     # success closes it. A job of its own on a GitHub runner, after the others whatever their
     # result.
-    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql]
+    needs: [evidence-copies, settings-drift, stable-promotions, rust-advisories, codeql, mutants]
     if: ${{ always() && github.event_name == 'schedule' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
