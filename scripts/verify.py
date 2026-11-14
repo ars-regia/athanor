@@ -174,9 +174,16 @@ def check_workflows():
         if yaml is None:
             r.fail(f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked")
             continue
-        doc = yaml.safe_load(read(wf))
-        events = triggers(doc) if isinstance(doc, dict) else set()
-        if events != {"workflow_call"} and "permissions" not in (doc or {}):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError as e:
+            r.fail(f"{wf.name}: not valid YAML ({e})")
+            continue
+        if not isinstance(doc, dict):
+            r.fail(f"{wf.name}: not a YAML mapping")
+            continue
+        events = triggers(doc)
+        if events != {"workflow_call"} and "permissions" not in doc:
             r.fail(f"{wf.name}: no top-level permissions, so the token gets the repository "
                    f"default (triggers: {', '.join(sorted(events)) or 'none'})")
 
