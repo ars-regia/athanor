@@ -43,11 +43,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
+          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
           # On the runner itself, not inside the builder image: the check decides whether
           # that image has to exist, so it cannot depend on it (first run, renamed image).
           # The script only needs bash, coreutils and skopeo, all on the runner.
-          bash scripts/check_idempotency.sh --package builder --registry "${REGISTRY}" --owner ${{ github.repository_owner }} --image-name athanor-builder > idemp.out
+          bash scripts/check_idempotency.sh --package builder --registry "${REGISTRY}" --owner "${GITHUB_REPOSITORY_OWNER}" --image-name athanor-builder > idemp.out
           source ./idemp.out
           if [ "$CACHE_HIT" = "true" ]; then
             echo "cache_hit=true" >> "$GITHUB_OUTPUT"
@@ -58,6 +58,9 @@ jobs:
 
       - name: Build and Publish Builder (Pure Nix)
         if: steps.check_idempotency.outputs.cache_hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONTENT_HASH: ${{ steps.check_idempotency.outputs.content_hash }}
         run: |
           set -euo pipefail
           echo "Building OCI image purely via Nix Flake..."
@@ -66,10 +69,10 @@ jobs:
           loaded=$(podman load -i result | sed -n 's/^Loaded image[^:]*: //p')
           [[ -n $loaded ]] || { echo "podman load reported no image name" >&2; exit 1; }
           
-          echo "${{ secrets.GITHUB_TOKEN }}" | podman login "${REGISTRY}" -u ${{ github.actor }} --password-stdin
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/athanor-builder" | tr '[:upper:]' '[:lower:]')
-          podman tag "$loaded" "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
-          bash scripts/retry.sh podman push "$IMAGE_LOWER:${{ steps.check_idempotency.outputs.content_hash }}"
+          echo "${GITHUB_TOKEN}" | podman login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
+          IMAGE_LOWER=$(echo "${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/athanor-builder" | tr '[:upper:]' '[:lower:]')
+          podman tag "$loaded" "$IMAGE_LOWER:${CONTENT_HASH}"
+          bash scripts/retry.sh podman push "$IMAGE_LOWER:${CONTENT_HASH}"
           echo "Waiting 15 seconds for GHCR eventual consistency..."
           sleep 15
 

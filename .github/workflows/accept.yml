@@ -76,7 +76,7 @@ jobs:
         # answers 401 without it, which would be recorded as a fail verdict.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
+        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
 
       - name: 🎯 Resolve the run
         run: bash system/accept-target.sh "${BUILD_RUN_ID}" target
@@ -208,7 +208,7 @@ jobs:
       - name: 🔑 Log in to the registry
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${{ github.actor }}" --password-stdin
+        run: echo "${GITHUB_TOKEN}" | podman login "${REGISTRY%%/*}" -u "${GITHUB_ACTOR}" --password-stdin
 
       - name: 🎯 Resolve the run
         run: bash system/accept-target.sh "${BUILD_RUN_ID}" target
