@@ -914,7 +914,10 @@ impl Ui {
     /// `PasswordEntry` (doc_accessibility.md, AX4): it shows one mask for each character typed,
     /// and AT-SPI reads it as password text holding only the masks. Nothing is copied, cut or
     /// offered as the primary selection out of it; text is pasted in. Read what was typed with
-    /// [`Ui::password_text`].
+    /// [`Ui::password_text`]. Every copy Sal makes of what is typed, committed, pasted or set is
+    /// overwritten when dropped; the copies made before it reaches Sal, by libxkbcommon, the
+    /// Wayland connection's buffers, the compositor, the input method or the clipboard's owner,
+    /// are not Sal's to overwrite.
     ///
     /// # Panics
     ///
@@ -2760,6 +2763,10 @@ impl Ui {
                     self.clips.push(Clip::Select(text));
                 }
                 field.scroll_to_caret(cx);
+                // The typed text may be a password field's: overwritten once the field has it.
+                if let Key::Text(mut text) = key {
+                    zeroize::Zeroize::zeroize(&mut text);
+                }
                 return edited.then_some(Event::Edited(id));
             }
         }

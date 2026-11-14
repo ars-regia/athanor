@@ -1756,7 +1756,8 @@ fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
 struct Pending {
     /// The preedit and its cursor, a byte range in it.
     preedit: Option<(String, Option<(usize, usize)>)>,
-    commit: Option<String>,
+    /// Overwritten when dropped: it may be a password field's text.
+    commit: Option<zeroize::Zeroizing<String>>,
 }
 
 /// The preedit without what a single-line field drops from it, the newline included, with its
@@ -1821,7 +1822,9 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                     .zip(usize::try_from(cursor_end).ok());
                 app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
             }
-            Event::CommitString { text } => app.ime.pending.commit = text,
+            Event::CommitString { text } => {
+                app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
+            }
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
@@ -3425,9 +3428,10 @@ mod tests {
             commits: 2,
             ..Ime::default()
         };
-        ime.pending.commit = Some("a".into());
+        ime.pending.commit = Some(zeroize::Zeroizing::new("a".into()));
         let (pending, current) = ime.done(1);
-        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        let commit = pending.commit.as_ref().map(|text| text.as_str());
+        assert_eq!((commit, current), (Some("a"), false));
         assert!(
             ime.pending.commit.is_none(),
             "a stale done still applies its text"
