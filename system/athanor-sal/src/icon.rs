@@ -13,6 +13,8 @@ use std::sync::Arc;
 use vello_cpu::peniko::ImageAlphaType;
 use vello_cpu::{PixelMetadata, Pixmap};
 
+mod premultiplied;
+
 /// The icon an entry gets when the theme has none of its name.
 pub const FALLBACK_ICON: &str = "application-x-executable-symbolic";
 
@@ -142,7 +144,17 @@ impl Image {
     /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output. The `gpu`
     /// renderer draws no image larger than its atlas (4096 by 4096, or the device's limit when
     /// smaller): it logs one line and leaves that part of the surface empty.
-    pub fn from_rgba8(width: u32, height: u32, mut pixels: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, Error> {
+        Self::from_pixels(width, height, pixels, ImageAlphaType::Alpha)
+    }
+
+    /// [`Image::from_rgba8`] for pixels whose alpha is `alpha`.
+    fn from_pixels(
+        width: u32,
+        height: u32,
+        mut pixels: Vec<u8>,
+        alpha: ImageAlphaType,
+    ) -> Result<Self, Error> {
         let (w, h) = (u16::try_from(width), u16::try_from(height));
         let (Ok(w @ 1..), Ok(h @ 1..)) = (w, h) else {
             return Err(
@@ -162,7 +174,7 @@ impl Image {
         if !pixels.capacity().is_multiple_of(4) {
             pixels = pixels.as_slice().to_vec();
         }
-        let metadata = PixelMetadata::new(ImageAlphaType::Alpha, true);
+        let metadata = PixelMetadata::new(alpha, true);
         Ok(Self {
             pixmap: Arc::new(Pixmap::from_parts(pixels, w, h, metadata)),
         })

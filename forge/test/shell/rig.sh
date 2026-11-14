@@ -28,11 +28,12 @@
 #   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-control-center   clippy, tests and release build of athanor-control-center (with athanor-services and the Sal pages of athanor-controls) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
-#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through
+#   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through;
+#                           RIG_CARGO_MUTANTS=<path> mounts that cargo-mutants binary (scripts/ci/mutants.sh)
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
-#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check (no GTK)
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
 #   rig.sh bar-e2e          athanor-bar in a scene: READY, live layout, mandatory keys, running windows, the favourites import and pinning, the power menu against a fake logind, memory
@@ -43,7 +44,7 @@
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
-#   rig.sh layer-guard <greeter|bar|dock|launcher>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
@@ -68,8 +69,9 @@
 #   rig.sh toolkit-picture  athanor-sal's picture on a full-size background layer surface under headless sway: the output's size at each mode and scale, on each output (SD6; run build-toolkit first)
 #   rig.sh toolkit-a11y     athanor-sal's root roles, radios, announcements and a surface out of the AT-SPI tree, read on the accessibility bus (Sal's S2; run build-toolkit first)
 #   rig.sh toolkit-popup    athanor-sal's tooltip and menu popups of a layer surface under headless sway: placement, grab, dismissal, keys and activation (run build-toolkit first)
-#   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one
-#   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail
+#   rig.sh launcher-e2e     athanor-launcher in seven scenes, confined: READY, calculator, toggle, show time, memory, frozen provider, hostile names, no localsearch, accessible tree, a command and a refused one;
+#                           RIG_COMPOSITOR=athanor runs them under athanor-sulphur, the launcher as its unit (run build-compositor first)
+#   rig.sh launcher-window-preview   the window row's preview carries the window's thumbnail (RIG_COMPOSITOR=athanor: as launcher-e2e)
 #   rig.sh chooser-e2e      press a preset in the chooser and wait until the bar and the dock draw it (run build-bar and build-dock first)
 #   rig.sh surface <greeter|layout (run build-bar and build-dock first)|chooser|bar|bar-power|bar-input|bar-calendar|bar-accessibility|bar-tiling|bar-popups|bar-notifications|bar-tray|bar-network|bar-bluetooth|bar-audio|bar-battery|bar-shield|dock|launcher (run build-launcher first)|control-center|control-center-network|control-center-bluetooth|control-center-audio|control-center-battery (run build-control-center first)|toolkit-chooser (run build-compositor and build-toolkit first)|toolkit-gallery (the same)|gtk-gallery>  capture every case of a surface and compare with the goldens
 #   rig.sh update-goldens <name>   replace the goldens with a fresh capture, deliberately
@@ -859,6 +861,7 @@ cargo)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        ${RIG_CARGO_MUTANTS:+-v "$RIG_CARGO_MUTANTS:/usr/local/bin/cargo-mutants:ro"} \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
 toolkit-gpu)
@@ -962,7 +965,7 @@ build-launcher)
                      cargo build --release --locked $packages
                  done
                  install -m 0755 /out/target/release/athanor-launcher /out/target/release/athanor-preview-render /out/bin/
-                 python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-launcher'
+                 python3 -B forge/scripts/check_shim_link_order.py --without-gtk /out/bin/athanor-launcher'
     ;;
 dock-roundtrip)
     # BR7's knob none and the bar preset take the surface off screen, and visible brings it
@@ -1064,7 +1067,11 @@ compositor-e2e)
     ;;
 launcher-e2e)
     # Every stage is its own scene: the fixtures differ, and each launcher starts fresh.
+    # RIG_COMPOSITOR=athanor runs them under athanor-sulphur, the launcher as its unit (OS4).
     require athanor-launcher build-launcher
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-sulphur build-compositor
+    fi
     for stage in e2e frozen-provider hostile no-localsearch tree command command-refused; do
         query="cc window" fixtures=""
         case $stage in
@@ -1085,12 +1092,15 @@ launcher-e2e)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "launcher-$stage" -- \
             bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
                      && python3 /repo/forge/test/shell/launcher_fixtures.py $fixtures \
-                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --log"
+                     && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --log ${session_unit[*]}"
     done
     ;;
 launcher-window-preview)
     # doc_launcher.md, LA6: a window's preview carries its thumbnail (Task 10's capture).
     require athanor-launcher build-launcher
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-sulphur build-compositor
+    fi
     seed_bar "$out/seed-launcher-window-preview" float top visible light
     in_rig "$(rig_image)" env RIG_LOCALE=en_US.UTF-8 RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-launcher-window-preview \
         RIG_DATA_OVERLAY=/repo/system/athanor-style/calmo/generated/cosmic \
@@ -1098,17 +1108,16 @@ launcher-window-preview)
         RIG_HOLD="python3 /repo/forge/test/shell/launcher_e2e.py window-preview" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 launcher-window-preview -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --window --log"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --client athanor-launcher --window --log ${session_unit[*]}"
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/compare.py \
         /repo/forge/test/shell/golden/launcher-window-preview /out launcher-window-preview
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock|launcher>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
     bar) binary=athanor-bar ;;
     dock) binary=athanor-dock ;;
-    launcher) binary=athanor-launcher ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
         exit 2

@@ -289,7 +289,7 @@ def release(args, fx):
     if verb == "download":
         name = value("-p")
         if name not in rel["assets"]:
-            return fail(f"no assets match the file pattern")
+            return fail("no assets match the file pattern")
         (pathlib.Path(value("-D")) / name).write_bytes((assets_dir() / rel["assets"][name]).read_bytes())
         return 0
     return fail(f"fake gh: unsupported call {args}", 2)

@@ -93,22 +93,27 @@ def tree(Atspi):
     return [(role, name, shown) for role, name, shown, _ in walk(app, Atspi)] if app is not None else []
 
 
+# The results: GTK's ListBox says "list"; the toolkit's list, of which the user chooses one
+# row, is ARIA's listbox, which Core-AAM 1.2 maps to "list box" (#982, atspi_compare.py).
+LIST_ROLES = {"list", "list box"}
+
+
 def region_holds(Atspi, text):
-    """True when a showing "filler" (GTK's Region role) has `text` as a label below it."""
+    """True when `text` is a showing label of the preview pane: a label outside the results
+    list. The pane is an unnamed region, which no role names: GTK's reaches AT-SPI as a
+    "filler", and the toolkit's is a generic container that AccessKit leaves out of the tree."""
     nodes = walk(find_application(Atspi, "athanor-launcher", 1), Atspi)
-    for index, (role, _, shown, depth) in enumerate(nodes):
-        if role != "filler" or not shown:
-            continue
-        for r, name, _, below in nodes[index + 1:]:
-            if below <= depth:
-                break
-            if r == "label" and name == text:
-                return True
+    ancestors = []
+    for role, name, shown, depth in nodes:
+        del ancestors[depth:]
+        if role == "label" and name == text and shown:
+            return not LIST_ROLES & set(ancestors)
+        ancestors.append(role)
     return False
 
 
-def named(Atspi, role, name):
-    return any(r == role and n == name and shown for r, n, shown in tree(Atspi))
+def named(Atspi, roles, name):
+    return any(r in roles and n == name and shown for r, n, shown in tree(Atspi))
 
 
 def show_times():
@@ -188,8 +193,7 @@ def stage_no_localsearch(Atspi):
 def stage_tree(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
-    check("Results list", named(Atspi, "list", "Results"), str(tree(Atspi)))
-    # GTK's Region role reaches at-spi as "filler"; the preview's own labels sit beside it.
+    check("Results list", named(Atspi, LIST_ROLES, "Results"), str(tree(Atspi)))
     check("preview region", region_holds(Atspi, "A window of the shell rig"), str(tree(Atspi)))
     # The menu's "Actions" list is not checked: the rig has no way to press Tab (no virtual
     # keyboard, and Atspi key synthesis does not reach a Wayland client).

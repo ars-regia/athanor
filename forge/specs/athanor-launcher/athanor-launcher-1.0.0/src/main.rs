@@ -5,26 +5,20 @@
 
 mod bus;
 mod i18n;
-mod layer_guard;
-mod surface;
 mod ui;
 
-use std::cell::RefCell;
 use std::env;
 use std::path::Path;
-use std::rc::Rc;
 
-use athanor_sulphur_client::shortcuts::{self, Binding};
 use athanor_layout::loader;
+use athanor_sal::driver;
+use athanor_sulphur_client::glib_loop::GlibSource;
+use athanor_sulphur_client::shortcuts::{self, Binding};
+use athanor_sulphur_client::Client;
 use athanor_unit::dirs::Dirs;
 use athanor_unit::{crash_loop, dirs, journal, sandbox};
-use gtk4::prelude::*;
-use gtk4::{glib, Application};
-
-const APP_ID: &str = "os.athanor.Launcher";
-
-/// The launcher and the bus name it owns, kept for the life of the app.
-type Running = (Rc<ui::Launcher>, gtk4::gio::OwnerId);
+use gio::glib;
+use wayland_client::Connection;
 
 fn main() -> glib::ExitCode {
     journal::init();
@@ -102,7 +96,7 @@ fn main() -> glib::ExitCode {
         Ok(Some(Binding::UserChoice)) => tracing::info!("Super keeps the command the user chose; it does not call {}", bus::NAME),
         Err(err) => tracing::warn!(error = %err, "Super is not bound to the launcher; it still opens from the bar"),
     }
-    // Before GTK starts a thread (LA9). Writes: the launch sockets, the unit's runtime
+    // Before GLib starts a thread (LA9). Writes: the launch sockets, the unit's runtime
     // directory, dconf, the cache (which holds qalc's per-run configuration directory), usage
     // and /tmp; reads stay open, because the preview reads files. The launch directory is also
     // where the window capture buffers live. No TCP for the launcher or for qalc and the
@@ -130,30 +124,41 @@ fn main() -> glib::ExitCode {
     }
     i18n::init();
 
-    let app = Application::builder().application_id(APP_ID).build();
-    // Built once; the handle keeps the launcher for the app's lifetime, every watch holds a
-    // weak reference (see athanor-bar's main.rs).
-    let handle: Rc<RefCell<Option<Running>>> = Rc::default();
-    let options = ui::Options { usage_path, given_up };
-    app.connect_activate(move |app| {
-        if handle.borrow().is_some() {
-            return;
+    // GLib's main context, which the compositor client, the bus name and GIO's watches run
+    // on, turns in the toolkit's loop.
+    let glib = match GlibSource::new() {
+        Ok(glib) => glib,
+        Err(err) => {
+            tracing::error!(error = %err, "cannot run GLib's main context");
+            return glib::ExitCode::FAILURE;
         }
-        let launcher = ui::start(app, &options);
-        let weak = Rc::downgrade(&launcher);
-        let owner = bus::own(
-            move || {
-                if let Some(launcher) = weak.upgrade() {
-                    launcher.toggle();
-                }
-            },
-            || {
-                if let Err(err) = athanor_unit::notify::notify_ready() {
-                    tracing::warn!(error = %err, "cannot tell systemd the launcher is ready");
-                }
-            },
-        );
-        handle.replace(Some((launcher, owner)));
-    });
-    app.run_with_args(&Vec::<String>::new())
+    };
+    let client = Connection::connect_to_env()
+        .map_err(|err| err.to_string())
+        .and_then(|connection| Client::connect_wayland(&connection).map_err(|err| err.to_string()));
+    let client = match client {
+        Ok(client) => {
+            // The open windows among the results, their actions and their pictures.
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "no compositor client; windows, launching and the focused output are unavailable");
+            None
+        }
+    };
+    let options = ui::Options {
+        usage_path,
+        given_up,
+        show: env::var("ATHANOR_LAUNCHER_SHOW").ok(),
+    };
+    match driver::run_with(ui::Launcher::new(options, client), glib) {
+        Ok(()) => glib::ExitCode::SUCCESS,
+        Err(err) => {
+            tracing::error!(error = %err, "the launcher stopped");
+            glib::ExitCode::FAILURE
+        }
+    }
 }

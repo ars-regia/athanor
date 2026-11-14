@@ -51,7 +51,7 @@ directory e come si usa.
 | `CACHYOS_PATCHES_COMMIT` | `21d721415790e6717b2ece16e82e08eb98d16c00` |
 | `NVIDIA_OPEN_VERSION` | `615.78.08` |
 | `NVIDIA_OPEN_COMMIT` | `1a82fbfda8f321b056eb3568850f9316c5e465c5` |
-| `NVIDIA_LEGACY_VERSION` | `580.178.04` |
+| `NVIDIA_LEGACY_VERSION` | `580.196.07` |
 <!-- pins:end -->
 
 ## Uso locale

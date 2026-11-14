@@ -557,7 +557,7 @@ def wait_for_phase(run: pathlib.Path, name: str, timeout: float = 30) -> None:
     deadline = time.time() + timeout
     path = run / "phases.txt"
     while time.time() < deadline:
-        if path.exists() and name in (l.split()[0] for l in path.read_text().splitlines() if l.strip()):
+        if path.exists() and name in (ln.split()[0] for ln in path.read_text().splitlines() if ln.strip()):
             return
         time.sleep(0.02)
     raise AssertionError(f"the console never noted {name}")
@@ -777,6 +777,10 @@ def test_print_probe_is_the_typed_probe(tmp: pathlib.Path) -> None:
         [sys.executable, str(HERE / "console.py"), "--print-probe", "MOK"], capture_output=True
     )
     assert proc.returncode == 0 and proc.stdout == console.MOK_PROBE, proc
+    proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "SESSION_HELD"], capture_output=True
+    )
+    assert proc.returncode == 0 and proc.stdout == console.SESSION_PROBE_HELD, proc
     proc = subprocess.run(
         [sys.executable, str(HERE / "console.py"), "--print-probe", "ORIGIN"], capture_output=True
     )

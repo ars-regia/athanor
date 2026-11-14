@@ -13,14 +13,11 @@ path = "src/main.rs"
 [dependencies]
 gtk4 = { workspace = true }
 relm4 = { workspace = true }
-glib = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 zbus = { workspace = true, features = ["tokio"] }
-libc = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
-anyhow = { workspace = true }
 athanor-style = { path = "../../../../system/athanor-style" }
 zeroize = { workspace = true, features = ["zeroize_derive"] }
 subtle = { workspace = true }

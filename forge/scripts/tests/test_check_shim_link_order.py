@@ -49,5 +49,31 @@ class LinkOrderTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["env"]["LC_ALL"], "C")
 
 
+class WithoutGtkTest(unittest.TestCase):
+    def test_a_surface_drawn_without_gtk_passes(self):
+        needed = ["libxkbcommon.so.0", "libwayland-client.so.0", "libfontconfig.so.1", "libc.so.6"]
+        self.assertEqual(check.gtk_libraries(needed), [])
+
+    def test_a_binary_with_no_needed_entry_is_a_problem(self):
+        found = check.gtk_libraries([])
+        self.assertEqual(len(found), 1)
+        self.assertIn("no NEEDED entry", found[0])
+
+    def test_gtk_and_the_shim_are_each_a_problem(self):
+        self.assertEqual(len(check.gtk_libraries(GOOD)), 2)
+
+    def test_main_takes_the_flag_before_the_binary(self):
+        line = " 0x1 (NEEDED)             Shared library: [libgtk-4.so.1]\n"
+        with mock.patch.object(check.subprocess, "run") as run:
+            run.return_value.stdout = line
+            self.assertEqual(check.main(["--without-gtk", "bin"]), 1)
+            self.assertEqual(run.call_args.args[0], ["readelf", "-d", "bin"])
+            run.return_value.stdout = " 0x1 (NEEDED)             Shared library: [libc.so.6]\n"
+            self.assertEqual(check.main(["--without-gtk", "bin"]), 0)
+            run.return_value.stdout = ""
+            self.assertEqual(check.main(["--without-gtk", "bin"]), 1, "no NEEDED entry")
+            self.assertEqual(check.main(["bin"]), 1, "without the flag the shim is required")
+
+
 if __name__ == "__main__":
     unittest.main()

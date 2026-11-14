@@ -141,6 +141,20 @@ class CiMode(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ATHANOR_UPDATE_TO", result.stderr)
 
+    def test_each_boot_asks_the_session_probe_of_its_image(self):
+        """The candidate is asked the strict probe. After GoBack() the guest runs the
+        published :stable image, which cannot ship a session unit added since, so it is
+        asked the held one (#1108 covered only the serial console)."""
+        text = RUN.read_text()
+        calls = re.findall(r"^\s*session_probes (\S+) (\S+)$", text, re.M)
+        self.assertEqual(calls, [("upgraded-", "SESSION"), ("rolled-back-", "SESSION_HELD")])
+        for _, name in calls:
+            printed = subprocess.run(
+                ["python3", "-B", str(RUN.parents[3] / "forge/test/iso/console.py"), "--print-probe", name],
+                capture_output=True,
+            )
+            self.assertEqual(printed.returncode, 0, printed.stderr)
+
     def test_ci_mode_rejects_a_dev_stage(self):
         result = self.run_sh("--ci", "install", env=self.ci)
         self.assertNotEqual(result.returncode, 0)

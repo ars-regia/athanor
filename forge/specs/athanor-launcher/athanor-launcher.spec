@@ -6,11 +6,11 @@ Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor launcher
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel binutils python3 gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel libxkbcommon-devel gettext binutils python3
 # localsearch's client library (athanor-search), poppler and cairo (the decoder), and what
 # glycin links (the decoder).
 BuildRequires:  tinysparql-devel poppler-glib-devel cairo-devel libseccomp-devel fontconfig-devel
-Requires:       gtk4 gtk4-layer-shell athanor-calmo
+Requires:       athanor-calmo adwaita-icon-theme
 # The calculator, file search, the decoder's loaders and their sandbox, and the terminal
 # that command rows open (doc_launcher.md, LA2, LA6, LA9).
 Requires:       qalculate localsearch tinysparql glycin-loaders bubblewrap poppler-glib xdg-terminal-exec
@@ -39,6 +39,10 @@ for catalog in forge/specs/athanor-launcher/athanor-launcher-1.0.0/po/*.po; do
     msgfmt --check --output-file="locale-build/$lang/LC_MESSAGES/athanor-launcher.mo" "$catalog"
 done
 
+%check
+# Drawn with Sal: neither GTK nor its layer-shell shim may come back among DT_NEEDED.
+python3 -B forge/scripts/check_shim_link_order.py --without-gtk target/release/athanor-launcher
+
 %install
 install -D -m 0755 target/release/athanor-launcher %{buildroot}/usr/bin/athanor-launcher
 install -D -m 0755 target/release/athanor-preview-render %{buildroot}/usr/libexec/athanor-preview-render
@@ -52,10 +56,6 @@ install -D -m 0644 forge/specs/athanor-launcher/athanor-launcher-1.0.0/data/os.a
 mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
 rm -rf locale-build
-
-%check
-# doc_shell.md, SH4: the layer-shell shim must load before libwayland-client and GTK.
-python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-launcher
 
 %files
 /usr/bin/athanor-launcher

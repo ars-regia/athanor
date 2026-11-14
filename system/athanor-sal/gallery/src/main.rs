@@ -28,9 +28,19 @@ struct Gallery {
     pages: Vec<(WidgetId, WidgetId)>,
     /// The states page's switch and the button it makes sensitive.
     states: (WidgetId, WidgetId),
+    /// The lists page's button and the list whose rows it replaces.
+    lists: (WidgetId, WidgetId),
+    /// The number of the lists page's first row less one: 0 or [`ROWS`].
+    first: u32,
+    /// The column of `strings.tsv` the window shows.
+    lang: usize,
     /// The dialogs page's button, which opens the dialog.
     open: WidgetId,
 }
+
+/// The rows of the lists page, a heading among them every [`ROWS_PER_HEADING`].
+const ROWS: u32 = 50;
+const ROWS_PER_HEADING: u32 = 25;
 
 /// The command line.
 struct Options {
@@ -81,8 +91,27 @@ fn tr(lang: usize, key: &str) -> Result<&'static str, String> {
         .ok_or(format!("strings.tsv has no {:?} for {key:?}", LANGUAGES[lang]))
 }
 
-/// The widgets of page `name` under `group`: for the states page, its switch and its button, and
-/// for the dialogs page its button.
+/// Fills `list` with the rows numbered from `first + 1`, which hold their name and a second line
+/// in a column, and a heading that opens each [`ROWS_PER_HEADING`] past the first ones: among
+/// the rows, not first, so that Tab enters the list at its first row, as in GTK's twin.
+fn fill_rows(ui: &mut Ui, list: WidgetId, lang: usize, first: u32) -> Result<(), String> {
+    let (row, rows, detail) = (tr(lang, "row")?, tr(lang, "rows")?, tr(lang, "row.detail")?);
+    for n in first + 1..=first + ROWS {
+        if n > first + 1 && (n - first - 1).is_multiple_of(ROWS_PER_HEADING) {
+            let last = (n + ROWS_PER_HEADING - 1).min(first + ROWS);
+            ui.list_heading(list, &format!("{rows} {n}–{last}"));
+        }
+        let name = format!("{row} {n}");
+        let item = ui.list_row(list, &name);
+        let column = ui.add(item, Kind::Column);
+        ui.add(column, Kind::Label(name));
+        ui.add(column, Kind::Label(detail.into()));
+    }
+    Ok(())
+}
+
+/// The widgets of page `name` under `group`: for the lists page its button and its list, for the
+/// states page its switch and its button, and for the dialogs page its button.
 fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<WidgetId>, String> {
     let t = |key| tr(lang, key);
     match name {
@@ -105,12 +134,12 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
                 .ok_or("the slider's range is broken")?;
         }
         "lists" => {
+            // The button comes first: Tab steps through the GTK twin's rows, not past them.
+            let replace = ui.add(group, Kind::Button(t("replace")?.into()));
             let scroll = ui.scroll(group, 200.0);
             let list = ui.list(scroll, t("list")?);
-            let row = t("row")?;
-            for n in 1..=50 {
-                ui.list_row(list, &format!("{row} {n}"));
-            }
+            fill_rows(ui, list, lang, 0)?;
+            return Ok(vec![replace, list]);
         }
         "text" => {
             // GTK's label with wrap, max-width-chars 40, lines 3 and an end ellipsis.
@@ -191,14 +220,17 @@ fn build(options: &Options) -> Result<(Ui, Gallery), String> {
     }
     ui.set_focus(Some(toggles[options.page]));
     ui.layout();
-    let [switch, button, open] = acted[..] else {
-        return Err("the states and dialogs pages lost their widgets".into());
+    let [replace, list, switch, button, open] = acted[..] else {
+        return Err("the lists, states and dialogs pages lost their widgets".into());
     };
     Ok((
         ui,
         Gallery {
             pages: shown,
             states: (switch, button),
+            lists: (replace, list),
+            first: 0,
+            lang,
             open,
         },
     ))
@@ -222,12 +254,23 @@ enum Answer {
 }
 
 /// Answers an event of the window: a page toggle shows its page, the states page's switch makes
-/// its button sensitive or insensitive, and the dialogs page's button asks for the dialog.
-fn on_event(ui: &mut Ui, gallery: &Gallery, event: Event) -> Answer {
+/// its button sensitive or insensitive, the lists page's button replaces the rows of its list
+/// with the next fifty, or the first fifty again, and the dialogs page's button asks for the
+/// dialog.
+fn on_event(ui: &mut Ui, gallery: &mut Gallery, event: Event) -> Answer {
     match event {
         Event::Selected(selected) => show_page(ui, &gallery.pages, selected),
         Event::Toggled(id) if id == gallery.states.0 => {
             ui.set_sensitive(gallery.states.1, ui.is_active(id));
+        }
+        Event::Clicked(id) if id == gallery.lists.0 => {
+            let list = gallery.lists.1;
+            gallery.first = ROWS - gallery.first;
+            ui.remove_children(list);
+            if let Err(error) = fill_rows(ui, list, gallery.lang, gallery.first) {
+                eprintln!("athanor-sal-gallery: {error}");
+            }
+            ui.layout();
         }
         Event::Clicked(id) if id == gallery.open => return Answer::OpenDialog,
         _ => {}
@@ -286,7 +329,7 @@ impl Application for App {
             _ => {
                 let answer = shell
                     .ui_mut(surface)
-                    .map(|ui| on_event(ui, &self.gallery, event));
+                    .map(|ui| on_event(ui, &mut self.gallery, event));
                 if answer == Some(Answer::OpenDialog) {
                     self.open_dialog(shell);
                 }
@@ -337,16 +380,16 @@ mod tests {
     #[test]
     fn the_states_switch_makes_its_button_sensitive() -> Result<(), String> {
         let options = Options::parse(["--page", "states"].map(String::from).into_iter())?;
-        let (mut ui, gallery) = build(&options)?;
+        let (mut ui, mut gallery) = build(&options)?;
         let (switch, button) = gallery.states;
         assert!(!ui.is_active(switch) && !ui.is_sensitive(button));
         let event = ui.activate(switch).ok_or("the switch does not toggle")?;
-        on_event(&mut ui, &gallery, event);
+        on_event(&mut ui, &mut gallery, event);
         assert!(ui.is_sensitive(button));
         let event = ui
             .set_active(switch, false)
             .ok_or("the switch does not toggle")?;
-        on_event(&mut ui, &gallery, event);
+        on_event(&mut ui, &mut gallery, event);
         assert!(!ui.is_sensitive(button));
         Ok(())
     }
@@ -355,11 +398,44 @@ mod tests {
     fn the_dialogs_button_asks_for_the_dialog() -> Result<(), String> {
         let options = Options::parse(["--page", "dialogs"].map(String::from).into_iter())?;
         assert_eq!(options.page, DIALOGS);
-        let (mut ui, gallery) = build(&options)?;
+        let (mut ui, mut gallery) = build(&options)?;
         let event = ui.activate(gallery.open).ok_or("the button does not click")?;
-        assert_eq!(on_event(&mut ui, &gallery, event), Answer::OpenDialog);
+        assert_eq!(on_event(&mut ui, &mut gallery, event), Answer::OpenDialog);
         let dialog = dialog(&options)?;
         assert_eq!(dialog.title, tr(0, "dialog.title")?);
+        Ok(())
+    }
+
+    /// The name of each row of `list`, the headings left out.
+    fn row_names(ui: &Ui, list: WidgetId) -> Vec<String> {
+        let rows = ui.widget(list).children.iter();
+        rows.filter_map(|&id| match &ui.widget(id).kind {
+            Kind::ListRow(name) => Some(name.clone()),
+            _ => None,
+        })
+        .collect()
+    }
+
+    #[test]
+    fn the_lists_button_replaces_the_rows_and_back() -> Result<(), String> {
+        let options = Options::parse(["--page", "lists"].map(String::from).into_iter())?;
+        let (mut ui, mut gallery) = build(&options)?;
+        let (button, list) = gallery.lists;
+        let count = ui.widget(list).children.len();
+        // Fifty rows and a heading among them, each row a column of its name and a second
+        // line; the first is a row, where Tab enters the list.
+        assert_eq!(count, 51);
+        let first_child = ui.widget(list).children[0];
+        assert!(matches!(ui.widget(first_child).kind, Kind::ListRow(_)));
+        let first = row_names(&ui, list);
+        assert_eq!((first[0].as_str(), first[49].as_str()), ("Row 1", "Row 50"));
+        for expected in [("Row 51", "Row 100"), ("Row 1", "Row 50")] {
+            let event = ui.activate(button).ok_or("the button does not click")?;
+            on_event(&mut ui, &mut gallery, event);
+            let names = row_names(&ui, list);
+            assert_eq!((names[0].as_str(), names[49].as_str()), expected);
+            assert_eq!(ui.widget(list).children.len(), count);
+        }
         Ok(())
     }
 }
