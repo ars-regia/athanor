@@ -150,6 +150,11 @@ check-semgrep:
     #!/usr/bin/env bash
     set -euo pipefail
     command -v semgrep >/dev/null || { echo "check: semgrep is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    # semgrep --test passes a rule that has no test file, so every rule needs one beside it.
+    for rule in .semgrep/rules/*.yaml; do
+        tests=("${rule%.yaml}".*)
+        [ "${#tests[@]}" -gt 1 ] || { echo "check: $rule has no test file (${rule%.yaml}.<ext>)" >&2; exit 1; }
+    done
     semgrep --test --metrics=off --disable-version-check .semgrep/
     semgrep scan --metrics=off --disable-version-check --error --timeout 0 --config .semgrep/ .
 
