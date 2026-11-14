@@ -665,9 +665,13 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
-    /// The primary button was pressed on the root itself, outside every child of it: on the
-    /// transparent part of a surface over the whole output, where a panel drawn on it closes,
-    /// as the control center does (doc_control_center.md CC9). A popup never raises it.
+    /// The primary button was pressed on no widget and on the root outside every shown child of
+    /// it, an island's transparent margin included, on any surface but a popup. A surface over
+    /// the whole output that draws its panel in a child of the root closes the panel at it, as
+    /// the control center does (doc_control_center.md CC9). A normal window or a dialog raises
+    /// it too, at a press on its bare background: it is not a request to close, and such a
+    /// surface ignores it, since the compositor's own focus and the window's close button say
+    /// when it goes.
     PressedOutside,
 }
 
@@ -2422,8 +2426,9 @@ impl Ui {
     }
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
-    /// the widget there and waits for the release to activate it, as GTK's buttons do; the
-    /// secondary button asks for its context menu.
+    /// the widget there and waits for the release to activate it, as GTK's buttons do, and raises
+    /// [`Event::PressedOutside`] on the root outside its shown children; the secondary button
+    /// asks for its context menu.
     pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
         let id = self.hit(x, y);
         match button {
