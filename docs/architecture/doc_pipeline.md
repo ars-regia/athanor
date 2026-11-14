@@ -1143,8 +1143,9 @@ no job restores is removed, and the
 ## 8. Observability
 
 **PL51. A scheduled run that fails is seen.** Every scheduled workflow ends with a job that
-runs the `alert` composite action on a GitHub-hosted runner once every other job has ended,
-whatever its result, so that a job whose runner was lost or that timed out is seen as well.
+runs the `alert` composite action on a GitHub-hosted runner once the jobs it reports have ended,
+whatever their result (every other job; the hours-long `mutants` job of `maintenance.yml` has an
+`alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
 it on the next success. No scheduled failure stays silent. Today `kernel-weekly.yml` and
 `maintenance.yml` end with that job; the other scheduled workflows gain it with PB2 (section
