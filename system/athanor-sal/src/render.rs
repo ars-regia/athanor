@@ -710,9 +710,9 @@ pub fn paint<C: Canvas>(
                 }
                 if let (Some(first), Some(second)) = (&widget.text, &tile.second) {
                     let top = r.y + (r.h - first.height() - second.height()) / 2.0;
-                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, first.width());
+                    let x = crate::tile::line_origin(r, t.padding, t.gap, ui.rtl, first);
                     draw_text(ctx, resources, first, (x, top), t.text)?;
-                    let x = crate::tile::line_x(r, t.padding, t.gap, ui.rtl, second.width());
+                    let x = crate::tile::line_origin(r, t.padding, t.gap, ui.rtl, second);
                     draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
                 }
             }
