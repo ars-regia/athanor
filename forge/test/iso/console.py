@@ -418,8 +418,9 @@ def session_probe(skip_absent: bool) -> bytes:
 
 
 SESSION_PROBE = session_probe(False)
-# What the serial console asks in the upgrade case, where the guest runs the published
-# :stable image; the SSH stages ask SESSION_PROBE of the candidate.
+# What the upgrade case asks wherever the guest runs the published :stable image: the
+# serial console before the upgrade, and the SSH stage after GoBack() (SESSION_HELD).
+# The SSH stage on the candidate asks SESSION_PROBE.
 SESSION_PROBE_HELD = session_probe(True)
 # Sixty seconds of looking plus fifteen of watching, and a margin.
 SESSION_PROBE_WAIT = 85.0
@@ -561,6 +562,7 @@ PROBES = {
     "MOK": MOK_PROBE,
     "GREETER": GREETER_PROBE,
     "SESSION": SESSION_PROBE,
+    "SESSION_HELD": SESSION_PROBE_HELD,
     "SETTINGS": SETTINGS_PROBE,
 }
 

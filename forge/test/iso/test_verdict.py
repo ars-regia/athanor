@@ -778,6 +778,10 @@ def test_print_probe_is_the_typed_probe(tmp: pathlib.Path) -> None:
     )
     assert proc.returncode == 0 and proc.stdout == console.MOK_PROBE, proc
     proc = subprocess.run(
+        [sys.executable, str(HERE / "console.py"), "--print-probe", "SESSION_HELD"], capture_output=True
+    )
+    assert proc.returncode == 0 and proc.stdout == console.SESSION_PROBE_HELD, proc
+    proc = subprocess.run(
         [sys.executable, str(HERE / "console.py"), "--print-probe", "ORIGIN"], capture_output=True
     )
     assert proc.returncode == 2, "an unknown probe must be refused"

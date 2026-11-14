@@ -1027,11 +1027,13 @@ probe() { # probe NAME PREFIX
   python3 "$ROOT/forge/test/iso/console.py" --print-probe "$1" | guest_ssh bash -s |
     python3 "$ROOT/forge/test/iso/console.py" --classify "$2" >> "$PHASES"
 }
-session_probes() { # session_probes PREFIX
+# SESSION is the strict probe, for the candidate. SESSION_HELD is the probe for the published
+# :stable image, after GoBack(): it skips a session unit that image cannot ship yet.
+session_probes() { # session_probes PREFIX SESSION|SESSION_HELD
   probe MOK "$1"
   probe GREETER "$1"
   type_keys "$GUEST_USER" @enter
-  probe SESSION "$1"
+  probe "$2" "$1"
   probe SETTINGS "$1"
 }
 
@@ -1171,7 +1173,7 @@ ci_stage_check() { # UD18 5
   sum=$(guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1)
   [[ $sum == "$(< "$ACC_STATE/shipped-sum")" ]] || die "FAIL  UD18 5: the candidate changed the shipped probe file: the merge is not tested"
   seeds_kept "UD18 5"
-  session_probes upgraded-
+  session_probes upgraded- SESSION
 }
 
 ci_stage_goback() { # UD18 6
@@ -1192,7 +1194,7 @@ ci_stage_check_back() { # UD18 6
   expect "UD18 6: the client holds the candidate it went back from" .update held
   [[ $(guest_ssh sudo cat /var/lib/athanor-update/held) == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the held digest is not the candidate"
   seeds_kept "UD18 6"
-  session_probes rolled-back-
+  session_probes rolled-back- SESSION_HELD
 }
 
 if [[ -n $ACC_CI ]]; then
