@@ -11,7 +11,8 @@ pub struct Look {
     pub menu: Theme,
 }
 
-/// The look of `appearance`: its variant's colours, with its accent when it has one.
+/// The look of `appearance`: its variant's colours, with its accent when it has one, and the
+/// system font's size.
 pub fn look(appearance: &Appearance) -> Look {
     let palette = sal::palette(appearance);
     let mut panel = Theme::default();
@@ -26,6 +27,8 @@ pub fn look(appearance: &Appearance) -> Look {
     panel.border = Rgba(palette.line);
     panel.title_bar = Rgba(palette.bar);
     panel.focus = Rgba(palette.acc_fg);
+    // The system font's size: the text follows the user's font, as the GTK launcher's (VL6).
+    panel.font_size = appearance.font_size;
     panel.island = Rgba(palette.surf);
     // The launcher is a panel of VL7, 30 px, with the GTK launcher's 12 px padding.
     panel.island_radius = sal::radius::PANEL;
@@ -55,5 +58,15 @@ mod tests {
         assert_eq!(look.panel.island_radius, sal::radius::PANEL);
         assert_eq!(look.menu.background, Rgba(palette.surf));
         assert_eq!(look.panel.view, Rgba(palette.surf2));
+    }
+
+    #[test]
+    fn the_text_is_the_system_fonts_size() {
+        let large = Appearance {
+            font_size: 22.0,
+            ..Appearance::default()
+        };
+        let look = look(&large);
+        assert_eq!((look.panel.font_size, look.menu.font_size), (22.0, 22.0));
     }
 }
