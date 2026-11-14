@@ -2421,3 +2421,129 @@ item = 11
 what = "the window sits lower on the screen"
 state = "closed"
 reason = "#941 placed the toolkit's windows as cosmic-comp places GTK's, and a toolkit window gives its minimum size as GTK does, so cosmic-comp centres a window wider than the size it first suggests, as the German one at scale 1.5"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 1
+what = "the quick tiles drawn as Sal tile modules, not GTK toggle buttons with a label box"
+state = "recorded"
+reason = "the tiles are Sal's tile widget, whose look follows VL10 (#1147); the title and second line remain two labels, as the GTK tile's box"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 2
+what = "the panel's width and corners: 458 px on the tiles and 344 px on a page at scale 1 in English, where GTK keeps 374 px, with a 30 px radius"
+state = "recorded"
+reason = "the panel takes VL10's panel radius and its tiles' modules (#1147); its width comes from the tile modules on the main view and from the page's content on a page"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 3
+what = "flat buttons without GTK's raised frame"
+state = "recorded"
+reason = "Sal's button follows VL10's flat button (#1147)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 4
+what = "the media cover placeholder drawn as Sal's image placeholder"
+state = "recorded"
+reason = "Sal draws VL10's placeholder for a missing cover (#1147), where GTK drew the theme's audio-x-generic icon"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 5
+what = "the text in the toolkit's default face and size"
+state = "closed"
+reason = "the surface's theme sets Inter at 13 px, as calmo's body text (test the_theme_is_the_panel_of_the_visual_language)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 6
+what = "the back button unframed, and the keyboard focus on the first control when a page opens"
+state = "recorded"
+reason = "the back button is VL10's unframed icon button (#1147); Sal puts the initial focus on the first control of a page, where GTK left it on the panel, so the keyboard reaches the page without a Tab"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 7
+what = "switches beside their label and sliders at their natural width"
+state = "closed"
+reason = "a page's column fills the panel's width, so a switch sits at the end edge and a slider takes the width, as the GTK rows (Ui::set_fill on a widget, test a_widget_set_to_fill_takes_the_width_of_its_column)"
+
+[[gtk-difference]]
+surface = "control-center-network"
+item = 8
+what = "no Network heading, the wired state as body text, and network rows without their icon"
+state = "closed"
+reason = "the page has the Network heading, 'Wired: connected' in calmo's caption size and ink2, and each Wi-Fi and Bluetooth row its icon before its name; a row is built again when its strength's icon changes, as the GTK rows"
+
+[[gtk-difference]]
+surface = "control-center-network"
+item = 9
+what = "the VPN connections as check boxes"
+state = "closed"
+reason = "each VPN is a Sal switch, as the GTK switch row; 'Office VPN', the fixture's connection, joins the labels the AT-SPI and Orca comparisons hear as a switch"
+
+[[gtk-difference]]
+surface = "control-center-audio"
+item = 10
+what = "the artist in body text, and the device rows and media controls at the start edge"
+state = "closed"
+reason = "the artist is a note in calmo's caption size and ink2; the device rows fill the page and the media controls are centred, as the GTK page"
+
+[[gtk-difference]]
+surface = "control-center-battery"
+item = 11
+what = "the time left in body text, and the power modes further apart than GTK's 28 px"
+state = "closed"
+reason = "the time left is a note in caption size and ink2; the power modes' column takes its own spacing (Ui::set_spacing) so the rows are 28 px apart, as the GTK radio rows; the theme's shared section gap is unchanged"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 12
+what = "each page as tall as its content"
+state = "recorded"
+reason = "the panel takes the height of the page it shows, where GTK's stack kept the tallest page's height (#1147); the network list's scroll is as tall as its rows up to its maximum (Ui::set_natural_height)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 13
+what = "headings and secondary lines about a tenth smaller than GTK's"
+state = "recorded"
+reason = "Sal's type steps are relative to calmo's 13 px body (heading 1.0, caption 0.82, VL10's sal.size), where GTK's built-in theme set .heading and .caption in points, 11 pt and 9 pt (#1147)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 14
+what = "an off switch with a pale knob and an unfilled track, an unselected radio with a faint ring, and an insensitive row dimmed"
+state = "recorded"
+reason = "Sal draws VL10's switch, radio and insensitive states (#1147), where GTK drew Adwaita's grey track, white knob and full ink on an insensitive flat button"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 15
+what = "a page's title at the top of its header row, beside the back button"
+state = "recorded"
+reason = "a Sal label stretched across a row draws its text at the top, where GTK's label centres it (yalign 0.5); changing it is a change to every Sal surface, not to the control center"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 16
+what = "rows, buttons and sections a few pixels further apart or closer than GTK's: network rows 40 px apart against 36, sections 8 px apart against 16"
+state = "recorded"
+reason = "the rows and sections take Sal's theme metrics, the control padding and the section gap of VL10 (#1147); only the power modes, whose 28 px pitch the maintainer asked for, take their own spacing"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 17
+what = "in right-to-left the back arrow, the chevrons, the volume icon and the media skip icons pointed as in left-to-right"
+state = "closed"
+reason = "GTK's icon lookup takes a name's -rtl variant in a right-to-left reading; the control center now looks that variant up first, and keeps the plain name of an icon that has none"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 18
+what = "in right-to-left a tile's second line ran past its disc"
+state = "closed"
+reason = "a line broken at the tile's room is aligned to the start of that room; Sal's tile now takes that alignment offset back, so both lines end beside the disc, as GTK's"
