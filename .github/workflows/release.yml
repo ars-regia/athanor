@@ -92,6 +92,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: 🌿 Release only from iso-v0
         run: '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || { echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
       - name: 📎 The checked candidate

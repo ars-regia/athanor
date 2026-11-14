@@ -12,7 +12,9 @@ name: Bot Merge
 # request itself.
 
 on:
-  workflow_run:
+  # Deliberate (see above): the job runs only the default branch's file, skips fork runs, and
+  # bot_merge.py checks the branch, the head and the checks before it merges.
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [Pull Request, System Image Check]
     types: [completed]
     # The head branches of the runs to follow: the branches BRANCH of bot_merge.py accepts,

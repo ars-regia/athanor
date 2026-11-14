@@ -60,6 +60,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Nested sandbox probe
         run: bash forge/test/shell/rig.sh probe-sandbox
       - name: GTK parse gate
@@ -72,6 +74,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the greeter and check the DT_NEEDED order
@@ -104,6 +108,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the layout crates
@@ -147,6 +153,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: The rig runs the cosmic-comp the session ships
@@ -170,6 +178,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: No GTK crate in their tree; clippy and tests without the gtk feature
@@ -184,6 +194,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the toolkit
@@ -203,6 +215,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test athanor-sulphur
@@ -242,6 +256,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the daemon
@@ -261,6 +277,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shell-rig-bin
@@ -309,6 +327,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the bar and check the DT_NEEDED order
@@ -354,6 +374,8 @@ jobs:
           ]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: shell-rig-bin
@@ -377,6 +399,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build and test the dock and check the DT_NEEDED order
@@ -415,6 +439,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the dock
@@ -436,6 +462,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the control center, with athanor-services and athanor-controls, and check the DT_NEEDED order
@@ -453,6 +481,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
       - name: Build the launcher and its decoder, with the qalc test required

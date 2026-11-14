@@ -49,6 +49,8 @@ jobs:
       changes: ${{ steps.changes.outputs.json }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Change detection (scripts/ci/changes.py)
         id: changes
@@ -72,6 +74,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -93,6 +97,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -113,6 +119,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -135,6 +143,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -196,6 +206,8 @@ jobs:
       NEEDS: ${{ toJSON(needs) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Verdict (scripts/ci/gate.py)
         run: |

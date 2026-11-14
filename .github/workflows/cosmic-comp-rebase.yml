@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Apply the patch set on the newest upstream tag
         run: python3 scripts/cosmic-comp-rebase/rebase.py "$RUNNER_TEMP/rebase"
