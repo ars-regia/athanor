@@ -91,13 +91,14 @@ impl Ui {
     }
 
     /// Adds an inline: its children side by side in reading order at their own widths, with
-    /// `padding` logical pixels kept free left and right, then above and below. See
-    /// [`Kind::Inline`].
+    /// `padding` logical pixels kept free left and right, then above and below; a padding that
+    /// is not a finite length of at least 0 counts as 0. See [`Kind::Inline`].
     ///
     /// # Panics
     ///
     /// When `parent` names no widget of this `Ui`.
     pub fn inline(&mut self, parent: WidgetId, padding: [f32; 2]) -> WidgetId {
+        let padding = padding.map(|p| if p.is_finite() { p.max(0.0) } else { 0.0 });
         self.add(parent, Kind::Inline { padding })
     }
 }
@@ -146,6 +147,22 @@ mod tests {
             }
             assert_eq!(s.y, i.y + 2.0);
         }
+    }
+
+    #[test]
+    fn a_padding_that_is_not_a_finite_length_of_at_least_0_counts_as_0() {
+        let rect = |padding| {
+            let mut ui = Ui::new("Strip", theme(), false);
+            let inline = ui.inline(Ui::ROOT, padding);
+            ui.add(inline, Kind::Button("A".into()));
+            ui.layout();
+            ui.widget(inline).rect
+        };
+        let none = rect([0.0, 0.0]);
+        for padding in [[f32::NAN, -4.0], [f32::INFINITY, f32::NEG_INFINITY], [-1.0, f32::NAN]] {
+            assert_eq!(rect(padding), none, "{padding:?}");
+        }
+        assert_eq!(rect([3.0, 0.0]).w, none.w + 6.0, "a valid padding is kept");
     }
 
     #[test]
@@ -221,8 +238,11 @@ mod tests {
         ui.layout();
         assert_eq!(ui.widget(center).rect.w, width, "measured as three children");
         assert!(!ui.is_visible(fourth), "neither drawn nor read");
-        let r = ui.widget(fourth).rect;
-        assert_ne!(ui.hit(r.x + 1.0, r.y + 1.0), Some(fourth), "never hit");
+        // No point of the window hits it, wherever its measure left its rectangle.
+        let (w, h) = ui.layout();
+        let points = (0..w as u32).flat_map(|x| (0..h as u32).map(move |y| (x as f32, y as f32)));
+        let hit: Vec<_> = points.filter(|&(x, y)| ui.hit(x, y) == Some(fourth)).collect();
+        assert!(hit.is_empty(), "never hit, but at {:?}", hit.first());
         assert!(!crate::focus::chain(&ui).contains(&fourth), "never focused");
         assert!(three.iter().all(|&c| ui.is_visible(c)));
     }
