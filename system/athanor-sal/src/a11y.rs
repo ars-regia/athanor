@@ -46,6 +46,7 @@ fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
 
 /// The node of a list row's label, beside the widgets' ids: a row has no text runs, so it takes
 /// the id of a first one.
+#[cfg(test)]
 pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
@@ -328,9 +329,7 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     node.set_bounds(bounds(ui, id, scale));
     let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if shown_label(ui, id).is_some() {
-        children.push(row_label_id(id));
-    }
+    children.extend((0..shown_labels(ui, id).len()).map(|n| text_run_id(id, n)));
     if id == Ui::ROOT && ui.announcement.is_some() {
         children.push(ANNOUNCEMENT);
     }
@@ -375,26 +374,36 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
         .collect()
 }
 
-/// The text widget `id` shows as a label inside it: a list heading's, a list row's unless it
-/// shows widgets of its own, and a labelled button's when it shows one.
-fn shown_label(ui: &Ui, id: WidgetId) -> Option<&str> {
+/// The texts widget `id` shows as labels inside it: a list heading's, a list row's unless it
+/// shows widgets of its own, a labelled button's when it shows one, and a tile's title and its
+/// second line, as the GtkLabels inside the GTK panel's tiles.
+fn shown_labels(ui: &Ui, id: WidgetId) -> Vec<&str> {
     match &ui.widget(id).kind {
-        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => Some(text),
-        Kind::LabelledButton { text, .. } if !text.is_empty() => Some(text),
-        _ => None,
+        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => vec![text],
+        Kind::LabelledButton { text, .. } if !text.is_empty() => vec![text],
+        Kind::Tile(tile) => [&tile.title, &tile.subtitle]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .map(String::as_str)
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
 /// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
 /// rows: AT-SPI reads the row as a list item named by its text, and the text as that label. A
 /// labelled button's text is a label inside it the same way, as the GtkLabel of a GTK button
-/// whose name is set apart.
-fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let text = shown_label(ui, id)?;
-    let mut label = Node::new(Role::Label);
-    label.set_value(text);
-    label.set_bounds(bounds(ui, id, scale));
-    Some((row_label_id(id), label))
+/// whose name is set apart, and a tile's two lines are two labels inside it.
+fn row_labels(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
+    let labels = shown_labels(ui, id).into_iter().enumerate();
+    labels
+        .map(|(n, text)| {
+            let mut label = Node::new(Role::Label);
+            label.set_value(text);
+            label.set_bounds(bounds(ui, id, scale));
+            (text_run_id(id, n), label)
+        })
+        .collect()
 }
 
 /// Whether row or heading `id` holds its text as a label: a row that shows widgets of its own
@@ -531,7 +540,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
-            .chain(shown().filter_map(|id| row_label(ui, id, scale)))
+            .chain(shown().flat_map(|id| row_labels(ui, id, scale)))
             .chain(announcement(ui, scale))
             .collect(),
         tree: Some(tree),

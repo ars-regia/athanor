@@ -55,8 +55,9 @@ SAME_ROLE = [
 ]
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button, and extended the rule to check boxes on
-# 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too. A label under any other
-# parent is its own element, as the title under the window.
+# 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too, and to a label at any
+# depth inside the button on 2026-11-14: the GTK panel's tile holds its title in a box in a box. A
+# label under any other parent is its own element, as the title under the window.
 BUTTONS = {"button", "push button", "toggle button", "check box"}
 # A switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
@@ -111,19 +112,17 @@ def significant(node):
 
 
 def spoken(nodes):
-    """The significant nodes, less the labels that repeat their button's name: a screen reader
-    speaks the two once, as the button's name (BUTTONS). Any other child, an image for one,
-    stays an element of its own. So are the labels beside a gallery's switch (SWITCH)."""
+    """The significant nodes, less the labels that repeat the name of a button they are inside,
+    at any depth: a screen reader speaks the two once, as the button's name (BUTTONS). Any other
+    child, an image for one, stays an element of its own. So are the labels beside a gallery's
+    switch (SWITCH)."""
     parents, out, parent_of = [], [], []
     for node in nodes:
         del parents[node["depth"]:]
         parent = parents[-1] if parents else None
         parent_of.append(id(parent))
-        repeats = (
-            node["role"] == "label"
-            and parent
-            and parent["role"] in BUTTONS
-            and node["name"] == parent["name"]
+        repeats = node["role"] == "label" and any(
+            above["role"] in BUTTONS and node["name"] == above["name"] for above in parents
         )
         if significant(node) and not (node["name"] and repeats):
             out.append(node)

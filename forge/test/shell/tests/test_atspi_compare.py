@@ -107,6 +107,25 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("button", "Close")])
         self.assertEqual((len(lines), failures), (2, ["image 'Close': missing"]))
 
+    def test_a_label_deep_inside_its_button_that_repeats_its_name_is_the_button(self):
+        # The GTK panel's tile: its title and status in a box in a box inside the toggle button.
+        tile = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("panel", ""), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Wi-Fi"), depth=3),
+            dict(node("label", "On"), depth=3),
+        ]
+        flat = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("label", "On"), depth=1),
+        ]
+        lines, failures = compare.compare(tile, flat)
+        self.assertEqual((len(lines), failures), (2, []))
+        # The status, which repeats no button's name, stays its own element.
+        _, failures = compare.compare(tile, flat[:1])
+        self.assertEqual(failures, ["label 'On': missing"])
+
     def test_a_label_that_repeats_another_parents_name_is_its_own_element(self):
         reference = [node("frame", "Layout"), dict(node("label", "Layout"), depth=1)]
         lines, failures = compare.compare(reference, [node("frame", "Layout")])

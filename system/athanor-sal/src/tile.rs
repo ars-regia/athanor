@@ -359,6 +359,29 @@ mod tests {
         assert_eq!(described(&ui).as_deref(), Some("Wi-Fi"));
     }
 
+    /// The title and the second line are labels inside the tile, as the GtkLabels inside the GTK
+    /// panel's tiles; a tile without a second line holds its title alone.
+    #[test]
+    fn the_title_and_the_second_line_are_labels_inside_the_tile() {
+        use crate::a11y::{node_id, text_run_id, tree_update};
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let wifi = ui.tile(Ui::ROOT, "Wi-Fi", "On", glyph(), true);
+        ui.layout();
+        let labels = |ui: &Ui| {
+            let update = tree_update(ui, 1.0);
+            let find = |id| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, node)| node);
+            let tile = find(node_id(wifi)).map(|n| n.children().to_vec()).unwrap_or_default();
+            tile.into_iter()
+                .filter_map(|id| find(id).map(|n| (n.role(), n.value().map(str::to_owned))))
+                .collect::<Vec<_>>()
+        };
+        let label = |text: &str| (accesskit::Role::Label, Some(text.to_owned()));
+        assert_eq!(labels(&ui), [label("Wi-Fi"), label("On")]);
+        assert_eq!(text_run_id(wifi, 1).0 >> 40, 2, "the second line's own node");
+        assert!(ui.set_tile_subtitle(wifi, ""));
+        assert_eq!(labels(&ui), [label("Wi-Fi")]);
+    }
+
     #[test]
     fn the_disc_and_the_lines_follow_the_reading_order() {
         let r = crate::widget::Rect {
