@@ -39,6 +39,7 @@ fn apply_writes_the_store_then_the_compositor() {
         accent_mode: AccentMode::Wallpaper,
         accent_computed: Rgb::from_hex("#336699"),
         animations: true,
+        font_size: Appearance::default().font_size,
     };
     let seen = Cell::new(None);
     appearance::apply(
@@ -107,4 +108,21 @@ fn apply_writes_the_store_then_the_compositor() {
     assert!(!Appearance::read().animations);
     appearance::apply(|current| current.high_contrast = true, |_| Ok(())).expect("apply");
     assert!(!interface.boolean("enable-animations") && !Appearance::read().animations);
+
+    // The font's size is GNOME's `font-name` at `text-scaling-factor`, as GTK reads them;
+    // `apply` never writes them.
+    interface
+        .set_string("font-name", "Inter Bold 12")
+        .expect("font-name");
+    interface
+        .set_double("text-scaling-factor", 1.5)
+        .expect("text-scaling-factor");
+    assert_eq!(
+        Appearance::read().font_size,
+        24.0,
+        "12 pt at 96 dpi, times 1.5"
+    );
+    appearance::apply(|current| current.font_size = 9.0, |_| Ok(())).expect("apply");
+    assert_eq!(interface.string("font-name"), "Inter Bold 12");
+    assert_eq!(Appearance::read().font_size, 24.0);
 }

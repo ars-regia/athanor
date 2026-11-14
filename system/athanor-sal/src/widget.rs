@@ -584,6 +584,11 @@ impl Widget {
         }
     }
 
+    /// How its text is set; [`Ui::set_text_style`] changes it.
+    pub fn text_style(&self) -> &TextStyle {
+        &self.style
+    }
+
     /// Whether the keyboard can focus the widget: not when it is insensitive itself. An
     /// insensitive ancestor makes it unreachable too; see [`Ui::is_sensitive`].
     pub fn is_focusable(&self) -> bool {

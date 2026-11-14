@@ -436,7 +436,7 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
+        dispatch(&mut event_loop, &conn, wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
@@ -1257,6 +1257,25 @@ fn each_open<T, S: Copy>(
             call(state, surface);
         }
     }
+}
+
+/// One turn of `event_loop`, then an error if the compositor ended `conn`, so that the process
+/// exits and its unit's `Restart=` applies (#1129). calloop-wayland-source returns an end of file,
+/// but only logs a protocol error, and the dead socket then wakes the loop at every turn with
+/// nothing to dispatch. The error names the protocol error's code and object, and its message
+/// where the backend keeps one: libwayland's keeps none. Every caller of [`run`] logs it before
+/// it exits.
+fn dispatch<D>(
+    event_loop: &mut EventLoop<'static, D>,
+    conn: &Connection,
+    timeout: Option<Duration>,
+    data: &mut D,
+) -> Result<(), Error> {
+    let turn = event_loop.dispatch(timeout, data);
+    if let Some(error) = conn.backend().last_error() {
+        return Err(format!("the compositor ended the Wayland connection: {error}").into());
+    }
+    Ok(turn?)
 }
 
 /// How long the loop waits for an event: not at all while a surface is queued `pending` for the
@@ -2996,6 +3015,9 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use wayland_client::protocol::wl_registry;
 
     #[test]
     fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
@@ -3559,5 +3581,89 @@ mod tests {
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    /// A client that dispatches nothing: the registry it asks for gives the compositor an object
+    /// to raise a protocol error on.
+    struct Client;
+
+    impl wayland_client::Dispatch<wl_registry::WlRegistry, ()> for Client {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    /// An event loop on the client end of a socket pair, as the driver runs one on the
+    /// compositor's socket, its registry as object 2, and the server end, which has read the
+    /// request for it.
+    fn on_socket_pair(
+    ) -> Result<(EventLoop<'static, Client>, Connection, wl_registry::WlRegistry, UnixStream), Error>
+    {
+        let (client, mut server) = UnixStream::pair()?;
+        let conn = Connection::from_socket(client)?;
+        let queue = conn.new_event_queue::<Client>();
+        let registry = conn.display().get_registry(&queue.handle(), ());
+        conn.flush()?;
+        // Read, so that closing the server end ends the stream instead of resetting it.
+        server.read_exact(&mut [0; 12])?;
+        let event_loop = EventLoop::try_new()?;
+        WaylandSource::new(conn.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|e| e.error.to_string())?;
+        Ok((event_loop, conn, registry, server))
+    }
+
+    /// The error of the first of a hundred turns of the loop that fails, if one does.
+    fn first_error(event_loop: &mut EventLoop<'static, Client>, conn: &Connection) -> Option<String> {
+        (0..100).find_map(|_| {
+            let turn = dispatch(event_loop, conn, Some(Duration::from_millis(10)), &mut Client);
+            turn.err().map(|error| error.to_string())
+        })
+    }
+
+    #[test]
+    fn the_loop_ends_with_the_protocol_error_that_ended_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, registry, mut server) = on_socket_pair()?;
+        assert_eq!(registry.id().protocol_id(), 2);
+        // wl_display.error(wl_registry 2, code 3, "invalid size"), then the compositor closes.
+        // Not on wl_display itself: libwayland reports its codes as an errno, ENOMEM for 2.
+        let text = b"invalid size\0\0\0\0";
+        let mut message = Vec::new();
+        for word in [1, (8 + 12 + text.len() as u32) << 16, 2, 3, 13] {
+            message.extend_from_slice(&u32::to_ne_bytes(word));
+        }
+        message.extend_from_slice(text);
+        server.write_all(&message)?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        let ended = "the compositor ended the Wayland connection: \
+                     Protocol error 3 on object wl_registry@2";
+        // The Rust backend keeps the message; libwayland's does not. Which one runs is not Sal's
+        // to choose: any crate built with it may turn on wayland-backend's client_system, as Sal's
+        // `gpu` feature does, and Cargo unifies features across a build, so both forms are right.
+        let message = format!("{ended}: invalid size");
+        assert!(
+            error.as_deref() == Some(&message) || error.as_deref() == Some(ended),
+            "{error:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_loop_ends_when_the_compositor_closes_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, _registry, server) = on_socket_pair()?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        assert!(
+            error.as_deref().is_some_and(|e| e.starts_with("the compositor ended the Wayland")),
+            "{error:?}"
+        );
+        Ok(())
     }
 }
