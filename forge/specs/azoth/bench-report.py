@@ -59,7 +59,7 @@ def main():
     labels = [r["label"] for r in latest]
     out.append(
         "| metric | "
-        + " | ".join(f"`{l}`" for l in labels)
+        + " | ".join(f"`{ln}`" for ln in labels)
         + (" | delta | " if len(latest) > 1 else " |")
     )
     out.append(

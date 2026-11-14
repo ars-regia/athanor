@@ -33,3 +33,8 @@ gpu = ["dep:vello_gpu", "dep:wgpu", "dep:wayland-backend"]
 athanor-i18n = { path = "../athanor-i18n" }
 # The AT-SPI bridge accesskit_unix runs, read in-process: a node's states as Orca gets them.
 accesskit_atspi_common = "0.21"
+
+[package.metadata.cargo-machete]
+# wayland-backend: no code names it; the `gpu` feature turns on its client_system backend for wgpu.
+# yeslogic-fontconfig-sys: the code uses it as `fontconfig_sys`.
+ignored = ["wayland-backend", "yeslogic-fontconfig-sys"]

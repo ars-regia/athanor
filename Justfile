@@ -122,8 +122,9 @@ check base="HEAD":
     just check-rust
     just check-deny
 
-# The static half of the gate: workflow lint, Justfile syntax, every verify.py check, the kernel
-# profile, the Calmo palette and the suites of forge/test/iso (about 2 minutes on a runner).
+# The static half of the gate: workflow lint (actionlint, zizmor), ruff check (ruff.toml), Justfile
+# syntax, unused dependencies (cargo-machete), every verify.py check, the kernel profile, the Calmo
+# palette and the suites of forge/test/iso (about 2 minutes on a runner).
 [group('QA & Security')]
 check-static base="HEAD":
     #!/usr/bin/env bash
@@ -134,7 +135,10 @@ check-static base="HEAD":
     command -v zizmor >/dev/null || { echo "check: zizmor is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
     # Offline: the online audits would call the GitHub API, and the gate must not depend on it.
     zizmor --offline --no-progress --config .github/zizmor.yml .github/workflows .github/actions
+    command -v ruff >/dev/null || { echo "check: ruff is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    ruff check --no-cache
     just check-syntax
+    just check-machete
     python3 -B scripts/verify.py --known-red scripts/ci/known-red.txt --known-red-base "{{ base }}"
     python3 -B forge/specs/athanor-kernel-profile/kernel_profile.py check
     python3 -B system/athanor-style/calmo/contrast.py
@@ -142,6 +146,17 @@ check-static base="HEAD":
     # These suites hold no TestCase: their own main() runs the cases, and discovery would find none.
     python3 -B forge/test/iso/test_verdict.py
     python3 -B forge/test/iso/test_report.py
+
+# Dependencies a Cargo.toml declares and no source uses (cargo-machete), over every manifest the
+# repository tracks but the vendored crates, which are not ours to edit. A dependency used only
+# through a macro, a rename or a feature goes in that manifest's [package.metadata.cargo-machete]
+# ignored list, with the reason beside it.
+[group('QA & Security')]
+check-machete:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo-machete >/dev/null || { echo "check-machete: cargo-machete is not on PATH (scripts/ci/install-tools.sh)" >&2; exit 1; }
+    git ls-files -z -- ':(glob)**/Cargo.toml' | grep -zv '/vendor/' | xargs -0 cargo-machete
 
 # The Python unit tests, in two shards that together cover every test directory of the
 # repository: `system` is system/tests (about 3 minutes on a runner), `other` is every other

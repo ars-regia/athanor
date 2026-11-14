@@ -1,0 +1,23 @@
+# ruff check runs from `just check-static` (PL28). The default rule set (E4, E7, E9, F) is
+# what is enabled; ruff format is not part of the gate, the files are not formatter-clean.
+# ruff skips git-ignored paths by itself (respect-gitignore); the list below adds the
+# vendored and scratch trees whatever .gitignore says.
+extend-exclude = ["vendor", ".scratch", "target"]
+# Tracked Python scripts that carry a python shebang and no .py extension.
+extend-include = [
+    "forge/specs/athanor-base-config/SOURCES/usr/libexec/athanor-firewall-zone-migrate",
+    "forge/specs/athanor-kernel-profile/SOURCES/usr/bin/athanor-profile-check",
+]
+
+[lint]
+# The classic default set, pinned: ruff 0.17 widened its own default, and a bump of the tool
+# must not widen the gate.
+select = ["E4", "E7", "E9", "F"]
+
+[lint.per-file-ignores]
+# E402: the import cannot come first. gi.require_version() must run before the gi.repository
+# import it selects, and install_console.py puts forge/test/iso on sys.path before it imports
+# console from there.
+"forge/test/shell/gtk_animation.py" = ["E402"]
+"system/athanor-search/tests/frozen_provider.py" = ["E402"]
+"scripts/devvm/install_console.py" = ["E402"]

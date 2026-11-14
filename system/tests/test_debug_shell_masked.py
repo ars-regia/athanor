@@ -28,7 +28,7 @@ class DebugShellMaskedTest(unittest.TestCase):
 
     def test_no_shipped_preset_enables_it(self):
         for preset in ROOT.glob("forge/specs/*/SOURCES/**/system-preset/*.preset"):
-            lines = [l.split() for l in preset.read_text().splitlines() if l.strip() and not l.lstrip().startswith("#")]
+            lines = [ln.split() for ln in preset.read_text().splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
             self.assertNotIn(["enable", "debug-shell.service"], lines, preset.name)
 
     def test_the_acceptance_expects_it_masked(self):

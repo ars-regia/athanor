@@ -557,7 +557,7 @@ def wait_for_phase(run: pathlib.Path, name: str, timeout: float = 30) -> None:
     deadline = time.time() + timeout
     path = run / "phases.txt"
     while time.time() < deadline:
-        if path.exists() and name in (l.split()[0] for l in path.read_text().splitlines() if l.strip()):
+        if path.exists() and name in (ln.split()[0] for ln in path.read_text().splitlines() if ln.strip()):
             return
         time.sleep(0.02)
     raise AssertionError(f"the console never noted {name}")

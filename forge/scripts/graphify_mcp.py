@@ -17,7 +17,7 @@ def load_graph():
                 data = json.load(f)
                 from networkx.readwrite import json_graph
                 G = json_graph.node_link_graph(data)
-        except Exception as e:
+        except Exception:
             pass
     return G
 

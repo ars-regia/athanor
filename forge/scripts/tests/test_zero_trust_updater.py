@@ -41,7 +41,9 @@ class UpdaterTest(unittest.TestCase):
         os.chdir(self.cwd)
 
     def run_updater(self, tag):
-        fetch = lambda url: {"tag_name": tag}
+        def fetch(url):
+            return {"tag_name": tag}
+
         return updater.main(str(self.report), fetch=fetch, pin=self.pinned.append)
 
     def test_newer_release_moves_version_and_release_only(self):

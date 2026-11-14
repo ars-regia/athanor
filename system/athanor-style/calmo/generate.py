@@ -395,7 +395,7 @@ def _sal_table(name, table, lines):
         const = key.upper().replace("-", "_")
         doc = f"    /// `sal.{name}.{key}`"
         if isinstance(value, dict) and name == "size" and key == "icon":
-            lines.append(f"    /// `[sal.size.icon]` in tokens.toml, in logical pixels.")
+            lines.append("    /// `[sal.size.icon]` in tokens.toml, in logical pixels.")
             lines.append("    pub mod icon {")
             for icon, size in value.items():
                 lines.append(f"        /// `sal.size.icon.{icon}`.")
