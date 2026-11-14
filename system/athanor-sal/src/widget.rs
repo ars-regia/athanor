@@ -5155,4 +5155,23 @@ mod tests {
             assert_eq!(ui.widget(label).rect.w, least, "{rtl}: its longest word");
         }
     }
+
+    /// A wrapping label aligned across in a column narrower than its least width
+    /// (Ui::set_min_width), as a row cell can make it, keeps that width, as GTK's width-request.
+    #[test]
+    fn an_aligned_wrapping_label_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Start, crate::Align::Fill]), Some(true));
+            assert!(ui.set_min_width(label, 400.0));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            assert_eq!(ui.widget(label).rect.w, 400.0, "{rtl}: its least width");
+        }
+    }
 }
