@@ -179,10 +179,14 @@ def compare(reference, transcript, exempt=None, indicator=False):
         if id(ref) in bars:
             lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
             continue
+        # Among the nodes of its name, the one of its role, then one of a role said alike (a
+        # toolkit's frame and its panel may share the name of GTK's grouping), then any.
         named = [node for node in candidates if node["name"] == ref["name"]]
-        match = next(
-            (node for node in named if node["role"] == ref["role"]), None
-        ) or next(iter(named), None)
+        match = (
+            next((node for node in named if node["role"] == ref["role"]), None)
+            or next((node for node in named if same_role(node["role"], ref["role"])), None)
+            or next(iter(named), None)
+        )
         label = f"{ref['role']} {ref['name']!r}"
         if ref["name"] in exempt:
             cause, issue = exempt[ref["name"]]

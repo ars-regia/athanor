@@ -79,6 +79,17 @@ class CompareTest(unittest.TestCase):
         transcript = [node("panel", "Style", ["showing"]), node("label", "Style")]
         self.assertEqual(compare.compare(reference, transcript)[1], [])
 
+    def test_a_frame_and_a_panel_of_one_name_match_the_grouping_by_its_alike_role(self):
+        # The toolkit names its window after its root group, which GTK leaves unnamed.
+        reference = [node("grouping", "Control center", ["showing", "vertical"])]
+        transcript = [
+            node("frame", "Control center", ["showing"]),
+            node("panel", "Control center", ["showing", "vertical"]),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("note: role 'panel'", lines[0])
+
     # The two rules the maintainer accepted on 2026-10-17.
     def test_a_label_that_repeats_its_buttons_name_is_the_button(self):
         reference = [node("toggle button", "Bar"), dict(node("label", "Bar"), depth=1)]
