@@ -204,6 +204,12 @@ fn shown() -> LayerOptions {
     options
 }
 
+/// Whether the field `field` of `ui` holds a query that is selected whole.
+fn selected_whole(ui: &Ui, field: WidgetId) -> bool {
+    ui.field_text(field)
+        .is_some_and(|text| !text.is_empty() && ui.field_selection(field) == Some(text))
+}
+
 fn empty(look: &Look, rtl: bool) -> Ui {
     let mut ui = Ui::new("", look.panel.clone(), rtl);
     ui.min_width = 1.0;
@@ -612,8 +618,22 @@ impl Launcher {
         if size == panel.size {
             return;
         }
+        self.rebuild(shell, surface, panel, size);
+    }
+
+    /// Lays the shown panel out again at `size`, with its query. A query selected whole, as
+    /// the one kept from the last Show is, stays selected, so typing still replaces it: in a
+    /// session the surface's first configure is smaller than the output, by the bar's
+    /// exclusive zone, and comes after the Show.
+    fn rebuild(&mut self, shell: &mut Shell, surface: SurfaceId, panel: Panel, size: (f32, f32)) {
+        let Some(ui) = shell.ui(surface) else { return };
         let text = ui.field_text(panel.field).unwrap_or_default();
+        let whole = selected_whole(ui, panel.field);
         self.build(shell, surface, &text, size);
+        if let (true, Some(ui), Some(panel)) = (whole, shell.ui_mut(surface), self.panel) {
+            ui.set_focus(Some(panel.field));
+            ui.key(SalKey::SelectAll);
+        }
     }
 
     fn apply(&mut self, shell: &mut Shell, change: Change) {
@@ -629,11 +649,7 @@ impl Launcher {
                 self.look = look::look(&current);
                 self.icons.reset(self.look.panel.text);
                 if let (Some(surface), Some(panel)) = (self.shown, self.panel) {
-                    let text = shell
-                        .ui(surface)
-                        .and_then(|ui| ui.field_text(panel.field))
-                        .unwrap_or_default();
-                    self.build(shell, surface, &text, panel.size);
+                    self.rebuild(shell, surface, panel, panel.size);
                 }
             }
             Change::Apps => {
@@ -844,5 +860,23 @@ impl Application for Launcher {
         if self.shown == Some(surface) {
             self.forget_shown(shell);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use athanor_sal::Theme;
+
+    #[test]
+    fn a_query_is_selected_whole_only_when_all_of_it_is() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let field = ui.field(Ui::ROOT, "Search", "");
+        assert!(!selected_whole(&ui, field), "an empty field");
+        ui.set_field_text(field, "firefox");
+        ui.set_focus(Some(field));
+        assert!(!selected_whole(&ui, field), "the caret only");
+        ui.key(SalKey::SelectAll);
+        assert!(selected_whole(&ui, field));
     }
 }
