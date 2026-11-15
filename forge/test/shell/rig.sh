@@ -89,6 +89,11 @@
 # stage there through sccache, bounded by ATHANOR_RIG_SCCACHE_SIZE (20G), so a new worktree
 # compiles only what changed. It turns incremental compilation off, which sccache cannot cache.
 # Unset, cargo runs without a wrapper. Nothing built here ships: the RPMs build in the forge.
+# Build scripts and proc macros run with the directory writable, and binaries of this rig reach
+# development machines (scripts/devvm/*-acceptance.sh, scripts/shell-bench/deploy.py), so a
+# directory serves one trust level: never point a build of an untrusted branch at the directory
+# of trusted ones. Concurrent runs on one directory each start their own sccache server, which
+# counts and evicts on its own, so together they can exceed the bound while they run.
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
@@ -140,10 +145,13 @@ build_image() {
     fi
 }
 
-# The podman options of the compiler cache, empty unless ATHANOR_RIG_SCCACHE asks for it. A
-# relative path would reach podman as the name of a volume, so it is refused.
+# The podman options of the compiler cache, empty unless ATHANOR_RIG_SCCACHE asks for it; the
+# recipes that run cargo set them up before they start. A relative path would reach podman as the
+# name of a volume, so it is refused, and a build stage without sccache would fail every rustc
+# call with an error that does not name the cache, so it is refused before cargo starts.
 cargo_cache=()
-if [ -n "${ATHANOR_RIG_SCCACHE:-}" ]; then
+cargo_cache_setup() {
+    [ -n "${ATHANOR_RIG_SCCACHE:-}" ] || return 0
     case $ATHANOR_RIG_SCCACHE in
     /*) ;;
     *)
@@ -151,10 +159,17 @@ if [ -n "${ATHANOR_RIG_SCCACHE:-}" ]; then
         exit 2
         ;;
     esac
+    local image
+    image=$(build_image)
+    if ! podman run --rm --network=none "$image" sh -c 'command -v sccache > /dev/null'; then
+        echo "rig.sh: ATHANOR_RIG_SCCACHE is set, but the build stage $image has no sccache;" \
+            "publish the stage (publish-rig-build-image.yml) and commit its pin, or unset the variable" >&2
+        exit 2
+    fi
     mkdir -p "$ATHANOR_RIG_SCCACHE"
     cargo_cache=(-v "$ATHANOR_RIG_SCCACHE:/sccache" -e RUSTC_WRAPPER=sccache -e SCCACHE_DIR=/sccache
         -e "SCCACHE_CACHE_SIZE=${ATHANOR_RIG_SCCACHE_SIZE:-20G}" -e CARGO_INCREMENTAL=0)
-fi
+}
 
 # The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
 # and the registry of the forge's tier 2 repository, where the rig's cosmic-comp comes from.
@@ -619,6 +634,11 @@ require_for() { # require_for <surface>
     bar*) require athanor-bar build-bar ;;
     esac
 }
+
+case "${1:-}" in
+build-image | build-image-ref | build-inputs) ;;
+build-* | no-gtk | cargo) cargo_cache_setup ;;
+esac
 
 case "${1:-}" in
 build-image-ref)
