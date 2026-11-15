@@ -220,9 +220,7 @@ impl Drm {
                     )))
                 }
                 _ if unused => {
-                    return Err(invalid(format!(
-                        "plane {index} follows an unused plane"
-                    )))
+                    return Err(invalid(format!("plane {index} follows an unused plane")))
                 }
                 _ => {}
             }
@@ -356,8 +354,16 @@ mod tests {
                 "a second row past the end",
             ),
             ((64, 64), one(0, 0), "a first plane without a stride"),
-            ((64, 64), [(0, 256), (0, 0), (0, 64)], "a third plane after an unused one"),
-            ((64, 64), [(0, 256), (64, 0), (0, 0)], "an unused plane with an offset"),
+            (
+                (64, 64),
+                [(0, 256), (0, 0), (0, 64)],
+                "a third plane after an unused one",
+            ),
+            (
+                (64, 64),
+                [(0, 256), (64, 0), (0, 0)],
+                "an unused plane with an offset",
+            ),
         ] {
             let result = drm.prime(file(256 * 64, what), size, ARGB, planes);
             assert_eq!(error(result), wl_drm::Error::InvalidName, "{what}");
