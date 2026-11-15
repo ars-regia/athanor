@@ -6400,6 +6400,38 @@ fn a_token_raises_nothing_while_locked() {
     run.stop();
 }
 
+/// A token made before the lock is dropped by it: used after the unlock, it raises nothing
+/// and gives no keyboard (L14).
+#[test]
+fn a_token_from_before_the_lock_activates_nothing_after_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+    let serial = click_bar(&mut run, &bar);
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token), "the click grants");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    assert!(!granted(&run, &token), "the lock drops the token");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    let before = stack(&run);
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the window is not raised");
+    assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
+    run.stop();
+}
+
 /// A press that a later one superseded grants no token, though both went to the bar.
 #[test]
 fn a_superseded_press_grants_no_token() {

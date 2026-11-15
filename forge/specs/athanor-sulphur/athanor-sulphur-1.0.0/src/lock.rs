@@ -98,6 +98,9 @@ impl SessionLockHandler for State {
         self.cancel_touches();
         // Decision 36: from the lock request on no lease is granted, and every one ends now.
         self.leases_locked();
+        // A token made before the lock activates nothing after it (L14): every one pending is
+        // dropped, and none is made while locked (`token_created`).
+        self.xdg_activation_state.retain_tokens(|_, _| false);
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
             locker: Some(Confirmation::new(locker)),
