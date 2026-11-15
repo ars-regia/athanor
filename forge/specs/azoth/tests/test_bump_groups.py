@@ -174,6 +174,18 @@ class BumpGroups(unittest.TestCase):
         self.assertRegex(prep["run"], r"if \[\[ \$LOCKED != true \]\]; then\s+outcome=FAIL")
         self.assertEqual(jobs["pr"]["needs"], ["kernel", "prep"])
 
+    def test_the_manifests_and_prep_read_a_store_made_for_the_run(self):
+        # The persistent store is written by other jobs; a manifest hashed from it could take
+        # in a file no pinned URL served (#1179).
+        jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]
+        steps = {step.get("name"): step for step in jobs["prep"]["steps"]}
+        for name in ("Manifests for the new pins", "Prep (signatures, patches, config gate)"):
+            self.assertIn('-v "$RUNNER_TEMP/azoth:/var/cache/azoth"', steps[name]["run"], name)
+        self.assertIn('mkdir "$RUNNER_TEMP/azoth"', steps["Manifests for the new pins"]["run"])
+        for job in jobs.values():
+            for step in job.get("steps", []):
+                self.assertNotIn(".cache/azoth", step.get("run", ""), step.get("name"))
+
     def test_system_group_touches_only_its_files(self):
         result, touched = self.apply("system")
         self.assertEqual(touched, {self.system_cf})

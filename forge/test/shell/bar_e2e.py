@@ -34,7 +34,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, walk  # noqa: E402
+from atspi_check import children, find_application, walk  # noqa: E402
 
 READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
@@ -66,12 +66,24 @@ def check(name, ok, detail=""):
 
 
 def wait_for(check_now, seconds):
+    """Poll `check_now` until it is true. A GLib.Error from it, an AT-SPI node destroyed
+    mid-read, means the state has not settled: poll again, and if it never does, fail with the
+    last error on stderr."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if check_now():
-            return True
+    error = None
+    while True:
+        try:
+            if check_now():
+                return True
+            error = None
+        except GLib.Error as err:
+            error = err
+        if time.monotonic() >= deadline:
+            break
         time.sleep(0.2)
-    return check_now()
+    if error is not None:
+        print(f"wait_for: {error}", file=sys.stderr)
+    return False
 
 
 def alive(pid):
@@ -92,24 +104,14 @@ def buttons_matching(app, Atspi, regex):
     found = []
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() == "button"
-                and regex.search(accessible.get_name())
-                and showing(accessible, Atspi)
-            ):
-                found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            # A window event rebuilt the row mid-walk and this node is gone: it is not
-            # there to be found. The callers poll, so the next walk sees the new row.
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if (
+            accessible.get_role_name() == "button"
+            and regex.search(accessible.get_name())
+            and showing(accessible, Atspi)
+        ):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found
@@ -168,23 +170,14 @@ def labelled(app, Atspi, role, label):
         return name
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() == role
-                and showing(accessible, Atspi)
-                and name_of(accessible) == label
-            ):
-                found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            # As in `buttons`: a node destroyed mid-walk is not there to be found.
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if (
+            accessible.get_role_name() == role
+            and showing(accessible, Atspi)
+            and name_of(accessible) == label
+        ):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found
@@ -206,9 +199,8 @@ def confirm_button(app, Atspi, name):
     same name sits on the hidden page of the stack."""
     for cancel in buttons(app, Atspi, "Cancel"):
         parent = cancel.get_parent()
-        for index in range(parent.get_child_count()):
-            child = parent.get_child_at_index(index)
-            if child and child.get_role_name() == "button" and child.get_name() == name:
+        for child in children(parent):
+            if child.get_role_name() == "button" and child.get_name() == name:
                 return cancel, child
     return None, None
 
