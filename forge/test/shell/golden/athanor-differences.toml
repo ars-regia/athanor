@@ -2516,3 +2516,94 @@ item = 18
 what = "in right-to-left a tile's second line ran past its disc"
 state = "closed"
 reason = "a line broken at the tile's room is aligned to the start of that room; Sal's tile now takes that alignment offset back, so both lines end beside the disc, as GTK's"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 1
+what = "the bar shows no Sound, Battery or shield button, so the network button sits further toward the end edge and its popover meets the screen's edge"
+state = "recorded"
+reason = "the audio, battery and shield modules are ported in their own branches; with them the bar holds GTK's twelve buttons and the network popover opens under its button, as GTK's. The comparisons of AT-SPI and Orca miss the same buttons until then"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 2
+what = "the text in the system sans, where GTK drew Inter"
+state = "recorded"
+reason = "the Sal bar's theme names no family, so the bar's clock, buttons and popovers take the system sans; the change is the bar's, across every surface of it, as bar-popups item 5 records, not the popovers'"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 3
+what = "the Wi-Fi switch shows the focus ring when the popover opens"
+state = "recorded"
+reason = "a Sal popover puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar and the control center's pages (control-center item 6); the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 4
+what = "an off switch's track tinted with the bar's chip, and a row's icon against its name"
+state = "closed"
+reason = "a page takes the popover's theme with the popover's fill as its surface and the GTK row box's 8 px between a row's icon and its name (look::page, test a_page_draws_its_buttons_on_the_popover_fill)"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 5
+what = "an off switch with a pale knob and an unfilled track, and the network that needs Settings dimmed in full"
+state = "recorded"
+reason = "Sal draws VL10's switch and insensitive states (#1147), as control-center item 14, where GTK drew Adwaita's grey track and white knob and dimmed only the row's icon"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 6
+what = "rows 40 px apart against 36, and the heading and the wired state about a tenth smaller"
+state = "recorded"
+reason = "the page takes Sal's theme metrics and type steps, the control padding of VL10 and calmo's 13 px body (#1147), as control-center items 13 and 16"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 7
+what = "the password field has no button that shows the password, and Connect is not the accent's filled button"
+state = "recorded"
+reason = "athanor-sal's password field has no peek toggle and its button no suggested style; the page is the control center's (#1165), so the change is athanor-sal's for both surfaces"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 8
+what = "a change of the appearance while the password page is open cancels NetworkManager's request"
+state = "recorded"
+reason = "the bar builds a popover again on a change of the appearance, and a page whose widgets are dropped answers the request it showed with a cancel, so that no request waits on a page nobody sees; GTK restyled the open page in place"
+
+[[gtk-difference]]
+surface = "bar-bluetooth"
+item = 9
+what = "the Pair button is described by one text holding the device, the digits and the note, where GTK pointed at the three labels with DescribedBy"
+state = "recorded"
+reason = "AccessKit's AT-SPI bridge sends ControllerFor alone of the relations (accesskit_atspi_common 0.21.1), so the page sets the three texts as the button's description; Orca reads the description as it read the relation's targets (bar_modules_e2e.py, description)"
+
+[[gtk-difference]]
+surface = "bar-bluetooth"
+item = 10
+what = "Pair is not the accent's filled button"
+state = "recorded"
+reason = "athanor-sal's button has no suggested style, as the power menu's confirmation"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 11
+what = "in the dark style the bar and the popovers are filled with calmo's plum, #2d1c33, where GTK filled them with navy, #1c2033"
+state = "recorded"
+reason = "the Sal bar takes its fills from athanor-style's generated Sal palette, the GTK bar took them from its own style sheet; the change is the bar's, across every surface of it and both popovers, not the popovers'"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 12
+what = "the clock writes the weekday and the date in English in every locale, Fri for Fr in German and the Latin digits and names in the right-to-left case"
+state = "recorded"
+reason = "the Sal bar's clock does not take the locale's names yet; the change is the clock module's, in the bar's own branch, and shows in both popovers' goldens"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 13
+what = "the popover casts no shadow"
+state = "recorded"
+reason = "a Sal popup card draws no shadow, as bar-popups records for every popup of the Sal bar; both popovers show it"
