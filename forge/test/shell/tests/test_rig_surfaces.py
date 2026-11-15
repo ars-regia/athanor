@@ -39,13 +39,54 @@ class GreeterOnlyUnderCosmicComp(unittest.TestCase):
 
 class AtspiReferences(unittest.TestCase):
     def test_bar_launcher_and_greeter_write_and_compare_their_transcripts(self):
-        # The bar's case serves bar-calendar too, the surface's name in $2.
-        for label, surface in (("bar | bar-calendar", "$2"), ("launcher", "launcher"), ("greeter", "greeter")):
+        # The bar's case serves each popover's, bar-calendar among them, the surface's name in $2.
+        for label, surface in (("bar | bar-*", "$2"), ("launcher", "launcher"), ("greeter", "greeter")):
             body = case(label, "atspi")
             name = f"atspi-{surface}${{3:+-$3}}.json"
             self.assertIn(f'ATSPI_TRANSCRIPT="/out/{name}"', body, surface)
             self.assertIn(f"golden/atspi/{name}", body, surface)
             self.assertIn("atspi_compare.py", body, surface)
+
+
+class PopoverScenes(unittest.TestCase):
+    """The popovers' AT-SPI and Orca runs open the popover of the bar surface they name, in the
+    scene capture_bar draws it in, and every popover shell-surfaces.yml runs has its walk."""
+
+    def test_atspi_and_orca_open_the_popover_of_bar_scene(self):
+        for command in ("atspi", "orca"):
+            label = "bar | bar-*" if command == "atspi" else "bar-*"
+            body = case(label, command)
+            self.assertIn('bar_scene "$2"', body, command)
+            self.assertIn('ATHANOR_BAR_OPEN="$open"', body, command)
+            self.assertIn("${scene_args[*]}", body, command)
+        self.assertIn('orca_walk.py /out/$transcript ${walk[*]}', case("bar-*", "orca"))
+
+    def test_capture_bar_takes_its_scene_from_bar_scene(self):
+        text = RIG.read_text(encoding="utf-8")
+        body = text[text.index("\ncapture_bar() {"):]
+        body = body[: body.index("\n}\n")]
+        self.assertIn('bar_scene "$surface"', body)
+
+    def test_every_popover_of_the_workflow_has_a_walk_and_its_references(self):
+        workflow = (SHELL.parent.parent.parent / ".github/workflows/shell-surfaces.yml").read_text(encoding="utf-8")
+        matrix = re.search(r"\n        popover: \[([^\]]*)\]", workflow)
+        self.assertIsNotNone(matrix)
+        run = {name.strip() for name in matrix.group(1).split(",")}
+        self.assertTrue(run)
+        walks = case("bar-*", "orca")
+        for surface in run:
+            self.assertRegex(walks, rf"\n        {surface}\) walk=\(", surface)
+            for suffix in ("", "-it"):
+                self.assertTrue((SHELL / f"golden/atspi/atspi-{surface}{suffix}.json").is_file(), surface)
+                self.assertTrue((SHELL / f"golden/orca/orca-{surface}{suffix}.txt").is_file(), surface)
+
+    def test_an_unknown_bar_surface_is_refused(self):
+        text = RIG.read_text(encoding="utf-8")
+        scene = text[text.index("\nbar_scene() {"):]
+        script = scene[: scene.index("\n}\n") + 3] + 'bar_scene "$1"\n'
+        result = subprocess.run(["bash", "-c", script, "-", "bar-nothing"], capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("bar-nothing", result.stderr)
 
 
 class OwnCompositorScenesRunInSystemdMode(unittest.TestCase):

@@ -77,7 +77,7 @@ BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"
 # that label counts as part of the switch. Both rules hold only for a check box that names a
 # switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
 # center (orca_compare.CONTROL_CENTER_SWITCHES and CONTROL_CENTER_FIXTURE_SWITCHES; maintainer,
-# 2026-11-14), whose toggle button is the
+# 2026-11-14) or of the bar (orca_compare.BAR_SWITCHES), whose toggle button is the
 # role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box, whatever its label, said as a
 # toggle button still fails. Nor does AccessKit give a toggle button
 # the `checkable` state (accesskit_atspi_common 0.21.0, node.rs:336, which adds it only to a

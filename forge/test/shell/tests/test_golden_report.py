@@ -199,7 +199,11 @@ class GoldenReportTest(unittest.TestCase):
         rig = (Path(gr.HERE) / "rig.sh").read_text(encoding="utf-8")
         body = rig.split("capture_bar() {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("preset=float", body.splitlines()[1])
-        bar = set(re.findall(r"^\s+([a-z-]+)\).*\bpreset=bar\b", body, re.MULTILINE))
+        self.assertIn('bar_scene "$surface"', body)
+        # bar-running is no surface of its own: an Orca walk of the bar preset's scene.
+        scene = rig.split("bar_scene() {", 1)[1].split("\n}\n", 1)[0]
+        bar = set(re.findall(r"^\s+([a-z| -]+)\).*\bpreset=bar\b", scene, re.MULTILINE))
+        bar = {name.strip() for names in bar for name in names.split("|")} - {"bar-running"}
         self.assertEqual(bar, set(gr.BAR_PRESET_SURFACES))
 
     def test_a_differing_case_names_each_control_decision_28_hides(self):

@@ -181,6 +181,31 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, [])
         self.assertIn("as 'Office VPN toggle button not pressed.'", lines[0])
 
+    def test_the_calendars_unnamed_arrows_are_heard_by_their_names_only_where_named(self):
+        reference = ["button.", "tab", "button."]
+        transcript = ["Calendar", "Previous month button.", "tab", "Next month button."]
+        lines, failures = compare.compare(reference, transcript, arrows=True)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Previous month button.'", lines[0])
+        self.assertEqual(
+            compare.compare(reference, transcript)[1], ["'button.': missing"]
+        )
+        # A named button the reference says itself speaks for no unnamed one.
+        self.assertEqual(
+            compare.compare(["button.", "OK button."], ["OK button."], arrows=True)[1],
+            ["'button.': missing"],
+        )
+
+    def test_the_switches_of_the_bar_are_heard_as_switches_in_both_languages(self):
+        for reference, heard in (
+            ("Tile windows check box not checked.", "Tile windows toggle button not pressed."),
+            (
+                "Contrasto elevato casella di spunta spuntata.",
+                "Contrasto elevato pulsante di commutazione premuto.",
+            ),
+        ):
+            self.assertEqual(compare.compare([reference], [heard])[1], [], reference)
+
     def test_a_control_center_switch_the_catalog_lacks_is_named(self):
         compare.control_center_labels.cache_clear()
         try:

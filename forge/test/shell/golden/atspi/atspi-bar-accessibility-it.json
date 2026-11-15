@@ -1,0 +1,622 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "athanor-bar",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Spazi di lavoro",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Applicazioni",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "venerdì 18 settembre 2026, 10:00",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "label",
+  "name": "ven 18 set 10:00",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Sorgente di input: English (US)",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Accessibilità",
+  "states": [
+   "expandable",
+   "expanded",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Contrasto elevato",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "check box",
+  "name": "Contrasto elevato",
+  "states": [
+   "checkable",
+   "focusable",
+   "focused",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Lettore dello schermo",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "check box",
+  "name": "Lettore dello schermo",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Lente d'ingrandimento",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "check box",
+  "name": "Lente d'ingrandimento",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Inverti i colori",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "check box",
+  "name": "Inverti i colori",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Filtro colore",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "radio button",
+  "name": "Nessun filtro colore",
+  "states": [
+   "checkable",
+   "checked",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Nessun filtro colore",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "radio button",
+  "name": "Scala di grigi",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Scala di grigi",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "radio button",
+  "name": "Rosso-verde (protanopia)",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Rosso-verde (protanopia)",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "radio button",
+  "name": "Verde-rosso (deuteranopia)",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Verde-rosso (deuteranopia)",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "radio button",
+  "name": "Blu-giallo (tritanopia)",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Blu-giallo (tritanopia)",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Affiancamento",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Alimentazione",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "button",
+  "name": "Immagine di sistema verificata",
+  "states": [
+   "expandable",
+   "focusable",
+   "has-popup",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]
