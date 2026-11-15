@@ -7,10 +7,13 @@ import sys
 import unittest
 from pathlib import Path
 
-from gi.repository import GLib
+import gi_stub
+
+gi_stub.install()
+from gi.repository import GLib  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import bar_e2e
+import bar_e2e  # noqa: E402
 
 
 class WaitForTest(unittest.TestCase):
