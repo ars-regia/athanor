@@ -12467,6 +12467,6 @@ mod wave2a;
 #[cfg(test)]
 mod background_effect;
 
-// Decision 36: content type, toplevel tag and DRM lease.
+// Decision 36: content type and toplevel tag.
 #[cfg(test)]
 mod decision36;
