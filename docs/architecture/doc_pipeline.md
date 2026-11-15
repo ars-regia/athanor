@@ -416,7 +416,7 @@ live repository.
 and release jobs never read a cache, volume or runner state the other wrote. On the
 self-hosted runner each job runs in an ephemeral guest (`scripts/runner/`) whose cache
 volumes are separate per trust level; a pull request from a fork never runs on it (PQ3).
-That separation does not exist yet (issue #TBD): `scripts/runner/vm.sh` attaches one persistent
+That separation does not exist yet (issue #1179): `scripts/runner/vm.sh` attaches one persistent
 `cache.raw` to every guest, which the runner image exposes as `~/.cache/azoth`
 (`scripts/runner/build-image.sh`), and the self-hosted `build` job of `call-kernel.yml`, which
 `pr.yml` runs for a pull request from this repository, writes it from the pull request's
@@ -445,8 +445,9 @@ that `kernel-bump.yml` runs to write that list for a new version hashes the file
 the store and downloads only those absent by name, so an unsigned file already in the store
 (the CachyOS configuration, a patch) enters the manifest unverified, including one a pull
 request wrote there through `call-kernel.yml`; the bump that changes the list is reviewed by a
-code owner. The mount is a `-v` in a shell step, and telling a host path that outlives the job
-from one that does not would need to know each runner's disks, so the check does not try.
+code owner, and issue #1179 moves the bump's manifest onto an empty store. The mount is a `-v`
+in a shell step, and telling a host path that outlives the job from one that does not would
+need to know each runner's disks, so the check does not try.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
