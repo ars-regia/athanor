@@ -663,6 +663,10 @@ def release_cache_problems(root):
     problems = []
     for name, (jobs, env) in sorted(release_path_workflows(root).items()):
         for job_id, job in jobs.items():
+            called = str(job.get("uses", ""))
+            if called and not (called.startswith(LOCAL_WORKFLOW) and "/" not in called[len(LOCAL_WORKFLOW):]):
+                problems.append(f"{name}: job {job_id} calls {called}, which the check cannot follow: call "
+                                f"a workflow of this repository as {LOCAL_WORKFLOW}<file> (PL10)")
             steps = list(expanded_steps(root, job.get("steps"), problems))
             for step in steps:
                 action = str(step.get("uses", "")).split("@")[0]

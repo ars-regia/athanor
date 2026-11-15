@@ -304,6 +304,16 @@ class ReleaseCacheProblems(unittest.TestCase):
                                      {"outer": outer, "kvm": inner}),
                          [self.unlisted("./.github/actions/outer"), self.unlisted("actions/cache/save")])
 
+    def test_a_reusable_workflow_the_check_cannot_follow_fails(self):
+        for called in ("other/repo/.github/workflows/build.yml@" + self.PIN,
+                       "ars-regia/athanor/.github/workflows/call-build.yml@" + self.PIN,
+                       "./.github/workflows/../workflows/call-build.yml"):
+            with self.subTest(called=called):
+                text = self.RELEASING.replace("./.github/workflows/call-build.yml", called)
+                self.assertEqual(self.problems(**{"release.yml": text}),
+                                 [f"release.yml: job build calls {called}, which the check cannot follow: "
+                                  "call a workflow of this repository as ./.github/workflows/<file> (PL10)"])
+
     def test_a_composite_action_that_is_not_yaml_is_reported(self):
         self.assertEqual(self.called("      - uses: ./.github/actions/kvm\n", {"kvm": "runs: [\n"})[0].split(":")[0],
                          "./.github/actions/kvm/action.yml")
