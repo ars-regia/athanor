@@ -6363,6 +6363,43 @@ fn a_click_on_a_bar_without_the_keyboard_grants_a_token() {
     run.stop();
 }
 
+/// While the session is locked a click's token is refused, and one granted before the lock
+/// raises no shown window and gives it no keyboard, then or at the unlock (L14).
+#[test]
+fn a_token_raises_nothing_while_locked() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+    let serial = click_bar(&mut run, &bar);
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token), "the click grants");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    let refused = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &refused), "no token while locked");
+    let before = stack(&run);
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the window is not raised");
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    assert_eq!(keyboard_focus(&run), focus, "the unlock gives the keyboard back");
+    run.stop();
+}
+
 /// A press that a later one superseded grants no token, though both went to the bar.
 #[test]
 fn a_superseded_press_grants_no_token() {

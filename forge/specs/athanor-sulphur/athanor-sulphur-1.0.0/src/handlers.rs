@@ -1628,9 +1628,15 @@ impl XdgActivationHandler for State {
     /// serial is one this compositor sent since that focus; the focused client always holds its
     /// own enter serial, so the range only keeps out serials never sent, and the focus check is
     /// what keeps other clients out.
+    ///
+    /// No client gets a token while the session is locked: the lock surfaces hold the input
+    /// (L14).
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
+        if self.lock.is_some() {
+            return false;
+        }
         let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
@@ -1664,19 +1670,20 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
-            // While the session is locked a token restores nothing (L14).
+            // While the session is locked a token restores, raises and focuses nothing (L14),
+            // as a popup grab takes nothing: the unlock gives the keyboard to the window on top
+            // before the lock.
             if self.lock.is_none() {
-                // A focused client can make a token at any time: it switches no workspace, and a
-                // window on an inactive one stays there.
+                // A token switches no workspace: a window on an inactive one stays there.
                 if let Some(window) = self
                     .window_or_minimised(&surface)
                     .filter(|window| self.on_active_workspace(window))
                 {
                     self.unminimise(&window);
                 }
-            }
-            if let Some(window) = self.window_for(&surface) {
-                self.focus(&window);
+                if let Some(window) = self.window_for(&surface) {
+                    self.focus(&window);
+                }
             }
         }
     }
