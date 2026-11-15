@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, walk  # noqa: E402
+from atspi_check import children, find_application, walk  # noqa: E402
 
 TIMEOUT = 10
 SURFACES = ("athanor-bar", "athanor-dock")
@@ -45,9 +45,8 @@ def applied(log):
 def find_button(accessible, name):
     if accessible.get_role_name() == "toggle button" and accessible.get_name() == name:
         return accessible
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        found = child and find_button(child, name)
+    for child in children(accessible):
+        found = find_button(child, name)
         if found:
             return found
     return None

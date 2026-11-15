@@ -146,13 +146,15 @@ jobs:
 
       - name: Manifests for the new pins
         if: ${{ steps.lock.outputs.locked == 'true' }}
+        # The manifests are hashed from what the store holds, so they read an empty store made
+        # for this run, never the runner's persistent one, which other jobs write (#1179).
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.cache/azoth"
+          mkdir "$RUNNER_TEMP/azoth"
           builder() {
             podman run --rm \
               -v "$GITHUB_WORKSPACE:/forge" \
-              -v "$HOME/.cache/azoth:/var/cache/azoth" \
+              -v "$RUNNER_TEMP/azoth:/var/cache/azoth" \
               -w /forge localhost/azoth-builder "$@"
           }
           builder bash forge/specs/azoth/build.sh --stage manifest --out /forge/manifest/kernel
@@ -175,7 +177,7 @@ jobs:
             echo "::error::lock.sh generate failed: the pull request carries the end of its log"
           elif ! podman run --rm \
                  -v "$GITHUB_WORKSPACE:/forge" \
-                 -v "$HOME/.cache/azoth:/var/cache/azoth" \
+                 -v "$RUNNER_TEMP/azoth:/var/cache/azoth" \
                  -w /forge localhost/azoth-builder \
                  bash forge/specs/azoth/build.sh --stage prep --out /forge/out > prep.log 2>&1; then
             outcome=FAIL

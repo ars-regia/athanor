@@ -164,6 +164,26 @@ maximised or full-screen window, with `active_hint` off or at a theme width of 0
 motion is open: the compositor has no source for it yet, so the flag (`Bell::reduced_motion`)
 is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
 
+Decision 33, wave 2b, adds `wl_drm`, standard, for the older Mesa clients that look for it
+before linux-dmabuf (`src/wl_drm.rs`, `src/fixture/wave2b.rs`). It is offered on a render node
+only, and its `device` names the node that linux-dmabuf's feedback names. A buffer comes only
+from `create_prime_buffer`, checked as linux-dmabuf checks its parameters and imported by the
+renderer as a dmabuf; a flink name is the `invalid_name` error, and `authenticate` is answered
+without authenticating anything, as a render node needs no DRM authentication. The bindings
+are generated from Mesa's description, `protocols/wayland-drm.xml`, copied unchanged from
+[`mesa/mesa`](https://gitlab.freedesktop.org/mesa/mesa) at commit
+`e74c9473592dafce4fb0005555ce9406b4200012` (2019-09-20, the last to change it, as on `main`
+on 2026-11-15), path `src/egl/wayland/wayland-drm/wayland-drm.xml`, SHA-256
+`15ca83d05ceae54b9b4c0e7fe0ceeeb3345b71cd3cb457811a55580ea182036f`. Its licence is in its
+`<copyright>` element: HPND-sell-variant, 2008-2011 Kristian Høgsberg and 2010-2011 Intel
+Corporation. No compositor's code was read for it (`doc_own_stack.md` OS3).
+
+Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
+the content type its client sets, applied with the surface's commit, and no behaviour reads it at
+1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag
+and description, applied with the commit; a tag grants nothing, since no privilege, class,
+allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse

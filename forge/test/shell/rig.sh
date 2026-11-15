@@ -854,13 +854,16 @@ compositor-globals)
         org_kde_kwin_server_decoration_manager xdg_toplevel_icon_manager_v1)
     # Decision 35.
     standard+=(ext_background_effect_manager_v1)
+    # Decision 36.
+    standard+=(wp_content_type_manager_v1 xdg_toplevel_tag_manager_v1)
     standard+=(xdg_wm_dialog_v1 wp_pointer_warp_v1 xdg_system_bell_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
-        dmabuf="no linux-dmabuf, as Pixman draws without a render node"
+        dmabuf="no linux-dmabuf nor wl_drm, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
+        ! grep -q "interface: 'wl_drm'" "$out/compositor-globals.txt" || missing+=("absence of wl_drm")
     elif grep -q 'explicit sync: .* render node' "$out/compositor-globals-compositor.log"; then
-        dmabuf="linux-dmabuf on the render node"
-        standard+=(zwp_linux_dmabuf_v1)
+        dmabuf="linux-dmabuf and wl_drm on the render node"
+        standard+=(zwp_linux_dmabuf_v1 wl_drm)
     else
         echo "compositor-globals: $out/compositor-globals-compositor.log names no renderer" >&2
         exit 1
