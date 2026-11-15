@@ -119,7 +119,10 @@ class Rig:
                 {
                     "derived_id": DERIVED_ID,
                     "rpm": rpm,
-                    "nevr": {self.base: PUBLISHED, DERIVED_ID: derived_nevr},
+                    "nevr": {
+                        self.base: PUBLISHED,
+                        **({DERIVED_ID: derived_nevr} if derived_nevr else {}),
+                    },
                 }
             )
         )
@@ -270,6 +273,15 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn(
             f"runs cosmic-comp {PUBLISHED}, not the {SPEC} the spec names",
+            result.stderr,
+        )
+
+    def test_a_derived_rig_without_cosmic_comp_fails_with_a_message(self):
+        rig = Rig(self.tmp, derived_nevr=None)
+        result = rig.run("cosmic-comp-version")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "the rig built from forge/specs/cosmic-comp has no cosmic-comp package",
             result.stderr,
         )
 

@@ -791,7 +791,10 @@ cosmic-comp-version)
     fi
     echo "the rig holds cosmic-comp $published and forge/specs/cosmic-comp names $want: building the spec as the forge does"
     build_spec_rig "$base" "$want"
-    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
+    if ! have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp); then
+        echo "rig.sh: the rig built from forge/specs/cosmic-comp has no cosmic-comp package: $have" >&2
+        exit 1
+    fi
     if [ "$have" != "$want" ]; then
         echo "rig.sh: the rig built from forge/specs/cosmic-comp runs cosmic-comp $have, not the $want the spec names" >&2
         exit 1
