@@ -105,6 +105,19 @@ pub trait Module {
         Reply::Stay
     }
 
+    /// Whether the module's source asks for its popover, as the network's password prompt:
+    /// polled at every turn of the loop once the bar is ready, and true once for each ask.
+    fn wants_open(&mut self) -> bool {
+        false
+    }
+
+    /// Whether the open popover's source changed without a [`Wakeup`], as a page that follows
+    /// its model itself: polled at every turn of the loop while the popover is open, and
+    /// [`Module::refresh`] follows.
+    fn changed(&self) -> bool {
+        false
+    }
+
     /// The popover closed, by Escape, a press outside it, its button or a reply.
     fn closed(&mut self) {}
 
