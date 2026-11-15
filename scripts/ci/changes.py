@@ -73,6 +73,8 @@ AREAS = {
         "system/athanor-sulphur-client/",
         "system/athanor-sal/",
         "forge/specs/athanor-sulphur/",
+        # The compositor the rig runs: rig.sh cosmic-comp-version builds the spec's.
+        "forge/specs/cosmic-comp/",
         "system/athanor-i18n/",
         "forge/specs/athanor-shelld/",
         "forge/specs/athanor-bar/",
