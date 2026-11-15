@@ -574,7 +574,7 @@ impl Dock {
         };
         let scale = out.info.scale_factor.clamp(1, 16) as u16;
         let mut ui = Ui::new(&row::menu_title(&state), self.look.menu.clone(), self.rtl);
-        let rows = row::menu(&mut ui, &mut self.icons, scale, &state, &self.favorites, |pinned| {
+        let rows = row::menu(&mut ui, Ui::ROOT, &mut self.icons, scale, &state, &self.favorites, |pinned| {
             if pinned {
                 tr("Unpin from Dock")
             } else {

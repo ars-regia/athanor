@@ -4,7 +4,7 @@
 //! `popover.athanor-bar-popover`), which the GTK bar reads.
 
 use athanor_layout::preset::Preset;
-use athanor_sal::{Rgba, Theme};
+use athanor_sal::{Rgba, Theme, Ui, WidgetId};
 use athanor_style::appearance::Appearance;
 use athanor_style::sal;
 
@@ -16,8 +16,13 @@ const BUTTON_RADIUS: f32 = 8.0;
 const GAP: f32 = 2.0;
 /// A float group's island, as `.preset-float .bar-group`: rounded by 10 px.
 const ISLAND_RADIUS: f32 = 10.0;
-/// A popover, as `popover.athanor-bar-popover > contents`: 12 px of padding.
-const POPOVER_PADDING: f32 = 12.0;
+/// A popover's frame, as `popover.athanor-bar-popover > contents` (12 px of padding, a 1 px
+/// line) with VL7's radius for the popovers, tiles of 12 px at a 12 px inset, and an arrow of
+/// 10 px, which GTK's measures on the goldens.
+const POPOVER_PADDING: f32 = sal::space::M;
+const POPOVER_RADIUS: f32 = sal::radius::CARD + sal::space::M;
+const POPOVER_BORDER: f32 = 1.0;
+const POPOVER_ARROW: f32 = 10.0;
 
 /// The themes of the bar's surfaces and of its popovers.
 pub struct Look {
@@ -74,10 +79,31 @@ pub fn look(appearance: &Appearance, preset: Preset) -> Look {
     // The group's own padding is the inline's (`group_padding`).
     bar.island_padding = 0.0;
 
+    // The popup's surface is transparent around the frame and its arrow.
     let mut popover = bar.clone();
-    popover.background = Rgba(palette.surf);
-    popover.margin = POPOVER_PADDING;
+    popover.background = Rgba([0, 0, 0, 0]);
+    popover.island = Rgba(palette.surf);
+    popover.island_radius = POPOVER_RADIUS;
+    popover.island_padding = POPOVER_PADDING;
+    popover.island_border = POPOVER_BORDER;
+    popover.island_arrow = POPOVER_ARROW;
     Look { bar, popover }
+}
+
+/// A popover named `name` in `theme`, opening below the bar when `top`, and its frame: the
+/// island the content goes in, whose arrow points at the button and whose margin on the edge
+/// facing the bar leaves the arrow its room.
+pub fn popover(name: &str, theme: Theme, rtl: bool, top: bool) -> (Ui, WidgetId) {
+    let arrow = theme.island_arrow;
+    let mut ui = Ui::new(name, theme, rtl);
+    let margin = if top {
+        [arrow, 0.0, 0.0, 0.0]
+    } else {
+        [0.0, 0.0, arrow, 0.0]
+    };
+    let frame = ui.island(Ui::ROOT, true, margin);
+    ui.set_arrow(frame);
+    (ui, frame)
 }
 
 #[cfg(test)]
@@ -101,10 +127,28 @@ mod tests {
         let look = look(&Appearance::default(), Preset::Bar);
         assert_eq!(look.bar.button_min, 32.0);
         assert_eq!((look.bar.padding, look.bar.radius), (8.0, 8.0));
+    }
+
+    #[test]
+    fn a_popover_is_a_framed_island_with_room_for_its_arrow_towards_the_bar() {
+        let look = look(&Appearance::default(), Preset::Bar);
+        assert_eq!(look.popover.background.0[3], 0);
         assert_eq!(
-            look.popover.background,
+            look.popover.island,
             Rgba(sal::palette(&Appearance::default()).surf)
         );
+        assert_eq!(look.popover.island_radius, 24.0);
+        assert_eq!(
+            (look.popover.island_padding, look.popover.island_border),
+            (12.0, 1.0)
+        );
+        for (top, margin) in [(true, [10.0, 0.0, 0.0, 0.0]), (false, [0.0, 0.0, 10.0, 0.0])] {
+            let (ui, frame) = popover("Power", look.popover.clone(), false, top);
+            assert!(matches!(
+                ui.widget(frame).kind,
+                athanor_sal::Kind::Island { vertical: true, margin: m, .. } if m == margin
+            ));
+        }
     }
 
     #[test]

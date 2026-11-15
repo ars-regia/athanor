@@ -249,10 +249,11 @@ pub fn menu_title(state: &State) -> String {
     app_name(&state.0, state.1.as_ref())
 }
 
-/// Fills `ui` with `state`'s menu: per window, its row, minimise and close; then a
-/// separator, open or a new window, and the pin row labelled by `pin_label(pinned)`.
+/// Fills `parent` of `ui` with `state`'s menu: per window, its row, minimise and close; then
+/// a separator, open or a new window, and the pin row labelled by `pin_label(pinned)`.
 pub fn menu(
     ui: &mut Ui,
+    parent: WidgetId,
     icons: &mut Icons,
     scale: u16,
     state: &State,
@@ -260,7 +261,7 @@ pub fn menu(
     pin_label: impl Fn(bool) -> String,
 ) -> Menu {
     let (entry, info) = state;
-    let list = ui.add(Ui::ROOT, Kind::Menu);
+    let list = ui.add(parent, Kind::Menu);
     let mut acts = Vec::new();
     let mut stale = false;
     for window in &entry.windows {

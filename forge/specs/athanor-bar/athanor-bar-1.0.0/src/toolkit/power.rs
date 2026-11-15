@@ -59,14 +59,14 @@ impl Menu {
     }
 }
 
-/// The menu's `page`, in `theme`.
-pub fn build(theme: Theme, rtl: bool, page: Page, offered: &[bool; 5]) -> (Ui, Menu) {
-    let mut ui = Ui::new(&tr("Power"), theme, rtl);
+/// The menu's `page`, in `theme`, in a popover below the bar when `top`.
+pub fn build(theme: Theme, rtl: bool, top: bool, page: Page, offered: &[bool; 5]) -> (Ui, Menu) {
+    let (mut ui, frame) = super::look::popover(&tr("Power"), theme, rtl, top);
     let mut acts = Vec::new();
     match page {
         Page::Actions => {
             // A menu's rows, flat as the GTK popover's `bar-row` buttons.
-            let list = ui.add(Ui::ROOT, Kind::Menu);
+            let list = ui.add(frame, Kind::Menu);
             for action in Action::ALL {
                 if shown(action, offered) {
                     let (label, _) = texts(action);
@@ -76,9 +76,9 @@ pub fn build(theme: Theme, rtl: bool, page: Page, offered: &[bool; 5]) -> (Ui, M
         }
         Page::Confirm(action) => {
             let (label, question) = texts(action);
-            let text = ui.add(Ui::ROOT, Kind::Label(question));
+            let text = ui.add(frame, Kind::Label(question));
             ui.set_wrap(text, Some(Wrap::default()));
-            let buttons = ui.add(Ui::ROOT, Kind::Row);
+            let buttons = ui.add(frame, Kind::Row);
             acts.push((ui.add(buttons, Kind::Button(tr("Cancel"))), Act::Cancel));
             acts.push((ui.add(buttons, Kind::Button(label)), Act::Run(action)));
         }
@@ -107,6 +107,7 @@ mod tests {
         let (ui, menu) = build(
             Theme::default(),
             false,
+            true,
             Page::Confirm(Action::Reboot),
             &[true; 5],
         );
@@ -117,7 +118,7 @@ mod tests {
 
     #[test]
     fn a_row_asks_before_its_action_runs() {
-        let (_, menu) = build(Theme::default(), false, Page::Actions, &[true; 5]);
+        let (_, menu) = build(Theme::default(), false, true, Page::Actions, &[true; 5]);
         assert!(menu.acts.iter().all(|(_, act)| matches!(act, Act::Ask(_))));
         assert_eq!(menu.acts.len(), Action::ALL.len());
     }
