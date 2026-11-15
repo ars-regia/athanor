@@ -12480,3 +12480,7 @@ mod background_effect;
 // Decision 36: content type and toplevel tag.
 #[cfg(test)]
 mod decision36;
+
+// Nulls the wire signature forbids (vendor/wayland-backend/PATCHES.md).
+#[cfg(test)]
+mod null_arguments;

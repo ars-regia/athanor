@@ -44,6 +44,7 @@ RS_DIRS = ["system", "forge/specs"]
 # count. Each directory's PATCHES.md says what it changes and when it goes.
 VENDORED_CRATES = {
     "system/athanor-sal/vendor/accesskit_atspi_common": "MIT OR Apache-2.0",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend": "MIT",
 }
 
 # --------------------------------------------------------------------------- #
