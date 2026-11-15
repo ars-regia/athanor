@@ -444,6 +444,7 @@ impl Bar {
                 let mut cx = Cx {
                     icons: &mut self.icons,
                     theme: &self.look.popover,
+                    secondary: self.look.secondary,
                     rtl: self.rtl,
                     top,
                     scale,
@@ -564,6 +565,7 @@ impl Bar {
                 let mut cx = Cx {
                     icons: &mut self.icons,
                     theme: &self.look.popover,
+                    secondary: self.look.secondary,
                     rtl: self.rtl,
                     top,
                     scale: out.scale(),
@@ -697,6 +699,7 @@ impl Bar {
         let mut cx = Cx {
             icons: &mut self.icons,
             theme: &self.look.popover,
+            secondary: self.look.secondary,
             rtl: self.rtl,
             top,
             scale: out.scale(),
@@ -778,6 +781,7 @@ impl Bar {
         let mut cx = Cx {
             icons: &mut self.icons,
             theme: &self.look.popover,
+            secondary: self.look.secondary,
             rtl: self.rtl,
             top,
             scale: out.scale(),

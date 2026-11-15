@@ -3,8 +3,10 @@
 //! measures of Calmo's stylesheet (`window.athanor-bar`, `button.bar-button`,
 //! `popover.athanor-bar-popover`), which the GTK bar read.
 
+use athanor_apps::sal::Icons;
+use athanor_controls::sal::widgets;
 use athanor_layout::preset::Preset;
-use athanor_sal::{Rgba, Theme, Ui, WidgetId};
+use athanor_sal::{Rgba, TextStyle, Theme, Ui, WidgetId};
 use athanor_style::appearance::Appearance;
 use athanor_style::sal;
 
@@ -28,6 +30,8 @@ const POPOVER_ARROW: f32 = 10.0;
 pub struct Look {
     pub bar: Theme,
     pub popover: Theme,
+    /// The popovers' secondary lines' ink, as `bar-popover-note`.
+    pub secondary: Rgba,
 }
 
 /// A group's padding, horizontal then vertical, as `.bar-group`: 2 px above and below but in
@@ -87,7 +91,28 @@ pub fn look(appearance: &Appearance, preset: Preset) -> Look {
     popover.island_padding = POPOVER_PADDING;
     popover.island_border = POPOVER_BORDER;
     popover.island_arrow = POPOVER_ARROW;
-    Look { bar, popover }
+    Look {
+        bar,
+        popover,
+        secondary: Rgba(palette.ink2),
+    }
+}
+
+/// What athanor-controls' pages are drawn with in a popover: the bar's icons at `scale`, and
+/// secondary lines in calmo's caption size and `secondary`'s ink, as `bar-popover-note`.
+pub fn controls(icons: &mut Icons, scale: u16, secondary: Rgba) -> widgets::Look<'_> {
+    const SIZE: u16 = super::modules::ICON;
+    widgets::Look {
+        icon: Box::new(move |name| icons.image(name, SIZE, scale)),
+        icon_size: f32::from(SIZE),
+        caption: TextStyle {
+            scale: sal::size::CAPTION.scale,
+            weight: sal::size::CAPTION.weight,
+            ..TextStyle::default()
+        },
+        secondary,
+        radio_gap: None,
+    }
 }
 
 /// A popover named `name` in `theme`, opening below the bar when `top`, and its frame: the

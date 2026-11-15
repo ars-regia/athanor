@@ -22,7 +22,7 @@ use std::rc::Rc;
 
 use athanor_apps::sal::Icons;
 use athanor_bar::order;
-use athanor_sal::{Event, Theme, Ui, WidgetId};
+use athanor_sal::{Event, Rgba, Theme, Ui, WidgetId};
 use athanor_sulphur_client::{Client, Event as Compositor};
 
 /// The size of a module's icon in the bar.
@@ -51,6 +51,8 @@ pub struct Cx<'a> {
     pub icons: &'a mut Icons,
     /// The popovers' look.
     pub theme: &'a Theme,
+    /// The popovers' secondary ink, calmo's ink2, as `bar-popover-note`.
+    pub secondary: Rgba,
     pub rtl: bool,
     /// The bar is at the top of its output: the popover's arrow points up.
     pub top: bool,
