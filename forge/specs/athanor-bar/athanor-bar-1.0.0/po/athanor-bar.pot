@@ -255,15 +255,15 @@ msgstr ""
 msgid "Control center"
 msgstr ""
 
-#: src/ui/bar.rs:469 src/ui/bar.rs:882
+#: src/ui/bar.rs:469 src/ui/bar.rs:903
 msgid "Bar"
 msgstr ""
 
-#: src/ui/bar.rs:830
+#: src/ui/bar.rs:851
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/bar.rs:832
+#: src/ui/bar.rs:853
 msgid "Pin to Bar"
 msgstr ""
 
@@ -369,6 +369,14 @@ msgstr ""
 
 #: src/ui/modules/aids.rs:116
 msgid "No modifier held"
+msgstr ""
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:59
+msgid "Sound"
+msgstr ""
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:77
+msgid "Battery"
 msgstr ""
 
 #: src/ui/modules/clock.rs:78

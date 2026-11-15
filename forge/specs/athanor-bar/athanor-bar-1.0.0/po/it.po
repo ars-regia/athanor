@@ -247,15 +247,15 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Control center"
 msgstr "Centro di controllo"
 
-#: src/ui/bar.rs:469 src/ui/bar.rs:882
+#: src/ui/bar.rs:469 src/ui/bar.rs:903
 msgid "Bar"
 msgstr "Barra"
 
-#: src/ui/bar.rs:830
+#: src/ui/bar.rs:851
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/bar.rs:832
+#: src/ui/bar.rs:853
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
@@ -362,6 +362,14 @@ msgstr "Attivare {aid}?"
 #: src/ui/modules/aids.rs:116
 msgid "No modifier held"
 msgstr "Nessun modificatore attivo"
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:59
+msgid "Sound"
+msgstr "Audio"
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:77
+msgid "Battery"
+msgstr "Batteria"
 
 #: src/ui/modules/clock.rs:78
 msgid "Calendar"
@@ -478,9 +486,6 @@ msgstr "Affianca le finestre"
 
 #~ msgid "The reason is in the system journal."
 #~ msgstr "Il motivo è nel registro di sistema."
-
-#~ msgid "Sound"
-#~ msgstr "Audio"
 
 #~ msgid "Clock"
 #~ msgstr "Orologio"

@@ -9,6 +9,8 @@ src/tiling.rs
 src/ui/bar.rs
 src/ui/modules/accessibility.rs
 src/ui/modules/aids.rs
+src/ui/modules/audio.rs
+src/ui/modules/battery.rs
 src/ui/modules/clock.rs
 src/ui/modules/input.rs
 src/ui/modules/power.rs

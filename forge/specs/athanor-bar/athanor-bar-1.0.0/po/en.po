@@ -247,15 +247,15 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Control center"
 msgstr "Control center"
 
-#: src/ui/bar.rs:469 src/ui/bar.rs:882
+#: src/ui/bar.rs:469 src/ui/bar.rs:903
 msgid "Bar"
 msgstr "Bar"
 
-#: src/ui/bar.rs:830
+#: src/ui/bar.rs:851
 msgid "Unpin from Bar"
 msgstr "Unpin from Bar"
 
-#: src/ui/bar.rs:832
+#: src/ui/bar.rs:853
 msgid "Pin to Bar"
 msgstr "Pin to Bar"
 
@@ -362,6 +362,14 @@ msgstr "Turn on {aid}?"
 #: src/ui/modules/aids.rs:116
 msgid "No modifier held"
 msgstr "No modifier held"
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:59
+msgid "Sound"
+msgstr "Sound"
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:77
+msgid "Battery"
+msgstr "Battery"
 
 #: src/ui/modules/clock.rs:78
 msgid "Calendar"
@@ -478,9 +486,6 @@ msgstr "Tile windows"
 
 #~ msgid "The reason is in the system journal."
 #~ msgstr "The reason is in the system journal."
-
-#~ msgid "Sound"
-#~ msgstr "Sound"
 
 #~ msgid "Clock"
 #~ msgstr "Clock"

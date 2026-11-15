@@ -10,6 +10,7 @@ mod audio;
 mod battery;
 mod bluetooth;
 mod clock;
+mod controls;
 mod input;
 mod network;
 mod notifications;
