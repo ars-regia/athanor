@@ -10,8 +10,9 @@ areas: [build, process, security]
 # 0140. Cache the Rust builds of the shell jobs in CI through the rig's compiler cache
 
 **Proposed.** The maintainer approved on 2026-11-15 the local compiler cache of the shell rig and
-a proposal for CI, which needs this record first. The maintainer has not taken the decisions
-below; approving this record approves them and the answers it recommends to the open questions.
+a proposal for CI, which needs this record first. On the same day the maintainer answered open
+questions 1 to 4, which the decision follows, and asked for question 5 to be measured first.
+Approving this record approves the decisions below; question 5 stays open.
 
 ## Context
 
@@ -39,14 +40,14 @@ request poison a signed kernel (PR #250).
 
 ## Decision
 
-1. **The logic stays in `rig.sh`.** A shell job that builds Rust sets `ATHANOR_RIG_SCCACHE` to a
-   directory under `$RUNNER_TEMP` and `ATHANOR_RIG_SCCACHE_SIZE` to the bound of item 4. The
+1. **The logic stays in `rig.sh`.** Every CI15 job that runs a `rig.sh build-*` recipe (the
+   maintainer's answer to question 3) sets `ATHANOR_RIG_SCCACHE` to a directory under `$RUNNER_TEMP` and `ATHANOR_RIG_SCCACHE_SIZE` to the bound of item 4. The
    workflow only restores that directory before the first `rig.sh build-*` step and saves it after
    the last one, with `actions/cache/restore` and `actions/cache/save` pinned by commit SHA as
    every action is. Another forge restores and saves the same directory with its own cache, or
    leaves the variable unset and builds from nothing, as today.
-2. **Who writes.** A cache is saved only by a `push` run of `shell-surfaces.yml` on `iso-v0`; whether
-   a `pull_request` run also saves into its own scope (item 5) is open question 1. It is never saved or
+2. **Who writes.** A cache is saved only by a `push` run of `shell-surfaces.yml` on `iso-v0`; a
+   `pull_request` run only restores (the maintainer's answer to question 1). It is never saved or
    restored in a `merge_group`, `workflow_run`, `pull_request_target`, `schedule` or
    `workflow_dispatch` run, nor in any job that pushes to a registry, signs, attests or uploads an
    artifact another workflow consumes.
@@ -61,8 +62,8 @@ request poison a signed kernel (PR #250).
    and every entry of the old one would miss. The key is not a correctness input: sccache hashes
    the compiler, its arguments, the sources and the environment it reads, and a stale entry
    misses rather than matches. The key decides only hit rate and size.
-4. **Size.** `ATHANOR_RIG_SCCACHE_SIZE` in CI is the size one job's directory reached after a
-   run, with a margin (open question 2); GitHub's cache of the repository is limited to 10 GB by
+4. **Size.** `ATHANOR_RIG_SCCACHE_SIZE` in CI is the size the job's directory reached after one
+   run, rounded up (the maintainer's answer to question 2); GitHub's cache of the repository is limited to 10 GB by
    default and evicts the least recently used entry, and an entry not used for seven days.
 5. **Poisoning, by scope.** GitHub scopes a cache to the ref of the run that saved it. A
    `pull_request` run restores from its own merge ref and from its base branch (`iso-v0`), and
@@ -103,6 +104,25 @@ with one codegen unit (`lto = true`, `codegen-units = 1` in the root `Cargo.toml
 optimises the whole program again on every build, and linked crates (binaries, tests, proc
 macros) and build scripts are never cached.
 
+The same recipe with the release profile's fat LTO turned off through cargo's environment
+(`CARGO_PROFILE_RELEASE_LTO=false` and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16`, cargo's defaults
+for a release profile), measured the same way on the same day with a cache directory of its own,
+the root `Cargo.toml` unchanged:
+
+| Run | Wall time | Clippy | Tests built | Release build |
+| --- | --- | --- | --- | --- |
+| No cache | 241 s | 40 s | 75 s | 62 s |
+| Empty cache | 301 s | 57 s | 81 s | 84 s |
+| Cache filled by the run above | 151 s | 24 s | 38 s | 28 s |
+
+Only the release build depends on the profile: 62 s in place of 160 s without a cache, 28 s in
+place of 126 s with a filled one. Clippy and the tests build the dev and test profiles, which the
+variables leave alone; their differences between the two series are the host's load (load
+averages from 2 to 11 when the runs started). The filled cache held 727 MB in 792 entries. The
+stripped `athanor-sulphur` binary is 13,699,720 bytes against 11,708,768 with fat LTO (17 %
+larger). The 779 tests of the recipe passed in each of the six runs. The two changes add up:
+from 331 s with neither to 151 s with both, 54 % less.
+
 *Estimate, not a measurement:* applied to the hosted runner's 10.5 minutes of
 `build-compositor` and 18.4 minutes of `build-toolkit` in `toolkit-surfaces`, the same 27 %
 saves about 8 minutes of 29 per run, less the time to restore and save the directory (about
@@ -130,10 +150,6 @@ on the hosted runner by the pull request that adds the steps.
   cargo processes on one target directory serialise on its lock at best, and a run over another
   checkout's sources can leave artifacts of the wrong source that the fingerprints of the next
   run accept by timestamp. The compiler cache keys every entry by content.
-- **A rig profile without fat LTO** for the binaries the rig builds, which never ship: it would
-  cut the part of the release build that sccache cannot cache, likely more than the cache does,
-  but the rig would then test binaries built otherwise than the RPM's. Not measured; it is open
-  question 5.
 - **One build job whose binaries the other jobs download.** `seal-bin` already does that for
   the bar and the control center. It saves the repeated builds within a run, not the cold build
   of every run, and it makes every surface job wait for the build job; it can be added on top.
@@ -151,17 +167,43 @@ on the hosted runner by the pull request that adds the steps.
   describes a check that `scripts/verify.py` does not hold yet; item 7 adds the part this record
   needs.
 
-## Open questions for the maintainer
+## Questions for the maintainer
 
-1. **Pull-request saves.** Saving in pull-request runs makes a pull request's second push fast,
-   at the cost of entries in the 10 GB budget that only that pull request reads. Recommended:
-   save on `push` to `iso-v0` only at first, and add pull-request saves if the push entries leave
-   room.
-2. **The bound in CI.** Recommended: the size measured after one `toolkit-surfaces` run, rounded
-   up; the local default stays 20G.
-3. **Which jobs.** Recommended: every CI15 job that runs a `build-*` recipe, one key per job; or
-   only `toolkit-surfaces` and the three other `build-compositor` jobs first, where the time is.
-4. **`check-rust` in `pr.yml`** compiles the workspace in the same build stage, also without a
-   cache. Recommended: out of this record, measured on its own later.
-5. **A rig build profile without fat LTO.** Recommended: measure it separately, and decide
-   whether the rig may test binaries built with another profile than the RPM's.
+Answered by the maintainer on 2026-11-15:
+
+1. **Pull-request saves.** Only `push` runs on `iso-v0` save; pull-request runs only restore
+   (item 2).
+2. **The bound in CI.** The size measured after one run, rounded up (item 4); the local default
+   stays 20G.
+3. **Which jobs.** Every CI15 job that runs a `build-*` recipe (item 1).
+4. **`check-rust` in `pr.yml`**, which compiles the workspace in the same build stage without a
+   cache, stays out of this record.
+
+Open:
+
+5. **A rig build profile without fat LTO.** Measured in section "Estimate": it saves more than
+   the cache, and the two add up. The least invasive way to select it is the one the measurement
+   used, cargo's `CARGO_PROFILE_RELEASE_*` variables passed by `rig.sh` to the cargo runs of a
+   recipe, so that the binaries stay under `target/release` and nothing reads another path. A
+   profile in the root `Cargo.toml` would be a workspace change and is not proposed here. Which
+   rig binaries may take it depends on what their checks measure:
+   - **Keep the RPM's profile** where a check measures the binary itself: the memory budgets
+     (PSS) of `shelld-e2e` (16 MB), `bar-e2e`, `bar-modules-e2e`, `notifications-e2e`,
+     `tray-e2e`, `dock-e2e` and `launcher-e2e` (64 MB), which a 17 % larger binary with another
+     code layout moves; `measure-chooser` (the chooser's stripped size, start-up time and
+     memory) and `compositor-soak` (frame-time thresholds), which no CI15 job runs. In CI that is
+     the jobs `shelld`, `build-bar` (whose binaries `bar` verifies and runs), `dock` and
+     `launcher`. Binaries built for a development machine (`scripts/devvm/*-acceptance.sh`,
+     `scripts/shell-bench/deploy.py`) keep it too. ST9 measures the installed image's RPM
+     binaries on the reference laptop and is not affected.
+   - **May take the faster profile** where the checks observe behaviour only: the goldens
+     (`surface`), `atspi`, `orca`, `layer-guard`, the `toolkit-*` checks, `chooser-e2e` and
+     `compositor-e2e`, that is the jobs `greeter`, `layout`, `compositor`, `toolkit-clipboard`,
+     `toolkit-surfaces`, `dock-scene` and `control-center`. `toolkit-motion` in
+     `toolkit-surfaces` checks settle times within a frame's tolerance, so that job switches only
+     after the check has passed under the faster profile on the hosted runner. Fat LTO changes inlining and code
+     layout, not the semantics of safe Rust: `overflow-checks`, `panic = "abort"` and `strip`
+     stay as they are. The shim link-order check (`DT_NEEDED`) is to be run under both profiles
+     before a job switches.
+   Recommended: decide it in its own pull request, with an opt-in variable of `rig.sh` set by the
+   jobs of the second group, measured on the hosted runner.
