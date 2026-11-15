@@ -11,14 +11,10 @@ use crate::ui::look;
 
 /// The size of the calendar's arrows, as GTK's.
 const ARROW: u16 = 16;
-/// The first weekday of the calendar, 0 for Sunday.
-// ponytail: Sunday, what GTK shows under the C locale, until the locale's own day is read
-// through nl_langinfo(_NL_TIME_FIRST_WEEKDAY); the process locale is not set, so that call
-// would answer the C locale's day too.
-const FIRST_WEEKDAY: u8 = 0;
-
 struct Clock {
     texts: Texts,
+    /// The calendar's first weekday, 0 for Sunday, the time locale's as GTK's calendar takes it.
+    first_weekday: u8,
     /// The short text and the long name, as last drawn.
     drawn: Option<(String, String)>,
 }
@@ -26,6 +22,7 @@ struct Clock {
 pub fn new(_start: &Start) -> Option<Box<dyn Module>> {
     Some(Box::new(Clock {
         texts: Texts::new(),
+        first_weekday: athanor_i18n::first_weekday(),
         drawn: None,
     }))
 }
@@ -76,7 +73,7 @@ impl Module for Clock {
             cx.icons.image("pan-end-symbolic", ARROW, cx.scale)?,
         ];
         let (mut ui, frame) = look::popover(&tr("Calendar"), cx.theme.clone(), cx.rtl, cx.top);
-        let calendar = ui.calendar(frame, &text, &arrows, FIRST_WEEKDAY, today);
+        let calendar = ui.calendar(frame, &text, &arrows, self.first_weekday, today);
         ui.set_focus(Some(calendar));
         Some(ui)
     }

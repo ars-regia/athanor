@@ -548,6 +548,9 @@ dependencies = [
 [[package]]
 name = "athanor-i18n"
 version = "1.0.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "athanor-idle"
