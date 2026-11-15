@@ -152,6 +152,7 @@ pub fn start(
             let renderer = gles(manager, node)?;
             let formats = renderer.dmabuf_formats();
             let pass = crate::look::prepare(renderer);
+            crate::wl_drm::global(&dh, *node, &formats);
             let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
             if !pass {
                 state.no_filter_pass();

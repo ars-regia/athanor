@@ -490,6 +490,7 @@ pub fn start(
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
 
+    crate::wl_drm::global(&dh, render_node, &dmabuf_formats);
     let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats).build()?;
     state
         .dmabuf_state
