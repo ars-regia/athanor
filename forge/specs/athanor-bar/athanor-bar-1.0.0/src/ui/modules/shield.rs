@@ -391,11 +391,17 @@ fn refusal_words(refusal: Refusal) -> String {
     }
 }
 
-/// A date of the file in the locale's format, in UTC: the build and check times are UTC.
+/// A date of the file, in UTC, as the build and check times are: "15 September 2026", the month
+/// from the catalog. The GTK bar's `%x` read the locale GTK set; nothing sets it here, and the
+/// C locale's "09/15/26" would read the wrong way round in most languages.
 fn date(epoch: i64) -> String {
     glib::DateTime::from_unix_utc(epoch)
-        .and_then(|time| time.format("%x"))
-        .map_or_else(|_| epoch.to_string(), |text| text.to_string())
+        .ok()
+        .and_then(|time| Some((time.day_of_month(), month_name(time.month())?, time.year())))
+        .map_or_else(
+            || epoch.to_string(),
+            |(day, month, year)| format!("{day} {month} {year}"),
+        )
 }
 
 /// The month's name from the bar's own catalog, so that it speaks the language of the sentence
