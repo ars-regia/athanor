@@ -32,9 +32,11 @@ Patch2:         0003-main-Add-keep-shortcuts-to-keep-the-key-bindings-wit.patch
 # locker's password field took no keys until a click (pop-os/cosmic-greeter#474). Not submitted yet.
 Patch3:         0004-shell-focus-Focus-the-lock-surface-when-nothing-hold.patch
 # wayland-backend's wire parser accepted nulls the signature forbids; Patch4 rejects them as
-# libwayland does and answers a malformed request with a protocol error, the change Sulphur
-# carries (forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend/PATCHES.md).
-# Not submitted. Drop it with a wayland-backend release that rejects these nulls.
+# libwayland does and answers a malformed request with a protocol error. Its hunks are those of
+# changes 1 and 2 that Sulphur carries on wayland-backend 0.3.17, applied to 0.3.15, whose two
+# files they touch are the same (forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/
+# wayland-backend/PATCHES.md). Not submitted. Drop it with a wayland-backend release that
+# rejects these nulls.
 Patch4:         0005-wayland-backend-Reject-nulls-the-wire-signature-forb.patch
 
 BuildRequires:  cargo rust
