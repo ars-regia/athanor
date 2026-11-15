@@ -247,6 +247,11 @@ class ReleaseCacheProblems(unittest.TestCase):
         return self.problems(actions, **{"release.yml": self.RELEASING,
                                          "call-build.yml": self.CALLED.format(steps=steps)})
 
+    @staticmethod
+    def unlisted(action, job="compile", name="call-build.yml"):
+        return (f"{name}: job {job} uses {action}, which is not in RELEASE_PATH_ACTIONS: add it once "
+                "it is checked to restore and save no cache (PL10)")
+
     def test_the_repository_passes(self):
         self.assertEqual(verify.release_cache_problems(ROOT), [])
 
@@ -257,8 +262,7 @@ class ReleaseCacheProblems(unittest.TestCase):
                 self.assertEqual(
                     self.problems(**{"release.yml": self.RELEASING,
                                      "call-build.yml": self.CALLED.format(steps=steps)}),
-                    [f"call-build.yml: job compile uses {action} on the release path, which restores "
-                     "and saves no cache (PL10)"])
+                    [self.unlisted(action)])
 
     def test_a_cache_action_in_the_releasing_workflow_fails(self):
         text = self.RELEASING.replace("      - run: true\n", f"      - uses: actions/cache@{self.PIN}\n")
@@ -276,44 +280,33 @@ class ReleaseCacheProblems(unittest.TestCase):
                      "restores and saves no cache (PL10)"])
 
     def test_any_cache_from_or_cache_to_fails(self):
-        for steps in ("      - run: podman build --cache-from ghcr.io/o/cache .\n",
-                      f"      - uses: docker/build-push-action@{self.PIN}\n        with:\n"
-                      "          cache-to: type=registry,ref=ghcr.io/o/cache\n"):
-            with self.subTest(steps=steps):
-                self.assertEqual(len(self.called(steps)), 1)
-
-    def test_an_action_name_matches_without_regard_to_case(self):
-        self.assertEqual(self.called(f"      - uses: Actions/Cache@{self.PIN}\n"),
-                         ["call-build.yml: job compile uses Actions/Cache on the release path, which "
+        self.assertEqual(self.called("      - run: podman build --cache-from ghcr.io/o/cache .\n"),
+                         ["call-build.yml: job compile gives a build a cache from outside the job (sccache "
+                          "on the Actions cache, cache-from or cache-to) on the release path, which "
                           "restores and saves no cache (PL10)"])
+        self.assertEqual(len(self.called("      - run: buildah build --cache-to ghcr.io/o/cache .\n")), 1)
 
-    def test_the_sccache_action_fails(self):
-        self.assertEqual(len(self.called(f"      - uses: mozilla-actions/sccache-action@{self.PIN}\n")), 1)
+    def test_an_action_outside_the_list_fails(self):
+        for action in ("mozilla-actions/sccache-action", "actions/setup-go", "actions/setup-python",
+                       "docker/build-push-action", "Actions/Cache", "docker://alpine"):
+            with self.subTest(action=action):
+                self.assertEqual(self.called(f"      - uses: {action}@{self.PIN}\n"), [self.unlisted(action)])
 
-    def test_a_setup_action_with_its_cache_on_fails(self):
-        def step(action, options=""):
-            return f"      - uses: {action}@{self.PIN}\n" + (f"        with:\n{options}" if options else "")
-        caching = (step("actions/setup-go"), step("actions/setup-go", "          cache: true\n"),
-                   step("actions-rust-lang/setup-rust-toolchain"), step("actions/setup-node"),
-                   step("actions/setup-python", "          cache: pip\n"),
-                   step("actions/setup-java", "          cache: maven\n"))
-        quiet = (step("actions/setup-go", "          cache: false\n"),
-                 step("actions/setup-node", "          package-manager-cache: false\n"),
-                 step("actions/setup-python"), step("actions/setup-java"), step("actions/setup-dotnet"))
-        for steps in caching:
-            with self.subTest(caching=steps):
-                self.assertEqual(len(self.called(steps)), 1)
-        for steps in quiet:
-            with self.subTest(quiet=steps):
-                self.assertEqual(self.called(steps), [])
+    def test_a_listed_action_passes_at_any_ref_and_case(self):
+        steps = ("      - uses: Actions/Checkout@v4\n      - uses: sigstore/cosign-installer@main\n"
+                 f"      - uses: actions/upload-artifact@{self.PIN}\n      - uses: ./.github/actions/kvm\n")
+        self.assertEqual(self.called(steps), [])
 
-    def test_a_local_composite_action_that_caches_fails(self):
+    def test_a_local_composite_action_is_read_step_by_step(self):
         inner = f"runs:\n  using: composite\n  steps:\n    - uses: actions/cache/save@{self.PIN}\n"
-        outer = "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/inner\n"
+        outer = "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/kvm\n"
         self.assertEqual(self.called("      - uses: ./.github/actions/outer\n",
-                                     {"outer": outer, "inner": inner}),
-                         ["call-build.yml: job compile uses actions/cache/save on the release path, "
-                          "which restores and saves no cache (PL10)"])
+                                     {"outer": outer, "kvm": inner}),
+                         [self.unlisted("./.github/actions/outer"), self.unlisted("actions/cache/save")])
+
+    def test_a_composite_action_that_is_not_yaml_is_reported(self):
+        self.assertEqual(self.called("      - uses: ./.github/actions/kvm\n", {"kvm": "runs: [\n"})[0].split(":")[0],
+                         "./.github/actions/kvm/action.yml")
 
     def test_a_workflow_level_backend_reaches_every_job(self):
         text = "env:\n  SCCACHE_GHA_ENABLED: 'true'\n" + self.CALLED.format(steps="      - run: true\n")
@@ -335,9 +328,7 @@ class ReleaseCacheProblems(unittest.TestCase):
         }
         for name, (text, job) in cases.items():
             with self.subTest(name=name):
-                self.assertEqual(self.problems(**{name: text}),
-                                 [f"{name}: job {job} uses actions/cache on the release path, which "
-                                  "restores and saves no cache (PL10)"])
+                self.assertEqual(self.problems(**{name: text}), [self.unlisted("actions/cache", job, name)])
 
     def test_a_job_that_narrows_the_token_leaves_the_grant_of_its_workflow(self):
         text = ("on: push\npermissions:\n  packages: write\njobs:\n  check:\n    runs-on: x\n"

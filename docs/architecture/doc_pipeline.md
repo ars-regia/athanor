@@ -426,13 +426,11 @@ takes as the release path every workflow with a job in a signing environment or 
 provenance) or `packages: write` (a push to the registry with the job's token), from the job or
 from the workflow, and every reusable workflow of the repository such a workflow calls. The
 whole workflow counts, since its other jobs build what that job signs or pushes. A push to
-another registry with a credential of its own is not seen. A cache step is a cache action
-(`actions/cache` with its `restore` and `save`, `Swatinem/rust-cache`,
-`mozilla-actions/sccache-action`, matched without regard to case), a toolchain setup action
-with its cache on (`setup-go` and `setup-rust-toolchain` unless `cache: false`, `setup-node`
-unless `package-manager-cache: false`, the others when `cache` is set), sccache on the Actions
-cache, or a `cache-from` or `cache-to` of any type, in the job's steps or in a local composite
-action they use. One store outlives the job and the check does not see it: the self-hosted
+another registry with a credential of its own is not seen. A release-path job uses only the
+actions of an allow-list, `RELEASE_PATH_ACTIONS` in `verify.py`, each checked to restore and save
+no cache and matched without regard to case or ref, and gives no build sccache on the Actions
+cache or a `cache-from` or `cache-to` of any type; both hold for its steps and for those of a
+local composite action they use. An action joins the list once it is checked to cache nothing. One store outlives the job and the check does not see it: the self-hosted
 `build` job of `kernel-build.yml` mounts `$HOME/.cache/azoth`, a directory of the runner host
 that holds the downloaded kernel sources. It is a store of verified inputs, not of build
 outputs: `forge/specs/azoth/build.sh` checks every file in it against `SOURCES/sources.sha256`,
