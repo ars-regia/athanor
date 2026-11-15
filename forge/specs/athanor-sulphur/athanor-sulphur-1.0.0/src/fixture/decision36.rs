@@ -273,6 +273,30 @@ fn locked_waits_for_the_resume_of_a_paused_session() {
     run.stop();
 }
 
+/// Through the function the udev backend's switch of virtual terminal calls first: a lease
+/// whose revocation fails keeps the terminal, its client told; once it ends, the switch goes on.
+#[test]
+fn a_failed_revocation_keeps_the_virtual_terminal() {
+    let mut run = Running::start(None);
+    let held = probe_lease(&mut run, 7);
+    refuse_leases(&mut run, Some("EACCES"));
+    assert!(
+        run.state.leases_before_switch(Some(2)).is_none(),
+        "the terminal is kept"
+    );
+    assert!(held.load(Ordering::SeqCst), "its client is told");
+    assert!(
+        !run.state.may_lease(),
+        "refused while the lease waits to end"
+    );
+    refuse_leases(&mut run, None);
+    assert!(
+        run.state.leases_before_switch(Some(2)).is_some(),
+        "switched once the lease has ended"
+    );
+    run.stop();
+}
+
 /// A lease held through a pause, with no lock, ends at the resume, before any output is drawn,
 /// and grants are made again.
 #[test]

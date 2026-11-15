@@ -225,6 +225,14 @@ impl<L> Leases<L> {
         (self.held.is_empty() && self.ending.is_empty()).then_some(Revoked(()))
     }
 
+    /// The connectors of the leases that wait to end.
+    pub fn ending_connectors(&self) -> Vec<connector::Handle> {
+        self.ending
+            .iter()
+            .flat_map(|(ended, _)| ended.connectors.iter().copied())
+            .collect()
+    }
+
     /// Tries again to end the leases that wait. Whether none waits any more.
     pub fn retry(&mut self, finish: impl FnMut(&Ended) -> Result<(), String>) -> bool {
         self.end(|_| false, finish)

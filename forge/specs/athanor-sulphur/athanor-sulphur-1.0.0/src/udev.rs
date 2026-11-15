@@ -591,10 +591,9 @@ impl State {
         if !drm.session.is_active() || from == Some(vt) {
             return;
         }
-        // Decision 36: from here to the resume no lease is granted, and the leases end while the
-        // compositor is still the GPU's master, which it is no longer when the pause is heard.
-        let number = self.leases.switching(from);
-        self.revoke_device_leases();
+        let Some(number) = self.leases_before_switch(from) else {
+            return;
+        };
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -2228,6 +2227,23 @@ impl State {
         if let Backend::Drm(drm) = &mut self.backend {
             drm.offer_all();
         }
+    }
+
+    /// Before a switch of virtual terminal the compositor makes from terminal `from`
+    /// (decision 36): from here to the resume no lease is granted, and every lease ends while
+    /// the compositor is still the GPU's master, which it is no longer when the pause is heard.
+    /// The switch's number; `None` when a lease could not be ended, and then the terminal is
+    /// not switched, for the lessee would go on scanning out on the seat another session holds.
+    pub(crate) fn leases_before_switch(&mut self, from: Option<i32>) -> Option<u32> {
+        let number = self.leases.switching(from);
+        self.leases
+            .revoke_all(|ended| finish(&mut self.backend, ended));
+        if self.leases.proof().is_some() {
+            return Some(number);
+        }
+        tracing::error!(connectors = ?self.leases.ending_connectors(), "a lease could not be ended before a switch of virtual terminal: the terminal is not switched");
+        self.leases.switch_failed();
+        None
     }
 
     /// A lock was requested: from now on no lease is granted, and every one ends.
