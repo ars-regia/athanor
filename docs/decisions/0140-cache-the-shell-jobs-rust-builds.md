@@ -2,14 +2,14 @@
 id: ADR-0140
 title: "Cache the Rust builds of the shell jobs in CI through the rig's compiler cache"
 date: 2026-11-15
-status: proposed
+status: accepted
 issues: []
 areas: [build, process, security]
 ---
 
 # 0140. Cache the Rust builds of the shell jobs in CI through the rig's compiler cache
 
-**Proposed.** The maintainer approved on 2026-11-15 the local compiler cache of the shell rig and
+**Accepted** by the maintainer with the pull request that records it. The maintainer approved on 2026-11-15 the local compiler cache of the shell rig and
 a proposal for CI, which needs this record first. On the same day the maintainer answered the
 six questions of section "Maintainer's answers", which the decision follows. Approving this record
 approves the decisions below.
