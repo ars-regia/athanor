@@ -2577,8 +2577,8 @@ reason = "GTK's 360 px width request included the card's margin; the Sal island'
 surface = "bar-popups"
 item = 4
 what = "an action or a click on a popup reaches the daemon without an activation token"
-state = "recorded"
-reason = "athanor-sal has no xdg-activation-v1 yet, so the bar cannot ask the compositor for a token; InvokeAction goes all the same with an empty token, as the GTK bar sent it when GDK had none (BR4), and the application's window does not take the focus"
+state = "closed"
+reason = "athanor-sal binds xdg-activation-v1 and the bar asks the compositor for a token with the surface and serial of the last press or key, as GDK did with its seat's last serial; InvokeAction carries it (BR4)"
 
 [[gtk-difference]]
 surface = "bar-popups"

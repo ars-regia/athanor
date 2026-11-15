@@ -201,11 +201,9 @@ def main():
     )
 
     check("an action button on a popup", press(app, Atspi, "Snooze"))
-    # Without an activation token: athanor-sal has no xdg-activation-v1 yet, recorded in
-    # athanor-differences.toml (bar-popups, item 4). The call goes all the same (BR4).
     check(
         "the action reaches the daemon with its key",
-        wait_for(logged("InvokeAction 2 snooze no-token"), 3),
+        wait_for(logged("InvokeAction 2 snooze token"), 3),
     )
 
     # Hostile input the daemon would already have cleaned: the bar checks it again (BR9).
