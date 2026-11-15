@@ -27,12 +27,11 @@ use std::time::{Duration, Instant};
 const LEASE_RETRY: Duration = Duration::from_secs(1);
 
 /// A locked session: the client's lock, its confirmation until the outputs have been drawn
-/// locked and every DRM lease has ended (decision 36), whether they have been, whether the
-/// leases are tried again once a second, and the lock surface of each output.
+/// locked and every DRM lease has ended (decision 36), whether the leases are tried again once
+/// a second, and the lock surface of each output.
 pub struct Lock {
     lock: ExtSessionLockV1,
     locker: Option<Confirmation>,
-    drawn: bool,
     retrying: bool,
     surfaces: Vec<(Output, LockSurface)>,
 }
@@ -102,7 +101,6 @@ impl SessionLockHandler for State {
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
             locker: Some(Confirmation::new(locker)),
-            drawn: false,
             retrying: false,
             surfaces: Vec::new(),
         });
@@ -244,22 +242,16 @@ impl State {
         }
     }
 
-    /// After a frame of every output: a lock waiting for its confirmation has been drawn.
+    /// The backend found every output showing the lock, now: `locked` is sent once every DRM
+    /// lease has ended as well (decision 36). Until then the leases are tried again once a
+    /// second, and after each attempt the backend looks at its outputs again (`confirm_lock`),
+    /// so that an output plugged in or turned on meanwhile must show the lock first; the
+    /// outputs show the lock from the request on, and only the confirmation waits.
     pub fn locked_drawn(&mut self) {
-        if let Some(lock) = &mut self.lock {
-            lock.drawn = true;
-        }
-        self.confirm_when_revoked();
-    }
-
-    /// Sends `locked` once the outputs show the lock and every DRM lease has ended (decision
-    /// 36). Until then the leases are tried again once a second; the outputs show the lock
-    /// from the request on, and only the confirmation waits.
-    pub fn confirm_when_revoked(&mut self) {
         let Some(lock) = &mut self.lock else {
             return;
         };
-        if !lock.drawn || lock.locker.is_none() {
+        if lock.locker.is_none() {
             return;
         }
         if let Some(revoked) = self.leases.proof() {
@@ -286,7 +278,7 @@ impl State {
                 return TimeoutAction::Drop;
             }
             state.retry_leases();
-            state.confirm_when_revoked();
+            state.confirm_lock();
             if waits(state) {
                 TimeoutAction::ToDuration(LEASE_RETRY)
             } else {

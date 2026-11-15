@@ -149,10 +149,15 @@ fn probe_lease(run: &mut Running, id: u32) -> Arc<AtomicBool> {
 /// Why the headless backend fails to end a lease, as a GPU whose master the compositor is
 /// not; `None` lets every lease end.
 fn refuse_leases(run: &mut Running, cause: Option<&str>) {
+    headless(run).lease_refused = cause.map(str::to_owned);
+}
+
+/// The fixture's headless backend.
+fn headless(run: &mut Running) -> &mut crate::headless::Headless {
     let crate::state::Backend::Headless(headless) = &mut run.state.backend else {
         panic!("the fixture runs headless");
     };
-    headless.lease_refused = cause.map(str::to_owned);
+    headless
 }
 
 /// Requests a lock, and runs until the compositor holds it.
@@ -222,6 +227,26 @@ fn locked_waits_for_a_lease_whose_revocation_fails() {
     );
     locked_withheld(&mut run, &mut locker, "the revocation fails");
     refuse_leases(&mut run, None);
+    locker.pump(&mut run, "the session is locked", |client, _| client.locked);
+    run.stop();
+}
+
+/// `locked` waits for every output to show the lock now: an output kept from being drawn, as
+/// one plugged in while a revocation failed, holds it back after the leases have ended, though
+/// every output had shown the lock before.
+#[test]
+fn locked_waits_for_an_output_that_has_not_shown_the_lock() {
+    let mut run = Running::start(None);
+    let _held = probe_lease(&mut run, 7);
+    refuse_leases(&mut run, Some("EACCES"));
+    let mut locker = Local::connect(&mut run, None);
+    let _lock = request_lock(&mut run, &mut locker);
+    locked_withheld(&mut run, &mut locker, "the revocation fails");
+    let second = output_at(&run, 1);
+    headless(&mut run).undrawn = Some(second);
+    refuse_leases(&mut run, None);
+    locked_withheld(&mut run, &mut locker, "an output has not shown the lock");
+    headless(&mut run).undrawn = None;
     locker.pump(&mut run, "the session is locked", |client, _| client.locked);
     run.stop();
 }

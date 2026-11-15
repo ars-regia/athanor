@@ -864,7 +864,7 @@ impl State {
         // A connector's `non-desktop` mark changes with no event of the scanner's.
         self.reconcile_leasable();
         self.retry_leases();
-        self.confirm_when_revoked();
+        self.confirm_lock();
         self.retry_dark_monitors();
     }
 
@@ -1465,7 +1465,8 @@ impl State {
         true
     }
 
-    /// A lock is confirmed only once every output presented a frame drawn locked.
+    /// A lock is confirmed only once every output presented a frame drawn locked. The other
+    /// backends confirm from their frames alone: they draw every output each frame.
     pub(crate) fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
             if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.frames.lock))) {

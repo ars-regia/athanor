@@ -83,6 +83,10 @@ pub struct Headless {
     /// (decision 36): until it is cleared, no lease ends.
     #[cfg(test)]
     pub lease_refused: Option<String>,
+    /// The output the fixture keeps from being drawn, as a monitor plugged in and not yet
+    /// presented.
+    #[cfg(test)]
+    pub undrawn: Option<Output>,
 }
 
 struct Virtual {
@@ -129,6 +133,8 @@ pub fn start(
         refused: None,
         #[cfg(test)]
         lease_refused: None,
+        #[cfg(test)]
+        undrawn: None,
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
     for (index, spec) in outputs.iter().enumerate() {
@@ -329,6 +335,10 @@ impl State {
                 continue;
             }
             shown += 1;
+            #[cfg(test)]
+            if headless.undrawn.as_ref() == Some(&output) {
+                continue;
+            }
             let popups = self.composing.popups_on(&self.space, &output);
             let pointer = self.seat.get_pointer().map(|p| p.current_location());
             let look = self
