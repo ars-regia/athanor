@@ -309,7 +309,7 @@ impl State {
     }
 
     /// Draws every output, then sends presentation feedback and frame callbacks.
-    fn tick(&mut self, period: Duration) {
+    pub(crate) fn tick(&mut self, period: Duration) {
         let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return;

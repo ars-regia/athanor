@@ -506,6 +506,7 @@ dependencies = [
  "athanor-bar",
  "athanor-layout",
  "athanor-shelld",
+ "athanor-sulphur",
  "athanor-sulphur-client",
  "athanor-trust-state",
  "base64",

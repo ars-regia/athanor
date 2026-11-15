@@ -13,12 +13,13 @@ cargo-fuzz = true
 [workspace]
 
 [features]
-default = ["update", "shelld", "layout", "gtk"]
+default = ["update", "shelld", "layout", "gtk", "sulphur"]
 update = ["athanor-fuzz-entries/update"]
 shelld = ["athanor-fuzz-entries/shelld"]
 layout = ["athanor-fuzz-entries/layout"]
 # The bar and the compositor client link GTK.
 gtk = ["athanor-fuzz-entries/gtk"]
+sulphur = ["athanor-fuzz-entries/sulphur"]
 
 # The shipped profile checks overflow (the root Cargo.toml); fuzzing should too.
 [profile.release]
@@ -124,5 +125,12 @@ doc = false
 name = "trust_state"
 path = "fuzz_targets/trust_state.rs"
 required-features = ["layout"]
+test = false
+doc = false
+
+[[bin]]
+name = "sulphur_protocol"
+path = "fuzz_targets/sulphur_protocol.rs"
+required-features = ["sulphur"]
 test = false
 doc = false

@@ -20,6 +20,9 @@ mod decoration;
 mod dock_overlap;
 mod focus_theme;
 mod foreign;
+// The protocol fuzz target's entry (issue #1172), for athanor-fuzz-entries.
+#[cfg(feature = "fuzz")]
+pub mod fuzz;
 mod gestures;
 mod grabs;
 mod handlers;

@@ -23,6 +23,8 @@ pub mod compositor;
 pub mod layout;
 #[cfg(feature = "shelld")]
 pub mod shelld;
+#[cfg(feature = "sulphur")]
+pub mod sulphur;
 #[cfg(feature = "update")]
 pub mod update;
 
