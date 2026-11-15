@@ -140,18 +140,26 @@ cosmic_comp_nevr() {
 # The rig the recipes run: the image `rig.sh cosmic-comp-version` derived from the pinned rig
 # with forge/specs/cosmic-comp's own build installed, while it is derived from that same rig and
 # the spec still names the build it holds and the image is still here; else the pinned rig.
-# $spec_rig holds "<pinned rig> <Version-Release> <image id>".
+# $spec_rig holds "<pinned rig's image id> <Version-Release> <image id>": the id, not the name,
+# so a rig rebuilt under the same name (build-image) leaves the derived rig unused.
 spec_rig=$out/cosmic-comp-spec/rig
 rig_image() {
     local base derived_from nevr id
     base=$(pinned_rig_image)
     if [ -s "$spec_rig" ] && read -r derived_from nevr id < "$spec_rig" &&
-        [ "$derived_from" = "$base" ] && [ "$nevr" = "$(cosmic_comp_nevr)" ] &&
-        podman image exists "$id"; then
+        [ "$nevr" = "$(cosmic_comp_nevr)" ] && podman image exists "$id" &&
+        podman image exists "$base" && [ "$(image_id "$base")" = "$derived_from" ]; then
         echo "$id"
     else
         echo "$base"
     fi
+}
+
+# The id of a local image, without its sha256: prefix.
+image_id() {
+    local id
+    id=$(podman image inspect --format '{{.Id}}' "$1")
+    echo "${id#sha256:}"
 }
 
 # Builds forge/specs/cosmic-comp the way the forge does and derives from the pinned rig an image
@@ -193,7 +201,7 @@ build_spec_rig() {
     podman build --network=none --pull=never --iidfile "$ctx/iid" -t "$local_image:cosmic-comp-spec" \
         -f "$ctx/Containerfile" "$ctx"
     id=$(cat "$ctx/iid")
-    echo "$base $want ${id#sha256:}" > "$spec_rig"
+    echo "$(image_id "$base") $want ${id#sha256:}" > "$spec_rig"
 }
 
 # The build stage, where cargo runs: an explicit one, else the published one pinned by digest,

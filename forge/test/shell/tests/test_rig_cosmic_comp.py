@@ -27,10 +27,13 @@ COPIED = (
 PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
 DERIVED_ID = "d" * 64
+BASE_ID = "b" * 64
 
 # The podman of the tests: `run ... rpm -q` answers the Version-Release of the image it names,
 # `run ... build_spec.sh build` leaves the RPM the test names in the checkout's forge/RPMS, and
-# `build` writes an image id to --iidfile. Every call is logged as a JSON list.
+# `build` writes an image id to --iidfile, `image inspect` answers the id the test gives the
+# image and `image exists` fails for the images the test lists as absent. Every call is logged
+# as a JSON list.
 PODMAN = textwrap.dedent(
     """\
     #!/usr/bin/env python3
@@ -42,6 +45,10 @@ PODMAN = textwrap.dedent(
         log.write(json.dumps(args) + "\\n")
     if args[0] == "volume" and args[1] == "create":
         print("home")
+    elif args[:2] == ["image", "exists"]:
+        sys.exit(1 if args[2] in conf["absent"] else 0)
+    elif args[:2] == ["image", "inspect"]:
+        print("sha256:" + conf["ids"][args[-1]])
     elif args[0] == "build":
         iid = args[args.index("--iidfile") + 1]
         pathlib.Path(iid).write_text("sha256:" + conf["derived_id"])
@@ -118,6 +125,8 @@ class Rig:
             json.dumps(
                 {
                     "derived_id": DERIVED_ID,
+                    "ids": {self.base: BASE_ID},
+                    "absent": [],
                     "rpm": rpm,
                     "nevr": {
                         self.base: PUBLISHED,
@@ -127,6 +136,12 @@ class Rig:
             )
         )
         self.out = tmp / "out"
+
+    def configure(self, **values):
+        path = self.tmp / "conf.json"
+        conf = json.loads(path.read_text())
+        conf.update(values)
+        path.write_text(json.dumps(conf))
 
     def set_release(self, release):
         path = self.tree / "forge/specs/cosmic-comp/cosmic-comp.spec"
@@ -209,7 +224,7 @@ class CosmicCompVersion(unittest.TestCase):
         )
         self.assertEqual(
             (rig.out / "cosmic-comp-spec/rig").read_text().split(),
-            [rig.base, SPEC, DERIVED_ID],
+            [BASE_ID, SPEC, DERIVED_ID],
         )
 
     def test_later_recipes_run_the_derived_rig_while_the_spec_names_its_build(self):
@@ -235,7 +250,21 @@ class CosmicCompVersion(unittest.TestCase):
     def test_a_derived_rig_of_another_base_is_not_run(self):
         rig = Rig(self.tmp)
         (rig.out / "cosmic-comp-spec").mkdir(parents=True)
-        (rig.out / "cosmic-comp-spec/rig").write_text(f"localhost/other {SPEC} {DERIVED_ID}\n")
+        (rig.out / "cosmic-comp-spec/rig").write_text(f"{'e' * 64} {SPEC} {DERIVED_ID}\n")
+        self.assertEqual(rig.run("probe-sandbox").returncode, 0)
+        self.assertEqual(rig.calls()[-1][rig.calls()[-1].index("bwrap") - 1], rig.base)
+
+    def test_a_pinned_rig_rebuilt_under_its_name_drops_the_derived_rig(self):
+        rig = Rig(self.tmp)
+        self.assertEqual(rig.run("cosmic-comp-version").returncode, 0)
+        rig.configure(ids={rig.base: "f" * 64})
+        self.assertEqual(rig.run("probe-sandbox").returncode, 0)
+        self.assertEqual(rig.calls()[-1][rig.calls()[-1].index("bwrap") - 1], rig.base)
+
+    def test_a_derived_rig_no_longer_present_is_not_run(self):
+        rig = Rig(self.tmp)
+        self.assertEqual(rig.run("cosmic-comp-version").returncode, 0)
+        rig.configure(absent=[DERIVED_ID])
         self.assertEqual(rig.run("probe-sandbox").returncode, 0)
         self.assertEqual(rig.calls()[-1][rig.calls()[-1].index("bwrap") - 1], rig.base)
 
