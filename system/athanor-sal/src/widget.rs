@@ -2281,6 +2281,7 @@ impl Ui {
         let natural = self.widgets[id].natural;
         let between = match self.widgets[id].kind {
             Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
+            Kind::Inline { .. } => self.widgets[id].spacing.unwrap_or(gap),
             _ => gap,
         };
         let widget = &mut self.widgets[id];
@@ -2357,7 +2358,7 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
-            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, between, *padding),
             Kind::CenterBox => strip::measure_center(&sizes),
             Kind::LabelledButton {
                 image, size: side, text, ..

@@ -53,7 +53,7 @@ impl Ui {
     /// Places the children of the inline `id` at `x`, `y` in reading order, each at its own
     /// width and the inline's height inside its padding.
     pub(super) fn place_inline(&mut self, id: WidgetId, x: f32, y: f32, pad: [f32; 2]) {
-        let gap = self.theme.gap;
+        let gap = self.widgets[id].spacing.unwrap_or(self.theme.gap);
         let outer = self.widgets[id].rect;
         let h = (outer.h - 2.0 * pad[1]).max(0.0);
         // The children that fill split what the others leave of the width, as GTK's hexpand.
