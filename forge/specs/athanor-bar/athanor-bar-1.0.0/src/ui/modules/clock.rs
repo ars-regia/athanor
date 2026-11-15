@@ -68,9 +68,10 @@ impl Module for Clock {
             tracing::error!("cannot read the date or the names of the months; no calendar");
             return None;
         };
+        let [start, end] = arrow_icons(cx.rtl);
         let arrows = [
-            cx.icons.image("pan-start-symbolic", ARROW, cx.scale)?,
-            cx.icons.image("pan-end-symbolic", ARROW, cx.scale)?,
+            cx.icons.image(start, ARROW, cx.scale)?,
+            cx.icons.image(end, ARROW, cx.scale)?,
         ];
         let (mut ui, frame) = look::popover(&tr("Calendar"), cx.theme.clone(), cx.rtl, cx.top);
         let calendar = ui.calendar(frame, &text, &arrows, self.first_weekday, today);
@@ -80,6 +81,16 @@ impl Module for Clock {
 
     fn event(&mut self, _cx: &mut Cx, _ui: &mut Ui, _event: Event) -> Reply {
         Reply::Stay
+    }
+}
+
+/// The icons of the calendar's start and end arrows, each pointing to its edge: in a
+/// right-to-left language the start arrow points right, as GTK's `pan-start-symbolic-rtl`.
+fn arrow_icons(rtl: bool) -> [&'static str; 2] {
+    if rtl {
+        ["pan-end-symbolic", "pan-start-symbolic"]
+    } else {
+        ["pan-start-symbolic", "pan-end-symbolic"]
     }
 }
 
@@ -122,6 +133,12 @@ fn calendar_text() -> Option<CalendarText> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_arrows_point_to_their_edges_in_both_directions() {
+        assert_eq!(arrow_icons(false), ["pan-start-symbolic", "pan-end-symbolic"]);
+        assert_eq!(arrow_icons(true), ["pan-end-symbolic", "pan-start-symbolic"]);
+    }
 
     #[test]
     fn the_calendar_names_its_months_from_january_and_its_days_from_sunday() {
