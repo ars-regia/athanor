@@ -3,9 +3,15 @@
 //! second page with Cancel, which takes the focus, and the action's own button. Suspend,
 //! Restart and Shut Down show only while logind offers them, asked each time the menu opens.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use athanor_bar::i18n::tr;
+use athanor_bar::logind;
 use athanor_bar::power::Action;
-use athanor_sal::{Kind, Theme, Ui, WidgetId, Wrap};
+use athanor_sal::{Event, Kind, Theme, Ui, WidgetId, Wrap};
+
+use super::{Cx, Module, Reply, Start, Wake, Wakeup, ICON};
 
 /// The page of the menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,7 +67,7 @@ impl Menu {
 
 /// The menu's `page`, in `theme`, in a popover below the bar when `top`.
 pub fn build(theme: Theme, rtl: bool, top: bool, page: Page, offered: &[bool; 5]) -> (Ui, Menu) {
-    let (mut ui, frame) = super::look::popover(&tr("Power"), theme, rtl, top);
+    let (mut ui, frame) = crate::look::popover(&tr("Power"), theme, rtl, top);
     let mut acts = Vec::new();
     match page {
         Page::Actions => {
@@ -84,6 +90,105 @@ pub fn build(theme: Theme, rtl: bool, top: bool, page: Page, offered: &[bool; 5]
         }
     }
     (ui, Menu { acts })
+}
+
+/// logind's last answers, in the order of [`Action::ALL`].
+type Offered = Rc<Cell<[bool; 5]>>;
+
+struct Power {
+    offered: Offered,
+    wake: Wake,
+    page: Page,
+    /// The open menu's buttons, and the answers it was drawn with.
+    menu: Option<(Menu, [bool; 5])>,
+}
+
+pub fn new(start: &Start) -> Option<Box<dyn Module>> {
+    let power = Power {
+        offered: Offered::default(),
+        wake: start.wake.clone(),
+        page: Page::Actions,
+        menu: None,
+    };
+    power.ask_logind();
+    Some(Box::new(power))
+}
+
+impl Power {
+    /// Asks logind whether each action it decides is offered; an open menu follows each
+    /// answer.
+    fn ask_logind(&self) {
+        for (at, action) in Action::ALL.into_iter().enumerate() {
+            if action.can_method().is_none() {
+                continue;
+            }
+            let (offered, wake) = (self.offered.clone(), self.wake.clone());
+            glib::spawn_future_local(async move {
+                let answer = logind::offered(action).await;
+                let mut now = offered.get();
+                now[at] = answer;
+                offered.set(now);
+                wake(Wakeup::Changed);
+            });
+        }
+    }
+}
+
+impl Module for Power {
+    fn button(&mut self, cx: &mut Cx, ui: &mut Ui, group: WidgetId) -> Option<WidgetId> {
+        let icon = "system-shutdown-symbolic";
+        Some(cx.icons.button(ui, group, icon, ICON, cx.scale, &tr("Power"), None))
+    }
+
+    fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
+        if self.page == Page::Actions {
+            self.ask_logind();
+        }
+        let offered = self.offered.get();
+        let (ui, menu) = build(cx.theme.clone(), cx.rtl, cx.top, self.page, &offered);
+        self.menu = Some((menu, offered));
+        Some(ui)
+    }
+
+    fn event(&mut self, _cx: &mut Cx, _ui: &mut Ui, event: Event) -> Reply {
+        let Event::Clicked(widget) = event else {
+            return Reply::Stay;
+        };
+        match self.menu.as_ref().and_then(|(menu, _)| menu.act(widget)) {
+            Some(Act::Ask(action)) => {
+                self.page = Page::Confirm(action);
+                Reply::Reopen
+            }
+            Some(Act::Cancel) => {
+                self.page = Page::Actions;
+                Reply::Reopen
+            }
+            Some(Act::Run(action)) => {
+                glib::spawn_future_local(async move {
+                    if let Err(err) = logind::run(action).await {
+                        tracing::error!(error = %err, action = action.id(), "the power action failed");
+                    }
+                });
+                Reply::Close
+            }
+            None => Reply::Stay,
+        }
+    }
+
+    fn refresh(&mut self, _cx: &mut Cx, _ui: &mut Ui) -> Reply {
+        // A row comes or goes with logind's answer.
+        match &self.menu {
+            Some((_, drawn)) if self.page == Page::Actions && *drawn != self.offered.get() => {
+                Reply::Reopen
+            }
+            _ => Reply::Stay,
+        }
+    }
+
+    fn closed(&mut self) {
+        self.page = Page::Actions;
+        self.menu = None;
+    }
 }
 
 #[cfg(test)]

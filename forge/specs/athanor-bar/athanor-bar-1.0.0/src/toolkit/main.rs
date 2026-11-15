@@ -4,11 +4,9 @@
 //! application name on the bus and in AT-SPI. `--record-exit` is the unit's ExecStopPost, as
 //! for the GTK bar.
 
-mod aids;
 mod bar;
 mod look;
 mod modules;
-mod power;
 
 use std::process::ExitCode;
 

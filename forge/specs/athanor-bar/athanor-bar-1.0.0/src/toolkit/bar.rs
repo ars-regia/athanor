@@ -6,11 +6,10 @@
 //! installed applications and the compositor's windows. GLib's callbacks only queue a
 //! change, which `turn` applies with the shell in hand.
 //!
-//! The modules drawn so far: the launcher, the application library and the workspaces
-//! openers, the running applications with their menus, the clock and its calendar, the input
-//! sources, the tiling switch, the accessibility menu with the keyboard aids, the power menu
-//! and the control center's button. The others are not built yet, and a preset's group keeps
-//! its place without them.
+//! The launcher, application-library and workspaces openers, the running applications with
+//! their menus and the control center's button are drawn here; every module with a popover is
+//! a [`modules::Module`] of its own file, registered in `modules::new`. A module not drawn yet
+//! shows no button, and a preset's group keeps its place without it.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,12 +20,10 @@ use std::time::Duration;
 use athanor_apps::entries::{self, Apps, State};
 use athanor_apps::favorites::Store;
 use athanor_apps::sal::{self as row, Icons, Press, Row};
-use athanor_bar::clock::Clock;
 use athanor_bar::control_center::{NAME, PATH};
 use athanor_bar::i18n::{self, tr};
 use athanor_bar::order::{self, Module};
-use athanor_bar::power::Action;
-use athanor_bar::{bus, logind, magnifier, screen_reader, start, tiling};
+use athanor_bar::{bus, start};
 use athanor_layout::loader::{Paths, Source};
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge, Preset};
@@ -34,16 +31,14 @@ use athanor_sal::driver::{
     Anchor as Edges, Application, KeyboardInteractivity, Layer, LayerOptions, OutputInfo, Shell,
     Side, SurfaceId,
 };
-use athanor_sal::{Event, Priority, TextStyle, Ui, WidgetId};
+use athanor_sal::{Event, Priority, Ui, WidgetId};
 use athanor_style::appearance::{self, Appearance};
-use athanor_sulphur_client::{theme, Client, Event as Compositor, Opener, Tiling, WorkspaceId};
+use athanor_sulphur_client::{Client, Event as Compositor, Opener};
 use gio::glib;
 use gio::prelude::*;
 
-use crate::aids;
 use crate::look::{self, Look};
-use crate::modules::{self, AccessState, AccessUi};
-use crate::power::{self, Act as PowerAct, Page};
+use crate::modules::{self, Cx, Reply, Wake, Wakeup, ICON};
 
 /// The program's name: of its failed-start notifications, as the GTK bar's (`Host::APP`).
 const APP: &str = "athanor-bar";
@@ -53,8 +48,6 @@ const NAMESPACE: &str = "athanor-bar";
 const DEBOUNCE: Duration = Duration::from_millis(250);
 /// The icon theme the GTK bar draws with.
 const ICON_THEME: &str = "Adwaita";
-/// The size of a module's symbolic icon, as GTK's default image size in a button.
-const ICON: u16 = 16;
 
 /// What GLib's callbacks tell the bar, applied at the next turn.
 enum Change {
@@ -64,17 +57,14 @@ enum Change {
     Reload,
     Appearance(Appearance),
     Apps,
-    /// Once a second: the clock.
+    /// Once a second: a turn, at which the clock's button reads the time.
     Tick,
-    /// logind's answer for an action of the power menu.
-    Offered(Action, bool),
     /// Whether the control center can be started on the session bus (CC1).
     ControlCenter(bool),
-    /// The compositor's keyboard layouts, workspaces or accessibility state changed: the
-    /// modules that show them.
-    Modules,
-    /// What the keyboard aids say of a change (doc_accessibility.md AX11).
-    Announce(String),
+    /// A change of the compositor's other than of the windows: the modules hear it.
+    Compositor(Compositor),
+    /// What a module's source asks.
+    Module(Wakeup),
 }
 
 type Queue = Rc<RefCell<Vec<Change>>>;
@@ -123,8 +113,6 @@ struct Out {
     info: OutputInfo,
     acts: Vec<(WidgetId, Act)>,
     row: Row,
-    /// The clock's button, when its preset shows it.
-    clock: Option<WidgetId>,
     /// The output's connector, whose active workspace the tiling switch changes.
     connector: Option<String>,
 }
@@ -135,6 +123,10 @@ impl Out {
             .iter()
             .find(|(w, _)| *w == widget)
             .map(|(_, act)| *act)
+    }
+
+    fn scale(&self) -> u16 {
+        self.info.scale_factor.clamp(1, 16) as u16
     }
 
     /// The button of `act` on this surface.
@@ -150,27 +142,7 @@ impl Out {
 enum Open {
     /// A running entry's menu.
     Entry(row::Menu),
-    Power(power::Menu),
-    Calendar,
-    /// Each layout's radio and its group.
-    Input(Vec<(WidgetId, u32)>),
-    /// The switch and the workspace it changes, with the mode it had when drawn.
-    Tiling(WidgetId, (WorkspaceId, Tiling)),
-    Accessibility(AccessUi),
-}
-
-impl Open {
-    /// The module whose popover this is; `None` for a running entry's menu.
-    fn module(&self) -> Option<Module> {
-        match self {
-            Open::Entry(_) => None,
-            Open::Power(_) => Some(Module::Power),
-            Open::Calendar => Some(Module::Clock),
-            Open::Input(_) => Some(Module::InputSource),
-            Open::Tiling(..) => Some(Module::Tiling),
-            Open::Accessibility(_) => Some(Module::Accessibility),
-        }
-    }
+    Module(Module),
 }
 
 /// The open popover, and the surface and the button it opened from.
@@ -196,26 +168,15 @@ pub struct Bar {
     outs: HashMap<SurfaceId, Out>,
     queue: Queue,
     debounce: Slot,
-    clock: Clock,
-    /// The clock's text and the name screen readers say, as last drawn.
-    clock_texts: Option<(String, String)>,
+    /// The modules with a popover, in the order of `Module::ALL`.
+    modules: Vec<(Module, Box<dyn modules::Module>)>,
     popover: Option<Popover>,
-    /// logind's last answers for the power menu, in the order of `Action::ALL`.
-    offered: [bool; 5],
     control_center: bool,
     /// The windows or the favourites changed while a popover held the rows.
     stale: bool,
-    /// A module's source changed while a popover was open: the surfaces are drawn again once
-    /// it closes.
+    /// A module's button went stale while a popover was open: the surfaces are drawn again
+    /// once it closes.
     modules_stale: bool,
-    /// One keyboard aids' service for the bar: a notice is announced once.
-    aids: Rc<aids::Service>,
-    /// What the accessibility button showed beside its icon at the last drawing.
-    aids_shown: String,
-    /// The screen reader's key; without it, no row.
-    reader_key: Option<gio::Settings>,
-    /// The magnifier's key, followed for the compositor (doc_accessibility.md AX10).
-    magnifier_key: Option<gio::Settings>,
     ready: bool,
     /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), opened once ready.
     open_on_start: Option<Module>,
@@ -266,20 +227,6 @@ fn inside(layout: Layout) -> Side {
     }
 }
 
-/// Asks logind whether each action it decides is offered, for the power menu.
-fn ask_logind(queue: &Queue) {
-    for action in Action::ALL {
-        if action.can_method().is_none() {
-            continue;
-        }
-        let queue = queue.clone();
-        glib::spawn_future_local(async move {
-            let offered = logind::offered(action).await;
-            queue.borrow_mut().push(Change::Offered(action, offered));
-        });
-    }
-}
-
 /// Asks the session bus whether the control center can be started (CC1): its button shows
 /// only then.
 fn ask_control_center(queue: &Queue) {
@@ -313,44 +260,6 @@ fn ask_control_center(queue: &Queue) {
     });
 }
 
-/// Asks the compositor for what the modules show: the keyboard group, the workspaces' tiling
-/// and the accessibility state. A source that cannot be watched leaves its module hidden.
-fn watch_modules(client: &Client) {
-    if let Err(err) = client.watch_keyboard_group() {
-        tracing::warn!(error = %err, "the keyboard group is not followed");
-    }
-    if let Err(err) = client.watch_tiling() {
-        tracing::warn!(error = %err, "the tiling of the workspaces is not followed");
-    }
-    // athanor-sulphur's manager is bound at the first watch, before the magnifier's key is
-    // sent.
-    if let Err(err) = client.watch_accessibility() {
-        tracing::warn!(error = %err, "cannot watch the compositor's accessibility state");
-    }
-}
-
-/// The magnifier's key (doc_accessibility.md AX10): true at the start turns the magnifier on,
-/// and each change is sent to the compositor. `None` without the schema.
-fn follow_magnifier(client: &Rc<Client>) -> Option<gio::Settings> {
-    let schema = gio::SettingsSchemaSource::default()?.lookup(magnifier::SCHEMA, true);
-    if !schema.is_some_and(|schema| schema.has_key(magnifier::KEY)) {
-        tracing::warn!(
-            "{} has no {}; the magnifier row switches the compositor alone",
-            magnifier::SCHEMA,
-            magnifier::KEY
-        );
-        return None;
-    }
-    let settings = gio::Settings::new(magnifier::SCHEMA);
-    let weak = Rc::downgrade(client);
-    magnifier::follow(&settings, move |enabled| {
-        if let Some(Err(err)) = weak.upgrade().map(|client| client.set_magnifier(enabled)) {
-            tracing::info!(error = %err, enabled, "the magnifier's key cannot reach the compositor");
-        }
-    });
-    Some(settings)
-}
-
 /// Shows or hides the control center (CC1), which answers on the session bus.
 fn toggle_control_center() {
     glib::spawn_future_local(async {
@@ -374,36 +283,30 @@ impl Bar {
     ) -> Bar {
         let queue: Queue = Rc::default();
         let client = client.map(Rc::new);
-        let aids = Rc::new(aids::Service::default());
-        let mut magnifier_key = None;
         if let Some(client) = &client {
-            let (queue, heard) = (queue.clone(), aids.clone());
+            let queue = queue.clone();
             client.connect_events(move |_, event| {
                 let change = match event {
                     Compositor::WindowAdded(_)
                     | Compositor::WindowChanged(_)
                     | Compositor::WindowRemoved(_) => Change::Windows,
-                    _ => Change::Modules,
+                    _ => Change::Compositor(event.clone()),
                 };
-                let mut queue = queue.borrow_mut();
-                if let Some(text) = heard.heard(event) {
-                    queue.push(Change::Announce(text));
-                }
-                queue.push(change);
+                queue.borrow_mut().push(change);
             });
-            watch_modules(client);
-            aids.start(client);
-            magnifier_key = follow_magnifier(client);
         }
-        let reader_key =
-            screen_reader::settings(gio::SettingsSchemaSource::default().as_ref(), None);
-        if reader_key.is_none() {
-            tracing::warn!(
-                "{} has no {}; the screen reader row is hidden",
-                screen_reader::SCHEMA,
-                screen_reader::KEY
-            );
-        }
+        let wake: Wake = {
+            let queue = queue.clone();
+            Rc::new(move |wakeup| queue.borrow_mut().push(Change::Module(wakeup)))
+        };
+        let start = modules::Start {
+            client: client.as_ref(),
+            wake: &wake,
+        };
+        let modules = Module::ALL
+            .into_iter()
+            .filter_map(|module| Some((module, modules::new(module, &start)?)))
+            .collect();
         // The layout's layers and the favourites file share these directories. Armed before
         // the layout and the favourites are read, so that a write while the bar starts is
         // read or reported, never lost.
@@ -435,12 +338,9 @@ impl Bar {
             ticked.borrow_mut().push(Change::Tick);
             glib::ControlFlow::Continue
         });
-        ask_logind(&queue);
         ask_control_center(&queue);
         let current = Appearance::read();
         let look = look::look(&current, layout.preset());
-        let clock = Clock::new();
-        let clock_texts = clock.texts();
         Bar {
             client,
             source,
@@ -454,17 +354,11 @@ impl Bar {
             outs: HashMap::new(),
             queue,
             debounce: Slot::default(),
-            clock,
-            clock_texts,
+            modules,
             popover: None,
-            offered: [false; 5],
             control_center: false,
             stale: false,
             modules_stale: false,
-            aids,
-            aids_shown: String::new(),
-            reader_key,
-            magnifier_key,
             ready: false,
             open_on_start: std::env::var("ATHANOR_BAR_OPEN")
                 .ok()
@@ -488,7 +382,7 @@ impl Bar {
     }
 
     /// Adds `module`'s widgets to `group`; false when it is not drawn, without its source or
-    /// not yet built by the toolkit bar.
+    /// not yet ported.
     fn module(
         &mut self,
         ui: &mut Ui,
@@ -526,82 +420,6 @@ impl Bar {
                 out.row = Row::build(ui, group, states, &mut self.icons, scale, Side::Bottom);
                 true
             }
-            Module::Clock => {
-                let (short, long) = self.clock_texts.clone().unwrap_or_default();
-                let button = ui.labelled_button(group, &long, None, 0.0, &short);
-                ui.set_tooltip(button, Some(&long));
-                ui.set_has_popup(button, true);
-                out.acts.push((button, Act::Popover(Module::Clock)));
-                // `.bar-clock`: semibold figures of one width.
-                ui.set_text_style(
-                    button,
-                    TextStyle {
-                        weight: 600,
-                        features: vec![*b"tnum"],
-                        ..TextStyle::default()
-                    },
-                );
-                out.clock = Some(button);
-                true
-            }
-            Module::Power => {
-                let button = self.icons.button(
-                    ui,
-                    group,
-                    "system-shutdown-symbolic",
-                    ICON,
-                    scale,
-                    &tr("Power"),
-                    None,
-                );
-                ui.set_has_popup(button, true);
-                out.acts.push((button, Act::Popover(Module::Power)));
-                true
-            }
-            Module::InputSource => {
-                let Some(name) = self.client.as_deref().and_then(modules::input_name) else {
-                    return false;
-                };
-                let icon = "input-keyboard-symbolic";
-                let button = self.icons.button(ui, group, icon, ICON, scale, &name, None);
-                ui.set_has_popup(button, true);
-                out.acts.push((button, Act::Popover(module)));
-                true
-            }
-            Module::Tiling => {
-                let connector = out.connector.as_deref();
-                let shown = self
-                    .client
-                    .as_deref()
-                    .and_then(|client| modules::tiling_target(client, connector))
-                    .is_some();
-                if !shown {
-                    return false;
-                }
-                let icon = "view-grid-symbolic";
-                let button = self.icons.button(ui, group, icon, ICON, scale, &tr("Tiling"), None);
-                ui.set_has_popup(button, true);
-                out.acts.push((button, Act::Popover(module)));
-                true
-            }
-            Module::Accessibility => {
-                // The keyboard aids' state beside the icon (AX11).
-                let shown = self.aids.shown();
-                let name = tr("Accessibility");
-                let icon = "preferences-desktop-accessibility-symbolic";
-                let button = match self.icons.image(icon, ICON, scale) {
-                    Some(image) if !shown.is_empty() => {
-                        let button =
-                            ui.labelled_button(group, &name, Some(image), f32::from(ICON), &shown);
-                        ui.set_tooltip(button, Some(&name));
-                        button
-                    }
-                    _ => self.icons.button(ui, group, icon, ICON, scale, &name, None),
-                };
-                ui.set_has_popup(button, true);
-                out.acts.push((button, Act::Popover(module)));
-                true
-            }
             Module::ControlCenter => {
                 if !self.control_center {
                     return false;
@@ -618,7 +436,26 @@ impl Bar {
                 out.acts.push((button, Act::ControlCenter));
                 true
             }
-            _ => false,
+            _ => {
+                let top = self.layout.panel() == PanelEdge::Top;
+                let Some((_, drawn)) = self.modules.iter_mut().find(|(m, _)| *m == module) else {
+                    return false;
+                };
+                let mut cx = Cx {
+                    icons: &mut self.icons,
+                    theme: &self.look.popover,
+                    rtl: self.rtl,
+                    top,
+                    scale,
+                    connector: out.connector.as_deref(),
+                };
+                let Some(button) = drawn.button(&mut cx, ui, group) else {
+                    return false;
+                };
+                ui.set_has_popup(button, true);
+                out.acts.push((button, Act::Popover(module)));
+                true
+            }
         }
     }
 
@@ -635,7 +472,6 @@ impl Bar {
             info,
             acts: Vec::new(),
             row: Row::default(),
-            clock: None,
             connector,
         };
         let line = ui.add(Ui::ROOT, athanor_sal::Kind::CenterBox);
@@ -679,7 +515,7 @@ impl Bar {
     /// Draws every surface again: the look, the layout or a module's source changed.
     fn rebuild_all(&mut self, shell: &mut Shell) {
         self.close_popover(shell);
-        self.aids_shown = self.aids.shown();
+        self.modules_stale = false;
         let states = self.states();
         let ids: Vec<SurfaceId> = self.outs.keys().copied().collect();
         for id in ids {
@@ -716,25 +552,32 @@ impl Bar {
         }
     }
 
-    /// The clock's text, once a second: each surface's button changes only when it does.
-    fn tick(&mut self, shell: &mut Shell) {
-        let Some(texts) = self.clock.texts() else {
-            return;
-        };
-        if self.clock_texts.as_ref() == Some(&texts) {
-            return;
-        }
-        let (short, long) = &texts;
+    /// Sets each module's stale buttons to their sources in place, or marks the surfaces to be
+    /// drawn again where a button cannot be set so.
+    fn update_buttons(&mut self, shell: &mut Shell) {
+        let top = self.layout.panel() == PanelEdge::Top;
         for (id, out) in &self.outs {
-            let (Some(button), Some(ui)) = (out.clock, shell.ui_mut(*id)) else {
+            let Some(ui) = shell.ui_mut(*id) else {
                 continue;
             };
-            ui.set_shown_text(button, short);
-            ui.set_text(button, long);
-            ui.set_tooltip(button, Some(long));
-            ui.layout();
+            for (module, drawn) in &mut self.modules {
+                let mut cx = Cx {
+                    icons: &mut self.icons,
+                    theme: &self.look.popover,
+                    rtl: self.rtl,
+                    top,
+                    scale: out.scale(),
+                    connector: out.connector.as_deref(),
+                };
+                if !drawn.stale(&cx) {
+                    continue;
+                }
+                match out.button(Act::Popover(*module)) {
+                    Some(button) if drawn.update(&mut cx, ui, button) => {}
+                    _ => self.modules_stale = true,
+                }
+            }
         }
-        self.clock_texts = Some(texts);
     }
 
     /// SH10: the first-session pick, on the outputs the shell knows, until it is done.
@@ -768,43 +611,43 @@ impl Bar {
     }
 
     /// Opens `module`'s popover on the surface of the first output by name, for the captures
-    /// of BR9.
+    /// of BR9 and for a module's source that asks.
     fn open_module(&mut self, shell: &mut Shell, module: Module) {
-        let target = Some(Act::Popover(module));
         let first = self
             .outs
             .iter()
             .min_by(|a, b| a.1.info.name.cmp(&b.1.info.name))
             .map(|(id, _)| *id);
-        let found = target.zip(first).and_then(|(act, surface)| {
-            let button = self.outs.get(&surface)?.button(act)?;
+        let found = first.and_then(|surface| {
+            let button = self.outs.get(&surface)?.button(Act::Popover(module))?;
             Some((surface, button))
         });
         match found {
             Some((surface, button)) => self.open_popover(shell, surface, button, module),
             None => tracing::warn!(
                 module = module.id(),
-                "ATHANOR_BAR_OPEN names a module the toolkit bar does not show"
+                "a module's popover was asked for, but the bar does not show the module"
             ),
         }
     }
 
     fn close_popover(&mut self, shell: &mut Shell) {
-        if self.popover.take().is_some() {
+        if let Some(popover) = self.popover.take() {
             shell.close_popup();
+            self.closed(popover.open);
         }
     }
 
-    fn open_power(&mut self, shell: &mut Shell, surface: SurfaceId, button: WidgetId, page: Page) {
-        if page == Page::Actions {
-            ask_logind(&self.queue);
+    /// Tells the module whose popover closed.
+    fn closed(&mut self, open: Open) {
+        if let Open::Module(module) = open {
+            if let Some((_, drawn)) = self.modules.iter_mut().find(|(m, _)| *m == module) {
+                drawn.closed();
+            }
         }
-        let top = self.layout.panel() == PanelEdge::Top;
-        let (ui, menu) = power::build(self.look.popover.clone(), self.rtl, top, page, &self.offered);
-        self.show_popover(shell, surface, button, ui, Open::Power(menu));
     }
 
-    /// Opens `module`'s popover from its `button` on `surface`.
+    /// Opens `module`'s popover from its `button` on `surface`, replacing an open one.
     fn open_popover(
         &mut self,
         shell: &mut Shell,
@@ -812,45 +655,36 @@ impl Bar {
         button: WidgetId,
         module: Module,
     ) {
-        let (theme, rtl) = (self.look.popover.clone(), self.rtl);
+        // The popover the new one replaces is told it closed, unless it is the module's own,
+        // which a second page opens again.
+        let reopening = self
+            .popover
+            .as_ref()
+            .is_some_and(|p| matches!(p.open, Open::Module(m) if m == module));
+        if !reopening {
+            if let Some(popover) = self.popover.take() {
+                self.closed(popover.open);
+            }
+        }
         let top = self.layout.panel() == PanelEdge::Top;
-        let Some(out) = self.outs.get(&surface) else {
+        let (Some(out), Some((_, drawn))) = (
+            self.outs.get(&surface),
+            self.modules.iter_mut().find(|(m, _)| *m == module),
+        ) else {
             return;
         };
-        let scale = out.info.scale_factor.clamp(1, 16) as u16;
-        let client = self.client.clone();
-        let (ui, open) = match (module, client) {
-            (Module::Power, _) => return self.open_power(shell, surface, button, Page::Actions),
-            (Module::Clock, _) => {
-                let Some(ui) = modules::calendar(theme, rtl, top, &mut self.icons, scale) else {
-                    return;
-                };
-                (ui, Open::Calendar)
-            }
-            (Module::InputSource, Some(client)) => {
-                let (ui, radios) = modules::input(theme, rtl, top, &client);
-                (ui, Open::Input(radios))
-            }
-            (Module::Tiling, Some(client)) => {
-                let Some(target) = modules::tiling_target(&client, out.connector.as_deref())
-                else {
-                    return;
-                };
-                let (ui, switch) = modules::tiling(theme, rtl, top, target.1);
-                (ui, Open::Tiling(switch, target))
-            }
-            (Module::Accessibility, client) => {
-                let state = AccessState {
-                    reader: self.reader_key.as_ref(),
-                    compositor: client.and_then(|client| client.accessibility()),
-                    offer: self.aids.offer(),
-                };
-                let (ui, widgets) = modules::accessibility(theme, rtl, top, &state);
-                (ui, Open::Accessibility(widgets))
-            }
-            _ => return,
+        let mut cx = Cx {
+            icons: &mut self.icons,
+            theme: &self.look.popover,
+            rtl: self.rtl,
+            top,
+            scale: out.scale(),
+            connector: out.connector.as_deref(),
         };
-        self.show_popover(shell, surface, button, ui, open);
+        let Some(ui) = drawn.open(&mut cx) else {
+            return;
+        };
+        self.show_popover(shell, surface, button, ui, Open::Module(module));
     }
 
     fn show_popover(
@@ -870,7 +704,11 @@ impl Bar {
                     open,
                 });
             }
-            Err(err) => tracing::error!(error = %err, "cannot open the popover"),
+            Err(err) => {
+                tracing::error!(error = %err, "cannot open the popover");
+                self.popover = None;
+                self.closed(open);
+            }
         }
     }
 
@@ -879,155 +717,79 @@ impl Bar {
         let Some(popover) = &self.popover else {
             return;
         };
-        let popup = popover.popup;
-        match (&popover.open, event) {
+        let (parent, anchor) = (popover.parent, popover.anchor);
+        let module = match (&popover.open, &event) {
             (Open::Entry(rows), Event::Clicked(widget)) => {
-                if let Some(act) = rows.act(widget) {
+                if let Some(act) = rows.act(*widget) {
                     self.close_popover(shell);
                     if let Some(client) = &self.client {
                         row::menu_act(client, &self.favorites, act, APP);
                     }
                     self.stale = true;
                 }
+                return;
             }
-            (Open::Power(menu), Event::Clicked(widget)) => {
-                if let Some(act) = menu.act(widget) {
-                    self.power_act(shell, act);
-                }
-            }
-            (Open::Input(radios), Event::Selected(widget)) => {
-                let group = radios.iter().find(|(radio, _)| *radio == widget);
-                if let (Some((_, group)), Some(client)) = (group, &self.client) {
-                    if let Err(err) = client.set_keyboard_group(*group) {
-                        tracing::error!(error = %err, "cannot change the input source");
-                    }
-                }
-            }
-            (Open::Tiling(switch, (id, mode)), Event::Toggled(widget)) if *switch == widget => {
-                let (switch, id, mode) = (*switch, *id, *mode);
-                let sent = self
-                    .client
-                    .as_ref()
-                    .map(|client| client.set_tiling(id, tiling::toggled(mode)));
-                if let Some(Err(err)) = sent {
-                    tracing::error!(error = %err, "cannot change the tiling mode");
-                    // No workspace event follows a request that was not sent: show the mode
-                    // the workspace still has.
-                    if let Some(ui) = shell.ui_mut(popup) {
-                        ui.set_active(switch, mode == Tiling::Tiled);
-                    }
-                }
-            }
-            (
-                Open::Accessibility(_),
-                Event::Toggled(widget) | Event::Selected(widget) | Event::Clicked(widget),
-            ) => self.access_event(shell, popup, widget),
-            _ => {}
-        }
+            (Open::Entry(_), _) => return,
+            (Open::Module(module), _) => *module,
+        };
+        let reply = self.with_module(shell, module, |drawn, cx, ui| drawn.event(cx, ui, event));
+        self.reply(shell, parent, anchor, module, reply);
     }
 
-    /// Acts on the accessibility menu's `widget`, as the GTK menu's rows do.
-    fn access_event(&mut self, shell: &mut Shell, popup: SurfaceId, widget: WidgetId) {
-        let Some(Popover {
-            open: Open::Accessibility(widgets),
-            parent,
-            anchor,
-            ..
-        }) = &self.popover
-        else {
-            return;
+    /// Runs `act` on `module` with the open popover's surface and widgets.
+    fn with_module(
+        &mut self,
+        shell: &mut Shell,
+        module: Module,
+        act: impl FnOnce(&mut dyn modules::Module, &mut Cx, &mut Ui) -> Reply,
+    ) -> Reply {
+        let top = self.layout.panel() == PanelEdge::Top;
+        let Some(popover) = &self.popover else {
+            return Reply::Stay;
         };
-        let (parent, anchor) = (*parent, *anchor);
-        let Some(ui) = shell.ui_mut(popup) else {
-            return;
+        let (Some(out), Some(ui), Some((_, drawn))) = (
+            self.outs.get(&popover.parent),
+            shell.ui_mut(popover.popup),
+            self.modules.iter_mut().find(|(m, _)| *m == module),
+        ) else {
+            return Reply::Stay;
         };
-        let on = ui.is_active(widget);
-        let compositor = self.client.as_ref().and_then(|client| client.accessibility());
-        if widget == widgets.high_contrast {
-            if let Err(err) =
-                appearance::apply(|choice| choice.high_contrast = on, theme::write_cosmic)
-            {
-                tracing::error!(error = %err, "cannot switch high contrast");
-                ui.set_active(widget, Appearance::read().high_contrast);
-            }
-        } else if Some(widget) == widgets.reader {
-            if let Some(key) = &self.reader_key {
-                if let Err(err) = key.set_boolean(screen_reader::KEY, on) {
-                    tracing::error!(error = %err, "cannot switch the screen reader");
-                    ui.set_active(widget, key.boolean(screen_reader::KEY));
-                }
-            }
-        } else if Some(widget) == widgets.magnifier {
-            let sent = magnifier::switch(self.magnifier_key.as_ref(), on, |enabled| {
-                self.client
-                    .as_ref()
-                    .map_or(Ok(()), |client| client.set_magnifier(enabled))
-                    .map_err(|err| err.to_string())
-            });
-            if let Err(err) = sent {
-                tracing::error!(error = %err, "cannot switch the magnifier");
-                // Show the compositor's state again.
-                if let Some(state) = compositor {
-                    widgets.show(ui, state);
-                }
-            }
-        } else if Some(widget) == widgets.accept {
-            self.aids.accept();
-            // The menu again, without the offer, and the button without it.
-            self.modules_stale = true;
-            self.open_popover(shell, parent, anchor, Module::Accessibility);
-        } else if Some(widget) == widgets.inverted
-            || widgets.filters.iter().any(|(radio, _)| *radio == widget)
-        {
-            // Inversion and the filter are one compositor request: each sends the other's
-            // state.
-            if let (Some((inverted, filter)), Some(client)) =
-                (widgets.screen_filter(ui), &self.client)
-            {
-                if let Err(err) = client.set_screen_filter(inverted, filter) {
-                    tracing::error!(error = %err, "cannot change the screen filter");
-                    if let Some(state) = compositor {
-                        widgets.show(ui, state);
-                    }
-                }
-            }
+        let mut cx = Cx {
+            icons: &mut self.icons,
+            theme: &self.look.popover,
+            rtl: self.rtl,
+            top,
+            scale: out.scale(),
+            connector: out.connector.as_deref(),
+        };
+        act(drawn.as_mut(), &mut cx, ui)
+    }
+
+    fn reply(
+        &mut self,
+        shell: &mut Shell,
+        parent: SurfaceId,
+        anchor: WidgetId,
+        module: Module,
+        reply: Reply,
+    ) {
+        match reply {
+            Reply::Stay => {}
+            Reply::Close => self.close_popover(shell),
+            Reply::Reopen => self.open_popover(shell, parent, anchor, module),
         }
     }
 
     /// Sets the open popover's widgets to their sources' state, after a change of them.
     fn refresh_popover(&mut self, shell: &mut Shell) {
-        let (Some(popover), Some(client)) = (self.popover.as_mut(), &self.client) else {
+        let Some((parent, anchor, module)) = self.popover.as_ref().and_then(|p| match p.open {
+            Open::Module(module) => Some((p.parent, p.anchor, module)),
+            Open::Entry(_) => None,
+        }) else {
             return;
         };
-        let Some(ui) = shell.ui_mut(popover.popup) else {
-            return;
-        };
-        let connector = self
-            .outs
-            .get(&popover.parent)
-            .and_then(|out| out.connector.as_deref());
-        match &mut popover.open {
-            Open::Input(radios) => {
-                let group = client.keyboard_group();
-                if let Some((radio, _)) = radios.iter().find(|(_, g)| *g == group) {
-                    ui.set_active(*radio, true);
-                }
-            }
-            Open::Tiling(switch, drawn) => match modules::tiling_target(client, connector) {
-                Some(target) if target.0 == drawn.0 => {
-                    ui.set_active(*switch, target.1 == Tiling::Tiled);
-                    *drawn = target;
-                }
-                // Another workspace is active, or none reports its mode.
-                _ => self.close_popover(shell),
-            },
-            Open::Accessibility(widgets) => {
-                if let Some(state) = client.accessibility() {
-                    widgets.show(ui, state);
-                }
-            }
-            _ => {}
-        }
+        let reply = self.with_module(shell, module, |drawn, cx, ui| drawn.refresh(cx, ui));
+        self.reply(shell, parent, anchor, module, reply);
     }
 
     /// Says `text` through the first surface, as the GTK bar through its first window.
@@ -1039,24 +801,6 @@ impl Bar {
             .map(|(id, _)| *id);
         if let Some(ui) = first.and_then(|id| shell.ui_mut(id)) {
             ui.announce(text, Priority::Polite);
-        }
-    }
-
-    fn power_act(&mut self, shell: &mut Shell, act: PowerAct) {
-        let Some((parent, anchor)) = self.popover.as_ref().map(|p| (p.parent, p.anchor)) else {
-            return;
-        };
-        match act {
-            PowerAct::Ask(action) => self.open_power(shell, parent, anchor, Page::Confirm(action)),
-            PowerAct::Cancel => self.open_power(shell, parent, anchor, Page::Actions),
-            PowerAct::Run(action) => {
-                self.close_popover(shell);
-                glib::spawn_future_local(async move {
-                    if let Err(err) = logind::run(action).await {
-                        tracing::error!(error = %err, action = action.id(), "the power action failed");
-                    }
-                });
-            }
         }
     }
 
@@ -1090,17 +834,10 @@ impl Bar {
             },
         );
         self.stale |= rows.stale;
-        match shell.open_popup(surface, button, ui, inside(self.layout)) {
-            Ok(popup) => {
-                self.popover = Some(Popover {
-                    parent: surface,
-                    anchor: button,
-                    popup,
-                    open: Open::Entry(rows),
-                });
-            }
-            Err(err) => tracing::error!(error = %err, "cannot open the entry's menu"),
+        if let Some(popover) = self.popover.take() {
+            self.closed(popover.open);
         }
+        self.show_popover(shell, surface, button, ui, Open::Entry(rows));
     }
 
     fn press(&mut self, shell: &mut Shell, surface: SurfaceId, button: WidgetId) {
@@ -1161,7 +898,6 @@ impl Application for Bar {
                     info: output.clone(),
                     acts: Vec::new(),
                     row: Row::default(),
-                    clock: None,
                     connector: output.name.clone(),
                 },
             );
@@ -1213,7 +949,9 @@ impl Application for Bar {
             .as_ref()
             .is_some_and(|p| shell.popup_parent() != Some(p.parent))
         {
-            self.popover = None;
+            if let Some(popover) = self.popover.take() {
+                self.closed(popover.open);
+            }
         }
         let changes = std::mem::take(&mut *self.queue.borrow_mut());
         for change in changes {
@@ -1230,8 +968,9 @@ impl Application for Bar {
                     self.icons.reset(self.look.bar.text);
                     // A module's popover stays open in the new look, as high contrast
                     // switched from the accessibility menu.
-                    let open = self.popover.as_ref().and_then(|popover| {
-                        Some((popover.parent, popover.open.module()?))
+                    let open = self.popover.as_ref().and_then(|popover| match popover.open {
+                        Open::Module(module) => Some((popover.parent, module)),
+                        Open::Entry(_) => None,
                     });
                     self.rebuild_all(shell);
                     if let Some((surface, module)) = open {
@@ -1249,31 +988,31 @@ impl Application for Bar {
                     self.icons.reset(self.look.bar.text);
                     self.stale = true;
                 }
-                Change::Tick => self.tick(shell),
-                Change::Offered(action, offered) => {
-                    if let Some(at) = Action::ALL.iter().position(|a| *a == action) {
-                        self.offered[at] = offered;
-                    }
-                }
+                Change::Tick => {}
                 Change::ControlCenter(present) => {
                     if present != self.control_center {
                         self.control_center = present;
                         self.rebuild_all(shell);
                     }
                 }
-                Change::Modules => {
-                    self.modules_stale = true;
+                Change::Compositor(event) => {
+                    let heard: Vec<String> = self
+                        .modules
+                        .iter_mut()
+                        .filter_map(|(_, drawn)| drawn.heard(&event))
+                        .collect();
+                    for text in heard {
+                        self.announce(shell, &text);
+                    }
                     self.refresh_popover(shell);
                 }
-                Change::Announce(text) => self.announce(shell, &text),
+                Change::Module(Wakeup::Changed) => self.refresh_popover(shell),
             }
         }
-        // A rejected key or an offer expires with time, not with an event.
-        if self.aids.shown() != self.aids_shown {
-            self.modules_stale = true;
-        }
+        // The clock's minute, a keyboard aid's notice that expired, a layout or a workspace
+        // that changed: each module says whether its buttons still show its source.
+        self.update_buttons(shell);
         if self.modules_stale && self.popover.is_none() {
-            self.modules_stale = false;
             self.rebuild_all(shell);
         }
         if self.stale && self.popover.is_none() {

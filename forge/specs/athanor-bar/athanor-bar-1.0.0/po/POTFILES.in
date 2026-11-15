@@ -9,7 +9,12 @@ src/order.rs
 src/power.rs
 src/tiling.rs
 src/toolkit/bar.rs
-src/toolkit/power.rs
+src/toolkit/modules/accessibility.rs
+src/toolkit/modules/aids.rs
+src/toolkit/modules/clock.rs
+src/toolkit/modules/input.rs
+src/toolkit/modules/power.rs
+src/toolkit/modules/tiling.rs
 src/ui/accessibility.rs
 src/ui/audio.rs
 src/ui/battery.rs
