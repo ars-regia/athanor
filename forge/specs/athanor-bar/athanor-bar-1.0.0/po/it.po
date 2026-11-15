@@ -243,19 +243,19 @@ msgstr "%a %-d %b %-I:%M %p"
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr "%A %-d %B %Y, %-I:%M %p"
 
-#: src/ui/bar.rs:433
+#: src/ui/bar.rs:437
 msgid "Control center"
 msgstr "Centro di controllo"
 
-#: src/ui/bar.rs:469 src/ui/bar.rs:882
+#: src/ui/bar.rs:475 src/ui/bar.rs:955
 msgid "Bar"
 msgstr "Barra"
 
-#: src/ui/bar.rs:830
+#: src/ui/bar.rs:903
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/bar.rs:832
+#: src/ui/bar.rs:905
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
@@ -448,6 +448,10 @@ msgstr "Affiancamento"
 #: src/ui/modules/tiling.rs:75
 msgid "Tile windows"
 msgstr "Affianca le finestre"
+
+#: src/ui/modules/tray.rs:747
+msgid "System tray"
+msgstr "Vassoio di sistema"
 
 #~ msgid "Launcher"
 #~ msgstr "Avvio applicazioni"
@@ -718,9 +722,6 @@ msgstr "Affianca le finestre"
 
 #~ msgid "Go back"
 #~ msgstr "Torna indietro"
-
-#~ msgid "System tray"
-#~ msgstr "Vassoio di sistema"
 
 #~ msgid "Not verified: the project moved; this machine is moving with it"
 #~ msgstr "Non verificata: il progetto ha cambiato indirizzo e questa macchina lo sta seguendo"

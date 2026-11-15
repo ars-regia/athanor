@@ -13,6 +13,7 @@ src/ui/modules/clock.rs
 src/ui/modules/input.rs
 src/ui/modules/power.rs
 src/ui/modules/tiling.rs
+src/ui/modules/tray.rs
 ../../../../system/athanor-controls/src/audio.rs
 ../../../../system/athanor-controls/src/battery.rs
 ../../../../system/athanor-controls/src/bluetooth.rs
