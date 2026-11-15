@@ -46,9 +46,22 @@ PASSWORDS = ["correct horse battery", "staple-9-orbit"]
 SECTIONS = []
 
 
+def serves_agent(bus, name):
+    """Whether the connection `name` serves the secret agent: the bar's other connection to
+    the system bus, GIO's for logind and the shield, serves no object there."""
+    try:
+        (xml,) = fx.call(
+            bus, name, SECRET_AGENT, "org.freedesktop.DBus.Introspectable", "Introspect", reply="(s)"
+        )
+    except GLib.Error:
+        return False
+    return "org.freedesktop.NetworkManager.SecretAgent" in xml
+
+
 def bar_name(bus, pid, seconds=10):
     """The bar's unique name on the private system bus: the connection whose process is
-    the bar. The modules connect after READY=1, so the name is waited for."""
+    the bar and that serves the models' agents. The modules connect after READY=1, so the
+    name is waited for."""
     deadline = time.monotonic() + seconds
     while True:
         (names,) = fx.call(
@@ -62,7 +75,7 @@ def bar_name(bus, pid, seconds=10):
                 bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
                 "GetConnectionUnixProcessID", "(s)", (name,), "(u)",
             )
-            if owner_pid == pid:
+            if owner_pid == pid and serves_agent(bus, name):
                 return name
         if time.monotonic() > deadline:
             return None
