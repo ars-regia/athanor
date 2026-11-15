@@ -151,7 +151,9 @@ build_image() {
 # call with an error that does not name the cache, so it is refused before cargo starts.
 cargo_cache=()
 cargo_cache_setup() {
-    [ -n "${ATHANOR_RIG_SCCACHE:-}" ] || return 0
+    if [ -z "${ATHANOR_RIG_SCCACHE:-}" ]; then
+        return 0
+    fi
     case $ATHANOR_RIG_SCCACHE in
     /*) ;;
     *)
