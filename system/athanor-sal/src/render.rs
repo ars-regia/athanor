@@ -587,15 +587,16 @@ pub fn paint<C: Canvas>(
                     draw_island(ctx, &t, fill, arrow(ui, id, fill));
                 }
             }
-            // Flat, filled only under the pointer, with its image in the middle and the line of
-            // a focused application along its indicator's side.
+            // Flat, filled only under the pointer or while its popup is open, as GTK's checked
+            // menu button, with its image in the middle and the line of a focused application
+            // along its indicator's side.
             Kind::IconButton {
                 image,
                 size,
                 indicator,
                 ..
             } => {
-                if hover == Some(id) {
+                if hover == Some(id) || widget.expanded == Some(true) {
                     ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
@@ -626,7 +627,7 @@ pub fn paint<C: Canvas>(
             // Flat as an icon button, its image then its text centred together, mirrored in
             // right to left.
             Kind::LabelledButton { image, size, .. } => {
-                if hover == Some(id) {
+                if hover == Some(id) || widget.expanded == Some(true) {
                     ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
