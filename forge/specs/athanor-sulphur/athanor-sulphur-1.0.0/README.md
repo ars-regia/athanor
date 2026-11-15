@@ -195,6 +195,8 @@ GPU's list of lessees no longer has it, and its CRTCs disabled. The types of `sr
 ensure only that `locked` needs a `Revoked`, which `Leases::proof` makes once every lease has been
 handed to the closure the caller passes and that closure has reported it ended; the read of the
 list of lessees is in that closure, `finish` in `src/udev.rs`, which every call there passes.
+When a lease cannot be ended before a switch the compositor makes, the compositor keeps its
+terminal and logs the lease's connectors as an error.
 Until then the lock is shown and the leases tried again once a second, at each scan and at the
 resume. While the session is paused the GPU is not touched.
 

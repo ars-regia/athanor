@@ -2277,7 +2277,8 @@ impl DrmLeaseHandler for State {
     /// The lease device of the udev backend. The global exists only there, made with that
     /// state, which is never dropped or replaced, so every request of a lease client finds it.
     /// Smithay's trait returns no `Option` (its drm_syncobj handler's does), so the other arm,
-    /// which no request reaches, has nothing to return and ends the compositor.
+    /// which no request reaches, has nothing to return and ends the compositor (debt tracked by
+    /// #1186).
     fn drm_lease_state(&mut self, _node: DrmNode) -> &mut DrmLeaseState {
         if let Backend::Drm(drm) = &mut self.backend {
             if let Some(leasing) = &mut drm.leasing {
