@@ -170,6 +170,8 @@ pub struct Bar {
     debounce: Slot,
     /// The modules with a popover, in the order of `Module::ALL`.
     modules: Vec<(Module, Box<dyn modules::Module>)>,
+    /// The activation tokens asked for and not answered yet, with the module each goes to.
+    tokens: Vec<(u64, Module)>,
     popover: Option<Popover>,
     control_center: bool,
     /// The windows or the favourites changed while a popover held the rows.
@@ -356,6 +358,7 @@ impl Bar {
             queue,
             debounce: Slot::default(),
             modules,
+            tokens: Vec::new(),
             popover: None,
             control_center: false,
             stale: false,
@@ -920,6 +923,14 @@ impl Bar {
     }
 }
 
+impl Bar {
+    fn hand_token(&mut self, module: Module, token: Option<String>) {
+        if let Some((_, drawn)) = self.modules.iter_mut().find(|(m, _)| *m == module) {
+            drawn.activation_token(token);
+        }
+    }
+}
+
 impl Application for Bar {
     /// Every output has a surface; `output_changed`, which follows at once, draws it.
     fn output(&mut self, _output: &OutputInfo) -> Option<(Ui, LayerOptions)> {
@@ -1006,6 +1017,13 @@ impl Application for Bar {
         }
     }
 
+    fn activation_token(&mut self, _shell: &mut Shell, request: u64, token: String) {
+        if let Some(at) = self.tokens.iter().position(|(asked, _)| *asked == request) {
+            let (_, module) = self.tokens.remove(at);
+            self.hand_token(module, Some(token));
+        }
+    }
+
     fn drawn(&mut self, shell: &mut Shell, _surface: SurfaceId) {
         self.notify_ready(shell);
         self.open_asked(shell);
@@ -1088,6 +1106,16 @@ impl Application for Bar {
                     self.refresh_popover(shell);
                 }
                 Change::Module(Wakeup::Changed) => self.refresh_popover(shell),
+                Change::Module(Wakeup::Activation(module)) => {
+                    let input = shell.last_input();
+                    match shell.request_activation_token(
+                        input.map(|(surface, _)| surface),
+                        input.map(|(_, serial)| serial),
+                    ) {
+                        Some(request) => self.tokens.push((request, module)),
+                        None => self.hand_token(module, None),
+                    }
+                }
                 Change::Module(Wakeup::Open(module)) => {
                     let open = self
                         .popover

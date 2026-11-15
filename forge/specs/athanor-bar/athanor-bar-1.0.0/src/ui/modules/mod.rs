@@ -37,6 +37,10 @@ pub enum Wakeup {
     /// A reply the person must see: the bar opens the module's popover, or draws it again
     /// when it is open.
     Open(order::Module),
+    /// The module asks for an xdg-activation token for an action of the input just handled,
+    /// which lets the application it calls raise its window: the bar asks the compositor with
+    /// the last input's surface and serial, and hands the token to `activation_token`.
+    Activation(order::Module),
 }
 
 /// The bar's handle for a module's sources, which may outlive it.
@@ -140,6 +144,10 @@ pub trait Module {
     /// module's own. Where a widget that takes no focus answers the pointer, as GTK's click
     /// gesture on a box.
     fn pressed(&mut self, _ui: &Ui, _surface: Option<SurfaceId>, _at: (f32, f32)) {}
+
+    /// The token of a `Wakeup::Activation`, in the order they were asked for; `None` when the
+    /// compositor offers no xdg-activation.
+    fn activation_token(&mut self, _token: Option<String>) {}
 }
 
 /// The module that draws `module`, or `None` for one without a popover or not ported yet.
