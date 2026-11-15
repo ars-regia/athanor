@@ -47,15 +47,15 @@
 #   rig.sh layer-guard <greeter|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|bar-calendar|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
-#   rig.sh atspi <greeter|chooser|bar|bar-calendar|dock|launcher|control-center> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <greeter|chooser|bar|bar-calendar|bar-network|bar-bluetooth|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-calendar|bar-network|bar-bluetooth|dock|launcher|control-center> it   the same in Italian, with the shipped catalog
 #   rig.sh atspi <bar|bar-modules|dock|launcher|control-center> --matrix   AX17: the walk in light, dark and both high-contrast
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   each page's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter|control-center> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
+#   rig.sh orca <chooser|dock|gallery|bar|bar-network|bar-bluetooth|launcher|greeter|control-center> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           control-center: the panel's walk, then one walk per detail page, against system_fixtures.py
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
@@ -1205,7 +1205,8 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
-            [bar-calendar]="athanor-bar Alimentazione"
+            [bar-calendar]="athanor-bar Alimentazione" [bar-network]="athanor-bar Modalità aereo"
+            [bar-bluetooth]="athanor-bar Dispositivi vicini"
             [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca"
             [control-center]="athanor-control-center Centro di controllo")
         [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
@@ -1287,16 +1288,26 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-sal-chooser"
         ;;
-    bar | bar-calendar)
+    bar | bar-calendar | bar-network | bar-bluetooth)
         # 8 interactive widgets under float: workspaces, applications, clock, input source,
         # accessibility, tiling, power, the shield. Under athanor-sulphur the bar runs as its
         # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
         # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
         # hides workspaces (#835) and applications (#836). bar-calendar opens the clock's
         # calendar too, whose tree the Orca walk never reaches; at least the same widgets.
-        # To record it again, copy <out>/atspi-bar-calendar[-it].json of a GTK run into golden/atspi/.
-        unit='' widgets=8 own=() open=()
-        if [ "$2" = bar-calendar ]; then open=(ATHANOR_BAR_OPEN=clock); fi
+        # bar-network and bar-bluetooth open the network and Bluetooth popovers against
+        # system_fixtures.py, as their goldens, and require a name of the popover: the
+        # fixtures start first, so the settle is longer.
+        # To record it again, copy <out>/atspi-<surface>[-it].json of a GTK run into golden/atspi/.
+        unit='' widgets=8 own=() open=() fixtures=() settle=8
+        case "$2" in
+        bar-calendar) open=(ATHANOR_BAR_OPEN=clock) ;;
+        bar-network) open=(ATHANOR_BAR_OPEN=network) fixtures=(--fixtures) settle=12 required=${required:-Airplane mode} ;;
+        bar-bluetooth)
+            open=(ATHANOR_BAR_OPEN=bluetooth) fixtures=(--fixtures --discovering) settle=12
+            required=${required:-Nearby devices}
+            ;;
+        esac
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-sulphur build-compositor
             unit=--unit widgets=6 own=(--own-compositor float - "${3:-en}")
@@ -1304,12 +1315,12 @@ atspi)
         stage_greeter_icons
         seed_bar "$out/seed-atspi-$2" float top visible light
         atspi_variant "$out/seed-atspi-$2"
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED="/out/seed-atspi-$2" \
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=$settle RIG_CONFIG_SEED="/out/seed-atspi-$2" \
             RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" "${open[@]}" \
             ATSPI_TRANSCRIPT="/out/atspi-$2${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-$2" -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client /out/bin/athanor-bar"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit ${fixtures[*]} --client /out/bin/athanor-bar"
         surface_not_closed atspi "$2" "atspi-$2"
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
         # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
@@ -1434,11 +1445,11 @@ orca)
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
     gallery) component= ;;
-    bar) component=athanor-bar ;;
+    bar | bar-network | bar-bluetooth) component=athanor-bar ;;
     launcher) component=athanor-launcher ;;
     greeter) component=athanor-greeter-ui ;;
     control-center) component=athanor-control-center ;;
-    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'launcher', 'greeter' or 'control-center', not '${2:-}'" >&2; exit 2 ;;
+    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'bar-network', 'bar-bluetooth', 'launcher', 'greeter' or 'control-center', not '${2:-}'" >&2; exit 2 ;;
     esac
     unit=
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
@@ -1549,6 +1560,28 @@ orca)
         # As `atspi bar`: GTK keeps exporting the tree of a surface the compositor closed, so
         # the walk alone would read a bar that is not on screen.
         surface_not_closed orca bar orca-bar
+        ;;
+    bar-network | bar-bluetooth)
+        # The module's popover, opened by ATHANOR_BAR_OPEN over system_fixtures.py, holds the
+        # keyboard: Orca hears it announced with the focus on its first control, then one Tab
+        # for each other control and one more, which comes back round to the first. Network:
+        # Wi-Fi, the three access points it joins (Campus needs Settings and takes no focus),
+        # Office VPN and Airplane mode; Bluetooth: its switch, the paired Headphones and
+        # Keyboard, and the nearby Phone and Speaker.
+        stage_greeter_icons
+        seed_bar "$out/seed-orca-$2" float top visible light
+        if [ "$2" = bar-network ]; then
+            open=network fixtures=(--fixtures) walk=(Tab*6)
+        else
+            open=bluetooth fixtures=(--fixtures --discovering) walk=(Tab*5)
+        fi
+        if [ -n "$unit" ]; then own=(--own-compositor float - "${3:-en}"); fi
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=12 RIG_CONFIG_SEED="/out/seed-orca-$2" \
+            RIG_DATA_OVERLAY="$bar_overlay" ATHANOR_BAR_OPEN=$open \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "orca-$2" -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit ${fixtures[*]}"
+        surface_not_closed orca "$2" "orca-$2"
         ;;
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
