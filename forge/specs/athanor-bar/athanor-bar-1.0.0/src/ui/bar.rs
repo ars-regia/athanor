@@ -178,7 +178,7 @@ pub struct Bar {
     /// once it closes.
     modules_stale: bool,
     ready: bool,
-    /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), opened once ready.
+    /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), until it opens.
     open_on_start: Option<Module>,
     /// The layout paths and the state directory of the first-session pick, until it is done.
     first_session: Option<(Paths, PathBuf)>,
@@ -592,8 +592,8 @@ impl Bar {
     }
 
     /// READY=1 once (Type=notify): at the first frame of a surface, as the GTK bar at its
-    /// window's `map`; then the popover the captures ask for. The first turns run before the
-    /// outputs are announced, so an empty output list is not a reason to be ready.
+    /// window's `map`. The first turns run before the outputs are announced, so an empty output
+    /// list is not a reason to be ready.
     fn notify_ready(&mut self, shell: &mut Shell) {
         if self.ready {
             return;
@@ -605,9 +605,30 @@ impl Bar {
         if let Err(err) = athanor_unit::notify::notify_ready() {
             tracing::error!(error = %err, "cannot tell systemd the bar is ready");
         }
-        if let Some(module) = self.open_on_start.take() {
-            self.open_module(shell, module);
+    }
+
+    /// Opens the popover the captures ask for once the bar is ready and its module shows its
+    /// button on the first output with its content final, as the GTK bar's modules kept the
+    /// request until then. One for a module without a popover opens at once, and is refused.
+    fn open_asked(&mut self, shell: &mut Shell) {
+        let Some(module) = self.open_on_start.filter(|_| self.ready) else {
+            return;
+        };
+        if let Some((_, drawn)) = self.modules.iter().find(|(m, _)| *m == module) {
+            let first = self
+                .outs
+                .values()
+                .min_by(|a, b| a.info.name.cmp(&b.info.name));
+            if !drawn.ready()
+                || first
+                    .and_then(|out| out.button(Act::Popover(module)))
+                    .is_none()
+            {
+                return;
+            }
         }
+        self.open_on_start = None;
+        self.open_module(shell, module);
     }
 
     /// Opens `module`'s popover on the surface of the first output by name, for the captures
@@ -928,6 +949,7 @@ impl Application for Bar {
 
     fn drawn(&mut self, shell: &mut Shell, _surface: SurfaceId) {
         self.notify_ready(shell);
+        self.open_asked(shell);
     }
 
     fn turn(&mut self, shell: &mut Shell) {
@@ -1019,5 +1041,6 @@ impl Application for Bar {
             self.refresh(shell);
         }
         self.notify_ready(shell);
+        self.open_asked(shell);
     }
 }

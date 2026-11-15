@@ -86,6 +86,12 @@ pub trait Module {
         false
     }
 
+    /// Whether the popover the captures ask for (`ATHANOR_BAR_OPEN`) may open now, its content
+    /// final; the bar asks again at every turn until it may.
+    fn ready(&self) -> bool {
+        true
+    }
+
     /// The popover, built from the source now; `None`, logged, when it cannot be drawn.
     fn open(&mut self, cx: &mut Cx) -> Option<Ui>;
 
