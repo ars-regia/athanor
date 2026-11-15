@@ -163,7 +163,9 @@ rig_image() {
 # artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
 build_spec_rig() {
     local base=$1 want=$2 idemp builder rpm ctx id
-    idemp=$(cd "$root/forge" && bash scripts/check_idempotency.sh --package builder \
+    # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
+    # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
+    idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
     builder=$registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp")
     if ! grep -qx 'CACHE_HIT=true' <<< "$idemp"; then
