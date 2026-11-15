@@ -6,21 +6,51 @@ license = "GPL-3.0-or-later"
 description = "The Athanor bar: one layer-shell surface per output with the modules of doc_bar.md"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
+[features]
+default = ["gtk"]
+# The GTK bar, the binary. Without it the models of the modules remain.
+gtk = [
+  "dep:gtk4",
+  "dep:gtk4-layer-shell",
+  "athanor-apps/gtk",
+  "athanor-controls/gtk",
+  "athanor-sulphur-client/gtk",
+  "athanor-style/gtk",
+]
+# The bar drawn with Athanor's own toolkit (doc_own_stack.md, decision 34), beside the GTK one
+# until the switch, as the dock's: no GTK crate in its tree. GLib's main context runs in the
+# toolkit's loop.
+toolkit = [
+  "dep:athanor-sal",
+  "athanor-apps/sal",
+  "athanor-controls/sal",
+  "dep:wayland-client",
+  "athanor-sulphur-client/calloop",
+]
+
 [dependencies]
-athanor-apps = { path = "../../../../system/athanor-apps" }
-athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client" }
-athanor-controls = { path = "../../../../system/athanor-controls" }
+athanor-apps = { path = "../../../../system/athanor-apps", default-features = false }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false }
+athanor-controls = { path = "../../../../system/athanor-controls", default-features = false }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-sal = { path = "../../../../system/athanor-sal", optional = true }
 athanor-services = { path = "../../../../system/athanor-services" }
-athanor-style = { path = "../../../../system/athanor-style" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
 athanor-unit = { path = "../../../../system/athanor-unit" }
+gio = { workspace = true }
 gio-unix = { workspace = true }
 # TimeZone::from_identifier, which reports an unknown zone instead of silently giving UTC.
 glib = { workspace = true, features = ["v2_68"] }
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
+gtk4 = { workspace = true, optional = true }
+gtk4-layer-shell = { workspace = true, optional = true }
+wayland-client = { workspace = true, optional = true }
 # O_NONBLOCK for picture files a peer names: a FIFO must not hang the bar.
 libc = { workspace = true }
 tracing = { workspace = true }
+
+[[bin]]
+name = "athanor-bar"
+path = "src/main.rs"
+required-features = ["gtk"]

@@ -1,8 +1,21 @@
 //! The time zone the clock shows (doc_bar.md, BR3). `$TZ` wins, as for every program.
 //! Otherwise the zone is the target of /etc/localtime, which timedatectl relinks. GLib's
 //! local zone is cached for the life of the process, so the bar names the zone itself.
+//! [`Clock`] reads the zone and the wall clock again at every tick: nothing is counted, so a
+//! resume or a clock that jumps shows at once.
 
+use std::cell::{Cell, RefCell};
+use std::env;
+use std::fs;
 use std::path::{Component, Path};
+use std::rc::Rc;
+
+use gio::prelude::*;
+
+use crate::i18n::tr;
+
+const INTERFACE: &str = "org.gnome.desktop.interface";
+const CLOCK_FORMAT: &str = "clock-format";
 
 /// The user's `clock-format` (doc_languages.md, LN8): `Some(true)` for a 24-hour clock.
 pub fn clock_format(value: Option<&str>) -> Option<bool> {
@@ -57,6 +70,134 @@ pub fn time_zone(id: Option<&str>) -> (glib::TimeZone, bool) {
             None => (glib::TimeZone::local(), true),
         },
         None => (glib::TimeZone::local(), false),
+    }
+}
+
+/// The settings that hold `clock-format`, `None` without the key.
+fn interface_settings() -> Option<gio::Settings> {
+    let schema = gio::SettingsSchemaSource::default()?.lookup(INTERFACE, true);
+    if !schema.is_some_and(|schema| schema.has_key(CLOCK_FORMAT)) {
+        tracing::warn!("{INTERFACE} has no {CLOCK_FORMAT}; the clock follows the locale");
+        return None;
+    }
+    Some(gio::Settings::new(INTERFACE))
+}
+
+/// The user's `clock-format` when they set it, else the locale's own 12/24-hour convention:
+/// the key's default says nothing of the region (doc_languages.md, LN8).
+fn read_hours24(interface: Option<&gio::Settings>) -> bool {
+    let chosen = interface
+        .and_then(|interface| interface.user_value(CLOCK_FORMAT))
+        .and_then(|value| clock_format(value.str()));
+    let now = glib::DateTime::from_utc(2000, 1, 1, 13, 0, 0.0).ok();
+    let format = |pattern| {
+        now.as_ref()
+            .and_then(|now| now.format(pattern).ok())
+            .map(|text| text.to_string())
+            .unwrap_or_default()
+    };
+    twenty_four_hour(chosen, &format("%X"), &format("%p"))
+}
+
+/// The bar's clock: the zone last read and the zone it gave, and whether it shows 24 hours,
+/// the user's `clock-format` followed live, else the locale (BR3).
+pub struct Clock {
+    zone: RefCell<Option<(Option<String>, glib::TimeZone)>>,
+    /// The last tick could not read or format the time: logged once, not every second.
+    failed: Cell<bool>,
+    hours24: Rc<Cell<bool>>,
+    /// Keeps `clock-format` watched.
+    _interface: Option<gio::Settings>,
+}
+
+impl Clock {
+    pub fn new() -> Clock {
+        let interface = interface_settings();
+        let hours24 = Rc::new(Cell::new(read_hours24(interface.as_ref())));
+        if let Some(interface) = &interface {
+            let watched = hours24.clone();
+            interface.connect_changed(Some(CLOCK_FORMAT), move |interface, _| {
+                watched.set(read_hours24(Some(interface)));
+            });
+        }
+        Clock {
+            zone: RefCell::new(None),
+            failed: Cell::new(false),
+            hours24,
+            _interface: interface,
+        }
+    }
+
+    fn current_zone(&self) -> glib::TimeZone {
+        let link = fs::read_link("/etc/localtime").ok();
+        let id = zone(
+            env::var("TZ").ok().as_deref(),
+            link.as_deref().map(Path::new),
+        );
+        let mut last = self.zone.borrow_mut();
+        match &*last {
+            Some((last_id, tz)) if *last_id == id => tz.clone(),
+            _ => {
+                let (tz, unknown) = time_zone(id.as_deref());
+                if unknown {
+                    // Logged when the zone changes, not every second.
+                    tracing::warn!(
+                        zone = id.as_deref().unwrap_or(""),
+                        "unknown time zone; the clock shows local time"
+                    );
+                }
+                *last = Some((id, tz.clone()));
+                tz
+            }
+        }
+    }
+
+    /// The time now in the zone the clock shows.
+    pub fn now(&self) -> Result<glib::DateTime, glib::BoolError> {
+        glib::DateTime::now(&self.current_zone())
+    }
+
+    /// The text the bar shows and the one screen readers say, now; `None`, logged once until
+    /// it works again, when the time cannot be read or formatted.
+    pub fn texts(&self) -> Option<(String, String)> {
+        let (short_pattern, long_pattern) = if self.hours24.get() {
+            (
+                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
+                tr("%a %-d %b %H:%M"),
+                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
+                tr("%A %-d %B %Y, %H:%M"),
+            )
+        } else {
+            (
+                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
+                tr("%a %-d %b %-I:%M %p"),
+                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
+                tr("%A %-d %B %Y, %-I:%M %p"),
+            )
+        };
+        let texts = self.now().and_then(|now| {
+            let short = now.format(&short_pattern)?;
+            let long = now.format(&long_pattern)?;
+            Ok((short.to_string(), long.to_string()))
+        });
+        match texts {
+            Ok(texts) => {
+                self.failed.set(false);
+                Some(texts)
+            }
+            Err(err) => {
+                if !self.failed.replace(true) {
+                    tracing::error!(error = %err, "cannot read or format the time; the clock is not updated");
+                }
+                None
+            }
+        }
+    }
+}
+
+impl Default for Clock {
+    fn default() -> Clock {
+        Clock::new()
     }
 }
 

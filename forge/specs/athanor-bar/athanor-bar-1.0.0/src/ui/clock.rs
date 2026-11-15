@@ -1,89 +1,20 @@
 //! The clock and its calendar (doc_bar.md, BR3). Every tick reads the zone and the wall
-//! clock again: nothing is counted, so a resume or a clock that jumps shows at once.
+//! clock again (`athanor_bar::clock::Clock`).
 
-use std::cell::{Cell, RefCell};
-use std::env;
-use std::fs;
-use std::path::Path;
 use std::rc::Rc;
 
-use athanor_bar::clock;
+use athanor_bar::clock::Clock;
 use gtk4::accessible::Property;
-use gtk4::gio;
-use gtk4::gio::prelude::*;
-use gtk4::glib;
 use gtk4::prelude::*;
 
 use super::popup::Popup;
 use super::{Bar, Changed, ModuleUi};
 use crate::i18n::tr;
 
-const INTERFACE: &str = "org.gnome.desktop.interface";
-const CLOCK_FORMAT: &str = "clock-format";
-
-/// The zone identifier last read, and the zone it gave.
-type Zone = Rc<RefCell<Option<(Option<String>, glib::TimeZone)>>>;
-
 struct ClockUi {
     popup: Popup,
     label: gtk4::Label,
-    zone: Zone,
-    /// The last tick could not read or format the time: logged once, not every second.
-    failed: Cell<bool>,
-    /// Whether the clock shows 24 hours (BR3): the user's `clock-format`, else the locale.
-    hours24: Rc<Cell<bool>>,
-    /// Keeps `clock-format` watched.
-    _interface: Option<gio::Settings>,
-}
-
-/// The settings that hold `clock-format`, `None` without the key.
-fn interface_settings() -> Option<gio::Settings> {
-    let schema = gio::SettingsSchemaSource::default()?.lookup(INTERFACE, true);
-    if !schema.is_some_and(|schema| schema.has_key(CLOCK_FORMAT)) {
-        tracing::warn!("{INTERFACE} has no {CLOCK_FORMAT}; the clock follows the locale");
-        return None;
-    }
-    Some(gio::Settings::new(INTERFACE))
-}
-
-/// The user's `clock-format` when they set it, else the locale's own 12/24-hour convention:
-/// the key's default says nothing of the region (doc_languages.md, LN8).
-fn read_hours24(interface: Option<&gio::Settings>) -> bool {
-    let chosen = interface
-        .and_then(|interface| interface.user_value(CLOCK_FORMAT))
-        .and_then(|value| clock::clock_format(value.str()));
-    let now = glib::DateTime::from_utc(2000, 1, 1, 13, 0, 0.0).ok();
-    let format = |pattern| {
-        now.as_ref()
-            .and_then(|now| now.format(pattern).ok())
-            .map(|text| text.to_string())
-            .unwrap_or_default()
-    };
-    clock::twenty_four_hour(chosen, &format("%X"), &format("%p"))
-}
-
-fn current_zone(zone: &Zone) -> glib::TimeZone {
-    let link = fs::read_link("/etc/localtime").ok();
-    let id = clock::zone(
-        env::var("TZ").ok().as_deref(),
-        link.as_deref().map(Path::new),
-    );
-    let mut last = zone.borrow_mut();
-    match &*last {
-        Some((last_id, tz)) if *last_id == id => tz.clone(),
-        _ => {
-            let (tz, unknown) = clock::time_zone(id.as_deref());
-            if unknown {
-                // Logged when the zone changes, not every second.
-                tracing::warn!(
-                    zone = id.as_deref().unwrap_or(""),
-                    "unknown time zone; the clock shows local time"
-                );
-            }
-            *last = Some((id, tz.clone()));
-            tz
-        }
-    }
+    clock: Rc<Clock>,
 }
 
 impl ModuleUi for ClockUi {
@@ -95,37 +26,8 @@ impl ModuleUi for ClockUi {
         if changed != Changed::Tick {
             return;
         }
-        let (short_pattern, long_pattern) = if self.hours24.get() {
-            (
-                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-                tr("%a %-d %b %H:%M"),
-                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-                tr("%A %-d %B %Y, %H:%M"),
-            )
-        } else {
-            (
-                // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
-                tr("%a %-d %b %-I:%M %p"),
-                // TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
-                tr("%A %-d %B %Y, %-I:%M %p"),
-            )
-        };
-        let texts = glib::DateTime::now(&current_zone(&self.zone)).and_then(|now| {
-            let short = now.format(&short_pattern)?;
-            let long = now.format(&long_pattern)?;
-            Ok((short, long))
-        });
-        let (short, long) = match texts {
-            Ok(texts) => {
-                self.failed.set(false);
-                texts
-            }
-            Err(err) => {
-                if !self.failed.replace(true) {
-                    tracing::error!(error = %err, "cannot read or format the time; the clock is not updated");
-                }
-                return;
-            }
+        let Some((short, long)) = self.clock.texts() else {
+            return;
         };
         if self.label.text() != short {
             self.label.set_text(&short);
@@ -145,28 +47,17 @@ pub fn new(bar: &Rc<Bar>) -> Option<Box<dyn ModuleUi>> {
     let popup = Popup::new(bar, &label, &tr("Clock"));
     let calendar = gtk4::Calendar::new();
     popup.popover.set_child(Some(&calendar));
-    let zone: Zone = Rc::new(RefCell::new(None));
-    let shown_zone = zone.clone();
+    let clock = Rc::new(Clock::new());
+    let shown = clock.clone();
     // The calendar opens on today, even when it was left on another month.
     popup.popover.connect_show(move |_| {
-        if let Ok(now) = glib::DateTime::now(&current_zone(&shown_zone)) {
+        if let Ok(now) = shown.now() {
             calendar.select_day(&now);
         }
     });
-    let interface = interface_settings();
-    let hours24 = Rc::new(Cell::new(read_hours24(interface.as_ref())));
-    if let Some(interface) = &interface {
-        let watched = hours24.clone();
-        interface.connect_changed(Some(CLOCK_FORMAT), move |interface, _| {
-            watched.set(read_hours24(Some(interface)));
-        });
-    }
     Some(Box::new(ClockUi {
         popup,
         label,
-        zone,
-        failed: Cell::new(false),
-        hours24,
-        _interface: interface,
+        clock,
     }))
 }

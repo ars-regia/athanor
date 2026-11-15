@@ -3,9 +3,8 @@
 //! the user's systemd, which ends the session and returns to the greeter. Every call has a
 //! timeout: a logind that does not answer leaves the bar running and the action unoffered.
 
-use athanor_bar::power::{self, Action};
-use gtk4::prelude::*;
-use gtk4::{gio, glib};
+use crate::power::{self, Action};
+use gio::prelude::*;
 
 const TIMEOUT_MS: i32 = 5000;
 const LOGIN1: &str = "org.freedesktop.login1";

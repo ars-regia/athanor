@@ -4,8 +4,6 @@
 
 use std::future::Future;
 
-use gtk4::{gio, glib};
-
 pub const TIMEOUT_MS: i32 = 5000;
 
 pub fn call(
