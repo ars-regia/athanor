@@ -268,8 +268,10 @@ own compositor, and what stays is the imitation inside a bordered window that de
   of its own, so its windows receive the standard globals only and carry the border of confined
   clients; inside the X server, X11 applications are not isolated from one another, and the
   documents that present X11 applications say so. *Amended on 2026-11-16 (decision 33, wave
-  2c):* the satellite's socket also receives `zwp_xwayland_keyboard_grab_manager_v1`, of
-  OS17's satellite class, and that one global beyond the standard ones; the satellite stays
+  2c):* once xwayland-satellite forwards Xwayland's keyboard grab to its compositor, which
+  version 0.8.3 does not do, the satellite's socket also receives
+  `zwp_xwayland_keyboard_grab_manager_v1`, of OS17's satellite class, and that one global
+  beyond the standard ones; until then it receives the standard globals only. The satellite stays
   confined for everything else, its border included. A client is the satellite's when it
   connected through that socket: the grant follows the socket, not an identity, and a string
   the client supplies grants nothing. The compositor keeps the satellite's clients as a
@@ -277,13 +279,16 @@ own compositor, and what stays is the imitation inside a bordered window that de
   class reaches no client of a security context. Tier 2 is kept off the socket,
   `$XDG_RUNTIME_DIR/athanor-x11-<N>`, as `doc_threat_model.md` TM2 lists: the broker's
   `confined` class replaces the runtime directory with a private tmpfs that does not bind it
-  and makes `/tmp/.X11-unix` inaccessible (`doc_session_daemons.md` SD8), and a Flatpak
-  application's runtime directory is Flatpak's own, which holds the socket only when the
-  application is granted that path. Any other process that can connect to the socket is
+  and makes `/tmp/.X11-unix` inaccessible (`doc_session_daemons.md` SD8), and Flatpak's
+  sandbox gives an application a runtime directory of its own, into which the host's
+  paths come only through the permissions the application names (`xdg-run/<path>`;
+  Flatpak's documentation, "Sandbox Permissions", docs.flatpak.org). Any other process
+  that can connect to the socket is
   tier 1 and is treated as the satellite. A confined application's own Wayland connection,
   through a security context, never receives the global. An X11 application reaches the X
   server, a Flatpak one included when it is given the X11 socket, and through it the
-  satellite's grab, which then holds only under the rules of decision 33, wave 2c.
+  satellite's grab, which then holds only under the rules of decision 33, wave 2c, and
+  gives it no more than decision 30's inhibitor gives any client.
 
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
@@ -1304,7 +1309,11 @@ compositor and that the own compositor did not yet offer:
         (`XWaylandClientData`). The compositor implements the protocol itself: the manager and
         grab objects and its own keyboard grab. No X11 code runs in the compositor or is linked
         into it (section 3). It offers the global only to the clients of the satellite's
-        socket (OS4). The rules:
+        socket (OS4). The class and the grab apply once xwayland-satellite forwards the grab
+        to its compositor: Xwayland asks its own compositor, the satellite, for the grab, and
+        xwayland-satellite 0.8.3 never uses this protocol, so the global would serve no
+        client. The compositor's code is written when a release of xwayland-satellite
+        forwards the grab (#1136). The rules:
         - a grab is accepted only from a client of the satellite's socket, for a surface of
           that client. The compositor refuses the request of any other client, confined or
           not, allow-listed or not, although such a client is not offered the global, so that
@@ -1317,13 +1326,23 @@ compositor and that the own compositor did not yet offer:
           lock, during the suspension or for a surface without the focus is accepted and
           waits;
         - the compositor owns the grab. It ends the active keyboard grab before any move of the
-          keyboard focus, whether a click on another surface, a window closed, a workspace
-          switched, the cycle of Ctrl+Alt+Tab or a focus a client gives, and arms it again
-          when the focus returns. A popup's keyboard grab or the input method's replaces it:
-          the X11 grab is inactive while that grab lasts and is armed again when it ends, as
-          the input method's grab is resumed after a popup's;
-        - the grab ends when its object or its surface is destroyed, and when the surface is
-          unmapped;
+          keyboard focus off the grab's surface, whether a click on another surface, a
+          workspace switched, the cycle of Ctrl+Alt+Tab or a focus a client gives, and arms it
+          again when the focus returns to that surface: by a click or a key, or because
+          another window that held the focus closed and the focus came back to it. A popup's
+          keyboard grab or the input method's replaces it: the X11 grab is inactive while that
+          grab lasts and is armed again when it ends, as the input method's grab is resumed
+          after a popup's. When more than one is waiting, a popup's grab comes first, then the
+          input method's, then the X11 grab, which is armed only when the keyboard has no
+          other grab and the input method has none waiting. An input method that holds its
+          grab therefore leaves the X11 grab inactive while it runs, and the compositor's
+          other bindings then act in an X11 window;
+        - the grab ends for good when its object or its surface is destroyed, and when the
+          surface is unmapped. A surface mapped again does not arm it, and this rule takes
+          precedence over the one that keeps a grab inactive while the focus is away: the
+          protocol makes only the destruction of the grab's object the ungrab, and the X
+          side releases its grab when the window is unmapped, so a grab armed again would be
+          one nobody holds;
         - during a grab the compositor reads each key before the grab: decision 30's protected
           keys act and do not reach the X11 surface, the keyboard monitor (AX4) observes the
           keys as it does without a grab, and the keyboard aids (AX11) act on them. The
@@ -1338,30 +1357,48 @@ compositor and that the own compositor did not yet offer:
           assertion that fails when the gate is removed:
           - the offer: the global reaches a client of the satellite's socket and no other
             client, unconfined, confined or allow-listed (`os9_every_global_is_classified`,
-            with the satellite's row in `data/globals`, and an identity case). The pull
-            request changes `x11_the_satellite_gets_the_standard_globals`, which then expects
-            this global too, and adds `satellite` to `CLASSES` in `scripts/verify.py`;
-          - the refusal: over the wire no other client can bind the global, so a test at the
-            request handler gives it a client not of the satellite's socket and finds the grab
-            inert;
+            with the satellite's row in `data/globals`, and
+            `x11_keyboard_grab_follows_the_socket_not_the_identity`, in which an allow-listed
+            client whose executable and unit are the satellite's, connected to the main
+            socket, is not offered it). The pull request changes
+            `x11_the_satellite_gets_the_standard_globals`, which then expects this global
+            too, and adds `satellite` to `CLASSES` in `scripts/verify.py`;
+          - the refusal: over the wire no other client can bind the global, so
+            `x11_keyboard_grab_handler_refuses_another_client` calls the request handler with
+            a client not of the satellite's socket and finds the grab inert;
+          - the build: `verify.py sulphur-no-xwayland` fails when the compositor's
+            `Cargo.toml` enables Smithay's `xwayland` feature, or when its default features
+            are turned back on;
           - the activation: a grab for the focused surface is active, and one for a surface
             without the focus waits and is active when the focus arrives;
           - the lock: the grab is inactive from the lock request on, one requested under the
             lock waits, and both are active again after the unlock once their surface has the
             focus;
-          - each focus move: a click on another surface, a window closed, a workspace switch,
-            the cycle of Ctrl+Alt+Tab and a focus a client gives leave the grab inactive, and
-            the focus's return arms it again;
+          - each focus move: a click on another surface, a workspace switch, the cycle of
+            Ctrl+Alt+Tab and a focus a client gives leave the grab inactive, and the focus's
+            return by a click, by a key and by the close of another window that held it arms
+            it again;
           - the suspension: Ctrl+Alt+Tab leaves the grab inactive, a grab requested meanwhile
             waits, a focus the client gives does not lift it, a click and a key each arm it
             again, and a second X11 surface's grab stays inactive under the same suspension;
           - another grab: a popup's keyboard grab and the input method's each leave the X11
-            grab inactive, and it is armed again when they end;
+            grab inactive, it is armed again when they end, and with both waiting the order
+            above holds;
           - the end: the grab ends with its object destroyed and with its surface destroyed
-            or unmapped;
+            or unmapped, and a surface unmapped and mapped again with the focus does not arm
+            it;
           - the keys: during a grab a protected key acts and does not reach the surface, the
             keyboard monitor (AX4) observes the keys, the keyboard aids act, and another
             binding reaches the surface;
+        - notes for the code. Smithay's `KeyboardHandle::set_focus` holds the keyboard's
+          lock across `focus_changed`, so the grab is armed again later, from an idle
+          callback or before the next key, as the focus's idle work and the input method's
+          resume before a key already are. `focus_changed` does not run for an unchanged
+          focus or for none, so the check before each key covers those cases. Whether a
+          grab is accepted, active or waiting is kept by the compositor, not in the keyboard
+          grab, because the lock, the layer surfaces and the workspace switch end the
+          keyboard's grab whatever it is. The input method's `grab_keyboard` and
+          `resume_input_method_grab` change, so that the order above holds;
       - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
         `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
         design, and it leaves this wave;
