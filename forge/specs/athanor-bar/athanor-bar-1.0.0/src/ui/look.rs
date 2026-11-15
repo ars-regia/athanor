@@ -39,6 +39,9 @@ pub fn group_padding(preset: Preset) -> [f32; 2] {
     }
 }
 
+/// Calmo's family, the GTK sheet's `font-family`.
+const FONT_FAMILY: &str = "Inter";
+
 /// A float group's margin around its island: top, right, bottom, left, as
 /// `.preset-float.edge-top .bar-group` (6 px 8 px 14 px) and its bottom twin; the inner side
 /// leaves room for the shadow.
@@ -67,8 +70,10 @@ pub fn look(appearance: &Appearance, preset: Preset) -> Look {
     bar.border = Rgba(palette.line);
     bar.title_bar = Rgba(palette.bar);
     bar.focus = Rgba(palette.acc_fg);
-    // The system font's size: the clock and the popovers follow the user's font (VL6).
+    // The system font's size: the clock and the popovers follow the user's font (VL6), in
+    // Calmo's family, as the GTK bar's sheet sets it.
     bar.font_size = appearance.font_size;
+    bar.font_family = Some(FONT_FAMILY.into());
     bar.padding = BUTTON_PADDING;
     bar.margin = 0.0;
     bar.gap = GAP;
@@ -109,6 +114,14 @@ pub fn popover(name: &str, theme: Theme, rtl: bool, top: bool) -> (Ui, WidgetId)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bar_and_its_popovers_take_calmos_family() {
+        let look = look(&Appearance::default(), Preset::Float);
+        for theme in [look.bar, look.popover] {
+            assert_eq!(theme.font_family.as_deref(), Some("Inter"));
+        }
+    }
 
     #[test]
     fn only_the_float_preset_draws_on_a_transparent_surface() {
