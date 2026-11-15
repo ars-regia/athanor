@@ -84,6 +84,11 @@
 # RIG_HEADLESS_OUTPUTS (default 1) outputs side by side in each capture; `surface layout` sets
 # it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors. Under it every capture
 # client runs as its unit (bar_session.py --unit, in-unit.sh), for the compositor's allow-list.
+#
+# ATHANOR_RIG_SCCACHE=<absolute directory> caches the rustc calls of every cargo run in the build
+# stage there through sccache, bounded by ATHANOR_RIG_SCCACHE_SIZE (20G), so a new worktree
+# compiles only what changed. It turns incremental compilation off, which sccache cannot cache.
+# Unset, cargo runs without a wrapper. Nothing built here ships: the RPMs build in the forge.
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
@@ -134,6 +139,22 @@ build_image() {
         echo "$local_image:build"
     fi
 }
+
+# The podman options of the compiler cache, empty unless ATHANOR_RIG_SCCACHE asks for it. A
+# relative path would reach podman as the name of a volume, so it is refused.
+cargo_cache=()
+if [ -n "${ATHANOR_RIG_SCCACHE:-}" ]; then
+    case $ATHANOR_RIG_SCCACHE in
+    /*) ;;
+    *)
+        echo "rig.sh: ATHANOR_RIG_SCCACHE must be an absolute path, not '$ATHANOR_RIG_SCCACHE'" >&2
+        exit 2
+        ;;
+    esac
+    mkdir -p "$ATHANOR_RIG_SCCACHE"
+    cargo_cache=(-v "$ATHANOR_RIG_SCCACHE:/sccache" -e RUSTC_WRAPPER=sccache -e SCCACHE_DIR=/sccache
+        -e "SCCACHE_CACHE_SIZE=${ATHANOR_RIG_SCCACHE_SIZE:-20G}" -e CARGO_INCREMENTAL=0)
+fi
 
 # The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
 # and the registry of the forge's tier 2 repository, where the rig's cosmic-comp comes from.
@@ -704,7 +725,7 @@ cosmic-preview)
 build-greeter)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-greeter-ui -p athanor-style --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-greeter-ui -p athanor-style \
@@ -715,7 +736,7 @@ build-greeter)
 build-layout)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit \
@@ -725,7 +746,7 @@ build-layout)
 build-compositor-client)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sulphur-client --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sulphur-client --no-default-features --features calloop --all-targets -- -D warnings \
@@ -738,13 +759,13 @@ build-compositor-client)
 no-gtk)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" bash forge/test/shell/no_gtk.sh
     ;;
 build-shelld)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-unit -p athanor-shelld --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-unit -p athanor-shelld \
@@ -754,7 +775,7 @@ build-shelld)
 build-compositor)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sulphur --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-sulphur \
@@ -764,7 +785,7 @@ build-compositor)
 build-toolkit)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sal --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sal --all-targets --features gpu -- -D warnings \
@@ -860,7 +881,7 @@ cargo)
     shift
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         ${RIG_CARGO_MUTANTS:+-v "$RIG_CARGO_MUTANTS:/usr/local/bin/cargo-mutants:ro"} \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
@@ -900,7 +921,7 @@ verify-bin)
 build-bar)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls -p athanor-bar --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-bar \
@@ -912,7 +933,7 @@ build-bar)
 build-control-center)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-services -p athanor-control-center --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-controls --no-default-features --features sal --all-targets -- -D warnings \
@@ -928,7 +949,7 @@ build-control-center)
 build-dock)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-dock --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-dock \
@@ -941,7 +962,7 @@ build-dock-toolkit)
     # after the executable, and the toolkit dock keeps the GTK dock's name on the bus.
     mkdir -p "$out/toolkit-dock" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-dock --no-default-features --features toolkit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-dock --no-default-features --features toolkit \
@@ -956,7 +977,7 @@ build-launcher)
     # so a command that holds both packages does not compile glycin-core. The decoder's own
     # spec builds with -p, as here.
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC=1 -w /repo "$(build_image)" \
         bash -c 'set -euo pipefail
                  for packages in "-p athanor-search -p athanor-preview -p athanor-launcher" "-p athanor-preview-render"; do
