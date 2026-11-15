@@ -4,4 +4,8 @@ tabulazione
 Luminosità dello schermo controllo scorrevole orizzontale 60 60 percento.
 tabulazione
 Bilanciato selezionato pulsante radio.
+tabulazione
+Luminosità dello schermo controllo scorrevole orizzontale 60 60 percento.
+tabulazione
+Bilanciato selezionato pulsante radio.
 Lettore schermo disattivato.
