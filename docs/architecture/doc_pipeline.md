@@ -431,11 +431,15 @@ actions of an allow-list, `RELEASE_PATH_ACTIONS` in `verify.py`, each checked to
 no cache and matched without regard to case or ref, and gives no build sccache on the Actions
 cache or a `cache-from` or `cache-to` of any type; both hold for its steps and for those of a
 local composite action they use. An action joins the list once it is checked to cache nothing. One store outlives the job and the check does not see it: the self-hosted
-`build` job of `kernel-build.yml` mounts `$HOME/.cache/azoth`, a directory of the runner host
-that holds the downloaded kernel sources. It is a store of verified inputs, not of build
-outputs: `forge/specs/azoth/build.sh` checks every file in it against `SOURCES/sources.sha256`,
-and the CachyOS and kernel.org tarballs and the Fedora SRPM against their signatures, before it
-uses any. The mount is a `-v` in a shell step, and telling a host path that outlives the job
+`build` job of `kernel-build.yml` and the self-hosted `prep` job of `kernel-bump.yml` mount
+`$HOME/.cache/azoth`, a directory of the runner host that holds the downloaded kernel sources.
+It is a store of verified inputs, not of build outputs: `forge/specs/azoth/build.sh` checks
+every file listed in `SOURCES/sources.sha256` against it, and the CachyOS and kernel.org
+tarballs and the Fedora SRPM against their signatures, before it uses any. The `manifest` stage
+that `kernel-bump.yml` runs to write that list for a new version hashes the files as they are in
+the store and downloads only those absent by name, so an unsigned file already in the store
+(the CachyOS configuration, a patch) enters the manifest unverified; the bump that changes the
+list is reviewed by a code owner. The mount is a `-v` in a shell step, and telling a host path that outlives the job
 from one that does not would need to know each runner's disks, so the check does not try.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
