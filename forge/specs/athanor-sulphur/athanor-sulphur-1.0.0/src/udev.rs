@@ -586,18 +586,34 @@ impl State {
         let Backend::Drm(drm) = &self.backend else {
             return;
         };
-        if !drm.session.is_active() || shown_vt() == Some(vt) {
+        let from = shown_vt();
+        if !drm.session.is_active() || from == Some(vt) {
             return;
         }
         // Decision 36: from here to the resume no lease is granted, and the leases end while the
         // compositor is still the GPU's master, which it is no longer when the pause is heard.
-        self.leases.switching();
+        let number = self.leases.switching(from);
         self.revoke_device_leases();
-        if let Backend::Drm(drm) = &mut self.backend {
-            if let Err(error) = drm.session.change_vt(vt) {
-                tracing::warn!(%error, vt, "the virtual terminal could not be switched");
-                self.leases.switch_failed();
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        if let Err(error) = drm.session.change_vt(vt) {
+            tracing::warn!(%error, vt, "the virtual terminal could not be switched");
+            self.leases.switch_failed();
+            return;
+        }
+        // A switch that pauses nothing would refuse grants for the rest of the session: a while
+        // after it, one that left its own terminal shown is over (`switch_settled`).
+        let settled = Timer::from_duration(SWITCH_SETTLES);
+        let timer = self.loop_handle.insert_source(settled, move |_, _, state| {
+            let shown = shown_vt();
+            if state.leases.switch_settled(number, shown) && shown.is_none() {
+                tracing::error!(vt, "a switch of virtual terminal paused nothing, and the terminal shown cannot be read: no display is leased until the session resumes");
             }
+            TimeoutAction::Drop
+        });
+        if let Err(error) = timer {
+            tracing::error!(%error, "a switch of virtual terminal has no timer: no display is leased until the session resumes");
         }
     }
 
@@ -1952,6 +1968,10 @@ fn non_desktop(device: &impl ControlDevice, connector: connector::Handle) -> std
     }
     unreadable.map_or(Ok(false), Err)
 }
+
+/// How long after a switch of virtual terminal the compositor asked for a switch that paused
+/// nothing is taken to be over: logind pauses the session well within it.
+const SWITCH_SETTLES: Duration = Duration::from_secs(2);
 
 /// The virtual terminal the kernel shows, from `tty0`. A switch to it pauses nothing, so
 /// `switch_vt` does not start one. One that cannot be read is no virtual terminal.

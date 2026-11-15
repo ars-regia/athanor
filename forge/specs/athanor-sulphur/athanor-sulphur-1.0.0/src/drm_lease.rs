@@ -5,8 +5,8 @@
 //! connectors marked `non-desktop`, which are never an output of the session. This module holds
 //! what decides when a lease ends, apart from DRM so that it is tested without a GPU:
 //! - no lease is granted from the lock request until the unlock, from a switch of virtual
-//!   terminal the compositor starts until the resume or the switch's failure, while the session
-//!   is paused, nor while a lease waits to end;
+//!   terminal the compositor starts until the resume, the switch's failure or the finding that
+//!   it paused nothing, while the session is paused, nor while a lease waits to end;
 //! - `locked` is sent only once every lease has ended: `Confirmation::confirm`, the only way
 //!   to send it, takes a `Revoked`, which `Leases::proof` makes only when no lease is held and
 //!   none waits to end;
@@ -79,8 +79,11 @@ pub struct Ended {
 pub struct Leases<L> {
     /// From the lock request to the unlock.
     locked: bool,
-    /// From a switch of virtual terminal the compositor starts to the resume or its failure.
-    switching: bool,
+    /// From a switch of virtual terminal the compositor starts to the resume, its failure, or
+    /// the finding that it paused nothing: the switch.
+    switching: Option<Switch>,
+    /// How many switches the compositor started: each one's number.
+    switches: u32,
     /// From the pause to the resume: the device is not touched.
     paused: bool,
     held: Vec<Held<L>>,
@@ -92,12 +95,20 @@ impl<L> Default for Leases<L> {
     fn default() -> Self {
         Self {
             locked: false,
-            switching: false,
+            switching: None,
+            switches: 0,
             paused: false,
             held: Vec::new(),
             ending: Vec::new(),
         }
     }
+}
+
+/// A switch of virtual terminal the compositor started: its number, and the terminal shown when
+/// it started, if it could be read.
+struct Switch {
+    number: u32,
+    from: Option<i32>,
 }
 
 /// That no lease is held and the device confirmed the end of every one: only `Leases::proof`
@@ -108,7 +119,7 @@ pub struct Revoked(());
 impl<L> Leases<L> {
     /// Whether a new lease may be granted.
     pub fn may_grant(&self) -> bool {
-        !self.locked && !self.switching && !self.paused && self.ending.is_empty()
+        !self.locked && self.switching.is_none() && !self.paused && self.ending.is_empty()
     }
 
     /// A lease was granted. One granted while no grant may be made ends at once.
@@ -136,14 +147,38 @@ impl<L> Leases<L> {
         self.locked = false;
     }
 
-    /// The compositor starts a switch of virtual terminal.
-    pub fn switching(&mut self) {
-        self.switching = true;
+    /// The compositor starts a switch of virtual terminal from terminal `from`, if it could
+    /// be read. The switch's number, for `switch_settled`.
+    pub fn switching(&mut self, from: Option<i32>) -> u32 {
+        self.switches = self.switches.wrapping_add(1);
+        self.switching = Some(Switch {
+            number: self.switches,
+            from,
+        });
+        self.switches
     }
 
     /// The switch the compositor asked for failed: no pause follows.
     pub fn switch_failed(&mut self) {
-        self.switching = false;
+        self.switching = None;
+    }
+
+    /// A while after switch `number` was asked for, terminal `shown` is shown. A switch that
+    /// paused nothing and left its own terminal shown is over; one whose terminal cannot be
+    /// read, or that another switch, a pause or the resume overtook, decides nothing: grants
+    /// stay refused until the resume. Whether this switch still refuses them.
+    pub fn switch_settled(&mut self, number: u32, shown: Option<i32>) -> bool {
+        let Some(switch) = &self.switching else {
+            return false;
+        };
+        if switch.number != number {
+            return false;
+        }
+        if !self.paused && shown.is_some() && shown == switch.from {
+            self.switching = None;
+            return false;
+        }
+        true
     }
 
     /// The session paused: the device is not touched until the resume.
@@ -154,7 +189,7 @@ impl<L> Leases<L> {
     /// The session resumed: the device may be touched again.
     pub fn resumed(&mut self) {
         self.paused = false;
-        self.switching = false;
+        self.switching = None;
     }
 
     /// The proof that `locked` needs: no lease is held, and none waits to end.
@@ -424,14 +459,49 @@ mod tests {
     #[test]
     fn no_lease_is_granted_from_a_switch_to_the_resume_or_its_failure() {
         let mut leases = Leases::<Logged>::default();
-        leases.switching();
+        leases.switching(Some(2));
         assert!(!leases.may_grant(), "from the switch");
         leases.switch_failed();
         assert!(leases.may_grant(), "after a failed switch");
-        leases.switching();
+        leases.switching(Some(2));
         leases.paused();
         leases.resumed();
         assert!(leases.may_grant(), "after the resume");
+    }
+
+    /// A switch that paused nothing ends only when its own terminal is still shown; an
+    /// unreadable terminal, another one, a pause or a later switch keep grants refused.
+    #[test]
+    fn a_switch_that_paused_nothing_ends_only_on_its_own_terminal() {
+        let mut leases = Leases::<Logged>::default();
+        let first = leases.switching(Some(2));
+        assert!(leases.switch_settled(first, None), "unreadable");
+        assert!(
+            leases.switch_settled(first, Some(3)),
+            "another terminal is shown"
+        );
+        assert!(!leases.may_grant());
+        let second = leases.switching(Some(2));
+        assert!(
+            !leases.switch_settled(first, Some(2)),
+            "an older switch decides nothing"
+        );
+        assert!(!leases.may_grant(), "the later switch still refuses");
+        leases.paused();
+        assert!(leases.switch_settled(second, Some(2)), "paused");
+        leases.resumed();
+        let unread = leases.switching(None);
+        assert!(
+            leases.switch_settled(unread, None),
+            "its terminal was never read"
+        );
+        leases.switch_failed();
+        let third = leases.switching(Some(2));
+        assert!(!leases.switch_settled(third, Some(2)));
+        assert!(
+            leases.may_grant(),
+            "it paused nothing and its terminal is shown"
+        );
     }
 
     #[test]
