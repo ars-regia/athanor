@@ -30,6 +30,12 @@ debug-assertions = true
 libfuzzer-sys = "0.4"
 athanor-fuzz-entries = { path = "../system/athanor-fuzz-entries", default-features = false }
 
+# A workspace of its own takes no [patch] of the root Cargo.toml: the fuzzed compositor must
+# parse the wire as the shipped one does, with the wire parser that rejects a null its
+# signature forbids (its PATCHES.md). The same directory as the root entry, not a copy.
+[patch.crates-io]
+wayland-backend = { path = "../forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }
+
 [[bin]]
 name = "update_claims"
 path = "fuzz_targets/update_claims.rs"
