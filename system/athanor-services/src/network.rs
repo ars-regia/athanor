@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::timeout;
 use zbus::message::Header;
 use zbus::proxy::MethodFlags;
-use zbus::{Array, ObjectPath, Variant};
+use zbus::{Array, ObjectPath, OwnedObjectPath, Variant};
 use zbus::{Connection, DBusError, Message, Proxy};
 /// The password a page sends, from its field up to the D-Bus call that carries it: overwritten
 /// as it drops, wherever it drops.
@@ -1144,7 +1144,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
             let call = async {
                 Proxy::new(&context.connection, NM, NM_PATH, NM)
                     .await?
-                    .call_with_flags::<_, _, ()>(
+                    .call_with_flags::<_, _, (OwnedObjectPath, OwnedObjectPath)>(
                         "AddAndActivateConnection",
                         MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
@@ -1163,7 +1163,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
             let call = async {
                 Proxy::new(&context.connection, NM, NM_PATH, NM)
                     .await?
-                    .call_with_flags::<_, _, ()>(
+                    .call_with_flags::<_, _, OwnedObjectPath>(
                         "ActivateConnection",
                         MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
@@ -2255,6 +2255,33 @@ mod tests {
                 format!("DeactivateConnection {ACTIVE_PATH}"),
             ]
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_join_and_an_activation_that_succeed_are_not_counted_as_refused() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let state = wait_for(&mut rig.states, |state| state.wifi.is_some()).await;
+        let lab = state.wifi.unwrap().networks[0].clone();
+        rig.commands
+            .send(NetworkCommand::Join {
+                network: lab,
+                password: None,
+            })
+            .unwrap();
+        rig.commands
+            .send(NetworkCommand::Activate {
+                connection: SAVED.into(),
+                device: WLAN.into(),
+                specific: AP_HOME.into(),
+            })
+            .unwrap();
+        // Jobs run in order: once this one is done, the two before it have answered.
+        rig.commands.send(NetworkCommand::Wireless(false)).unwrap();
+        let state = wait_for(&mut rig.states, |state| {
+            state.wifi.as_ref().is_some_and(|wifi| !wifi.enabled)
+        })
+        .await;
+        assert_eq!(state.refused, 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
