@@ -1004,6 +1004,9 @@ impl Shell {
         let from = self
             .get_mut(parent)
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        if let Some(arrow) = ui.arrow.as_mut() {
+            arrow.side = Some(side);
+        }
         let open = OpenPopup::opened(parent, anchor, id, &mut from.ui, &mut ui, menu);
         from.dirty = true;
         // A tooltip takes no pointer: it never stands between the pointer and its widget.
@@ -2749,15 +2752,35 @@ impl PopupHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         popup: &Popup,
-        _: PopupConfigure,
+        configure: PopupConfigure,
     ) {
         // ponytail: the popup keeps its widgets' size and the place the compositor gave it; a
         // menu whose items change while it is open would need a reposition.
-        let Some(surface) = self.shell.find(popup.wl_surface()) else {
+        let Some(id) = self.shell.find(popup.wl_surface()).map(|surface| surface.id) else {
+            return;
+        };
+        // The middle of the widget it opened from, in the popup's own coordinates, for the
+        // arrow of its island: the compositor may have slid the popup along the edge.
+        let anchor = self
+            .shell
+            .popup
+            .filter(|open| open.surface == id)
+            .and_then(|open| {
+                let parent = self.shell.ui(open.parent)?;
+                Some(parent.widget(open.anchor_in(parent)?).rect)
+            });
+        let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
         surface.configured = true;
-        let id = surface.id;
+        if let (Some(arrow), Some(r)) = (surface.ui.arrow.as_mut(), anchor) {
+            let (x, y) = configure.position;
+            arrow.at = match arrow.side {
+                Some(Side::Left | Side::Right) => Some(r.y + r.h / 2.0 - y as f32),
+                Some(_) => Some(r.center_x() - x as f32),
+                None => None,
+            };
+        }
         self.changed(id, None);
     }
 

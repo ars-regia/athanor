@@ -266,6 +266,93 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     .to_path(0.1)
 }
 
+/// The arrow of the island `id` marked by [`crate::Ui::set_arrow`], once its popup is placed: the
+/// two ends of its base on the edge of `fill` that faces the popup's widget, and its tip, the
+/// base kept clear of the fill's corners.
+fn arrow(ui: &Ui, id: WidgetId, fill: crate::widget::Rect) -> Option<[(f64, f64); 3]> {
+    let arrow = ui.arrow.filter(|arrow| arrow.island == id)?;
+    let (side, at) = (arrow.side?, arrow.at?);
+    let size = ui.theme.island_arrow;
+    if size <= 0.0 {
+        return None;
+    }
+    // Along the edge, between the corners' arcs.
+    let clear = ui.theme.island_radius + size;
+    let along = |start: f32, length: f32| {
+        f64::from(at.clamp(start + clear, (start + length - clear).max(start + clear)))
+    };
+    let (s, f) = (f64::from(size), fill);
+    let (left, top, right, bottom) = (
+        f64::from(f.x),
+        f64::from(f.y),
+        f64::from(f.x + f.w),
+        f64::from(f.bottom()),
+    );
+    Some(match side {
+        // Below its widget: the arrow stands on the top edge, pointing up.
+        Side::Bottom => {
+            let x = along(f.x, f.w);
+            [(x - s, top), (x, top - s), (x + s, top)]
+        }
+        Side::Top => {
+            let x = along(f.x, f.w);
+            [(x - s, bottom), (x, bottom + s), (x + s, bottom)]
+        }
+        Side::Right => {
+            let y = along(f.y, f.h);
+            [(left, y - s), (left - s, y), (left, y + s)]
+        }
+        Side::Left => {
+            let y = along(f.y, f.h);
+            [(right, y - s), (right + s, y), (right, y + s)]
+        }
+    })
+}
+
+/// An island's fill in `t.island`, with `t.island_border` of `t.border` inside its edge, and
+/// the `arrow` out of that edge drawn as part of the fill: the outline goes round the arrow,
+/// not under it.
+fn draw_island<C: Canvas>(
+    ctx: &mut C,
+    t: &Theme,
+    fill: crate::widget::Rect,
+    arrow: Option<[(f64, f64); 3]>,
+) {
+    let border = t.island_border;
+    ctx.set_paint(color(t.island));
+    ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
+    if border > 0.0 {
+        ctx.set_stroke(Stroke::new(f64::from(border)));
+        ctx.set_paint(color(t.border));
+        ctx.stroke_path(&rounded(fill, -border / 2.0, t.island_radius));
+    }
+    let Some([a, tip, b]) = arrow else {
+        return;
+    };
+    // The base sinks into the fill by the border's width, so that the arrow's fill covers the
+    // outline where the two meet.
+    let (mx, my) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+    let (dx, dy) = (mx - tip.0, my - tip.1);
+    let length = dx.hypot(dy).max(f64::EPSILON);
+    let sink = f64::from(border) / length;
+    let inner = |p: (f64, f64)| (p.0 + dx * sink, p.1 + dy * sink);
+    let mut path = BezPath::new();
+    path.move_to(inner(a));
+    path.line_to(tip);
+    path.line_to(inner(b));
+    path.close_path();
+    ctx.set_paint(color(t.island));
+    ctx.fill_path(&path);
+    if border > 0.0 {
+        let mut sides = BezPath::new();
+        sides.move_to(a);
+        sides.line_to(tip);
+        sides.line_to(b);
+        ctx.set_paint(color(t.border));
+        ctx.stroke_path(&sides);
+    }
+}
+
 /// Draws `image` in the middle of `r`, fitted to a square of `side` logical pixels with its
 /// aspect ratio kept.
 fn draw_icon<C: Canvas>(
@@ -497,8 +584,7 @@ pub fn paint<C: Canvas>(
             }
             Kind::Island { .. } => {
                 if let Some(fill) = island {
-                    ctx.set_paint(color(t.island));
-                    ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
+                    draw_island(ctx, &t, fill, arrow(ui, id, fill));
                 }
             }
             // Flat, filled only under the pointer, with its image in the middle and the line of
@@ -1371,6 +1457,49 @@ mod tests {
         let ink = at(bar.x + bar.w / 2.0, bar.y + bar.h / 2.0);
         let half = mix(t.background, t.border, INSENSITIVE);
         assert!(near(&ink, half), "the indicator {ink:?} is not {half:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_popups_island_draws_its_outline_and_an_arrow_at_its_widget() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Popover", crate::Theme::default(), false);
+        ui.theme.background = Rgba::rgb(0x00, 0xff, 0x00);
+        ui.theme.island = Rgba::rgb(0x20, 0x20, 0x20);
+        ui.theme.border = Rgba::rgb(0xff, 0x00, 0x00);
+        ui.theme.island_radius = 6.0;
+        ui.theme.island_padding = 12.0;
+        ui.theme.island_border = 2.0;
+        ui.theme.island_arrow = 8.0;
+        let island = ui.island(crate::Ui::ROOT, true, [10.0, 0.0, 0.0, 0.0]);
+        ui.add(island, crate::Kind::Label("A popover of some width".into()));
+        ui.set_arrow(island);
+        let unplaced = render(&mut ui, 1.0)?;
+        let fill = ui.island_fill(island).expect("the island has a child");
+        let pixel = |p: &Pixmap, x: f64, y: f64| {
+            let i = 4 * (usize::from(p.width()) * y as usize + x as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let (x, top) = (f64::from(fill.x) + 40.0, f64::from(fill.y));
+        let (background, island_fill, border) = (
+            ui.theme.background.0.to_vec(),
+            ui.theme.island.0.to_vec(),
+            ui.theme.border.0.to_vec(),
+        );
+        // Before the compositor places the popup, no arrow.
+        assert_eq!(pixel(&unplaced, x, top - 3.0), background);
+        let arrow = ui.arrow.as_mut().expect("marked");
+        (arrow.side, arrow.at) = (Some(Side::Bottom), Some(fill.x + 40.0));
+        let placed = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&placed, x, top - 3.0), island_fill, "the arrow, above the fill");
+        assert_eq!(pixel(&placed, x, top + 0.5), island_fill, "no outline under the arrow");
+        assert_eq!(pixel(&placed, x + 20.0, top + 0.5), border, "the outline beside it");
+        assert_eq!(pixel(&placed, x + 12.0, top - 3.0), background, "beside the arrow");
+        // A widget past the island's end: the arrow stays clear of the corner.
+        let arrow = ui.arrow.as_mut().expect("marked");
+        arrow.at = Some(fill.x + fill.w + 50.0);
+        let slid = render(&mut ui, 1.0)?;
+        let clear = f64::from(fill.x + fill.w) - 6.0 - 8.0;
+        assert_eq!(pixel(&slid, clear, top - 3.0), island_fill);
         Ok(())
     }
 

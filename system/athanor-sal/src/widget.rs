@@ -981,6 +981,21 @@ pub struct Ui {
     /// The widgets whose active descendant is the selected row of a list, by the widget: see
     /// [`Ui::set_active_descendant`].
     pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
+    /// The island whose fill points at the widget this popup opened from ([`Ui::set_arrow`]).
+    pub(crate) arrow: Option<Arrow>,
+}
+
+/// The arrow of an island marked by [`Ui::set_arrow`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Arrow {
+    /// The island it stands out of.
+    pub island: WidgetId,
+    /// Where the popup stands from its widget, set when it opens: the arrow is on the island's
+    /// edge that faces the widget.
+    pub side: Option<crate::driver::Side>,
+    /// The middle of the widget along that edge, in this surface's logical pixels, once the
+    /// compositor placed the popup. Nothing is drawn before.
+    pub at: Option<f32>,
 }
 
 impl Ui {
@@ -1011,6 +1026,7 @@ impl Ui {
             pose: crate::motion::Pose::REST,
             free: std::collections::BTreeSet::new(),
             descendants: Vec::new(),
+            arrow: None,
         }
     }
 
@@ -1223,6 +1239,19 @@ impl Ui {
     /// When `parent` names no widget of this `Ui`.
     pub fn island(&mut self, parent: WidgetId, vertical: bool, margin: [f32; 4]) -> WidgetId {
         self.add(parent, Kind::Island { vertical, margin })
+    }
+
+    /// Marks `island` to point at the widget a popup of these widgets opens from, as GTK's
+    /// popover arrow: once the compositor placed the popup, a triangle of the theme's
+    /// `island_arrow` stands out of the island's edge that faces the widget, at the widget's
+    /// middle, kept clear of the island's corners. The island's margin on that edge leaves it
+    /// room. Only the latest island marked has one.
+    pub fn set_arrow(&mut self, island: WidgetId) {
+        self.arrow = Some(Arrow {
+            island,
+            side: None,
+            at: None,
+        });
     }
 
     /// Adds a flat button named `label` for assistive technologies, showing `image` in a
