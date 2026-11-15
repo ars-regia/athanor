@@ -63,11 +63,16 @@ package jobs of one run:
   adds an edge too.
 - **Dirty nodes**: a custom package is dirty when the registry has no
   `athanor-forge-<package>:hash-<hash>`, the hash being the one
-  `check_idempotency.sh --hash-only` computes. The lookups run eight at a time, each `registry_probe.sh` under
-  `retry.sh`: "manifest unknown" (and ghcr's 403 for a never-published package) means
-  absent; any other failure is retried and then stops the run, because reading an
+  `check_idempotency.sh --hash-only` computes, or when no trusted run of
+  `call-dag-compile.yml` signed the digest that tag names (issue #1176). The lookups run eight at a time, each
+  `verify_image.sh`: `registry_probe.sh` under `retry.sh` reads the tag's digest, and
+  `system/tier-digests.sh signed` verifies the digest with cosign against the identity and
+  issuer the tiers use. "manifest unknown" (and ghcr's 403 for a never-published package) means
+  absent; an image without that signature is rebuilt and reported as an error; any other failure is retried and then stops the run, because reading an
   unanswered question as "clean" would ship stale images and reading it as "dirty" would
-  silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
+  silently rebuild the whole graph. The tier assembly (`fetch_repo_rpms.sh`) takes a package's RPMs only from the
+  digest `resolve_node_image.sh` verified the same way, and restores a published tier only
+  when `call-system-image.yml` signed it. A dirty package does not dirty its dependents: builds
   never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
   commit that changes no package schedules no matrix job.
 - **Cycle check**: `graphlib.TopologicalSorter.prepare()` on the graph; a cycle (a tier
