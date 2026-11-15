@@ -42,6 +42,8 @@ const RETRY_SECS: [u32; 3] = [5, 30, 300];
 const REQUEST_TIMEOUT_MS: i32 = i32::MAX;
 /// The seal, in the bar and in the sheet, as calmo's `.athanor-seal`.
 const SEAL: u16 = 22;
+/// Between the sheet's seal and its title, as the GTK heading box's spacing.
+const HEADING_SPACING: f32 = 8.0;
 /// The sheet's lines, as GTK's `max-width-chars` of 40.
 const NOTE_CHARS: u32 = 40;
 /// The seals ship in `hicolor`, which every theme inherits.
@@ -638,6 +640,7 @@ fn build(
     match page.confirm() {
         None => {
             let heading = ui.inline(frame, [0.0, 0.0]);
+            ui.set_spacing(heading, Some(HEADING_SPACING));
             // The seal is decoration: the title says it.
             if let Some(seal) = seal {
                 ui.image(heading, seal, f32::from(SEAL), "");

@@ -2516,3 +2516,38 @@ item = 18
 what = "in right-to-left a tile's second line ran past its disc"
 state = "closed"
 reason = "a line broken at the tile's room is aligned to the start of that room; Sal's tile now takes that alignment offset back, so both lines end beside the disc, as GTK's"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 1
+what = "the build and check dates read 15 September 2026, where GTK wrote the locale's short date, 09/15/2026 and 15.09.2026"
+state = "recorded"
+reason = "the GTK bar's %x read the LC_TIME that GTK set; the Sal bar sets no locale, so %x gives the C locale's 09/15/26, which reads the wrong way round in most languages. The sheet writes day, month and year with the month from the bar's catalog, as the expiry of a postponed restart already did; the rig's German test catalog has no month names, so the German capture keeps the English month"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 2
+what = "the sheet's seal touched its title"
+state = "closed"
+reason = "Sal's inline takes a spacing of its own now (Ui::set_spacing), and the heading keeps the GTK heading box's 8 px between the seal and the title"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 3
+what = "the seal showed no badge, then no seal at all"
+state = "closed"
+reason = "Sal draws a symbolic icon's success, warning and error classes in their colours (IconTheme::symbolic), and reads all of Fedora's hicolor index, whose scalable directories, the seal's among them, come after the first 256"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 4
+what = "Restart to update and Go back to the previous version are flat rows at the start edge, where GTK centred them as buttons"
+state = "recorded"
+reason = "they are the rows of a menu, as the power menu's, so the arrow keys move between them as in GTK; Sal aligns a widget in a column only at the start, at the end or across it, and has no centre"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 5
+what = "the switch shows the focus ring when the sheet opens"
+state = "recorded"
+reason = "a Sal menu popup puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar does; the GTK popover gave the focus without the ring to a popover opened by the pointer"

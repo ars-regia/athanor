@@ -165,6 +165,23 @@ class GoldenReportTest(unittest.TestCase):
             all("#1147" in e["reason"] for e in items if e["item"] in (1, 2, 3, 4, 6, 12))
         )
 
+    def test_the_bar_shield_answers_every_item_of_its_port(self):
+        """Each difference of the Sal trust shield against the GTK one found in its port is
+        closed or recorded with its reason."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface", "").startswith("bar-shield")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 6)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"
         dock = {"dock-workspaces", "dock-library"}
