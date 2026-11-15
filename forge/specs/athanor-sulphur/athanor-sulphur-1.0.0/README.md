@@ -652,10 +652,12 @@ echo "$sock"
 
 If the last message appears, stop here and send the log.
 
-The bar and the dock are unique applications on the user's D-Bus (`os.athanor.Bar`,
-`os.athanor.Dock`): a second copy would only wake the one running in the COSMIC session on VT 1
-and exit, and nothing would be drawn here. Stop those two units first; the graphical session
-loses its bar and dock until step 6 or the end of the run:
+The dock is a unique application on the user's D-Bus (`os.athanor.Dock`): a second copy would
+only wake the one running in the COSMIC session on VT 1 and exit, and nothing would be drawn
+here. The bar, drawn with Sal, has no such name and a second copy would run, but it would share
+the user's services with the first: NetworkManager keeps the secret agent `os.athanor.Bar` of
+the first bar and refuses the second's. Stop those two units first; the graphical session loses
+its bar and dock until step 6 or the end of the run:
 
 ```
 systemctl --user stop athanor-bar.service athanor-dock.service
@@ -672,7 +674,7 @@ here: if it opens a window on VT 1 instead, close every Ptyxis window there firs
 
 ```
 mkdir -p ~/c1/run/athanor-bar ~/c1/run/athanor-dock
-systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
+systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
 systemd-run --user --collect --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-dock" /usr/bin/athanor-dock
 WAYLAND_DISPLAY="$sock" ptyxis --standalone &> terminal.log &
 ```
