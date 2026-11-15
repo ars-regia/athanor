@@ -7,7 +7,10 @@ Reads the pinned version from forge/specs/cosmic-comp/cosmic-comp.spec, lists up
 `epoch-X.Y.Z` tags, picks the newest stable one (the pinned one when nothing is newer, which
 still proves the set applies), checks that tag out and applies the patches of
 forge/specs/cosmic-comp/SOURCES that the spec declares, in the order of its `PatchN:` lines,
-as %autosetup does: each patch on top of those before it. A patch that fails is reported and
+as %autosetup does: each patch on top of those before it. Before the patches, each crate the
+spec declares as a further Source (`SourceN:` with N > 0, a URL ending in `.crate`) is
+downloaded, checked against SOURCES/sources.sha256 and unpacked under vendor/, as %prep does,
+since a patch may change a vendored crate. A patch that fails is reported and
 left out; the rest are still tried. Writes OUT_DIR/report.json and OUT_DIR/report.md.
 Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares no patches
 (said so in the report). A missing spec, patch directory or declared patch file is an error
@@ -15,13 +18,16 @@ Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares
 """
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+import tarfile
 import tempfile
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = ROOT / "forge/specs/cosmic-comp/cosmic-comp.spec"
@@ -58,6 +64,61 @@ def spec_patches(spec_text, patches_dir):
             f"declared in the spec but absent from {patches_dir}: {', '.join(missing)}"
         )
     return paths
+
+
+def expand(text, spec_text):
+    """Expand the %{name} macros the spec defines with %global or %define, and its Name and
+    Version tags. An error for a macro the spec does not define."""
+    macros = {
+        m.group(1).lower(): m.group(2)
+        for m in re.finditer(r"^(Name|Version):\s+(\S+)\s*$", spec_text, re.M)
+    }
+    macros |= {
+        m.group(1): m.group(2)
+        for m in re.finditer(r"^%(?:global|define)\s+(\w+)\s+(\S+)\s*$", spec_text, re.M)
+    }
+    while m := re.search(r"%\{(\w+)\}", text):
+        if m.group(1) not in macros:
+            sys.exit(f"cosmic-comp.spec: %{{{m.group(1)}}} is not defined in the spec")
+        text = text[: m.start()] + macros[m.group(1)] + text[m.end() :]
+    return text
+
+
+def spec_crates(spec_text):
+    """The crates the spec declares as further Sources: (URL, file name), the name being the
+    URL's `#/name` fragment or else its basename, as forge/scripts/fetch_sources.sh names it."""
+    crates = []
+    for m in re.finditer(r"^Source([1-9]\d*):\s+(\S+)\s*$", spec_text, re.M):
+        url = expand(m.group(2), spec_text)
+        name = url.split("#/", 1)[1] if "#/" in url else url.rsplit("/", 1)[-1]
+        if re.match(r"^(https?|file)://", url) and name.endswith(".crate"):
+            crates.append((url.split("#", 1)[0], name))
+    return crates
+
+
+def vendor_crates(src, spec_text, sources_dir):
+    """Unpack each crate under src/vendor, as %prep does, after checking its sha256 against
+    sources.sha256. An error for a crate the manifest does not list or whose hash differs."""
+    manifest = sources_dir / "sources.sha256"
+    known = {}
+    if manifest.is_file():
+        for line in manifest.read_text().splitlines():
+            if line.strip():
+                digest, name = line.split()
+                known[name] = digest
+    for url, name in spec_crates(spec_text):
+        if name not in known:
+            sys.exit(f"{manifest}: no sha256 for {name}")
+        with urllib.request.urlopen(url) as response:
+            data = response.read()
+        if hashlib.sha256(data).hexdigest() != known[name]:
+            sys.exit(f"{name}: sha256 differs from {manifest}")
+        archive = src / name
+        archive.write_bytes(data)
+        (src / "vendor").mkdir(exist_ok=True)
+        with tarfile.open(archive) as tar:
+            tar.extractall(src / "vendor", filter="data")
+        archive.unlink()
 
 
 def select_tag(tags, pinned):
@@ -158,6 +219,7 @@ def main(argv):
             ],
             check=True,
         )
+        vendor_crates(src, spec_text, args.patches)
         rows = apply_patches(src, patches)
 
     out = pathlib.Path(args.out)

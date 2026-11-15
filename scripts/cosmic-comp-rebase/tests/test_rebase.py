@@ -1,9 +1,12 @@
 """Unit test of the cosmic-comp rebase drill (python3 -B -m unittest discover -s scripts/cosmic-comp-rebase/tests -v)."""
 
+import hashlib
+import io
 import json
 import pathlib
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -122,6 +125,41 @@ class Drill(unittest.TestCase):
         with self.assertRaises(SystemExit):
             rebase.main([out, "--spec", str(self.spec), "--patches", str(self.tmp / "none"), "--repo", str(self.upstream)])
         self.declare("0001-absent.patch")
+        with self.assertRaises(SystemExit):
+            self.run_drill()
+
+    def crate(self, sha256=None):
+        """A crate archive, wayland-backend-0.3.15/src/wire.rs, declared as Source1 by a
+        file:// URL through a %global, its sha256 in sources.sha256; and a patch on it."""
+        body = b"pub fn parse() {}\n"
+        packed = io.BytesIO()
+        with tarfile.open(fileobj=packed, mode="w:gz") as tar:
+            entry = tarfile.TarInfo("wayland-backend-0.3.15/src/wire.rs")
+            entry.size = len(body)
+            tar.addfile(entry, io.BytesIO(body))
+        archive = self.tmp / "wayland-backend-0.3.15.crate"
+        archive.write_bytes(packed.getvalue())
+        digest = sha256 or hashlib.sha256(packed.getvalue()).hexdigest()
+        (self.patches / "sources.sha256").write_text(f"{digest}  wayland-backend-0.3.15.crate\n")
+        (self.patches / "0001-vendor.patch").write_text(
+            "--- a/vendor/wayland-backend-0.3.15/src/wire.rs\n"
+            "+++ b/vendor/wayland-backend-0.3.15/src/wire.rs\n"
+            "@@ -1 +1,2 @@\n pub fn parse() {}\n+pub fn check() {}\n"
+        )
+        self.spec.write_text(
+            SPEC
+            + "%global wayland_backend_version 0.3.15\n"
+            + f"Source1:        {archive.parent.as_uri()}/wayland-backend-%{{wayland_backend_version}}.crate\n"
+            + "Patch0:         0001-vendor.patch\n"
+        )
+
+    def test_a_patch_on_a_crate_the_spec_unpacks_under_vendor_applies(self):
+        self.crate()
+        status, report, _ = self.run_drill()
+        self.assertEqual((status, [(p["patch"], p["applies"]) for p in report["patches"]]), (0, [("0001-vendor.patch", True)]))
+
+    def test_a_crate_whose_sha256_differs_from_the_manifest_is_an_error(self):
+        self.crate(sha256="0" * 64)
         with self.assertRaises(SystemExit):
             self.run_drill()
 
