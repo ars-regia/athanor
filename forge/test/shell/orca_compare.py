@@ -78,7 +78,9 @@ def gallery_labels(*keys):
 # The switches of the control center's pages (system/athanor-controls): Wi-Fi on the network page,
 # the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids
 # (maintainer decision, 2026-11-14).
-CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone")
+# Airplane mode is the switch of the same athanor-controls network page in the bar's popover;
+# the control center's catalog holds it too.
+CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone", "Airplane mode")
 CONTROL_CENTER_PO = (
     Path(__file__).resolve().parents[3]
     / "forge/specs/athanor-control-center/athanor-control-center-1.0.0/po"

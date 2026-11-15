@@ -276,6 +276,27 @@ class CompareTest(unittest.TestCase):
         )
         self.assertEqual(failures, ["check box 'Speakers': role 'toggle button'"])
 
+    def test_a_popover_frame_named_as_its_switch_leaves_the_switch_its_toggle_button(self):
+        # The bar's Bluetooth popover is a frame named Bluetooth that holds the Bluetooth switch.
+        reference = [node("check box", "Bluetooth", ["checkable", "checked"])]
+        transcript = [
+            node("frame", "Bluetooth", ["active"]),
+            dict(node("toggle button", "Bluetooth", ["pressed"]), depth=1),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("transcript 'toggle button'", lines[0])
+
+    def test_the_airplane_switch_of_the_bar_network_page_is_a_toggle_button(self):
+        for name in ("Airplane mode", "Modalità aereo"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable"]), depth=1),
+            ]
+            lines, failures = compare.compare(reference, [node("toggle button", name)])
+            self.assertEqual((len(lines), failures), (1, []))
+
     def test_a_list_box_is_a_list(self):
         reference = [node("list", "A list", ["focusable", "showing"])]
         lines, failures = compare.compare(reference, [node("list box", "A list", ["focusable", "showing"])])
