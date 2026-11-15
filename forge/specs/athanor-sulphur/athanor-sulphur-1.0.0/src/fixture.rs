@@ -6576,7 +6576,8 @@ fn a_press_a_move_takes_grants_no_token() {
 }
 
 /// A press that ends a popup's grab goes to the surface under the pointer, and is that
-/// client's: the bar, clicked while a window's menu holds the pointer.
+/// client's: the bar, clicked while a window's menu holds the pointer. The grab's end gives the
+/// keyboard back to the window, after the press, so the click grants the bar no token.
 #[test]
 fn a_press_that_ends_a_popup_grab_is_the_clients_under_it() {
     let mut run = Running::start(None);
@@ -6585,12 +6586,67 @@ fn a_press_that_ends_a_popup_grab_is_the_clients_under_it() {
     let mut app = Local::connect(&mut run, None);
     app.toplevel(&mut run);
     let (_, xdg) = app.window.clone().expect("the window");
+    let window = keyboard_focus(&run);
     grabbing_popup(&mut app, &mut run, &xdg);
+    assert_ne!(keyboard_focus(&run), window, "the menu has the keyboard");
     let pointer = run.state.seat.get_pointer().expect("a pointer");
     assert!(pointer.is_grabbed(), "the menu holds the pointer");
     // `click_bar` checks that the press is the bar's.
-    click_bar(&mut run, &bar);
+    let serial = click_bar(&mut run, &bar);
     assert!(!pointer.is_grabbed(), "the press ended the grab");
+    assert_eq!(keyboard_focus(&run), window, "the window has the keyboard back");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token), "the keyboard moved after the click");
+    run.stop();
+}
+
+/// A press that ends the grab of a popup whose parent takes no keyboard moves no keyboard, so
+/// the click on the bar grants it a token.
+#[test]
+fn a_press_that_ends_a_pointer_only_popup_grab_grants_a_token() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity};
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let top = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (mut panel, _, layer) =
+        top_surface_on(&mut run, "panel", top, KeyboardInteractivity::None, None);
+    // Below the bar's zone.
+    press(&mut run, (100.0, 40.0).into());
+    release(&mut run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(Some(to), panel.id, "the press went to the panel");
+    let compositor: wl_compositor::WlCompositor = panel.bind(4);
+    let shm: wl_shm::WlShm = panel.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = panel.bind(1);
+    let seat: wl_seat::WlSeat = panel.bind(1);
+    let qh = panel.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(None, &positioner, &qh, ());
+    layer.get_popup(&popup);
+    popup.grab(&seat, serial.into());
+    panel.client.configure = None;
+    surface.commit();
+    panel.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(panel.client.configure.expect("a configure"));
+    let (buffer, _) = panel.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    panel.roundtrip(&mut run);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(pointer.is_grabbed(), "the popup holds the pointer");
+    let focus = keyboard_focus(&run);
+    let serial = click_bar(&mut run, &bar);
+    assert!(!pointer.is_grabbed(), "the press ended the grab");
+    assert_eq!(keyboard_focus(&run), focus, "the grab's end moves no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token));
     run.stop();
 }
 
