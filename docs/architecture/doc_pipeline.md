@@ -432,7 +432,13 @@ another registry with a credential of its own is not seen. A cache step is a cac
 with its cache on (`setup-go` and `setup-rust-toolchain` unless `cache: false`, `setup-node`
 unless `package-manager-cache: false`, the others when `cache` is set), sccache on the Actions
 cache, or a `cache-from` or `cache-to` of any type, in the job's steps or in a local composite
-action they use.
+action they use. One store outlives the job and the check does not see it: the self-hosted
+`build` job of `kernel-build.yml` mounts `$HOME/.cache/azoth`, a directory of the runner host
+that holds the downloaded kernel sources. It is a store of verified inputs, not of build
+outputs: `forge/specs/azoth/build.sh` checks every file in it against `SOURCES/sources.sha256`,
+and the CachyOS and kernel.org tarballs and the Fedora SRPM against their signatures, before it
+uses any. The mount is a `-v` in a shell step, and telling a host path that outlives the job
+from one that does not would need to know each runner's disks, so the check does not try.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
@@ -1639,4 +1645,5 @@ already named: a job of a release-path workflow (one with a job in a signing env
 `release`, or with a job whose token has `id-token: write` or `packages: write`, or a reusable
 workflow of the repository that such a workflow calls) that runs a cache step of PL10, in its
 own steps or in a local composite action, fails it. The release path so includes
-`azoth-signer.yml` and `kernel-build.yml`.
+`azoth-signer.yml` and `kernel-build.yml`; PL10 records the one store the check does not see,
+the kernel build's host directory of verified sources.
