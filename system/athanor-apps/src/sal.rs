@@ -53,7 +53,7 @@ impl Icons {
         self.images
             .entry((icon.to_owned(), size, scale))
             .or_insert_with(|| match theme.image(icon, size, scale) {
-                Ok(image) if icon.ends_with("-symbolic") => Some(image.tinted(ink)),
+                Ok(image) if is_symbolic(icon) => Some(image.tinted(ink)),
                 Ok(image) => Some(image),
                 Err(err) => {
                     tracing::error!(error = %err, icon, "cannot draw the icon; the button shows its name");
@@ -61,6 +61,19 @@ impl Icons {
                 }
             })
             .clone()
+    }
+
+    /// The name `icon` is drawn under in a reading that is right-to-left when `rtl`: the theme's
+    /// `-rtl` variant when it has one, as GTK's lookup takes it, so that a directional icon
+    /// points along the reading. The theme draws a fallback for a name it lacks, so the variant
+    /// is looked up first.
+    pub fn reading(&self, icon: &str, size: u16, scale: u16, rtl: bool) -> String {
+        let mirrored = format!("{icon}-rtl");
+        if rtl && self.theme.lookup(&mirrored, size, scale).is_some() {
+            mirrored
+        } else {
+            icon.to_owned()
+        }
     }
 
     /// A button with the icon `icon` and the name and tooltip `label`; a plain button with
@@ -83,6 +96,12 @@ impl Icons {
         ui.set_tooltip(button, Some(label));
         button
     }
+}
+
+/// Whether the theme draws `icon` in one ink: a symbolic icon, or its right-to-left variant,
+/// which GTK names `<icon>-symbolic-rtl`.
+fn is_symbolic(icon: &str) -> bool {
+    icon.ends_with("-symbolic") || icon.ends_with("-symbolic-rtl")
 }
 
 /// The icon an entry is drawn with: its desktop entry's, or [`FALLBACK_ICON`].
