@@ -2165,9 +2165,7 @@ BUDGET = {
     "unreachable!(": 0,
     "todo!(": 0,
     "unimplemented!(": 0,
-    # must() of athanor-fuzz-entries, finding() of Sulphur's protocol fuzz target (#1172) and
-    # the DRM lease handler of Sulphur (#1186).
-    "process::abort(": 3,
+    "process::abort(": 2,  # the fuzz entry and the DRM lease handler of Sulphur, #1186
 }
 
 

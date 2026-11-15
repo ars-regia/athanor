@@ -14,7 +14,7 @@ fn replay(target: &str, entry: fn(&[u8]) -> athanor_fuzz_entries::Setup) {
     assert!(!files.is_empty(), "corpus {target} is empty");
     for file in files {
         eprintln!("replay {}", file.display());
-        entry(&std::fs::read(&file).expect("corpus file")).expect("harness setup");
+        entry(&std::fs::read(&file).expect("corpus file")).expect("fuzz entry");
     }
 }
 

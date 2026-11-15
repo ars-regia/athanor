@@ -1,8 +1,9 @@
 //! The protocol fuzz target of issue #1172 (`fuzz/fuzz_targets/sulphur_protocol.rs`): the bytes
 //! a fuzzer mutates become the requests one client writes on its socket, to the compositor on
 //! its headless backend on Pixman. Each input runs on a compositor of its own, so the replay of
-//! a corpus file is the run that found it. A breach of these properties aborts the process,
-//! which is how the fuzzer and the replay test of athanor-fuzz-entries see a finding:
+//! a corpus file is the run that found it. A breach of these properties is the [`Finding`] that
+//! `run` returns, and the fuzz target (through `athanor_fuzz_entries::must`) and the replay test
+//! of athanor-fuzz-entries end on it:
 //! - the compositor never panics (`panic = "abort"`) and its loop never fails;
 //! - a protocol error ends only the client that made it: a second client still has its answer;
 //! - a client inside a security context is offered only the `standard` globals of
@@ -49,7 +50,19 @@ const TURNS: usize = 100;
 /// The frame period `tick` draws for.
 const PERIOD: Duration = Duration::from_millis(16);
 
-/// Runs `data` against a new compositor. `Err` is a failure of the harness, never a finding.
+/// A breach of one of the target's properties: the fuzz target ends on it, as on a panic.
+#[derive(Debug)]
+pub struct Finding(String);
+
+impl std::fmt::Display for Finding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "athanor-sulphur fuzz finding: {}", self.0)
+    }
+}
+
+impl std::error::Error for Finding {}
+
+/// Runs `data` against a new compositor. `Err` is a [`Finding`], or a failure of the harness.
 pub fn run(data: &[u8]) -> Result<(), Error> {
     let mut event_loop: EventLoop<State> = EventLoop::try_new()?;
     let display: Display<State> = Display::new()?;
@@ -88,7 +101,7 @@ pub fn run(data: &[u8]) -> Result<(), Error> {
     let mut run = Run { event_loop, state };
 
     client.send(&mut run, 1, 1, &REGISTRY.to_le_bytes())?;
-    run.turn(false);
+    run.turn(false)?;
     client.receive()?;
     while let Some(op) = input.next() {
         let p = op / 3;
@@ -96,7 +109,7 @@ pub fn run(data: &[u8]) -> Result<(), Error> {
             0 => client.bind(&mut run, &mut input, p)?,
             1 => client.request(&mut run, &mut input, p)?,
             _ => {
-                run.turn(p % 2 == 1);
+                run.turn(p % 2 == 1)?;
                 client.receive()?;
             }
         }
@@ -106,11 +119,13 @@ pub fn run(data: &[u8]) -> Result<(), Error> {
     witness.send(&mut run, 1, 0, &2u32.to_le_bytes())?;
     let mut answered = false;
     for _ in 0..TURNS {
-        run.turn(false);
+        run.turn(false)?;
         client.receive()?;
         witness.receive()?;
         if witness.gone {
-            finding("a client outside the protocol error was disconnected");
+            return Err(finding(
+                "a client outside the protocol error was disconnected",
+            ));
         }
         answered = witness
             .events
@@ -121,14 +136,13 @@ pub fn run(data: &[u8]) -> Result<(), Error> {
         }
     }
     if !answered {
-        finding("the compositor no longer answers another client");
+        return Err(finding("the compositor no longer answers another client"));
     }
     // The client hangs up with whatever it still holds: the compositor destroys it all, then
     // draws a frame without it.
     drop(client);
-    run.turn(false);
-    run.turn(true);
-    Ok(())
+    run.turn(false)?;
+    run.turn(true)
 }
 
 /// The compositor and its loop.
@@ -139,19 +153,20 @@ struct Run {
 
 impl Run {
     /// One turn of the loop, as `main`'s, and a frame when `draw` holds.
-    fn turn(&mut self, draw: bool) {
+    fn turn(&mut self, draw: bool) -> Result<(), Error> {
         if let Err(error) = self
             .event_loop
             .dispatch(Some(Duration::ZERO), &mut self.state)
         {
-            finding(&format!("the compositor's loop failed: {error}"));
+            return Err(finding(format!("the compositor's loop failed: {error}")));
         }
         self.state.refresh_idle_inhibit();
         if draw {
             self.state.tick(PERIOD);
         }
-        if let Some(reason) = &self.state.fatal {
-            finding(&format!("a client ended the compositor: {reason}"));
+        match &self.state.fatal {
+            Some(reason) => Err(finding(format!("a client ended the compositor: {reason}"))),
+            None => Ok(()),
         }
     }
 }
@@ -197,7 +212,7 @@ impl Peer {
         for _ in 0..TURNS {
             match self.stream.write(&message[written..]) {
                 Ok(n) => written += n,
-                Err(error) if error.kind() == ErrorKind::WouldBlock => run.turn(false),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => run.turn(false)?,
                 Err(error) if error.kind() == ErrorKind::BrokenPipe => {
                     self.gone = true;
                     return Ok(());
@@ -208,7 +223,9 @@ impl Peer {
                 return Ok(());
             }
         }
-        finding("the compositor no longer reads a client's requests");
+        Err(finding(
+            "the compositor no longer reads a client's requests",
+        ))
     }
 
     /// Reads what the socket holds and splits it into the events that are whole.
@@ -235,7 +252,9 @@ impl Peer {
         {
             let size = (header >> 16) as usize;
             if size < 8 || !size.is_multiple_of(4) {
-                finding(&format!("the compositor sent a message of {size} bytes"));
+                return Err(finding(format!(
+                    "the compositor sent a message of {size} bytes"
+                )));
             }
             if self.inbox.len() < start + size {
                 break;
@@ -284,8 +303,8 @@ impl Fuzzed {
         for event in std::mem::take(&mut self.peer.events) {
             if event.object == REGISTRY && event.opcode == 0 {
                 match global(&event.args) {
-                    Some(global) => self.admit(global),
-                    None => finding("a wl_registry.global the client cannot read"),
+                    Some(global) => self.admit(global)?,
+                    None => return Err(finding("a wl_registry.global the client cannot read")),
                 }
             }
         }
@@ -293,21 +312,24 @@ impl Fuzzed {
     }
 
     /// A breach when the client's class should not see `interface`.
-    fn admit(&mut self, (name, interface, version): (u32, String, u32)) {
+    fn admit(&mut self, (name, interface, version): (u32, String, u32)) -> Result<(), Error> {
         match class(&interface) {
             Some("standard") => {}
             Some("unconfined" | "layer-gated") if !self.confined => {}
-            Some(class) => finding(&format!(
-                "{interface} ({class}) offered to a client {}",
-                if self.confined {
-                    "inside a security context"
-                } else {
-                    "outside the allow-list"
-                }
-            )),
-            None => finding(&format!("{interface} has no row in data/globals")),
+            Some(class) => {
+                return Err(finding(format!(
+                    "{interface} ({class}) offered to a client {}",
+                    if self.confined {
+                        "inside a security context"
+                    } else {
+                        "outside the allow-list"
+                    }
+                )))
+            }
+            None => return Err(finding(format!("{interface} has no row in data/globals"))),
         }
         self.globals.push((name, interface, version));
+        Ok(())
     }
 
     fn new_id(&mut self) -> u32 {
@@ -425,8 +447,7 @@ fn class(interface: &str) -> Option<&'static str> {
         })
 }
 
-/// A breach of the target's properties: the process ends, as a panic would.
-fn finding(what: &str) -> ! {
-    eprintln!("athanor-sulphur fuzz finding: {what}");
-    std::process::abort();
+/// The error of a breach of the target's properties.
+fn finding(what: impl Into<String>) -> Error {
+    Box::new(Finding(what.into()))
 }
