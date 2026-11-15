@@ -287,6 +287,37 @@ fn a_resume_ends_the_leases_held_through_a_pause() {
     run.stop();
 }
 
+/// Without a render node: the lease device's row in `data/globals` is `unconfined`, and the
+/// filter its global is made with lists it to a client outside a security context only.
+#[test]
+fn the_lease_device_is_unconfined() {
+    assert!(
+        classified().contains(&("wp_drm_lease_device_v1", Class::Unconfined)),
+        "its row in data/globals"
+    );
+    let mut run = Running::start(None);
+    let mut open = Local::connect(&mut run, None);
+    open.toplevel(&mut run);
+    let (inside, _) = confined(&mut run);
+    let client = |local: &Local| {
+        window_of(&run, local.id.as_ref().expect("an id"))
+            .toplevel()
+            .expect("a toplevel")
+            .wl_surface()
+            .client()
+            .expect("the client")
+    };
+    assert!(
+        crate::drm_lease::shown_to(&client(&open)),
+        "outside a context"
+    );
+    assert!(
+        !crate::drm_lease::shown_to(&client(&inside)),
+        "inside a context"
+    );
+    run.stop();
+}
+
 /// The lease device of the GPU `ATHANOR_RENDER_NODE` names is listed to a client outside a
 /// security context and hidden from one inside it. Nothing binds it: the fixture has no udev
 /// backend to lease from. `ATHANOR_RENDER_NODE=/dev/dri/renderD128 cargo test -- --ignored`.

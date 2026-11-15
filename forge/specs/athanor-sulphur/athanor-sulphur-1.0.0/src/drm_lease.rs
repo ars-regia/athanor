@@ -27,13 +27,19 @@
 use crate::state::State;
 use smithay::backend::drm::DrmNode;
 use smithay::reexports::drm::control::{connector, crtc};
-use smithay::reexports::wayland_server::DisplayHandle;
+use smithay::reexports::wayland_server::{Client, DisplayHandle};
 use smithay::wayland::drm_lease::{DrmLease, DrmLeaseState, Error};
 use smithay::wayland::session_lock::SessionLocker;
 
 /// Offers the lease device of `node` to every client outside a security context.
 pub fn global(dh: &DisplayHandle, node: &DrmNode) -> Result<DrmLeaseState, Error> {
-    DrmLeaseState::new_with_filter::<State, _>(dh, node, crate::state::unconfined)
+    DrmLeaseState::new_with_filter::<State, _>(dh, node, shown_to)
+}
+
+/// Whether the lease device is listed to `client`: only outside a security context, the
+/// `unconfined` class of `data/globals`.
+pub fn shown_to(client: &Client) -> bool {
+    crate::state::unconfined(client)
 }
 
 /// The lease the compositor's `Leases` hold: Smithay's, or, in the fixture, a probe that
