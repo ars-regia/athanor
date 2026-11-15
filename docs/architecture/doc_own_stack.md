@@ -1402,8 +1402,8 @@ compositor and that the own compositor did not yet offer:
       and its connector disabled, when its device is lost on a session switch or removed,
       when its connector is disconnected, or when the connector stops being `non-desktop`.
       Fixture tests cover the refusal from the lock request on, the revocation and the
-      disabled connector before `locked`, and the revocation on a lost device and on a
-      disconnected connector (OS19, item 2);
+      disabled connector before `locked`, and the revocation on a lost device, on a
+      disconnected connector and on a connector that stops being `non-desktop` (OS19, item 2).
 
     Not taken:
     - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
@@ -1414,7 +1414,8 @@ compositor and that the own compositor did not yet offer:
 
     Left for a later decision: `zwlr_gamma_control_manager_v1`, which Smithay does not
     implement and which would be privileged, since it changes what every output shows; and
-    `xdg_toplevel_drag_manager_v1`, which only KWin and Mutter offer.
+    `xdg_toplevel_drag_manager_v1`, which Smithay does not implement and which, in the
+    snapshots, only KWin and Mutter offer.
 
 ## 8. Risks
 
