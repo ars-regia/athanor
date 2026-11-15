@@ -10,9 +10,9 @@ areas: [build, process, security]
 # 0140. Cache the Rust builds of the shell jobs in CI through the rig's compiler cache
 
 **Proposed.** The maintainer approved on 2026-11-15 the local compiler cache of the shell rig and
-a proposal for CI, which needs this record first. On the same day the maintainer answered open
-questions 1 to 4, which the decision follows, and asked for question 5 to be measured first.
-Approving this record approves the decisions below; question 5 stays open.
+a proposal for CI, which needs this record first. On the same day the maintainer answered the
+six questions of section "Maintainer's answers", which the decision follows. Approving this record
+approves the decisions below.
 
 ## Context
 
@@ -43,7 +43,7 @@ request poison a signed kernel (PR #250).
 ## Decision
 
 1. **The logic stays in `rig.sh`.** Every CI15 job that runs a `rig.sh build-*` recipe (the
-   maintainer's answer to question 3) sets `ATHANOR_RIG_SCCACHE` to a directory under `$RUNNER_TEMP` and `ATHANOR_RIG_SCCACHE_SIZE` to the bound of item 5. The
+   maintainer's answer to question 3), starting with the four of answer 6, sets `ATHANOR_RIG_SCCACHE` to a directory under `$RUNNER_TEMP` and `ATHANOR_RIG_SCCACHE_SIZE` to the bound of item 5. The
    workflow only restores that directory before the first `rig.sh build-*` step and saves it after
    the last one, with `actions/cache/restore` and `actions/cache/save` pinned by commit SHA as
    every action is. Another forge restores and saves the same directory with its own cache, or
@@ -88,7 +88,10 @@ request poison a signed kernel (PR #250).
    already fills: 10.23 GB in 48 entries on 2026-11-15, 7.1 GB of them the eight `rust-cache`
    entries of `rust-security-audit`. Without room every save evicts an entry another workflow
    restores, the fuzz corpus of `fuzz.yml` among them, and the rig's entries evict one another
-   before a pull request reads them; question 6 asks how to make the room. A save leaves the
+   before a pull request reads them. So the cache starts in the four jobs where the time is,
+   `toolkit-surfaces`, `dock`, `launcher` and `toolkit-clipboard` (about 4 to 6 GB), the cache of
+   `rust-security-audit` shrinks in a pull request of its own, and the other jobs join as room
+   frees (the maintainer's answer to question 6). A save leaves the
    job's entries of older lockfiles to no reader, since pull requests restore the newest, so the
    push run deletes them: a last job of `shell-surfaces.yml`, on `push` only, after the build jobs
    whatever their result (`if: ${{ !cancelled() && github.event_name == 'push' }}`), with
@@ -130,6 +133,16 @@ request poison a signed kernel (PR #250).
    write`, no `packages: write`, and runs no sign or publish script; the pruning job runs on
    `push` only, with `actions: write` and `contents: read` alone; no release-path restore key is
    a prefix of `rig-sccache-` or the reverse.
+9. **Rig build profiles** (the maintainer's answer to question 5). The jobs whose checks measure
+   the binary keep the RPM's release profile: `shelld`, `build-bar`, `dock` and `launcher` (the
+   PSS budgets), `measure-chooser`, `compositor-soak`, and the binaries built for development
+   machines (`scripts/devvm/*-acceptance.sh`, `scripts/shell-bench/deploy.py`). The jobs
+   `greeter`, `layout`, `compositor`, `toolkit-clipboard`, `dock-scene` and `control-center` build
+   with a faster profile, fat LTO off and 16 codegen units, selected by `rig.sh` through cargo's
+   `CARGO_PROFILE_RELEASE_LTO` and `CARGO_PROFILE_RELEASE_CODEGEN_UNITS` and not by a profile in
+   the root `Cargo.toml`. `toolkit-surfaces` switches only after a trial of its checks under the
+   faster profile on the hosted runner, for `toolkit-motion`'s settle times. The shim link-order
+   check (`DT_NEEDED`) runs under both profiles.
 
 ## Estimate
 
@@ -175,7 +188,7 @@ saves about 8 minutes of 29 per run, less the time to restore and save the direc
 1.5 GB for the two recipes, extrapolated from the 735 MB of one), and the two other
 `build-compositor` jobs, `dock` and `launcher`, save about 3 minutes each: about 13 minutes of
 runner time per run across the three jobs, and about 8 minutes of the workflow's wall time,
-whose longest job is `toolkit-surfaces`. With the faster profile of question 5 as well, the
+whose longest job is `toolkit-surfaces`. With the faster profile of item 9 as well, the
 measured 54 % would apply to `build-compositor`; `build-toolkit` was not measured that way. `build-toolkit` links more release binaries,
 each with fat LTO, so its share that sccache cannot cache may be larger and its saving smaller.
 The first run after a new build image or lockfile pays the 9 %. The figures are to be measured
@@ -212,25 +225,28 @@ on the hosted runner by the pull request that adds the steps.
   sets the variable: `publish-rig-build-image.yml` publishes it and its pin pull request commits
   it, as for any change of the stage.
 - `maintenance.yml`'s statistics (PL50) report the `rig-sccache-` entries against the limit.
+- The CI steps of items 1, 4 and 5 and the profile switch of item 9 land in a pull request after
+  this record is accepted, with the CI15 and PL50 text and the check of item 8; the record's own
+  pull request carries `rig.sh`'s local cache and the build stage that holds sccache.
+- The cache of `rust-security-audit` shrinks in a pull request of its own (item 5).
 - PL10's sentence that `verify.py workflows` rejects a cache step in a release-path job
   describes a check that `scripts/verify.py` does not hold yet, and `call-dag-compile.yml`
   breaks the rule today (item 7, issue #1174); item 8 adds the part this record needs.
 
-## Questions for the maintainer
+## Maintainer's answers
 
-Answered by the maintainer on 2026-11-15:
+The maintainer answered on 2026-11-15:
 
 1. **Pull-request saves.** Only `push` runs on `iso-v0` save; pull-request runs only restore
    (item 2).
 2. **The bound in CI.** The size measured after one run, rounded up (item 5); the local default
    stays 20G.
-3. **Which jobs.** Every CI15 job that runs a `build-*` recipe (item 1).
+3. **Which jobs.** Every CI15 job that runs a `build-*` recipe (item 1), the four of answer 6
+   first.
 4. **`check-rust` in `pr.yml`**, which compiles the workspace in the same build stage without a
    cache, stays out of this record.
-
-Open:
-
-5. **A rig build profile without fat LTO.** Measured in section "Estimate": it saves more than
+5. **A rig build profile without fat LTO.** Answer: the proposal below, recorded as item 9. The
+   proposal: measured in section "Estimate", the profile saves more than
    the cache, and the two add up. The least invasive way to select it is the one the measurement
    used, cargo's `CARGO_PROFILE_RELEASE_*` variables passed by `rig.sh` to the cargo runs of a
    recipe, so that the binaries stay under `target/release` and nothing reads another path. A
@@ -254,9 +270,9 @@ Open:
      layout, not the semantics of safe Rust: `overflow-checks`, `panic = "abort"` and `strip`
      stay as they are. The shim link-order check (`DT_NEEDED`) is to be run under both profiles
      before a job switches.
-   Recommended: decide it in its own pull request, with an opt-in variable of `rig.sh` set by the
-   jobs of the second group, measured on the hosted runner.
-6. **Room in the 10 GB** (item 5), found after answer 3: one entry for each of the eleven jobs
+   The trial of `toolkit-surfaces` and the link-order check under both profiles come first.
+6. **Room in the 10 GB** (item 5), raised after answer 3. Answer: option (a), the four jobs
+   first, with (c) in its own pull request, and the other jobs as room frees. The question: one entry for each of the eleven jobs
    does not fit beside the caches the repository holds today. Options: (a) start with the jobs
    where the time is, `toolkit-surfaces`, `dock`, `launcher` and `toolkit-clipboard`, about 4 to
    6 GB, and add the others as room appears; (b) one entry for the jobs that run the same recipes,
