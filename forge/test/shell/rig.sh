@@ -1562,14 +1562,13 @@ orca)
         # keyboard: Orca hears it announced with the focus on its first control, then one Tab
         # for each other control and one more, which comes back round to the first. Audio:
         # the output's slider, mute switch and two devices, the input's slider and mute switch,
-        # and the three media buttons. Battery: the three power modes and the brightness, as
-        # Sal's radios, each a stop; GTK's group was one stop, on the chosen mode, so its walk
-        # goes round twice and says every line of Sal's. Under athanor-sulphur Ctrl+Alt+Tab
-        # gives the bar the keyboard first, as in the bar's walk.
+        # and the three media buttons; battery: the power modes, one stop as a group of radios,
+        # and the brightness. Under athanor-sulphur Ctrl+Alt+Tab gives the bar the keyboard
+        # first, as in the bar's walk.
         stage_greeter_icons
         seed_bar "$out/seed-orca-$2" float top visible light
         walk=(Tab*9)
-        if [ "$2" = bar-battery ]; then walk=(Tab*4); fi
+        if [ "$2" = bar-battery ]; then walk=(Tab*2); fi
         if [ -n "$unit" ]; then walk=(ctrl+alt+Tab "${walk[@]}"); fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=12 RIG_CONFIG_SEED="/out/seed-orca-$2" \
             RIG_DATA_OVERLAY="$bar_overlay" ATHANOR_BAR_OPEN="${2#bar-}" \

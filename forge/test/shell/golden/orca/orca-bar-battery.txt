@@ -4,8 +4,4 @@ tab
 Screen brightness horizontal slider 60 60 percent.
 tab
 Balanced selected radio button.
-tab
-Screen brightness horizontal slider 60 60 percent.
-tab
-Balanced selected radio button.
 Screen reader off.
