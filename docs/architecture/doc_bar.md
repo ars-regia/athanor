@@ -59,7 +59,7 @@ Status: **revision 1, approved by the maintainer on 2026-09-25.** It is the spec
 
 | Module | Source | What it does |
 |---|---|---|
-| Network | NetworkManager over D-Bus (`zbus`) | wired state, the Wi-Fi list, connecting with a password, VPN, airplane mode. It registers a NetworkManager secret agent; a password is typed into a `gtk::PasswordEntry` and sent to NetworkManager on the system bus, and never written to a file of ours |
+| Network | NetworkManager over D-Bus (`zbus`) | wired state, the Wi-Fi list, connecting with a password, VPN, airplane mode. It registers a NetworkManager secret agent; a password is typed into the bar's own password entry and is sent only to NetworkManager, on the system bus, never written to a file of ours |
 | Bluetooth | BlueZ over D-Bus | power, paired devices, connect and disconnect, pairing through a BlueZ agent that shows the confirmation of the PIN |
 | Audio | the PulseAudio protocol (`pipewire-pulse`) | volume and choice of the output and input devices; media controls over MPRIS |
 | Battery | UPower; the power-profiles interface (`tuned-ppd`); logind's `SetBrightness` | percentage, time left, power profile, screen brightness; nothing goes through COSMIC's settings daemon |
