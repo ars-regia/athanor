@@ -12476,3 +12476,7 @@ mod wave2b;
 // Decision 35: ext-background-effect-v1's blur.
 #[cfg(test)]
 mod background_effect;
+
+// Decision 36: content type and toplevel tag.
+#[cfg(test)]
+mod decision36;
