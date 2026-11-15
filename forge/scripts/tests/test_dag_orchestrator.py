@@ -16,7 +16,7 @@ import time
 import unittest
 from unittest import mock
 
-from signed_registry import DIGEST, TRUSTED, TRUST_ENV, WORKFLOWS, stub_cosign
+from signed_registry import DIGEST, TRUSTED, TRUST_ENV, WORKFLOWS, stub_cosign, stub_skopeo
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "dag_orchestrator.py"
 
@@ -110,12 +110,7 @@ class RegistryStateTest(unittest.TestCase):
         (root / "forge/specs/athanor-dock").mkdir(parents=True)
         (root / "forge/specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
         (root / "bin").mkdir()
-        stub = root / "bin/skopeo"
-        stub.write_text(
-            '#!/usr/bin/env bash\ncat "$ANSWER_DIR/answer" >&2\n'
-            f'[[ $(cat "$ANSWER_DIR/status") == 0 ]] && echo {DIGEST}\nexit "$(cat "$ANSWER_DIR/status")"\n'
-        )
-        stub.chmod(0o755)
+        stub_skopeo(root / "bin")
         stub_cosign(root / "bin")
         (root / "signer").write_text(TRUSTED)
         self.root = root
@@ -171,6 +166,19 @@ class RegistryStateTest(unittest.TestCase):
                     self.assertEqual({"dock"}, self.dirty())
                 self.assertIn("athanor-forge-dock:hash-", err.getvalue())
                 self.assertIn("no trusted run of call-dag-compile.yml signed", err.getvalue())
+
+    def test_a_signed_image_labelled_with_another_hash_or_none_is_rebuilt_and_reported(self):
+        # A trusted digest of an older build or of another package, copied with its signature
+        # to this hash tag, verifies: its content label does not.
+        self.answer(0)
+        for label in ("f" * 64, "none"):
+            with self.subTest(label=label):
+                (self.root / "label").write_text(label)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    self.assertEqual({"dock"}, self.dirty())
+                self.assertIn("athanor-forge-dock:hash-", err.getvalue())
+                self.assertIn("not the tag's hash", err.getvalue())
 
     def test_a_verification_that_cannot_be_answered_stops_the_run(self):
         self.answer(0)

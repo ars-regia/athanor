@@ -156,8 +156,8 @@ echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
 # which stops here rather than reading as a hit or a miss. Anonymous: the forge images are
 # public, and credentials a registry rejects fail even a public read.
 # A package image is a hit only when verify_image.sh finds the digest of its tag signed by a
-# trusted run of call-dag-compile.yml (issue #1176): an image without that signature is a
-# miss, reported as an error, so the build replaces it. The builder is not signed by any run
+# trusted run of call-dag-compile.yml and labelled with the tag's hash (issue #1176): any
+# other image is a miss, reported as an error, so the build replaces it. The builder is not signed by any run
 # yet: its tag alone still decides.
 SCRIPTS="$(dirname "${BASH_SOURCE[0]}")"
 if [[ "$PACKAGE" == "builder" ]]; then

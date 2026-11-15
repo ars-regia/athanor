@@ -5,7 +5,7 @@
 # The tier assembly pulls by this digest, never by a tag: :latest is mutable (a revert or a
 # second branch moves it away from the content the run verified), and so is the hash tag
 # between a check and a pull. The digest is printed only when verify_image.sh finds it signed by
-# a trusted run of call-dag-compile.yml (issue #1176). A package with no entry, a tag the
+# a trusted run of call-dag-compile.yml and labelled with that hash (issue #1176). A package with no entry, a tag the
 # registry lacks, an image without that signature and a lookup that cannot be answered are
 # errors.
 #
@@ -34,7 +34,7 @@ absent)
     exit 1
     ;;
 *)
-    echo "resolve_node_image: ${ref} is not signed by a trusted run: its RPMs are not taken" >&2
+    echo "resolve_node_image: ${ref} is not a trusted build of its hash: its RPMs are not taken" >&2
     exit 1
     ;;
 esac

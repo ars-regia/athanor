@@ -39,10 +39,31 @@ def stub_cosign(bin_dir):
     stub.chmod(0o755)
 
 
+# A registry where every tag names DIGEST. A status file other than 0 fails each call with the
+# answer file on stderr. The config of DIGEST is labelled with the hash of the last hash tag
+# asked, as dag_package.sh labels a build, unless a label file says otherwise ("none": no label).
+SKOPEO_STUB = f"""#!/usr/bin/env bash
+[[ -f $ANSWER_DIR/answer ]] && cat "$ANSWER_DIR/answer" >&2
+status=0
+[[ -f $ANSWER_DIR/status ]] && status=$(< "$ANSWER_DIR/status")
+[[ $status == 0 ]] || exit "$status"
+ref=${{!#}}
+if [[ " $* " == *" --config "* ]]; then
+  label=$(< "$ANSWER_DIR/tag_hash")
+  [[ -f $ANSWER_DIR/label ]] && label=$(< "$ANSWER_DIR/label")
+  [[ $label == none ]] && labels='{{}}' || labels="{{\\"tier.content.sha256\\": \\"$label\\"}}"
+  echo "{{\\"config\\": {{\\"Labels\\": $labels}}}}"
+else
+  [[ $ref == *:hash-* ]] && echo "${{ref##*:hash-}}" > "$ANSWER_DIR/tag_hash"
+  echo {DIGEST}
+fi
+"""
+
+
 def stub_skopeo(bin_dir):
-    """A skopeo on PATH for which every tag is present and names DIGEST."""
+    """A skopeo on PATH that answers as SKOPEO_STUB says."""
     stub = bin_dir / "skopeo"
-    stub.write_text(f"#!/usr/bin/env bash\necho {DIGEST}\n")
+    stub.write_text(SKOPEO_STUB)
     stub.chmod(0o755)
 
 

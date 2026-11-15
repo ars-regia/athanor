@@ -371,9 +371,10 @@ def content_hash(pkg):
 
 def image_exists(ref):
     """Whether the registry has ref as an image a trusted run of call-dag-compile.yml built.
-    verify_image.sh resolves the tag to a digest and verifies the digest's signature
-    (issue #1176): a tag alone proves only that some job with packages: write pushed it. An
-    image that is not signed so is not built, and is rebuilt; verify_image.sh reports it as
+    verify_image.sh resolves the tag to a digest, verifies the digest's signature and checks
+    that its config is labelled with the tag's hash (issue #1176): a tag alone proves only that
+    some job with packages: write pushed it. An image that fails either is not built, and is
+    rebuilt; verify_image.sh reports it as
     an error, which is passed on. A lookup or verification that cannot be answered, once
     retry.sh has repeated it, raises with the script's own message, so the run stops instead
     of reading it as clean or as dirty."""

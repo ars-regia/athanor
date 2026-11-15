@@ -45,7 +45,17 @@ class ResolveNodeImageTest(unittest.TestCase):
                 result = self.resolve("bar")
                 self.assertNotEqual(0, result.returncode)
                 self.assertEqual("", result.stdout)
-                self.assertIn("its RPMs are not taken", result.stderr)
+                self.assertIn("is not a trusted build of its hash", result.stderr)
+
+    def test_a_signed_image_labelled_with_another_hash_or_none_is_not_fetched(self):
+        (self.state / "hashes.json").write_text(json.dumps({"bar": "ab12"}))
+        for label in ("cd34", "none"):
+            with self.subTest(label=label):
+                (self.state / "label").write_text(label)
+                result = self.resolve("bar")
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertIn("not the tag's hash", result.stderr)
 
     def test_a_verification_that_cannot_be_answered_is_an_error(self):
         (self.state / "hashes.json").write_text(json.dumps({"bar": "ab12"}))

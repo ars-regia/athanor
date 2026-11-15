@@ -185,6 +185,15 @@ class PackageCacheHitTest(unittest.TestCase):
                 self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
                 self.assertIn("no trusted run of call-dag-compile.yml signed", result.stderr)
 
+    def test_a_signed_image_labelled_with_another_hash_or_none_is_a_miss_and_an_error(self):
+        for label in ("f" * 64, "none"):
+            with self.subTest(label=label):
+                (self.root / "label").write_text(label)
+                result = self.check(TRUSTED)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+                self.assertIn("not the tag's hash", result.stderr)
+
     def test_a_verification_that_cannot_be_answered_fails_the_check(self):
         (self.root / "cosign_error").write_text("")
         result = self.check(TRUSTED)
