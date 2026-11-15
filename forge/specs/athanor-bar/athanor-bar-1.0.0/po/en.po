@@ -98,7 +98,7 @@ msgstr "Nearby devices"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348
-#: src/ui/modules/power.rs:88
+#: src/ui/modules/power.rs:88 src/ui/modules/shield.rs:684
 msgid "Cancel"
 msgstr "Cancel"
 
@@ -441,6 +441,295 @@ msgstr "Shut down now?"
 msgid "Power"
 msgstr "Power"
 
+#: src/ui/modules/shield.rs:319
+msgid "System image verified"
+msgstr "System image verified"
+
+#: src/ui/modules/shield.rs:320
+msgid "Not verified yet"
+msgstr "Not verified yet"
+
+#: src/ui/modules/shield.rs:321
+msgid "Update refused"
+msgstr "Update refused"
+
+#: src/ui/modules/shield.rs:327
+msgid "Signed with a key of the policy in force"
+msgstr "Signed with a key of the policy in force"
+
+#: src/ui/modules/shield.rs:328
+msgid "Not verified: installed from media"
+msgstr "Not verified: installed from media"
+
+#: src/ui/modules/shield.rs:329
+msgid "Not verified: no signature"
+msgstr "Not verified: no signature"
+
+#: src/ui/modules/shield.rs:330
+msgid "Not verified: its key is not in the policy"
+msgstr "Not verified: its key is not in the policy"
+
+#: src/ui/modules/shield.rs:331
+msgid "Not verified: fetched under a permissive policy"
+msgstr "Not verified: fetched under a permissive policy"
+
+#: src/ui/modules/shield.rs:332
+msgid "Not verified: the image is outside the policy's scope"
+msgstr "Not verified: the image is outside the policy's scope"
+
+#: src/ui/modules/shield.rs:333
+msgid "Not verified: the system was changed on this machine"
+msgstr "Not verified: the system was changed on this machine"
+
+#: src/ui/modules/shield.rs:334
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr "Not verified: waiting for the stable channel to be published"
+
+#: src/ui/modules/shield.rs:335
+msgid "Not verified: this machine does not verify its updates"
+msgstr "Not verified: this machine does not verify its updates"
+
+#: src/ui/modules/shield.rs:336
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr "Signed, but pinned to one build: it receives no updates"
+
+#: src/ui/modules/shield.rs:342
+msgid "Up to date"
+msgstr "Up to date"
+
+#: src/ui/modules/shield.rs:343
+msgid "An update is available; it downloads at the next check"
+msgstr "An update is available; it downloads at the next check"
+
+#: src/ui/modules/shield.rs:344
+msgid "An update is ready; it installs when you restart"
+msgstr "An update is ready; it installs when you restart"
+
+#: src/ui/modules/shield.rs:345
+msgid "The update installs at the next restart"
+msgstr "The update installs at the next restart"
+
+#: src/ui/modules/shield.rs:346
+msgid "The last update was refused by the policy"
+msgstr "The last update was refused by the policy"
+
+#: src/ui/modules/shield.rs:348
+msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
+msgstr "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
+
+#: src/ui/modules/shield.rs:350
+msgid "This version is older than one this machine has run"
+msgstr "This version is older than one this machine has run"
+
+#: src/ui/modules/shield.rs:357
+msgid "The last check failed: network error"
+msgstr "The last check failed: network error"
+
+#: src/ui/modules/shield.rs:358
+msgid "The last check failed: registry error"
+msgstr "The last check failed: registry error"
+
+#: src/ui/modules/shield.rs:359
+msgid "The last check failed: refused by the policy"
+msgstr "The last check failed: refused by the policy"
+
+#: src/ui/modules/shield.rs:360
+msgid "The last check failed: storage error"
+msgstr "The last check failed: storage error"
+
+#: src/ui/modules/shield.rs:361
+msgid "The last check failed: internal error"
+msgstr "The last check failed: internal error"
+
+#: src/ui/modules/shield.rs:367
+msgid "No trust state yet: the first check has not run"
+msgstr "No trust state yet: the first check has not run"
+
+#: src/ui/modules/shield.rs:369
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr "The trust state file is not owned by the system and was ignored"
+
+#: src/ui/modules/shield.rs:371
+msgid "The trust state file could not be read"
+msgstr "The trust state file could not be read"
+
+#: src/ui/modules/shield.rs:372 src/ui/modules/shield.rs:390
+msgid "The update service did not answer"
+msgstr "The update service did not answer"
+
+#: src/ui/modules/shield.rs:378
+msgid "Not authorised"
+msgstr "Not authorised"
+
+#: src/ui/modules/shield.rs:379
+msgid "Another update request is running"
+msgstr "Another update request is running"
+
+#: src/ui/modules/shield.rs:381
+msgid "Nothing is downloaded yet; the update downloads at the next check"
+msgstr "Nothing is downloaded yet; the update downloads at the next check"
+
+#: src/ui/modules/shield.rs:383
+msgid "There is no previous version to go back to"
+msgstr "There is no previous version to go back to"
+
+#: src/ui/modules/shield.rs:384
+msgid "A program is blocking the restart; close it and try again"
+msgstr "A program is blocking the restart; close it and try again"
+
+#: src/ui/modules/shield.rs:385
+msgid "The request failed; the system journal says why"
+msgstr "The request failed; the system journal says why"
+
+#: src/ui/modules/shield.rs:387
+msgid "This security update was already postponed once, or can no longer be"
+msgstr "This security update was already postponed once, or can no longer be"
+
+#: src/ui/modules/shield.rs:389
+msgid "Only security updates can be postponed"
+msgstr "Only security updates can be postponed"
+
+#: src/ui/modules/shield.rs:405
+msgid "January"
+msgstr "January"
+
+#: src/ui/modules/shield.rs:406
+msgid "February"
+msgstr "February"
+
+#: src/ui/modules/shield.rs:407
+msgid "March"
+msgstr "March"
+
+#: src/ui/modules/shield.rs:408
+msgid "April"
+msgstr "April"
+
+#: src/ui/modules/shield.rs:409
+msgid "May"
+msgstr "May"
+
+#: src/ui/modules/shield.rs:410
+msgid "June"
+msgstr "June"
+
+#: src/ui/modules/shield.rs:411
+msgid "July"
+msgstr "July"
+
+#: src/ui/modules/shield.rs:412
+msgid "August"
+msgstr "August"
+
+#: src/ui/modules/shield.rs:413
+msgid "September"
+msgstr "September"
+
+#: src/ui/modules/shield.rs:414
+msgid "October"
+msgstr "October"
+
+#: src/ui/modules/shield.rs:415
+msgid "November"
+msgstr "November"
+
+#: src/ui/modules/shield.rs:416
+msgid "December"
+msgstr "December"
+
+#: src/ui/modules/shield.rs:449
+#, rust-format
+msgid "Version {version}"
+msgstr "Version {version}"
+
+#: src/ui/modules/shield.rs:450
+#, rust-format
+msgid "Built on {date}"
+msgstr "Built on {date}"
+
+#: src/ui/modules/shield.rs:453
+#, rust-format
+msgid "Last checked on {date}"
+msgstr "Last checked on {date}"
+
+#: src/ui/modules/shield.rs:454
+msgid "Never checked"
+msgstr "Never checked"
+
+#: src/ui/modules/shield.rs:461
+#, rust-format
+msgid "Host: {host}"
+msgstr "Host: {host}"
+
+#: src/ui/modules/shield.rs:465
+msgid "Signature policy in force"
+msgstr "Signature policy in force"
+
+#: src/ui/modules/shield.rs:467
+msgid "Signature policy not in force"
+msgstr "Signature policy not in force"
+
+#: src/ui/modules/shield.rs:470
+msgid "The policy is the one Athanor ships"
+msgstr "The policy is the one Athanor ships"
+
+#: src/ui/modules/shield.rs:472
+msgid "The policy was changed on this machine"
+msgstr "The policy was changed on this machine"
+
+#: src/ui/modules/shield.rs:475
+msgid "Secure Boot on"
+msgstr "Secure Boot on"
+
+#: src/ui/modules/shield.rs:477
+msgid "Secure Boot off: this machine runs in the declared degraded mode"
+msgstr "Secure Boot off: this machine runs in the declared degraded mode"
+
+#: src/ui/modules/shield.rs:481
+msgid "Automatic security updates are off: security fixes wait until someone installs them."
+msgstr "Automatic security updates are off: security fixes wait until someone installs them."
+
+#: src/ui/modules/shield.rs:486
+#, rust-format
+msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
+msgstr "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
+
+#: src/ui/modules/shield.rs:499
+msgid "Restart and install the update now?"
+msgstr "Restart and install the update now?"
+
+#: src/ui/modules/shield.rs:499 src/ui/modules/shield.rs:664
+msgid "Restart to update"
+msgstr "Restart to update"
+
+#: src/ui/modules/shield.rs:501
+msgid "Go back to the previous version and restart? This asks for an administrator's password."
+msgstr "Go back to the previous version and restart? This asks for an administrator's password."
+
+#: src/ui/modules/shield.rs:502
+msgid "Go back"
+msgstr "Go back"
+
+#: src/ui/modules/shield.rs:505
+msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+msgstr "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+
+#: src/ui/modules/shield.rs:506
+msgid "Turn Off"
+msgstr "Turn Off"
+
+#: src/ui/modules/shield.rs:659
+msgid "Automatic security updates"
+msgstr "Automatic security updates"
+
+#: src/ui/modules/shield.rs:663
+msgid "Postpone"
+msgstr "Postpone"
+
+#: src/ui/modules/shield.rs:667
+msgid "Go back to the previous version"
+msgstr "Go back to the previous version"
+
 #: src/ui/modules/tiling.rs:63 src/ui/modules/tiling.rs:74
 msgid "Tiling"
 msgstr "Tiling"
@@ -500,224 +789,6 @@ msgstr "Tile windows"
 
 #~ msgid "Do not disturb"
 #~ msgstr "Do not disturb"
-
-#~ msgid "Restart to update"
-#~ msgstr "Restart to update"
-
-#~ msgid "Restart and install the update now?"
-#~ msgstr "Restart and install the update now?"
-
-#~ msgid "System image verified"
-#~ msgstr "System image verified"
-
-#~ msgid "Not verified yet"
-#~ msgstr "Not verified yet"
-
-#~ msgid "Update refused"
-#~ msgstr "Update refused"
-
-#~ msgid "Signed with a key of the policy in force"
-#~ msgstr "Signed with a key of the policy in force"
-
-#~ msgid "Not verified: installed from media"
-#~ msgstr "Not verified: installed from media"
-
-#~ msgid "Not verified: no signature"
-#~ msgstr "Not verified: no signature"
-
-#~ msgid "Not verified: its key is not in the policy"
-#~ msgstr "Not verified: its key is not in the policy"
-
-#~ msgid "Not verified: fetched under a permissive policy"
-#~ msgstr "Not verified: fetched under a permissive policy"
-
-#~ msgid "Not verified: the image is outside the policy's scope"
-#~ msgstr "Not verified: the image is outside the policy's scope"
-
-#~ msgid "Not verified: the system was changed on this machine"
-#~ msgstr "Not verified: the system was changed on this machine"
-
-#~ msgid "Not verified: waiting for the stable channel to be published"
-#~ msgstr "Not verified: waiting for the stable channel to be published"
-
-#~ msgid "Not verified: this machine does not verify its updates"
-#~ msgstr "Not verified: this machine does not verify its updates"
-
-#~ msgid "Signed, but pinned to one build: it receives no updates"
-#~ msgstr "Signed, but pinned to one build: it receives no updates"
-
-#~ msgid "Up to date"
-#~ msgstr "Up to date"
-
-#~ msgid "An update is available; it downloads at the next check"
-#~ msgstr "An update is available; it downloads at the next check"
-
-#~ msgid "An update is ready; it installs when you restart"
-#~ msgstr "An update is ready; it installs when you restart"
-
-#~ msgid "The update installs at the next restart"
-#~ msgstr "The update installs at the next restart"
-
-#~ msgid "The last update was refused by the policy"
-#~ msgstr "The last update was refused by the policy"
-
-#~ msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
-#~ msgstr "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
-
-#~ msgid "This version is older than one this machine has run"
-#~ msgstr "This version is older than one this machine has run"
-
-#~ msgid "The last check failed: network error"
-#~ msgstr "The last check failed: network error"
-
-#~ msgid "The last check failed: registry error"
-#~ msgstr "The last check failed: registry error"
-
-#~ msgid "The last check failed: refused by the policy"
-#~ msgstr "The last check failed: refused by the policy"
-
-#~ msgid "The last check failed: storage error"
-#~ msgstr "The last check failed: storage error"
-
-#~ msgid "The last check failed: internal error"
-#~ msgstr "The last check failed: internal error"
-
-#~ msgid "No trust state yet: the first check has not run"
-#~ msgstr "No trust state yet: the first check has not run"
-
-#~ msgid "The trust state file is not owned by the system and was ignored"
-#~ msgstr "The trust state file is not owned by the system and was ignored"
-
-#~ msgid "The trust state file could not be read"
-#~ msgstr "The trust state file could not be read"
-
-#~ msgid "The update service did not answer"
-#~ msgstr "The update service did not answer"
-
-#~ msgid "Not authorised"
-#~ msgstr "Not authorised"
-
-#~ msgid "Another update request is running"
-#~ msgstr "Another update request is running"
-
-#~ msgid "Nothing is downloaded yet; the update downloads at the next check"
-#~ msgstr "Nothing is downloaded yet; the update downloads at the next check"
-
-#~ msgid "There is no previous version to go back to"
-#~ msgstr "There is no previous version to go back to"
-
-#~ msgid "A program is blocking the restart; close it and try again"
-#~ msgstr "A program is blocking the restart; close it and try again"
-
-#~ msgid "The request failed; the system journal says why"
-#~ msgstr "The request failed; the system journal says why"
-
-#~ msgid "This security update was already postponed once, or can no longer be"
-#~ msgstr "This security update was already postponed once, or can no longer be"
-
-#~ msgid "Only security updates can be postponed"
-#~ msgstr "Only security updates can be postponed"
-
-#~ msgid "January"
-#~ msgstr "January"
-
-#~ msgid "February"
-#~ msgstr "February"
-
-#~ msgid "March"
-#~ msgstr "March"
-
-#~ msgid "April"
-#~ msgstr "April"
-
-#~ msgid "May"
-#~ msgstr "May"
-
-#~ msgid "June"
-#~ msgstr "June"
-
-#~ msgid "July"
-#~ msgstr "July"
-
-#~ msgid "August"
-#~ msgstr "August"
-
-#~ msgid "September"
-#~ msgstr "September"
-
-#~ msgid "October"
-#~ msgstr "October"
-
-#~ msgid "November"
-#~ msgstr "November"
-
-#~ msgid "December"
-#~ msgstr "December"
-
-#, rust-format
-#~ msgid "Version {version}"
-#~ msgstr "Version {version}"
-
-#, rust-format
-#~ msgid "Built on {date}"
-#~ msgstr "Built on {date}"
-
-#, rust-format
-#~ msgid "Last checked on {date}"
-#~ msgstr "Last checked on {date}"
-
-#~ msgid "Never checked"
-#~ msgstr "Never checked"
-
-#, rust-format
-#~ msgid "Host: {host}"
-#~ msgstr "Host: {host}"
-
-#~ msgid "Signature policy in force"
-#~ msgstr "Signature policy in force"
-
-#~ msgid "Signature policy not in force"
-#~ msgstr "Signature policy not in force"
-
-#~ msgid "The policy is the one Athanor ships"
-#~ msgstr "The policy is the one Athanor ships"
-
-#~ msgid "The policy was changed on this machine"
-#~ msgstr "The policy was changed on this machine"
-
-#~ msgid "Secure Boot on"
-#~ msgstr "Secure Boot on"
-
-#~ msgid "Secure Boot off: this machine runs in the declared degraded mode"
-#~ msgstr "Secure Boot off: this machine runs in the declared degraded mode"
-
-#~ msgid "Automatic security updates are off: security fixes wait until someone installs them."
-#~ msgstr "Automatic security updates are off: security fixes wait until someone installs them."
-
-#, rust-format
-#~ msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
-#~ msgstr "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
-
-#~ msgid "Postpone"
-#~ msgstr "Postpone"
-
-#~ msgid "Go back to the previous version"
-#~ msgstr "Go back to the previous version"
-
-#~ msgid "Automatic security updates"
-#~ msgstr "Automatic security updates"
-
-#~ msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
-#~ msgstr "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
-
-#~ msgid "Turn Off"
-#~ msgstr "Turn Off"
-
-#~ msgid "Go back to the previous version and restart? This asks for an administrator's password."
-#~ msgstr "Go back to the previous version and restart? This asks for an administrator's password."
-
-#~ msgid "Go back"
-#~ msgstr "Go back"
 
 #~ msgid "System tray"
 #~ msgstr "System tray"
