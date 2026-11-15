@@ -56,30 +56,30 @@ msgid "Running applications"
 msgstr "Applicazioni in esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:160
-#: ../../../../system/athanor-apps/src/sal.rs:144
+#: ../../../../system/athanor-apps/src/sal.rs:163
 msgid "Running"
 msgstr "In esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:388
-#: ../../../../system/athanor-apps/src/sal.rs:277
+#: ../../../../system/athanor-apps/src/sal.rs:296
 #, rust-format
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
 #: ../../../../system/athanor-apps/src/row.rs:392
-#: ../../../../system/athanor-apps/src/sal.rs:288
+#: ../../../../system/athanor-apps/src/sal.rs:307
 #: src/ui/modules/notifications.rs:899
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
 
 #: ../../../../system/athanor-apps/src/row.rs:419
-#: ../../../../system/athanor-apps/src/sal.rs:305
+#: ../../../../system/athanor-apps/src/sal.rs:324
 msgid "Open"
 msgstr "Apri"
 
 #: ../../../../system/athanor-apps/src/row.rs:421
-#: ../../../../system/athanor-apps/src/sal.rs:307
+#: ../../../../system/athanor-apps/src/sal.rs:326
 msgid "New Window"
 msgstr "Nuova finestra"
 
@@ -296,15 +296,15 @@ msgstr "%A %-d %B %Y, %-I:%M %p"
 msgid "Control center"
 msgstr "Centro di controllo"
 
-#: src/ui/bar.rs:479 src/ui/bar.rs:1017
+#: src/ui/bar.rs:479 src/ui/bar.rs:1024
 msgid "Bar"
 msgstr "Barra"
 
-#: src/ui/bar.rs:957
+#: src/ui/bar.rs:964
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/bar.rs:959
+#: src/ui/bar.rs:966
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
@@ -411,6 +411,14 @@ msgstr "Attivare {aid}?"
 #: src/ui/modules/aids.rs:116
 msgid "No modifier held"
 msgstr "Nessun modificatore attivo"
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:60
+msgid "Sound"
+msgstr "Audio"
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:78
+msgid "Battery"
+msgstr "Batteria"
 
 #: src/ui/modules/clock.rs:76
 msgid "Calendar"
@@ -813,9 +821,6 @@ msgstr "Affianca le finestre"
 #: src/ui/modules/tray.rs:747
 msgid "System tray"
 msgstr "Vassoio di sistema"
-
-#~ msgid "Sound"
-#~ msgstr "Audio"
 
 #~ msgid "Clock"
 #~ msgstr "Orologio"

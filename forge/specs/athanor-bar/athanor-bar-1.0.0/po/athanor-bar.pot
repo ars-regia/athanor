@@ -64,30 +64,30 @@ msgid "Running applications"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:160
-#: ../../../../system/athanor-apps/src/sal.rs:144
+#: ../../../../system/athanor-apps/src/sal.rs:163
 msgid "Running"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:388
-#: ../../../../system/athanor-apps/src/sal.rs:277
+#: ../../../../system/athanor-apps/src/sal.rs:296
 #, rust-format
 msgid "Minimise {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:392
-#: ../../../../system/athanor-apps/src/sal.rs:288
+#: ../../../../system/athanor-apps/src/sal.rs:307
 #: src/ui/modules/notifications.rs:899
 #, rust-format
 msgid "Close {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:419
-#: ../../../../system/athanor-apps/src/sal.rs:305
+#: ../../../../system/athanor-apps/src/sal.rs:324
 msgid "Open"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:421
-#: ../../../../system/athanor-apps/src/sal.rs:307
+#: ../../../../system/athanor-apps/src/sal.rs:326
 msgid "New Window"
 msgstr ""
 
@@ -304,15 +304,15 @@ msgstr ""
 msgid "Control center"
 msgstr ""
 
-#: src/ui/bar.rs:479 src/ui/bar.rs:1017
+#: src/ui/bar.rs:479 src/ui/bar.rs:1024
 msgid "Bar"
 msgstr ""
 
-#: src/ui/bar.rs:957
+#: src/ui/bar.rs:964
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/bar.rs:959
+#: src/ui/bar.rs:966
 msgid "Pin to Bar"
 msgstr ""
 
@@ -418,6 +418,14 @@ msgstr ""
 
 #: src/ui/modules/aids.rs:116
 msgid "No modifier held"
+msgstr ""
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:60
+msgid "Sound"
+msgstr ""
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:78
+msgid "Battery"
 msgstr ""
 
 #: src/ui/modules/clock.rs:76

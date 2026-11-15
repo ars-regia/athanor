@@ -50,7 +50,7 @@
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-<popover>|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
 #   rig.sh atspi <greeter|chooser|bar|bar-<popover>|dock|launcher|control-center> it   the same in Italian, with the shipped catalog
-#   rig.sh atspi <bar|bar-modules|dock|launcher|control-center> --matrix   AX17: the walk in light, dark and both high-contrast
+#   rig.sh atspi <bar|bar-<popover>|bar-modules|dock|launcher|control-center> --matrix   AX17: the walk in light, dark and both high-contrast
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
@@ -1185,8 +1185,8 @@ EOF
 atspi)
     if [ "${3:-}" = --matrix ]; then
         case ${2:-} in
-        bar | bar-modules | dock | launcher | control-center) ;;
-        *) echo "rig.sh atspi: --matrix runs on bar, bar-modules, dock, launcher or control-center, not '${2:-}'" >&2; exit 2 ;;
+        bar | bar-* | dock | launcher | control-center) ;;
+        *) echo "rig.sh atspi: --matrix runs on bar, bar-<popover>, bar-modules, dock, launcher or control-center, not '${2:-}'" >&2; exit 2 ;;
         esac
         for appearance in light dark hc-light hc-dark; do
             for scale in 1.0 1.25 1.5; do
@@ -1221,10 +1221,12 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
+            [bar-audio]="athanor-bar Audio" [bar-battery]="athanor-bar Batteria"
             [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca"
             [control-center]="athanor-control-center Centro di controllo")
         key=${2:-}
-        case "$key" in bar-*) key=bar ;; esac
+        # A popover's own name where it has one, else the bar's, which its tree holds too.
+        case "$key" in bar-*) [ -n "${italian[$key]:-}" ] || key=bar ;; esac
         [ -n "${italian[$key]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
         read -r component required <<< "${italian[$key]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
@@ -1589,6 +1591,11 @@ orca)
         bar-accessibility) walk=(Tab*4 Down*4 Tab) ;;
         bar-tiling) walk=(Tab) ;;
         bar-power) walk=(Tab*5) ;;
+        # The output's slider, mute switch and two devices, the input's slider and mute
+        # switch, and the three media buttons.
+        bar-audio) walk=(Tab*9) ;;
+        # The power modes, one stop as a group of radios, and the brightness.
+        bar-battery) walk=(Tab*2) ;;
         bar-running) walk=(Tab*3 shift+F10 Down*4 Escape) ;;
         *) echo "rig.sh orca: $2 has no walk; name its keys here" >&2; exit 2 ;;
         esac

@@ -633,15 +633,22 @@ impl Bar {
     }
 
     /// The popover the captures ask for, once the bar is ready and the module shows its
-    /// button: the notifications show theirs only once the daemon listed them.
+    /// button with its content final (`Module::ready`), as the GTK bar's modules kept the
+    /// request until then: the notifications show theirs only once the daemon listed them.
     fn open_asked(&mut self, shell: &mut Shell) {
         let Some(module) = self.open_on_start.filter(|_| self.ready) else {
             return;
         };
-        if self.shows(module) {
-            self.open_on_start = None;
-            self.open_module(shell, module);
+        let ready = self
+            .modules
+            .iter()
+            .find(|(m, _)| *m == module)
+            .is_none_or(|(_, drawn)| drawn.ready());
+        if !ready || !self.shows(module) {
+            return;
         }
+        self.open_on_start = None;
+        self.open_module(shell, module);
     }
 
     /// The modules' own surfaces, after the bar's.

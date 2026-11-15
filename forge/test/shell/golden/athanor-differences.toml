@@ -2742,3 +2742,101 @@ item = 4
 what = "the cards of the list take the popover's corner radius"
 state = "recorded"
 reason = "a Sal Ui draws every island with its theme's one radius, so a card in the list rounds at the popover's 24 px; GTK's .notification-card class gave the cards 18 px, which the popups, on a Ui of their own, keep"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 1
+what = "no Network, Bluetooth or shield button in the bar, which is shorter, and the popover further towards the end edge"
+state = "recorded"
+reason = "those modules are ported on their own branches and show no button until then (fba961ef); the goldens are captured again once they land"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 2
+what = "the module's button not drawn pressed while its popover is open"
+state = "recorded"
+reason = "Sal's popup draws no state on the widget it opens from; a change to how the bar opens every popover, not to the module"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 3
+what = "the focus ring drawn on the output's slider when the popover opens"
+state = "recorded"
+reason = "Sal gives the first control the focus and shows its ring, as the control center's pages (item 6); GTK focused the same slider, as its Orca reference says, without the ring"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 4
+what = "the device rows raised on the bar's chip, and the popover about 50 px wider"
+state = "closed"
+reason = "the page opens in a theme with flat buttons on the popover's fill and a 160 px least slider, so the widest row of labels and switches sets the width, as GTK's (controls::theme)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 5
+what = "the artist in body text"
+state = "closed"
+reason = "the artist is a note in calmo's caption size and ink2, as bar-popover-note (controls::look)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 6
+what = "headings and notes a tenth smaller, an off switch with a pale knob, rows a few pixels apart from GTK's, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's type steps, switch and metrics and the palette's surface follow VL10, as the control center's items 13, 14 and 16 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 7
+what = "no Network, Bluetooth or shield button in the bar, which is shorter, and the popover against the end edge"
+state = "recorded"
+reason = "those modules are ported on their own branches and show no button until then (fba961ef); the goldens are captured again once they land"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 8
+what = "the module's button not drawn pressed while its popover is open"
+state = "recorded"
+reason = "Sal's popup draws no state on the widget it opens from; a change to how the bar opens every popover, not to the module"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 9
+what = "the focus on Power saver when the popover opens, and each power mode its own Tab stop"
+state = "closed"
+reason = "a Sal radio group is one Tab stop on its chosen radio, which the arrows move along the group, as GTK's and the WAI-ARIA radio group (maintainer decision, 2026-11-15); the focus opens on Balanced and the Orca walk takes GTK's two Tabs"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 10
+what = "the power modes 32 px apart and the popover about 50 px wider"
+state = "closed"
+reason = "the page takes a 2.25 px radio gap for GTK's 30 px pitch and a 160 px least slider, so the widest row sets the width (controls::look, controls::theme)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 11
+what = "the time left in body text"
+state = "closed"
+reason = "the time left is a note in calmo's caption size and ink2, as bar-popover-note (controls::look)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 12
+what = "headings and notes a tenth smaller, an unselected radio with a faint ring, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's type steps and radio and the palette's surface follow VL10, as the control center's items 13 and 14 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 13
+what = "in right-to-left the volume button's and the media buttons' icons pointed left to right"
+state = "closed"
+reason = "the icons are looked up under the theme's -rtl variant when the reading is right-to-left, as GTK's lookup takes it, and tinted as symbolic (Icons::reading)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 14
+what = "the focus ring drawn on the chosen power mode when the popover opens"
+state = "recorded"
+reason = "Sal shows the ring of the control it gives the focus, as on the audio popover's slider (item 3); GTK focused the same mode, as its Orca reference says, without the ring"
