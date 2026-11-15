@@ -1406,20 +1406,33 @@ compositor and that the own compositor did not yet offer:
       over a locked session. After the unlock a client asks again. A lease is also revoked,
       and its connector disabled, when its device is lost on a session switch or removed,
       when its connector is disconnected, or when the connector stops being `non-desktop`.
-      *Amended on 2026-11-15:* revoking needs the device's DRM master. A session switch the
-      compositor makes, on its own keys, revokes every lease and disables its connector
-      before the switch. A switch logind makes on another request is acknowledged to logind
-      before the compositor is told, so the compositor revokes at the pause while it still
-      holds the master, and otherwise at the resume, before any output is drawn again; until
-      then the headset can keep showing its client's last frames. A lock confirmed while the
-      session is paused takes the same path: the revocation is attempted, a failure is
-      logged as an error naming the connector, and the lease ends at the resume. Fixture
-      tests drive the real `ext_session_lock_v1` through the lease rules, with a probe in
-      place of DRM: the refusal from the lock request on, the revocation before `locked`,
-      and the grant again after the unlock. Unit tests on the same rules cover the
-      disabled connector, the revocation on a lost device, on a disconnected connector and
-      on a connector that stops being `non-desktop`, and the switch the compositor makes
-      (OS19, item 2).
+      *Amended on 2026-11-15:* revoking needs the device's DRM master, so the order is kept
+      by what the compositor waits for:
+      - `locked` is sent only once every lease has been revoked and its connector and CRTC
+        disabled, each step having succeeded. While the session is paused, or while a
+        revocation fails, `locked` waits; the outputs stay covered from the lock request on
+        as before, and only the confirmation waits. The compositor tries again at the
+        resume, before any output is drawn, and sends `locked` once the revocation succeeds;
+      - a revocation that fails is logged as an error naming the connector, and the lease
+        is not counted as ended: new requests stay refused and the revocation is tried
+        again at the next scan of the device;
+      - new requests are also refused from the moment the compositor starts a session
+        switch on its own keys, or the session is paused, until the resume. A switch the
+        compositor makes revokes every lease and disables its connector before the switch;
+      - a switch logind makes on another request is acknowledged to logind before the
+        compositor is told, and libseat's contract forbids using the device after that.
+        The revocation at the pause is only an attempt; the one that counts is at the
+        resume. Until then the client holding the lease can go on driving the headset with
+        new frames, while another session has the seat;
+      - fixture tests drive the real `ext_session_lock_v1` through the lease rules, with a
+        probe in place of DRM: the refusal from the lock request on, `locked` withheld
+        while the probe's revocation fails or the session is paused and sent once it
+        succeeds, and the grant again after the unlock. Unit tests on the same rules cover
+        the disabled connector, the revocation on a lost device, on a disconnected
+        connector and on a connector that stops being `non-desktop`, and the switch the
+        compositor makes. The DRM calls themselves, the revocation, the disabled CRTC, the
+        list of lessees and the `non-desktop` property, have no automatic test, since the
+        fixture runs without a DRM device: this is an exception to OS19, item 2.
 
     Not taken:
     - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
@@ -1429,6 +1442,8 @@ compositor and that the own compositor did not yet offer:
     - holding a switch logind makes until the leases are revoked, which Smithay's session
       cannot do at the pinned revision: it acknowledges the pause to logind before the
       compositor's callback runs (*amended on 2026-11-15*);
+    - sending `locked` while the session is paused and ending the lease at the resume, which
+      confirms a lock while a client may still drive a headset (*amended on 2026-11-15*);
     - one global for each DRM device the kernel lists, which offers connectors on a GPU the
       compositor neither drives nor scans (*amended on 2026-11-15*);
     - reading the tag for window rules now, which waits for a rule the maintainer decides.
