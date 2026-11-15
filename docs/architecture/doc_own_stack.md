@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -62,6 +62,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
   cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
   `doc_visual_language.md` (VL13), proposed with #1077.
+- Amended on 2026-11-15: decision 36, with OS17 and decision 33's wave 2c.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -430,8 +431,10 @@ pointer gestures and xdg-foreign, standard, and answers every request of xdg-dec
 client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
 per-client filter for it (C1 results, section 4). Decision 33 gives the classes of the second
-wave: standard for all but the DRM lease, unconfined; the X11 keyboard grab waits for an
-amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+wave: standard for all but the DRM lease, unconfined, whose class and design decision 36 now
+gives; the X11 keyboard grab waits for an amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+Decision 36 adds `wp_content_type_manager_v1` and `xdg_toplevel_tag_manager_v1`, standard, and
+`wp_drm_lease_device_v1`, unconfined.
 
 **OS18. The compositor is not restarted.** Its unit has no `Restart=`: Wayland clients do not
 survive their compositor, so its end ends the session and greetd shows the greeter (`doc_session.md`
@@ -1277,7 +1280,8 @@ compositor and that the own compositor did not yet offer:
         first. That amendment keeps decision 30's protected keys, the Ctrl+Alt+Tab suspension and
         the keyboard aids (AX4, AX11) with the compositor during a grab;
       - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
-        `non-desktop`, such as a headset's;
+        `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
+        design, and it leaves this wave;
       - libei through an EIS socket, given only to the portal backend for the RemoteDesktop and
         InputCapture portals, behind the portal's consent. It delivers no input while the
         session is locked, which is stricter than OS4's rule for the virtual keyboard;
@@ -1369,6 +1373,49 @@ compositor and that the own compositor did not yet offer:
     (`doc_visual_language.md`). Until then the toolkit draws M0 there. *Amended on 2026-11-11,
     with revision 4 of `doc_visual_language.md` (VL13):* under cosmic-comp the toolkit may offer
     M1 on its own measurement, as VL13 says, and never M2.
+36. **The protocols KWin, Mutter, Hyprland and Sway offer past the second wave** (OS17;
+    amends decision 33's wave 2c; taken by the maintainer on 2026-11-15, with the pull request
+    that records it). On 2026-11-15 the globals of the own compositor at `origin/iso-v0`
+    8794c120 were compared with the snapshots of Wayland Explorer at f406667b (2026-11-14) for
+    cosmic-comp 1.11.0, niri 26.04, KWin 6.7, Mutter 51, Hyprland 0.52.1 and Sway 1.11, and with
+    Sway 1.12's release notes. Among the globals Smithay implements at the pinned revision,
+    and outside decision 21's colour management and wave 2b, three that at least three of
+    them offer are missing. Each comes with its row in `data/globals` and its fixture test
+    (OS17; OS19, item 2):
+    - `wp_content_type_manager_v1`, standard. The compositor keeps each surface's type, `none`,
+      `photo`, `video` or `game`, applied with the surface's commit. At 1.0 no behaviour reads
+      it: scheduling, tearing (wave 2b) and adaptive sync stay as they are. A rule that reads
+      it is written as an amendment of the decision that owns that behaviour;
+    - `xdg_toplevel_tag_manager_v1`, standard. The compositor keeps each toplevel's tag and
+      its description, applied with the toplevel's commit. A tag is the client's own word: it
+      never selects a privilege, a class of OS17, an allow-list line, OS4's border or the mark
+      of a trusted prompt. Those still come from the security context and the allow-list
+      alone. At 1.0 no window rule reads it;
+    - `wp_drm_lease_device_v1`, unconfined. Each DRM device offers one global. A connector is
+      offered for lease only when the kernel marks it `non-desktop`, such as a headset's, and
+      such a connector is never an output of the session: no workspace, layer surface, cursor or
+      lock surface is placed on it. A lease is granted only while the session is unlocked:
+      from the moment a lock is requested, every new request is refused. Before the lock is
+      confirmed (`locked` of `ext_session_lock_v1`), every lease is revoked and the compositor
+      disables the leased connector and its CRTC, so a headset never shows a client's frame
+      over a locked session. After the unlock a client asks again. A lease is also revoked,
+      and its connector disabled, when its device is lost on a session switch or removed,
+      when its connector is disconnected, or when the connector stops being `non-desktop`.
+      Fixture tests cover the refusal from the lock request on, the revocation and the
+      disabled connector before `locked`, and the revocation on a lost device, on a
+      disconnected connector and on a connector that stops being `non-desktop` (OS19, item 2).
+
+    Not taken:
+    - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
+      Smithay has the protocol;
+    - keeping leases across the lock, which leaves a client's frames on a headset the locked
+      session does not cover;
+    - reading the tag for window rules now, which waits for a rule the maintainer decides.
+
+    Left for a later decision: `zwlr_gamma_control_manager_v1`, which Smithay does not
+    implement and which would be privileged, since it changes what every output shows; and
+    `xdg_toplevel_drag_manager_v1`, which Smithay does not implement and which, in the
+    snapshots, only KWin and Mutter offer.
 
 ## 8. Risks
 
