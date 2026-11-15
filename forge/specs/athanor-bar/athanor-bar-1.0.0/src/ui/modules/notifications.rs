@@ -20,6 +20,7 @@ use athanor_apps::sal::entry_icon;
 use athanor_bar::control_center;
 use athanor_bar::i18n::{tr, tr_with};
 use athanor_bar::notices::{self, Held, Notice, Picture, WIRE_SIGNATURE};
+use athanor_bar::order;
 use athanor_bar::popups::{place, target_output, Popups};
 use athanor_sal::driver::{Anchor, KeyboardInteractivity, Layer, LayerOptions, Shell, SurfaceId};
 use athanor_sal::{
@@ -105,6 +106,8 @@ struct Service {
     /// Bumped on every owner change of the control center: a `GetAll` reply from a previous
     /// owner is dropped.
     control_center_generation: Cell<u64>,
+    /// The actions waiting for their activation token, in the order the bar asked for them.
+    invoking: RefCell<VecDeque<(u32, String)>>,
 }
 
 impl Service {
@@ -163,6 +166,7 @@ impl Service {
                 last_tick: Cell::new(None),
                 paused: Cell::new(false),
                 control_center_open: Cell::new(false),
+                invoking: RefCell::new(VecDeque::new()),
                 control_center_subscription: RefCell::new(None),
                 control_center_generation: Cell::new(0),
             }
@@ -530,15 +534,21 @@ impl Service {
         self.changed();
     }
 
-    /// An action button, or a click on the text for "default". The token lets the
-    /// application raise its window (BR4, "Actions"); without one the call still goes.
+    /// An action button, or a click on the text for "default": the call goes once the bar
+    /// has the activation token of the click or key, which lets the application raise its
+    /// window (BR4, "Actions").
     fn invoke(&self, id: u32, key: &str) {
-        let token = self
-            .client
-            .as_ref()
-            .and_then(|client| client.activation_token(None))
-            .unwrap_or_default();
-        self.call("InvokeAction", (id, key, token).to_variant());
+        self.invoking.borrow_mut().push_back((id, key.to_owned()));
+        (self.wake)(Wakeup::Activation(order::Module::Notifications));
+    }
+
+    /// The token for the oldest action waiting; without one the call still goes.
+    fn invoke_with(&self, token: Option<String>) {
+        let Some((id, key)) = self.invoking.borrow_mut().pop_front() else {
+            return;
+        };
+        let token = token.unwrap_or_default();
+        self.call("InvokeAction", (id, key.as_str(), token).to_variant());
     }
 
     /// The daemon sends no signal for do not disturb, so the bar takes the new state only
@@ -1203,6 +1213,10 @@ impl Module for Notifications {
 
     fn closed(&mut self) {
         self.list = None;
+    }
+
+    fn activation_token(&mut self, token: Option<String>) {
+        self.service.invoke_with(token);
     }
 
     /// The popups, each on the output it was put on (BR4): a new popup goes to the output of
