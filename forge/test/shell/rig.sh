@@ -33,6 +33,8 @@
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
+#   rig.sh build-bar-toolkit    clippy, tests and release build of the toolkit bar into <out>/toolkit-bar/athanor-bar:
+#                           ATHANOR_BAR_BIN=/out/toolkit-bar/athanor-bar runs it in the bar's captures and `atspi bar`
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check (no GTK)
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
@@ -102,6 +104,19 @@ fi
 case $dock_app in
 '' | *[[:space:]]*)
     echo "rig.sh: ATHANOR_DOCK_BIN must end in a file name without spaces, not '$dock_bin'" >&2
+    exit 2
+    ;;
+esac
+# The bar the bar's captures and `atspi bar` run, as a path inside the rig; the toolkit
+# bar's captures are tagged as the toolkit dock's.
+bar_bin=${ATHANOR_BAR_BIN:-/out/bin/athanor-bar}
+bar_tag=
+if [ "$bar_bin" = /out/toolkit-bar/athanor-bar ]; then
+    bar_tag=toolkit-
+fi
+case $bar_bin in
+*[[:space:]]*)
+    echo "rig.sh: ATHANOR_BAR_BIN must be a path without spaces, not '$bar_bin'" >&2
     exit 2
     ;;
 esac
@@ -408,7 +423,7 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
 # system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
     local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable=""
-    local session=(python3 /repo/forge/test/shell/bar_session.py)
+    local session=(python3 /repo/forge/test/shell/bar_session.py --client "$bar_bin")
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
     bar-power) open=power ;;
@@ -444,6 +459,7 @@ capture_bar() { # capture_bar <surface>
         msgfmt -o /out/locale/bar/rtl.mo /out/bar-pseudo-rtl.po'
     stage_greeter_icons
     while IFS=$'\t' read -r tag variant scale locale catalog; do
+        tag=$bar_tag$tag
         tags+=("$tag")
         seed_bar "$out/seed-$tag" "$preset" "$panel" "$dock" "$variant"
         override=()
@@ -948,6 +964,18 @@ build-dock-toolkit)
                  && cargo build --release --locked -p athanor-dock --no-default-features --features toolkit --bin athanor-dock-toolkit \
                  && install -m 0755 /out/target/release/athanor-dock-toolkit /out/toolkit-dock/athanor-dock'
     ;;
+build-bar-toolkit)
+    # Installed as athanor-bar in a directory of its own, as the toolkit dock: accesskit names
+    # the application after the executable.
+    mkdir -p "$out/toolkit-bar" "$out/target"
+    podman run --rm --memory 6g --security-opt label=disable \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
+        bash -c 'cargo clippy --locked -p athanor-bar --no-default-features --features toolkit --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-bar --no-default-features --features toolkit \
+                 && cargo build --release --locked -p athanor-bar --no-default-features --features toolkit --bin athanor-bar-toolkit \
+                 && install -m 0755 /out/target/release/athanor-bar-toolkit /out/toolkit-bar/athanor-bar'
+    ;;
 build-launcher)
     mkdir -p "$out/bin" "$out/target"
     # ATHANOR_REQUIRE_QALC: the calculator's test runs the real qalc and may not skip here.
@@ -1305,7 +1333,7 @@ atspi)
             ATSPI_TRANSCRIPT="/out/atspi-$2${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-$2" -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$bar_bin")"
         surface_not_closed atspi "$2" "atspi-$2"
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
         # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
