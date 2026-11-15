@@ -127,13 +127,9 @@ def showing_role(app, Atspi, role):
     found = []
 
     def visit(accessible):
-        try:
-            if accessible.get_role_name() == role and showing(accessible, Atspi):
-                found.append(accessible)
-            kids = list(children(accessible))
-        except GLib.Error:
-            return
-        for child in kids:
+        if accessible.get_role_name() == role and showing(accessible, Atspi):
+            found.append(accessible)
+        for child in children(accessible):
             visit(child)
 
     visit(app)

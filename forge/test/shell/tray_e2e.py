@@ -37,19 +37,15 @@ MENU_ROLES = {"menu item", "check menu item", "radio menu item"}
 
 
 def menu_items(app, Atspi):
-    """{name: accessible} of the showing menu rows, or {} when a rebuild interrupted."""
+    """{name: accessible} of the showing menu rows."""
     found = {}
 
     def visit(accessible):
-        try:
-            if accessible.get_role_name() in MENU_ROLES and accessible.get_state_set().contains(
-                Atspi.StateType.SHOWING
-            ):
-                found[accessible.get_name()] = accessible
-            kids = list(children(accessible))
-        except GLib.Error:
-            return
-        for child in kids:
+        if accessible.get_role_name() in MENU_ROLES and accessible.get_state_set().contains(
+            Atspi.StateType.SHOWING
+        ):
+            found[accessible.get_name()] = accessible
+        for child in children(accessible):
             visit(child)
 
     visit(app)

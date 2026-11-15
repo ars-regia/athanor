@@ -16,8 +16,6 @@ import sys
 import time
 from pathlib import Path
 
-from gi.repository import GLib
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import children, find_application, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
@@ -121,15 +119,8 @@ def shows(app, Atspi, summary):
 
 
 def labels(app, Atspi):
-    """The showing labels' names, or None when a rebuild removed a node mid-walk."""
-    try:
-        return [
-            name
-            for role, name, shown, _ in walk(app, Atspi)
-            if shown and role == "label"
-        ]
-    except GLib.Error:
-        return None
+    """The showing labels' names."""
+    return [name for role, name, shown, _ in walk(app, Atspi) if shown and role == "label"]
 
 
 def switch_node(app, Atspi):
@@ -137,17 +128,13 @@ def switch_node(app, Atspi):
     found = []
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() in ("switch", "toggle button", "check box")
-                and accessible.get_name() == "Automatic security updates"
-                and showing(accessible, Atspi)
-            ):
-                found.append(accessible)
-            kids = list(children(accessible))
-        except GLib.Error:
-            return
-        for child in kids:
+        if (
+            accessible.get_role_name() in ("switch", "toggle button", "check box")
+            and accessible.get_name() == "Automatic security updates"
+            and showing(accessible, Atspi)
+        ):
+            found.append(accessible)
+        for child in children(accessible):
             visit(child)
 
     visit(app)
@@ -168,7 +155,7 @@ def press_switch(app, Atspi):
 
 
 def shows_label(app, Atspi, prefix):
-    return any(text.startswith(prefix) for text in labels(app, Atspi) or ())
+    return any(text.startswith(prefix) for text in labels(app, Atspi))
 
 
 def main():
@@ -410,7 +397,7 @@ def main():
     trust_state.write("hostile")
     toggle_sheet(app, Atspi, True)
     shown = [
-        text for text in labels(app, Atspi) or () if text.startswith("Version 43.")
+        text for text in labels(app, Atspi) if text.startswith("Version 43.")
     ]
     check("the hostile version is shown", len(shown) == 1, repr(shown))
     check(
@@ -444,7 +431,7 @@ def main():
         wait_for(
             lambda: any(
                 text.startswith("The security update is postponed, at most until ")
-                for text in labels(app, Atspi) or ()
+                for text in labels(app, Atspi)
             ),
             3,
         ),

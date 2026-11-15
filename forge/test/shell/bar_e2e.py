@@ -104,19 +104,13 @@ def buttons_matching(app, Atspi, regex):
     found = []
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() == "button"
-                and regex.search(accessible.get_name())
-                and showing(accessible, Atspi)
-            ):
-                found.append(accessible)
-            kids = list(children(accessible))
-        except GLib.Error:
-            # A window event rebuilt the row mid-walk and this node is gone: it is not
-            # there to be found. The callers poll, so the next walk sees the new row.
-            return
-        for child in kids:
+        if (
+            accessible.get_role_name() == "button"
+            and regex.search(accessible.get_name())
+            and showing(accessible, Atspi)
+        ):
+            found.append(accessible)
+        for child in children(accessible):
             visit(child)
 
     visit(app)
@@ -176,18 +170,13 @@ def labelled(app, Atspi, role, label):
         return name
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() == role
-                and showing(accessible, Atspi)
-                and name_of(accessible) == label
-            ):
-                found.append(accessible)
-            kids = list(children(accessible))
-        except GLib.Error:
-            # As in `buttons`: a node destroyed mid-walk is not there to be found.
-            return
-        for child in kids:
+        if (
+            accessible.get_role_name() == role
+            and showing(accessible, Atspi)
+            and name_of(accessible) == label
+        ):
+            found.append(accessible)
+        for child in children(accessible):
             visit(child)
 
     visit(app)
