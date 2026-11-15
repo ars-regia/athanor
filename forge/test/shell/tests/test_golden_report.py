@@ -177,7 +177,7 @@ class GoldenReportTest(unittest.TestCase):
             for e in table.get("gtk-difference", [])
             if e.get("surface") in ("bar-audio", "bar-battery")
         ]
-        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 14)))
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 15)))
         for entry in items:
             self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
             self.assertTrue(entry["what"].strip(), entry["item"])

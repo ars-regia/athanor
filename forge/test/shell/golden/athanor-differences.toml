@@ -2576,9 +2576,9 @@ reason = "Sal's popup draws no state on the widget it opens from; a change to ho
 [[gtk-difference]]
 surface = "bar-battery"
 item = 9
-what = "the focus and its ring on Power saver when the popover opens, and each power mode its own Tab stop"
-state = "recorded"
-reason = "Sal gives the first control the focus and makes each radio a stop, where GTK's group was one stop on the chosen mode; the Orca walk goes round with four Tabs and hears every line of GTK's"
+what = "the focus on Power saver when the popover opens, and each power mode its own Tab stop"
+state = "closed"
+reason = "a Sal radio group is one Tab stop on its chosen radio, which the arrows move along the group, as GTK's and the WAI-ARIA radio group (maintainer decision, 2026-11-15); the focus opens on Balanced and the Orca walk takes GTK's two Tabs"
 
 [[gtk-difference]]
 surface = "bar-battery"
@@ -2607,3 +2607,10 @@ item = 13
 what = "in right-to-left the volume button's and the media buttons' icons pointed left to right"
 state = "closed"
 reason = "the icons are looked up under the theme's -rtl variant when the reading is right-to-left, as GTK's lookup takes it, and tinted as symbolic (Icons::reading)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 14
+what = "the focus ring drawn on the chosen power mode when the popover opens"
+state = "recorded"
+reason = "Sal shows the ring of the control it gives the focus, as on the audio popover's slider (item 3); GTK focused the same mode, as its Orca reference says, without the ring"
