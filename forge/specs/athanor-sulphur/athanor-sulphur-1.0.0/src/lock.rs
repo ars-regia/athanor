@@ -19,14 +19,21 @@ use smithay::wayland::compositor::get_parent;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+/// How often the DRM leases a lock waits on are tried again (decision 36).
+const LEASE_RETRY: Duration = Duration::from_secs(1);
+
 /// A locked session: the client's lock, its confirmation until the outputs have been drawn
-/// locked, and the lock surface of each output.
+/// locked and every DRM lease has ended (decision 36), whether they have been, whether the
+/// leases are tried again once a second, and the lock surface of each output.
 pub struct Lock {
     lock: ExtSessionLockV1,
     locker: Option<Confirmation>,
+    drawn: bool,
+    retrying: bool,
     surfaces: Vec<(Output, LockSurface)>,
 }
 
@@ -95,6 +102,8 @@ impl SessionLockHandler for State {
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
             locker: Some(Confirmation::new(locker)),
+            drawn: false,
+            retrying: false,
             surfaces: Vec::new(),
         });
         self.aids_quiet_changed();
@@ -235,11 +244,60 @@ impl State {
         }
     }
 
-    /// After a frame of every output: a lock waiting for its confirmation has been drawn, and
-    /// is confirmed once every DRM lease is revoked (decision 36).
+    /// After a frame of every output: a lock waiting for its confirmation has been drawn.
     pub fn locked_drawn(&mut self) {
-        if let Some(locker) = self.lock.as_mut().and_then(|lock| lock.locker.take()) {
-            locker.confirm(self.revoke_leases());
+        if let Some(lock) = &mut self.lock {
+            lock.drawn = true;
+        }
+        self.confirm_when_revoked();
+    }
+
+    /// Sends `locked` once the outputs show the lock and every DRM lease has ended (decision
+    /// 36). Until then the leases are tried again once a second; the outputs show the lock
+    /// from the request on, and only the confirmation waits.
+    pub fn confirm_when_revoked(&mut self) {
+        let Some(lock) = &mut self.lock else {
+            return;
+        };
+        if !lock.drawn || lock.locker.is_none() {
+            return;
+        }
+        if let Some(revoked) = self.leases.proof() {
+            if let Some(locker) = lock.locker.take() {
+                locker.confirm(revoked);
+            }
+            return;
+        }
+        if lock.retrying {
+            return;
+        }
+        let epoch = self.lock_epoch.load(std::sync::atomic::Ordering::SeqCst);
+        let timer = Timer::from_duration(LEASE_RETRY);
+        let retrying = self.loop_handle.insert_source(timer, move |_, _, state| {
+            // A lock confirmed, unlocked or replaced since needs this timer no more.
+            let waits = |state: &State| {
+                state.lock_epoch.load(std::sync::atomic::Ordering::SeqCst) == epoch
+                    && state
+                        .lock
+                        .as_ref()
+                        .is_some_and(|lock| lock.locker.is_some())
+            };
+            if !waits(state) {
+                return TimeoutAction::Drop;
+            }
+            state.retry_leases();
+            state.confirm_when_revoked();
+            if waits(state) {
+                TimeoutAction::ToDuration(LEASE_RETRY)
+            } else {
+                TimeoutAction::Drop
+            }
+        });
+        match retrying {
+            Ok(_) => lock.retrying = true,
+            Err(error) => {
+                tracing::error!(%error, "the leases have no timer: they are tried again at the next scan")
+            }
         }
     }
 }

@@ -15,7 +15,7 @@ use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
 use crate::output_management::{set_can_sync, Step};
 use crate::state::{Backend, State, BACKGROUND, FRAME_THROTTLE};
-use crate::drm_lease::{Held, Revoked};
+use crate::drm_lease::{Ended, Held, Lease};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
@@ -74,6 +74,7 @@ use smithay::wayland::drm_lease::{
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::presentation::Refresh;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -129,7 +130,7 @@ pub struct Drm {
     /// The lease device of decision 36, when the GPU's primary node could be offered.
     leasing: Option<DrmLeaseState>,
     /// The connectors offered for lease, those marked `non-desktop`, with the CRTC of each.
-    leasable: HashMap<connector::Handle, crtc::Handle>,
+    leasable: HashMap<connector::Handle, Offer>,
 }
 
 /// What a scheduled draw of an output is for.
@@ -582,12 +583,20 @@ impl State {
     /// there is none; while the session is paused, another terminal has the seat, and nothing
     /// here switches it.
     pub fn switch_vt(&mut self, vt: i32) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        if !drm.session.is_active() || shown_vt() == Some(vt) {
+            return;
+        }
+        // Decision 36: from here to the resume no lease is granted, and the leases end while the
+        // compositor is still the GPU's master, which it is no longer when the pause is heard.
+        self.leases.switching();
+        self.revoke_device_leases();
         if let Backend::Drm(drm) = &mut self.backend {
-            if !drm.session.is_active() {
-                return;
-            }
             if let Err(error) = drm.session.change_vt(vt) {
                 tracing::warn!(%error, vt, "the virtual terminal could not be switched");
+                self.leases.switch_failed();
             }
         }
     }
@@ -672,8 +681,9 @@ impl State {
     /// The session is paused, on a switch to another virtual terminal: the GPU and the input
     /// devices are given up until it resumes.
     pub(crate) fn pause(&mut self) {
-        // Decision 36: the leases end first, while the compositor may still be the GPU's master.
-        self.revoke_device_leases();
+        // Decision 36: no lease is granted and the GPU is not touched until the resume; a switch
+        // the compositor makes has ended the leases before it (`switch_vt`).
+        self.pause_leases();
         if let Backend::Drm(drm) = &mut self.backend {
             tracing::info!("the session is paused");
             drm.libinput.suspend();
@@ -752,7 +762,12 @@ impl State {
             self.fail(format!("the GPU could not be taken back: {error}"));
             return;
         }
-        end_lessees(drm);
+        // Decision 36: the leases end now, before any output is drawn; the GPU was not touched
+        // while the session was paused.
+        self.resume_leases();
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
         for head in drm.outputs.values_mut() {
             head.frames.session_resumed();
             // The switch was activity: the idle daemon decides again from it (output power
@@ -848,6 +863,8 @@ impl State {
         }
         // A connector's `non-desktop` mark changes with no event of the scanner's.
         self.reconcile_leasable();
+        self.retry_leases();
+        self.confirm_when_revoked();
         self.retry_dark_monitors();
     }
 
@@ -1935,40 +1952,91 @@ fn non_desktop(device: &impl ControlDevice, connector: connector::Handle) -> std
     unreadable.map_or(Ok(false), Err)
 }
 
-/// Disables `crtc`, which a lease held, so that its connector shows nothing: after the
-/// revocation the lessee's last frame would stay on it.
-fn disable_crtc(device: &impl ControlDevice, crtc: crtc::Handle) {
-    if let Err(error) = device.set_crtc(crtc, None, (0, 0), &[], None) {
-        tracing::warn!(%error, ?crtc, "a CRTC a lease held could not be disabled");
-    }
+/// The virtual terminal the kernel shows, from `tty0`. A switch to it pauses nothing, so
+/// `switch_vt` does not start one. One that cannot be read is no virtual terminal.
+fn shown_vt() -> Option<i32> {
+    let active = std::fs::read_to_string("/sys/class/tty/tty0/active")
+        .map_err(|error| tracing::warn!(%error, "the virtual terminal shown could not be read"))
+        .ok()?;
+    active.trim().strip_prefix("tty")?.parse().ok()
 }
 
-/// What disables a CRTC a lease held: nothing outside the udev backend, which alone leases.
-fn disabling(backend: &Backend) -> impl FnMut(crtc::Handle) + '_ {
-    move |crtc| {
-        if let Backend::Drm(drm) = backend {
-            disable_crtc(drm.heads.device(), crtc);
+/// A connector offered for lease: the CRTC that drives it, and the name its clients are told.
+struct Offer {
+    crtc: crtc::Handle,
+    name: String,
+}
+
+/// Ends a lease that was dropped: revokes it, confirms from the GPU's list of lessees that it
+/// is gone, disables its CRTCs, so that the lessee's last frame does not stay on them, and
+/// offers its connectors still marked `non-desktop` anew. Only the list counts: a lease its
+/// client destroyed, or whose connector is gone, may still be listed, and a revocation that
+/// failed because Smithay's drop had revoked it already is no failure once the list confirms
+/// it. These are ioctls of the GPU's master; why one failed is the error. Nothing outside the
+/// udev backend leases a GPU; the fixture's headless backend fails as it is told.
+fn finish(backend: &mut Backend, ended: &Ended) -> Result<(), String> {
+    let drm = match backend {
+        Backend::Drm(drm) => drm,
+        #[cfg(test)]
+        Backend::Headless(headless) => return headless.lease_refused.clone().map_or(Ok(()), Err),
+        #[allow(unreachable_patterns)]
+        _ => return Ok(()),
+    };
+    let device = drm.heads.device();
+    let lessee = std::num::NonZeroU32::new(ended.id).ok_or("the lease has no id")?;
+    let revoked = device.revoke_lease(lessee);
+    let lessees = device
+        .list_lessees()
+        .map_err(|error| format!("the lessees could not be listed: {error}"))?;
+    if lessees.contains(&lessee) {
+        return Err(match revoked {
+            Err(error) => format!("the revocation failed: {error}"),
+            Ok(()) => "the lessee is listed after its revocation".into(),
+        });
+    }
+    for &crtc in &ended.crtcs {
+        device
+            .set_crtc(crtc, None, (0, 0), &[], None)
+            .map_err(|error| format!("CRTC {crtc:?} could not be disabled: {error}"))?;
+    }
+    for &connector in &ended.connectors {
+        drm.offer_again(connector);
+    }
+    Ok(())
+}
+
+impl Drm {
+    /// Offers `connector` to the lease clients, while the session is active. Smithay's record
+    /// of it is withdrawn first: that drops a lease of it Smithay still keeps, which would offer
+    /// it a second time when its client destroys it, so each connector is offered once.
+    fn offer_again(&mut self, connector: connector::Handle) {
+        let (Some(leasing), Some(offer)) = (&mut self.leasing, self.leasable.get(&connector))
+        else {
+            return;
+        };
+        leasing.withdraw_connector(connector);
+        if self.session.is_active() {
+            leasing.add_connector::<State>(connector, offer.name.clone(), offer.name.clone());
         }
     }
-}
 
-/// After the session resumes: a lease the GPU still lists is revoked, since its revocation may
-/// have come when the compositor was no longer master, and the CRTCs of the connectors offered
-/// for lease are disabled.
-fn end_lessees(drm: &Drm) {
-    let device = drm.heads.device();
-    match device.list_lessees() {
-        Ok(lessees) => {
-            for lessee in lessees {
-                if let Err(error) = device.revoke_lease(lessee) {
-                    tracing::warn!(%error, lessee = lessee.get(), "a lease left from before the switch could not be revoked");
-                }
+    /// The session pauses: the lease clients are told that every connector went away.
+    /// `suspend` is not used, since its `resume` offers a second time each connector that a
+    /// lease destroyed in between offered again.
+    fn withdraw_offers(&mut self) {
+        if let Some(leasing) = &mut self.leasing {
+            for &connector in self.leasable.keys() {
+                leasing.withdraw_connector(connector);
             }
         }
-        Err(error) => tracing::warn!(%error, "the GPU's leases could not be listed"),
     }
-    for &crtc in drm.leasable.values() {
-        disable_crtc(device, crtc);
+
+    /// The session resumes: every connector still offered is offered again.
+    fn offer_all(&mut self) {
+        let connectors: Vec<connector::Handle> = self.leasable.keys().copied().collect();
+        for connector in connectors {
+            self.offer_again(connector);
+        }
     }
 }
 
@@ -2000,22 +2068,22 @@ impl State {
                 return false;
             }
         }
-        if drm.leasable.insert(handle, crtc).is_none() {
+        if let Entry::Vacant(entry) = drm.leasable.entry(handle) {
             let name = format!(
                 "{}-{}",
                 connector.interface().as_str(),
                 connector.interface_id()
             );
-            if let Some(leasing) = &mut drm.leasing {
-                leasing.add_connector::<State>(handle, name.clone(), name.clone());
-            }
             tracing::info!(connector = name, "a non-desktop display is offered for lease");
+            entry.insert(Offer { crtc, name });
+            drm.offer_again(handle);
         }
         true
     }
 
     /// `connector` is offered for lease no more: it was unplugged or is no longer
-    /// `non-desktop`. Its leases are revoked and their CRTCs disabled.
+    /// `non-desktop`. The lease that holds it is revoked and its CRTCs disabled; its other
+    /// connectors, which Smithay forgot with the withdrawal, are offered anew (`finish`).
     fn unleasable(&mut self, connector: connector::Handle) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
@@ -2028,7 +2096,7 @@ impl State {
         }
         let device = drm.node.dev_id();
         self.leases
-            .revoke_connector(device, connector, disabling(&self.backend));
+            .revoke_connector(device, connector, |ended| finish(&mut self.backend, ended));
         tracing::info!(?connector, "a display is offered for lease no more");
     }
 
@@ -2078,23 +2146,60 @@ impl State {
         }
     }
 
-    /// The GPU is lost, on a session switch or a removal: its leases are revoked.
+    /// The GPU is lost, about to be on a switch of virtual terminal, or back from a pause: its
+    /// leases end.
     fn revoke_device_leases(&mut self) {
         let Backend::Drm(drm) = &self.backend else {
             return;
         };
         let device = drm.node.dev_id();
-        self.leases.revoke_device(device, disabling(&self.backend));
+        self.leases
+            .revoke_device(device, |ended| finish(&mut self.backend, ended));
     }
 
-    /// A lock was requested: from now on no lease is granted, and every one is revoked.
+    /// The session pauses: the GPU is not touched until the resume, as libseat requires once the
+    /// pause is acknowledged, and the lease clients are told that the connectors went away.
+    fn pause_leases(&mut self) {
+        self.leases.paused();
+        if let Backend::Drm(drm) = &mut self.backend {
+            drm.withdraw_offers();
+        }
+    }
+
+    /// The session resumed, before any output is drawn: every lease ends, the ones left from
+    /// before the pause included, and the connectors are offered again.
+    fn resume_leases(&mut self) {
+        self.leases.resumed();
+        self.revoke_device_leases();
+        if let Backend::Drm(drm) = &mut self.backend {
+            drm.offer_all();
+        }
+    }
+
+    /// A lock was requested: from now on no lease is granted, and every one ends.
     pub fn leases_locked(&mut self) {
-        let _revoked = self.leases.lock_requested(disabling(&self.backend));
+        self.leases
+            .lock_requested(|ended| finish(&mut self.backend, ended));
     }
 
-    /// Revokes every lease and disables its CRTCs: the proof that `locked` needs.
-    pub fn revoke_leases(&mut self) -> Revoked {
-        self.leases.revoke_all(disabling(&self.backend))
+    /// Tries again to end the leases that wait.
+    pub fn retry_leases(&mut self) {
+        self.leases.retry(|ended| finish(&mut self.backend, ended));
+    }
+
+    /// Whether a lease may be granted now. A backend without a session has no GPU to lease.
+    pub(crate) fn may_lease(&self) -> bool {
+        self.leases.may_grant()
+            && match &self.backend {
+                Backend::Drm(drm) => drm.session.is_active(),
+                _ => true,
+            }
+    }
+
+    /// A lease was granted; one granted while no grant may be made ends at once.
+    pub(crate) fn lease_granted(&mut self, held: Held<Lease>) {
+        self.leases
+            .granted(held, |ended| finish(&mut self.backend, ended));
     }
 }
 
@@ -2113,39 +2218,44 @@ impl DrmLeaseHandler for State {
         std::process::abort()
     }
 
-    /// Leases the connectors asked for, each with its CRTC and that CRTC's primary plane, while
-    /// the session is active and no lock is requested. Smithay goes on after the `empty_lease`
-    /// error it raises, so an empty request is refused here.
+    /// Leases the connectors asked for, each with its CRTC and a primary plane of that CRTC,
+    /// while the session is active and no lock is requested. Smithay goes on after the
+    /// `empty_lease` error it raises, so an empty request is refused here.
     fn lease_request(
         &mut self,
         node: DrmNode,
         request: DrmLeaseRequest,
     ) -> Result<DrmLeaseBuilder, LeaseRejected> {
+        if !self.may_lease() || request.connectors.is_empty() {
+            return Err(LeaseRejected::default());
+        }
         let Backend::Drm(drm) = &self.backend else {
             return Err(LeaseRejected::default());
         };
-        if !self.leases.may_grant()
-            || !drm.session.is_active()
-            || node != drm.node
-            || request.connectors.is_empty()
-        {
+        if node != drm.node {
             return Err(LeaseRejected::default());
         }
         let device = drm.heads.device();
         let mut builder = DrmLeaseBuilder::new(device);
         for connector in request.connectors {
-            let crtc = *drm
+            let crtc = drm
                 .leasable
                 .get(&connector)
-                .ok_or_else(LeaseRejected::default)?;
+                .ok_or_else(LeaseRejected::default)?
+                .crtc;
             let planes = device.planes(&crtc).map_err(LeaseRejected::with_cause)?;
-            let primary = planes.primary.first().ok_or_else(LeaseRejected::default)?;
-            let claim = device
-                .claim_plane(primary.handle, crtc)
+            let (plane, claim) = planes
+                .primary
+                .iter()
+                .find_map(|info| {
+                    device
+                        .claim_plane(info.handle, crtc)
+                        .map(|claim| (info.handle, claim))
+                })
                 .ok_or_else(LeaseRejected::default)?;
             builder.add_connector(connector);
             builder.add_crtc(crtc);
-            builder.add_plane(primary.handle, claim);
+            builder.add_plane(plane, claim);
         }
         Ok(builder)
     }
@@ -2156,15 +2266,17 @@ impl DrmLeaseHandler for State {
             id: lease.id(),
             connectors: lease.connectors().copied().collect(),
             crtcs: lease.crtcs().copied().collect(),
-            lease,
+            lease: Lease::Drm(Box::new(lease)),
         };
         tracing::info!(lease = held.id, connectors = ?held.connectors, "a non-desktop display is leased");
-        self.leases.granted(held, disabling(&self.backend));
+        self.lease_granted(held);
     }
 
+    /// The client destroyed its lease: it ends as any other, from what the GPU lists.
     fn lease_destroyed(&mut self, _node: DrmNode, lease_id: u32) {
-        tracing::info!(lease = lease_id, "a lease ended");
-        self.leases.destroyed(lease_id, disabling(&self.backend));
+        tracing::info!(lease = lease_id, "a lease was destroyed by its client");
+        self.leases
+            .destroyed(lease_id, |ended| finish(&mut self.backend, ended));
     }
 }
 

@@ -79,6 +79,10 @@ pub struct Headless {
     /// may refuse what its backend took to be possible.
     #[cfg(test)]
     pub refused: Option<Output>,
+    /// Why the fixture fails to end a lease, as a GPU whose master the compositor is not
+    /// (decision 36): until it is cleared, no lease ends.
+    #[cfg(test)]
+    pub lease_refused: Option<String>,
 }
 
 struct Virtual {
@@ -123,6 +127,8 @@ pub fn start(
         outputs: Vec::new(),
         #[cfg(test)]
         refused: None,
+        #[cfg(test)]
+        lease_refused: None,
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
     for (index, spec) in outputs.iter().enumerate() {
