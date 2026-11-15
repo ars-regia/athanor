@@ -172,13 +172,16 @@ allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
 `wp_drm_lease_device_v1`, unconfined, exists on the udev backend only, for the GPU it draws on:
 it offers the connectors the kernel marks `non-desktop`, such as a headset's, which never become
 outputs. No lease is granted from the lock request to the unlock, from a switch of virtual
-terminal the compositor starts or a pause to the resume, nor while a lease waits to end. A lease
-ends at the lock request, before a switch the compositor makes, at the resume, on a GPU removal,
-an unplug and a connector that stops being `non-desktop`: it is revoked, counted ended only once
-the GPU's list of lessees no longer has it, and its CRTCs disabled. `locked` is sent only once
-every lease has ended, an order the types of `src/drm_lease.rs` enforce; until then the lock is
-shown and the leases tried again once a second, at each scan and at the resume. While the session
-is paused the GPU is not touched.
+terminal the compositor starts or a pause to the resume, nor while a lease waits to end; a switch
+that paused nothing and left its own terminal shown is over after two seconds. A lease ends at
+the lock request, before a switch the compositor makes, at the resume, on a GPU removal, an
+unplug and a connector that stops being `non-desktop`: it is revoked, counted ended only once the
+GPU's list of lessees no longer has it, and its CRTCs disabled. The types of `src/drm_lease.rs`
+ensure only that `locked` needs a `Revoked`, which `Leases::proof` makes once every lease has been
+handed to the closure the caller passes and that closure has reported it ended; the read of the
+list of lessees is in that closure, `finish` in `src/udev.rs`, which every call there passes.
+Until then the lock is shown and the leases tried again once a second, at each scan and at the
+resume. While the session is paused the GPU is not touched.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
