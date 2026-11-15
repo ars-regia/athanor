@@ -66,12 +66,24 @@ def check(name, ok, detail=""):
 
 
 def wait_for(check_now, seconds):
+    """Poll `check_now` until it is true. A GLib.Error from it, an AT-SPI node destroyed
+    mid-read, means the state has not settled: poll again, and if it never does, fail with the
+    last error on stderr."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if check_now():
-            return True
+    error = None
+    while True:
+        try:
+            if check_now():
+                return True
+            error = None
+        except GLib.Error as err:
+            error = err
+        if time.monotonic() >= deadline:
+            break
         time.sleep(0.2)
-    return check_now()
+    if error is not None:
+        print(f"wait_for: {error}", file=sys.stderr)
+    return False
 
 
 def alive(pid):

@@ -34,8 +34,6 @@ import sys
 import time
 from pathlib import Path
 
-from gi.repository import GLib
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import children, find_application, walk  # noqa: E402
 from bar_e2e import check, failures, pss_kb, wait_for  # noqa: E402
@@ -64,16 +62,9 @@ def labels(Atspi):
     found = []
 
     def walk(node):
-        try:
-            kids = list(children(node))
-            for child in kids:
-                if child.get_role() == Atspi.Role.LIST_ITEM:
-                    found.append(child.get_name())
-        except GLib.Error:
-            # A node destroyed mid-walk is not a row; the callers poll, so the next walk
-            # sees the new state.
-            return
-        for child in kids:
+        for child in children(node):
+            if child.get_role() == Atspi.Role.LIST_ITEM:
+                found.append(child.get_name())
             walk(child)
 
     walk(app)
