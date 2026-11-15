@@ -11,8 +11,13 @@ use std::fmt;
 use std::time::{Duration, Instant};
 
 mod alert;
+mod exact_value;
+mod horizontal;
+mod spacing;
+mod natural;
 pub(crate) mod labelled;
 mod rows;
+mod strip;
 pub(crate) mod wheel;
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
@@ -320,7 +325,7 @@ pub enum Kind {
     /// width of its column or group, or its cell in a row; [`Ui::set_sensitive`] gives it the
     /// insensitive look. Add it with [`Ui::level`], which keeps its range valid.
     Level(Level),
-    /// A single-line text field.
+    /// A single-line text field, or a password field ([`Ui::password`]).
     Field(Box<TextField>),
     /// A text field of several lines, as GTK's `TextView` in a `ScrolledWindow`: as wide as a
     /// field, its text wrapped at that width, a number of lines tall, and scrolled to keep the
@@ -439,6 +444,19 @@ pub enum Kind {
         /// focus, as the GTK dock's inset shadow.
         indicator: Option<crate::driver::Side>,
     },
+    /// Its children side by side in reading order, each at its own width and all at its
+    /// height, as a GTK box that is not homogeneous: a bar's group of buttons. `padding` is
+    /// kept free left and right, then above and below. Add it with [`Ui::inline`].
+    #[non_exhaustive]
+    Inline {
+        /// The room kept free inside its edges, horizontal then vertical, on both sides.
+        padding: [f32; 2],
+    },
+    /// Three children along a line, as GTK's `CenterBox`: the first at the start edge, the
+    /// second centred on the whole line, moved aside only when its neighbours need the room,
+    /// and the third at the end edge, all at its height. In a column it fills the line. A
+    /// child that is not shown keeps its place empty, and a child past the third is never shown.
+    CenterBox,
     /// A flat button that shows an image beside a text, as a GTK button holding a box of an
     /// image and a label: named by its label for assistive technologies, which read the text
     /// it shows as a label inside it. Activating it raises [`Event::Clicked`]. Its content
@@ -593,6 +611,22 @@ pub struct Widget {
     pub(crate) min_w: f32,
     /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
+    /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
+    /// [`Ui::set_fill`].
+    pub(crate) fill: bool,
+    /// Whether a group or an alert says it is horizontal: see [`Ui::set_horizontal`].
+    pub(crate) horizontal: bool,
+    /// The room a column keeps between its children: see [`Ui::set_spacing`].
+    pub(crate) spacing: Option<f32>,
+    /// Whether a scroll is as tall as its content, up to its height: see
+    /// [`Ui::set_natural_height`].
+    pub(crate) natural: bool,
+    /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
+    /// shown a cell.
+    pub(crate) slots: usize,
+    /// The width the last measure gave it, which an inline adds a fill share to: placing it
+    /// again, as a scroll does, starts from this and never from the last placement.
+    pub(crate) natural_w: f32,
 }
 
 impl Widget {
@@ -613,6 +647,12 @@ impl Widget {
             wrap: None,
             min_w: 0.0,
             ink: None,
+            fill: false,
+            horizontal: false,
+            spacing: None,
+            natural: false,
+            slots: 0,
+            natural_w: 0.0,
         }
     }
 
@@ -661,6 +701,9 @@ pub enum Event {
     Changed(WidgetId),
     /// A field's committed text changed, or [`Ui::set_text`] changed a widget's text.
     Edited(WidgetId),
+    /// Enter was pressed in a single-line field, as GTK's `GtkEntry::activate`: the form it
+    /// belongs to may submit. A text area breaks the line instead.
+    Activated(WidgetId),
     /// A button of the title bar was activated; the driver acts on it.
     Window(WindowButton),
     /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
@@ -682,6 +725,14 @@ pub enum Event {
     /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
     /// closes at Escape, and the surface gets no such event.
     Escape,
+    /// The primary button was pressed on no widget and on the root outside every shown child of
+    /// it, an island's transparent margin included, on any surface but a popup. A surface over
+    /// the whole output that draws its panel in a child of the root closes the panel at it, as
+    /// the control center does (doc_control_center.md CC9). A normal window or a dialog raises
+    /// it too, at a press on its bare background: it is not a request to close, and such a
+    /// surface ignores it, since the compositor's own focus and the window's close button say
+    /// when it goes.
+    PressedOutside,
     /// The middle button was pressed on a widget that is not a field or a text area, which
     /// paste the primary selection instead: a tray's item asks for its secondary activation.
     /// It neither focuses nor activates the widget.
@@ -827,6 +878,9 @@ pub struct Ui {
     pub min_width: f32,
     /// The window's height in logical pixels when its widgets need less.
     pub min_height: f32,
+    /// Whether the driver shows it in a popup, where a press outside the root's children is
+    /// still on the menu and raises no [`Event::PressedOutside`].
+    pub(crate) popup: bool,
     /// Whether the compositor may make the window larger than its widgets, as GTK's
     /// `resizable`: when false, the window's maximum size is its minimum. True by default.
     pub resizable: bool,
@@ -872,6 +926,7 @@ impl Ui {
             rtl,
             min_width: 0.0,
             min_height: 0.0,
+            popup: false,
             resizable: true,
             stale_popup: false,
             focus: None,
@@ -946,6 +1001,37 @@ impl Ui {
     pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
         let field = TextField::new(name, text, self.theme.font_size, self.rtl);
         self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Adds an empty password field named `name` for assistive technologies, as GTK's
+    /// `PasswordEntry` (doc_accessibility.md, AX4): it shows one mask for each character typed,
+    /// and AT-SPI reads it as password text holding only the masks. Nothing is copied, cut or
+    /// offered as the primary selection out of it; text is pasted in. Read what was typed with
+    /// [`Ui::password_text`]. Every copy Sal makes of what is typed, committed, pasted or set is
+    /// overwritten when dropped; the copies made before it reaches Sal, by libxkbcommon, the
+    /// Wayland connection's buffers, the compositor, the input method or the clipboard's owner,
+    /// are not Sal's to overwrite.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn password(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let field = TextField::password(name, self.theme.font_size, self.rtl);
+        self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// What was typed in the password field `id`, or `None` if it is not one. Every other read
+    /// of the field, [`Ui::field_text`] among them, gives only its masks. Clear it with
+    /// [`Ui::set_field_text`] once it is used: the old text is overwritten.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn password_text(&self, id: WidgetId) -> Option<&str> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) => field.password_text(),
+            _ => None,
+        }
     }
 
     /// Adds a text area named `name` for assistive technologies, holding `text`: `lines` lines
@@ -1898,12 +1984,24 @@ impl Ui {
     pub fn is_visible(&self, id: WidgetId) -> bool {
         let mut at = Some(id);
         while let Some(w) = at {
-            if !self.widgets[w].visible {
+            if !self.shown(w) {
                 return false;
             }
             at = self.widgets[w].parent;
         }
         true
+    }
+
+    /// Whether `id` is shown in its parent: visible, and not past the third child of a centre
+    /// box, which has no place for it.
+    pub(crate) fn shown(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        widget.visible
+            && widget.parent.is_none_or(|p| {
+                let parent = &self.widgets[p];
+                !matches!(parent.kind, Kind::CenterBox)
+                    || parent.children.iter().take(3).any(|&c| c == id)
+            })
     }
 
     /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
@@ -1947,6 +2045,22 @@ impl Ui {
         })
     }
 
+    /// Whether the point is on the root outside every shown child of it, outside a popup. An
+    /// island covers its fill only, so its transparent margin is outside it, as GTK's pick
+    /// passes over a widget's margin; an island with no child shown covers nothing.
+    fn outside_children(&self, x: f32, y: f32) -> bool {
+        let covers = |c: WidgetId| match self.widgets[c].kind {
+            Kind::Island { .. } => self.island_fill(c).is_some_and(|r| r.contains(x, y)),
+            _ => self.widgets[c].rect.contains(x, y),
+        };
+        !self.popup
+            && self.widgets[Self::ROOT]
+                .children
+                .iter()
+                .filter(|&&c| self.is_visible(c))
+                .all(|&c| !covers(c))
+    }
+
     /// The window's size in logical pixels, after [`Ui::layout`].
     pub fn size(&self) -> (f32, f32) {
         self.size
@@ -1986,9 +2100,8 @@ impl Ui {
     }
 
     pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
-        let widgets = &self.widgets;
-        let shown = widgets[id].children.iter();
-        shown.copied().filter(|&c| widgets[c].visible).collect()
+        let children = self.widgets[id].children.iter();
+        children.copied().filter(|&c| self.shown(c)).collect()
     }
 
     pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
@@ -2005,8 +2118,10 @@ impl Ui {
         let children = self.visible_children(id);
         let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
         let spacing = gap * children.len().saturating_sub(1) as f32;
+        let slots = self.widgets[id].slots;
+        let natural = self.widgets[id].natural;
         let between = match self.widgets[id].kind {
-            Kind::Column => section_gap,
+            Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
             _ => gap,
         };
         let widget = &mut self.widgets[id];
@@ -2022,7 +2137,7 @@ impl Ui {
                 // A height set through `Ui::add` is checked here; NaN falls to 0 in `max`.
                 *height = if height.is_finite() { height.max(0.0) } else { 0.0 };
                 *offset = offset.min(content - *height).max(0.0);
-                (w, *height)
+                (w, if natural { content.min(*height) } else { *height })
             }
             // A line in the middle of a gap.
             Kind::Separator => (0.0, gap + 1.0),
@@ -2082,6 +2197,8 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::CenterBox => strip::measure_center(&sizes),
             Kind::LabelledButton {
                 image, size: side, text, ..
             } => {
@@ -2098,7 +2215,8 @@ impl Ui {
             }
             Kind::Row => {
                 let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
-                let w = widest * sizes.len() as f32 + spacing;
+                let cells = sizes.len().max(slots);
+                let w = widest * cells as f32 + gap * cells.saturating_sub(1) as f32;
                 (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
             }
             Kind::Label(text) | Kind::Tooltip(text) => {
@@ -2176,6 +2294,7 @@ impl Ui {
         let w = w.max(widget.min_w);
         widget.rect.w = w;
         widget.rect.h = h;
+        widget.natural_w = w;
         (w, h)
     }
 
@@ -2188,26 +2307,26 @@ impl Ui {
             0.0
         };
         let gap = match self.widgets[id].kind {
-            Kind::Column => self.theme.section_gap,
+            Kind::Column => self.widgets[id].spacing.unwrap_or(self.theme.section_gap),
             _ => self.theme.gap,
         };
         let outer = self.widgets[id].rect;
         let children = self.visible_children(id);
         match self.widgets[id].kind {
+            Kind::Inline { padding } => self.place_inline(id, x, y, padding),
+            Kind::CenterBox => self.place_center(id, x, y),
             Kind::Row => {
-                let n = children.len().max(1) as f32;
+                let cells = children.len().max(self.widgets[id].slots).max(1);
+                let n = cells as f32;
                 let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
-                let mut cx = if self.rtl { x + outer.w } else { x };
-                for c in children {
-                    self.widgets[c].rect.w = w;
-                    if self.rtl {
-                        cx -= w;
-                        self.place(c, cx, y);
-                        cx -= gap;
-                    } else {
-                        self.place(c, cx, y);
-                        cx += w + gap;
-                    }
+                for (at, c) in children.into_iter().enumerate() {
+                    // Each cell from its own offset, and the last one of a full row ends on the
+                    // row's far edge, so that no float residue builds up along the row.
+                    let start = at as f32 * (w + gap);
+                    let end = if at + 1 == cells { outer.w } else { start + w };
+                    let (cx, cw) = strip::mirrored(x, outer.w, start, end, self.rtl);
+                    self.widgets[c].rect.w = cw;
+                    self.place(c, cx, y);
                 }
             }
             Kind::Menu | Kind::List { .. } | Kind::Scroll { .. } => {
@@ -2317,6 +2436,7 @@ impl Ui {
                         && (matches!(
                         self.widgets[c].kind,
                         Kind::Row
+                            | Kind::CenterBox
                             | Kind::Group(_)
                             | Kind::Alert(_)
                             | Kind::Menu
@@ -2328,7 +2448,9 @@ impl Ui {
                             | Kind::List { .. }
                             | Kind::Island { .. }
                             | Kind::Picture { .. }
-                    ) || self.widgets[c].wrap.is_some())
+                    ) || self.widgets[c].wrap.is_some()
+                        || self.widgets[c].fill
+                        || self.inline_fills(c))
                     {
                         // Never below its least width (Ui::set_min_width), as GTK's width-request.
                         self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
@@ -2527,10 +2649,10 @@ impl Ui {
     }
 
     /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
-    /// the widget there and waits for the release to activate it, as GTK's buttons do; the
-    /// secondary button asks for its context menu; the middle button gives
-    /// [`Event::MiddleClick`] on a widget that is not a field or a text area, which paste the
-    /// primary selection instead.
+    /// the widget there and waits for the release to activate it, as GTK's buttons do, and raises
+    /// [`Event::PressedOutside`] on the root outside its shown children; the secondary button
+    /// asks for its context menu; the middle button gives [`Event::MiddleClick`] on a widget
+    /// that is not a field or a text area, which paste the primary selection instead.
     pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
         let id = self.hit(x, y);
         match button {
@@ -2542,6 +2664,9 @@ impl Ui {
                     dragging: false,
                 });
                 self.set_focus(id.or(self.focus));
+                if id.is_none() && self.outside_children(x, y) {
+                    return Some(Event::PressedOutside);
+                }
                 // A field puts its caret at the press; a slider takes its value from it, and
                 // from the drag that follows.
                 let id = id.filter(|&id| !self.point_in_field(id, x, y, false))?;
@@ -2611,11 +2736,10 @@ impl Ui {
         if field.is_composing() {
             return None;
         }
-        let text: String = text
-            .chars()
-            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-            .take(Self::FIELD_MAX_CHARS)
-            .collect();
+        // Overwritten when dropped: it may be a password field's text.
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
         // Inserting nothing would delete the selection.
         if text.is_empty() {
             return None;
@@ -2670,7 +2794,8 @@ impl Ui {
             return None;
         };
         let composing = field.is_composing();
-        let selected = field.selected_text().is_some();
+        // A password field's selection is deleted, never copied or cut.
+        let (copied, selected) = (field.selected_text().is_some(), field.has_selection());
         let empty = field.text().is_empty();
         let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
         let list = menu.add(Ui::ROOT, Kind::Menu);
@@ -2680,7 +2805,8 @@ impl Ui {
                 && match key {
                     Key::Paste => can_paste,
                     Key::SelectAll => !empty,
-                    _ => selected,
+                    Key::Delete => selected,
+                    _ => copied,
                 };
             if key == Key::SelectAll {
                 menu.add(list, Kind::Separator);
@@ -2700,7 +2826,7 @@ impl Ui {
         else {
             return None;
         };
-        if key == Key::Delete && field.selected_text().is_none() {
+        if key == Key::Delete && !field.has_selection() {
             return None;
         }
         self.set_focus(Some(id));
@@ -2780,7 +2906,8 @@ impl Ui {
     /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
     /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
     /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
-    /// and never leave it, as GTK's `TextView`. Escape, focused widget or not, is
+    /// and never leave it, as GTK's `TextView`; Enter in a single-line field is
+    /// [`Event::Activated`]. Escape, focused widget or not, is
     /// [`Event::Escape`], and in a dialog's widgets the window's Close, but while a focused field
     /// shows the input method's preedit: the input method's to cancel, as GTK's input method
     /// filters keys before a dialog's bindings.
@@ -2806,6 +2933,7 @@ impl Ui {
                         field.insert(cx, "\n");
                         true
                     }
+                    Key::Enter => return Some(Event::Activated(id)),
                     Key::Backspace => {
                         field.backspace(cx);
                         true
@@ -2864,6 +2992,10 @@ impl Ui {
                     self.clips.push(Clip::Select(text));
                 }
                 field.scroll_to_caret(cx);
+                // The typed text may be a password field's: overwritten once the field has it.
+                if let Key::Text(mut text) = key {
+                    zeroize::Zeroize::zeroize(&mut text);
+                }
                 return edited.then_some(Event::Edited(id));
             }
         }
@@ -3014,7 +3146,9 @@ impl Ui {
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
-        field.commit(&mut self.text, &printable(text, multiline));
+        // Overwritten when dropped: it may be a password field's text.
+        let text = printable(text, multiline);
+        field.commit(&mut self.text, &text);
         field.scroll_to_caret(&mut self.text);
         Some(Event::Edited(id))
     }
@@ -3031,11 +3165,10 @@ impl Ui {
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
         };
-        let text: String = text
-            .chars()
-            .filter(|&c| keeps(c, multiline) && !is_invisible_format(c))
-            .take(Self::FIELD_MAX_CHARS)
-            .collect();
+        // Overwritten when dropped: it may be a password field's text.
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
         field.set_text(&text);
         if multiline {
             // As a GTK text view's, where a single-line field's caret stays at its start.
@@ -4551,6 +4684,29 @@ mod tests {
     }
 
     #[test]
+    fn enter_activates_a_single_line_field_and_breaks_a_text_areas_line() {
+        let mut ui = Ui::new("Join", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        let secret = ui.password(Ui::ROOT, "Password");
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        ui.set_focus(Some(name));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"), "Enter types nothing");
+        ui.set_focus(Some(secret));
+        ui.commit("hunter2");
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(secret)));
+        assert_eq!(ui.password_text(secret), Some("hunter2"));
+        ui.set_focus(Some(area));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Edited(area)));
+        assert_eq!(ui.field_text(area).as_deref(), Some("\n"));
+        // A press activates nothing: only Enter submits, as in GTK's entries.
+        let r = ui.widget(name).rect;
+        ui.pointer_press(r.x + 1.0, r.y + 1.0, PointerButton::Primary);
+        assert_eq!(ui.pointer_release(r.x + 1.0, r.y + 1.0, PointerButton::Primary), None);
+    }
+
+    #[test]
     fn a_field_selects_with_shift_and_the_arrows_and_with_select_all() {
         let mut ui = Ui::new("Text", Theme::default(), false);
         let name = ui.field(Ui::ROOT, "Name", "");
@@ -4602,6 +4758,178 @@ mod tests {
             assert_eq!(selected(&ui, name), None, "rtl {rtl}");
             assert_eq!(ui.field_text(name).as_deref(), Some("abcdef"));
         }
+    }
+
+    #[test]
+    fn a_press_on_the_root_outside_its_children_is_reported_and_one_inside_is_not() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.min_width = 400.0;
+        ui.min_height = 300.0;
+        let panel = ui.add(Ui::ROOT, Kind::Group("Panel".into()));
+        ui.add(panel, Kind::Label("Wi-Fi".into()));
+        let button = ui.add(panel, Kind::Button("Settings".into()));
+        ui.layout();
+        let p = ui.widget(panel).rect;
+        let (inside, outside) = ((p.x + 1.0, p.y + 1.0), (p.x + 1.0, p.y + p.h + 10.0));
+        assert!(ui.hit(inside.0, inside.1).is_none(), "on the group, not on a widget");
+        assert!(outside.1 < 300.0 && !p.contains(outside.0, outside.1));
+        for (at, raised) in [(inside, None), (outside, Some(Event::PressedOutside))] {
+            assert_eq!(ui.pointer_press(at.0, at.1, PointerButton::Primary), raised);
+            ui.pointer_release(at.0, at.1, PointerButton::Primary);
+        }
+        assert_eq!(
+            ui.pointer_press(outside.0, outside.1, PointerButton::Secondary),
+            None,
+            "only the primary button"
+        );
+        ui.pointer_release(outside.0, outside.1, PointerButton::Secondary);
+        let r = ui.widget(button).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
+        // A popup raises none: popup.rs, where the driver's path marks it.
+    }
+
+    /// The control center's panel is an island on the root, at the end of the line: a press on
+    /// the island's transparent margin is outside it, as GTK's pick passes over a margin, and one
+    /// on its fill is not, in either direction. A hidden child of the root covers nothing.
+    #[test]
+    fn a_press_on_an_islands_margin_or_where_a_hidden_child_was_is_outside() {
+        let press = |ui: &mut Ui, (x, y): (f32, f32)| {
+            let event = ui.pointer_press(x, y, PointerButton::Primary);
+            ui.pointer_release(x, y, PointerButton::Primary);
+            event
+        };
+        for rtl in [false, true] {
+            let mut ui = Ui::new("t", Theme::default(), rtl);
+            ui.min_width = 400.0;
+            ui.min_height = 300.0;
+            let island = ui.island(Ui::ROOT, true, [8.0; 4]);
+            assert!(ui.set_align(island, [crate::Align::End, crate::Align::Start]).is_some());
+            ui.add(island, Kind::Label("Wi-Fi".into()));
+            let old = ui.add(Ui::ROOT, Kind::Group("Old".into()));
+            ui.add(old, Kind::Label("Gone".into()));
+            ui.layout();
+            let (outer, fill) = (ui.widget(island).rect, ui.island_fill(island));
+            let Some(fill) = fill else {
+                unreachable!("an island with a label shown fills");
+            };
+            assert_eq!(fill.x > 200.0, !rtl, "the end of the line, rtl {rtl}");
+            let margin = (fill.x - 4.0, fill.y + 1.0);
+            assert!(outer.contains(margin.0, margin.1) && !fill.contains(margin.0, margin.1));
+            let on_fill = (fill.x + 1.0, fill.y + 1.0);
+            assert_eq!(press(&mut ui, on_fill), None, "rtl {rtl}");
+            assert_eq!(press(&mut ui, margin), Some(Event::PressedOutside), "rtl {rtl}");
+            let o = ui.widget(old).rect;
+            let was = (o.x + 1.0, o.y + 1.0);
+            assert!(!fill.contains(was.0, was.1));
+            assert_eq!(press(&mut ui, was), None, "on a shown group, rtl {rtl}");
+            ui.set_visible(old, false);
+            assert_eq!(ui.widget(old).rect, o, "the hidden group keeps its rectangle");
+            assert_eq!(press(&mut ui, was), Some(Event::PressedOutside), "rtl {rtl}");
+        }
+    }
+
+    /// A drag across a password field selects its masks and offers no primary selection, in
+    /// either direction: nothing of it leaves by the mouse either (doc_accessibility.md, AX4).
+    #[test]
+    fn a_drag_across_a_password_field_offers_no_primary_selection() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Wi-Fi", Theme::default(), rtl);
+            let field = ui.password(Ui::ROOT, "Password");
+            let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(field));
+            ui.commit("Zq7#é");
+            ui.set_focus(Some(other));
+            ui.take_clips();
+            let r = ui.widget(field).rect;
+            let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+            assert_eq!(ui.pointer_press(start, y, PointerButton::Primary), None);
+            assert!(ui.selecting(), "rtl {rtl}");
+            assert_eq!(ui.pointer_motion(end, y), None);
+            assert_eq!(ui.pointer_release(end, y, PointerButton::Primary), None);
+            let Kind::Field(text) = &ui.widget(field).kind else {
+                unreachable!("a password field is a field");
+            };
+            assert!(text.has_selection(), "the drag selected the masks, rtl {rtl}");
+            assert_eq!(ui.offered, None, "rtl {rtl}");
+            assert!(ui.take_clips().is_empty(), "rtl {rtl}");
+            assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        }
+    }
+
+    /// A password field (doc_accessibility.md, AX4) keeps what is typed, and gives out only its
+    /// masks: the field's text, its selection, the clipboards and the input method's preedit
+    /// never hold a character of it. Text is pasted in.
+    #[test]
+    fn a_password_field_keeps_its_text_and_gives_out_only_masks() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        let plain = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.password_text(plain), None, "a plain field is not one");
+
+        ui.key(Key::Text("Zq".into()));
+        ui.commit("7#é");
+        assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●●●"));
+
+        // Edits in the middle follow the masks: Backspace, Delete, and typing over a selection.
+        ui.key(Key::Left);
+        ui.key(Key::Left);
+        ui.key(Key::Backspace);
+        assert_eq!(ui.password_text(field), Some("Zq#é"));
+        ui.key(Key::Delete);
+        assert_eq!(ui.password_text(field), Some("Zqé"));
+        ui.key(Key::SelectLeft);
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.password_text(field), Some("Zxé"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // A selection gives no clipboard anything: no primary selection, Copy or Cut.
+        ui.take_clips();
+        ui.key(Key::SelectAll);
+        assert_eq!((ui.key(Key::Copy), ui.key(Key::Cut)), (None, None));
+        assert!(ui.take_clips().is_empty(), "nothing leaves the field");
+        assert_eq!(
+            ui.cut(field, "●●●"),
+            None,
+            "a cut of the masks deletes nothing"
+        );
+        let (menu, items) = ui.field_menu(field, true).expect("a field's menu");
+        for (item, key) in items {
+            let enabled = menu.is_sensitive(item);
+            match key {
+                Key::Copy | Key::Cut => assert!(!enabled, "{key:?} is refused"),
+                Key::Paste | Key::Delete => assert!(enabled, "{key:?} is allowed"),
+                _ => {}
+            }
+        }
+
+        // Paste in replaces the selection.
+        assert_eq!(ui.key(Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(field)]);
+        assert_eq!(ui.paste(field, "pä§\u{7}"), Some(Event::Edited(field)));
+        assert_eq!(ui.password_text(field), Some("pä§"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // The input method's preedit is never drawn; what it commits is kept.
+        ui.compose("secret", Some((6, 6)));
+        let Kind::Field(text) = &ui.widget(field).kind else {
+            unreachable!("a password field is a field");
+        };
+        assert_eq!(text.shown(), "●●●", "no preedit");
+        ui.commit("ß");
+        assert_eq!(ui.password_text(field), Some("pä§ß"));
+
+        // An assistive technology's SetValue sets it, and clearing it empties both.
+        ui.set_field_text(field, "new");
+        assert_eq!(ui.password_text(field), Some("new"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+        ui.set_field_text(field, "");
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.field_text(field).as_deref(), Some(""));
     }
 
     #[test]

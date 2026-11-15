@@ -446,17 +446,18 @@ dependencies = [
  "athanor-controls",
  "athanor-i18n",
  "athanor-layout",
+ "athanor-sal",
  "athanor-services",
  "athanor-style",
  "athanor-sulphur-client",
  "athanor-unit",
+ "gio",
  "gio-unix",
  "glib",
- "gtk4",
- "gtk4-layer-shell",
  "libc",
  "tokio",
  "tracing",
+ "wayland-client",
 ]
 
 [[package]]
@@ -464,7 +465,9 @@ name = "athanor-controls"
 version = "1.0.0"
 dependencies = [
  "athanor-i18n",
+ "athanor-sal",
  "athanor-services",
+ "glib",
  "gtk4",
  "tokio",
  "tracing",
@@ -672,6 +675,7 @@ dependencies = [
  "wayland-client",
  "wgpu",
  "yeslogic-fontconfig-sys",
+ "zeroize",
 ]
 
 [[package]]
@@ -701,6 +705,7 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus 6.2.1",
+ "zeroize",
 ]
 
 [[package]]

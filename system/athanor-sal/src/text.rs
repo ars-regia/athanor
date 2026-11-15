@@ -1,5 +1,6 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
+use crate::password::{mask, Secret, MASK};
 use crate::widget::Rect;
 use parley::fontique::FamilyId;
 use parley::setting::{FontFeature, Tag};
@@ -171,9 +172,10 @@ pub(crate) fn keeps(c: char, multiline: bool) -> bool {
     (!c.is_control() || (multiline && c == '\n')) && !matches!(c, '\u{2028}' | '\u{2029}')
 }
 
-/// `text` with only the characters a field [`keeps`].
-pub(crate) fn printable(text: &str, multiline: bool) -> String {
-    text.chars().filter(|&c| keeps(c, multiline)).collect()
+/// `text` with only the characters a field [`keeps`], in a buffer overwritten when dropped: it
+/// may be a password field's text.
+pub(crate) fn printable(text: &str, multiline: bool) -> zeroize::Zeroizing<String> {
+    crate::password::kept(text, usize::MAX, |c| keeps(c, multiline))
 }
 
 /// A text field: Parley's editor, with the input method's preedit kept apart from the committed
@@ -191,6 +193,9 @@ pub struct TextField {
     column: Option<f32>,
     /// Whether the text keeps its newlines, as a text area's does.
     multiline: bool,
+    /// A password field's text, while the editor holds one mask for each of its characters
+    /// (`crate::password`); none for any other field.
+    hidden: Option<Secret>,
 }
 
 impl TextField {
@@ -208,6 +213,56 @@ impl TextField {
             offset: 0.0,
             column: None,
             multiline: false,
+            hidden: None,
+        }
+    }
+
+    /// An empty password field named `name` (doc_accessibility.md, AX4): it shows, and gives
+    /// out, one mask for each character typed, and keeps the characters apart.
+    pub(crate) fn password(name: &str, size: f32, rtl: bool) -> Self {
+        let mut field = Self::new(name, "", size, rtl);
+        field.hidden = Some(Secret::default());
+        field
+    }
+
+    /// Whether this is a password field.
+    pub fn is_password(&self) -> bool {
+        self.hidden.is_some()
+    }
+
+    /// A password field's text; none for any other field.
+    pub(crate) fn password_text(&self) -> Option<&str> {
+        self.hidden.as_ref().map(Secret::as_str)
+    }
+
+    /// Applies `edit` to a password field's masks, given one mask for each character of `text`
+    /// the field keeps, and the same change to its hidden text: the characters inserted end at
+    /// the caret, where every edit of a single-line field leaves it. A change the masks and the
+    /// hidden text cannot agree on empties both.
+    fn edit_password(
+        &mut self,
+        cx: &mut TextContext,
+        text: &str,
+        edit: impl FnOnce(&mut parley::PlainEditorDriver<'_, Brush>, &str),
+    ) {
+        let kept = printable(text, false);
+        let inserted = kept.chars().count();
+        let before = self.editor.text().chars().count();
+        edit(&mut self.driver(cx), &mask(inserted));
+        let after = self.editor.text().chars().count();
+        let caret = self.editor.raw_selection().focus().index() / MASK.len_utf8();
+        let Some(hidden) = self.hidden.as_mut() else {
+            return;
+        };
+        let start = caret.checked_sub(inserted);
+        let removed = (before + inserted).checked_sub(after);
+        let agreed = match (start, removed) {
+            (Some(start), Some(removed)) => hidden.splice(start, removed, &kept),
+            _ => false,
+        };
+        if !agreed || hidden.chars() != after {
+            hidden.set("");
+            self.editor.set_text("");
         }
     }
 
@@ -314,6 +369,11 @@ impl TextField {
         (!self.is_composing()).then_some(ends)
     }
 
+    /// Whether the selection is more than the caret; never while the input method composes.
+    pub(crate) fn has_selection(&self) -> bool {
+        self.selection().is_some_and(|(anchor, focus)| anchor != focus)
+    }
+
     /// Whether an input method's composition is in progress.
     pub fn is_composing(&self) -> bool {
         self.editor.is_composing()
@@ -323,6 +383,12 @@ impl TextField {
     /// of `text` the field keeps: a `\r` of a `\r\n` goes, so the text's only newline is `\n`.
     pub fn set_text(&mut self, text: &str) {
         self.column = None;
+        if let Some(hidden) = self.hidden.as_mut() {
+            let kept = printable(text, false);
+            self.editor.set_text(&mask(kept.chars().count()));
+            hidden.set(&kept);
+            return;
+        }
         self.editor.set_text(&printable(text, self.multiline));
     }
 
@@ -333,16 +399,30 @@ impl TextField {
 
     /// Types `text` at the caret, replacing the selection.
     pub fn insert(&mut self, cx: &mut TextContext, text: &str) {
+        if self.is_password() {
+            self.edit_password(cx, text, |driver, masks| {
+                driver.insert_or_replace_selection(masks)
+            });
+            return;
+        }
         self.driver(cx).insert_or_replace_selection(text);
     }
 
     /// Deletes the selection, or the cluster before the caret.
     pub fn backspace(&mut self, cx: &mut TextContext) {
+        if self.is_password() {
+            self.edit_password(cx, "", |driver, _| driver.backdelete());
+            return;
+        }
         self.driver(cx).backdelete();
     }
 
     /// Deletes the selection, or the cluster after the caret.
     pub fn delete(&mut self, cx: &mut TextContext) {
+        if self.is_password() {
+            self.edit_password(cx, "", |driver, _| driver.delete());
+            return;
+        }
         self.driver(cx).delete();
     }
 
@@ -448,8 +528,10 @@ impl TextField {
         let cursor = cursor.filter(|&(start, end)| {
             start <= end && preedit.is_char_boundary(start) && preedit.is_char_boundary(end)
         });
+        let password = self.is_password();
         let mut driver = self.driver(cx);
-        if preedit.is_empty() {
+        // A password field shows no preedit: it would draw the characters it hides.
+        if preedit.is_empty() || password {
             driver.clear_compose();
         } else {
             driver.set_compose(preedit, cursor);
@@ -458,6 +540,10 @@ impl TextField {
 
     /// Commits `text` from the input method, replacing the preedit.
     pub fn commit(&mut self, cx: &mut TextContext, text: &str) {
+        if self.is_password() {
+            self.insert(cx, text);
+            return;
+        }
         let mut driver = self.driver(cx);
         driver.clear_compose();
         driver.insert_or_replace_selection(text);
@@ -465,7 +551,12 @@ impl TextField {
 
     /// The selected text, if the selection is not the caret; none while the input method
     /// composes.
+    /// A password field's selection gives none: nothing is copied, cut, offered as the primary
+    /// selection or dragged out of it, as GTK's password entry refuses them.
     pub(crate) fn selected_text(&self) -> Option<String> {
+        if self.is_password() {
+            return None;
+        }
         self.editor.selected_text().map(str::to_owned)
     }
 
@@ -573,6 +664,26 @@ impl TextField {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An edit the masks and the hidden text cannot agree on, here one that leaves the caret
+    /// before what it inserted, empties both, in either direction: the field never keeps a
+    /// secret its masks do not count, nor one the person did not type.
+    #[test]
+    fn a_password_edit_the_masks_cannot_follow_empties_the_field() {
+        for rtl in [false, true] {
+            let mut cx = TextContext::default();
+            let mut field = TextField::password("Password", 15.0, rtl);
+            field.insert(&mut cx, "abc");
+            assert_eq!(field.password_text(), Some("abc"), "rtl {rtl}");
+            field.select_all(&mut cx);
+            field.edit_password(&mut cx, "xyz", |driver, masks| {
+                driver.insert_or_replace_selection(masks);
+                driver.move_to_text_start();
+            });
+            assert_eq!(field.password_text(), Some(""), "rtl {rtl}");
+            assert_eq!(field.editor.text().chars().count(), 0, "rtl {rtl}");
+        }
+    }
 
     /// The caret's byte offset, its line, and its horizontal position.
     fn caret_at(cx: &mut TextContext, field: &mut TextField) -> (usize, usize, f64) {

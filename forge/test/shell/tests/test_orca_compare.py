@@ -157,6 +157,38 @@ class CompareTest(unittest.TestCase):
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
             )
 
+    def test_a_control_center_switch_is_heard_as_a_toggle_button_and_a_check_box_is_not(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        lines, failures = compare.compare(
+            ["Mute output check box not checked.", "Wi-Fi check box checked.",
+             "Silenzia l'uscita casella di spunta non spuntata."],
+            ["Mute output toggle button not pressed.", "Wi-Fi toggle button pressed.",
+             "Silenzia l'uscita pulsante di commutazione non premuto."],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Mute output toggle button not pressed.'", lines[0])
+        # A check box of the control center that is none of its switches still fails.
+        reference = "Speakers check box checked."
+        self.assertEqual(
+            compare.compare([reference], ["Speakers toggle button pressed."])[1],
+            [f"{reference!r}: missing"],
+        )
+
+    def test_the_vpn_of_the_control_center_fixture_is_heard_as_a_switch(self):
+        lines, failures = compare.compare(
+            ["Office VPN check box not checked."], ["Office VPN toggle button not pressed."]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Office VPN toggle button not pressed.'", lines[0])
+
+    def test_a_control_center_switch_the_catalog_lacks_is_named(self):
+        compare.control_center_labels.cache_clear()
+        try:
+            with self.assertRaisesRegex(LookupError, "no translation of Nowhere"):
+                compare.control_center_labels("Wi-Fi", "Nowhere")
+        finally:
+            compare.control_center_labels.cache_clear()
+
     def test_the_gallery_strings_are_read_only_for_a_switch_or_a_text_area(self):
         # Another surface's walk passes without the file; a gallery's fails with its name.
         compare.gallery_labels.cache_clear()

@@ -46,6 +46,7 @@ fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
 
 /// The node of a list row's label, beside the widgets' ids: a row is neither a label nor a field
 /// and has no text runs, so it takes the id of a first one.
+#[cfg(test)]
 pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
@@ -72,21 +73,27 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             }
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+        Kind::Column
+        | Kind::Row
+        | Kind::TitleBar
+        | Kind::Island { .. }
+        | Kind::Inline { .. }
+        | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
         Kind::Alert(name) => {
             // A column as a group is, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Alert);
             node.set_label(name.as_str());
-            node.set_orientation(Orientation::Vertical);
+            node.set_orientation(group_orientation(widget));
             node
         }
         Kind::Group(name) => {
-            // A group stacks its children as a column, and says so as GTK's vertical box does.
+            // A group stacks its children as a column, and says so as GTK's vertical box does,
+            // unless the application lays it out as a row (Ui::set_horizontal).
             let mut node = Node::new(Role::Group);
             node.set_label(name.as_str());
-            node.set_orientation(Orientation::Vertical);
+            node.set_orientation(group_orientation(widget));
             node
         }
         Kind::Label(text) => {
@@ -249,10 +256,14 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_orientation(Orientation::Horizontal);
             node
         }
-        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines.
+        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines. A
+        // password field is password text, as GTK's PasswordEntry, and its value and text runs
+        // are its masks (password.rs).
         Kind::Field(field) | Kind::TextArea(field) => {
             let mut node = Node::new(if matches!(widget.kind, Kind::TextArea(_)) {
                 Role::MultilineTextInput
+            } else if field.is_password() {
+                Role::PasswordInput
             } else {
                 Role::TextInput
             });
@@ -319,11 +330,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
-    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if shown_label(ui, id).is_some() {
-        children.push(row_label_id(id));
-    }
+    children.extend((0..shown_labels(ui, id).len()).map(|n| text_run_id(id, n)));
     if id == Ui::ROOT && ui.announcement.is_some() {
         children.push(ANNOUNCEMENT);
     }
@@ -376,26 +385,45 @@ fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
     }
 }
 
-/// The text widget `id` shows as a label inside it: a list heading's, a list row's unless it
-/// shows widgets of its own, and a labelled button's when it shows one.
-fn shown_label(ui: &Ui, id: WidgetId) -> Option<&str> {
+/// The orientation a group or an alert says: see [`Ui::set_horizontal`].
+fn group_orientation(widget: &crate::widget::Widget) -> Orientation {
+    if widget.horizontal {
+        Orientation::Horizontal
+    } else {
+        Orientation::Vertical
+    }
+}
+
+/// The texts widget `id` shows as labels inside it: a list heading's, a list row's unless it
+/// shows widgets of its own, a labelled button's when it shows one, and a tile's title and its
+/// second line, as the GtkLabels inside the GTK panel's tiles.
+fn shown_labels(ui: &Ui, id: WidgetId) -> Vec<&str> {
     match &ui.widget(id).kind {
-        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => Some(text),
-        Kind::LabelledButton { text, .. } if !text.is_empty() => Some(text),
-        _ => None,
+        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => vec![text],
+        Kind::LabelledButton { text, .. } if !text.is_empty() => vec![text],
+        Kind::Tile(tile) => [&tile.title, &tile.subtitle]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .map(String::as_str)
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
 /// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
 /// rows: AT-SPI reads the row as a list item named by its text, and the text as that label. A
 /// labelled button's text is a label inside it the same way, as the GtkLabel of a GTK button
-/// whose name is set apart.
-fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let text = shown_label(ui, id)?;
-    let mut label = Node::new(Role::Label);
-    label.set_value(text);
-    label.set_bounds(bounds(ui, id, scale));
-    Some((row_label_id(id), label))
+/// whose name is set apart, and a tile's two lines are two labels inside it.
+fn row_labels(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
+    let labels = shown_labels(ui, id).into_iter().enumerate();
+    labels
+        .map(|(n, text)| {
+            let mut label = Node::new(Role::Label);
+            label.set_value(text);
+            label.set_bounds(bounds(ui, id, scale));
+            (text_run_id(id, n), label)
+        })
+        .collect()
 }
 
 /// Whether row or heading `id` holds its text as a label: a row that shows widgets of its own
@@ -532,7 +560,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
-            .chain(shown().filter_map(|id| row_label(ui, id, scale)))
+            .chain(shown().flat_map(|id| row_labels(ui, id, scale)))
             .chain(announcement(ui, scale))
             .collect(),
         tree: Some(tree),
@@ -1346,6 +1374,104 @@ mod tests {
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 1))));
         ui.key(crate::Key::SelectRight);
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
+    }
+
+    /// A password field reaches AT-SPI as GTK's PasswordEntry does, password text, and nothing
+    /// AT-SPI reads or hears of it, its name, its text, its value or the events of its edits,
+    /// holds a character of what was typed (doc_accessibility.md, AX4).
+    #[test]
+    fn a_password_field_gives_at_spi_no_character_of_its_text() {
+        use accesskit::{ActionHandler, ActionRequest};
+        use accesskit_atspi_common::{
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, Granularity, InterfaceSet,
+            Role as AtspiRole, WindowBounds,
+        };
+        type Events = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+        struct Recorder(Events);
+        impl AdapterCallback for Recorder {
+            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn emit_event(&self, _: &Adapter, event: Event) {
+                let mut events = self.0.lock().expect("not poisoned");
+                events.push(format!("{event:?}"));
+            }
+        }
+        struct NoActions;
+        impl ActionHandler for NoActions {
+            fn do_action(&mut self, _: ActionRequest) {}
+        }
+        // Characters no name, number or debug text of the tree holds, so any found leaked.
+        const SECRET: &str = "ŽƷ¶ŧ€";
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        let events = Events::default();
+        let mut adapter = Adapter::new(
+            &AppContext::new(None),
+            Recorder(events.clone()),
+            tree_update(&ui, 1.0),
+            true,
+            WindowBounds::default(),
+            NoActions,
+        );
+        ui.commit("ŽƷ");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("¶ŧx");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.key(crate::widget::Key::Backspace);
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("€");
+        adapter.update(tree_update(&ui, 1.0));
+        assert_eq!(ui.password_text(field), Some(SECRET));
+
+        let root = adapter.platform_node(adapter.root_id());
+        let node = (0..root.child_count().expect("children"))
+            .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+            .map(|child| root.relative(child))
+            .find(|child| child.name().ok().as_deref() == Some("Password"))
+            .expect("the field reaches AT-SPI");
+        assert_eq!(node.role().expect("a role"), AtspiRole::PasswordText);
+        assert_eq!(node.character_count().expect("a text"), 5);
+        let text = node.text(0, -1).expect("a text");
+        assert_eq!(text, "●●●●●");
+        let values: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value().map(str::to_owned))
+            .collect();
+        assert!(values.contains(&text), "the field's value is its masks");
+        // What Orca reads character by character, word by word and line by line
+        // (doc_accessibility.md, AX4), and every node's label and description.
+        let mut strings = Vec::new();
+        for granularity in [Granularity::Char, Granularity::Word, Granularity::Line] {
+            for offset in 0..5 {
+                let (said, ..) = node.string_at_offset(offset, granularity).expect("a string");
+                strings.push(said);
+            }
+        }
+        assert!(strings.iter().any(|said| said == "●"), "a character is a mask");
+        let labels: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.description()])
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        assert!(labels.iter().any(|label| label == "Password"), "{labels:?}");
+
+        let events = events.lock().expect("not poisoned");
+        assert!(!events.is_empty(), "the edits are heard");
+        let heard = [node.name().expect("a name"), text]
+            .into_iter()
+            .chain(values)
+            .chain(strings)
+            .chain(labels)
+            .chain(events.iter().cloned());
+        for said in heard {
+            let leaked: Vec<char> = SECRET.chars().filter(|&c| said.contains(c)).collect();
+            assert!(leaked.is_empty(), "{leaked:?} reached AT-SPI in {said:?}");
+        }
     }
 
     /// Through the AT-SPI bridge itself: a menu button reads as expandable, and expanded while

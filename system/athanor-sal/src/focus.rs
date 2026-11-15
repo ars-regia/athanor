@@ -11,7 +11,7 @@ pub fn chain(ui: &Ui) -> Vec<WidgetId> {
     let mut out = Vec::new();
     let mut stack = vec![Ui::ROOT];
     while let Some(id) = stack.pop() {
-        if !ui.widget(id).visible || !ui.widget(id).sensitive {
+        if !ui.shown(id) || !ui.widget(id).sensitive {
             continue;
         }
         if let Kind::List { .. } = ui.widget(id).kind {

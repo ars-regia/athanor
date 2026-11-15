@@ -1772,19 +1772,38 @@ type ImeField = (SurfaceId, WidgetId, ContentHint);
 fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
-    let hint = match widget.kind {
+    let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // An input method neither shows, learns nor suggests what a password field is given.
+        Kind::Field(field) if field.is_password() => {
+            ContentHint::HiddenText | ContentHint::SensitiveData
+        }
         _ => ContentHint::None,
     };
     Some((id, widget.rect, hint))
 }
 
+/// The content type a field asks the input method for: a password's for hidden text.
+fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
+    let purpose = if hint.contains(ContentHint::HiddenText) {
+        ContentPurpose::Password
+    } else {
+        ContentPurpose::Normal
+    };
+    (hint, purpose)
+}
+
+/// A preedit and its cursor, a byte range in it. Overwritten when dropped.
+type Preedit = (zeroize::Zeroizing<String>, Option<(usize, usize)>);
+
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
-    /// The preedit and its cursor, a byte range in it.
-    preedit: Option<(String, Option<(usize, usize)>)>,
-    commit: Option<String>,
+    /// The preedit and its cursor, a byte range in it. Overwritten when dropped: a password
+    /// field never shows it, but the input method sends it all the same.
+    preedit: Option<Preedit>,
+    /// Overwritten when dropped: it may be a password field's text.
+    commit: Option<zeroize::Zeroizing<String>>,
 }
 
 /// The preedit without what a single-line field drops from it, the newline included, with its
@@ -1793,7 +1812,7 @@ struct Pending {
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
-) -> (String, Option<(usize, usize)>) {
+) -> Preedit {
     let kept = |at: usize| {
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
@@ -1806,6 +1825,14 @@ fn printable_preedit(
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
     (crate::text::printable(text, false), cursor)
+}
+
+/// Overwrites the text of a key that no field took: it may be a character of a password.
+/// `Ui::key` does the same for the keys it takes.
+fn forget(key: &mut Key) {
+    if let Key::Text(text) = key {
+        zeroize::Zeroize::zeroize(text);
+    }
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1847,9 +1874,12 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 let cursor = usize::try_from(cursor_begin)
                     .ok()
                     .zip(usize::try_from(cursor_end).ok());
-                app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
+                app.ime.pending.preedit =
+                    Some((zeroize::Zeroizing::new(text.unwrap_or_default()), cursor));
             }
-            Event::CommitString { text } => app.ime.pending.commit = text,
+            Event::CommitString { text } => {
+                app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
+            }
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
@@ -2129,7 +2159,8 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(hint, ContentPurpose::Normal);
+            let (hint, purpose) = content_type(hint);
+            text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -2445,7 +2476,7 @@ impl App {
     }
 
     fn key(&mut self, event: KeyEvent) {
-        let key = match event.keysym {
+        let mut key = match event.keysym {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
@@ -2471,7 +2502,8 @@ impl App {
             Keysym::Menu => Key::Menu,
             _ => match event.utf8 {
                 Some(text) if !text.chars().any(char::is_control) => Key::Text(text),
-                _ => return,
+                Some(text) => return forget(&mut Key::Text(text)),
+                None => return,
             },
         };
         self.hide_tooltip();
@@ -2491,17 +2523,17 @@ impl App {
             _ => self.key_target(),
         };
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
-            return;
+            return forget(&mut key);
         };
         let modifiers = KeyModifiers::from(self.modifiers);
         if self.shell.get_mut(id).is_some()
             && self.application.key(&mut self.shell, id, &key, modifiers)
         {
             self.changed(id, None);
-            return;
+            return forget(&mut key);
         }
         let Some(surface) = self.shell.get_mut(id) else {
-            return;
+            return forget(&mut key);
         };
         let before = surface.ui.focus();
         let event = surface.ui.key(key);
@@ -3573,9 +3605,10 @@ mod tests {
             commits: 2,
             ..Ime::default()
         };
-        ime.pending.commit = Some("a".into());
+        ime.pending.commit = Some(zeroize::Zeroizing::new("a".into()));
         let (pending, current) = ime.done(1);
-        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        let commit = pending.commit.as_ref().map(|text| text.as_str());
+        assert_eq!((commit, current), (Some("a"), false));
         assert!(
             ime.pending.commit.is_none(),
             "a stale done still applies its text"
@@ -3638,7 +3671,7 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        ime.pending.preedit = Some(("ni".into(), None));
+        ime.pending.preedit = Some((zeroize::Zeroizing::new("ni".into()), None));
         assert_eq!(ime.leave(), Some(a));
         assert_eq!(ime.entered, None);
         // The first done after the next enter applies nothing from before the leave.
@@ -3662,6 +3695,22 @@ mod tests {
         assert!(!ui.end_composition(), "a second end changed the field");
     }
 
+    /// An input method neither shows, learns nor suggests a password: the field asks for hidden,
+    /// sensitive text of a password, and a plain field for none of it.
+    #[test]
+    fn a_password_field_asks_for_hidden_sensitive_text_of_a_password() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let password = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, content_type(hint)));
+        ui.set_focus(Some(password));
+        let hidden = ContentHint::HiddenText | ContentHint::SensitiveData;
+        assert_eq!(asked(&ui), Some((password, (hidden, ContentPurpose::Password))));
+        ui.set_focus(Some(name));
+        assert_eq!(asked(&ui), Some((name, (ContentHint::None, ContentPurpose::Normal))));
+    }
+
     #[test]
     fn a_text_area_asks_for_multiline_text() {
         let mut ui = Ui::new("Text", Theme::default(), false);
@@ -3676,16 +3725,43 @@ mod tests {
     }
 
     #[test]
+    fn a_key_no_field_takes_is_overwritten() {
+        let mut typed = Key::Text("h".into());
+        forget(&mut typed);
+        assert_eq!(typed, Key::Text(String::new()));
+        let mut tab = Key::Tab;
+        forget(&mut tab);
+        assert_eq!(tab, Key::Tab);
+    }
+
+    #[test]
     fn the_preedit_cursor_follows_the_text_printable_keeps() {
         // "a\tbç": the tab goes, so the cursor after "b" (byte 3) moves to byte 2.
         assert_eq!(
             printable_preedit("a\tb\u{e7}", Some((3, 5))),
-            ("ab\u{e7}".to_owned(), Some((2, 4)))
+            (zeroize::Zeroizing::new("ab\u{e7}".to_owned()), Some((2, 4)))
         );
-        assert_eq!(printable_preedit("ab", None), ("ab".to_owned(), None));
+        assert_eq!(
+            printable_preedit("ab", None),
+            (zeroize::Zeroizing::new("ab".to_owned()), None)
+        );
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    #[test]
+    fn the_preedit_is_overwritten_wherever_it_drops() {
+        // A password field shows no preedit, but the input method sends one all the same.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let pending = Pending {
+            preedit: Some((zeroize::Zeroizing::new("hunter2".into()), None)),
+            ..Pending::default()
+        };
+        if let Some((preedit, _)) = &pending.preedit {
+            overwritten(preedit);
+        }
+        overwritten(&printable_preedit("hunter2", None).0);
     }
 
     /// A client that dispatches nothing: the registry it asks for gives the compositor an object

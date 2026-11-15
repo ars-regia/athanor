@@ -111,8 +111,8 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(len(found), len({tag for _, tag in found}))
         layout = [tag for surface, tag in found if surface == "layout"]
         self.assertEqual((len(layout), sum("-2o-" in tag for tag in layout)), (27, 6))
-        self.assertEqual(len(found) - len(layout), 17 * 12)
-        self.assertEqual(len(found), 231)
+        self.assertEqual(len(found) - len(layout), 22 * 12)
+        self.assertEqual(len(found), 291)
         # No cosmic component has a case (open question 1).
         self.assertFalse([s for s in wanted if s.startswith("cosmic")])
 
@@ -144,6 +144,26 @@ class GoldenReportTest(unittest.TestCase):
             self.assertTrue(entry["reason"].strip(), entry["item"])
         self.assertNotIn("item", {key for e in table.get("difference", []) for key in e})
 
+
+    def test_the_control_center_answers_every_item_of_its_port(self):
+        """Each difference of the Sal control center against the GTK one found in its port is
+        closed or recorded with its reason; the recorded look of VL10 names #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface", "").startswith("control-center")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 19)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(
+            all("#1147" in e["reason"] for e in items if e["item"] in (1, 2, 3, 4, 6, 12))
+        )
 
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"

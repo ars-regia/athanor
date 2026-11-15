@@ -198,6 +198,14 @@ pub(crate) fn line_x(r: Rect, pad: f32, gap: f32, rtl: bool, width: f32) -> f32 
     }
 }
 
+/// Where `line` is drawn from, after the disc in reading order. A line broken at the tile's
+/// room is aligned to the start edge of that room, which in right-to-left moves its glyphs by
+/// the room it leaves: that offset is taken back, so that the line ends at the disc's gap.
+pub(crate) fn line_origin(r: Rect, pad: f32, gap: f32, rtl: bool, line: &Layout<Brush>) -> f32 {
+    let lead = line.lines().next().map_or(0.0, |first| first.metrics().offset);
+    line_x(r, pad, gap, rtl, line.width()) - lead
+}
+
 #[cfg(test)]
 mod tests {
     use crate::theme::Theme;
@@ -357,6 +365,53 @@ mod tests {
         assert_eq!(described(&ui).as_deref(), Some("Home"));
         assert!(ui.set_tile_subtitle(wifi, ""));
         assert_eq!(described(&ui).as_deref(), Some("Wi-Fi"));
+    }
+
+    /// The title and the second line are labels inside the tile, as the GtkLabels inside the GTK
+    /// panel's tiles; a tile without a second line holds its title alone.
+    #[test]
+    fn the_title_and_the_second_line_are_labels_inside_the_tile() {
+        use crate::a11y::{node_id, text_run_id, tree_update};
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let wifi = ui.tile(Ui::ROOT, "Wi-Fi", "On", glyph(), true);
+        ui.layout();
+        let labels = |ui: &Ui| {
+            let update = tree_update(ui, 1.0);
+            let find = |id| update.nodes.iter().find(|(n, _)| *n == id).map(|(_, node)| node);
+            let tile = find(node_id(wifi)).map(|n| n.children().to_vec()).unwrap_or_default();
+            tile.into_iter()
+                .filter_map(|id| find(id).map(|n| (n.role(), n.value().map(str::to_owned))))
+                .collect::<Vec<_>>()
+        };
+        let label = |text: &str| (accesskit::Role::Label, Some(text.to_owned()));
+        assert_eq!(labels(&ui), [label("Wi-Fi"), label("On")]);
+        assert_eq!(text_run_id(wifi, 1).0 >> 40, 2, "the second line's own node");
+        assert!(ui.set_tile_subtitle(wifi, ""));
+        assert_eq!(labels(&ui), [label("Wi-Fi")]);
+    }
+
+    /// In right-to-left both lines end at the disc's gap, the second as well when it is broken
+    /// at the room of a tile wider than its text.
+    #[test]
+    fn in_right_to_left_both_lines_end_beside_the_disc() {
+        let mut ui = Ui::new("t", Theme::default(), true);
+        ui.min_width = 400.0;
+        let wifi = ui.tile(Ui::ROOT, "Wi-Fi", "On", glyph(), true);
+        ui.layout();
+        let widget = ui.widget(wifi);
+        let (r, t) = (widget.rect, &ui.theme);
+        let Kind::Tile(tile) = &widget.kind else {
+            unreachable!("a tile")
+        };
+        assert!(tile.placed.is_some(), "the second line is broken at the tile's room");
+        let end = r.x + r.w - t.padding - super::DISC - t.gap;
+        for line in [widget.text.as_ref(), tile.second.as_deref()] {
+            let line = line.expect("laid out");
+            let x = super::line_origin(r, t.padding, t.gap, true, line);
+            let lead = line.lines().next().map_or(0.0, |first| first.metrics().offset);
+            let right = x + lead + line.width();
+            assert!((right - end).abs() < 0.5, "ends at {right}, the disc's gap at {end}");
+        }
     }
 
     #[test]

@@ -17,6 +17,7 @@ mod drop_down;
 mod icon;
 mod icon_toggle;
 mod motion;
+mod password;
 mod popup;
 mod range;
 pub(crate) mod render;
