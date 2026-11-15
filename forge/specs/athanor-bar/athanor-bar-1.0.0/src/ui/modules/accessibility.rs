@@ -137,7 +137,8 @@ fn menu(cx: &Cx, state: &State) -> (Ui, Widgets) {
     if let Some(compositor) = state.compositor {
         magnifier = Some(ui.switch(frame, &tr("Magnifier"), compositor.magnifier));
         inverted = Some(ui.switch(frame, &tr("Invert colours"), compositor.inverted));
-        ui.add(frame, Kind::Label(tr("Colour filter")));
+        let heading = ui.add(frame, Kind::Label(tr("Colour filter")));
+        look::note(&mut ui, heading);
         let group = ui.add(frame, Kind::Column);
         for filter in FILTERS {
             let radio = ui.radio(group, &filter_label(filter), filter == compositor.filter);

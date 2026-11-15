@@ -4,7 +4,7 @@
 //! `popover.athanor-bar-popover`), which the GTK bar read.
 
 use athanor_layout::preset::Preset;
-use athanor_sal::{Rgba, Theme, Ui, WidgetId};
+use athanor_sal::{Rgba, TextStyle, Theme, Ui, WidgetId};
 use athanor_style::appearance::Appearance;
 use athanor_style::sal;
 
@@ -109,6 +109,20 @@ pub fn popover(name: &str, theme: Theme, rtl: bool, top: bool) -> (Ui, WidgetId)
     let frame = ui.island(Ui::ROOT, true, margin);
     ui.set_arrow(frame);
     (ui, frame)
+}
+
+/// Draws `label` as calmo's `bar-popover-note`, a popover's secondary line: the caption's size
+/// and weight in the appearance's ink2.
+pub fn note(ui: &mut Ui, label: WidgetId) {
+    ui.set_text_style(
+        label,
+        TextStyle {
+            scale: sal::size::CAPTION.scale,
+            weight: sal::size::CAPTION.weight,
+            features: Vec::new(),
+        },
+    );
+    ui.set_ink(label, Some(Rgba(sal::palette(&Appearance::read()).ink2)));
 }
 
 #[cfg(test)]
