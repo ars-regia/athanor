@@ -23,7 +23,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
@@ -1469,6 +1469,8 @@ impl SeatHandler for State {
     /// The text inputs follow the keyboard too, except while the session is locked
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // Smithay calls this for every new focus but none; `set_keyboard_focus` marks that.
+        self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
         // The focus outline moves.
         self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
@@ -1621,8 +1623,9 @@ impl XdgActivationHandler for State {
     /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
     /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
     /// The press must be the latest input: a later press of any kind, a key, a button, a finger
-    /// or a pen, to whichever client, or a keyboard focus change supersedes it; its release
-    /// does not. A client behind a security context gets no token this way.
+    /// or a pen, to whichever client, or a later change of the keyboard focus, to a surface or
+    /// to none, supersedes it; its release does not. A client behind a security context gets no
+    /// token this way.
     ///
     /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
     /// user's click or from mapping a window while nothing else holds it (`place`), and the
@@ -1646,16 +1649,15 @@ impl XdgActivationHandler for State {
         }
         // The seat named is a resource of the client that asks.
         let outside = seat.client().is_some_and(|asking| unconfined(&asking));
-        let Some(keyboard) = self.seat.get_keyboard() else {
-            return false;
-        };
-        let enter = keyboard.last_enter();
         let latest = self.grab_serials.press == Some(serial)
-            && enter.is_none_or(|enter| serial.is_no_older_than(&enter));
+            && self.grab_serials.focus.is_none_or(|focus| serial.is_no_older_than(&focus));
         if outside && latest && self.grab_serials.clicked(serial, &client) {
             return true;
         }
-        let Some(enter) = enter else {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return false;
+        };
+        let Some(enter) = keyboard.last_enter() else {
             return false;
         };
         let focused = keyboard

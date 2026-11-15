@@ -6465,6 +6465,52 @@ fn a_key_press_after_a_click_grants_no_token() {
     run.stop();
 }
 
+/// A window mapped after the click takes the keyboard, which supersedes the click: the bar gets
+/// no token.
+#[test]
+fn a_window_mapped_after_a_click_supersedes_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, app.id, "the window has the keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// The keyboard moved after the click, then left for no surface when the last window closed:
+/// the click stays superseded, though Smithay forgets the enter at the leave.
+#[test]
+fn the_last_window_closing_after_a_click_keeps_it_superseded() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    assert!(run.state.minimise(&fixture));
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let mut app = Local::connect(&mut run, None);
+    let toplevel = app.toplevel(&mut run);
+    let (surface, xdg) = app.window.clone().expect("the window");
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    app.pump(&mut run, "the keyboard has no focus", |_, state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.current_focus().is_none())
+    });
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A press a window's move takes, over the bar, is delivered to no client: the bar gets no
 /// token from it.
 #[test]

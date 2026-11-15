@@ -310,6 +310,9 @@ pub struct GrabSerials {
     /// The last press of any kind, a key, a button, a finger or a pen, whether a client or the
     /// compositor took it: a click grants a token only while it is the last (`token_created`).
     pub press: Option<Serial>,
+    /// A serial taken at the last change of the keyboard focus, to a surface or to none: a
+    /// click older than it grants no token (`token_created`).
+    pub focus: Option<Serial>,
 }
 
 impl GrabSerials {
@@ -2235,6 +2238,7 @@ mod tests {
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),
             press: Some(s(10)),
+            focus: None,
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");
