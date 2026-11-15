@@ -567,11 +567,21 @@ def release_problems(root):
     return problems
 
 
-# PL10: a step that restores or saves a cache, and a setting that points sccache or BuildKit at
-# the Actions cache service. A cache that lives only in the job's own disk or volume is not one.
-CACHE_ACTION = re.compile(r"^(?:actions/cache(?:/restore|/save)?|Swatinem/rust-cache)@")
-CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b")
+# PL10: the actions that restore or save a cache, compared without regard to case as GitHub
+# resolves them, and the settings that give a build a cache from outside the job: sccache on
+# the Actions cache, and a BuildKit or buildah cache-from or cache-to of any type. A cache that
+# lives only in the job's own disk or volume is not one.
+CACHE_ACTIONS = {"actions/cache", "actions/cache/restore", "actions/cache/save", "swatinem/rust-cache",
+                 "mozilla-actions/sccache-action"}
+# Toolchain setup actions with a cache input. setup-go caches unless `cache: false` (default true
+# since v4) and setup-rust-toolchain unless `cache: false` (default true); setup-node v5 caches
+# the package manager package.json names unless `package-manager-cache: false`; setup-python,
+# setup-java and setup-dotnet cache only when `cache` is set.
+SETUP_ACTION = re.compile(r"^(?:actions/setup-[\w-]+|actions-rust-lang/setup-rust-toolchain)$", re.I)
+CACHING_BY_DEFAULT = {"actions/setup-go", "actions-rust-lang/setup-rust-toolchain"}
+CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b|\bcache-(?:from|to)\b", re.I)
 LOCAL_WORKFLOW = "./.github/workflows/"
+LOCAL_ACTION = "./.github/actions/"
 # The token grants of a job that publishes: id-token for a keyless signature, attestation or
 # provenance, packages for a push to GHCR with the job's token. A push to another registry with
 # a credential of its own is not seen.
@@ -619,24 +629,57 @@ def release_path_workflows(root):
     return path
 
 
+def expanded_steps(root, steps, depth=0):
+    """The steps of a job, each followed by the steps of the local composite action it uses, at
+    any depth GitHub allows."""
+    for step in steps or []:
+        if not isinstance(step, dict):
+            continue
+        yield step
+        uses = str(step.get("uses", ""))
+        if uses.startswith(LOCAL_ACTION) and depth < 10:
+            for manifest in ("action.yml", "action.yaml"):
+                path = Path(root) / uses / manifest
+                if path.is_file():
+                    action = yaml.safe_load(read(path))
+                    runs = action.get("runs") if isinstance(action, dict) else None
+                    yield from expanded_steps(root, (runs or {}).get("steps"), depth + 1)
+
+
+def caching_action(step):
+    """The name of the action a step uses when that action restores or saves a cache, or None."""
+    name = str(step.get("uses", "")).split("@")[0]
+    options = step.get("with") if isinstance(step.get("with"), dict) else {}
+    if name.lower() in CACHE_ACTIONS:
+        return name
+    if not SETUP_ACTION.match(name):
+        return None
+    if "cache" in options:
+        return name if str(options["cache"]).strip().lower() not in ("", "false") else None
+    if name.lower() == "actions/setup-node":
+        return name if str(options.get("package-manager-cache", "true")).lower() != "false" else None
+    return name if name.lower() in CACHING_BY_DEFAULT else None
+
+
 def release_cache_problems(root):
     """PL10: no job of a release-path workflow (release_path_workflows) restores or saves a
-    cache, with a cache action or with an sccache or BuildKit backend on the Actions cache,
-    because a cache is an input the provenance does not name (PL20) and any job of the default
+    cache, through its own steps or those of a local composite action it uses: a cache action, a
+    toolchain setup action with its cache on, sccache on the Actions cache, or a cache-from or
+    cache-to. A cache is an input the provenance does not name (PL20), and any job of the default
     branch can write one."""
     if yaml is None:
         return []
     problems = []
     for name, (jobs, env) in sorted(release_path_workflows(root).items()):
         for job_id, job in jobs.items():
-            for step in job.get("steps") or []:
-                uses = str(step.get("uses", "")) if isinstance(step, dict) else ""
-                if CACHE_ACTION.match(uses):
-                    problems.append(f"{name}: job {job_id} uses {uses.split('@')[0]} on the release path, "
-                                    "which restores and saves no cache (PL10)")
-            if CACHE_BACKEND.search(json.dumps([env, job], default=str)):
-                problems.append(f"{name}: job {job_id} points a cache at the Actions cache service on the "
-                                "release path, which restores and saves no cache (PL10)")
+            steps = list(expanded_steps(root, job.get("steps")))
+            for action in filter(None, map(caching_action, steps)):
+                problems.append(f"{name}: job {job_id} uses {action} on the release path, "
+                                "which restores and saves no cache (PL10)")
+            if CACHE_BACKEND.search(json.dumps([env, job, steps], default=str)):
+                problems.append(f"{name}: job {job_id} gives a build a cache from outside the job (sccache "
+                                "on the Actions cache, cache-from or cache-to) on the release path, which "
+                                "restores and saves no cache (PL10)")
     return problems
 
 

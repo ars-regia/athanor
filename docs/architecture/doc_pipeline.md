@@ -426,7 +426,13 @@ takes as the release path every workflow with a job in a signing environment or 
 provenance) or `packages: write` (a push to the registry with the job's token), from the job or
 from the workflow, and every reusable workflow of the repository such a workflow calls. The
 whole workflow counts, since its other jobs build what that job signs or pushes. A push to
-another registry with a credential of its own is not seen.
+another registry with a credential of its own is not seen. A cache step is a cache action
+(`actions/cache` with its `restore` and `save`, `Swatinem/rust-cache`,
+`mozilla-actions/sccache-action`, matched without regard to case), a toolchain setup action
+with its cache on (`setup-go` and `setup-rust-toolchain` unless `cache: false`, `setup-node`
+unless `package-manager-cache: false`, the others when `cache` is set), sccache on the Actions
+cache, or a `cache-from` or `cache-to` of any type, in the job's steps or in a local composite
+action they use.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
@@ -1631,6 +1637,6 @@ attests and publishes the forge packages, no longer restores a Rust cache
 recorded them as debt left to PB11. `verify.py workflows` gains the check PL10 and section 10
 already named: a job of a release-path workflow (one with a job in a signing environment or in
 `release`, or with a job whose token has `id-token: write` or `packages: write`, or a reusable
-workflow of the repository that such a workflow calls) that uses a cache action or points
-sccache or BuildKit at the Actions cache service fails it. The release path so includes
+workflow of the repository that such a workflow calls) that runs a cache step of PL10, in its
+own steps or in a local composite action, fails it. The release path so includes
 `azoth-signer.yml` and `kernel-build.yml`.
