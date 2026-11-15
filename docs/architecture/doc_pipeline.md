@@ -56,6 +56,10 @@
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
   root `Cargo.toml` or `Cargo.lock` that only adds workspace members does not select `shell`.
+  Also amended 2026-11-15 (#1174), approved by the maintainer on 2026-11-15, a correction of
+  the current state and no new target decision: PL10 no longer records restored caches on the
+  release path as debt, since `call-dag-compile.yml` restores none and `verify.py workflows`
+  rejects a cache step there (section 15).
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -414,8 +418,10 @@ volumes are separate per trust level; a pull request from a fork never runs on i
 Release-path builds restore no cache: a cache is an input the provenance does not name
 (PL20), and any job of the default branch can write one; the kernel made the same choice
 (PR #250). Pull-request builds may restore caches by prefix. `verify.py workflows` rejects a
-cache step in a release-path job. Today `call-dag-compile.yml` restores a Rust and an
-sccache cache on the release path; they go with PB11.
+cache step in a release-path job. *Amended on 2026-11-15 (#1174):* `call-dag-compile.yml`
+no longer restores the Rust and sccache caches this paragraph recorded as debt, and the check
+takes as the release path every workflow with a job in a signing environment or in `release`
+(PL11, PL60), and every reusable workflow of the repository it calls.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
@@ -1611,3 +1617,12 @@ updateinfo source of the Fedora half; section 3.3 adds the release statements to
 `release-candidate`; PL11 and PL56 let `sign-images` install cosign and run `cosign attest`
 beside the image key (D43). The markers, `mark-current`, the janitor's marker rule and the
 re-run rule stay with the rest of PB4b.
+
+**Amended on 2026-11-15 (#1174),** approved by the maintainer on 2026-11-15, a correction of
+the current state and not a new target decision. `call-dag-compile.yml`, which builds, signs,
+attests and publishes the forge packages, no longer restores a Rust cache
+(`Swatinem/rust-cache`) or an sccache cache (`actions/cache`), so PL10 drops the sentence that
+recorded them as debt left to PB11. `verify.py workflows` gains the check PL10 and section 10
+already named: a job of a release-path workflow (one with a job in a signing environment or in
+`release`, or a reusable workflow of the repository that such a workflow calls) that uses a
+cache action or points sccache or BuildKit at the Actions cache service fails it.
