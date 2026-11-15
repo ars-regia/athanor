@@ -59,10 +59,10 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   approved by the maintainer with #977.
 - Amended on 2026-11-11: decision 33, with OS17; decision 34, with section 6, step 5 and
   section 8; decision 35, with OS17 and OS20.
-- Amended on 2026-11-15: decision 36, with OS17 and decision 33's wave 2c.
 - Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
   cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
   `doc_visual_language.md` (VL13), proposed with #1077.
+- Amended on 2026-11-15: decision 36, with OS17 and decision 33's wave 2c.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -431,8 +431,8 @@ pointer gestures and xdg-foreign, standard, and answers every request of xdg-dec
 client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
 per-client filter for it (C1 results, section 4). Decision 33 gives the classes of the second
-wave: standard for all but the DRM lease, unconfined; the X11 keyboard grab waits for an
-amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+wave: standard for all but the DRM lease, unconfined, whose class and design decision 36 now
+gives; the X11 keyboard grab waits for an amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
 Decision 36 adds `wp_content_type_manager_v1` and `xdg_toplevel_tag_manager_v1`, standard, and
 `wp_drm_lease_device_v1`, unconfined.
 
@@ -1378,10 +1378,10 @@ compositor and that the own compositor did not yet offer:
     that records it). On 2026-11-15 the globals of the own compositor at `origin/iso-v0`
     8794c120 were compared with the snapshots of Wayland Explorer at f406667b (2026-11-14) for
     cosmic-comp 1.11.0, niri 26.04, KWin 6.7, Mutter 51, Hyprland 0.52.1 and Sway 1.11, and with
-    Sway 1.12's release notes. Outside decision 21's colour management and wave 2b, three
-    globals that at least three of them offer are missing, and Smithay implements all three at
-    the pinned revision. Each comes with its row in `data/globals` and its fixture test (OS17;
-    OS19, item 2):
+    Sway 1.12's release notes. Among the globals Smithay implements at the pinned revision,
+    and outside decision 21's colour management and wave 2b, three that at least three of
+    them offer are missing. Each comes with its row in `data/globals` and its fixture test
+    (OS17; OS19, item 2):
     - `wp_content_type_manager_v1`, standard. The compositor keeps each surface's type, `none`,
       `photo`, `video` or `game`, applied with the surface's commit. At 1.0 no behaviour reads
       it: scheduling, tearing (wave 2b) and adaptive sync stay as they are. A rule that reads
@@ -1394,11 +1394,16 @@ compositor and that the own compositor did not yet offer:
     - `wp_drm_lease_device_v1`, unconfined. Each DRM device offers one global. A connector is
       offered for lease only when the kernel marks it `non-desktop`, such as a headset's, and
       such a connector is never an output of the session: no workspace, layer surface, cursor or
-      lock surface is placed on it. A lease is granted only while the session is unlocked. When
-      the session locks, every lease is revoked before the lock is confirmed (`locked` of
-      `ext_session_lock_v1`), so a headset never shows a client's frame over a locked session.
-      After the unlock a client asks again. A device lost on a session switch, or removed,
-      revokes its leases.
+      lock surface is placed on it. A lease is granted only while the session is unlocked:
+      from the moment a lock is requested, every new request is refused. Before the lock is
+      confirmed (`locked` of `ext_session_lock_v1`), every lease is revoked and the compositor
+      disables the leased connector and its CRTC, so a headset never shows a client's frame
+      over a locked session. After the unlock a client asks again. A lease is also revoked,
+      and its connector disabled, when its device is lost on a session switch or removed,
+      when its connector is disconnected, or when the connector stops being `non-desktop`.
+      Fixture tests cover the refusal from the lock request on, the revocation and the
+      disabled connector before `locked`, and the revocation on a lost device and on a
+      disconnected connector (OS19, item 2);
 
     Not taken:
     - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
@@ -1406,6 +1411,10 @@ compositor and that the own compositor did not yet offer:
     - keeping leases across the lock, which leaves a client's frames on a headset the locked
       session does not cover;
     - reading the tag for window rules now, which waits for a rule the maintainer decides.
+
+    Left for a later decision: `zwlr_gamma_control_manager_v1`, which Smithay does not
+    implement and which would be privileged, since it changes what every output shows; and
+    `xdg_toplevel_drag_manager_v1`, which only KWin and Mutter offer.
 
 ## 8. Risks
 
