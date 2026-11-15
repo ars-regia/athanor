@@ -39,19 +39,19 @@ msgstr ""
 msgid "Fully charged"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/labels.rs:42 src/panel.rs:179
+#: ../../../../system/athanor-controls/src/labels.rs:42 src/panel.rs:180
 msgid "Power saver"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/labels.rs:43 src/panel.rs:180
+#: ../../../../system/athanor-controls/src/labels.rs:43 src/panel.rs:181
 msgid "Performance"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/labels.rs:44 src/panel.rs:181
+#: ../../../../system/athanor-controls/src/labels.rs:44 src/panel.rs:182
 msgid "Balanced"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:131 src/panel.rs:370
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131 src/panel.rs:383
 msgid "Mute output"
 msgstr ""
 
@@ -59,7 +59,7 @@ msgstr ""
 msgid "Output"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:131 src/panel.rs:369
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131 src/panel.rs:382
 msgid "Output volume"
 msgstr ""
 
@@ -67,11 +67,11 @@ msgstr ""
 msgid "Input"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:132 src/panel.rs:377
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132 src/panel.rs:390
 msgid "Input volume"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:132 src/panel.rs:378
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132 src/panel.rs:391
 msgid "Mute microphone"
 msgstr ""
 
@@ -80,106 +80,139 @@ msgstr ""
 msgid "{device}, in use"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:350 src/media.rs:85
+#: ../../../../system/athanor-controls/src/sal/audio.rs:367 src/media.rs:85
 msgid "Next track"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:350
-#: ../../../../system/athanor-controls/src/sal/audio.rs:457 src/media.rs:128
+#: ../../../../system/athanor-controls/src/sal/audio.rs:367
+#: ../../../../system/athanor-controls/src/sal/audio.rs:474 src/media.rs:128
 msgid "Pause"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:350 src/media.rs:76
+#: ../../../../system/athanor-controls/src/sal/audio.rs:367 src/media.rs:76
 msgid "Previous track"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/audio.rs:457 src/media.rs:82
+#: ../../../../system/athanor-controls/src/sal/audio.rs:474 src/media.rs:82
 #: src/media.rs:130
 msgid "Play"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/battery.rs:135 src/panel.rs:66
+#: ../../../../system/athanor-controls/src/sal/battery.rs:138 src/panel.rs:67
 msgid "Power mode"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/battery.rs:148
-#: ../../../../system/athanor-controls/src/sal/battery.rs:153
+#: ../../../../system/athanor-controls/src/sal/battery.rs:151
+#: ../../../../system/athanor-controls/src/sal/battery.rs:156
 msgid "Screen brightness"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:94
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:226
 #, rust-format
 msgid "{device}, connected"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:132 src/panel.rs:63
-#: src/panel.rs:163
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:328 src/panel.rs:64
+#: src/panel.rs:164
 msgid "Bluetooth"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:214
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:331
+msgid "Nearby devices"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:366
+#: ../../../../system/athanor-controls/src/sal/network.rs:418
+msgid "Cancel"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:367
+msgid "Pair"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:515
+#, rust-format
+msgid "Pair with {device}?"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:517
+#, rust-format
+msgid "Pair only if {device} shows the same number."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:524
+#, rust-format
+msgid "Pairing with {device}"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:526
+#, rust-format
+msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:222
 #, rust-format
 msgid "{network}, connected"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:215
+#: ../../../../system/athanor-controls/src/sal/network.rs:223
 #, rust-format
 msgid "{network}, connecting"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:216
+#: ../../../../system/athanor-controls/src/sal/network.rs:224
 #, rust-format
 msgid "{network}, needs Settings"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:217
+#: ../../../../system/athanor-controls/src/sal/network.rs:225
 #, rust-format
 msgid "{network}, secured"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:336 src/panel.rs:62
+#: ../../../../system/athanor-controls/src/sal/network.rs:362 src/panel.rs:163
+msgid "Network"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:366 src/panel.rs:63
 msgid "Wi-Fi"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:342 src/panel.rs:64
+#: ../../../../system/athanor-controls/src/sal/network.rs:373 src/panel.rs:65
 msgid "Airplane mode"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:372
+#: ../../../../system/athanor-controls/src/sal/network.rs:408
 msgid "The password was not accepted. Try again."
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:374
+#: ../../../../system/athanor-controls/src/sal/network.rs:411
 msgid "Password"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:376
-msgid "Cancel"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/sal/network.rs:377
+#: ../../../../system/athanor-controls/src/sal/network.rs:419
 msgid "Connect"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:602
+#: ../../../../system/athanor-controls/src/sal/network.rs:665
 #, rust-format
 msgid "Password for {network}"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:619
+#: ../../../../system/athanor-controls/src/sal/network.rs:682
 msgid "Wired: connected"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/network.rs:620
+#: ../../../../system/athanor-controls/src/sal/network.rs:683
 msgid "Wired: not connected"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/sal/widgets.rs:29
-#: ../../../../system/athanor-controls/src/sal/widgets.rs:41
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:85
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:98
 msgid "The action did not complete."
 msgstr ""
 
-#: src/center.rs:166 src/center.rs:212 src/center.rs:221
+#: src/center.rs:171 src/center.rs:217 src/center.rs:226
 msgid "Control center"
 msgstr ""
 
@@ -199,62 +232,58 @@ msgstr ""
 msgid "Media player"
 msgstr ""
 
-#: src/panel.rs:65
+#: src/panel.rs:66
 msgid "Dark mode"
 msgstr ""
 
-#: src/panel.rs:154
+#: src/panel.rs:155
 msgid "On"
 msgstr ""
 
-#: src/panel.rs:156
+#: src/panel.rs:157
 msgid "Off"
 msgstr ""
 
-#: src/panel.rs:162
-msgid "Network"
-msgstr ""
-
-#: src/panel.rs:164 src/panel.rs:440
+#: src/panel.rs:165 src/panel.rs:455
 msgid "Sound"
 msgstr ""
 
-#: src/panel.rs:165
+#: src/panel.rs:166
 msgid "Power"
 msgstr ""
 
-#: src/panel.rs:360 src/panel.rs:440
+#: src/panel.rs:373 src/panel.rs:455
 #, rust-format
 msgid "Open the {name} page"
 msgstr ""
 
-#: src/panel.rs:381
+#: src/panel.rs:394
 msgid "Brightness"
 msgstr ""
 
-#: src/panel.rs:394
+#: src/panel.rs:409
 msgid "Settings"
 msgstr ""
 
-#: src/panel.rs:456
+#: src/panel.rs:478
 msgid "Back"
 msgstr ""
 
-#: src/panel.rs:466
+#: src/panel.rs:488
 #, rust-format
 msgid "The {name} page is not available yet."
 msgstr ""
 
-#: src/panel.rs:576
+#: src/panel.rs:598
 msgid "Connecting"
 msgstr ""
 
-#: src/panel.rs:648
+#: src/panel.rs:670
 #, rust-format
 msgid "{percent}%"
 msgstr ""
 
-#: src/panel.rs:650
+#: src/panel.rs:672
 #, rust-format
 msgid "Battery {level}"
 msgstr ""
