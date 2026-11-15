@@ -2180,7 +2180,7 @@ impl State {
 
     /// The session pauses: the GPU is not touched until the resume, as libseat requires once the
     /// pause is acknowledged, and the lease clients are told that the connectors went away.
-    fn pause_leases(&mut self) {
+    pub(crate) fn pause_leases(&mut self) {
         self.leases.paused();
         if let Backend::Drm(drm) = &mut self.backend {
             drm.withdraw_offers();
@@ -2189,9 +2189,10 @@ impl State {
 
     /// The session resumed, before any output is drawn: every lease ends, the ones left from
     /// before the pause included, and the connectors are offered again.
-    fn resume_leases(&mut self) {
+    pub(crate) fn resume_leases(&mut self) {
         self.leases.resumed();
-        self.revoke_device_leases();
+        self.leases
+            .revoke_all(|ended| finish(&mut self.backend, ended));
         if let Backend::Drm(drm) = &mut self.backend {
             drm.offer_all();
         }

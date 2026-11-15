@@ -251,13 +251,14 @@ fn locked_waits_for_an_output_that_has_not_shown_the_lock() {
     run.stop();
 }
 
-/// While the session is paused the device is not touched: the lease is not even dropped, and
-/// `locked` waits; after the resume the lease ends and `locked` is sent.
+/// Through the functions the udev backend's pause and resume call: while the session is paused
+/// the device is not touched, the lease is not even dropped, and `locked` waits; the resume ends
+/// the lease at once, and `locked` is sent.
 #[test]
 fn locked_waits_for_the_resume_of_a_paused_session() {
     let mut run = Running::start(None);
     let held = probe_lease(&mut run, 7);
-    run.state.leases.paused();
+    run.state.pause_leases();
     assert!(!run.state.may_lease(), "refused while paused");
     let mut locker = Local::connect(&mut run, None);
     let _lock = request_lock(&mut run, &mut locker);
@@ -266,9 +267,23 @@ fn locked_waits_for_the_resume_of_a_paused_session() {
         !held.load(Ordering::SeqCst),
         "the device is not touched while paused"
     );
-    run.state.leases.resumed();
+    run.state.resume_leases();
+    assert!(held.load(Ordering::SeqCst), "ended at the resume");
     locker.pump(&mut run, "the session is locked", |client, _| client.locked);
-    assert!(held.load(Ordering::SeqCst), "ended after the resume");
+    run.stop();
+}
+
+/// A lease held through a pause, with no lock, ends at the resume, before any output is drawn,
+/// and grants are made again.
+#[test]
+fn a_resume_ends_the_leases_held_through_a_pause() {
+    let mut run = Running::start(None);
+    let held = probe_lease(&mut run, 7);
+    run.state.pause_leases();
+    assert!(!held.load(Ordering::SeqCst), "kept while paused");
+    run.state.resume_leases();
+    assert!(held.load(Ordering::SeqCst), "ended at the resume");
+    assert!(run.state.may_lease(), "granted again after the resume");
     run.stop();
 }
 

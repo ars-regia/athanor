@@ -142,6 +142,11 @@ impl<L> Leases<L> {
         self.end(|_| true, finish);
     }
 
+    /// Every lease ends, as at the resume.
+    pub fn revoke_all(&mut self, finish: impl FnMut(&Ended) -> Result<(), String>) {
+        self.end(|_| true, finish);
+    }
+
     /// The session was unlocked.
     pub fn unlocked(&mut self) {
         self.locked = false;
