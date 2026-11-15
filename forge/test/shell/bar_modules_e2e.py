@@ -147,17 +147,11 @@ def type_password(app, Atspi, password):
     return bool(entries) and entries[0].set_text_contents(password)
 
 
-def described_by(accessible, Atspi):
-    """The names of the accessibles a DescribedBy relation of `accessible` points to."""
-    if accessible is None:
-        return []
-    names = []
-    for relation in accessible.get_relation_set():
-        if relation.get_relation_type() == Atspi.RelationType.DESCRIBED_BY:
-            for index in range(relation.get_n_targets()):
-                target = relation.get_target(index)
-                names.append(target.get_name() if target is not None else None)
-    return names
+def description(accessible):
+    """The accessible description of `accessible`. The bar's Pair carries the device, the
+    digits and the note in it, where GTK's pointed at the three labels with DescribedBy, a
+    relation AccessKit's AT-SPI bridge does not send."""
+    return None if accessible is None else accessible.get_description()
 
 
 def press_confirm(app, Atspi, name):
@@ -448,8 +442,8 @@ def bluetooth(ctx):
     check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
     check(
         "the Pair button is described by the device, the digits and the note",
-        described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
-        == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
+        description(confirm_button(app, Atspi, "Pair")[1])
+        == f"Pair with Phone? {fx.PAIRING_CODE} Pair only if Phone shows the same number.",
     )
     check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
     phone = device_path("Phone")
