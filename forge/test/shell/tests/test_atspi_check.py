@@ -99,5 +99,40 @@ class RingTest(unittest.TestCase):
         self.assertIsNone(check.ring_note(None, True))
 
 
+class ChildrenTest(unittest.TestCase):
+    class Fake:
+        def __init__(self, kids):
+            self.kids = kids
+
+        def get_child_count(self):
+            return len(self.kids)
+
+        def get_child_at_index(self, index):
+            return self.kids[index]
+
+    def test_a_child_gone_between_the_count_and_the_lookup_is_skipped(self):
+        self.assertEqual(list(check.children(self.Fake(["a", None, "c"]))), ["a", "c"])
+
+    def test_window_of_skips_a_gone_window(self):
+        class Window(self.Fake):
+            def get_component_iface(self):
+                return self
+
+        class Rect:
+            x = y = 0
+            width, height = 30, 20
+
+        class Atspi:
+            class CoordType:
+                WINDOW = 0
+
+            class Component:
+                @staticmethod
+                def get_extents(_, __):
+                    return Rect
+
+        self.assertEqual(check.window_of(Window([Window([]), None]), Atspi), (0, 0, 30, 20))
+
+
 if __name__ == "__main__":
     unittest.main()

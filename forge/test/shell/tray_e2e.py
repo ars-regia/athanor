@@ -16,7 +16,7 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, problems, walk  # noqa: E402
+from atspi_check import children, find_application, problems, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
@@ -37,24 +37,16 @@ MENU_ROLES = {"menu item", "check menu item", "radio menu item"}
 
 
 def menu_items(app, Atspi):
-    """{name: accessible} of the showing menu rows, or {} when a rebuild interrupted."""
+    """{name: accessible} of the showing menu rows."""
     found = {}
 
     def visit(accessible):
-        try:
-            if accessible.get_role_name() in MENU_ROLES and accessible.get_state_set().contains(
-                Atspi.StateType.SHOWING
-            ):
-                found[accessible.get_name()] = accessible
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if accessible.get_role_name() in MENU_ROLES and accessible.get_state_set().contains(
+            Atspi.StateType.SHOWING
+        ):
+            found[accessible.get_name()] = accessible
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found

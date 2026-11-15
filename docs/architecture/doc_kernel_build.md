@@ -522,9 +522,10 @@ pacchetti resta nel riepilogo del check). Il gruppo kernel ha tre job:
    altrimenti riscrive `pins.env`, i `FROM` e la tabella dei pin di `KERNEL.md`
    e li passa come artefatto. Una PR aperta alla volta per gruppo (etichetta
    `kernel-bump`): una PR `system-bump` in attesa di revisione non ferma il kernel.
-2. **prep** (runner self-hosted, dove il builder e la cache già esistono): nel
-   builder, `build.sh --stage manifest` e `nvidia.sh manifest` scaricano i
-   sorgenti dei pin nuovi e riscrivono i due manifesti degli hash (il `.run`
+2. **prep** (runner self-hosted, dove il builder già esiste): nel builder, su uno
+   store vuoto creato per l'esecuzione e non sulla cache persistente del runner, che
+   altri job scrivono (#1179), `build.sh --stage manifest` e `nvidia.sh manifest`
+   scaricano i sorgenti dei pin nuovi e riscrivono i due manifesti degli hash (il `.run`
    legacy è confrontato con l'hash che NVIDIA pubblica accanto); poi `build.sh
 --stage prep`: firme PGP con le chiavi vendorizzate (una rotazione di chiave
    è un prep rosso, mai un'accettazione silenziosa), patch applicate,

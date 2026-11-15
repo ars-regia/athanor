@@ -178,6 +178,12 @@ on 2026-11-15), path `src/egl/wayland/wayland-drm/wayland-drm.xml`, SHA-256
 `<copyright>` element: HPND-sell-variant, 2008-2011 Kristian Høgsberg and 2010-2011 Intel
 Corporation. No compositor's code was read for it (`doc_own_stack.md` OS3).
 
+Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
+the content type its client sets, applied with the surface's commit, and no behaviour reads it at
+1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag
+and description, applied with the commit; a tag grants nothing, since no privilege, class,
+allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse
