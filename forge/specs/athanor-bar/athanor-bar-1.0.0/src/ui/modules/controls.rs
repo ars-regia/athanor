@@ -4,7 +4,6 @@
 use athanor_apps::sal::Icons;
 use athanor_controls::sal::widgets::Look;
 use athanor_sal::{Image, Rgba, TextStyle, Theme};
-use athanor_style::appearance::Appearance;
 use athanor_style::sal;
 
 use super::{Wake, Wakeup, ICON};
@@ -17,6 +16,10 @@ const RADIO_GAP: f32 = 2.25;
 /// row of switches and labels sets the popover's width and the sliders take it.
 const SLIDER_WIDTH: f32 = 160.0;
 
+/// The room between a page row's icon and its name, as the GTK popover's row box: 8 px,
+/// measured on the goldens of bar-network at scale 1.
+const ROW_GAP: f32 = 8.0;
+
 /// The popover's theme for a page: flat buttons on the popover's fill, as the GTK popover's
 /// device rows, where the bar's own buttons sit on a chip.
 pub fn theme(popover: &Theme) -> Theme {
@@ -26,11 +29,20 @@ pub fn theme(popover: &Theme) -> Theme {
     theme
 }
 
+/// The popover's theme for a page of rows, the network's and Bluetooth's: flat buttons on the
+/// popover's fill, a row's icon [`ROW_GAP`] from its name, and the theme's field width for the
+/// password prompt's entry.
+pub fn rows(popover: &Theme) -> Theme {
+    let mut theme = popover.clone();
+    theme.surface = popover.island;
+    theme.gap = ROW_GAP;
+    theme
+}
+
 /// What a page is drawn with in a popover at `scale`: the bar's icons at a module's size, in
-/// their right-to-left variant when `rtl`, and secondary lines in the caption's size and the
-/// appearance's ink2, as calmo's `bar-popover-note`.
-pub fn look(icons: &mut Icons, scale: u16, rtl: bool) -> Look<'_> {
-    let secondary = Rgba(sal::palette(&Appearance::read()).ink2);
+/// their right-to-left variant when `rtl`, and secondary lines in the caption's size and
+/// `secondary`, the popovers' ink2, as calmo's `bar-popover-note`.
+pub fn look(icons: &mut Icons, scale: u16, rtl: bool, secondary: Rgba) -> Look<'_> {
     Look {
         icon: Box::new(move |name| image(icons, name, scale, rtl)),
         icon_size: f32::from(ICON),
@@ -60,5 +72,26 @@ pub fn waker<T>(wake: &Wake) -> impl Fn(&T) + 'static {
         // at GLib's default priority; an idle source runs after it. A follower of the page's
         // model that called the bar back would need athanor-controls to take a callback.
         glib::idle_add_local_once(move || wake(Wakeup::Changed));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use athanor_layout::preset::Preset;
+    use athanor_style::appearance::Appearance;
+
+    use super::*;
+    use crate::ui::look;
+
+    #[test]
+    fn a_page_draws_its_buttons_on_the_popover_fill() {
+        let popover = look::look(&Appearance::default(), Preset::Float).popover;
+        for page in [theme(&popover), rows(&popover)] {
+            assert_eq!(page.surface, popover.island);
+            assert_eq!(page.island, popover.island, "the frame is the popover's");
+        }
+        assert_eq!(rows(&popover).gap, ROW_GAP);
+        assert_eq!(rows(&popover).field_width, popover.field_width, "the entry keeps its width");
+        assert_eq!(theme(&popover).field_width, SLIDER_WIDTH);
     }
 }

@@ -13,7 +13,7 @@ use athanor_controls::sal::Turn;
 use athanor_sal::{Event, Ui, WidgetId};
 use athanor_services::bluetooth::{self, BluetoothState};
 
-use super::{Cx, Module, Reply, Start, ICON};
+use super::{controls, Cx, Module, Reply, Start, ICON};
 use crate::ui::look;
 
 struct Bluetooth {
@@ -77,9 +77,9 @@ impl Module for Bluetooth {
     }
 
     fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
-        let (mut ui, frame) = look::popover(&tr("Bluetooth"), look::page(cx.theme), cx.rtl, cx.top);
-        let mut controls = look::controls(cx.icons, cx.scale, cx.secondary);
-        self.page.build(&mut ui, frame, &mut controls);
+        let (mut ui, frame) = look::popover(&tr("Bluetooth"), controls::rows(cx.theme), cx.rtl, cx.top);
+        let mut drawn_with = controls::look(cx.icons, cx.scale, cx.rtl, cx.secondary);
+        self.page.build(&mut ui, frame, &mut drawn_with);
         Some(ui)
     }
 

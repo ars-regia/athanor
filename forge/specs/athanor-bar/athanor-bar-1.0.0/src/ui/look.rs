@@ -3,8 +3,6 @@
 //! measures of Calmo's stylesheet (`window.athanor-bar`, `button.bar-button`,
 //! `popover.athanor-bar-popover`), which the GTK bar read.
 
-use athanor_apps::sal::Icons;
-use athanor_controls::sal::widgets;
 use athanor_layout::preset::Preset;
 use athanor_sal::{Rgba, TextStyle, Theme, Ui, WidgetId};
 use athanor_style::appearance::Appearance;
@@ -25,9 +23,6 @@ const POPOVER_PADDING: f32 = sal::space::M;
 const POPOVER_RADIUS: f32 = sal::radius::CARD + sal::space::M;
 const POPOVER_BORDER: f32 = 1.0;
 const POPOVER_ARROW: f32 = 10.0;
-/// The room between a page row's icon and its name, as the GTK popover's row box: 8 px,
-/// measured on the goldens of bar-network at scale 1.
-const ROW_GAP: f32 = 8.0;
 
 /// The themes of the bar's surfaces and of its popovers.
 pub struct Look {
@@ -106,33 +101,6 @@ pub fn look(appearance: &Appearance, preset: Preset) -> Look {
     }
 }
 
-/// The theme a popover draws one of athanor-controls' pages in: its buttons flat on the
-/// popover's fill, as the GTK popover's rows, where the bar's own buttons sit on a chip, and a
-/// row's icon [`ROW_GAP`] from its name.
-pub fn page(popover: &Theme) -> Theme {
-    let mut theme = popover.clone();
-    theme.surface = popover.island;
-    theme.gap = ROW_GAP;
-    theme
-}
-
-/// What athanor-controls' pages are drawn with in a popover: the bar's icons at `scale`, and
-/// secondary lines in calmo's caption size and `secondary`'s ink, as `bar-popover-note`.
-pub fn controls(icons: &mut Icons, scale: u16, secondary: Rgba) -> widgets::Look<'_> {
-    const SIZE: u16 = super::modules::ICON;
-    widgets::Look {
-        icon: Box::new(move |name| icons.image(name, SIZE, scale)),
-        icon_size: f32::from(SIZE),
-        caption: TextStyle {
-            scale: sal::size::CAPTION.scale,
-            weight: sal::size::CAPTION.weight,
-            ..TextStyle::default()
-        },
-        secondary,
-        radio_gap: None,
-    }
-}
-
 /// A popover named `name` in `theme`, opening below the bar when `top`, and its frame: the
 /// island the content goes in, whose arrow points at the button and whose margin on the edge
 /// facing the bar leaves the arrow its room.
@@ -185,15 +153,6 @@ mod tests {
         let float = look(&appearance, Preset::Float);
         assert_eq!(float.bar.background.0[3], 0);
         assert_eq!(float.bar.island, Rgba(palette.bar));
-    }
-
-    #[test]
-    fn a_page_draws_its_buttons_on_the_popover_fill() {
-        let popover = look(&Appearance::default(), Preset::Float).popover;
-        let page = page(&popover);
-        assert_eq!(page.surface, popover.island);
-        assert_eq!(page.gap, ROW_GAP);
-        assert_eq!(page.island, popover.island, "the frame is the popover's");
     }
 
     #[test]

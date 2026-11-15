@@ -63,7 +63,7 @@ impl Module for Audio {
             &mut ui,
             frame,
             media,
-            &controls::look(cx.icons, cx.scale, cx.rtl),
+            &controls::look(cx.icons, cx.scale, cx.rtl, cx.secondary),
         );
         Some(ui)
     }

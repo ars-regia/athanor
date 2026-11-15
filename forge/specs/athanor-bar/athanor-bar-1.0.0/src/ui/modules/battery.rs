@@ -77,7 +77,7 @@ impl Module for BatteryModule {
         let (mut ui, frame) =
             look::popover(&tr("Battery"), controls::theme(cx.theme), cx.rtl, cx.top);
         self.page
-            .build(&mut ui, frame, &controls::look(cx.icons, cx.scale, cx.rtl));
+            .build(&mut ui, frame, &controls::look(cx.icons, cx.scale, cx.rtl, cx.secondary));
         // The brightness keys change the backlight without a signal: read it again.
         self.page.opened(&mut ui);
         Some(ui)
