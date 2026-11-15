@@ -8,29 +8,76 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+#: ../../../../system/athanor-apps/src/entries.rs:89
+#: ../../../../system/athanor-apps/src/entries.rs:243
+#: ../../../../system/athanor-apps/src/entries.rs:245
+msgid "Unknown application"
+msgstr "Applicazione sconosciuta"
+
+#: ../../../../system/athanor-apps/src/entries.rs:105
+#, rust-format
+msgid "{app}: {title}"
+msgstr "{app}: {title}"
+
+#: ../../../../system/athanor-apps/src/entries.rs:111
+#, rust-format
+msgid "{app} ({count} windows)"
+msgstr "{app} ({count} finestre)"
+
+#: ../../../../system/athanor-apps/src/entries.rs:121
+#: ../../../../system/athanor-apps/src/entries.rs:301
+msgid "Untitled window"
+msgstr "Finestra senza titolo"
+
+#: ../../../../system/athanor-apps/src/entries.rs:138
+msgid "Launcher"
+msgstr "Avvio applicazioni"
+
+#: ../../../../system/athanor-apps/src/entries.rs:139
+msgid "Applications"
+msgstr "Applicazioni"
+
+#: ../../../../system/athanor-apps/src/entries.rs:140
+msgid "Workspaces"
+msgstr "Spazi di lavoro"
+
+#: ../../../../system/athanor-apps/src/entries.rs:190
+#, rust-format
+msgid "{name} could not start"
+msgstr "Impossibile avviare {name}"
+
+#: ../../../../system/athanor-apps/src/entries.rs:191
+msgid "The reason is in the system journal."
+msgstr "Il motivo è nel registro di sistema."
+
 #: ../../../../system/athanor-apps/src/row.rs:58
 msgid "Running applications"
 msgstr "Applicazioni in esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:160
+#: ../../../../system/athanor-apps/src/sal.rs:138
 msgid "Running"
 msgstr "In esecuzione"
 
 #: ../../../../system/athanor-apps/src/row.rs:388
+#: ../../../../system/athanor-apps/src/sal.rs:271
 #, rust-format
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
 #: ../../../../system/athanor-apps/src/row.rs:392
+#: ../../../../system/athanor-apps/src/sal.rs:282
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
 
 #: ../../../../system/athanor-apps/src/row.rs:419
+#: ../../../../system/athanor-apps/src/sal.rs:299
 msgid "Open"
 msgstr "Apri"
 
 #: ../../../../system/athanor-apps/src/row.rs:421
+#: ../../../../system/athanor-apps/src/sal.rs:301
 msgid "New Window"
 msgstr "Nuova finestra"
 
@@ -363,23 +410,23 @@ msgstr "Attivare {aid}?"
 msgid "No modifier held"
 msgstr "Nessun modificatore attivo"
 
-#: src/ui/modules/clock.rs:78
+#: src/ui/modules/clock.rs:75
 msgid "Calendar"
 msgstr "Calendario"
 
-#: src/ui/modules/clock.rs:117
+#: src/ui/modules/clock.rs:114
 msgid "Previous month"
 msgstr "Mese precedente"
 
-#: src/ui/modules/clock.rs:118
+#: src/ui/modules/clock.rs:115
 msgid "Next month"
 msgstr "Mese successivo"
 
-#: src/ui/modules/clock.rs:119
+#: src/ui/modules/clock.rs:116
 msgid "Previous year"
 msgstr "Anno precedente"
 
-#: src/ui/modules/clock.rs:120
+#: src/ui/modules/clock.rs:117
 msgid "Next year"
 msgstr "Anno successivo"
 
@@ -448,36 +495,6 @@ msgstr "Affiancamento"
 #: src/ui/modules/tiling.rs:75
 msgid "Tile windows"
 msgstr "Affianca le finestre"
-
-#~ msgid "Launcher"
-#~ msgstr "Avvio applicazioni"
-
-#~ msgid "Applications"
-#~ msgstr "Applicazioni"
-
-#~ msgid "Workspaces"
-#~ msgstr "Spazi di lavoro"
-
-#~ msgid "Unknown application"
-#~ msgstr "Applicazione sconosciuta"
-
-#, rust-format
-#~ msgid "{app}: {title}"
-#~ msgstr "{app}: {title}"
-
-#, rust-format
-#~ msgid "{app} ({count} windows)"
-#~ msgstr "{app} ({count} finestre)"
-
-#~ msgid "Untitled window"
-#~ msgstr "Finestra senza titolo"
-
-#, rust-format
-#~ msgid "{name} could not start"
-#~ msgstr "Impossibile avviare {name}"
-
-#~ msgid "The reason is in the system journal."
-#~ msgstr "Il motivo è nel registro di sistema."
 
 #~ msgid "Sound"
 #~ msgstr "Audio"

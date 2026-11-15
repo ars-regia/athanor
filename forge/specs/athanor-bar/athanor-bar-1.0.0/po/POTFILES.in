@@ -19,5 +19,7 @@ src/ui/modules/tiling.rs
 ../../../../system/athanor-controls/src/labels.rs
 ../../../../system/athanor-controls/src/network.rs
 ../../../../system/athanor-controls/src/widgets.rs
+../../../../system/athanor-apps/src/entries.rs
 ../../../../system/athanor-apps/src/openers.rs
 ../../../../system/athanor-apps/src/row.rs
+../../../../system/athanor-apps/src/sal.rs
