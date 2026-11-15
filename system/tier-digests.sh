@@ -10,9 +10,14 @@
 #               file is written only when every digest verifies, as verify does.
 #   verify      check that each tier digest of tier-digests.json is signed by a trusted run;
 #               the Orchestrator runs it before the system image build
-#   signed REF  print signed or unsigned for one image reference, retrying a failure of
-#               cosign itself; forge/scripts/publish_tiers.sh asks it before it reuses a tier
-#   probe REF   one attempt of signed
+#   signed REF [WORKFLOW]
+#               print signed or unsigned for one image reference, retrying a failure of
+#               cosign itself; forge/scripts/publish_tiers.sh asks it before it reuses a tier.
+#               WORKFLOW is the file of the signing workflow: call-system-image.yml (the
+#               default, the tiers) or call-dag-compile.yml (the package images, which
+#               forge/scripts/verify_image.sh asks before a build is skipped or its RPMs used)
+#   probe REF [WORKFLOW]
+#               one attempt of signed
 #
 # The Orchestrator does not resolve: forge/scripts/publish_tiers.sh writes the same file with
 # the digests it published in the same run, and signs keyless each image it pushes. The file is
@@ -20,8 +25,9 @@
 # system/build-image.sh reads it. The registry is $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER
 # (default ghcr.io and ars-regia), in lower case.
 #
-# A trusted signature is one by .github/workflows/call-system-image.yml of GITHUB_SERVER_URL and
-# GITHUB_REPOSITORY (default https://github.com and ars-regia/athanor) run on a branch of
+# A trusted signature is one by .github/workflows/call-system-image.yml, or the WORKFLOW of
+# signed, of GITHUB_SERVER_URL and GITHUB_REPOSITORY (default https://github.com and
+# ars-regia/athanor) run on a branch of
 # TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
 # trusted run accepts them. No other branch is trusted, rebase/* included, but for the base of a
@@ -58,8 +64,11 @@ die() {
 }
 case ${1:-}:$# in
 resolve:1 | verify:1 | signed:2 | probe:2) ;;
+signed:3 | probe:3) [[ $3 == call-system-image.yml || $3 == call-dag-compile.yml ]] || usage ;;
 *) usage ;;
 esac
+# The workflow whose runs sign what is verified.
+SIGNER=${3:-call-system-image.yml}
 
 ISSUER=https://token.actions.githubusercontent.com
 # Only these messages of cosign v3 make a reference unsigned, every other failure is an error:
@@ -103,7 +112,7 @@ protected() {
 trust() {
     local workflow ref own refs='' trusted
     command -v cosign > /dev/null || die "cosign is not on PATH"
-    workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/call-system-image.yml"
+    workflow="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-ars-regia/athanor}/.github/workflows/$SIGNER"
     # Owner, repository, host and branch names hold no regex metacharacter other than the dot.
     workflow=${workflow//./\\.}
     read -ra trusted <<< "${TIER_TRUSTED_REFS:-iso-v0 main}"
@@ -156,7 +165,7 @@ probe() {
     return "$rc"
 }
 
-signed() { bash "$ROOT/forge/scripts/retry.sh" bash "$SELF" probe "$1"; }
+signed() { bash "$ROOT/forge/scripts/retry.sh" bash "$SELF" probe "$1" "$SIGNER"; }
 
 # verify_tiers REGISTRY DIGEST0 DIGEST1 DIGEST2 DIGEST3: fails unless all four are signed.
 verify_tiers() {

@@ -179,6 +179,27 @@ class TierDigests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(self.resolve(*args).returncode, 2)
 
+    def test_signed_asks_for_the_workflow_it_is_given(self):
+        # forge/scripts/verify_image.sh asks for a package image built by call-dag-compile.yml
+        # (issue #1176): the same branches and issuer, another workflow, and no third one.
+        dag = WORKFLOW.replace("call-system-image.yml", "call-dag-compile.yml")
+        for signer, workflow, verdict in (
+            (f"{dag}@refs/heads/iso-v0", "call-dag-compile.yml", "signed"),
+            (f"{WORKFLOW}@refs/heads/iso-v0", "call-dag-compile.yml", "unsigned"),
+            (f"{dag}@refs/heads/feature", "call-dag-compile.yml", "unsigned"),
+            (f"{dag}@refs/heads/iso-v0", "call-system-image.yml", "unsigned"),
+        ):
+            with self.subTest(signer=signer, workflow=workflow):
+                self.publish("ghcr.io/ars-regia", signers={"tier0": signer}, **DIGESTS)
+                r = self.resolve(
+                    "signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}",
+                    workflow,
+                )
+                self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+        r = self.resolve("signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}",
+                         "release.yml")
+        self.assertEqual(r.returncode, 2)
+
     def cosign_stub(self, body):
         """Replace the fake cosign with a bash script of BODY."""
         stub = self.dir / "bin" / "cosign"
