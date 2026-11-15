@@ -204,6 +204,15 @@ def property_of(bus, name, path, interface, prop):
     return value
 
 
+def press_again(lookup):
+    """Presses the first widget `lookup` finds. A Sal page reopens its popover when its rows
+    change, so the widget is looked up again, once the new popover shows it."""
+    wait_for(lambda: bool(lookup()), 5)
+    found = lookup()
+    if found:
+        found[0].do_action(0)
+
+
 def open_popover(app, Atspi, button, content):
     """Opens the module's popover unless `content` already shows."""
     if not content():
@@ -329,20 +338,27 @@ def network(ctx):
     def airplane():
         return labelled(app, Atspi, "toggle button", "Airplane mode")
 
+    def airplane_on():
+        found = airplane()
+        return bool(found) and found[0].get_state_set().contains(Atspi.StateType.PRESSED)
+
     open_popover(app, Atspi, "Network", airplane)
     airplane()[0].do_action(0)
     check("airplane mode turns Wi-Fi and mobile broadband off", wait_for(
         lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is False
         and property_of(bus, fx.NM, NM_PATH, fx.NM, "WwanEnabled") is False, 5))
-    wait_for(lambda: airplane() and airplane()[0].get_state_set().contains(Atspi.StateType.PRESSED), 5)
-    airplane()[0].do_action(0)
+    check("the airplane switch shows it on", wait_for(airplane_on, 5))
+    press_again(airplane)
     check("and back on", wait_for(lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is True, 5))
 
-    # The VPN switch activates the saved VPN profile.
-    vpn = labelled(app, Atspi, "toggle button", "Office VPN")
-    check("the VPN is listed", bool(vpn))
-    if vpn:
-        vpn[0].do_action(0)
+    # The VPN switch activates the saved VPN profile. Wi-Fi back on brings its networks back,
+    # and the page reopens its popover with them.
+    def vpn():
+        return labelled(app, Atspi, "toggle button", "Office VPN")
+
+    wait_for(lambda: bool(buttons(app, Atspi, "Home Network, secured")), 5)
+    check("the VPN is listed", wait_for(lambda: bool(vpn()), 5))
+    press_again(vpn)
     check("the VPN switch asks NetworkManager to activate the VPN", wait_for(
         lambda: any(str(args[0]).startswith(fx.NM_SETTINGS) and args[1] == "/"
                     for args in mock_calls(bus, fx.NM, NM_PATH, "ActivateConnection")), 5))
@@ -418,10 +434,15 @@ def bluetooth(ctx):
     def power():
         return labelled(app, Atspi, "toggle button", "Bluetooth")
 
+    def power_off():
+        # Read once: the page rebuilds its rows when the adapter turns off.
+        found = power()
+        return bool(found) and not found[0].get_state_set().contains(Atspi.StateType.PRESSED)
+
     power()[0].do_action(0)
     check("the switch turns the adapter off", wait_for(lambda: adapter("Powered") is False, 5))
-    wait_for(lambda: power() and not power()[0].get_state_set().contains(Atspi.StateType.PRESSED), 5)
-    power()[0].do_action(0)
+    check("the switch shows it off", wait_for(power_off, 5))
+    press_again(power)
     check("and on again", wait_for(lambda: adapter("Powered") is True, 5))
 
     # Requests the person did not start from the bar (maintainer decision D8): rejected by the
