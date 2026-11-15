@@ -1,0 +1,517 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "athanor-control-center",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Back",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "label",
+  "name": "Network",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Network",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Wired: connected",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "label",
+  "name": "Wi-Fi",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "check box",
+  "name": "Wi-Fi",
+  "states": [
+   "checkable",
+   "checked",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "scroll pane",
+  "name": "",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 12,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 13,
+  "role": "button",
+  "name": "Athanor Lab, connected",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 14,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "label",
+  "name": "Athanor Lab, connected",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 13,
+  "role": "button",
+  "name": "Corner Café",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 14,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "label",
+  "name": "Corner Café",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 13,
+  "role": "button",
+  "name": "Home Network, secured",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 14,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "label",
+  "name": "Home Network, secured",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 13,
+  "role": "button",
+  "name": "Campus, needs Settings",
+  "states": [
+   "focusable",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 14,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "image",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 15,
+  "role": "label",
+  "name": "Campus, needs Settings",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 12,
+  "role": "label",
+  "name": "Office VPN",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 12,
+  "role": "check box",
+  "name": "Office VPN",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]

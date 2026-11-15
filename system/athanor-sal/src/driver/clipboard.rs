@@ -27,6 +27,7 @@ use smithay_client_toolkit::reexports::protocols::wp::primary_selection::zv1::cl
 use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::rc::Rc;
+use zeroize::{Zeroize, Zeroizing};
 use std::time::Duration;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{
@@ -118,7 +119,7 @@ fn read_paste<D: PasteHost + 'static>(
     surface: SurfaceId,
     pipe: ReadPipe,
     timeout: Duration,
-    mut done: impl FnMut(&mut D, String) + 'static,
+    mut done: impl FnMut(&mut D, &str) + 'static,
 ) -> Result<(), String> {
     if let Some(old) = slot.take() {
         eprintln!("athanor-sal: the paste not yet read gives way to the next");
@@ -134,10 +135,15 @@ fn read_paste<D: PasteHost + 'static>(
             loop_handle.remove(read.deadline);
         }
         match result {
-            Ok(_) if data.blocked(surface) => {
-                eprintln!("athanor-sal: nothing pasted: a dialog now blocks the window");
+            // Overwritten once given: it may be a password field's text.
+            Ok(mut text) => {
+                if data.blocked(surface) {
+                    eprintln!("athanor-sal: nothing pasted: a dialog now blocks the window");
+                } else {
+                    done(data, &text);
+                }
+                text.zeroize();
             }
-            Ok(text) => done(data, text),
             Err(error) => eprintln!("athanor-sal: nothing pasted: {error}"),
         }
         PostAction::Remove
@@ -197,18 +203,29 @@ fn choose(offered: &[String]) -> Option<&'static str> {
 }
 
 /// A text read from a clipboard's pipe, as it comes.
-#[derive(Default)]
-struct Incoming(Vec<u8>);
+/// What was read of a paste, in one buffer of [`READ_MAX`] bytes, overwritten when dropped: a
+/// buffer grown as the text came would free smaller ones holding its start, which may be a
+/// password.
+struct Incoming(Zeroizing<Vec<u8>>);
+
+impl Default for Incoming {
+    fn default() -> Self {
+        Self(Zeroizing::new(Vec::with_capacity(READ_MAX)))
+    }
+}
 
 impl Incoming {
     /// Reads once what the pipe has: `None` while more may come, then the text, or why there is
     /// none: it is longer than [`READ_MAX`], or not UTF-8.
     fn read(&mut self, mut pipe: impl Read) -> Option<Result<String, String>> {
-        let mut chunk = [0; PIPE_BUF];
-        match pipe.read(&mut chunk) {
+        let mut chunk = Zeroizing::new([0; PIPE_BUF]);
+        match pipe.read(&mut *chunk) {
             Ok(0) => Some(
-                String::from_utf8(std::mem::take(&mut self.0))
-                    .map_err(|e| format!("the text is not UTF-8: {e}")),
+                String::from_utf8(std::mem::take(&mut *self.0)).map_err(|e| {
+                    let why = format!("the text is not UTF-8: {}", e.utf8_error());
+                    e.into_bytes().zeroize();
+                    why
+                }),
             ),
             Ok(n) if self.0.len() + n > READ_MAX => {
                 Some(Err(format!("the text is longer than {READ_MAX} bytes")))
@@ -467,7 +484,7 @@ impl App {
             id,
             pipe,
             PASTE_TIMEOUT,
-            move |app, text| app.pasted(id, widget, &text),
+            move |app, text| app.pasted(id, widget, text),
         );
         if let Err(error) = read {
             eprintln!("athanor-sal: nothing pasted: {error}");
@@ -681,6 +698,19 @@ mod tests {
         }
     }
 
+    /// A paste of several reads is read into the one buffer of the bound it started with.
+    #[test]
+    fn a_paste_is_read_into_one_buffer_that_never_grows() -> io::Result<()> {
+        let (reader, mut writer) = io::pipe()?;
+        let text = "x".repeat(3 * PIPE_BUF + 1);
+        writer.write_all(text.as_bytes())?;
+        drop(writer);
+        let read = read_all(reader);
+        assert_eq!(read.as_ref().map(String::len), Ok(text.len()));
+        assert_eq!(read.map(|text| text.capacity()), Ok(READ_MAX));
+        Ok(())
+    }
+
     #[test]
     fn a_paste_is_utf_8_text_of_at_most_its_bound() -> io::Result<()> {
         let (reader, mut writer) = io::pipe()?;
@@ -789,7 +819,7 @@ mod tests {
             SurfaceId(0),
             pipe,
             timeout,
-            |pastes, text| pastes.pasted.push(text),
+            |pastes, text| pastes.pasted.push(text.to_owned()),
         )?;
         Ok(writer)
     }

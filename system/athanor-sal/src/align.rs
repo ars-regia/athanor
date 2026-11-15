@@ -32,10 +32,10 @@ impl Ui {
     ///
     /// - `Some(true)`: the alignment changed.
     /// - `Some(false)`: the widget already has this alignment.
-    /// - `None`: ignored, and nothing changes: only a [`Kind::Column`], the root included, and
-    ///   a [`Kind::Group`] read their children's alignment, so the root itself, the title bar,
-    ///   a child of any other widget and a [`Kind::Picture`], whose size comes from its column
-    ///   alone, take none.
+    /// - `None`: ignored, and nothing changes: only a [`Kind::Column`], the root included, a
+    ///   [`Kind::Group`] and a [`Kind::Alert`], laid out as a group, read their children's
+    ///   alignment, so the root itself, the title bar, a child of any other widget and a
+    ///   [`Kind::Picture`], whose size comes from its column alone, take none.
     ///
     /// # Panics
     ///
@@ -43,7 +43,7 @@ impl Ui {
     pub fn set_align(&mut self, id: WidgetId, align: [Align; 2]) -> Option<bool> {
         let widget = &self.widgets[id];
         let parent = &self.widgets[widget.parent?].kind;
-        if !matches!(parent, Kind::Column | Kind::Group(_))
+        if !matches!(parent, Kind::Column | Kind::Group(_) | Kind::Alert(_))
             || matches!(widget.kind, Kind::Picture { .. })
             || self.title_bar == Some(id)
         {
@@ -53,6 +53,28 @@ impl Ui {
         let changed = widget.align != align;
         widget.align = align;
         Some(changed)
+    }
+
+    /// Gives widget `id` a width of at least `width` logical pixels, as GTK's `width-request`:
+    /// it measures at that width when its content needs less, and its children are placed in
+    /// it as in any wider widget. A width that is not finite, or not above 0, is none. Whether
+    /// it changed; call [`Ui::layout`] afterwards.
+    ///
+    /// The floor holds where a [`Kind::Column`], the root included, a [`Kind::Group`] or a
+    /// [`Kind::Alert`] places the widget; a row, a menu, a list, a scroll and an island place it
+    /// at the width they give it, which may be narrower.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_min_width(&mut self, id: WidgetId, width: f32) -> bool {
+        let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+        // A stale id writes to a widget nothing reads: it changes nothing.
+        let live = self.contains(id);
+        let widget = &mut self.widgets[id];
+        let changed = widget.min_w != width;
+        widget.min_w = width;
+        live && changed
     }
 }
 
@@ -119,6 +141,71 @@ mod tests {
             let y = if along == Align::End { 290.0 - r.h } else { 10.0 };
             assert_eq!(r.y, y, "{along:?}");
         }
+    }
+
+    #[test]
+    fn a_child_of_an_alert_takes_its_alignment_as_in_a_group() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", theme(), rtl);
+            ui.min_width = 300.0;
+            let alert = ui.alert(Ui::ROOT, "Battery low");
+            let text = ui.add(alert, Kind::Label("Plug in the charger".into()));
+            let end = ui.add(alert, Kind::Button("Dismiss".into()));
+            assert_eq!(ui.set_align(end, [Align::End, Align::Fill]), Some(true));
+            ui.layout();
+            let (a, t, e) = (ui.widget(alert).rect, ui.widget(text).rect, ui.widget(end).rect);
+            assert_eq!(e.y, t.y + t.h, "in order");
+            assert!(e.w < a.w, "its own width");
+            if rtl {
+                assert_eq!(e.x, a.x, "rtl {rtl}");
+            } else {
+                assert_eq!(e.x + e.w, a.x + a.w, "rtl {rtl}");
+            }
+            assert_eq!(ui.set_align(end, [Align::End, Align::Fill]), Some(false));
+        }
+    }
+
+    #[test]
+    fn a_least_width_widens_a_widget_and_never_narrows_it() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", theme(), rtl);
+            (ui.min_width, ui.min_height) = (400.0, 300.0);
+            let island = ui.island(Ui::ROOT, true, [0.0; 4]);
+            let row = ui.add(island, Kind::Row);
+            ui.add(row, Kind::Button("Wi-Fi".into()));
+            ui.set_align(island, [Align::End, Align::Start]);
+            ui.layout();
+            let (natural, row_natural) = (ui.widget(island).rect.w, ui.widget(row).rect.w);
+            assert!(natural < 200.0);
+            assert!(ui.set_min_width(island, 200.0));
+            assert!(!ui.set_min_width(island, 200.0), "unchanged");
+            ui.layout();
+            let (i, r) = (ui.widget(island).rect, ui.widget(row).rect);
+            assert_eq!(i.w, 200.0);
+            let right = if rtl { i.x == 10.0 } else { i.x + i.w == 390.0 };
+            assert!(right, "still at its end edge");
+            assert!(r.w > row_natural && r.x >= i.x && r.x + r.w <= i.x + i.w, "a row fills it");
+            // Less than its content needs changes nothing; no width is no least width.
+            for width in [1.0, -5.0, f32::NAN, f32::INFINITY] {
+                ui.set_min_width(island, width);
+                ui.layout();
+                assert_eq!(ui.widget(island).rect.w, natural, "{width}");
+            }
+        }
+    }
+
+    /// A stale id (Ui::remove_children) changes nothing, as the WidgetId contract says.
+    #[test]
+    fn a_least_width_on_a_removed_widget_changes_nothing() {
+        let mut ui = Ui::new("Align", theme(), false);
+        let group = ui.add(Ui::ROOT, Kind::Group("Wi-Fi".into()));
+        let button = ui.add(group, Kind::Button("Connect".into()));
+        ui.remove_children(group);
+        assert!(!ui.set_min_width(button, 400.0));
+        let again = ui.add(group, Kind::Button("Connect".into()));
+        assert_ne!(again, button, "the slot's next widget");
+        ui.layout();
+        assert!(ui.widget(again).rect.w < 400.0, "the slot's next widget is untouched");
     }
 
     #[test]

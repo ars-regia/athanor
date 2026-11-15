@@ -79,6 +79,17 @@ class CompareTest(unittest.TestCase):
         transcript = [node("panel", "Style", ["showing"]), node("label", "Style")]
         self.assertEqual(compare.compare(reference, transcript)[1], [])
 
+    def test_a_frame_and_a_panel_of_one_name_match_the_grouping_by_its_alike_role(self):
+        # The toolkit names its window after its root group, which GTK leaves unnamed.
+        reference = [node("grouping", "Control center", ["showing", "vertical"])]
+        transcript = [
+            node("frame", "Control center", ["showing"]),
+            node("panel", "Control center", ["showing", "vertical"]),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("note: role 'panel'", lines[0])
+
     # The two rules the maintainer accepted on 2026-10-17.
     def test_a_label_that_repeats_its_buttons_name_is_the_button(self):
         reference = [node("toggle button", "Bar"), dict(node("label", "Bar"), depth=1)]
@@ -91,10 +102,77 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual((len(lines), failures), (1, []))
 
+    def test_a_label_that_repeats_its_radio_buttons_name_is_the_radio_button(self):
+        # The maintainer extended the rule to radio buttons on 2026-11-14.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Balanced"), depth=1)]
+        lines, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual((len(lines), failures), (1, []))
+        # A label inside the radio button that repeats no name of it stays its own element.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Default"), depth=1)]
+        _, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual(failures, ["label 'Default': missing"])
+
+    def test_a_dark_variant_of_the_matrix_expects_the_dark_mode_tile_on(self):
+        # The maintainer decided on 2026-11-14 that the Dark mode tile alone follows the
+        # variant's scheme; the reference is the light one.
+        reference = [
+            node("panel", "Control center"),
+            dict(node("toggle button", "Dark mode"), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Dark mode"), depth=3),
+            dict(node("label", "Off"), depth=3),
+            dict(node("label", "Off"), depth=1),
+        ]
+
+        def read(tile, second):
+            return [
+                node("panel", "Control center"),
+                dict(node("toggle button", "Dark mode", tile), depth=1),
+                dict(node("label", second), depth=2),
+                dict(node("label", "Off"), depth=1),
+            ]
+
+        on, off = read(["pressed"], "On"), read([], "Off")
+        for variant in ("dark@1.0", "hc-dark@1.5"):
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertEqual(failures, [], variant)
+            # A dark variant whose tile says it is off fails.
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(
+                failures,
+                ["toggle button 'Dark mode': state 'pressed' missing", "label 'On': missing"],
+                variant,
+            )
+        # A light variant, or a walk outside the matrix, whose tile says it is on fails.
+        for variant in ("light@1.0", "hc-light@1.25", ""):
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(failures, [], variant)
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertIn("label 'Off': missing", failures, variant)
+
     def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
         reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
         lines, failures = compare.compare(reference, [node("button", "Close")])
         self.assertEqual((len(lines), failures), (2, ["image 'Close': missing"]))
+
+    def test_a_label_deep_inside_its_button_that_repeats_its_name_is_the_button(self):
+        # The GTK panel's tile: its title and status in a box in a box inside the toggle button.
+        tile = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("panel", ""), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Wi-Fi"), depth=3),
+            dict(node("label", "On"), depth=3),
+        ]
+        flat = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("label", "On"), depth=1),
+        ]
+        lines, failures = compare.compare(tile, flat)
+        self.assertEqual((len(lines), failures), (2, []))
+        # The status, which repeats no button's name, stays its own element.
+        _, failures = compare.compare(tile, flat[:1])
+        self.assertEqual(failures, ["label 'On': missing"])
 
     def test_a_label_that_repeats_another_parents_name_is_its_own_element(self):
         reference = [node("frame", "Layout"), dict(node("label", "Layout"), depth=1)]
@@ -180,6 +258,23 @@ class CompareTest(unittest.TestCase):
         ]
         _, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual(failures, ["label 'Option one': missing"])
+
+    def test_a_control_center_switch_and_the_label_beside_it_are_a_toggle_button(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        for name in ("Mute microphone", "Silenzia il microfono"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable", "checked"]), depth=1),
+            ]
+            lines, failures = compare.compare(
+                reference, [node("toggle button", name, ["pressed"])]
+            )
+            self.assertEqual((len(lines), failures), (1, []))
+        _, failures = compare.compare(
+            [node("check box", "Speakers")], [node("toggle button", "Speakers")]
+        )
+        self.assertEqual(failures, ["check box 'Speakers': role 'toggle button'"])
 
     def test_a_list_box_is_a_list(self):
         reference = [node("list", "A list", ["focusable", "showing"])]

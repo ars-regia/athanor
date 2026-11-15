@@ -303,7 +303,6 @@ class Repomd(unittest.TestCase):
         good_rpm = b"payload"
         good_sha = hashlib.sha256(good_rpm).hexdigest()
         bad_rpm = b"different payload"
-        bad_sha = hashlib.sha256(bad_rpm).hexdigest()
         # Metadata with good_sha for the first package
         xml = primary(*[
             package(lock.BRANCHES["legacy"]["packages"][0], 3, "580.178.04", "1.fc43", "x86_64", f"x/{lock.BRANCHES['legacy']['packages'][0]}.rpm", good_sha),

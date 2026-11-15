@@ -71,8 +71,11 @@ Stati pulsante di commutazione non premuto.
 tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
-Un elenco Elenco con 50 voci
+Sostituisci le righe button.
+tabulazione
+Un elenco Elenco con 51 voci
 Riga 1.
+Una seconda riga.
 tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.

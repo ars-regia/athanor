@@ -16,6 +16,7 @@ so does an exemption that names no utterance of the reference.
 --walks checks the gallery's transcript, one walk per page, on its own (walk_problems).
 """
 
+import json
 import sys
 from functools import cache
 from itertools import pairwise
@@ -41,10 +42,19 @@ from golden_report import exemptions
 # heard together, as an entry's line that ends in that utterance; neither alone, nor a line after
 # anything else, a single-line field's line included.
 #
+# But for the query the launcher's Orca recipe types itself (rig.sh, `orca launcher`): a field
+# holding it is an entry, and Orca says an entry's text in the same utterance as its role, where
+# GTK's GtkText is a text whose line Orca says after it (maintainer decision, 2026-11-13, a
+# Core-AAM role). So a field's line followed by that query, and only by it, may be heard as one
+# entry utterance that ends in it.
+#
 # And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
-# button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the `switch` and
-# `enable` keys of its strings.tsv) with the role and the state words together is rewritten: a real check box,
-# whatever its label, spoken as a toggle button still fails.
+# button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a line that
+# names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the
+# control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of its
+# fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) with the role and the state
+# words together is rewritten: a real check box, whatever
+# its label, spoken as a toggle button still fails.
 
 
 STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
@@ -65,8 +75,50 @@ def gallery_labels(*keys):
     return [text for key in keys for text in rows[key]]
 
 
+# The switches of the control center's pages (system/athanor-controls): Wi-Fi on the network page,
+# the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids
+# (maintainer decision, 2026-11-14).
+CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone")
+CONTROL_CENTER_PO = (
+    Path(__file__).resolve().parents[3]
+    / "forge/specs/athanor-control-center/athanor-control-center-1.0.0/po"
+)
+
+
+@cache
+def control_center_labels(*msgids):
+    """The texts of `msgids` in the control center's en.po and it.po. Read on first use, as the
+    gallery's strings are; a msgid a catalog lacks or leaves untranslated is an error that names
+    it."""
+    texts = []
+    for lang in ("en", "it"):
+        path = CONTROL_CENTER_PO / f"{lang}.po"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        # The single-line entries the switches have: a msgid line, then its msgstr line.
+        catalog = {
+            json.loads(key.removeprefix("msgid ")): json.loads(text.removeprefix("msgstr "))
+            for key, text in pairwise(lines)
+            if key.startswith('msgid "') and text.startswith('msgstr "')
+        }
+        missing = [msgid for msgid in msgids if not catalog.get(msgid)]
+        if missing:
+            raise LookupError(f"{path} has no translation of {', '.join(missing)}")
+        texts += [catalog[msgid] for msgid in msgids]
+    return texts
+
+
+# A VPN's switch is named by its NetworkManager connection, not by a catalog: the fixture's
+# (forge/test/shell/system_fixtures.py), the same in every language (maintainer decision,
+# 2026-11-14).
+CONTROL_CENTER_FIXTURE_SWITCHES = ("Office VPN",)
+
+
 def switch_labels():
-    return gallery_labels("switch", "enable")
+    return (
+        gallery_labels("switch", "enable")
+        + control_center_labels(*CONTROL_CENTER_SWITCHES)
+        + list(CONTROL_CENTER_FIXTURE_SWITCHES)
+    )
 
 
 SWITCH_SPEECH = {
@@ -77,6 +129,7 @@ SWITCH_SPEECH = {
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
+TYPED = "cc window."
 
 # Focus that returns from a dialog. When a dialog closes, GTK moves the focus to the window's
 # control, then makes the window active, then sends window:activate, and Orca says the window's
@@ -156,7 +209,7 @@ def compare(reference, transcript, exempt=None):
     for field, after in pairwise(reference):
         for role, said in SAME_FIELD_ROLE.items():
             label = field.removesuffix(f" {role}.")
-            if label == field or label not in gallery_labels("notes"):
+            if label == field or not (after == TYPED or label in gallery_labels("notes")):
                 continue
             joined = f"{label} {said} {after}"
             if joined in spoken:

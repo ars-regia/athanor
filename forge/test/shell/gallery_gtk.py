@@ -62,6 +62,31 @@ def group(title):
     return container
 
 
+# The rows of the lists page, a heading among them every ROWS_PER_HEADING, as the toolkit's.
+ROWS = 50
+ROWS_PER_HEADING = 25
+
+
+def fill_rows(rows, text, first):
+    """The rows numbered from first + 1 into the list box `rows`, each holding its name and a
+    second line and named by the first. A heading opens each ROWS_PER_HEADING rows past the
+    first ones: a row that is neither selectable, activatable nor focusable, as the toolkit's
+    list_heading, so that Tab enters the list at its first row."""
+    for n in range(first + 1, first + ROWS + 1):
+        if n > first + 1 and (n - first - 1) % ROWS_PER_HEADING == 0:
+            last = min(n + ROWS_PER_HEADING - 1, first + ROWS)
+            label = Gtk.Label(label=f"{text['rows']} {n}\u2013{last}", xalign=0)
+            rows.append(Gtk.ListBoxRow(child=label, selectable=False, activatable=False,
+                                       focusable=False))
+        name = f"{text['row']} {n}"
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(Gtk.Label(label=name, xalign=0))
+        column.append(Gtk.Label(label=text["row.detail"], xalign=0))
+        row = Gtk.ListBoxRow(child=column)
+        row.update_property([Gtk.AccessibleProperty.LABEL], [name])
+        rows.append(row)
+
+
 def fill_page(page, container, text):
     """The widgets of `page`, as system/athanor-sal/gallery/src/main.rs adds them."""
     if page == "buttons":
@@ -93,6 +118,9 @@ def fill_page(page, container, text):
         scale.update_property([Gtk.AccessibleProperty.LABEL], [text["slider"]])
         container.append(scale)
     elif page == "lists":
+        # The button comes first: Tab steps through the list's rows, not past them.
+        replace = Gtk.Button(label=text["replace"])
+        container.append(replace)
         scroll = Gtk.ScrolledWindow(
             min_content_height=200,
             max_content_height=200,
@@ -100,8 +128,15 @@ def fill_page(page, container, text):
         )
         rows = Gtk.ListBox()
         rows.update_property([Gtk.AccessibleProperty.LABEL], [text["list"]])
-        for n in range(1, 51):
-            rows.append(Gtk.Label(label=f"{text['row']} {n}", xalign=0))
+        first = [0]
+        fill_rows(rows, text, first[0])
+
+        def again(_):
+            first[0] = ROWS - first[0]
+            rows.remove_all()
+            fill_rows(rows, text, first[0])
+
+        replace.connect("clicked", again)
         scroll.set_child(rows)
         container.append(scroll)
     elif page == "text":

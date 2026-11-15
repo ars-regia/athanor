@@ -17,9 +17,13 @@ transcript holds fails, and so does an exemption that names no element of the re
 --gallery compares the gallery's trees, one per page of cases.py gallery-pages, each in
 atspi-gallery-<page>[-it].json of both directories; a page with no reference or no transcript
 fails (gallery_problems).
+
+ATSPI_VARIANT is the variant of AX17's matrix the transcript was read in, as rig.sh's
+RIG_ATSPI_VARIANT (<appearance>@<scale>); in a dark one the reference reads as for_variant says.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -53,17 +57,29 @@ SAME_ROLE = [
     {"text", "entry"},
     {"list", "list box"},
 ]
+# The control center's Dark mode tile says the colour scheme the scene is seeded with, and the
+# reference is the GTK panel's in the light scheme: in a dark variant of AX17's matrix that tile,
+# and nothing else, is expected on, pressed and with "On" as its second line (maintainer decision,
+# 2026-11-14). The matrix runs in English.
+DARK_VARIANTS = {"dark", "hc-dark"}
+DARK_TILE = ("toggle button", "Dark mode")
 # GTK puts a label inside each button. The maintainer decided on 2026-10-17 that the label that
 # repeats its button's name counts as part of the button, and extended the rule to check boxes on
-# 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too. A label under any other
-# parent is its own element, as the title under the window.
-BUTTONS = {"button", "push button", "toggle button", "check box"}
+# 2026-11-05 (#648): GTK's GtkCheckButton holds its label as a child too, and to a label at any
+# depth inside the button on 2026-11-14: the GTK panel's tile holds its title in a box in a box,
+# and to radio buttons on 2026-11-14: a GtkCheckButton in a group is a radio button that holds its
+# label the same way. A label under any other parent is its own element, as the title under the
+# window.
+BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"}
 # A switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
 # button, as orca_compare.py hears it (maintainer, 2026-10-21). GTK draws a label beside the
 # switch, a sibling that repeats its name, where the toolkit's switch draws both as one widget:
 # that label counts as part of the switch. Both rules hold only for a check box that names a
-# switch of the gallery (the `switch` and `enable` keys of its strings.tsv): a real check box,
-# whatever its label, said as a toggle button still fails. Nor does AccessKit give a toggle button
+# switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
+# center (orca_compare.CONTROL_CENTER_SWITCHES and CONTROL_CENTER_FIXTURE_SWITCHES; maintainer,
+# 2026-11-14), whose toggle button is the
+# role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box, whatever its label, said as a
+# toggle button still fails. Nor does AccessKit give a toggle button
 # the `checkable` state (accesskit_atspi_common 0.21.0, node.rs:336, which adds it only to a
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").
@@ -117,19 +133,17 @@ def significant(node):
 
 
 def spoken(nodes):
-    """The significant nodes, less the labels that repeat their button's name: a screen reader
-    speaks the two once, as the button's name (BUTTONS). Any other child, an image for one,
-    stays an element of its own. So are the labels beside a gallery's switch (SWITCH)."""
+    """The significant nodes, less the labels that repeat the name of a button they are inside,
+    at any depth: a screen reader speaks the two once, as the button's name (BUTTONS). Any other
+    child, an image for one, stays an element of its own. So are the labels beside a gallery's
+    switch (SWITCH)."""
     parents, out, parent_of = [], [], []
     for node in nodes:
         del parents[node["depth"]:]
         parent = parents[-1] if parents else None
         parent_of.append(id(parent))
-        repeats = (
-            node["role"] == "label"
-            and parent
-            and parent["role"] in BUTTONS
-            and node["name"] == parent["name"]
+        repeats = node["role"] == "label" and any(
+            above["role"] in BUTTONS and node["name"] == above["name"] for above in parents
         )
         if significant(node) and not (node["name"] and repeats):
             out.append(node)
@@ -145,6 +159,25 @@ def spoken(nodes):
         if node["role"] == "label" and (parent, node["name"]) in switches
     }
     return [node for node in out if id(node) not in beside]
+
+
+def for_variant(reference, variant):
+    """The reference as the matrix's `variant` (<appearance>@<scale>, or empty outside the
+    matrix) reads it: in a dark variant the Dark mode tile is pressed and its "Off" says "On"
+    (DARK_VARIANTS); any other variant reads the reference as it is."""
+    if variant.split("@")[0] not in DARK_VARIANTS:
+        return reference
+    out, tile = [], None
+    for node in reference:
+        if tile is not None and node["depth"] <= tile:
+            tile = None
+        if (node["role"], node["name"]) == DARK_TILE:
+            node = dict(node, states=sorted(set(node["states"]) | {"pressed"}))
+            tile = node["depth"]
+        elif tile is not None and (node["role"], node["name"]) == ("label", "Off"):
+            node = dict(node, name="On")
+        out.append(node)
+    return out
 
 
 def gallery_switch(reference_role, role, name):
@@ -198,10 +231,15 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         if id(ref) in bars:
             lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
             continue
+        # Among the nodes of its name, the one of its role, then one of a role said alike (a
+        # toolkit's frame and its panel may share the name of GTK's grouping), then any
+        # (maintainer decision, 2026-11-14).
         named = [node for node in candidates if node["name"] == ref["name"]]
-        match = next(
-            (node for node in named if node["role"] == ref["role"]), None
-        ) or next(iter(named), None)
+        match = (
+            next((node for node in named if node["role"] == ref["role"]), None)
+            or next((node for node in named if same_role(node["role"], ref["role"])), None)
+            or next(iter(named), None)
+        )
         match = counterparts.get(id(ref), match)
         label = f"{ref['role']} {ref['name']!r}"
         if ref["name"] in exempt:
@@ -299,6 +337,7 @@ def main(argv):
         reference, transcript = (
             json.loads(Path(path).read_text(encoding="utf-8")) for path in argv[:2]
         )
+        reference = for_variant(reference, os.environ.get("ATSPI_VARIANT", ""))
         exempt = {}
         if own:
             preset, dock, lang = (None if v == "-" else v for v in own[1:])

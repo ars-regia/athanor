@@ -56,8 +56,8 @@ use smithay_client_toolkit::{
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
-            cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
+            cursor_shape::CursorShapeManager, AxisScroll, PointerEvent, PointerEventKind,
+            PointerHandler, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -235,6 +235,13 @@ pub trait Application {
     /// The keyboard entered (`focused`) or left `surface`, a popup included.
     fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
 
+    /// The primary button was pressed on `surface` at `at`, in logical pixels, after its widgets
+    /// took the press: where a surface closes when the user presses beside its content, as the
+    /// launcher's panel over its whole output does (doc_launcher.md, LA5), comparing `at` with
+    /// [`crate::Ui::island_fill`] or a widget's `rect`. A press that closes a popup comes here
+    /// for no surface, nor does one that moves a window by its title bar.
+    fn pressed(&mut self, _shell: &mut Shell, _surface: SurfaceId, _at: (f32, f32)) {}
+
     /// A key pressed, or repeated, on `surface`, before its widgets see it, a focused field
     /// included: `true` takes it, and the widgets never see it. Where an application gives keys
     /// a meaning of its own while the focus stays in a field: the arrows that move a list of
@@ -263,10 +270,12 @@ pub trait Application {
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
 
-    /// The first frame of `surface` was committed: called in the turn of the event loop that
-    /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
-    /// compositor may withhold from a surface it does not show. Where a `Type=notify`
-    /// service tells systemd it is ready. Not called for a surface closed by then.
+    /// The first frame of `surface` was committed, or the first after
+    /// [`Shell::report_next_frame`]: called in the turn of the event loop that drew it, after
+    /// [`Application::turn`], so that nothing waits on a frame callback the compositor may
+    /// withhold from a surface it does not show. Where a `Type=notify` service tells systemd it
+    /// is ready, and a surface kept open and shown again times its showing. Not called for a
+    /// surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
     /// The motion of `surface` ([`Shell::animate`]) reached its end pose, which the surface keeps:
@@ -427,7 +436,7 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
+        dispatch(&mut event_loop, &conn, wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
@@ -586,6 +595,15 @@ impl Shell {
     /// tells, and a dock's Type=notify waits for. `false` once it is closed.
     pub fn drawn(&self, id: SurfaceId) -> bool {
         self.surfaces.iter().any(|s| s.id == id && s.drawn)
+    }
+
+    /// Reports the next frame `id` commits through [`Application::drawn`], as its first frame
+    /// is: for a surface kept open and shown again, whose showing is timed to the frame that
+    /// shows it. A surface closed by then is not reported; nothing for an `id` not open.
+    pub fn report_next_frame(&mut self, id: SurfaceId) {
+        if let Some(surface) = self.get_mut(id) {
+            surface.report = true;
+        }
     }
 
     /// The widgets of `id`, which the driver draws again after the event.
@@ -1139,6 +1157,7 @@ impl Shell {
             output: None,
             configured: false,
             drawn: false,
+            report: false,
             frame_pending: false,
             redraw: false,
             dirty: false,
@@ -1183,9 +1202,11 @@ impl Shell {
     fn draw_dirty(&mut self) -> Result<(), Error> {
         for surface in &mut self.surfaces {
             if surface.dirty {
-                let first = !surface.drawn;
+                let (first, was_pending) = (!surface.drawn, surface.frame_pending);
                 surface.draw(&mut self.pool, &self.qh)?;
-                if first && surface.drawn {
+                let after = (surface.drawn, surface.frame_pending);
+                if reported(first, surface.report, was_pending, after) {
+                    surface.report = false;
                     self.first_frames.push(surface.id);
                 }
             }
@@ -1214,6 +1235,15 @@ fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl
     }
 }
 
+/// Whether a draw reports its surface through [`Application::drawn`]: its first frame since its
+/// first configure, `drawn` after it, or, while [`Shell::report_next_frame`] asked to `report`,
+/// a frame it committed: none was pending before, and one is after. A draw while a frame is
+/// pending only lays out; the frame callback marks the surface for the draw that commits.
+fn reported(first: bool, report: bool, was_pending: bool, after: (bool, bool)) -> bool {
+    let (drawn, pending) = after;
+    (first && drawn) || (report && !was_pending && pending)
+}
+
 /// Calls `call` on each of `surfaces` that `open` finds open in `state` when its turn comes, so
 /// that one closed before, or by an earlier `call`, is skipped.
 fn each_open<T, S: Copy>(
@@ -1227,6 +1257,25 @@ fn each_open<T, S: Copy>(
             call(state, surface);
         }
     }
+}
+
+/// One turn of `event_loop`, then an error if the compositor ended `conn`, so that the process
+/// exits and its unit's `Restart=` applies (#1129). calloop-wayland-source returns an end of file,
+/// but only logs a protocol error, and the dead socket then wakes the loop at every turn with
+/// nothing to dispatch. The error names the protocol error's code and object, and its message
+/// where the backend keeps one: libwayland's keeps none. Every caller of [`run`] logs it before
+/// it exits.
+fn dispatch<D>(
+    event_loop: &mut EventLoop<'static, D>,
+    conn: &Connection,
+    timeout: Option<Duration>,
+    data: &mut D,
+) -> Result<(), Error> {
+    let turn = event_loop.dispatch(timeout, data);
+    if let Some(error) = conn.backend().last_error() {
+        return Err(format!("the compositor ended the Wayland connection: {error}").into());
+    }
+    Ok(turn?)
 }
 
 /// How long the loop waits for an event: not at all while a surface is queued `pending` for the
@@ -1410,6 +1459,8 @@ struct Surface {
     configured: bool,
     /// A frame was committed since the first configure.
     drawn: bool,
+    /// The next frame committed is reported drawn ([`Shell::report_next_frame`]).
+    report: bool,
     /// A frame is committed and its callback has not come: the next one waits for it, so that
     /// drawing never runs ahead of the compositor, which throttles a covered surface.
     frame_pending: bool,
@@ -1721,19 +1772,38 @@ type ImeField = (SurfaceId, WidgetId, ContentHint);
 fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
-    let hint = match widget.kind {
+    let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // An input method neither shows, learns nor suggests what a password field is given.
+        Kind::Field(field) if field.is_password() => {
+            ContentHint::HiddenText | ContentHint::SensitiveData
+        }
         _ => ContentHint::None,
     };
     Some((id, widget.rect, hint))
 }
 
+/// The content type a field asks the input method for: a password's for hidden text.
+fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
+    let purpose = if hint.contains(ContentHint::HiddenText) {
+        ContentPurpose::Password
+    } else {
+        ContentPurpose::Normal
+    };
+    (hint, purpose)
+}
+
+/// A preedit and its cursor, a byte range in it. Overwritten when dropped.
+type Preedit = (zeroize::Zeroizing<String>, Option<(usize, usize)>);
+
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
-    /// The preedit and its cursor, a byte range in it.
-    preedit: Option<(String, Option<(usize, usize)>)>,
-    commit: Option<String>,
+    /// The preedit and its cursor, a byte range in it. Overwritten when dropped: a password
+    /// field never shows it, but the input method sends it all the same.
+    preedit: Option<Preedit>,
+    /// Overwritten when dropped: it may be a password field's text.
+    commit: Option<zeroize::Zeroizing<String>>,
 }
 
 /// The preedit without what a single-line field drops from it, the newline included, with its
@@ -1742,7 +1812,7 @@ struct Pending {
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
-) -> (String, Option<(usize, usize)>) {
+) -> Preedit {
     let kept = |at: usize| {
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
@@ -1755,6 +1825,14 @@ fn printable_preedit(
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
     (crate::text::printable(text, false), cursor)
+}
+
+/// Overwrites the text of a key that no field took: it may be a character of a password.
+/// `Ui::key` does the same for the keys it takes.
+fn forget(key: &mut Key) {
+    if let Key::Text(text) = key {
+        zeroize::Zeroize::zeroize(text);
+    }
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1796,9 +1874,12 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 let cursor = usize::try_from(cursor_begin)
                     .ok()
                     .zip(usize::try_from(cursor_end).ok());
-                app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
+                app.ime.pending.preedit =
+                    Some((zeroize::Zeroizing::new(text.unwrap_or_default()), cursor));
             }
-            Event::CommitString { text } => app.ime.pending.commit = text,
+            Event::CommitString { text } => {
+                app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
+            }
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
@@ -2078,7 +2159,8 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(hint, ContentPurpose::Normal);
+            let (hint, purpose) = content_type(hint);
+            text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -2330,6 +2412,11 @@ impl App {
         let event = surface.ui.pointer_press(x, y, button);
         self.pressed_at = Some((x, y));
         self.changed(id, event);
+        if button == PointerButton::Primary && !self.shell.exit {
+            self.application.pressed(&mut self.shell, id, (x, y));
+            // What the application changed is drawn, and the input method follows the focus.
+            self.changed(id, None);
+        }
         self.pressed_at = None;
     }
 
@@ -2389,7 +2476,7 @@ impl App {
     }
 
     fn key(&mut self, event: KeyEvent) {
-        let key = match event.keysym {
+        let mut key = match event.keysym {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
@@ -2419,7 +2506,8 @@ impl App {
             Keysym::Menu => Key::Menu,
             _ => match event.utf8 {
                 Some(text) if !text.chars().any(char::is_control) => Key::Text(text),
-                _ => return,
+                Some(text) => return forget(&mut Key::Text(text)),
+                None => return,
             },
         };
         self.hide_tooltip();
@@ -2439,17 +2527,17 @@ impl App {
             _ => self.key_target(),
         };
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
-            return;
+            return forget(&mut key);
         };
         let modifiers = KeyModifiers::from(self.modifiers);
         if self.shell.get_mut(id).is_some()
             && self.application.key(&mut self.shell, id, &key, modifiers)
         {
             self.changed(id, None);
-            return;
+            return forget(&mut key);
         }
         let Some(surface) = self.shell.get_mut(id) else {
-            return;
+            return forget(&mut key);
         };
         let before = surface.ui.focus();
         let event = surface.ui.key(key);
@@ -2885,24 +2973,14 @@ impl PointerHandler for App {
                             .pointer_release(at.0, at.1, PointerButton::Primary);
                         self.changed(id, event);
                     }
-                    // wl_pointer's axis values are in surface coordinates: logical pixels.
                     PointerEventKind::Axis {
                         horizontal,
                         vertical,
                         ..
                     } => {
-                        let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
-                        // A turn no scroll took goes to the widget under the pointer.
-                        let event = if moved {
-                            None
-                        } else {
-                            let steps = crate::widget::wheel::steps;
-                            let dx = steps(horizontal.value120, horizontal.discrete);
-                            let dy = steps(vertical.value120, vertical.discrete);
-                            surface.ui.pointer_wheel(at.0, at.1, dx, dy)
-                        };
+                        let (changed, event) = axis(&mut surface.ui, at, horizontal, vertical);
                         self.hide_tooltip();
-                        if moved || event.is_some() {
+                        if changed {
                             self.changed(id, event);
                         }
                     }
@@ -2926,6 +3004,30 @@ impl PointerHandler for App {
             }
         }
     }
+}
+
+/// The wheel or the touchpad turned at `at` on `ui`: the innermost scroll or text area under
+/// the pointer takes the vertical axis, whether or not it moves, as GTK's scrolled window does,
+/// and the widget under it gets what no scroll took, each axis on its own, as whole steps
+/// ([`Ui::pointer_wheel`]). Whether the widgets changed, and the event.
+fn axis(
+    ui: &mut Ui,
+    at: (f32, f32),
+    horizontal: AxisScroll,
+    vertical: AxisScroll,
+) -> (bool, Option<Event>) {
+    // wl_pointer's axis values are in surface coordinates: logical pixels.
+    let taken = ui.scroll_under(at.0, at.1).is_some();
+    let moved = ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+    let steps = crate::widget::wheel::steps;
+    let dx = steps(horizontal.value120, horizontal.discrete);
+    let dy = if taken {
+        0
+    } else {
+        steps(vertical.value120, vertical.discrete)
+    };
+    let event = ui.pointer_wheel(at.0, at.1, dx, dy);
+    (moved || event.is_some(), event)
 }
 
 impl ShmHandler for App {
@@ -2976,6 +3078,87 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use wayland_client::protocol::wl_registry;
+
+    #[test]
+    fn a_turn_no_scroll_takes_reaches_the_widget_as_whole_steps_and_each_axis_apart() {
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        for n in 0..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        let item = ui.add(Ui::ROOT, Kind::Button("Item".into()));
+        ui.layout();
+        let r = ui.widget(item).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        let turn = |value120, absolute| AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        };
+        let none = AxisScroll::default();
+        // A high resolution wheel sends a quarter of a notch per event.
+        for _ in 0..3 {
+            assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (false, None));
+        }
+        let step = Event::Wheel { widget: item, dx: 0, dy: 1 };
+        assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (true, Some(step)));
+        // The deprecated discrete count, from an older compositor.
+        let old = AxisScroll {
+            discrete: -1,
+            ..turn(0, -15.0)
+        };
+        let up = Event::Wheel { widget: item, dx: 0, dy: -1 };
+        assert_eq!(axis(&mut ui, at, none, old), (true, Some(up)));
+        // Over the scroll, the scroll takes the vertical axis, and the horizontal one is kept.
+        let s = ui.widget(scroll).rect;
+        let over = (s.x + 1.0, s.y + 1.0);
+        let (moved, event) = axis(&mut ui, over, turn(120, 15.0), turn(120, 15.0));
+        assert!(moved, "the scroll follows");
+        assert!(
+            matches!(event, Some(Event::Wheel { dx: 1, dy: 0, .. })),
+            "the vertical turn the scroll took reaches no widget: {event:?}"
+        );
+    }
+
+    /// A turn of `value120` 120ths of a notch, `absolute` logical pixels.
+    fn turn(value120: i32, absolute: f64) -> AxisScroll {
+        AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        }
+    }
+
+    #[test]
+    fn a_scroll_at_its_end_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        // At offset 0, a turn up over a button inside moves nothing and reaches no widget.
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let first = ui.add(scroll, Kind::Button("Line 0".into()));
+        for n in 1..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        ui.layout();
+        let r = ui.widget(first).rect;
+        assert_eq!(axis(&mut ui, (r.x + 1.0, r.y + 1.0), none, turn(-120, -15.0)), (false, None));
+    }
+
+    #[test]
+    fn a_scroll_whose_content_fits_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 400.0);
+        let only = ui.add(scroll, Kind::Button("Only".into()));
+        ui.layout();
+        let r = ui.widget(only).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        assert_eq!(axis(&mut ui, at, none, turn(120, 15.0)), (false, None));
+        assert_eq!(axis(&mut ui, at, none, turn(-120, -15.0)), (false, None));
+    }
 
     #[test]
     fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
@@ -3330,6 +3513,21 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_is_reported_first_and_when_asked_once_committed() {
+        // The first frame, whether or not the draw committed it.
+        assert!(reported(true, false, false, (true, true)));
+        assert!(!reported(true, false, false, (false, false)), "not configured yet");
+        // Later frames only when asked, and only a draw that committed one.
+        assert!(!reported(false, false, false, (true, true)));
+        assert!(reported(false, true, false, (true, true)));
+        assert!(
+            !reported(false, true, true, (true, true)),
+            "a draw while a frame is pending only lays out"
+        );
+        assert!(!reported(false, true, false, (true, false)), "nothing committed");
+    }
+
+    #[test]
     fn a_surface_closed_before_its_turn_is_not_reported_drawn() {
         // Surfaces 1, 2 and 3 drew their first frame; 2 closed since, and drawing 1 closes 3.
         let mut state = (vec![1, 3], Vec::new());
@@ -3411,9 +3609,10 @@ mod tests {
             commits: 2,
             ..Ime::default()
         };
-        ime.pending.commit = Some("a".into());
+        ime.pending.commit = Some(zeroize::Zeroizing::new("a".into()));
         let (pending, current) = ime.done(1);
-        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        let commit = pending.commit.as_ref().map(|text| text.as_str());
+        assert_eq!((commit, current), (Some("a"), false));
         assert!(
             ime.pending.commit.is_none(),
             "a stale done still applies its text"
@@ -3476,7 +3675,7 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        ime.pending.preedit = Some(("ni".into(), None));
+        ime.pending.preedit = Some((zeroize::Zeroizing::new("ni".into()), None));
         assert_eq!(ime.leave(), Some(a));
         assert_eq!(ime.entered, None);
         // The first done after the next enter applies nothing from before the leave.
@@ -3500,6 +3699,22 @@ mod tests {
         assert!(!ui.end_composition(), "a second end changed the field");
     }
 
+    /// An input method neither shows, learns nor suggests a password: the field asks for hidden,
+    /// sensitive text of a password, and a plain field for none of it.
+    #[test]
+    fn a_password_field_asks_for_hidden_sensitive_text_of_a_password() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let password = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, content_type(hint)));
+        ui.set_focus(Some(password));
+        let hidden = ContentHint::HiddenText | ContentHint::SensitiveData;
+        assert_eq!(asked(&ui), Some((password, (hidden, ContentPurpose::Password))));
+        ui.set_focus(Some(name));
+        assert_eq!(asked(&ui), Some((name, (ContentHint::None, ContentPurpose::Normal))));
+    }
+
     #[test]
     fn a_text_area_asks_for_multiline_text() {
         let mut ui = Ui::new("Text", Theme::default(), false);
@@ -3514,15 +3729,126 @@ mod tests {
     }
 
     #[test]
+    fn a_key_no_field_takes_is_overwritten() {
+        let mut typed = Key::Text("h".into());
+        forget(&mut typed);
+        assert_eq!(typed, Key::Text(String::new()));
+        let mut tab = Key::Tab;
+        forget(&mut tab);
+        assert_eq!(tab, Key::Tab);
+    }
+
+    #[test]
     fn the_preedit_cursor_follows_the_text_printable_keeps() {
         // "a\tbç": the tab goes, so the cursor after "b" (byte 3) moves to byte 2.
         assert_eq!(
             printable_preedit("a\tb\u{e7}", Some((3, 5))),
-            ("ab\u{e7}".to_owned(), Some((2, 4)))
+            (zeroize::Zeroizing::new("ab\u{e7}".to_owned()), Some((2, 4)))
         );
-        assert_eq!(printable_preedit("ab", None), ("ab".to_owned(), None));
+        assert_eq!(
+            printable_preedit("ab", None),
+            (zeroize::Zeroizing::new("ab".to_owned()), None)
+        );
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    #[test]
+    fn the_preedit_is_overwritten_wherever_it_drops() {
+        // A password field shows no preedit, but the input method sends one all the same.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let pending = Pending {
+            preedit: Some((zeroize::Zeroizing::new("hunter2".into()), None)),
+            ..Pending::default()
+        };
+        if let Some((preedit, _)) = &pending.preedit {
+            overwritten(preedit);
+        }
+        overwritten(&printable_preedit("hunter2", None).0);
+    }
+
+    /// A client that dispatches nothing: the registry it asks for gives the compositor an object
+    /// to raise a protocol error on.
+    struct Client;
+
+    impl wayland_client::Dispatch<wl_registry::WlRegistry, ()> for Client {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    /// An event loop on the client end of a socket pair, as the driver runs one on the
+    /// compositor's socket, its registry as object 2, and the server end, which has read the
+    /// request for it.
+    fn on_socket_pair(
+    ) -> Result<(EventLoop<'static, Client>, Connection, wl_registry::WlRegistry, UnixStream), Error>
+    {
+        let (client, mut server) = UnixStream::pair()?;
+        let conn = Connection::from_socket(client)?;
+        let queue = conn.new_event_queue::<Client>();
+        let registry = conn.display().get_registry(&queue.handle(), ());
+        conn.flush()?;
+        // Read, so that closing the server end ends the stream instead of resetting it.
+        server.read_exact(&mut [0; 12])?;
+        let event_loop = EventLoop::try_new()?;
+        WaylandSource::new(conn.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|e| e.error.to_string())?;
+        Ok((event_loop, conn, registry, server))
+    }
+
+    /// The error of the first of a hundred turns of the loop that fails, if one does.
+    fn first_error(event_loop: &mut EventLoop<'static, Client>, conn: &Connection) -> Option<String> {
+        (0..100).find_map(|_| {
+            let turn = dispatch(event_loop, conn, Some(Duration::from_millis(10)), &mut Client);
+            turn.err().map(|error| error.to_string())
+        })
+    }
+
+    #[test]
+    fn the_loop_ends_with_the_protocol_error_that_ended_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, registry, mut server) = on_socket_pair()?;
+        assert_eq!(registry.id().protocol_id(), 2);
+        // wl_display.error(wl_registry 2, code 3, "invalid size"), then the compositor closes.
+        // Not on wl_display itself: libwayland reports its codes as an errno, ENOMEM for 2.
+        let text = b"invalid size\0\0\0\0";
+        let mut message = Vec::new();
+        for word in [1, (8 + 12 + text.len() as u32) << 16, 2, 3, 13] {
+            message.extend_from_slice(&u32::to_ne_bytes(word));
+        }
+        message.extend_from_slice(text);
+        server.write_all(&message)?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        let ended = "the compositor ended the Wayland connection: \
+                     Protocol error 3 on object wl_registry@2";
+        // The Rust backend keeps the message; libwayland's does not. Which one runs is not Sal's
+        // to choose: any crate built with it may turn on wayland-backend's client_system, as Sal's
+        // `gpu` feature does, and Cargo unifies features across a build, so both forms are right.
+        let message = format!("{ended}: invalid size");
+        assert!(
+            error.as_deref() == Some(&message) || error.as_deref() == Some(ended),
+            "{error:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_loop_ends_when_the_compositor_closes_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, _registry, server) = on_socket_pair()?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        assert!(
+            error.as_deref().is_some_and(|e| e.starts_with("the compositor ended the Wayland")),
+            "{error:?}"
+        );
+        Ok(())
     }
 }

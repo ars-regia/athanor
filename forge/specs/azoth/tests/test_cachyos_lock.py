@@ -143,7 +143,7 @@ class CommittedLocks(unittest.TestCase):
         build = (AZOTH / "build.sh").read_text()
         self.assertIn('die() { echo "build.sh: $*" >&2; exit 1; }', build)
         for lock in ("cachyos-files.list says", "cachyos-protected.sha256 says", "differ from derived.config"):
-            line = next(l for l in build.splitlines() if lock in l and "die " in l)
+            line = next(ln for ln in build.splitlines() if lock in ln and "die " in ln)
             self.assertIn('die "refresh needed: ', line)
         bump = (AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text()
         self.assertIn("grep -q '^build.sh: refresh needed: ' prep.log", bump)
@@ -217,7 +217,9 @@ class LockFunctions(unittest.TestCase):
             files, protected = r.stdout.split("-- protected\n")
             self.assertEqual(files, "-- files\nM  Makefile\nM  fs/x.c\nD  mm/gone.c\n"
                                     "M  mm/link\nA  mm/new.o\nM  mm/slub.c\n")
-            sha = lambda text: hashlib.sha256(text.encode()).hexdigest()
+            def sha(text):
+                return hashlib.sha256(text.encode()).hexdigest()
+
             self.assertEqual(protected.splitlines(), [
                 f"100755 {sha('m' + chr(10))}  Makefile",
                 "000000 deleted  mm/gone.c",

@@ -44,3 +44,7 @@ required-features = ["gtk"]
 [[example]]
 name = "cc-launch"
 required-features = ["calloop"]
+
+[package.metadata.cargo-machete]
+# The code wayland_scanner::generate_client_code! expands (protocols.rs) names `bitflags::bitflags!` for the bitfield enums.
+ignored = ["bitflags"]

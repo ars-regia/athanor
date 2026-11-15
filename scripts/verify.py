@@ -168,6 +168,25 @@ def check_workflows():
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
+        # 1f. A workflow that runs on its own sets the token's permissions, or it gets the
+        # repository default (CodeQL actions/missing-workflow-permissions, 2026-11-14). A
+        # reusable workflow takes them from its caller.
+        if yaml is None:
+            r.fail(f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked")
+            continue
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError as e:
+            r.fail(f"{wf.name}: not valid YAML ({e})")
+            continue
+        if not isinstance(doc, dict):
+            r.fail(f"{wf.name}: not a YAML mapping")
+            continue
+        events = triggers(doc)
+        if events != {"workflow_call"} and "permissions" not in doc:
+            r.fail(f"{wf.name}: no top-level permissions, so the token gets the repository "
+                   f"default (triggers: {', '.join(sorted(events)) or 'none'})")
+
     # 1e. D43: signing keys only in sign-only jobs
     for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
         r.fail(problem)
@@ -1337,6 +1356,57 @@ def check_attestation_absent():
     return r
 
 
+def inherits_from_workspace(table):
+    """True if a manifest table takes any key from a parent workspace (`x = { workspace = true }`
+    or `x.workspace = true`, at any depth)."""
+    return isinstance(table, dict) and (
+        table.get("workspace") is True or any(inherits_from_workspace(v) for v in table.values()))
+
+
+def stale_lock_problems(locks, manifests):
+    """A Cargo.lock beside a crate that inherits from a parent workspace and has no [workspace]
+    table of its own is never read: cargo builds the crate with the parent's lock, or, when the
+    parent excludes it, cannot build it at all. A crate that inherits nothing is its own root and
+    keeps its lock. `locks` are paths relative to the root; `manifests` maps a lock's Cargo.toml
+    to its text, or to None when there is none, as beside a spec's source archive. A vendored
+    crate keeps the lock it was published with."""
+    out = []
+    for lock in sorted(locks):
+        if "/vendor/" in f"/{lock}":
+            continue
+        name = str(Path(lock).with_name("Cargo.toml"))
+        text = manifests.get(name)
+        if text is None:
+            continue
+        try:
+            manifest = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            out.append(f"{name}: not valid TOML ({e})")
+            continue
+        if "workspace" not in manifest and inherits_from_workspace(manifest):
+            out.append(f"{lock}: its crate inherits from a parent workspace, so cargo never reads "
+                       f"this lock and its pins only raise advisories; delete it")
+    return out
+
+
+@check("cargo-locks", "No Cargo.lock beside a crate that inherits from a parent workspace, where cargo never reads it")
+def check_cargo_locks():
+    r = Result()
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    locks = [p for p in listed.stdout.split("\0") if p]
+    manifests = {}
+    for lock in locks:
+        manifest = Path(lock).with_name("Cargo.toml")
+        manifests[str(manifest)] = read(ROOT / manifest) if (ROOT / manifest).is_file() else None
+    for problem in stale_lock_problems(locks, manifests):
+        r.fail(problem)
+    return r
+
+
 @check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
 def check_paths():
     r = Result()
@@ -1661,8 +1731,8 @@ def check_shipped():
     exempt_file = ROOT / "experimental" / "EXEMPT"
     exempt = set()
     if exempt_file.exists():
-        exempt = {l.strip() for l in read(exempt_file).split("\n")
-                  if l.strip() and not l.startswith("#")}
+        exempt = {ln.strip() for ln in read(exempt_file).split("\n")
+                  if ln.strip() and not ln.startswith("#")}
 
     built = crates_built_by_specs()
     for m in members:
@@ -2408,8 +2478,6 @@ def check_shell_failures():
 CSS_DIRS = ["system", "forge/specs"]
 CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
 CSS_BUDGETS = {
-    "forge/specs/athanor-control-center/athanor-control-center-1.0.0/src/ui.rs": {"px": 2},
-    "forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/ui/mod.rs": {"px": 10},
     "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
     "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
     "system/athanor-style/src/accent_template.css": {"px": 2},
@@ -3736,7 +3804,9 @@ def sandbox_grant_problems(relative, code, read_grants):
     """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
     other than a dirs::Checked or dirs::CheckedNode."""
     found = []
-    line = lambda pos: code.count("\n", 0, pos) + 1
+    def line(pos):
+        return code.count("\n", 0, pos) + 1
+
     for match in PATH_BENEATH.finditer(code):
         if any(start <= match.start() < end for start, end in read_grants):
             continue

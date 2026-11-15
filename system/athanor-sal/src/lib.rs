@@ -17,11 +17,13 @@ mod drop_down;
 mod icon;
 mod icon_toggle;
 mod motion;
+mod password;
 mod popup;
 mod range;
 pub(crate) mod render;
 pub(crate) mod text;
 mod theme;
+mod tile;
 mod widget;
 mod wrap;
 
@@ -34,6 +36,7 @@ pub use motion::{Curve, Motion, Pose};
 pub use render::Error;
 pub use text::TextStyle;
 pub use theme::{Rgba, Theme, TitleBarStyle};
+pub use tile::Tile;
 pub use wrap::Wrap;
 pub use widget::{
     Calendar, CalendarText, Cell, Date, Event, Key, Kind, Level, Mark, PointerButton, Priority,

@@ -120,6 +120,19 @@ class CompareTest(unittest.TestCase):
             ["'Name text.': missing", "'Screen reader off.': missing"],
         )
 
+    def test_a_field_and_the_query_the_recipe_types_may_be_heard_as_one_entry_utterance(self):
+        reference = ["Search text.", "cc window.", "Cerca testo.", "cc window."]
+        transcript = ["Search entry cc window.", "Cerca campo inserimento cc window."]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Search entry cc window.'", lines[0])
+
+    def test_a_field_is_not_joined_to_a_query_the_recipe_does_not_type(self):
+        self.assertEqual(
+            compare.compare(["Search text.", "cc terminal."], ["Search entry cc terminal."])[1],
+            ["'Search text.': missing", "'cc terminal.': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",
@@ -143,6 +156,38 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
             )
+
+    def test_a_control_center_switch_is_heard_as_a_toggle_button_and_a_check_box_is_not(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        lines, failures = compare.compare(
+            ["Mute output check box not checked.", "Wi-Fi check box checked.",
+             "Silenzia l'uscita casella di spunta non spuntata."],
+            ["Mute output toggle button not pressed.", "Wi-Fi toggle button pressed.",
+             "Silenzia l'uscita pulsante di commutazione non premuto."],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Mute output toggle button not pressed.'", lines[0])
+        # A check box of the control center that is none of its switches still fails.
+        reference = "Speakers check box checked."
+        self.assertEqual(
+            compare.compare([reference], ["Speakers toggle button pressed."])[1],
+            [f"{reference!r}: missing"],
+        )
+
+    def test_the_vpn_of_the_control_center_fixture_is_heard_as_a_switch(self):
+        lines, failures = compare.compare(
+            ["Office VPN check box not checked."], ["Office VPN toggle button not pressed."]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Office VPN toggle button not pressed.'", lines[0])
+
+    def test_a_control_center_switch_the_catalog_lacks_is_named(self):
+        compare.control_center_labels.cache_clear()
+        try:
+            with self.assertRaisesRegex(LookupError, "no translation of Nowhere"):
+                compare.control_center_labels("Wi-Fi", "Nowhere")
+        finally:
+            compare.control_center_labels.cache_clear()
 
     def test_the_gallery_strings_are_read_only_for_a_switch_or_a_text_area(self):
         # Another surface's walk passes without the file; a gallery's fails with its name.
@@ -190,6 +235,24 @@ class CompareTest(unittest.TestCase):
 
 
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/orca"
+
+
+class SecondLineTest(unittest.TestCase):
+    """A focused list row that holds more labels than its name is read with them: Orca 49 speaks
+    the row's name, then each label its name does not repeat (_generate_descendants), which a
+    label offers only through AT-SPI's Text interface. The gallery's lists page pins it."""
+
+    def test_the_gallery_walk_reads_the_first_rows_second_line(self):
+        for lang, golden, row, line in (
+            ("en", "orca-gallery.txt", "Row 1.", "A second line."),
+            ("it", "orca-gallery-it.txt", "Riga 1.", "Una seconda riga."),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                self.assertIn(row, reference)
+                self.assertEqual(reference[reference.index(row) + 1], line)
+                spoken = [u for u in reference if u != line]
+                self.assertEqual(compare.compare(reference, spoken)[1], [f"{line!r}: missing"])
 
 
 class HiddenTest(unittest.TestCase):

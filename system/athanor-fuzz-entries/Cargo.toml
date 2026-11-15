@@ -41,3 +41,7 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 zbus = { workspace = true, optional = true }
+
+[package.metadata.cargo-machete]
+# Used by the athanor-update modules that lib.rs includes with #[path]; the scan reads only this crate's own sources.
+ignored = ["chrono", "serde", "tracing"]

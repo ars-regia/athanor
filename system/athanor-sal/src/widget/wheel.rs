@@ -1,8 +1,11 @@
-//! The wheel and the middle button on a widget that is not a scroll or a field: what GTK's
-//! scroll controller with discrete steps, and a click gesture on the middle button, give a
-//! status notifier item of the bar's tray.
+//! The wheel over a widget where no scroll or text area takes the turn: what GTK's scroll
+//! controller with discrete steps gives a status notifier item of the bar's tray. The middle
+//! button is [`Event::MiddleClick`], in the widget module.
 
 use super::{Event, Ui};
+
+/// One step of the wheel, in `value120`'s 120ths.
+const STEP: i32 = 120;
 
 /// The wheel's turn on one axis, in 120ths of a step, from the values of a `wl_pointer` axis
 /// event: `value120` from a compositor that sends it, or else the deprecated `discrete` count
@@ -19,8 +22,11 @@ pub fn steps(value120: i32, discrete: i32) -> i32 {
 
 impl Ui {
     /// The wheel turned by `dx` and `dy` 120ths of a step, right and down when positive, at
-    /// the point, in logical pixels, where no scroll took it: [`Event::Wheel`] for the
-    /// focusable widget under the point, if any; `None` for no turn.
+    /// the point, in logical pixels, where no scroll took it. The turns add up on each axis
+    /// over the focusable widget under the point, as GTK's scroll controller with discrete
+    /// steps does: [`Event::Wheel`] gives the widget the whole steps they make and keeps the
+    /// rest for the next turn, until the pointer leaves the widget or the surface. `None` for
+    /// no turn, for no widget there, and while the turns make no whole step.
     pub fn pointer_wheel(&mut self, x: f32, y: f32, dx: i32, dy: i32) -> Option<Event> {
         if dx == 0 && dy == 0 {
             return None;
@@ -28,7 +34,19 @@ impl Ui {
         if let Some(done) = self.calendar_wheel(x, y, dy) {
             return done;
         }
-        self.hit(x, y).map(|widget| Event::Wheel { widget, dx, dy })
+        let Some(widget) = self.hit(x, y) else {
+            self.wheel = None;
+            return None;
+        };
+        let mut rest = match self.wheel {
+            Some((over, rest)) if over == widget => rest,
+            _ => [0, 0],
+        };
+        rest[0] = rest[0].saturating_add(dx);
+        rest[1] = rest[1].saturating_add(dy);
+        self.wheel = Some((widget, rest.map(|r| r % STEP)));
+        let [dx, dy] = rest.map(|r| r / STEP);
+        (dx != 0 || dy != 0).then_some(Event::Wheel { widget, dx, dy })
     }
 }
 
@@ -56,7 +74,7 @@ mod tests {
         let up = Event::Wheel {
             widget: button,
             dx: 0,
-            dy: -120,
+            dy: -1,
         };
         assert_eq!(wheel, Some(up));
         assert_eq!(ui.pointer_wheel(x, y, 0, 0), None);
@@ -70,5 +88,31 @@ mod tests {
         ui.set_sensitive(button, false);
         assert_eq!(ui.pointer_press(x, y, PointerButton::Middle), None);
         assert_eq!(ui.pointer_wheel(x, y, 120, 0), None);
+    }
+
+    #[test]
+    fn a_high_resolution_wheel_adds_its_turns_up_to_whole_steps_on_each_axis() {
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let item = ui.add(Ui::ROOT, Kind::Button("Item".into()));
+        let other = ui.add(Ui::ROOT, Kind::Button("Other".into()));
+        ui.layout();
+        let at = |ui: &Ui, id| (ui.widget(id).rect.x + 1.0, ui.widget(id).rect.y + 1.0);
+        let (x, y) = at(&ui, item);
+        let step = |dx, dy| Some(Event::Wheel { widget: item, dx, dy });
+        for _ in 0..3 {
+            assert_eq!(ui.pointer_wheel(x, y, 0, 30), None, "a quarter of a notch");
+        }
+        assert_eq!(ui.pointer_wheel(x, y, 0, 30), step(0, 1), "one notch, one step");
+        assert_eq!(ui.pointer_wheel(x, y, 90, 0), None);
+        assert_eq!(ui.pointer_wheel(x, y, 270, -30), step(3, 0), "each axis keeps its own");
+        assert_eq!(ui.pointer_wheel(x, y, 0, -90), step(0, -1));
+        ui.pointer_wheel(x, y, 0, 90);
+        let (ox, oy) = at(&ui, other);
+        ui.pointer_motion(ox, oy);
+        ui.pointer_motion(x, y);
+        assert_eq!(ui.pointer_wheel(x, y, 0, 30), None, "the rest went with the pointer");
+        ui.pointer_wheel(x, y, 0, 60);
+        ui.pointer_leave();
+        assert_eq!(ui.pointer_wheel(x, y, 0, 30), None, "and with the surface");
     }
 }

@@ -70,6 +70,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-i18n",
  "athanor-services",
+ "glib",
  "gtk4",
  "tokio",
  "tracing",
@@ -127,6 +128,7 @@ dependencies = [
  "tokio",
  "tracing",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]
@@ -150,7 +152,6 @@ dependencies = [
  "gtk4",
  "gtk4-layer-shell",
  "serde",
- "serde_json",
  "tokio",
  "toml",
  "tracing",
