@@ -69,9 +69,9 @@ class PopoverScenes(unittest.TestCase):
 
     def test_every_popover_of_the_workflow_has_a_walk_and_its_references(self):
         workflow = (SHELL.parent.parent.parent / ".github/workflows/shell-surfaces.yml").read_text(encoding="utf-8")
-        matrix = re.search(r"\n        popover: \[([^\]]*)\]", workflow)
+        matrix = re.search(r"\n        popover:\s*\[([^\]]*)\]", workflow)
         self.assertIsNotNone(matrix)
-        run = {name.strip() for name in matrix.group(1).split(",")}
+        run = {name.strip() for name in matrix.group(1).split(",")} - {""}
         self.assertTrue(run)
         walks = case("bar-*", "orca")
         for surface in run:
