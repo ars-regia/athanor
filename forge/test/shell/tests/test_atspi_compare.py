@@ -285,6 +285,19 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("menu", "A list", ["focusable", "showing"])])
         self.assertEqual(failures, ["list 'A list': role 'menu'"])
 
+    def test_a_checkable_menu_item_is_a_check_or_radio_menu_item(self):
+        for role in ("check menu item", "radio menu item"):
+            reference = [node("menu item", "Sort by name", ["checkable", "checked", "showing"])]
+            transcript = [node(role, "Sort by name", ["checkable", "checked", "showing"])]
+            lines, failures = compare.compare(reference, transcript)
+            self.assertEqual(failures, [])
+            self.assertIn(f"note: role '{role}'", lines[0])
+
+    def test_a_menu_item_that_is_not_checkable_is_not_a_check_menu_item(self):
+        reference = [node("menu item", "New window", ["showing"])]
+        _, failures = compare.compare(reference, [node("check menu item", "New window", ["showing"])])
+        self.assertEqual(failures, ["menu item 'New window': role 'check menu item'"])
+
     def test_a_scroll_bar_and_its_subtree_have_no_counterpart_in_a_tree_without_one(self):
         def at(depth, role, name, value=""):
             return {**node(role, name, ["showing"], value), "depth": depth}

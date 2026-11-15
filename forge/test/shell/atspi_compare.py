@@ -84,6 +84,13 @@ BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").
 SWITCH = ("check box", "toggle button")
+# GTK 4.20's PopoverMenu says each entry of its menu a menu item, a check or a radio entry with
+# the `checkable` state, where W3C Core-AAM 1.2 maps ARIA's menuitemcheckbox and menuitemradio to
+# AT-SPI's check menu item and radio menu item. The maintainer decided on 2026-11-15 that a
+# checkable menu item of the reference equals a check menu item and a radio menu item of the
+# transcript, and that the toolkit keeps the roles Core-AAM prescribes; a menu item that is not
+# checkable is still neither.
+CHECKABLE_MENU_ITEM = {"check menu item", "radio menu item"}
 # A disabled control takes no focus (doc_own_stack.md, lines 506-508: "it takes neither the focus
 # nor the pointer"), where GTK keeps an insensitive widget focusable. A control disabled in both
 # trees, neither sensitive in the reference nor enabled or sensitive in the transcript, may lack
@@ -195,6 +202,15 @@ def known_absence(state, ref, node):
     return None
 
 
+def checkable_menu_item(ref, node):
+    """A checkable menu item of the reference said as a check or radio menu item."""
+    return (
+        ref["role"] == "menu item"
+        and "checkable" in ref["states"]
+        and node["role"] in CHECKABLE_MENU_ITEM
+    )
+
+
 def same_role(a, b):
     return a == b or any(a in group and b in group for group in SAME_ROLE)
 
@@ -263,6 +279,7 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         if not (
             same_role(match["role"], ref["role"])
             or gallery_switch(ref["role"], match["role"], ref["name"])
+            or checkable_menu_item(ref, match)
         ):
             problems.append(f"role {match['role']!r}")
         elif match["role"] != ref["role"]:
