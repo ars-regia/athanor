@@ -9,24 +9,25 @@
 
 use athanor_sal::driver::Role;
 use athanor_sal::{
-    driver, Application, Event, Kind, Shell, Side, SurfaceId, Theme, Ui, WidgetId, WindowButton,
-    Wrap,
+    driver, Application, CalendarText, Date, Event, IconTheme, Kind, Shell, Side, SurfaceId, Theme,
+    Ui, WidgetId, WindowButton, Wrap,
 };
 use std::num::NonZeroU32;
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// One line per string: the key, then its text in each language, tab separated.
 const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 8] = [
-    "buttons", "choices", "values", "lists", "text", "states", "dialogs", "menus",
+const PAGES: [&str; 9] = [
+    "buttons", "choices", "values", "lists", "text", "states", "calendar", "dialogs", "menus",
 ];
 /// The page that opens a dialog, with its dialog open at the start.
-const DIALOGS: usize = 6;
+const DIALOGS: usize = 7;
 /// The page that opens a menu, with its menu open at the start.
-const MENUS: usize = 7;
+const MENUS: usize = 8;
 
 /// The window's widgets the gallery acts on.
 struct Gallery {
@@ -175,6 +176,23 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
             ui.set_sensitive(button, false);
             return Ok(vec![switch, button]);
         }
+        "calendar" => {
+            let text = CalendarText {
+                months: words(t("months")?)?,
+                weekdays: words(t("weekdays")?)?,
+                arrows: [
+                    t("calendar.previous-month")?.into(),
+                    t("calendar.next-month")?.into(),
+                    t("calendar.previous-year")?.into(),
+                    t("calendar.next-year")?.into(),
+                ],
+            };
+            let first = t("weekday.first")?.parse().map_err(|_| "weekday.first is no number")?;
+            let icons = IconTheme::system("Adwaita");
+            let arrow = |name| icons.image(name, 16, 2).map_err(|error| format!("{name}: {error}"));
+            let arrows = [arrow("pan-start-symbolic")?, arrow("pan-end-symbolic")?];
+            ui.calendar(group, &text, &arrows, first, today());
+        }
         "dialogs" => return Ok(vec![ui.add(group, Kind::Button(t("dialog.open")?.into()))]),
         "menus" => {
             let button = ui.add(group, Kind::Button(t("menu.open")?.into()));
@@ -185,6 +203,33 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
     }
     Ok(Vec::new())
 }
+
+/// The space-separated words of `text`, one for each entry of the array.
+fn words<const N: usize>(text: &str) -> Result<[String; N], String> {
+    let words: Vec<String> = text.split(' ').map(String::from).collect();
+    words.try_into().map_err(|words: Vec<String>| format!("{N} words, not {}", words.len()))
+}
+
+/// Today in UTC, from the system clock (the rig's frozen date under libfaketime).
+// ponytail: UTC, not the local zone; a time-zone database when the gallery shows one.
+fn today() -> Date {
+    civil(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+}
+
+/// The day of `secs` past 1970-01-01 in UTC: Howard Hinnant's `civil_from_days`.
+fn civil(secs: u64) -> Date {
+    let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u8;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u8;
+    let year = (yoe + era * 400 + i64::from(month <= 2)) as i32;
+    Date { year, month, day }
+}
+
 
 /// The gallery's margins and spacings, as the GTK twin's and the GTK chooser's: 24 around, 18
 /// between the groups, 8 inside one.
@@ -452,6 +497,15 @@ mod tests {
     use athanor_sal::Mark;
 
     #[test]
+    fn every_page_builds_in_every_language() -> Result<(), String> {
+        for lang in LANGUAGES {
+            build(&Options::parse(["--lang", lang].map(String::from).into_iter())?)?;
+        }
+        Ok(())
+    }
+
+
+    #[test]
     fn a_selection_inside_a_page_keeps_the_page() -> Result<(), String> {
         let (mut ui, gallery) = build(&Options::parse(std::iter::empty())?)?;
         let pages = gallery.pages;
@@ -537,6 +591,16 @@ mod tests {
         ));
         Ok(())
     }
+
+    #[test]
+    fn the_day_of_a_time_counts_the_gregorian_calendar() {
+        let date = |year, month, day| Date { year, month, day };
+        assert_eq!(civil(0), date(1970, 1, 1));
+        assert_eq!(civil(951_782_400), date(2000, 2, 29));
+        // The rig's frozen time, scene.sh's 2026-09-18 10:00.
+        assert_eq!(civil(1_789_725_600), date(2026, 9, 18));
+    }
+
 
     /// The name of each row of `list`, the headings left out.
     fn row_names(ui: &Ui, list: WidgetId) -> Vec<String> {

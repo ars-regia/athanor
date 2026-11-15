@@ -92,6 +92,7 @@ GALLERY_PAGES = {
     "lists": 2,
     "text": 1,
     "states": 1,
+    "calendar": 5,
     "dialogs": 1,
     # Its menu, open at the start, takes the walk's Space and gives the focus back to its button,
     # one control past the page's toggle: the walk counts no control after it.

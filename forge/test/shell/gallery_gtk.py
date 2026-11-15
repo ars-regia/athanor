@@ -245,6 +245,10 @@ def fill_page(page, container, text):
         button = Gtk.Button(label=text["waiting"], sensitive=False)
         switch.connect("notify::active", lambda s, _: button.set_sensitive(s.get_active()))
         container.append(button)
+    elif page == "calendar":
+        # GTK's calendar is on today, the rig's frozen date, and starts its weeks on the locale's
+        # first weekday, as the toolkit's strings.tsv says for each language.
+        container.append(Gtk.Calendar())
     elif page == "dialogs":
         button = Gtk.Button(label=text["dialog.open"])
         button.connect("clicked", lambda b: open_dialog(b.get_root(), text))
