@@ -9,8 +9,10 @@ src/tiling.rs
 src/ui/bar.rs
 src/ui/modules/accessibility.rs
 src/ui/modules/aids.rs
+src/ui/modules/bluetooth.rs
 src/ui/modules/clock.rs
 src/ui/modules/input.rs
+src/ui/modules/network.rs
 src/ui/modules/power.rs
 src/ui/modules/tiling.rs
 ../../../../system/athanor-controls/src/audio.rs
@@ -18,6 +20,9 @@ src/ui/modules/tiling.rs
 ../../../../system/athanor-controls/src/bluetooth.rs
 ../../../../system/athanor-controls/src/labels.rs
 ../../../../system/athanor-controls/src/network.rs
+../../../../system/athanor-controls/src/sal/bluetooth.rs
+../../../../system/athanor-controls/src/sal/network.rs
+../../../../system/athanor-controls/src/sal/widgets.rs
 ../../../../system/athanor-controls/src/widgets.rs
 ../../../../system/athanor-apps/src/openers.rs
 ../../../../system/athanor-apps/src/row.rs
