@@ -446,7 +446,8 @@ neither dmabuf capture nor damage (C1 results, section 10, item 11).
 class: standard, offered to every client; unconfined, offered only outside a security context;
 layer-gated, offered outside a security context, with top and overlay layers the allow-list
 grants (decision 31); privileged (OS4); or satellite, offered only to the clients of
-xwayland-satellite's socket (OS4; decision 33, wave 2c, amended on 2026-11-16). The fixture
+xwayland-satellite's socket, once the satellite forwards the X11 keyboard grab (OS4; decision
+33, wave 2c, amended on 2026-11-16; #1136). The fixture
 fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` is unconfined (OS9
 plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
 (questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
@@ -459,7 +460,8 @@ client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
 per-client filter for it (C1 results, section 4). Decision 33 gives the classes of the second
 wave: standard for all but the DRM lease, unconfined, whose class and design decision 36 now
-gives; the X11 keyboard grab is of the satellite class (amended on 2026-11-16). Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+gives; the X11 keyboard grab is of the satellite class, offered once xwayland-satellite forwards
+the grab (amended on 2026-11-16; #1136). Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
 Decision 36 adds `wp_content_type_manager_v1` and `xdg_toplevel_tag_manager_v1`, standard, and
 `wp_drm_lease_device_v1`, unconfined.
 
@@ -1398,7 +1400,9 @@ compositor and that the own compositor did not yet offer:
           grab is accepted, active or waiting is kept by the compositor, not in the keyboard
           grab, because the lock, the layer surfaces and the workspace switch end the
           keyboard's grab whatever it is. The input method's `grab_keyboard` and
-          `resume_input_method_grab` change, so that the order above holds;
+          `resume_input_method_grab` change, and so does the popup's grab check in
+          `handlers.rs`, which today installs a popup's grab only over the input method's,
+          so that the order above holds;
       - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
         `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
         design, and it leaves this wave;
