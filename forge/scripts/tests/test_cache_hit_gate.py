@@ -8,16 +8,11 @@ import re
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
-# Where the pipeline's scripts and workflows live; tests and documents are not read.
-ROOTS = (
-    "forge/scripts",
-    "forge/Justfile",
-    "system",
-    "scripts",
-    "Justfile",
-    ".github/workflows",
-)
-SUFFIXES = {".sh", ".py", ".yml", ".yaml", ""}
+# Where the pipeline's code lives: scripts, workflows, actions, recipes, container builds, Nix
+# and the Rust and JavaScript tools. Unit tests and documents are not read.
+ROOTS = ("forge", "system", "scripts", ".github", "Justfile", "flake.nix")
+SUFFIXES = {".sh", ".py", ".yml", ".yaml", ".nix", ".rs", ".toml", ".mjs", ".js", ""}
+GATE = {"forge/scripts/verify_image.sh", "forge/scripts/registry_probe.sh"}
 # registry_probe.sh answers only whether a tag exists. verify_image.sh is the gate built on it;
 # check_idempotency.sh asks it directly for the builder alone, an image no run signs yet, and
 # check_idempotency_test.sh tests it against the live registry, and the CI path filter of
@@ -28,11 +23,21 @@ PROBE_USERS = {
     "forge/scripts/check_idempotency_test.sh",
     "scripts/ci/changes.py",
 }
-PROBE_USE = re.compile(r"^(?!\s*#).*registry_probe\.sh", re.M)
+PROBE_USE = re.compile(r"registry_probe\.sh")
 # A file that names a package image's hash tag reads it, and so must pass it through the gate:
-# only tag_signed_image.sh writes the tag, after signing the digest it points the tag at.
-HASH_TAG = re.compile(r":hash-|HASH_TAG_PREFIX=\"hash-\"")
+# only tag_signed_image.sh writes the tag, after signing the digest it points the tag at. Every
+# spelling counts: ":hash-<h>", "hash-" + h, 'hash-', hash-${h}, hash-$h.
+HASH_TAG = re.compile(r"[:\"'/]hash-|hash-[$\{]")
 HASH_TAG_WRITERS = {"forge/scripts/tag_signed_image.sh"}
+# A call of the gate, not a mention of it: the path ends in a quote, a space or a parenthesis
+# and starts after a slash or a quote ("$here/verify_image.sh", "verify_image.sh").
+GATE_CALL = re.compile(r"[/\"']verify_image\.sh[\"'\s)]")
+COMMENT = re.compile(r"^\s*(#|//)")
+
+
+def code(text):
+    """TEXT without its comment lines, which never call anything."""
+    return "\n".join(line for line in text.splitlines() if not COMMENT.match(line))
 
 
 def pipeline_files():
@@ -45,9 +50,10 @@ def pipeline_files():
         )
         for file in candidates:
             rel = file.relative_to(REPO).as_posix()
-            if "/tests/" in f"/{rel}" or file.suffix not in SUFFIXES:
+            if file.suffix not in SUFFIXES and file.name not in ("Justfile", "Containerfile"):
                 continue
-            yield rel, file.read_text(errors="replace")
+            if "/tests/" not in f"/{rel}" and rel not in GATE:
+                yield rel, code(file.read_text(errors="replace"))
 
 
 class CacheHitGateTest(unittest.TestCase):
@@ -65,12 +71,12 @@ class CacheHitGateTest(unittest.TestCase):
         users = {
             rel
             for rel, text in pipeline_files()
-            if PROBE_USE.search(text) and rel != "forge/scripts/registry_probe.sh"
+            if PROBE_USE.search(text)
         }
-        self.assertEqual(PROBE_USERS, users)
+        self.assertEqual(PROBE_USERS - GATE, users)
 
     def test_the_builder_is_the_only_unverified_hit(self):
-        text = (REPO / "forge/scripts/check_idempotency.sh").read_text()
+        text = code((REPO / "forge/scripts/check_idempotency.sh").read_text())
         branch = re.search(
             r'"builder" \]\]; then\n  PROBE_CMD=\((.*?)\)\n.*?\nelse\n  PROBE_CMD=\((.*?)\)\n',
             text,
@@ -88,10 +94,18 @@ class CacheHitGateTest(unittest.TestCase):
             if rel in HASH_TAG_WRITERS or not HASH_TAG.search(text):
                 continue
             with self.subTest(file=rel):
-                self.assertIn("verify_image.sh", text)
+                self.assertRegex(text, GATE_CALL)
+
+    def test_a_comment_or_a_mention_is_not_a_call_of_the_gate(self):
+        text = code('# then verify_image.sh checks it\nref = f"{r}:hash-{h}"  # verify_image.sh\n')
+        self.assertRegex(text, HASH_TAG)
+        self.assertNotRegex(text, GATE_CALL)
+        for spelling in ('"hash-" + h', "'hash-'", "hash-${h}", "hash-$h", ":hash-<h>"):
+            self.assertRegex(spelling, HASH_TAG)
+        self.assertNotRegex("--hash-only content-hash", HASH_TAG)
 
     def test_the_brain_takes_only_a_signed_image_as_a_hit(self):
-        text = (REPO / "forge/scripts/dag_orchestrator.py").read_text()
+        text = code((REPO / "forge/scripts/dag_orchestrator.py").read_text())
         body = re.search(r"\ndef image_exists\(ref\):\n(.*?)\n\n\n", text, re.S)
         self.assertIsNotNone(body)
         self.assertIn('"verify_image.sh"), ref, "call-dag-compile.yml"', body.group(1))
