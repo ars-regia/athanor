@@ -2587,6 +2587,8 @@ what = "the text's lines stand further apart, so a card is taller"
 state = "recorded"
 reason = "the Sal bar's font and line height differ from GTK's across the bar, not in the popups alone; the cards keep GTK's padding, spacing and width"
 
+# bar-notifications: the list is the bar's popover, as the GTK bar drew it, an interim until the
+# control center's panel holds it (doc_notification_center.md NC1, #1189).
 [[gtk-difference]]
 surface = "bar-notifications"
 item = 1

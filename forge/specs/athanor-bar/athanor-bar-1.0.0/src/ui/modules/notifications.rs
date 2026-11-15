@@ -1165,6 +1165,8 @@ impl Module for Notifications {
         self.drawn != self.service.face()
     }
 
+    /// The list as the bar's popover, an interim until the control center's panel holds it
+    /// (doc_notification_center.md NC1, issue #1189).
     fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
         if !self.service.live() {
             return None;
