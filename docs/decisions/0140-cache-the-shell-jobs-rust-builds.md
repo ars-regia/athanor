@@ -101,10 +101,10 @@ request poison a signed kernel (PR #250).
    push cancels it, the next push run prunes, and GitHub's seven days bound what a pause leaves.
 6. **Poisoning, by scope.** GitHub scopes a cache to the ref of the run that saved it. A
    `pull_request` run restores from its own merge ref, from its base branch and from the default
-   branch, both `iso-v0` for most pull requests, and saves only to its own merge ref, which no other pull request and no push run reads. A run of a
+   branch, both `iso-v0` for most pull requests. GitHub would scope a save of it to its own merge
+   ref, which no other pull request and no push run reads, and item 2 has it save nothing. A run of a
    fork's pull request has the same scope and no write access to `iso-v0`'s. So only a run of
-   code already merged into `iso-v0` writes what pull requests restore, and a pull request's
-   entries reach only that pull request's later runs. A `workflow_run` or `pull_request_target`
+   code already merged into `iso-v0` writes what pull requests restore. A `workflow_run` or `pull_request_target`
    run runs in the base's scope: item 2 forbids the cache there, as `merge_group` (whose entries
    would sit under a queue ref nothing reads again). A pull request's build scripts and proc
    macros can write the directory it restored, and nothing saves it. A pull request to a
@@ -228,7 +228,8 @@ on the hosted runner by the pull request that adds the steps.
 - The CI steps of items 1, 4 and 5 and the profile switch of item 9 land in a pull request after
   this record is accepted, with the CI15 and PL50 text and the check of item 8; the record's own
   pull request carries `rig.sh`'s local cache and the build stage that holds sccache.
-- The cache of `rust-security-audit` shrinks in a pull request of its own (item 5).
+- The cache of `rust-security-audit` shrinks in a pull request of its own (item 5, issue #1177),
+  merged before the CI steps, which otherwise evict other workflows' entries from the start.
 - PL10's sentence that `verify.py workflows` rejects a cache step in a release-path job
   describes a check that `scripts/verify.py` does not hold yet, and `call-dag-compile.yml`
   breaks the rule today (item 7, issue #1174); item 8 adds the part this record needs.
