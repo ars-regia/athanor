@@ -38,8 +38,8 @@ const SCALES: RangeInclusive<i64> = 1..=16;
 const THRESHOLDS: RangeInclusive<i64> = 0..=4096;
 
 /// The most directories read from an `index.theme`, which bounds the parse and the files each
-/// lookup stats. hicolor lists about a hundred.
-const MAX_DIRECTORIES: usize = 256;
+/// lookup stats. Fedora's hicolor lists about 660, its `scalable` ones last.
+const MAX_DIRECTORIES: usize = 1024;
 
 /// `O_NONBLOCK` of Linux on x86_64 and aarch64; libc is not a dependency of the toolkit.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -966,22 +966,26 @@ mod tests {
     }
 
     #[test]
-    fn at_most_256_directories_are_read() -> Result<(), Error> {
-        let names: Vec<String> = (0..300).map(|n| format!("d{n}")).collect();
+    fn at_most_max_directories_are_read() -> Result<(), Error> {
+        // Fedora's hicolor lists its `scalable` directories after about 660 others.
+        const { assert!(MAX_DIRECTORIES > 700) };
+        let names: Vec<String> = (0..MAX_DIRECTORIES + 44).map(|n| format!("d{n}")).collect();
         let mut index = format!("[Icon Theme]\nDirectories={}\n", names.join(","));
         for name in &names {
             index.push_str(&format!("[{name}]\nSize=16\nType=Fixed\n"));
         }
+        let last = format!("t/d{}/last.png", MAX_DIRECTORIES - 1);
+        let beyond = format!("t/d{MAX_DIRECTORIES}/beyond.png");
         let dir = scratch(
             "many",
             &[
                 ("t/index.theme", index.as_bytes()),
-                ("t/d255/last.png", PNG),
-                ("t/d256/beyond.png", PNG),
+                (&last, PNG),
+                (&beyond, PNG),
             ],
         )?;
         let theme = IconTheme::new(vec![dir], "t");
-        assert_eq!(tail(theme.resolve("last", 16, 1)), "t/d255/last.png");
+        assert_eq!(tail(theme.resolve("last", 16, 1)), last);
         assert_eq!(theme.resolve("beyond", 16, 1), None);
         Ok(())
     }
