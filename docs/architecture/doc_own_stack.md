@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-16 in decision 33's wave 2c, the X11 keyboard grab, which adds the satellite class to OS17 and its one exception to OS4's confinement of xwayland-satellite; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-16 in decision 33's wave 2c, the X11 keyboard grab, which adds the satellite class to OS17, its one exception to OS4's confinement of xwayland-satellite, and a line to `doc_threat_model.md` TM2; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -66,7 +66,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-15: decision 36's DRM lease, its device, the session switch, the
   paused session and when `locked` is sent.
 - Amended on 2026-11-15: decision 36's switch when a lease cannot be ended.
-- Amended on 2026-11-16: decision 33's X11 keyboard grab, with OS4 and OS17.
+- Amended on 2026-11-16: decision 33's X11 keyboard grab, with OS4, OS17 and
+  `doc_threat_model.md` TM2.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -271,9 +272,18 @@ own compositor, and what stays is the imitation inside a bordered window that de
   OS17's satellite class, and that one global beyond the standard ones; the satellite stays
   confined for everything else, its border included. A client is the satellite's when it
   connected through that socket: the grant follows the socket, not an identity, and a string
-  the client supplies grants nothing. The socket is in the user's runtime directory, so any
-  process that can connect to it is treated as the satellite; a confined application's own
-  connection, through a security context, never receives the global.
+  the client supplies grants nothing. The compositor keeps the satellite's clients as a
+  security context's clients are kept, with one mark more that tells them apart, so that the
+  class reaches no client of a security context. Tier 2 is kept off the socket,
+  `$XDG_RUNTIME_DIR/athanor-x11-<N>`, as `doc_threat_model.md` TM2 lists: the broker's
+  `confined` class replaces the runtime directory with a private tmpfs that does not bind it
+  and makes `/tmp/.X11-unix` inaccessible (`doc_session_daemons.md` SD8), and a Flatpak
+  application's runtime directory is Flatpak's own, which holds the socket only when the
+  application is granted that path. Any other process that can connect to the socket is
+  tier 1 and is treated as the satellite. A confined application's own Wayland connection,
+  through a security context, never receives the global. An X11 application reaches the X
+  server, a Flatpak one included when it is given the X11 socket, and through it the
+  satellite's grab, which then holds only under the rules of decision 33, wave 2c.
 
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
@@ -1288,43 +1298,70 @@ compositor and that the own compositor did not yet offer:
     - **Wave 2c, the protocols that need a design of their own.** Each is written as an amendment
       of this decision before its code:
       - `zwp_xwayland_keyboard_grab_manager_v1`, satellite (OS17). *Amended on 2026-11-16:*
-        OS4 confines xwayland-satellite to the standard globals, and Smithay's global at the
-        pinned revision is visible only to an Xwayland that Smithay starts itself
-        (`XWaylandClientData`), so under the own compositor it reaches no client, the satellite
-        included. The compositor registers the global itself, keeps Smithay's handling of its
-        requests and offers it only to the clients of the satellite's socket (OS4). The rules:
-        - a grab is honoured only from a client of the satellite's socket, on a surface of that
-          client that has the keyboard focus when it asks. The compositor refuses any other
-          request, confined or not, allow-listed or not, although such a client is not offered
-          the global, so that a mistake in one gate grants nothing. A refused grab's object
-          stays inert;
-        - while the session is locked a grab is refused, and the lock ends any grab; a grab
-          the lock ended is not restored at unlock, and the satellite asks again;
+        OS4 confines xwayland-satellite to the standard globals. Smithay's module for this
+        protocol is built only with its `xwayland` feature, which the own compositor does not
+        enable, and its global is visible only to an Xwayland that Smithay starts itself
+        (`XWaylandClientData`). The compositor implements the protocol itself: the manager and
+        grab objects and its own keyboard grab. No X11 code runs in the compositor or is linked
+        into it (section 3). It offers the global only to the clients of the satellite's
+        socket (OS4). The rules:
+        - a grab is accepted only from a client of the satellite's socket, for a surface of
+          that client. The compositor refuses the request of any other client, confined or
+          not, allow-listed or not, although such a client is not offered the global, so that
+          a mistake in one gate grants nothing. A refused grab's object stays inert;
+        - an accepted grab is active only while its surface has the keyboard focus, as
+          decision 30's inhibitor is. It is inactive from the lock request on (decision 36)
+          until the unlock, during Ctrl+Alt+Tab's suspension, and whenever the keyboard focus
+          leaves its surface. It is active again when the focus returns to that surface, as
+          decision 30's persistent constraints and inhibitors are. A grab requested under the
+          lock, during the suspension or for a surface without the focus is accepted and
+          waits;
+        - the compositor owns the grab. It ends the active keyboard grab before any move of the
+          keyboard focus, whether a click on another surface, a window closed, a workspace
+          switched, the cycle of Ctrl+Alt+Tab or a focus a client gives, and arms it again
+          when the focus returns. A popup's keyboard grab or the input method's replaces it:
+          the X11 grab is inactive while that grab lasts and is armed again when it ends, as
+          the input method's grab is resumed after a popup's;
+        - the grab ends when its object or its surface is destroyed, and when the surface is
+          unmapped;
         - during a grab the compositor reads each key before the grab: decision 30's protected
           keys act and do not reach the X11 surface, the keyboard monitor (AX4) observes the
           keys as it does without a grab, and the keyboard aids (AX11) act on them. The
           compositor's other bindings reach the X11 surface, as under decision 30's
           inhibitor;
-        - the grab ends when its object or its surface is destroyed, when the surface is
-          unmapped, and when the surface loses the keyboard focus. Smithay's grab holds the
-          focus on its surface while it lives, so the compositor ends the grab before it
-          moves the keyboard focus for any reason: a click on another surface, a window
-          closed, a workspace switched, the cycle of Ctrl+Alt+Tab or a focus a client gives;
-        - Ctrl+Alt+Tab ends the grab, also when the cycle has no surface of the shell to move
-          the keyboard to, and decision 30's suspension then covers the satellite's client: a
-          grab it requests meanwhile is refused, until the user clicks one of its surfaces or
-          moves the keyboard to one by a key. Every X11 application is that one client, so the
-          suspension covers them all;
-        - the code's pull request adds fixture tests: the global is offered to a client of the
-          satellite's socket and to no other client, unconfined, confined or allow-listed
-          (`os9_every_global_is_classified`, with the satellite's row in `data/globals`, and an
-          identity case); a grab from the satellite on its focused surface is granted, and one
-          from any other client, or on a surface without the keyboard focus, is refused; a
-          grab requested while locked is refused; the grab ends with its object destroyed,
-          with its surface destroyed or unmapped, with the keyboard focus moved, with the lock
-          and with Ctrl+Alt+Tab, and one requested during the suspension is refused; during a
-          grab a protected key acts and does not reach the surface, and the keyboard aids act.
-          Each gate has an assertion that fails when the gate is removed;
+        - Ctrl+Alt+Tab suspends the grab, also when the cycle has no surface of the shell to
+          move the keyboard to, by decision 30's rule for the satellite's client: the
+          suspension lasts until the user clicks one of its surfaces or moves the keyboard to
+          one by a key, and a focus the client gives does not lift it. Every X11 application
+          is that one client, so the suspension covers them all;
+        - the code's pull request adds fixture tests, one case each, and each gate has an
+          assertion that fails when the gate is removed:
+          - the offer: the global reaches a client of the satellite's socket and no other
+            client, unconfined, confined or allow-listed (`os9_every_global_is_classified`,
+            with the satellite's row in `data/globals`, and an identity case). The pull
+            request changes `x11_the_satellite_gets_the_standard_globals`, which then expects
+            this global too, and adds `satellite` to `CLASSES` in `scripts/verify.py`;
+          - the refusal: over the wire no other client can bind the global, so a test at the
+            request handler gives it a client not of the satellite's socket and finds the grab
+            inert;
+          - the activation: a grab for the focused surface is active, and one for a surface
+            without the focus waits and is active when the focus arrives;
+          - the lock: the grab is inactive from the lock request on, one requested under the
+            lock waits, and both are active again after the unlock once their surface has the
+            focus;
+          - each focus move: a click on another surface, a window closed, a workspace switch,
+            the cycle of Ctrl+Alt+Tab and a focus a client gives leave the grab inactive, and
+            the focus's return arms it again;
+          - the suspension: Ctrl+Alt+Tab leaves the grab inactive, a grab requested meanwhile
+            waits, a focus the client gives does not lift it, a click and a key each arm it
+            again, and a second X11 surface's grab stays inactive under the same suspension;
+          - another grab: a popup's keyboard grab and the input method's each leave the X11
+            grab inactive, and it is armed again when they end;
+          - the end: the grab ends with its object destroyed and with its surface destroyed
+            or unmapped;
+          - the keys: during a grab a protected key acts and does not reach the surface, the
+            keyboard monitor (AX4) observes the keys, the keyboard aids act, and another
+            binding reaches the surface;
       - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
         `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
         design, and it leaves this wave;
