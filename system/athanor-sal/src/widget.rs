@@ -209,6 +209,21 @@ impl std::ops::IndexMut<WidgetId> for Widgets {
     }
 }
 
+/// The longest length layout keeps, in logical pixels: 2^64 times less than the largest `f32`,
+/// so that the sizes, paddings, gaps and offsets a tree adds up to place its widgets, a few for
+/// each widget, stay finite for any tree that fits in memory (#1153).
+pub(crate) const LENGTH_MAX: f32 = f32::MAX / (1u128 << 64) as f32;
+
+/// `v` as a length layout keeps: 0 when it is not finite or below 0, and at most
+/// [`LENGTH_MAX`].
+pub(crate) fn length(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, LENGTH_MAX)
+    } else {
+        0.0
+    }
+}
+
 /// A rectangle in logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -1503,14 +1518,20 @@ impl Ui {
     }
 
     /// Adds a scroll whose viewport is `height` logical pixels high; add its child to the id it
-    /// returns. A height that is negative or not finite counts as 0.
+    /// returns. A height that is negative or not finite counts as 0, and one past 2^64 times
+    /// less than the largest `f32` as that length.
     ///
     /// # Panics
     ///
     /// When `parent` names no widget of this `Ui`.
     pub fn scroll(&mut self, parent: WidgetId, height: f32) -> WidgetId {
-        let height = if height.is_finite() { height.max(0.0) } else { 0.0 };
-        self.add(parent, Kind::Scroll { height, offset: 0.0 })
+        self.add(
+            parent,
+            Kind::Scroll {
+                height: length(height),
+                offset: 0.0,
+            },
+        )
     }
 
     /// Adds a list named `name` for assistive technologies, with no row selected.
@@ -2069,6 +2090,22 @@ impl Ui {
     /// Shapes every text and places every widget; returns the window's size in logical pixels.
     pub fn layout(&mut self) -> (f32, f32) {
         self.text.set_family(self.theme.font_family.as_deref());
+        // The theme's lengths of space and size, which measure and place add up, bounded.
+        let t = &mut self.theme;
+        for v in [
+            &mut t.padding,
+            &mut t.margin,
+            &mut t.section_gap,
+            &mut t.gap,
+            &mut t.field_width,
+            &mut t.island_padding,
+            &mut t.button_min,
+            &mut t.control_border,
+            &mut t.control_min_height,
+        ] {
+            *v = length(*v);
+        }
+        t.title_bar_height = t.title_bar_height.map(length);
         let (mut w, mut h) = self.measure(Self::ROOT);
         self.place(Self::ROOT, 0.0, 0.0);
         // Height for width: a wrapping label asks for a width that does not depend on the one its
@@ -2135,7 +2172,7 @@ impl Ui {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 let content = sizes.iter().map(|s| s.1).sum::<f32>();
                 // A height set through `Ui::add` is checked here; NaN falls to 0 in `max`.
-                *height = if height.is_finite() { height.max(0.0) } else { 0.0 };
+                *height = length(*height);
                 *offset = offset.min(content - *height).max(0.0);
                 (w, if natural { content.min(*height) } else { *height })
             }
@@ -2291,7 +2328,8 @@ impl Ui {
             }
             Kind::TextArea(area) => (field_width, area.view_height(&mut self.text) + pad),
         };
-        let w = w.max(widget.min_w);
+        // Each container's sum ends here, bounded, so the one above it adds finite sizes.
+        let (w, h) = (length(w.max(widget.min_w)), length(h));
         widget.rect.w = w;
         widget.rect.h = h;
         widget.natural_w = w;
