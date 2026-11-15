@@ -327,6 +327,7 @@ mod tests {
         let cx = Cx {
             icons: &mut icons,
             theme: &theme,
+            secondary: theme.text,
             rtl: false,
             top: true,
             scale: 1,

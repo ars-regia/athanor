@@ -329,6 +329,12 @@ impl Page {
         }
     }
 
+    /// Whether the model changed since the page last showed it: the surface calls
+    /// [`Page::turn`] then.
+    pub fn changed(&self) -> bool {
+        (self.service.states.get(), self.service.failures.get()) != self.seen
+    }
+
     /// Whether the surface should open the page: NetworkManager asked for a password while the
     /// page was hidden. True once for each request; the page built next shows the prompt.
     pub fn wants_open(&mut self) -> bool {
@@ -485,6 +491,17 @@ impl Page {
             ids.failure.hide(ui);
         }
         self.abandon(ui);
+    }
+
+    /// The surface dropped the [`Ui`] that held the page, as a popover that closed: the page
+    /// leaves the screen as [`Page::closed`] says, with no widgets left to set.
+    pub fn dropped(&mut self) {
+        self.shown = false;
+        self.ids = None;
+        self.typed = Zeroizing::default();
+        if matches!(self.asking.take(), Some(Asked { ask: Ask::Secrets, .. })) {
+            self.service.answer(None);
+        }
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -1114,6 +1131,16 @@ mod tests {
         assert!(ids(&page).airplane.is_none());
         page.closed(&mut ui);
         assert!(matches!(answer.try_recv(), Ok(None)), "hiding the page cancels the request");
+    }
+
+    #[test]
+    fn a_page_dropped_with_its_popover_cancels_the_request_and_forgets_what_was_typed() {
+        let (mut page, mut ui, mut answer) = secrets_page();
+        type_password(&mut page, &mut ui, "correct horse");
+        assert!(!page.changed());
+        page.dropped();
+        assert!(matches!(answer.try_recv(), Ok(None)));
+        assert!(page.typed.is_empty() && page.ids.is_none());
     }
 
     #[test]

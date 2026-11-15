@@ -452,6 +452,7 @@ impl Bar {
                 let mut cx = Cx {
                     icons: &mut self.icons,
                     theme: &self.look.popover,
+                    secondary: self.look.secondary,
                     rtl: self.rtl,
                     top,
                     scale,
@@ -574,6 +575,7 @@ impl Bar {
                 let mut cx = Cx {
                     icons: &mut self.icons,
                     theme: &self.look.popover,
+                    secondary: self.look.secondary,
                     rtl: self.rtl,
                     top,
                     scale: out.scale(),
@@ -810,6 +812,7 @@ impl Bar {
         let mut cx = Cx {
             icons: &mut self.icons,
             theme: &self.look.popover,
+            secondary: self.look.secondary,
             rtl: self.rtl,
             top,
             scale: out.scale(),
@@ -891,6 +894,7 @@ impl Bar {
         let mut cx = Cx {
             icons: &mut self.icons,
             theme: &self.look.popover,
+            secondary: self.look.secondary,
             rtl: self.rtl,
             top,
             scale: out.scale(),
@@ -1218,6 +1222,28 @@ impl Application for Bar {
                     }
                 }
             }
+        }
+        // A source that asks for its popover, or whose open popover changed on its own, as the
+        // pages of athanor-controls, which follow their models themselves.
+        if self.ready {
+            let asked = self
+                .modules
+                .iter_mut()
+                .find_map(|(module, drawn)| drawn.wants_open().then_some(*module));
+            if let Some(module) = asked {
+                self.open_module(shell, module);
+            }
+        }
+        let open = self.popover.as_ref().and_then(|popover| match popover.open {
+            Open::Module(module) => Some(module),
+            Open::Entry(_) => None,
+        });
+        if open.is_some_and(|open| {
+            self.modules
+                .iter()
+                .any(|(module, drawn)| *module == open && drawn.changed())
+        }) {
+            self.refresh_popover(shell);
         }
         // The clock's minute, a keyboard aid's notice that expired, a layout or a workspace
         // that changed: each module says whether its buttons still show its source.

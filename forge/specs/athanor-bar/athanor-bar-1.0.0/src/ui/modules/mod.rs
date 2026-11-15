@@ -24,7 +24,7 @@ use std::rc::Rc;
 use athanor_apps::sal::Icons;
 use athanor_bar::order;
 use athanor_sal::driver::{Shell, SurfaceId};
-use athanor_sal::{Event, Theme, Ui, WidgetId};
+use athanor_sal::{Event, Rgba, Theme, Ui, WidgetId};
 use athanor_sulphur_client::{Client, Event as Compositor};
 
 /// The size of a module's icon in the bar.
@@ -61,6 +61,8 @@ pub struct Cx<'a> {
     pub icons: &'a mut Icons,
     /// The popovers' look.
     pub theme: &'a Theme,
+    /// The popovers' secondary ink, calmo's ink2, as `bar-popover-note`.
+    pub secondary: Rgba,
     pub rtl: bool,
     /// The bar is at the top of its output: the popover's arrow points up.
     pub top: bool,
@@ -125,6 +127,19 @@ pub trait Module {
     /// A source changed while the popover is open: its widgets follow in place.
     fn refresh(&mut self, _cx: &mut Cx, _ui: &mut Ui) -> Reply {
         Reply::Stay
+    }
+
+    /// Whether the module's source asks for its popover, as the network's password prompt:
+    /// polled at every turn of the loop once the bar is ready, and true once for each ask.
+    fn wants_open(&mut self) -> bool {
+        false
+    }
+
+    /// Whether the open popover's source changed without a [`Wakeup`], as a page that follows
+    /// its model itself: polled at every turn of the loop while the popover is open, and
+    /// [`Module::refresh`] follows.
+    fn changed(&self) -> bool {
+        false
     }
 
     /// The popover closed, by Escape, a press outside it, its button or a reply.

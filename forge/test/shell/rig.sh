@@ -1222,6 +1222,7 @@ atspi)
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
             [bar-audio]="athanor-bar Audio" [bar-battery]="athanor-bar Batteria"
+            [bar-network]="athanor-bar Modalità aereo" [bar-bluetooth]="athanor-bar Dispositivi vicini"
             [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca"
             [control-center]="athanor-control-center Centro di controllo")
         key=${2:-}
@@ -1334,6 +1335,11 @@ atspi)
         # To record it again, copy <out>/atspi-<surface>[-it].json of a GTK run into golden/atspi/.
         unit='' widgets=8 own=() open='' preset=float panel=top dock=visible settle=8 stable='' scene_args=()
         if [ "$2" != bar ]; then bar_scene "$2"; fi
+        # A popover whose tree holds a name of its own requires it, as the Italian check does.
+        case "$2" in
+        bar-network) required=${required:-Airplane mode} ;;
+        bar-bluetooth) required=${required:-Nearby devices} ;;
+        esac
         if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
             require athanor-sulphur build-compositor
             unit=--unit widgets=6 own=(--own-compositor "$preset" - "${3:-en}")
@@ -1596,6 +1602,11 @@ orca)
         bar-audio) walk=(Tab*9) ;;
         # The power modes, one stop as a group of radios, and the brightness.
         bar-battery) walk=(Tab*2) ;;
+        # Wi-Fi, the three access points it joins (Campus needs Settings and takes no focus),
+        # Office VPN and Airplane mode.
+        bar-network) walk=(Tab*6) ;;
+        # Its switch, the paired Headphones and Keyboard, and the nearby Phone and Speaker.
+        bar-bluetooth) walk=(Tab*5) ;;
         bar-running) walk=(Tab*3 shift+F10 Down*4 Escape) ;;
         *) echo "rig.sh orca: $2 has no walk; name its keys here" >&2; exit 2 ;;
         esac

@@ -297,6 +297,22 @@ jobs:
         run: bash forge/test/shell/rig.sh orca bar
       - name: Orca's speech on the bar in Italian against its transcript
         run: bash forge/test/shell/rig.sh orca bar it
+      - name: Accessibility tree of the bar's network popover
+        run: bash forge/test/shell/rig.sh atspi bar-network
+      - name: Accessibility tree of the bar's network popover in Italian
+        run: bash forge/test/shell/rig.sh atspi bar-network it
+      - name: Orca's speech on the bar's network popover against its transcript
+        run: bash forge/test/shell/rig.sh orca bar-network
+      - name: Orca's speech on the bar's network popover in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca bar-network it
+      - name: Accessibility tree of the bar's Bluetooth popover
+        run: bash forge/test/shell/rig.sh atspi bar-bluetooth
+      - name: Accessibility tree of the bar's Bluetooth popover in Italian
+        run: bash forge/test/shell/rig.sh atspi bar-bluetooth it
+      - name: Orca's speech on the bar's Bluetooth popover against its transcript
+        run: bash forge/test/shell/rig.sh orca bar-bluetooth
+      - name: Orca's speech on the bar's Bluetooth popover in Italian against its transcript
+        run: bash forge/test/shell/rig.sh orca bar-bluetooth it
       - name: Live layout, mandatory keys, running windows, the power menu and memory
         run: bash forge/test/shell/rig.sh bar-e2e
       - name: The network, Bluetooth, audio and battery modules against their fixtures
