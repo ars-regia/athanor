@@ -56,7 +56,8 @@ impl Module for Audio {
     }
 
     fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
-        let (mut ui, frame) = look::popover(&tr("Sound"), cx.theme.clone(), cx.rtl, cx.top);
+        let (mut ui, frame) =
+            look::popover(&tr("Sound"), controls::theme(cx.theme), cx.rtl, cx.top);
         let media = media_icons(cx);
         self.page
             .build(&mut ui, frame, media, &controls::look(cx.icons, cx.scale));
