@@ -74,7 +74,25 @@ struct Trust {
     _monitor: Option<gio::FileMonitor>,
 }
 
+thread_local! {
+    /// The bar's one trust state: the shield and the power menu's "Restart to update" (BR3)
+    /// read the same answer and send through the same path.
+    static SHARED: RefCell<Weak<Trust>> = const { RefCell::new(Weak::new()) };
+}
+
 impl Trust {
+    /// The trust state of the bar, started by whichever module asks first.
+    fn shared(wake: &Wake) -> Rc<Trust> {
+        SHARED.with(|shared| {
+            if let Some(trust) = shared.borrow().upgrade() {
+                return trust;
+            }
+            let trust = Trust::start(wake.clone());
+            *shared.borrow_mut() = Rc::downgrade(&trust);
+            trust
+        })
+    }
+
     fn start(wake: Wake) -> Rc<Trust> {
         let trust = Rc::new_cyclic(|me: &Weak<Trust>| {
             let monitor = Path::new(STATE_PATH).parent().and_then(|dir| {
@@ -724,6 +742,27 @@ fn focus_before(
     }
 }
 
+/// The power menu's share of the trust state (BR3): "Restart to update" stands beside
+/// "Restart" and is the same request as the sheet's (SH11).
+pub struct Update(Rc<Trust>);
+
+impl Update {
+    pub fn new(start: &Start) -> Update {
+        Update(Trust::shared(start.wake))
+    }
+
+    /// Whether a downloaded update offers "Restart to update" now.
+    pub fn offered(&self) -> bool {
+        self.0.offered(Request::Apply)
+    }
+
+    /// Sends Apply if the state still offers it, as it may have stopped while the question
+    /// was open; else the sheet opens and says why.
+    pub fn apply(&self) {
+        self.0.send(Request::Apply);
+    }
+}
+
 struct Shield {
     trust: Rc<Trust>,
     seals: IconTheme,
@@ -738,7 +777,7 @@ struct Shield {
 
 pub fn new(start: &Start) -> Option<Box<dyn Module>> {
     Some(Box::new(Shield {
-        trust: Trust::start(start.wake.clone()),
+        trust: Trust::shared(start.wake),
         seals: IconTheme::system(SEAL_THEME),
         drawn: None,
         page: Page::Sheet,
