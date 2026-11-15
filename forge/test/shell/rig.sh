@@ -812,7 +812,7 @@ compositor-globals)
     # Decision 35.
     standard+=(ext_background_effect_manager_v1)
     # Decision 36.
-    standard+=(wp_content_type_manager_v1)
+    standard+=(wp_content_type_manager_v1 xdg_toplevel_tag_manager_v1)
     standard+=(xdg_wm_dialog_v1 wp_pointer_warp_v1 xdg_system_bell_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf, as Pixman draws without a render node"

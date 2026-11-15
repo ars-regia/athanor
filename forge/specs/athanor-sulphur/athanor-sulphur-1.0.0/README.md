@@ -166,7 +166,9 @@ is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
 
 Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
 the content type its client sets, applied with the surface's commit, and no behaviour reads it at
-1.0 (`src/fixture/decision36.rs`).
+1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag
+and description, applied with the commit; a tag grants nothing, since no privilege, class,
+allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than

@@ -46,6 +46,7 @@ mod state;
 mod tablet;
 mod tiling;
 mod toplevel_icon;
+mod toplevel_tag;
 mod toplevel_state;
 mod touch;
 mod xkb_config;
