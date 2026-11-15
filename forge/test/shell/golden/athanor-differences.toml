@@ -2392,6 +2392,97 @@ state = "closed"
 reason = "#941 placed the toolkit's windows as cosmic-comp places GTK's, and a toolkit window gives its minimum size as GTK does, so cosmic-comp centres a window wider than the size it first suggests, as the German one at scale 1.5"
 
 [[gtk-difference]]
+surface = "bar"
+item = 1
+what = "no shield button at the end of the bar, so the modules after the clock sit further towards the end edge and the power popover is pushed in from it"
+state = "recorded"
+reason = "the shield is ported on its own branch (its module and Wakeup::Open) and shows no button until then; the goldens are captured again once it lands"
+
+[[gtk-difference]]
+surface = "bar"
+item = 2
+what = "the module's button not drawn pressed while its popover is open"
+state = "closed"
+reason = "Sal fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs)"
+
+[[gtk-difference]]
+surface = "bar"
+item = 3
+what = "the clock and the popovers in the system sans"
+state = "closed"
+reason = "the bar's and its popovers' themes set Calmo's family, Inter, as the GTK bar's sheet (look::FONT_FAMILY, test the_bar_and_its_popovers_take_calmos_family)"
+
+[[gtk-difference]]
+surface = "bar"
+item = 4
+what = "the running application's mark a straight 2 px line, where GTK's inset shadow follows the button's rounded corners"
+state = "recorded"
+reason = "Sal's icon button draws the dock's and the bar's running mark as one straight bar (render.rs INDICATOR); a rounded mark is a change to Sal's renderer that the dock shares (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 5
+what = "the focus ring on the first control of a popover when it opens: the calendar's previous-month arrow, the first input source, the first switch, the tiling switch and Lock"
+state = "recorded"
+reason = "Sal gives the first control the focus and shows its ring, as the control center's pages (item 6); GTK focused the same control, as its Orca references say, without the ring (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 6
+what = "no days of the adjacent months, as many weeks as the month holds (five for September 2026, where GTK draws six), and the month and year a few pixels higher"
+state = "recorded"
+reason = "Sal's calendar widget (#1122) shows the month's own days in its own weeks, and its header row takes VL10's metrics (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 7
+what = "today in the accent's purple, where GTK draws Adwaita's blue selection"
+state = "recorded"
+reason = "the maintainer decided on 2026-11-13 that the Calmo palette prevails over Adwaita's on the port to Sal, for every Sal surface (VL10, #1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 8
+what = "the month and weekday names and the clock's day and month in English under German and the right-to-left pseudo-locale, where GTK shows the locale's names"
+state = "recorded"
+reason = "the clock formats with GLib's g_date_time_format, which reads the process's LC_TIME, and the Sal bar, which no longer starts GTK, never calls setlocale; the format strings are translated, the names are not; how the bar takes the locale's names is the maintainer's choice, reported with the port"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 9
+what = "both month and year arrows pointing the left-to-right way in a right-to-left language"
+state = "closed"
+reason = "the clock gives the calendar pan-end-symbolic as its start arrow and pan-start-symbolic as its end one when the language runs right to left, as GTK's pan-start-symbolic-rtl (clock::arrow_icons, test the_arrows_point_to_their_edges_in_both_directions)"
+
+[[gtk-difference]]
+surface = "bar-input"
+item = 10
+what = "radios and switches in Sal's look, an off switch with a pale track, rows a few pixels closer than GTK's, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's radio, switch and metrics and the palette's surface follow VL10, as the control center's items 13 and 14 and the chooser's item 6 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-accessibility"
+item = 11
+what = "the Colour filter heading in body text"
+state = "closed"
+reason = "the heading is a note in Calmo's caption size and ink2, as the GTK bar's bar-popover-note (look::note)"
+
+[[gtk-difference]]
+surface = "bar-power"
+item = 12
+what = "the actions in rows about 26 px tall at scale 1, where GTK's popover menu rows are about 36, with less room around them"
+state = "recorded"
+reason = "the actions are Sal's flat buttons at VL10's padding, where GTK drew its model buttons' menu padding (#1147)"
+
+[[gtk-difference]]
+surface = "bar-tiling"
+item = 13
+what = "the tiling switch in Sal's look, its off track pale and its knob smaller"
+state = "recorded"
+reason = "Sal's switch follows VL10, as the control center's item 14 (#1147)"
+
+[[gtk-difference]]
 surface = "control-center"
 item = 1
 what = "the quick tiles drawn as Sal tile modules, not GTK toggle buttons with a label box"

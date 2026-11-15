@@ -178,6 +178,24 @@ class GoldenReportTest(unittest.TestCase):
             self.assertTrue(entry["what"].strip(), entry["item"])
             self.assertTrue(entry["reason"].strip(), entry["item"])
 
+    def test_the_bar_answers_every_item_of_its_port(self):
+        """Each difference of the Sal bar's strip and of its clock, input, tiling, accessibility
+        and power popovers against the GTK bar found in their port is closed or recorded with
+        its reason; the recorded look of VL10 names #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        surfaces = ("bar", "bar-calendar", "bar-input", "bar-tiling", "bar-accessibility", "bar-power")
+        items = [e for e in table.get("gtk-difference", []) if e.get("surface") in surfaces]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 14)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(
+            all("#1147" in e["reason"] for e in items if e["item"] in (4, 5, 6, 7, 10, 12, 13))
+        )
+
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"
         dock = {"dock-workspaces", "dock-library"}
