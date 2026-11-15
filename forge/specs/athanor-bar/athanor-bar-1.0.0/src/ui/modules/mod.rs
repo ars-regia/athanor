@@ -33,6 +33,9 @@ pub enum Wakeup {
     /// The source changed: the bar asks every module whether its buttons are stale and sets
     /// the open popover's widgets again.
     Changed,
+    /// A reply the person must see: the bar opens the module's popover, or draws it again
+    /// when it is open.
+    Open(order::Module),
 }
 
 /// The bar's handle for a module's sources, which may outlive it.

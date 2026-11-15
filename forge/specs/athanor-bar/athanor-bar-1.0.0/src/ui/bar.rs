@@ -1007,6 +1007,19 @@ impl Application for Bar {
                     self.refresh_popover(shell);
                 }
                 Change::Module(Wakeup::Changed) => self.refresh_popover(shell),
+                Change::Module(Wakeup::Open(module)) => {
+                    let open = self
+                        .popover
+                        .as_ref()
+                        .filter(|p| matches!(p.open, Open::Module(m) if m == module))
+                        .map(|p| (p.parent, p.anchor));
+                    match open {
+                        Some((surface, button)) => {
+                            self.open_popover(shell, surface, button, module)
+                        }
+                        None => self.open_module(shell, module),
+                    }
+                }
             }
         }
         // The clock's minute, a keyboard aid's notice that expired, a layout or a workspace
