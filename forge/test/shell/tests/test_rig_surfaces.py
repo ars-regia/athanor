@@ -39,8 +39,8 @@ class GreeterOnlyUnderCosmicComp(unittest.TestCase):
 
 class AtspiReferences(unittest.TestCase):
     def test_bar_launcher_and_greeter_write_and_compare_their_transcripts(self):
-        # The bar's case serves bar-calendar too, the surface's name in $2.
-        for label, surface in (("bar | bar-calendar", "$2"), ("launcher", "launcher"), ("greeter", "greeter")):
+        # The bar's case serves its popovers too, the surface's name in $2.
+        for label, surface in (("bar | bar-calendar | bar-network | bar-bluetooth", "$2"), ("launcher", "launcher"), ("greeter", "greeter")):
             body = case(label, "atspi")
             name = f"atspi-{surface}${{3:+-$3}}.json"
             self.assertIn(f'ATSPI_TRANSCRIPT="/out/{name}"', body, surface)
