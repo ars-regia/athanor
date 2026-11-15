@@ -5,7 +5,7 @@ Release:        24%{?athanor_content}%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel pulseaudio-libs-devel gettext
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel pulseaudio-libs-devel gettext binutils python3
 # Inter, the interface font, and the symbolic icons the bar draws.
 Requires:       athanor-calmo adwaita-icon-theme athanor-shelld
 # The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
@@ -38,6 +38,10 @@ for catalog in forge/specs/athanor-bar/athanor-bar-1.0.0/po/*.po; do
     mkdir -p "locale-build/$lang/LC_MESSAGES"
     msgfmt --check --output-file="locale-build/$lang/LC_MESSAGES/athanor-bar.mo" "$catalog"
 done
+
+%check
+# Drawn with Sal: neither GTK nor its layer-shell shim may come back among DT_NEEDED.
+python3 -B forge/scripts/check_shim_link_order.py --without-gtk target/release/athanor-bar
 
 %install
 install -D -m 0755 target/release/athanor-bar %{buildroot}/usr/bin/athanor-bar
