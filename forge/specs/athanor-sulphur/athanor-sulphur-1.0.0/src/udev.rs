@@ -1952,6 +1952,35 @@ fn render(
 
 // Decision 36: the leases of the displays the kernel marks `non-desktop` (`drm_lease.rs`).
 
+/// What a connector is by its `non-desktop` mark: a display offered for lease, a monitor of the
+/// session, or, while the mark cannot be read, neither.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Role {
+    Leased,
+    Monitor,
+    Unread,
+}
+
+impl Role {
+    fn of(mark: &std::io::Result<bool>) -> Self {
+        match mark {
+            Ok(true) => Self::Leased,
+            Ok(false) => Self::Monitor,
+            Err(_) => Self::Unread,
+        }
+    }
+
+    /// Whether the connector is offered for lease.
+    fn offered(self) -> bool {
+        self == Self::Leased
+    }
+
+    /// Whether the connector may be set up as an output of the session.
+    fn output(self) -> bool {
+        self == Self::Monitor
+    }
+}
+
 /// Whether the kernel marks `connector` `non-desktop`, as a headset's. A property that cannot be
 /// described is skipped; when none is the mark, the last such error is the failure.
 fn non_desktop(device: &impl ControlDevice, connector: connector::Handle) -> std::io::Result<bool> {
@@ -2074,21 +2103,21 @@ impl State {
         }
     }
 
-    /// Whether `connector`, driven by `crtc`, is marked `non-desktop`: then it is offered for
-    /// lease and never set up as an output. One whose mark cannot be read is a monitor, as it
-    /// was before decision 36.
+    /// Whether `connector`, driven by `crtc`, is kept from being set up as an output: one marked
+    /// `non-desktop` is offered for lease; one whose mark cannot be read is neither leased nor an
+    /// output until a scan reads it.
     fn leasable(&mut self, connector: &connector::Info, crtc: crtc::Handle) -> bool {
         let Backend::Drm(drm) = &mut self.backend else {
             return false;
         };
         let handle = connector.handle();
-        match non_desktop(drm.heads.device(), handle) {
-            Ok(true) => {}
-            Ok(false) => return false,
-            Err(error) => {
-                tracing::warn!(%error, connector = ?handle, "whether a display is non-desktop could not be read: it is a monitor");
-                return false;
-            }
+        let mark = non_desktop(drm.heads.device(), handle);
+        if let Err(error) = &mark {
+            tracing::error!(%error, connector = ?handle, "whether a display is non-desktop could not be read: it is neither leased nor shown until a scan reads it");
+        }
+        let role = Role::of(&mark);
+        if !role.offered() {
+            return !role.output();
         }
         if let Entry::Vacant(entry) = drm.leasable.entry(handle) {
             let name = format!(
@@ -2124,7 +2153,8 @@ impl State {
 
     /// After a scan: a connector offered for lease that is unplugged or no longer `non-desktop`
     /// is withdrawn, and a monitor, shown or disabled, that became `non-desktop` is taken down,
-    /// for `retry_dark_monitors` to offer it. A mark that cannot be read withdraws a lease.
+    /// for `retry_dark_monitors` to offer it. A mark that cannot be read withdraws a lease, and
+    /// `retry_dark_monitors` then sets up no output on it (`leasable`).
     fn reconcile_leasable(&mut self) {
         let Backend::Drm(drm) = &self.backend else {
             return;
@@ -2139,7 +2169,7 @@ impl State {
         let withdrawn: Vec<connector::Handle> = drm
             .leasable
             .keys()
-            .filter(|handle| !plugged(handle) || !matches!(non_desktop(device, **handle), Ok(true)))
+            .filter(|handle| !plugged(handle) || !Role::of(&non_desktop(device, **handle)).offered())
             .copied()
             .collect();
         let disabled = &self.output_management.disabled;
@@ -2155,7 +2185,7 @@ impl State {
             .filter(|(info, crtc)| {
                 plugged(&info.handle())
                     && monitor(info, crtc)
-                    && matches!(non_desktop(device, info.handle()), Ok(true))
+                    && Role::of(&non_desktop(device, info.handle())).offered()
             })
             .map(|(info, crtc)| (info.clone(), crtc))
             .collect();
@@ -2307,7 +2337,7 @@ impl DrmLeaseHandler for State {
 pub(crate) mod tests {
     use super::{
         first_fault, identity_of, kept_mode, lock_shown, output_of, pacing, EdidFault, FailureLog,
-        Frames, LockFrames, Wake,
+        Frames, LockFrames, Role, Wake,
     };
     use std::time::{Duration, Instant};
 
@@ -2577,6 +2607,18 @@ pub(crate) mod tests {
             mode(1920)
         );
         assert_eq!(kept_mode(&offered, None, mode(1920)), mode(1920));
+    }
+
+    /// A connector whose `non-desktop` mark cannot be read is neither offered for lease nor set
+    /// up as an output; only a mark read `false` makes a monitor of the session.
+    #[test]
+    fn an_unread_mark_neither_leases_nor_shows_a_connector() {
+        let unread = Role::of(&Err(std::io::Error::from_raw_os_error(5)));
+        assert!(!unread.offered() && !unread.output(), "unread");
+        let leased = Role::of(&Ok(true));
+        assert!(leased.offered() && !leased.output(), "non-desktop");
+        let monitor = Role::of(&Ok(false));
+        assert!(!monitor.offered() && monitor.output(), "a monitor");
     }
 
     #[test]
