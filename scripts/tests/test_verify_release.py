@@ -1,7 +1,8 @@
-"""PL54, PL56, PL57, PL60: verify.py refuses a job of release.yml that does not check the ref
-first, a request-release job that does not wait for every job of the build or dispatches the
-release off iso-v0, another trigger or concurrency group, an input interpolated into run:, and a
-signing job, a writer of :latest or of :stable outside the place the spec gives it."""
+"""PL10, PL54, PL56, PL57, PL60: verify.py refuses a cache step on the release path, a job of
+release.yml that does not check the ref first, a request-release job that does not wait for
+every job of the build or dispatches the release off iso-v0, another trigger or concurrency
+group, an input interpolated into run:, and a signing job, a writer of :latest or of :stable
+outside the place the spec gives it."""
 
 import importlib.util
 import pathlib
@@ -218,6 +219,67 @@ class PolicyPullProblems(unittest.TestCase):
         self.assertEqual(verify.policy_pull_problems(root), [
             f"scripts/ci/{name}: pulls through a policy outside system/verify-images.sh, which runs it "
             "in the builder image (runner skopeo 1.13)" for name in ("global.sh", "promote.sh")])
+
+
+class ReleaseCacheProblems(unittest.TestCase):
+    """PL10: a job of a release-path workflow, or of a reusable workflow one calls, restores and
+    saves no cache; a pull-request job may."""
+
+    RELEASING = ("on: workflow_dispatch\njobs:\n  sign:\n    environment: signing\n    runs-on: x\n"
+                 "    steps:\n      - run: true\n  build:\n    uses: ./.github/workflows/call-build.yml\n")
+    CALLED = "on: workflow_call\njobs:\n  compile:\n    runs-on: x\n    steps:\n{steps}"
+    PULL_REQUEST = "on: pull_request\njobs:\n  check:\n    runs-on: x\n    steps:\n{steps}"
+    PIN = "0" * 40
+
+    def problems(self, **workflows):
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        (root / ".github/workflows").mkdir(parents=True)
+        for name, text in workflows.items():
+            (root / ".github/workflows" / name).write_text(text)
+        return verify.release_cache_problems(root)
+
+    def test_the_repository_passes(self):
+        self.assertEqual(verify.release_cache_problems(ROOT), [])
+
+    def test_a_cache_action_in_a_called_workflow_fails(self):
+        for action in ("actions/cache", "actions/cache/restore", "actions/cache/save", "Swatinem/rust-cache"):
+            with self.subTest(action=action):
+                steps = f"      - uses: {action}@{self.PIN}\n"
+                self.assertEqual(
+                    self.problems(**{"release.yml": self.RELEASING,
+                                     "call-build.yml": self.CALLED.format(steps=steps)}),
+                    [f"call-build.yml: job compile uses {action} on the release path, which restores "
+                     "and saves no cache (PL10)"])
+
+    def test_a_cache_action_in_the_releasing_workflow_fails(self):
+        text = self.RELEASING.replace("      - run: true\n", f"      - uses: actions/cache@{self.PIN}\n")
+        self.assertEqual(len(self.problems(**{"release.yml": text})), 1)
+
+    def test_a_cache_backend_on_the_actions_cache_fails(self):
+        for steps in ("      - run: cargo build\n        env:\n          SCCACHE_GHA_ENABLED: 'true'\n",
+                      "      - run: docker buildx build --cache-from type=gha .\n"):
+            with self.subTest(steps=steps):
+                self.assertEqual(
+                    self.problems(**{"release.yml": self.RELEASING,
+                                     "call-build.yml": self.CALLED.format(steps=steps)}),
+                    ["call-build.yml: job compile points a cache at the Actions cache service on the "
+                     "release path, which restores and saves no cache (PL10)"])
+
+    def test_a_workflow_level_backend_reaches_every_job(self):
+        text = "env:\n  SCCACHE_GHA_ENABLED: 'true'\n" + self.CALLED.format(steps="      - run: true\n")
+        self.assertEqual(len(self.problems(**{"release.yml": self.RELEASING, "call-build.yml": text})), 1)
+
+    def test_a_pull_request_job_with_a_cache_passes(self):
+        steps = f"      - uses: Swatinem/rust-cache@{self.PIN}\n      - uses: actions/cache@{self.PIN}\n"
+        self.assertEqual(self.problems(**{"release.yml": self.RELEASING,
+                                          "call-build.yml": self.CALLED.format(steps="      - run: true\n"),
+                                          "pr.yml": self.PULL_REQUEST.format(steps=steps)}), [])
+
+    def test_a_promotion_in_release_is_on_the_release_path(self):
+        text = self.RELEASING.replace("environment: signing", "environment: release").replace(
+            "      - run: true\n", f"      - uses: actions/cache/restore@{self.PIN}\n")
+        self.assertEqual(len(self.problems(**{"promote.yml": text})), 1)
 
 
 if __name__ == "__main__":

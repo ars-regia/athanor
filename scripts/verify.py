@@ -188,7 +188,8 @@ def check_workflows():
                    f"default (triggers: {', '.join(sorted(events)) or 'none'})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
+    for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -563,6 +564,58 @@ def release_problems(root):
                                     "which only tag-latest of release.yml writes (PL35, PL56)")
                 if STABLE_WRITER.search(run) and environment != "release":
                     problems.append(f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)")
+    return problems
+
+
+# PL10: a step that restores or saves a cache, and a setting that points sccache or BuildKit at
+# the Actions cache service. A cache that lives only in the job's own disk or volume is not one.
+CACHE_ACTION = re.compile(r"^(?:actions/cache(?:/restore|/save)?|Swatinem/rust-cache)@")
+CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b")
+LOCAL_WORKFLOW = "./.github/workflows/"
+
+
+def release_cache_problems(root):
+    """PL10: no job of a release-path workflow restores or saves a cache, with a cache action or
+    with an sccache or BuildKit backend on the Actions cache, because a cache is an input the
+    provenance does not name (PL20) and any job of the default branch can write one. The release
+    path is every workflow with a job in a signing environment (D43) or in release (PL60), and
+    every reusable workflow of this repository it calls, at any depth."""
+    root = Path(root)
+    if yaml is None:
+        return []
+    workflows = {}
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError:
+            continue  # signing_problems reports a workflow it cannot read
+        if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
+            jobs = {job_id: job for job_id, job in doc["jobs"].items() if isinstance(job, dict)}
+            workflows[wf.name] = jobs, doc.get("env")
+    def releasing(job):
+        environment = (job_environment(job) or "").lower()
+        return environment.startswith("signing") or environment == "release"
+    pending = [name for name, (jobs, _) in workflows.items() if any(map(releasing, jobs.values()))]
+    release_path = set()
+    while pending:
+        name = pending.pop()
+        if name in release_path or name not in workflows:
+            continue
+        release_path.add(name)
+        pending += [uses[len(LOCAL_WORKFLOW):] for job in workflows[name][0].values()
+                    if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)]
+    problems = []
+    for name in sorted(release_path):
+        jobs, env = workflows[name]
+        for job_id, job in jobs.items():
+            for step in job.get("steps") or []:
+                uses = str(step.get("uses", "")) if isinstance(step, dict) else ""
+                if CACHE_ACTION.match(uses):
+                    problems.append(f"{name}: job {job_id} uses {uses.split('@')[0]} on the release path, "
+                                    "which restores and saves no cache (PL10)")
+            if CACHE_BACKEND.search(json.dumps([env, job], default=str)):
+                problems.append(f"{name}: job {job_id} points a cache at the Actions cache service on the "
+                                "release path, which restores and saves no cache (PL10)")
     return problems
 
 
