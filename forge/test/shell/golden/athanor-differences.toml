@@ -2551,3 +2551,66 @@ item = 5
 what = "the switch shows the focus ring when the sheet opens"
 state = "recorded"
 reason = "a Sal menu popup puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar does; the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 1
+what = "a popup card casts no shadow"
+state = "recorded"
+reason = "a Sal island draws its fill and its outline, and no shadow; the GTK popup's box-shadow has no counterpart in Sal yet"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 2
+what = "a critical popup's amber outline"
+state = "closed"
+reason = "Sal's island takes an ink for its outline now (Ui::set_ink), and a critical card takes the warning ink, as GTK's .critical class"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 3
+what = "the cards were 28 px wider than GTK's"
+state = "closed"
+reason = "GTK's 360 px width request included the card's margin; the Sal island's minimum width includes its margin too, so the card takes the same 360 px"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 4
+what = "an action or a click on a popup reaches the daemon without an activation token"
+state = "recorded"
+reason = "athanor-sal has no xdg-activation-v1 yet, so the bar cannot ask the compositor for a token; InvokeAction goes all the same with an empty token, as the GTK bar sent it when GDK had none (BR4), and the application's window does not take the focus"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 5
+what = "the text's lines stand further apart, so a card is taller"
+state = "recorded"
+reason = "the Sal bar's font and line height differ from GTK's across the bar, not in the popups alone; the cards keep GTK's padding, spacing and width"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 1
+what = "Clear all shows the focus ring when the list opens"
+state = "recorded"
+reason = "a Sal menu popup puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar does; the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 2
+what = "the list kept 480 px however few notifications it held"
+state = "closed"
+reason = "the scroll takes its content's natural height up to 480 px (Ui::set_natural_height), as GTK's propagate-natural-height"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 3
+what = "the separator above Do not disturb was missing"
+state = "closed"
+reason = "the separator fills the column's width (Ui::set_fill); left to its natural width it had none and drew nothing"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 4
+what = "the cards of the list take the popover's corner radius"
+state = "recorded"
+reason = "a Sal Ui draws every island with its theme's one radius, so a card in the list rounds at the popover's 24 px; GTK's .notification-card class gave the cards 18 px, which the popups, on a Ui of their own, keep"

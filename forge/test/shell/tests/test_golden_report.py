@@ -182,6 +182,22 @@ class GoldenReportTest(unittest.TestCase):
             self.assertTrue(entry["what"].strip(), entry["item"])
             self.assertTrue(entry["reason"].strip(), entry["item"])
 
+    def test_the_notifications_answer_every_item_of_their_port(self):
+        """Each difference of the Sal notification list and popups against the GTK ones found
+        in their port is closed or recorded with its reason."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        for surface, count in (("bar-popups", 5), ("bar-notifications", 4)):
+            items = [
+                e for e in table.get("gtk-difference", []) if e.get("surface") == surface
+            ]
+            self.assertEqual(sorted(e["item"] for e in items), list(range(1, count + 1)))
+            for entry in items:
+                self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+                self.assertTrue(entry["what"].strip(), entry["item"])
+                self.assertTrue(entry["reason"].strip(), entry["item"])
+
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"
         dock = {"dock-workspaces", "dock-library"}

@@ -60,6 +60,14 @@ def never(seen, seconds):
     return not seen()
 
 
+def dnd_switches(app, Atspi):
+    """The do not disturb switch: GTK's reaches AT-SPI as a check box, AccessKit's
+    Role::Switch as a toggle button."""
+    return labelled(app, Atspi, "check box", "Do not disturb") or labelled(
+        app, Atspi, "toggle button", "Do not disturb"
+    )
+
+
 def toggle_list(app, Atspi, open_):
     """Presses the notification button, then waits until the list is `open_`. GTK clicks a
     button activated through AT-SPI only once its 250 ms press animation ends, so the press
@@ -193,9 +201,11 @@ def main():
     )
 
     check("an action button on a popup", press(app, Atspi, "Snooze"))
+    # Without an activation token: athanor-sal has no xdg-activation-v1 yet, recorded in
+    # athanor-differences.toml (bar-popups, item 4). The call goes all the same (BR4).
     check(
         "the action reaches the daemon with its key",
-        wait_for(logged("InvokeAction 2 snooze token"), 3),
+        wait_for(logged("InvokeAction 2 snooze no-token"), 3),
     )
 
     # Hostile input the daemon would already have cleaned: the bar checks it again (BR9).
@@ -271,7 +281,7 @@ def main():
         repr(problems(nodes, 7)),
     )
 
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     check("the do not disturb switch shows", bool(switches))
     if switches:
         switches[0].do_action(0)
@@ -282,7 +292,7 @@ def main():
     notify("Loud", hints={"urgency": GLib.Variant("y", 2)})
     check("a critical popup shows under do not disturb", wait_for(shows("Loud"), 3))
     check("the list opens for the switch", toggle_list(app, Atspi, True))
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     if switches:
         switches[0].do_action(0)
     check("do not disturb turns off", wait_for(logged("SetDoNotDisturb False"), 3))
