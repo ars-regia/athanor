@@ -46,8 +46,11 @@ host itself.
   `BALLOON_FLOOR` nor above `VM_MEMORY`. Under pressure the guest drops its cache first;
   once the host has room it grows back. The regulator is not part of the job: if it
   fails, the job goes on and the reason is in the journal (lines start with `balloon:`).
-- Two extra disks: `cache.raw` persists across jobs (podman storage, `~/.cache/azoth`),
-  `scratch.raw` is recreated empty before every job (the work directory).
+- Two extra disks, both recreated empty before every job: `cache.raw` (podman storage,
+  `~/.cache/azoth`) and `scratch.raw` (the work directory). No job reads what an earlier one
+  wrote: every guest takes whichever self-hosted job comes first, a pull request's or a
+  release's, and a pull request's kernel build is the one the push may publish (ADR-0110), so
+  a cache kept for pull requests alone would still reach a release (doc_pipeline.md PL10).
 - The GitHub token is a service credential encrypted with the host key and the TPM2
   (`/etc/credstore.encrypted/athanor-runner.github-token`), used only to create and
   remove runner registrations.
