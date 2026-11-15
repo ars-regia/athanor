@@ -411,6 +411,9 @@ impl State {
         crate::bell::global(&dh);
         // Decision 35.
         crate::background_effect::global(&dh);
+        // Decision 36. A surface's content type is kept, applied with its commit, and read by
+        // nothing at 1.0.
+        smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());

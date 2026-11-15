@@ -12466,3 +12466,7 @@ mod wave2a;
 // Decision 35: ext-background-effect-v1's blur.
 #[cfg(test)]
 mod background_effect;
+
+// Decision 36: content type, toplevel tag and DRM lease.
+#[cfg(test)]
+mod decision36;

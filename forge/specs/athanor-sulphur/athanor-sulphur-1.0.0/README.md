@@ -164,6 +164,10 @@ maximised or full-screen window, with `active_hint` off or at a theme width of 0
 motion is open: the compositor has no source for it yet, so the flag (`Bell::reduced_motion`)
 is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
 
+Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
+the content type its client sets, applied with the surface's commit, and no behaviour reads it at
+1.0 (`src/fixture/decision36.rs`).
+
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
 every kernel Athanor ships; without it, nothing is granted: `SO_PEERCRED` would leave a pid-reuse
