@@ -19,7 +19,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, walk  # noqa: E402
+from atspi_check import children, find_application, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     buttons,
     buttons_matching,
@@ -144,15 +144,11 @@ def switch_node(app, Atspi):
                 and showing(accessible, Atspi)
             ):
                 found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
+            kids = list(children(accessible))
         except GLib.Error:
             return
-        for child in children:
-            if child:
-                visit(child)
+        for child in kids:
+            visit(child)
 
     visit(app)
     return found[0] if found else None

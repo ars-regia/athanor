@@ -16,7 +16,7 @@ from pathlib import Path
 from gi.repository import Gio, GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, problems, walk  # noqa: E402
+from atspi_check import children, find_application, problems, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
@@ -46,15 +46,11 @@ def menu_items(app, Atspi):
                 Atspi.StateType.SHOWING
             ):
                 found[accessible.get_name()] = accessible
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
+            kids = list(children(accessible))
         except GLib.Error:
             return
-        for child in children:
-            if child:
-                visit(child)
+        for child in kids:
+            visit(child)
 
     visit(app)
     return found

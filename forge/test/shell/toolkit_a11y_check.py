@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application
+from atspi_check import children, find_application
 
 APP = "athanor-sal-a11y"
 DIALOG = ("alert", "What did you plug in?")
@@ -48,11 +48,6 @@ def pump(GLib, seconds, done):
         if time.monotonic() > deadline:
             return False
         time.sleep(0.05)
-
-
-def children(node):
-    found = (node.get_child_at_index(i) for i in range(node.get_child_count()))
-    return [child for child in found if child is not None]
 
 
 def windows(app):
@@ -145,7 +140,7 @@ def main():
         lambda event: heard.append((event.any_data, event.detail1))
     )
     listener.register("object:announcement")
-    status_nodes = len(children(window(app, STATUS)))
+    status_nodes = len(list(children(window(app, STATUS))))
     if not click(dialog, "Announce"):
         failures.append("no button 'Announce' in the dialog")
     pump(GLib, TIMEOUT, lambda: heard)
@@ -153,7 +148,7 @@ def main():
     pump(GLib, 1, lambda: False)
     if heard != [(ANNOUNCED, POLITE)]:
         failures.append(f"heard {heard}, expected [({ANNOUNCED!r}, {POLITE})]")
-    if (nodes := len(children(window(app, STATUS)))) != status_nodes:
+    if (nodes := len(list(children(window(app, STATUS))))) != status_nodes:
         failures.append(
             f"the status holds {nodes} node(s) after the announcement, {status_nodes} before"
         )

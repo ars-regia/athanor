@@ -99,5 +99,37 @@ class RingTest(unittest.TestCase):
         self.assertIsNone(check.ring_note(None, True))
 
 
+class ChildrenTest(unittest.TestCase):
+    class Fake:
+        def __init__(self, kids):
+            self.kids = kids
+
+        def get_child_count(self):
+            return len(self.kids)
+
+        def get_child_at_index(self, index):
+            return self.kids[index]
+
+    def test_a_child_gone_between_the_count_and_the_lookup_is_skipped(self):
+        self.assertEqual(list(check.children(self.Fake(["a", None, "c"]))), ["a", "c"])
+
+    def test_walk_survives_a_gone_child(self):
+        class Node(self.Fake):
+            def get_state_set(self):
+                return self
+
+            def contains(self, _):
+                return True
+
+            def get_role_name(self):
+                return "panel"
+
+            def get_name(self):
+                return "n"
+
+        atspi = type("Atspi", (), {"StateType": type("S", (), {"SHOWING": 0})})
+        self.assertEqual(len(check.walk(Node([Node([]), None]), atspi)), 2)
+
+
 if __name__ == "__main__":
     unittest.main()
