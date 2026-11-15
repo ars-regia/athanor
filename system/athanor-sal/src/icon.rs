@@ -166,6 +166,15 @@ impl Image {
         })
     }
 
+    /// Decodes a PNG already read, as [`Image::from_file`] decodes a file's: where the caller
+    /// reads the file under rules of its own. Refused for a PNG larger than [`MAX_IMAGE_SIDE`]
+    /// on a side.
+    pub fn from_png(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self {
+            pixmap: Arc::new(decode_png(bytes)?),
+        })
+    }
+
     /// Takes pixels already decoded: `width` by `height` pixels of straight-alpha sRGB RGBA8, row
     /// by row from the top left, which are premultiplied in place. Refused when `pixels` does not
     /// hold exactly that many, or when a side is 0 or over 65535, the largest a buffer holds.
@@ -734,6 +743,14 @@ mod tests {
         assert!(error.to_string().contains("more than"), "{error}");
         // An index.theme over 1 MiB is not read: the theme has no directories.
         assert_eq!(IconTheme::new(vec![dir], "t").resolve("icon", 16, 1), None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_png_read_by_the_caller_is_decoded_and_anything_else_refused() -> Result<(), Error> {
+        let image = Image::from_png(PNG)?;
+        assert_eq!((image.width(), image.height()), (16, 16));
+        assert!(Image::from_png(b"<svg/>").is_err());
         Ok(())
     }
 
