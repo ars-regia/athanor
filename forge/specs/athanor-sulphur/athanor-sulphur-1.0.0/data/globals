@@ -45,6 +45,8 @@ ext_background_effect_manager_v1 standard
 # Decision 36.
 wp_content_type_manager_v1 standard
 xdg_toplevel_tag_manager_v1 standard
+# On the udev backend only, for the GPU it draws on.
+wp_drm_lease_device_v1 unconfined
 # Under doc_own_stack.md decision 30's rule (`constraints.rs`).
 zwp_pointer_constraints_v1 standard
 zwp_relative_pointer_manager_v1 standard

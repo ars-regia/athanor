@@ -3140,11 +3140,18 @@ fn classified() -> Vec<(&'static str, Class)> {
 /// (`fixture` checks them on a node).
 const RENDER_NODE_GLOBALS: [&str; 2] = ["zwp_linux_dmabuf_v1", "wp_linux_drm_syncobj_manager_v1"];
 
-/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them.
+/// The globals offered only by the udev backend, on the GPU it draws on (decision 36).
+const UDEV_GLOBALS: [&str; 1] = ["wp_drm_lease_device_v1"];
+
+/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them headless.
 fn rows(admitted: impl Fn(Class) -> bool) -> BTreeSet<&'static str> {
     classified()
         .into_iter()
-        .filter(|(interface, class)| admitted(*class) && !RENDER_NODE_GLOBALS.contains(interface))
+        .filter(|(interface, class)| {
+            admitted(*class)
+                && !RENDER_NODE_GLOBALS.contains(interface)
+                && !UDEV_GLOBALS.contains(interface)
+        })
         .map(|(interface, _)| interface)
         .collect()
 }

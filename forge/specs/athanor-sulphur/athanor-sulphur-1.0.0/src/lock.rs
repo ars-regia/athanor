@@ -2,8 +2,9 @@
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
 //! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
 //! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
-//! output has been drawn locked.
+//! output has been drawn locked, and every DRM lease revoked (decision 36, `drm_lease.rs`).
 
+use crate::drm_lease::Confirmation;
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
 use smithay::desktop::{find_popup_root_surface, Window};
@@ -25,7 +26,7 @@ use std::time::{Duration, Instant};
 /// locked, and the lock surface of each output.
 pub struct Lock {
     lock: ExtSessionLockV1,
-    locker: Option<SessionLocker>,
+    locker: Option<Confirmation>,
     surfaces: Vec<(Output, LockSurface)>,
 }
 
@@ -89,9 +90,11 @@ impl SessionLockHandler for State {
         // A finger held on a window goes on reaching it no more: its surface is told the touch
         // is cancelled, and its release is no event (`touch.rs`).
         self.cancel_touches();
+        // Decision 36: from the lock request on no lease is granted, and every one ends now.
+        self.leases_locked();
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
-            locker: Some(locker),
+            locker: Some(Confirmation::new(locker)),
             surfaces: Vec::new(),
         });
         self.aids_quiet_changed();
@@ -104,6 +107,7 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.leases.unlocked();
         // Decision 35: nothing was sent while locked; the current answer is sent now.
         self.resend_dock_overlaps();
         self.aids_drop_pending();
@@ -232,10 +236,10 @@ impl State {
     }
 
     /// After a frame of every output: a lock waiting for its confirmation has been drawn, and
-    /// is confirmed.
+    /// is confirmed once every DRM lease is revoked (decision 36).
     pub fn locked_drawn(&mut self) {
         if let Some(locker) = self.lock.as_mut().and_then(|lock| lock.locker.take()) {
-            locker.lock();
+            locker.confirm(self.revoke_leases());
         }
     }
 }

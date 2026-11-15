@@ -238,6 +238,8 @@ pub struct State {
     pub lock_state: SessionLockManagerState,
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
+    /// The DRM leases granted (decision 36); only the udev backend grants one.
+    pub leases: crate::drm_lease::Leases<smithay::wayland::drm_lease::DrmLease>,
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
@@ -490,6 +492,7 @@ impl State {
             captures: Vec::new(),
             lock_state,
             lock: None,
+            leases: Default::default(),
             idle_notifier_state,
             inhibitors: HashMap::new(),
             input_hold,
