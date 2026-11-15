@@ -2,20 +2,27 @@
 
 The published crate `wayland-backend` 0.3.17 (crates.io, `MIT`, sha256
 `38a91b4eaddff87b1cd1074985e3713da4af2c49742d1b356b2c01670a67a078`, wayland-rs commit
-`72f7fe0d9e99cb720ed57ade0c3077aec533b6ab`, `wayland-backend`), with two changes to its pure-Rust
-server. `[patch.crates-io]` in the repository's root `Cargo.toml` puts it in place of the
-published crate for every crate of the workspace. The workspace links libwayland for its clients
-(`client_system`), so the changes reach the server side only, which Sulphur runs.
+`72f7fe0d9e99cb720ed57ade0c3077aec533b6ab`, `wayland-backend`), with changes to its pure-Rust
+backend. `[patch.crates-io]` in the repository's root `Cargo.toml` puts it in place of the
+published crate for every crate of the workspace.
+
+The wire parser of change 1 serves both sides of the pure-Rust backend. On the server it is
+Sulphur's. On the client it is that of every workspace crate that reaches `wayland-client`
+(the OSD, the launcher, the dock, the bar, the idle daemon, the control center and
+`athanor-sulphur-client` among them): those clients now reject an event with a null in a slot
+the signature does not admit, or with a new id of 0, with the protocol error "Malformed Wayland
+message.", as libwayland's client does.
+Only athanor-sal's optional `gpu` feature turns on `client_system`, which links libwayland's
+client and does not use this parser.
 
 ## 1. A null the signature forbids is a malformed message
 
 ### Why
 
 The wire parser read a string of length 0 as a null whatever the signature said, and took an
-object or a new id of 0 as it came. The server's own handlers and the request parsers that
-wayland-scanner generates take a non-null argument as present, and do not expect the null
-(`panic = "abort"`). libwayland rejects these nulls when it reads the message, and so does the
-parser now.
+object or a new id of 0 as it came, so it accepted nulls the signature forbids. libwayland
+rejects these nulls when it reads the message, and the patch brings the parser to the same
+behaviour.
 
 ### The change
 

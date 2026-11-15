@@ -126,8 +126,7 @@ fn data_device_manager(wire: &mut Wire) {
 /// The requests a case sends on its own client.
 type Requests = fn(&mut Wire);
 
-/// Each null a signature forbids: a string, an object and a new id, the first two in the
-/// requests whose handlers took them as present. Each ends its own client with a
+/// Nulls the signature forbids: a string, an object and a new id. Each ends its own client with a
 /// `wl_display.error`; the next client, and the fixture's, are served still.
 #[test]
 fn a_null_the_signature_forbids_ends_only_its_client() {
