@@ -6315,6 +6315,107 @@ fn a_token_restores_nothing_while_locked() {
     run.stop();
 }
 
+/// Whether the compositor keeps `token`: one it did not grant activates nothing.
+fn granted(run: &Running, token: &str) -> bool {
+    use smithay::wayland::xdg_activation::XdgActivationToken;
+    run.state
+        .xdg_activation_state
+        .data_for_token(&XdgActivationToken::from(token.to_owned()))
+        .is_some()
+}
+
+/// Clicks the bar of `bar`, at the top of the first output: the press's serial, delivered to it.
+fn click_bar(run: &mut Running, bar: &Local) -> u32 {
+    press(run, (100.0, 10.0).into());
+    release(run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(Some(to), bar.id, "the press went to the bar");
+    serial.into()
+}
+
+/// A click on a bar that never takes the keyboard gives the bar a token, which raises another
+/// application's window and gives it the keyboard (doc_bar.md, BR4).
+#[test]
+fn a_click_on_a_bar_without_the_keyboard_grants_a_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let window = app.server_window(&run, &surface);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+
+    let serial = click_bar(&mut run, &bar);
+    assert_eq!(keyboard_focus(&run), focus, "the bar takes no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token), "the click grants");
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "the window has the keyboard"
+    );
+    run.stop();
+}
+
+/// A press that a later one superseded grants no token, though both went to the bar.
+#[test]
+fn a_superseded_press_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let first = click_bar(&mut run, &bar);
+    let second = click_bar(&mut run, &bar);
+    let stale = run.activation_token(&mut bar, first);
+    assert!(!granted(&run, &stale), "the first press is stale");
+    let token = run.activation_token(&mut bar, second);
+    assert!(granted(&run, &token), "the last press grants");
+    run.stop();
+}
+
+/// A press delivered to another client's window grants the bar no token.
+#[test]
+fn another_clients_press_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let id = app.id.clone().expect("an id");
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    release(&mut run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(to, id, "the press went to the window");
+    let token = run.activation_token(&mut bar, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A client behind a security context gets no token from a press alone: it still needs the
+/// keyboard.
+#[test]
+fn a_press_alone_grants_a_sandboxed_client_no_token() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut sandboxed = Local::connect(&mut run, Some(context));
+    sandboxed.toplevel(&mut run);
+    let id = sandboxed.id.clone().expect("an id");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    // As if its window had the press, with the keyboard on the other window.
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.button = Some((serial, id));
+    let token = run.activation_token(&mut sandboxed, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A state object is sent the window's state and outputs at once, then each change: another
 /// window focused, its own focus back, and the minimise, after which its client's configure no
 /// longer says activated.

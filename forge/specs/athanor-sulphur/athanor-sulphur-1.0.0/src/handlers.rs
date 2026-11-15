@@ -2,7 +2,7 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{is_full_screen, ClientState, State};
+use crate::state::{is_full_screen, unconfined, ClientState, State};
 use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
@@ -1614,17 +1614,34 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation_state
     }
 
-    /// A token is good only when the client that asks for it holds the keyboard focus of this
-    /// seat, which it gets from the user's click or from mapping a window while nothing else
-    /// holds it (`place`). The serial must also be one this compositor sent since that focus;
-    /// the focused client always holds its own enter serial, so the range only keeps out serials
-    /// never sent, and the focus check is what keeps other clients out.
+    /// A token is good when its serial is the user's input to the client that asks for it, on
+    /// this seat, in one of two ways.
+    ///
+    /// The serial is the last button press, and this compositor delivered it to a surface of
+    /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
+    /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
+    /// Any later press, to whichever client, supersedes it. A client behind a security context
+    /// gets no token this way.
+    ///
+    /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
+    /// user's click or from mapping a window while nothing else holds it (`place`), and the
+    /// serial is one this compositor sent since that focus; the focused client always holds its
+    /// own enter serial, so the range only keeps out serials never sent, and the focus check is
+    /// what keeps other clients out.
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
         let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
+        if Seat::from_resource(&seat).as_ref() != Some(&self.seat) {
+            return false;
+        }
+        // The seat named is a resource of the client that asks.
+        let outside = seat.client().is_some_and(|asking| unconfined(&asking));
+        if outside && self.grab_serials.clicked(serial, &client) {
+            return true;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
@@ -1635,9 +1652,7 @@ impl XdgActivationHandler for State {
             .current_focus()
             .and_then(|surface| surface.client())
             .map(|focused| focused.id());
-        Seat::from_resource(&seat).as_ref() == Some(&self.seat)
-            && focused == Some(client)
-            && serial_since_focus(serial, enter, self.last_input_serial)
+        focused == Some(client) && serial_since_focus(serial, enter, self.last_input_serial)
     }
 
     fn request_activation(
