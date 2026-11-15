@@ -1413,11 +1413,14 @@ compositor and that the own compositor did not yet offer:
         revocation fails, `locked` waits; the outputs stay covered from the lock request on
         as before, and only the confirmation waits. The compositor tries again at the
         resume, before any output is drawn, and sends `locked` once the revocation succeeds;
-      - a lease the client has already ended, or whose connector is gone, counts as revoked.
-        Any other revocation that fails is logged as an error naming the connector, and the
-        lease is not counted as ended: new requests stay refused, and the revocation is
-        tried again at the next scan of the device, at the resume, and, while the session
-        is active and a lock waits on it, once a second;
+      - a lease counts as revoked only once the device no longer lists its lessee, read from
+        the device's list of lessees and not from the compositor's or Smithay's records, so a
+        lease a client destroyed while keeping its file descriptor, or one whose connector
+        is gone, is revoked like any other. Until the device confirms it, the lease is not
+        counted as ended: new requests stay refused, and the revocation is tried again at
+        the next scan of the device, at the resume, and, while the session is active and a
+        lock waits on it, once a second. A failure is logged as an error naming the
+        connector the first time and whenever its cause changes;
       - new requests are also refused from the moment the compositor starts a session
         switch on its own keys, or the session is paused, until the resume, or until the
         switch fails or names the session already shown. A switch the compositor makes
