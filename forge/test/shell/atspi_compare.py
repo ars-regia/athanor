@@ -113,9 +113,11 @@ INDICATOR_PAGES = {"lists"}
 # an unnamed button of the bar's calendar references matches the transcript's named button at the
 # same position: the k-th unnamed button of the reference, the k-th named button of the
 # transcript that no element of the reference names. The rule holds only for the references it
-# names, so that an unnamed button anywhere else still fails as missing.
+# names, and for the gallery's calendar page, which shows the same two calendars, so that an
+# unnamed button anywhere else still fails as missing.
 ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
 ARROWS_REFERENCES = {"atspi-bar-calendar", "atspi-bar-calendar-it"}
+ARROWS_PAGES = {"calendar"}
 
 
 def in_scroll_bar(nodes):
@@ -328,7 +330,9 @@ def gallery_problems(references, transcripts, lang):
         reference, transcript = (
             json.loads(path.read_text(encoding="utf-8")) for path in paths.values()
         )
-        found, failed = compare(reference, transcript, indicator=page in INDICATOR_PAGES)
+        found, failed = compare(
+            reference, transcript, indicator=page in INDICATOR_PAGES, arrows=page in ARROWS_PAGES
+        )
         lines += [f"{page}: {line}" for line in found]
         issue = EXPECTED_DIFFERENCES.get(page)
         if issue is None:

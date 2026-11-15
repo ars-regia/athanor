@@ -409,6 +409,20 @@ class GalleryTest(unittest.TestCase):
             _, failures = compare.gallery_problems(references, transcripts, "en")
             self.assertEqual(failures, ["lists: no difference left; remove its expected difference (#1)"])
 
+    def test_the_arrow_rule_holds_for_the_gallerys_calendar_page_only(self):
+        self.assertEqual(compare.ARROWS_PAGES, {"calendar"})
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                (Path(references) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "")])
+                )
+                (Path(transcripts) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "Next month")])
+                )
+            _, failures = compare.gallery_problems(references, transcripts, "en")
+            pages = [page for page in compare.GALLERY_PAGES if page != "calendar"]
+            self.assertEqual(failures, [f"{page}: button '': missing" for page in pages])
+
     def test_an_expected_difference_of_no_page_fails(self):
         stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}
         with mock.patch.object(compare, "EXPECTED_DIFFERENCES", stale):
