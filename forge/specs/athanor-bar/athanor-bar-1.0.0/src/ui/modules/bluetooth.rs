@@ -77,7 +77,7 @@ impl Module for Bluetooth {
     }
 
     fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
-        let (mut ui, frame) = look::popover(&tr("Bluetooth"), cx.theme.clone(), cx.rtl, cx.top);
+        let (mut ui, frame) = look::popover(&tr("Bluetooth"), look::page(cx.theme), cx.rtl, cx.top);
         let mut controls = look::controls(cx.icons, cx.scale, cx.secondary);
         self.page.build(&mut ui, frame, &mut controls);
         Some(ui)
