@@ -421,7 +421,11 @@ Release-path builds restore no cache: a cache is an input the provenance does no
 cache step in a release-path job. *Amended on 2026-11-15 (#1174):* `call-dag-compile.yml`
 no longer restores the Rust and sccache caches this paragraph recorded as debt, and the check
 takes as the release path every workflow with a job in a signing environment or in `release`
-(PL11, PL60), and every reusable workflow of the repository it calls.
+(PL11, PL60) or a job whose token has `id-token: write` (a keyless signature, attestation or
+provenance) or `packages: write` (a push to the registry with the job's token), from the job or
+from the workflow, and every reusable workflow of the repository such a workflow calls. The
+whole workflow counts, since its other jobs build what that job signs or pushes. A push to
+another registry with a credential of its own is not seen.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
@@ -1624,5 +1628,7 @@ attests and publishes the forge packages, no longer restores a Rust cache
 (`Swatinem/rust-cache`) or an sccache cache (`actions/cache`), so PL10 drops the sentence that
 recorded them as debt left to PB11. `verify.py workflows` gains the check PL10 and section 10
 already named: a job of a release-path workflow (one with a job in a signing environment or in
-`release`, or a reusable workflow of the repository that such a workflow calls) that uses a
-cache action or points sccache or BuildKit at the Actions cache service fails it.
+`release`, or with a job whose token has `id-token: write` or `packages: write`, or a reusable
+workflow of the repository that such a workflow calls) that uses a cache action or points
+sccache or BuildKit at the Actions cache service fails it. The release path so includes
+`azoth-signer.yml` and `kernel-build.yml`.

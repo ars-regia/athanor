@@ -222,8 +222,8 @@ class PolicyPullProblems(unittest.TestCase):
 
 
 class ReleaseCacheProblems(unittest.TestCase):
-    """PL10: a job of a release-path workflow, or of a reusable workflow one calls, restores and
-    saves no cache; a pull-request job may."""
+    """PL10: a job of a release-path workflow, one that signs, attests, pushes or promotes, or of a
+    reusable workflow one calls, restores and saves no cache; a pull-request job may."""
 
     RELEASING = ("on: workflow_dispatch\njobs:\n  sign:\n    environment: signing\n    runs-on: x\n"
                  "    steps:\n      - run: true\n  build:\n    uses: ./.github/workflows/call-build.yml\n")
@@ -275,6 +275,31 @@ class ReleaseCacheProblems(unittest.TestCase):
         self.assertEqual(self.problems(**{"release.yml": self.RELEASING,
                                           "call-build.yml": self.CALLED.format(steps="      - run: true\n"),
                                           "pr.yml": self.PULL_REQUEST.format(steps=steps)}), [])
+
+    def test_a_keyless_signer_or_a_registry_push_is_on_the_release_path(self):
+        cache = f"      - uses: actions/cache@{self.PIN}\n"
+        cases = {
+            "sign.yml": ("on: push\njobs:\n  publish:\n    runs-on: x\n    permissions:\n"
+                         "      id-token: write\n    steps:\n" + cache, "publish"),
+            "push.yml": ("on: push\npermissions:\n  packages: write\njobs:\n  check:\n    runs-on: x\n"
+                         "    steps:\n" + cache, "check"),
+        }
+        for name, (text, job) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(**{name: text}),
+                                 [f"{name}: job {job} uses actions/cache on the release path, which "
+                                  "restores and saves no cache (PL10)"])
+
+    def test_a_job_that_narrows_the_token_leaves_the_grant_of_its_workflow(self):
+        text = ("on: push\npermissions:\n  packages: write\njobs:\n  check:\n    runs-on: x\n"
+                f"    permissions:\n      contents: read\n    steps:\n      - uses: actions/cache@{self.PIN}\n")
+        self.assertEqual(self.problems(**{"check.yml": text}), [])
+
+    def test_the_signer_image_and_the_kernel_build_are_on_the_release_path(self):
+        path = verify.release_path_workflows(ROOT)
+        for name in ("azoth-signer.yml", "kernel-build.yml", "call-dag-compile.yml", "release.yml"):
+            self.assertIn(name, path)
+        self.assertNotIn("pr.yml", path)
 
     def test_a_promotion_in_release_is_on_the_release_path(self):
         text = self.RELEASING.replace("environment: signing", "environment: release").replace(

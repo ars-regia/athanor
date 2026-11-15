@@ -572,41 +572,62 @@ def release_problems(root):
 CACHE_ACTION = re.compile(r"^(?:actions/cache(?:/restore|/save)?|Swatinem/rust-cache)@")
 CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b")
 LOCAL_WORKFLOW = "./.github/workflows/"
+# The token grants of a job that publishes: id-token for a keyless signature, attestation or
+# provenance, packages for a push to GHCR with the job's token. A push to another registry with
+# a credential of its own is not seen.
+PUBLISHING_GRANTS = ("id-token", "packages")
 
 
-def release_cache_problems(root):
-    """PL10: no job of a release-path workflow restores or saves a cache, with a cache action or
-    with an sccache or BuildKit backend on the Actions cache, because a cache is an input the
-    provenance does not name (PL20) and any job of the default branch can write one. The release
-    path is every workflow with a job in a signing environment (D43) or in release (PL60), and
-    every reusable workflow of this repository it calls, at any depth."""
+def publishes(permissions):
+    """Whether a permissions block grants the token a write that publishes (PUBLISHING_GRANTS)."""
+    if permissions == "write-all":
+        return True
+    return isinstance(permissions, dict) and any(permissions.get(g) == "write" for g in PUBLISHING_GRANTS)
+
+
+def release_path_workflows(root):
+    """{workflow: (jobs, env)} for the release path of PL10: every workflow with a job in a
+    signing environment (D43) or in release (PL60), or with a job whose token may sign keylessly,
+    attest or push to the registry (id-token or packages write, from the job or, when the job
+    sets none, from the workflow), and every reusable workflow of this repository such a
+    workflow calls, at any depth. The whole workflow counts: its other jobs build what the
+    publishing job signs or pushes. Workflows that are not YAML are left to signing_problems."""
     root = Path(root)
-    if yaml is None:
-        return []
     workflows = {}
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         try:
             doc = yaml.safe_load(read(wf))
         except yaml.YAMLError:
-            continue  # signing_problems reports a workflow it cannot read
+            continue
         if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
             jobs = {job_id: job for job_id, job in doc["jobs"].items() if isinstance(job, dict)}
-            workflows[wf.name] = jobs, doc.get("env")
-    def releasing(job):
+            workflows[wf.name] = jobs, doc.get("env"), doc.get("permissions")
+    def releasing(job, permissions):
         environment = (job_environment(job) or "").lower()
-        return environment.startswith("signing") or environment == "release"
-    pending = [name for name, (jobs, _) in workflows.items() if any(map(releasing, jobs.values()))]
-    release_path = set()
+        return (environment.startswith("signing") or environment == "release"
+                or publishes(job.get("permissions", permissions)))
+    pending = [name for name, (jobs, _, permissions) in workflows.items()
+               if any(releasing(job, permissions) for job in jobs.values())]
+    path = {}
     while pending:
         name = pending.pop()
-        if name in release_path or name not in workflows:
+        if name in path or name not in workflows:
             continue
-        release_path.add(name)
-        pending += [uses[len(LOCAL_WORKFLOW):] for job in workflows[name][0].values()
+        path[name] = workflows[name][:2]
+        pending += [uses[len(LOCAL_WORKFLOW):] for job in path[name][0].values()
                     if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)]
+    return path
+
+
+def release_cache_problems(root):
+    """PL10: no job of a release-path workflow (release_path_workflows) restores or saves a
+    cache, with a cache action or with an sccache or BuildKit backend on the Actions cache,
+    because a cache is an input the provenance does not name (PL20) and any job of the default
+    branch can write one."""
+    if yaml is None:
+        return []
     problems = []
-    for name in sorted(release_path):
-        jobs, env = workflows[name]
+    for name, (jobs, env) in sorted(release_path_workflows(root).items()):
         for job_id, job in jobs.items():
             for step in job.get("steps") or []:
                 uses = str(step.get("uses", "")) if isinstance(step, dict) else ""
