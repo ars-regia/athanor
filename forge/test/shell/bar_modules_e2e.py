@@ -324,21 +324,22 @@ def network(ctx):
     check("a GetSecrets from another process is refused", refused)
     check("and opens no prompt", not prompt_open())
 
-    # Airplane mode is NetworkManager's two radio switches.
+    # Airplane mode is NetworkManager's two radio switches. A Sal switch is a toggle button,
+    # pressed when on.
     def airplane():
-        return labelled(app, Atspi, "check box", "Airplane mode")
+        return labelled(app, Atspi, "toggle button", "Airplane mode")
 
     open_popover(app, Atspi, "Network", airplane)
     airplane()[0].do_action(0)
     check("airplane mode turns Wi-Fi and mobile broadband off", wait_for(
         lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is False
         and property_of(bus, fx.NM, NM_PATH, fx.NM, "WwanEnabled") is False, 5))
-    wait_for(lambda: airplane() and airplane()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    wait_for(lambda: airplane() and airplane()[0].get_state_set().contains(Atspi.StateType.PRESSED), 5)
     airplane()[0].do_action(0)
     check("and back on", wait_for(lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is True, 5))
 
     # The VPN switch activates the saved VPN profile.
-    vpn = labelled(app, Atspi, "check box", "Office VPN")
+    vpn = labelled(app, Atspi, "toggle button", "Office VPN")
     check("the VPN is listed", bool(vpn))
     if vpn:
         vpn[0].do_action(0)
@@ -415,11 +416,11 @@ def bluetooth(ctx):
     check("an open popover discovers", wait_for(lambda: adapter("Discovering") is True, 5))
 
     def power():
-        return labelled(app, Atspi, "check box", "Bluetooth")
+        return labelled(app, Atspi, "toggle button", "Bluetooth")
 
     power()[0].do_action(0)
     check("the switch turns the adapter off", wait_for(lambda: adapter("Powered") is False, 5))
-    wait_for(lambda: power() and not power()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    wait_for(lambda: power() and not power()[0].get_state_set().contains(Atspi.StateType.PRESSED), 5)
     power()[0].do_action(0)
     check("and on again", wait_for(lambda: adapter("Powered") is True, 5))
 
