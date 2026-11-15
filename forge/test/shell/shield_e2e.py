@@ -115,7 +115,7 @@ def confirm(app, Atspi, name):
 
 
 def shows(app, Atspi, summary):
-    return summary in (alerts(app, Atspi) or [])
+    return summary in alerts(app, Atspi)
 
 
 def labels(app, Atspi):
