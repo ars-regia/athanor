@@ -56,7 +56,8 @@
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
   root `Cargo.toml` or `Cargo.lock` that only adds workspace members does not select `shell`.
-  Also amended 2026-11-15 (#1174), approved by the maintainer on 2026-11-15, a correction of
+  Also amended 2026-11-15 (#1174), approved by the maintainer with the pull request that makes
+  the change, a correction of
   the current state and no new target decision: PL10 no longer records restored caches on the
   release path as debt, since `call-dag-compile.yml` restores none and `verify.py workflows`
   rejects a cache step there (section 15).
@@ -1622,7 +1623,8 @@ updateinfo source of the Fedora half; section 3.3 adds the release statements to
 beside the image key (D43). The markers, `mark-current`, the janitor's marker rule and the
 re-run rule stay with the rest of PB4b.
 
-**Amended on 2026-11-15 (#1174),** approved by the maintainer on 2026-11-15, a correction of
+**Amended on 2026-11-15 (#1174),** approved by the maintainer with the pull request that makes
+the change, a correction of
 the current state and not a new target decision. `call-dag-compile.yml`, which builds, signs,
 attests and publishes the forge packages, no longer restores a Rust cache
 (`Swatinem/rust-cache`) or an sccache cache (`actions/cache`), so PL10 drops the sentence that
