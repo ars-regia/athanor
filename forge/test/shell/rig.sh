@@ -41,7 +41,8 @@
 #   rig.sh dock-e2e         athanor-dock in a scene: READY, openers, running windows, pinning, the favourites followed live, the knob and presets live, memory
 #   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
 #   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
-#   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
+#   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory;
+#                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the bar as its unit (run build-compositor first)
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
 #   rig.sh layer-guard <greeter|dock>   the surface must refuse to run when the shim loads late
@@ -1055,6 +1056,12 @@ shield-e2e)
     ;;
 tray-e2e)
     require athanor-shelld build-shelld
+    # Under athanor-sulphur the bar runs as its unit, whose layer surface the allow-list admits.
+    unit=""
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-sulphur build-compositor
+        unit=--unit
+    fi
     stage_greeter_icons
     seed_bar "$out/seed-tray-e2e" float top visible light
     rm -f "$out/tray-e2e-tray.log" "$out/tray-e2e-shelld.log"
@@ -1064,7 +1071,7 @@ tray-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/tray_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 tray-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --tray --respawn"
+                 && exec python3 /repo/forge/test/shell/bar_session.py $unit --tray --respawn"
     ;;
 compositor-e2e)
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then

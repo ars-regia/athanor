@@ -4,11 +4,13 @@
 //!
 //! `athanor-sal-gallery [--lang en|it] [--rtl] [--page <name>]`: `--lang` picks a column of
 //! `strings.tsv`, `--rtl` mirrors the window and `--page` names the page shown at the start. The
-//! dialogs page starts with its dialog open, the focus on the dialog's button.
+//! dialogs page starts with its dialog open, the focus on the dialog's button, and the menus page
+//! with its menu open, the focus on the menu's first item.
 
 use athanor_sal::driver::Role;
 use athanor_sal::{
-    driver, Application, Event, Kind, Shell, SurfaceId, Theme, Ui, WidgetId, WindowButton, Wrap,
+    driver, Application, Event, Kind, Shell, Side, SurfaceId, Theme, Ui, WidgetId, WindowButton,
+    Wrap,
 };
 use std::num::NonZeroU32;
 use std::process::ExitCode;
@@ -18,9 +20,13 @@ const STRINGS: &str = include_str!("../strings.tsv");
 /// The languages of `strings.tsv`, in the order of its columns.
 const LANGUAGES: [&str; 2] = ["en", "it"];
 /// The pages, in the order of the page toggles; the first is shown unless `--page` names another.
-const PAGES: [&str; 7] = ["buttons", "choices", "values", "lists", "text", "states", "dialogs"];
+const PAGES: [&str; 8] = [
+    "buttons", "choices", "values", "lists", "text", "states", "dialogs", "menus",
+];
 /// The page that opens a dialog, with its dialog open at the start.
 const DIALOGS: usize = 6;
+/// The page that opens a menu, with its menu open at the start.
+const MENUS: usize = 7;
 
 /// The window's widgets the gallery acts on.
 struct Gallery {
@@ -36,6 +42,17 @@ struct Gallery {
     lang: usize,
     /// The dialogs page's button, which opens the dialog.
     open: WidgetId,
+    /// The menus page's button, which opens the menu.
+    menu: WidgetId,
+}
+
+/// What the menu's check and radios show: the menu takes them from here each time it opens,
+/// as GTK's menu takes them from its actions' states.
+#[derive(Clone, Copy)]
+struct Choices {
+    check: bool,
+    /// The radio selected, 0 or 1.
+    radio: usize,
 }
 
 /// The rows of the lists page, a heading among them every [`ROWS_PER_HEADING`].
@@ -159,6 +176,11 @@ fn page(ui: &mut Ui, group: WidgetId, name: &str, lang: usize) -> Result<Vec<Wid
             return Ok(vec![switch, button]);
         }
         "dialogs" => return Ok(vec![ui.add(group, Kind::Button(t("dialog.open")?.into()))]),
+        "menus" => {
+            let button = ui.add(group, Kind::Button(t("menu.open")?.into()));
+            ui.set_has_popup(button, true);
+            return Ok(vec![button]);
+        }
         _ => return Err(format!("no page {name:?}")),
     }
     Ok(Vec::new())
@@ -186,6 +208,27 @@ fn dialog(options: &Options) -> Result<Ui, String> {
     ui.set_focus(Some(close));
     ui.layout();
     Ok(ui)
+}
+
+/// The menu of the menus page, laid out, and its check and radios: an item, a check, two radios,
+/// an item that takes no input and a submenu of one item, in three sections, as GTK draws a menu
+/// model's sections.
+fn menu(options: &Options, choices: Choices) -> Result<(Ui, [WidgetId; 3]), String> {
+    let t = |key| tr(options.lang, key);
+    let mut ui = Ui::new(t("menu.open")?, Theme::default(), options.rtl);
+    let menu = ui.add(Ui::ROOT, Kind::Menu);
+    ui.add(menu, Kind::MenuItem(t("menu.item")?.into()));
+    let check = ui.menu_check(menu, t("menu.check")?, choices.check);
+    ui.add(menu, Kind::Separator);
+    let first = ui.menu_radio(menu, t("menu.radio1")?, choices.radio == 0);
+    let second = ui.menu_radio(menu, t("menu.radio2")?, choices.radio == 1);
+    ui.add(menu, Kind::Separator);
+    let off = ui.add(menu, Kind::MenuItem(t("menu.off")?.into()));
+    ui.set_sensitive(off, false);
+    let (_, page) = ui.submenu(menu, t("menu.more")?);
+    ui.add(page, Kind::MenuItem(t("menu.about")?.into()));
+    ui.layout();
+    Ok((ui, [check, first, second]))
 }
 
 /// The window, with the page toggles that show one page each, and the widgets the gallery acts
@@ -220,8 +263,8 @@ fn build(options: &Options) -> Result<(Ui, Gallery), String> {
     }
     ui.set_focus(Some(toggles[options.page]));
     ui.layout();
-    let [replace, list, switch, button, open] = acted[..] else {
-        return Err("the lists, states and dialogs pages lost their widgets".into());
+    let [replace, list, switch, button, open, menu] = acted[..] else {
+        return Err("the lists, states, dialogs and menus pages lost their widgets".into());
     };
     Ok((
         ui,
@@ -232,6 +275,7 @@ fn build(options: &Options) -> Result<(Ui, Gallery), String> {
             first: 0,
             lang,
             open,
+            menu,
         },
     ))
 }
@@ -251,12 +295,13 @@ fn show_page(ui: &mut Ui, pages: &[(WidgetId, WidgetId)], selected: WidgetId) {
 enum Answer {
     Nothing,
     OpenDialog,
+    OpenMenu,
 }
 
 /// Answers an event of the window: a page toggle shows its page, the states page's switch makes
 /// its button sensitive or insensitive, the lists page's button replaces the rows of its list
-/// with the next fifty, or the first fifty again, and the dialogs page's button asks for the
-/// dialog.
+/// with the next fifty, or the first fifty again, and the dialogs and menus pages' buttons ask
+/// for the dialog and the menu.
 fn on_event(ui: &mut Ui, gallery: &mut Gallery, event: Event) -> Answer {
     match event {
         Event::Selected(selected) => show_page(ui, &gallery.pages, selected),
@@ -273,18 +318,22 @@ fn on_event(ui: &mut Ui, gallery: &mut Gallery, event: Event) -> Answer {
             ui.layout();
         }
         Event::Clicked(id) if id == gallery.open => return Answer::OpenDialog,
+        Event::Clicked(id) if id == gallery.menu => return Answer::OpenMenu,
         _ => {}
     }
     Answer::Nothing
 }
 
-/// The window, and the dialog it opens over itself.
+/// The window, and the dialog and the menu it opens over itself.
 struct App {
     options: Options,
     gallery: Gallery,
     window: Option<Ui>,
     /// The window once open, and its dialog while open.
     open: Option<(SurfaceId, Option<SurfaceId>)>,
+    choices: Choices,
+    /// The menu's check and radios, from its last opening.
+    entries: [WidgetId; 3],
 }
 
 impl App {
@@ -297,6 +346,34 @@ impl App {
             Ok(id) => self.open = Some((window, Some(id))),
             Err(error) => eprintln!("athanor-sal-gallery: the dialog did not open: {error}"),
         }
+    }
+
+    fn open_menu(&mut self, shell: &mut Shell) {
+        let Some((window, None)) = self.open else {
+            return;
+        };
+        let opened = menu(&self.options, self.choices).map_err(Into::into);
+        match opened.and_then(|(ui, entries)| {
+            self.entries = entries;
+            shell.open_popup(window, self.gallery.menu, ui, Side::Bottom)
+        }) {
+            Ok(_) => {}
+            Err(error) => eprintln!("athanor-sal-gallery: the menu did not open: {error}"),
+        }
+    }
+
+    /// An entry of the menu: an item closes it, as a check or a radio does once it has changed
+    /// the choices. The submenu's entries slide its pages in the menu itself.
+    fn menu_event(&mut self, shell: &mut Shell, event: Event) {
+        let [check, first, second] = self.entries;
+        match event {
+            Event::Clicked(_) => {}
+            Event::Toggled(id) if id == check => self.choices.check = !self.choices.check,
+            Event::Toggled(id) if id == first => self.choices.radio = 0,
+            Event::Toggled(id) if id == second => self.choices.radio = 1,
+            _ => return,
+        }
+        shell.close_popup();
     }
 }
 
@@ -313,6 +390,8 @@ impl Application for App {
             self.open = Some((surface, None));
             if self.options.page == DIALOGS {
                 self.open_dialog(shell);
+            } else if self.options.page == MENUS {
+                self.open_menu(shell);
             }
         }
     }
@@ -326,12 +405,15 @@ impl Application for App {
                     self.open = Some((window, None));
                 }
             }
+            Some((window, None)) if surface != window => self.menu_event(shell, event),
             _ => {
                 let answer = shell
                     .ui_mut(surface)
                     .map(|ui| on_event(ui, &mut self.gallery, event));
-                if answer == Some(Answer::OpenDialog) {
-                    self.open_dialog(shell);
+                match answer {
+                    Some(Answer::OpenDialog) => self.open_dialog(shell),
+                    Some(Answer::OpenMenu) => self.open_menu(shell),
+                    _ => {}
                 }
             }
         }
@@ -347,6 +429,11 @@ fn main() -> ExitCode {
             gallery,
             window: Some(ui),
             open: None,
+            choices: Choices {
+                check: true,
+                radio: 0,
+            },
+            entries: [Ui::ROOT; 3],
         };
         driver::run(app).map_err(|error| error.to_string())
     };
@@ -362,6 +449,7 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use athanor_sal::Mark;
 
     #[test]
     fn a_selection_inside_a_page_keeps_the_page() -> Result<(), String> {
@@ -403,6 +491,50 @@ mod tests {
         assert_eq!(on_event(&mut ui, &mut gallery, event), Answer::OpenDialog);
         let dialog = dialog(&options)?;
         assert_eq!(dialog.title, tr(0, "dialog.title")?);
+        Ok(())
+    }
+
+    #[test]
+    fn the_menus_page_holds_each_kind_of_menu_entry() -> Result<(), String> {
+        let options = Options::parse(["--page", "menus"].map(String::from).into_iter())?;
+        assert_eq!(options.page, MENUS);
+        let (mut ui, mut gallery) = build(&options)?;
+        let event = ui.activate(gallery.menu).ok_or("the button does not click")?;
+        assert_eq!(on_event(&mut ui, &mut gallery, event), Answer::OpenMenu);
+        let choices = Choices {
+            check: false,
+            radio: 1,
+        };
+        let (menu, [check, first, second]) = menu(&options, choices)?;
+        let marks: Vec<_> = [check, first, second]
+            .map(|id| match &menu.widget(id).kind {
+                Kind::MenuEntry { mark, .. } => Some(*mark),
+                _ => None,
+            })
+            .into();
+        assert_eq!(
+            marks,
+            [
+                Some(Mark::Check(false)),
+                Some(Mark::Radio(false)),
+                Some(Mark::Radio(true))
+            ]
+        );
+        let entries = &menu.widget(menu.widget(check).parent.ok_or("no menu")?).children;
+        let kinds: Vec<_> = entries.iter().map(|&id| &menu.widget(id).kind).collect();
+        assert_eq!(
+            kinds.iter().filter(|kind| matches!(kind, Kind::Separator)).count(),
+            2
+        );
+        let off = entries[entries.len() - 2];
+        assert!(!menu.is_sensitive(off), "the last section's item takes no input");
+        assert!(matches!(
+            kinds.last(),
+            Some(Kind::MenuEntry {
+                mark: Mark::Submenu(_),
+                ..
+            })
+        ));
         Ok(())
     }
 

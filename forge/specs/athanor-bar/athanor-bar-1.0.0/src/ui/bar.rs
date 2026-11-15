@@ -180,6 +180,9 @@ pub struct Bar {
     ready: bool,
     /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), opened once ready.
     open_on_start: Option<Module>,
+    /// The module and the surface of the last input on a module's own widgets, where the
+    /// popover it makes ready opens.
+    input_from: Option<(Module, SurfaceId)>,
     /// The layout paths and the state directory of the first-session pick, until it is done.
     first_session: Option<(Paths, PathBuf)>,
     _watches: Vec<gio::FileMonitor>,
@@ -363,6 +366,7 @@ impl Bar {
             open_on_start: std::env::var("ATHANOR_BAR_OPEN")
                 .ok()
                 .and_then(|id| Module::from_id(&id)),
+            input_from: None,
             first_session,
             _watches: watches,
             _apps_monitor: apps_monitor,
@@ -452,7 +456,9 @@ impl Bar {
                 let Some(button) = drawn.button(&mut cx, ui, group) else {
                     return false;
                 };
-                ui.set_has_popup(button, true);
+                if drawn.anchor(ui, button) == Some(button) {
+                    ui.set_has_popup(button, true);
+                }
                 out.acts.push((button, Act::Popover(module)));
                 true
             }
@@ -618,10 +624,8 @@ impl Bar {
             .iter()
             .min_by(|a, b| a.1.info.name.cmp(&b.1.info.name))
             .map(|(id, _)| *id);
-        let found = first.and_then(|surface| {
-            let button = self.outs.get(&surface)?.button(Act::Popover(module))?;
-            Some((surface, button))
-        });
+        let found =
+            first.and_then(|surface| Some((surface, self.anchor(shell, surface, module)?)));
         match found {
             Some((surface, button)) => self.open_popover(shell, surface, button, module),
             None => tracing::warn!(
@@ -629,6 +633,82 @@ impl Bar {
                 "a module's popover was asked for, but the bar does not show the module"
             ),
         }
+    }
+
+    /// The widget `module`'s popover opens from on `surface`: the one the module names, else
+    /// its button.
+    fn anchor(&self, shell: &Shell, surface: SurfaceId, module: Module) -> Option<WidgetId> {
+        let button = self.outs.get(&surface)?.button(Act::Popover(module))?;
+        let (_, drawn) = self.modules.iter().find(|(m, _)| *m == module)?;
+        drawn.anchor(shell.ui(surface)?, button).or(Some(button))
+    }
+
+    /// Opens the popover `module` has ready, on the surface of its last input, or on the
+    /// first output's when it was asked for by the captures.
+    fn open_ready(&mut self, shell: &mut Shell, module: Module) {
+        let from = self
+            .input_from
+            .filter(|(m, surface)| *m == module && self.outs.contains_key(surface));
+        let Some((_, surface)) = from else {
+            self.open_module(shell, module);
+            return;
+        };
+        if let Some(anchor) = self.anchor(shell, surface, module) {
+            self.open_popover(shell, surface, anchor, module);
+        }
+    }
+
+    /// Hands an input on a widget inside a module's button to the module, when the button is
+    /// a row of widgets of its own (the tray's items); false for any other widget. A press on
+    /// the widget whose popover is open closes it, as a second press on a popover's button.
+    fn module_input(
+        &mut self,
+        shell: &mut Shell,
+        surface: SurfaceId,
+        widget: WidgetId,
+        event: &Event,
+    ) -> bool {
+        let (Some(out), Some(ui)) = (self.outs.get(&surface), shell.ui(surface)) else {
+            return false;
+        };
+        // Down from the button, whose widgets are the surface's: `widget` came with the event.
+        let inside = |button: WidgetId| {
+            let mut stack = vec![button];
+            while let Some(at) = stack.pop() {
+                let children = &ui.widget(at).children;
+                if children.contains(&widget) {
+                    return true;
+                }
+                stack.extend(children);
+            }
+            false
+        };
+        let Some((module, button)) = out.acts.iter().find_map(|(button, act)| match act {
+            Act::Popover(module) if *button != widget && inside(*button) => {
+                Some((*module, *button))
+            }
+            _ => None,
+        }) else {
+            return false;
+        };
+        if matches!(event, Event::Clicked(_))
+            && self
+                .popover
+                .as_ref()
+                .is_some_and(|p| p.anchor == widget && p.parent == surface)
+        {
+            self.close_popover(shell);
+            return true;
+        }
+        self.input_from = Some((module, surface));
+        let (Some(ui), Some((_, drawn))) = (
+            shell.ui(surface),
+            self.modules.iter_mut().find(|(m, _)| *m == module),
+        ) else {
+            return true;
+        };
+        drawn.input(ui, button, widget, event);
+        true
     }
 
     fn close_popover(&mut self, shell: &mut Shell) {
@@ -919,6 +999,11 @@ impl Application for Bar {
             return;
         }
         match event {
+            Event::Clicked(widget)
+            | Event::ContextMenu(widget)
+            | Event::MiddleClick(widget)
+            | Event::Wheel { widget, .. }
+                if self.module_input(shell, surface, widget, &event) => {}
             Event::Clicked(button) => self.press(shell, surface, button),
             // Only a running entry has a menu: `open_entry_menu` does nothing for another.
             Event::ContextMenu(button) => self.open_entry_menu(shell, surface, button),
@@ -974,11 +1059,7 @@ impl Application for Bar {
                     });
                     self.rebuild_all(shell);
                     if let Some((surface, module)) = open {
-                        let button = self
-                            .outs
-                            .get(&surface)
-                            .and_then(|out| out.button(Act::Popover(module)));
-                        if let Some(button) = button {
+                        if let Some(button) = self.anchor(shell, surface, module) {
                             self.open_popover(shell, surface, button, module);
                         }
                     }
@@ -1007,6 +1088,7 @@ impl Application for Bar {
                     self.refresh_popover(shell);
                 }
                 Change::Module(Wakeup::Changed) => self.refresh_popover(shell),
+                Change::Module(Wakeup::Open(module)) => self.open_ready(shell, module),
             }
         }
         // The clock's minute, a keyboard aid's notice that expired, a layout or a workspace

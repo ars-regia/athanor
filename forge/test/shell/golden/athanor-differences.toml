@@ -2516,3 +2516,38 @@ item = 18
 what = "in right-to-left a tile's second line ran past its disc"
 state = "closed"
 reason = "a line broken at the tile's room is aligned to the start of that room; Sal's tile now takes that alignment offset back, so both lines end beside the disc, as GTK's"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 1
+what = "the shield's button is missing at the end of the bar, so the row is shorter and its buttons sit further towards the end edge"
+state = "recorded"
+reason = "the shield's module is ported to Sal in its own branch (feat/sal-bar-shield); the tray's capture shows the bar as this branch draws it, without it"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 2
+what = "the menu's rows are 28 px apart at scale 1, not 30, the menu is about 10 px narrower and its labels start about 5 px nearer its start edge"
+state = "recorded"
+reason = "Sal's menu entries take their height and padding from the bar's popover theme, whose padding is the bar buttons'; GTK's PopoverMenu uses its model buttons' own; to close with the gallery's menus page, which compares Sal's menu entries with GTK's popover menu"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 3
+what = "the check box and the radio ring are about 17 px, not 14, and an unselected ring is filled with a light tint"
+state = "recorded"
+reason = "Sal's menu entries reuse the check button's and the radio's drawing at the check button's size (c6a4f797); to close with the gallery's menus page"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 4
+what = "the first entry carries a focus ring when the menu opens without the keyboard"
+state = "recorded"
+reason = "Sal's open_popup focuses the menu's first item and draws its ring; GTK focuses it but draws the ring only after a key press; the captures open the menu through ATHANOR_BAR_OPEN, with no key pressed"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 5
+what = "the submenu's arrow is drawn in ink, where GTK draws it dimmed"
+state = "recorded"
+reason = "Sal draws a submenu entry's arrow in the label's colour; to close with the gallery's menus page"

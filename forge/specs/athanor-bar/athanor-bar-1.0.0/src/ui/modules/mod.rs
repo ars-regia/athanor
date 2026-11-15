@@ -33,6 +33,9 @@ pub enum Wakeup {
     /// The source changed: the bar asks every module whether its buttons are stale and sets
     /// the open popover's widgets again.
     Changed,
+    /// The module's popover is ready, as the tray's menu once its item answered: the bar
+    /// opens it from [`Module::anchor`], on the surface of the module's last input.
+    Open(order::Module),
 }
 
 /// The bar's handle for a module's sources, which may outlive it.
@@ -104,6 +107,19 @@ pub trait Module {
     fn heard(&mut self, _event: &Compositor) -> Option<String> {
         None
     }
+
+    /// The widget the popover opens from: `button`, or for a module whose button is a row of
+    /// widgets of its own (the tray's items), one of them, or `None` while the row is empty.
+    /// The bar marks `button` as opening a popover only when it is its own anchor.
+    fn anchor(&self, _ui: &Ui, button: WidgetId) -> Option<WidgetId> {
+        Some(button)
+    }
+
+    /// An input on `widget`, one of the widgets inside `button` that [`Module::anchor`] can
+    /// name: [`Event::Clicked`], [`Event::ContextMenu`], [`Event::MiddleClick`] or
+    /// [`Event::Wheel`]. A module that opens its popover from it wakes the bar with
+    /// [`Wakeup::Open`].
+    fn input(&mut self, _ui: &Ui, _button: WidgetId, _widget: WidgetId, _event: &Event) {}
 }
 
 /// The module that draws `module`, or `None` for one without a popover or not ported yet.
