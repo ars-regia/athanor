@@ -21,6 +21,7 @@ cannot be downloaded after the retries exits 2 with a message, apart from a patc
 
 import argparse
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -141,7 +142,8 @@ def download(url, name):
         try:
             with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
                 return response.read()
-        except (urllib.error.URLError, OSError) as failure:
+        # A truncated body or a bad status line is an HTTPException, not an OSError.
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as failure:
             error = failure
             if attempt < RETRIES:
                 time.sleep(RETRY_DELAY)

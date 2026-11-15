@@ -1,6 +1,7 @@
 """Unit test of the cosmic-comp rebase drill (python3 -B -m unittest discover -s scripts/cosmic-comp-rebase/tests -v)."""
 
 import hashlib
+import http.client
 import io
 import json
 import pathlib
@@ -8,6 +9,8 @@ import signal
 import subprocess
 import sys
 import tarfile
+import unittest.mock
+import urllib.error
 import tempfile
 import unittest
 
@@ -180,8 +183,10 @@ class Drill(unittest.TestCase):
         self.assertIn("no sha256 for wayland-backend-0.3.15.crate", self.drill_exits())
 
     def test_a_malformed_manifest_line_is_an_error(self):
-        self.crate(manifest="not-a-hash\n")
-        self.assertIn("not a `sha256  name` line", self.drill_exits())
+        for line in ("not-a-hash", f"{'0' * 64}  a.crate  b.crate", f"{'g' * 64}  a.crate"):
+            with self.subTest(line=line):
+                self.crate(manifest=line + "\n")
+                self.assertIn("not a `sha256  name` line", self.drill_exits())
 
     def test_an_undefined_macro_is_an_error(self):
         self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-%{undefined}.crate")
@@ -199,7 +204,7 @@ class Drill(unittest.TestCase):
         self.assertIn("does not finish expanding", self.drill_exits())
 
     def test_a_file_name_that_is_not_one_path_component_is_an_error(self):
-        for name in ("../../x.crate", ".hidden.crate"):
+        for name in ("../../x.crate", "a/b.crate", ".hidden.crate"):
             with self.subTest(name=name):
                 self.crate(source=f"{self.tmp.as_uri()}/wayland-backend-0.3.15.crate#/{name}")
                 self.assertIn("invalid file name", self.drill_exits())
@@ -217,6 +222,21 @@ class Drill(unittest.TestCase):
         self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
         rebase.RETRY_DELAY = 0
         self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
+
+    def test_a_download_is_tried_four_times_with_a_timeout_whatever_fails(self):
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-0.3.15.crate")
+        failures = [
+            http.client.IncompleteRead(b"x", 10),
+            http.client.BadStatusLine("x"),
+            urllib.error.URLError("x"),
+            TimeoutError("x"),
+        ]
+        self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
+        rebase.RETRY_DELAY = 0
+        with unittest.mock.patch.object(rebase.urllib.request, "urlopen", side_effect=failures) as urlopen:
+            self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertTrue(all(call.kwargs.get("timeout") for call in urlopen.call_args_list))
 
 if __name__ == "__main__":
     unittest.main()
