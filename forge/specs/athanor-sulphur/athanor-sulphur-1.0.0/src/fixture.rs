@@ -1507,8 +1507,10 @@ fn fixture(node: Option<&Path>) {
     }
     let count = |name: &str| globals.iter().filter(|g| *g == name).count();
     assert_eq!(count("wl_output"), OUTPUTS.len());
-    // linux-dmabuf and explicit sync come with a render node, and syncobj only when it can wait.
+    // linux-dmabuf, wl_drm and explicit sync come with a render node, and syncobj only when it
+    // can wait.
     assert_eq!(count("zwp_linux_dmabuf_v1"), usize::from(node.is_some()));
+    assert_eq!(count("wl_drm"), usize::from(node.is_some()));
     assert_eq!(
         count("wp_linux_drm_syncobj_manager_v1"),
         usize::from(state.syncobj_state.is_some())
@@ -3138,7 +3140,11 @@ fn classified() -> Vec<(&'static str, Class)> {
 
 /// The globals offered only on a render node: the tests below run on Pixman, without one
 /// (`fixture` checks them on a node).
-const RENDER_NODE_GLOBALS: [&str; 2] = ["zwp_linux_dmabuf_v1", "wp_linux_drm_syncobj_manager_v1"];
+const RENDER_NODE_GLOBALS: [&str; 3] = [
+    "zwp_linux_dmabuf_v1",
+    "wp_linux_drm_syncobj_manager_v1",
+    "wl_drm",
+];
 
 /// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them.
 fn rows(admitted: impl Fn(Class) -> bool) -> BTreeSet<&'static str> {
@@ -12462,6 +12468,10 @@ mod idle;
 // Decision 33, wave 2a: the standard globals.
 #[cfg(test)]
 mod wave2a;
+
+// Decision 33, wave 2b: wl_drm on a render node.
+#[cfg(test)]
+mod wave2b;
 
 // Decision 35: ext-background-effect-v1's blur.
 #[cfg(test)]

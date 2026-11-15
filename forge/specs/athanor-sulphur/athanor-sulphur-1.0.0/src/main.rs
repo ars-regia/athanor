@@ -52,6 +52,7 @@ mod touch;
 mod xkb_config;
 mod udev;
 mod winit;
+mod wl_drm;
 mod workspace;
 mod workspace_tiling;
 mod xwayland;

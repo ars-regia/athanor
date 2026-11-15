@@ -53,6 +53,8 @@ wp_pointer_warp_v1 standard
 # On a render node only, and linux-drm-syncobj-v1 only on one that can wait on a syncobj.
 zwp_linux_dmabuf_v1 standard
 wp_linux_drm_syncobj_manager_v1 standard
+# Decision 33, wave 2b: on a render node only, the one linux-dmabuf's feedback names (`wl_drm.rs`).
+wl_drm standard
 wp_security_context_manager_v1 unconfined
 zwp_text_input_manager_v3 unconfined
 zwlr_layer_shell_v1 layer-gated
