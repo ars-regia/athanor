@@ -3235,6 +3235,28 @@ impl Ui {
             key => key,
         };
         if let Some(id) = focused {
+            // A group of radios: the arrows move the choice along the group and wrap round, left
+            // and right as read, as GTK's grouped check buttons and the WAI-ARIA radio group.
+            let group = focus::radio_group(self, id);
+            let forward = match key {
+                Key::Down => Some(true),
+                Key::Up => Some(false),
+                Key::Right => Some(!self.rtl),
+                Key::Left => Some(self.rtl),
+                _ => None,
+            };
+            if let (Some(forward), false) = (forward, group.is_empty()) {
+                let n = group.len();
+                let at = group.iter().position(|&r| r == id).unwrap_or(0);
+                let to = group[if forward { (at + 1) % n } else { (at + n - 1) % n }];
+                return if to == id && self.is_active(to) {
+                    None
+                } else {
+                    self.activate(to)
+                };
+            }
+        }
+        if let Some(id) = focused {
             if let Kind::Slider(slider) = &self.widgets[id].kind {
                 let (min, max) = (slider.min, slider.max);
                 // What is seen: Right moves the knob right, which is toward min when mirrored.
