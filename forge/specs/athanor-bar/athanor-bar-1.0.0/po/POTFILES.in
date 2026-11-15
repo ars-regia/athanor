@@ -8,6 +8,8 @@ src/main.rs
 src/order.rs
 src/power.rs
 src/tiling.rs
+src/toolkit/bar.rs
+src/toolkit/power.rs
 src/ui/accessibility.rs
 src/ui/audio.rs
 src/ui/battery.rs

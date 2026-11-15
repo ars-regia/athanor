@@ -54,3 +54,8 @@ tracing = { workspace = true }
 name = "athanor-bar"
 path = "src/main.rs"
 required-features = ["gtk"]
+
+[[bin]]
+name = "athanor-bar-toolkit"
+path = "src/toolkit/main.rs"
+required-features = ["toolkit"]
