@@ -1575,7 +1575,12 @@ orca)
         else
             open=bluetooth fixtures=(--fixtures --discovering) walk=(Tab*5)
         fi
-        if [ -n "$unit" ]; then own=(--own-compositor float - "${3:-en}"); fi
+        if [ -n "$unit" ]; then
+            # athanor-sulphur gives the bar the keyboard on Ctrl+Alt+Tab only, as `orca bar`;
+            # the popover then holds it. The walk never leaves the popover, so the buttons
+            # decision 28 hides need no exemption.
+            walk=(ctrl+alt+Tab "${walk[@]}")
+        fi
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=12 RIG_CONFIG_SEED="/out/seed-orca-$2" \
             RIG_DATA_OVERLAY="$bar_overlay" ATHANOR_BAR_OPEN=$open \
             RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
