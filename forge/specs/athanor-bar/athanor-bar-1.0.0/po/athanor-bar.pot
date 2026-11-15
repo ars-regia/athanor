@@ -30,6 +30,7 @@ msgid "Minimise {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:392
+#: src/ui/modules/notifications.rs:888
 #, rust-format
 msgid "Close {title}"
 msgstr ""
@@ -106,7 +107,7 @@ msgstr ""
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348
-#: src/ui/modules/power.rs:88 src/ui/modules/shield.rs:684
+#: src/ui/modules/power.rs:88 src/ui/modules/shield.rs:693
 msgid "Cancel"
 msgstr ""
 
@@ -251,19 +252,19 @@ msgstr ""
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr ""
 
-#: src/ui/bar.rs:433
+#: src/ui/bar.rs:434
 msgid "Control center"
 msgstr ""
 
-#: src/ui/bar.rs:469 src/ui/bar.rs:882
+#: src/ui/bar.rs:470 src/ui/bar.rs:926
 msgid "Bar"
 msgstr ""
 
-#: src/ui/bar.rs:830
+#: src/ui/bar.rs:874
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/bar.rs:832
+#: src/ui/bar.rs:876
 msgid "Pin to Bar"
 msgstr ""
 
@@ -405,6 +406,32 @@ msgstr ""
 msgid "Layout {number}"
 msgstr ""
 
+#: src/ui/modules/notifications.rs:653
+msgid "Unknown application"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:924 src/ui/modules/notifications.rs:1098
+#: src/ui/modules/notifications.rs:1145
+msgid "Notifications"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:932
+msgid "Clear all"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:948
+msgid "No notifications"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:983
+msgid "Do not disturb"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:1140
+#, rust-format
+msgid "Notifications, {count} waiting"
+msgstr ""
+
 #: src/ui/modules/power.rs:36
 msgid "Lock"
 msgstr ""
@@ -449,292 +476,292 @@ msgstr ""
 msgid "Power"
 msgstr ""
 
-#: src/ui/modules/shield.rs:319
+#: src/ui/modules/shield.rs:321
 msgid "System image verified"
 msgstr ""
 
-#: src/ui/modules/shield.rs:320
+#: src/ui/modules/shield.rs:322
 msgid "Not verified yet"
 msgstr ""
 
-#: src/ui/modules/shield.rs:321
+#: src/ui/modules/shield.rs:323
 msgid "Update refused"
 msgstr ""
 
-#: src/ui/modules/shield.rs:327
+#: src/ui/modules/shield.rs:329
 msgid "Signed with a key of the policy in force"
 msgstr ""
 
-#: src/ui/modules/shield.rs:328
+#: src/ui/modules/shield.rs:330
 msgid "Not verified: installed from media"
 msgstr ""
 
-#: src/ui/modules/shield.rs:329
+#: src/ui/modules/shield.rs:331
 msgid "Not verified: no signature"
 msgstr ""
 
-#: src/ui/modules/shield.rs:330
+#: src/ui/modules/shield.rs:332
 msgid "Not verified: its key is not in the policy"
 msgstr ""
 
-#: src/ui/modules/shield.rs:331
+#: src/ui/modules/shield.rs:333
 msgid "Not verified: fetched under a permissive policy"
 msgstr ""
 
-#: src/ui/modules/shield.rs:332
+#: src/ui/modules/shield.rs:334
 msgid "Not verified: the image is outside the policy's scope"
 msgstr ""
 
-#: src/ui/modules/shield.rs:333
+#: src/ui/modules/shield.rs:335
 msgid "Not verified: the system was changed on this machine"
 msgstr ""
 
-#: src/ui/modules/shield.rs:334
+#: src/ui/modules/shield.rs:336
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr ""
 
-#: src/ui/modules/shield.rs:335
+#: src/ui/modules/shield.rs:337
 msgid "Not verified: this machine does not verify its updates"
 msgstr ""
 
-#: src/ui/modules/shield.rs:336
+#: src/ui/modules/shield.rs:338
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr ""
 
-#: src/ui/modules/shield.rs:342
+#: src/ui/modules/shield.rs:344
 msgid "Up to date"
 msgstr ""
 
-#: src/ui/modules/shield.rs:343
+#: src/ui/modules/shield.rs:345
 msgid "An update is available; it downloads at the next check"
 msgstr ""
 
-#: src/ui/modules/shield.rs:344
+#: src/ui/modules/shield.rs:346
 msgid "An update is ready; it installs when you restart"
 msgstr ""
 
-#: src/ui/modules/shield.rs:345
+#: src/ui/modules/shield.rs:347
 msgid "The update installs at the next restart"
 msgstr ""
 
-#: src/ui/modules/shield.rs:346
+#: src/ui/modules/shield.rs:348
 msgid "The last update was refused by the policy"
 msgstr ""
 
-#: src/ui/modules/shield.rs:348
+#: src/ui/modules/shield.rs:350
 msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
 msgstr ""
 
-#: src/ui/modules/shield.rs:350
+#: src/ui/modules/shield.rs:352
 msgid "This version is older than one this machine has run"
 msgstr ""
 
-#: src/ui/modules/shield.rs:357
+#: src/ui/modules/shield.rs:359
 msgid "The last check failed: network error"
 msgstr ""
 
-#: src/ui/modules/shield.rs:358
+#: src/ui/modules/shield.rs:360
 msgid "The last check failed: registry error"
 msgstr ""
 
-#: src/ui/modules/shield.rs:359
+#: src/ui/modules/shield.rs:361
 msgid "The last check failed: refused by the policy"
 msgstr ""
 
-#: src/ui/modules/shield.rs:360
+#: src/ui/modules/shield.rs:362
 msgid "The last check failed: storage error"
 msgstr ""
 
-#: src/ui/modules/shield.rs:361
+#: src/ui/modules/shield.rs:363
 msgid "The last check failed: internal error"
 msgstr ""
 
-#: src/ui/modules/shield.rs:367
+#: src/ui/modules/shield.rs:369
 msgid "No trust state yet: the first check has not run"
 msgstr ""
 
-#: src/ui/modules/shield.rs:369
+#: src/ui/modules/shield.rs:371
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr ""
 
-#: src/ui/modules/shield.rs:371
+#: src/ui/modules/shield.rs:373
 msgid "The trust state file could not be read"
 msgstr ""
 
-#: src/ui/modules/shield.rs:372 src/ui/modules/shield.rs:390
+#: src/ui/modules/shield.rs:374 src/ui/modules/shield.rs:392
 msgid "The update service did not answer"
 msgstr ""
 
-#: src/ui/modules/shield.rs:378
+#: src/ui/modules/shield.rs:380
 msgid "Not authorised"
 msgstr ""
 
-#: src/ui/modules/shield.rs:379
+#: src/ui/modules/shield.rs:381
 msgid "Another update request is running"
 msgstr ""
 
-#: src/ui/modules/shield.rs:381
+#: src/ui/modules/shield.rs:383
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr ""
 
-#: src/ui/modules/shield.rs:383
+#: src/ui/modules/shield.rs:385
 msgid "There is no previous version to go back to"
 msgstr ""
 
-#: src/ui/modules/shield.rs:384
+#: src/ui/modules/shield.rs:386
 msgid "A program is blocking the restart; close it and try again"
 msgstr ""
 
-#: src/ui/modules/shield.rs:385
+#: src/ui/modules/shield.rs:387
 msgid "The request failed; the system journal says why"
 msgstr ""
 
-#: src/ui/modules/shield.rs:387
+#: src/ui/modules/shield.rs:389
 msgid "This security update was already postponed once, or can no longer be"
 msgstr ""
 
-#: src/ui/modules/shield.rs:389
+#: src/ui/modules/shield.rs:391
 msgid "Only security updates can be postponed"
 msgstr ""
 
-#: src/ui/modules/shield.rs:405
+#: src/ui/modules/shield.rs:413
 msgid "January"
 msgstr ""
 
-#: src/ui/modules/shield.rs:406
+#: src/ui/modules/shield.rs:414
 msgid "February"
 msgstr ""
 
-#: src/ui/modules/shield.rs:407
+#: src/ui/modules/shield.rs:415
 msgid "March"
 msgstr ""
 
-#: src/ui/modules/shield.rs:408
+#: src/ui/modules/shield.rs:416
 msgid "April"
 msgstr ""
 
-#: src/ui/modules/shield.rs:409
+#: src/ui/modules/shield.rs:417
 msgid "May"
 msgstr ""
 
-#: src/ui/modules/shield.rs:410
+#: src/ui/modules/shield.rs:418
 msgid "June"
 msgstr ""
 
-#: src/ui/modules/shield.rs:411
+#: src/ui/modules/shield.rs:419
 msgid "July"
 msgstr ""
 
-#: src/ui/modules/shield.rs:412
+#: src/ui/modules/shield.rs:420
 msgid "August"
 msgstr ""
 
-#: src/ui/modules/shield.rs:413
+#: src/ui/modules/shield.rs:421
 msgid "September"
 msgstr ""
 
-#: src/ui/modules/shield.rs:414
+#: src/ui/modules/shield.rs:422
 msgid "October"
 msgstr ""
 
-#: src/ui/modules/shield.rs:415
+#: src/ui/modules/shield.rs:423
 msgid "November"
 msgstr ""
 
-#: src/ui/modules/shield.rs:416
+#: src/ui/modules/shield.rs:424
 msgid "December"
 msgstr ""
 
-#: src/ui/modules/shield.rs:449
+#: src/ui/modules/shield.rs:457
 #, rust-format
 msgid "Version {version}"
 msgstr ""
 
-#: src/ui/modules/shield.rs:450
+#: src/ui/modules/shield.rs:458
 #, rust-format
 msgid "Built on {date}"
 msgstr ""
 
-#: src/ui/modules/shield.rs:453
+#: src/ui/modules/shield.rs:461
 #, rust-format
 msgid "Last checked on {date}"
 msgstr ""
 
-#: src/ui/modules/shield.rs:454
+#: src/ui/modules/shield.rs:462
 msgid "Never checked"
 msgstr ""
 
-#: src/ui/modules/shield.rs:461
+#: src/ui/modules/shield.rs:469
 #, rust-format
 msgid "Host: {host}"
 msgstr ""
 
-#: src/ui/modules/shield.rs:465
+#: src/ui/modules/shield.rs:473
 msgid "Signature policy in force"
 msgstr ""
 
-#: src/ui/modules/shield.rs:467
+#: src/ui/modules/shield.rs:475
 msgid "Signature policy not in force"
 msgstr ""
 
-#: src/ui/modules/shield.rs:470
+#: src/ui/modules/shield.rs:478
 msgid "The policy is the one Athanor ships"
 msgstr ""
 
-#: src/ui/modules/shield.rs:472
+#: src/ui/modules/shield.rs:480
 msgid "The policy was changed on this machine"
 msgstr ""
 
-#: src/ui/modules/shield.rs:475
+#: src/ui/modules/shield.rs:483
 msgid "Secure Boot on"
 msgstr ""
 
-#: src/ui/modules/shield.rs:477
+#: src/ui/modules/shield.rs:485
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr ""
 
-#: src/ui/modules/shield.rs:481
+#: src/ui/modules/shield.rs:489
 msgid "Automatic security updates are off: security fixes wait until someone installs them."
 msgstr ""
 
-#: src/ui/modules/shield.rs:486
+#: src/ui/modules/shield.rs:494
 #, rust-format
 msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
 msgstr ""
 
-#: src/ui/modules/shield.rs:499
+#: src/ui/modules/shield.rs:507
 msgid "Restart and install the update now?"
 msgstr ""
 
-#: src/ui/modules/shield.rs:499 src/ui/modules/shield.rs:664
+#: src/ui/modules/shield.rs:507 src/ui/modules/shield.rs:673
 msgid "Restart to update"
 msgstr ""
 
-#: src/ui/modules/shield.rs:501
+#: src/ui/modules/shield.rs:509
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr ""
 
-#: src/ui/modules/shield.rs:502
+#: src/ui/modules/shield.rs:510
 msgid "Go back"
 msgstr ""
 
-#: src/ui/modules/shield.rs:505
+#: src/ui/modules/shield.rs:513
 msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
 msgstr ""
 
-#: src/ui/modules/shield.rs:506
+#: src/ui/modules/shield.rs:514
 msgid "Turn Off"
 msgstr ""
 
-#: src/ui/modules/shield.rs:659
+#: src/ui/modules/shield.rs:668
 msgid "Automatic security updates"
 msgstr ""
 
-#: src/ui/modules/shield.rs:663
+#: src/ui/modules/shield.rs:672
 msgid "Postpone"
 msgstr ""
 
-#: src/ui/modules/shield.rs:667
+#: src/ui/modules/shield.rs:676
 msgid "Go back to the previous version"
 msgstr ""
 
