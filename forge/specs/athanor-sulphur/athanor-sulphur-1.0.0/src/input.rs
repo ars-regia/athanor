@@ -99,6 +99,9 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        if key_state == KeyState::Pressed {
+            self.grab_serials.press = Some(serial);
+        }
         // A key the input method's grab takes is no client's to name.
         let mut to = keyboard
             .current_focus()
@@ -298,10 +301,6 @@ impl State {
         // token made from the click that focused a window is in range.
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
-        if button_state == ButtonState::Pressed {
-            let to = pointer.current_focus().and_then(|surface| surface.client());
-            self.grab_serials.button = to.map(|client| (serial, client.id()));
-        }
         pointer.button(
             self,
             &ButtonEvent {
@@ -311,6 +310,14 @@ impl State {
                 time,
             },
         );
+        // After the grab: every grab sends the press to the pointer's focus then, so a press is
+        // the client's it was delivered to. A move or a resize sends it to no client, and a
+        // popup's grab that the press dismisses sends it to the surface under the pointer.
+        if button_state == ButtonState::Pressed {
+            self.grab_serials.press = Some(serial);
+            let to = pointer.current_focus().and_then(|surface| surface.client());
+            self.grab_serials.button = to.map(|client| (serial, client.id()));
+        }
         pointer.frame(self);
         self.a11y.set_pointing(false);
     }

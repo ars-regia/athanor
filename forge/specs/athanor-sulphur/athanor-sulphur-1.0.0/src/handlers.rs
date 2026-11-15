@@ -1620,8 +1620,9 @@ impl XdgActivationHandler for State {
     /// The serial is the last button press, and this compositor delivered it to a surface of
     /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
     /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
-    /// Any later press, to whichever client, supersedes it. A client behind a security context
-    /// gets no token this way.
+    /// The press must be the latest input: a later press of any kind, a key, a button, a finger
+    /// or a pen, to whichever client, or a keyboard focus change supersedes it; its release
+    /// does not. A client behind a security context gets no token this way.
     ///
     /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
     /// user's click or from mapping a window while nothing else holds it (`place`), and the
@@ -1645,13 +1646,16 @@ impl XdgActivationHandler for State {
         }
         // The seat named is a resource of the client that asks.
         let outside = seat.client().is_some_and(|asking| unconfined(&asking));
-        if outside && self.grab_serials.clicked(serial, &client) {
-            return true;
-        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
-        let Some(enter) = keyboard.last_enter() else {
+        let enter = keyboard.last_enter();
+        let latest = self.grab_serials.press == Some(serial)
+            && enter.is_none_or(|enter| serial.is_no_older_than(&enter));
+        if outside && latest && self.grab_serials.clicked(serial, &client) {
+            return true;
+        }
+        let Some(enter) = enter else {
             return false;
         };
         let focused = keyboard

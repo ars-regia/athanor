@@ -6415,6 +6415,45 @@ fn a_superseded_press_grants_no_token() {
     run.stop();
 }
 
+/// A key press after the click, sent to another client, supersedes it: the bar gets no token.
+#[test]
+fn a_key_press_after_a_click_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let serial = click_bar(&mut run, &bar);
+    key(&mut run.state, KEY_Q, true);
+    key(&mut run.state, KEY_Q, false);
+    let (_, to) = run.state.grab_serials.key_press.clone().expect("a key press");
+    assert_eq!(Some(to), other.id, "the key went to the window");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A press a window's move takes, over the bar, is delivered to no client: the bar gets no
+/// token from it.
+#[test]
+fn a_press_a_move_takes_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    moved(&mut run, &mut app);
+    run.state.pointer_to((100.0, 10.0).into(), InputTime::now());
+    // BTN_RIGHT, while the left button holds the move.
+    run.state
+        .button_input(0x111, ButtonState::Pressed, InputTime::now());
+    assert!(moving(&run), "the move goes on");
+    let serial = run.state.grab_serials.press.expect("a press");
+    assert!(run.state.grab_serials.button.is_none(), "the press went to no client");
+    let token = run.activation_token(&mut bar, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A press delivered to another client's window grants the bar no token.
 #[test]
 fn another_clients_press_grants_no_token() {
@@ -6448,6 +6487,7 @@ fn a_press_alone_grants_a_sandboxed_client_no_token() {
     // As if its window had the press, with the keyboard on the other window.
     let serial = SERIAL_COUNTER.next_serial();
     run.state.grab_serials.button = Some((serial, id));
+    run.state.grab_serials.press = Some(serial);
     let token = run.activation_token(&mut sandboxed, serial.into());
     assert!(!granted(&run, &token));
     run.stop();

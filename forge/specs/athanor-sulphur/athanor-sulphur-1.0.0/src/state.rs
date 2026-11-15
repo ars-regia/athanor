@@ -307,6 +307,9 @@ pub struct GrabSerials {
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
+    /// The last press of any kind, a key, a button, a finger or a pen, whether a client or the
+    /// compositor took it: a click grants a token only while it is the last (`token_created`).
+    pub press: Option<Serial>,
 }
 
 impl GrabSerials {
@@ -2231,6 +2234,7 @@ mod tests {
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),
+            press: Some(s(10)),
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");
