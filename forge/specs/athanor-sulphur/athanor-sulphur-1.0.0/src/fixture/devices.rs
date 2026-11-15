@@ -671,7 +671,7 @@ fn a_lock_cancels_a_pinch_in_progress() {
 }
 
 /// Waits for the protocol error of `local`.
-fn protocol_error(
+pub(super) fn protocol_error(
     run: &mut Running,
     local: &mut Local,
 ) -> wayland_client::backend::protocol::ProtocolError {
