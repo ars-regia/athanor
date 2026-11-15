@@ -14,11 +14,14 @@ since a patch may change a vendored crate. A patch that fails is reported and
 left out; the rest are still tried. Writes OUT_DIR/report.json and OUT_DIR/report.md.
 Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares no patches
 (said so in the report). A missing spec, patch directory or declared patch file is an error
-(exit 1 with a message), never an empty set.
+(exit 1 with a message), never an empty set, and so is a crate the manifest does not list,
+whose hash differs, whose name or URL is invalid or whose archive leaves vendor/. A crate that
+cannot be downloaded after the retries exits 2 with a message, apart from a patch that fails.
 """
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -27,12 +30,20 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SPEC = ROOT / "forge/specs/cosmic-comp/cosmic-comp.spec"
 PATCHES = ROOT / "forge/specs/cosmic-comp/SOURCES"
 REPO = "https://github.com/pop-os/cosmic-comp"
+# A crate that cannot be downloaded exits with this status, apart from a patch that does not
+# apply (1). Like `curl --retry 3 --retry-delay 5` in forge/scripts/fetch_sources.sh.
+DOWNLOAD_FAILED = 2
+RETRIES, RETRY_DELAY, TIMEOUT = 3, 5, 60
+# Expansions of one Source line before the drill gives up on a macro that names itself.
+MAX_EXPANSIONS = 100
 TAG = re.compile(
     r"^epoch-(\d+)\.(\d+)\.(\d+)$"
 )  # stable releases only: no -alpha or -beta
@@ -68,7 +79,8 @@ def spec_patches(spec_text, patches_dir):
 
 def expand(text, spec_text):
     """Expand the %{name} macros the spec defines with %global or %define, and its Name and
-    Version tags. An error for a macro the spec does not define."""
+    Version tags. An error for a macro the spec does not define, and for one that does not
+    finish expanding in MAX_EXPANSIONS steps (a macro that names itself)."""
     macros = {
         m.group(1).lower(): m.group(2)
         for m in re.finditer(r"^(Name|Version):\s+(\S+)\s*$", spec_text, re.M)
@@ -77,48 +89,84 @@ def expand(text, spec_text):
         m.group(1): m.group(2)
         for m in re.finditer(r"^%(?:global|define)\s+(\w+)\s+(\S+)\s*$", spec_text, re.M)
     }
-    while m := re.search(r"%\{(\w+)\}", text):
+    for _ in range(MAX_EXPANSIONS):
+        m = re.search(r"%\{(\w+)\}", text)
+        if not m:
+            return text
         if m.group(1) not in macros:
             sys.exit(f"cosmic-comp.spec: %{{{m.group(1)}}} is not defined in the spec")
         text = text[: m.start()] + macros[m.group(1)] + text[m.end() :]
-    return text
+    sys.exit(f"cosmic-comp.spec: {text} does not finish expanding in {MAX_EXPANSIONS} steps")
 
 
 def spec_crates(spec_text):
     """The crates the spec declares as further Sources: (URL, file name), the name being the
-    URL's `#/name` fragment or else its basename, as forge/scripts/fetch_sources.sh names it."""
+    URL's last `#/name` fragment or else its basename, as forge/scripts/fetch_sources.sh names
+    it, and held to the same rule: one path component, not empty, not starting with a dot.
+    A crate whose URL is not http, https or file is an error."""
     crates = []
     for m in re.finditer(r"^Source([1-9]\d*):\s+(\S+)\s*$", spec_text, re.M):
-        url = expand(m.group(2), spec_text)
-        name = url.split("#/", 1)[1] if "#/" in url else url.rsplit("/", 1)[-1]
-        if re.match(r"^(https?|file)://", url) and name.endswith(".crate"):
-            crates.append((url.split("#", 1)[0], name))
+        entry = expand(m.group(2), spec_text)
+        url = entry.split("#", 1)[0]
+        name = entry.rsplit("#/", 1)[1] if "#/" in entry else url.rsplit("/", 1)[-1]
+        if not name.endswith(".crate"):
+            continue
+        if not name or "/" in name or name.startswith("."):
+            sys.exit(f"cosmic-comp.spec: invalid file name derived from {entry}: '{name}'")
+        if not re.match(r"^(https?|file)://", url):
+            sys.exit(f"cosmic-comp.spec: Source{m.group(1)} {url} is not an http, https or file URL")
+        crates.append((url, name))
     return crates
+
+
+def manifest_hashes(manifest):
+    """The `sha256  name` lines of sources.sha256; an error for a line of another shape."""
+    known = {}
+    if not manifest.is_file():
+        return known
+    for number, line in enumerate(manifest.read_text().splitlines(), 1):
+        if not line.strip():
+            continue
+        fields = line.split()
+        if len(fields) != 2 or not re.fullmatch(r"[0-9a-f]{64}", fields[0]):
+            sys.exit(f"{manifest}:{number}: not a `sha256  name` line: {line!r}")
+        known[fields[1]] = fields[0]
+    return known
+
+
+def download(url, name):
+    """The bytes at url, with RETRIES retries RETRY_DELAY seconds apart, each attempt bounded by
+    TIMEOUT; exits with DOWNLOAD_FAILED when every attempt fails."""
+    for attempt in range(RETRIES + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=TIMEOUT) as response:
+                return response.read()
+        except (urllib.error.URLError, OSError) as failure:
+            error = failure
+            if attempt < RETRIES:
+                time.sleep(RETRY_DELAY)
+    print(f"{name}: download of {url} failed after {RETRIES + 1} attempts: {error}", file=sys.stderr)
+    raise SystemExit(DOWNLOAD_FAILED)
 
 
 def vendor_crates(src, spec_text, sources_dir):
     """Unpack each crate under src/vendor, as %prep does, after checking its sha256 against
     sources.sha256. An error for a crate the manifest does not list or whose hash differs."""
     manifest = sources_dir / "sources.sha256"
-    known = {}
-    if manifest.is_file():
-        for line in manifest.read_text().splitlines():
-            if line.strip():
-                digest, name = line.split()
-                known[name] = digest
+    known = manifest_hashes(manifest)
     for url, name in spec_crates(spec_text):
         if name not in known:
             sys.exit(f"{manifest}: no sha256 for {name}")
-        with urllib.request.urlopen(url) as response:
-            data = response.read()
+        data = download(url, name)
         if hashlib.sha256(data).hexdigest() != known[name]:
             sys.exit(f"{name}: sha256 differs from {manifest}")
-        archive = src / name
-        archive.write_bytes(data)
         (src / "vendor").mkdir(exist_ok=True)
-        with tarfile.open(archive) as tar:
-            tar.extractall(src / "vendor", filter="data")
-        archive.unlink()
+        # The data filter refuses a member outside vendor/, a link out of it or a device.
+        try:
+            with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+                tar.extractall(src / "vendor", filter="data")
+        except tarfile.FilterError as refused:
+            sys.exit(f"{name}: {refused}")
 
 
 def select_tag(tags, pinned):

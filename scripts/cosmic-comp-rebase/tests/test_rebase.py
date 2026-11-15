@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import pathlib
+import signal
 import subprocess
 import sys
 import tarfile
@@ -128,30 +129,42 @@ class Drill(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_drill()
 
-    def crate(self, sha256=None):
-        """A crate archive, wayland-backend-0.3.15/src/wire.rs, declared as Source1 by a
-        file:// URL through a %global, its sha256 in sources.sha256; and a patch on it."""
+    def crate(self, sha256=None, member="wayland-backend-0.3.15/src/wire.rs", manifest=None, source=None, macros=""):
+        """A crate archive holding `member`, declared as Source1 by a file:// URL through a
+        %global, its sha256 in sources.sha256, and a patch on it. `manifest` replaces the
+        manifest's text, `source` the Source1 value, `macros` adds lines to the spec."""
         body = b"pub fn parse() {}\n"
         packed = io.BytesIO()
         with tarfile.open(fileobj=packed, mode="w:gz") as tar:
-            entry = tarfile.TarInfo("wayland-backend-0.3.15/src/wire.rs")
+            entry = tarfile.TarInfo(member)
             entry.size = len(body)
             tar.addfile(entry, io.BytesIO(body))
         archive = self.tmp / "wayland-backend-0.3.15.crate"
         archive.write_bytes(packed.getvalue())
         digest = sha256 or hashlib.sha256(packed.getvalue()).hexdigest()
-        (self.patches / "sources.sha256").write_text(f"{digest}  wayland-backend-0.3.15.crate\n")
+        (self.patches / "sources.sha256").write_text(
+            f"{digest}  wayland-backend-0.3.15.crate\n" if manifest is None else manifest
+        )
         (self.patches / "0001-vendor.patch").write_text(
             "--- a/vendor/wayland-backend-0.3.15/src/wire.rs\n"
             "+++ b/vendor/wayland-backend-0.3.15/src/wire.rs\n"
             "@@ -1 +1,2 @@\n pub fn parse() {}\n+pub fn check() {}\n"
         )
+        if source is None:
+            source = f"{archive.parent.as_uri()}/wayland-backend-%{{wayland_backend_version}}.crate"
         self.spec.write_text(
             SPEC
             + "%global wayland_backend_version 0.3.15\n"
-            + f"Source1:        {archive.parent.as_uri()}/wayland-backend-%{{wayland_backend_version}}.crate\n"
+            + macros
+            + f"Source1:        {source}\n"
             + "Patch0:         0001-vendor.patch\n"
         )
+
+    def drill_exits(self):
+        """The SystemExit of a drill that stops before its report."""
+        with self.assertRaises(SystemExit) as stopped:
+            self.run_drill()
+        return stopped.exception.code
 
     def test_a_patch_on_a_crate_the_spec_unpacks_under_vendor_applies(self):
         self.crate()
@@ -160,9 +173,50 @@ class Drill(unittest.TestCase):
 
     def test_a_crate_whose_sha256_differs_from_the_manifest_is_an_error(self):
         self.crate(sha256="0" * 64)
-        with self.assertRaises(SystemExit):
-            self.run_drill()
+        self.assertIn("sha256 differs", self.drill_exits())
 
+    def test_a_crate_the_manifest_does_not_list_is_an_error(self):
+        self.crate(manifest=f"{'0' * 64}  cosmic-comp-1.8.0.tar.gz\n")
+        self.assertIn("no sha256 for wayland-backend-0.3.15.crate", self.drill_exits())
+
+    def test_a_malformed_manifest_line_is_an_error(self):
+        self.crate(manifest="not-a-hash\n")
+        self.assertIn("not a `sha256  name` line", self.drill_exits())
+
+    def test_an_undefined_macro_is_an_error(self):
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-%{undefined}.crate")
+        self.assertIn("%{undefined} is not defined", self.drill_exits())
+
+    def test_a_macro_that_names_itself_is_an_error_not_a_hang(self):
+        self.crate(source="https://static.crates.io/%{again}.crate", macros="%global again %{again}\n")
+
+        def hung(*_):
+            raise TimeoutError("the expansion did not stop")
+
+        signal.signal(signal.SIGALRM, hung)
+        self.addCleanup(signal.alarm, 0)
+        signal.alarm(5)
+        self.assertIn("does not finish expanding", self.drill_exits())
+
+    def test_a_file_name_that_is_not_one_path_component_is_an_error(self):
+        for name in ("../../x.crate", ".hidden.crate"):
+            with self.subTest(name=name):
+                self.crate(source=f"{self.tmp.as_uri()}/wayland-backend-0.3.15.crate#/{name}")
+                self.assertIn("invalid file name", self.drill_exits())
+
+    def test_a_crate_url_that_is_not_http_https_or_file_is_an_error(self):
+        self.crate(source="ftp://example.org/wayland-backend-0.3.15.crate")
+        self.assertIn("is not an http, https or file URL", self.drill_exits())
+
+    def test_a_member_outside_vendor_is_refused(self):
+        self.crate(member="../escaped.rs")
+        self.assertIn("escaped.rs", self.drill_exits())
+
+    def test_a_crate_that_cannot_be_downloaded_exits_apart_from_a_patch_that_fails(self):
+        self.crate(source=(self.tmp / "absent").as_uri() + "/wayland-backend-0.3.15.crate")
+        self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
+        rebase.RETRY_DELAY = 0
+        self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
 
 if __name__ == "__main__":
     unittest.main()
