@@ -161,9 +161,10 @@ class BumpGroups(unittest.TestCase):
         )
 
     def resolve_srpm_checksig(self, nvr, pinned_fpr, signer_fpr):
-        """Runs the SRPM signature line of `lock.sh resolve`, which the prep's lock step reaches
-        for every moved FEDORA_KERNEL_NVR, against a fake rpmkeys that imports any key file and
-        reports the SRPM as signed by signer_fpr."""
+        """Runs the SRPM signature line of `lock.sh resolve` against a fake rpmkeys that imports
+        any key file and reports the SRPM as signed by signer_fpr. The prep's lock step reaches
+        that line after a bump because each lock's `# kernel:` header names FEDORA_KERNEL_NVR, so
+        a moved NVR leaves every lock stale; this test does not check that part."""
         lock_sh = AZOTH / "lock.sh"
         line = [
             row.strip()
