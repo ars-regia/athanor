@@ -56,6 +56,9 @@ jobs:
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust-security-audit
+          # Saved by iso-v0 alone: every pull request and queue run reads the default branch's
+          # entry, and the entries of their own refs filled the repository's 10 GB (#1177).
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' }}
 
       - name: Run the audit in the builder image
         run: |
