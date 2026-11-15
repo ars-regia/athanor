@@ -114,8 +114,9 @@ not the builds.
    in-place builds, or unpacks the sources and fetches what their `Cargo.lock` and
    `go.mod` pin. The `build` stage runs `rpmbuild` with `--network=none`,
    `CARGO_NET_OFFLINE=true` and `GOPROXY=off`. Specs without `Source` build the checkout
-   in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
-   package.
+   in place (`rpmbuild --build-in-place`). Rust compiles through sccache, whose cache lives
+   in the build's home volume and goes with it: the DAG restores no cache
+   ([doc_pipeline.md](doc_pipeline.md), PL10).
 
    The spec of each of the forge's own packages, except the four that follow an upstream or
    kernel release (`RELEASE_BY_HAND` in `scripts/verify.py`: `cosmic-comp`, `greenboot-rs`,

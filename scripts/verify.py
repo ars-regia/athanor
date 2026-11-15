@@ -189,7 +189,8 @@ def check_workflows():
                    f"default (triggers: {', '.join(sorted(events)) or 'none'})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
+    for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -564,6 +565,119 @@ def release_problems(root):
                                     "which only tag-latest of release.yml writes (PL35, PL56)")
                 if STABLE_WRITER.search(run) and environment != "release":
                     problems.append(f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)")
+    return problems
+
+
+# PL10: the actions a release-path job may use, each checked to restore and save no cache,
+# compared in lower case as GitHub resolves names and without the ref; a local composite action
+# is also read step by step. Any other action fails the check until it is checked and listed.
+RELEASE_PATH_ACTIONS = {
+    "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
+    "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
+    "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
+}
+# The settings that give a build a cache from outside the job: sccache on the Actions cache, and
+# a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
+# own disk or volume is not one.
+CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b|\bcache-(?:from|to)\b", re.I)
+LOCAL_WORKFLOW = "./.github/workflows/"
+LOCAL_ACTION = "./.github/actions/"
+# The token grants of a job that publishes: id-token for a keyless signature, attestation or
+# provenance, packages for a push to GHCR with the job's token. A push to another registry with
+# a credential of its own is not seen.
+PUBLISHING_GRANTS = ("id-token", "packages")
+
+
+def publishes(permissions):
+    """Whether a permissions block grants the token a write that publishes (PUBLISHING_GRANTS)."""
+    if permissions == "write-all":
+        return True
+    return isinstance(permissions, dict) and any(permissions.get(g) == "write" for g in PUBLISHING_GRANTS)
+
+
+def release_path_workflows(root):
+    """{workflow: (jobs, env)} for the release path of PL10: every workflow with a job in a
+    signing environment (D43) or in release (PL60), or with a job whose token may sign keylessly,
+    attest or push to the registry (id-token or packages write, from the job or, when the job
+    sets none, from the workflow), and every reusable workflow of this repository such a
+    workflow calls, at any depth. The whole workflow counts: its other jobs build what the
+    publishing job signs or pushes. Workflows that are not YAML are left to signing_problems."""
+    root = Path(root)
+    workflows = {}
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
+            jobs = {job_id: job for job_id, job in doc["jobs"].items() if isinstance(job, dict)}
+            workflows[wf.name] = jobs, doc.get("env"), doc.get("permissions")
+    def releasing(job, permissions):
+        environment = (job_environment(job) or "").lower()
+        return (environment.startswith("signing") or environment == "release"
+                or publishes(job.get("permissions", permissions)))
+    pending = [name for name, (jobs, _, permissions) in workflows.items()
+               if any(releasing(job, permissions) for job in jobs.values())]
+    path = {}
+    while pending:
+        name = pending.pop()
+        if name in path or name not in workflows:
+            continue
+        path[name] = workflows[name][:2]
+        pending += [uses[len(LOCAL_WORKFLOW):] for job in path[name][0].values()
+                    if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)]
+    return path
+
+
+def expanded_steps(root, steps, problems, depth=0):
+    """The steps of a job, each followed by the steps of the local composite action it uses, at
+    any depth GitHub allows. A manifest that is not YAML is a line of problems."""
+    for step in steps or []:
+        if not isinstance(step, dict):
+            continue
+        yield step
+        uses = str(step.get("uses", ""))
+        if uses.startswith(LOCAL_ACTION) and depth < 10:
+            for manifest in ("action.yml", "action.yaml"):
+                path = Path(root) / uses / manifest
+                if not path.is_file():
+                    continue
+                try:
+                    action = yaml.safe_load(read(path))
+                except yaml.YAMLError as error:
+                    problems.append(f"{uses}/{manifest}: not YAML the PL10 check can read: "
+                                    f"{str(error).splitlines()[0]}")
+                    continue
+                runs = action.get("runs") if isinstance(action, dict) else None
+                yield from expanded_steps(root, (runs or {}).get("steps") if isinstance(runs, dict) else None,
+                                          problems, depth + 1)
+
+
+def release_cache_problems(root):
+    """PL10: no job of a release-path workflow (release_path_workflows) restores or saves a
+    cache, through its own steps or those of a local composite action it uses: an action outside
+    RELEASE_PATH_ACTIONS, sccache on the Actions cache, or a cache-from or cache-to. A cache is an
+    input the provenance does not name (PL20), and any job of the default branch can write one."""
+    if yaml is None:
+        return []
+    problems = []
+    for name, (jobs, env) in sorted(release_path_workflows(root).items()):
+        for job_id, job in jobs.items():
+            called = str(job.get("uses", ""))
+            if called and not (called.startswith(LOCAL_WORKFLOW) and "/" not in called[len(LOCAL_WORKFLOW):]):
+                problems.append(f"{name}: job {job_id} calls {called}, which the check cannot follow: call "
+                                f"a workflow of this repository as {LOCAL_WORKFLOW}<file> (PL10)")
+            steps = list(expanded_steps(root, job.get("steps"), problems))
+            for step in steps:
+                action = str(step.get("uses", "")).split("@")[0]
+                if action and action.lower() not in RELEASE_PATH_ACTIONS:
+                    problems.append(f"{name}: job {job_id} uses {action}, which is not in RELEASE_PATH_ACTIONS: "
+                                    "add it once it is checked to restore and save no cache (PL10)")
+            if CACHE_BACKEND.search(json.dumps([env, job, steps], default=str)):
+                problems.append(f"{name}: job {job_id} gives a build a cache from outside the job (sccache "
+                                "on the Actions cache, cache-from or cache-to) on the release path, which "
+                                "restores and saves no cache (PL10)")
     return problems
 
 
