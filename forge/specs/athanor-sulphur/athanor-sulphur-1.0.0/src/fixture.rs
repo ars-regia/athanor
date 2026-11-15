@@ -6363,26 +6363,42 @@ fn a_click_on_a_bar_without_the_keyboard_grants_a_token() {
     run.stop();
 }
 
-/// While the session is locked a click's token is refused, and one granted before the lock
-/// raises no shown window and gives it no keyboard, then or at the unlock (L14).
+/// While the session is locked no client gets a token, not even the locker, which holds the
+/// keyboard on its lock surface and names its own enter serial: only the lock refuses it (L14).
+#[test]
+fn the_locker_gets_no_token() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface has the keyboard");
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut locker, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// While the session is locked a token raises no shown window and gives it no keyboard, then or
+/// at the unlock (L14). No client gets one then, so the token is the compositor's own.
 #[test]
 fn a_token_raises_nothing_while_locked() {
     let mut run = Running::start(None);
-    let mut bar = Local::connect(&mut run, None);
-    bar.bar(&mut run, 30);
     let mut app = Local::connect(&mut run, None);
     app.toplevel(&mut run);
     let (surface, _) = app.window.clone().expect("the window");
     let mut other = Local::connect(&mut run, None);
     other.toplevel(&mut run);
     let focus = keyboard_focus(&run);
-    let serial = click_bar(&mut run, &bar);
-    let token = run.activation_token(&mut bar, serial);
-    assert!(granted(&run, &token), "the click grants");
 
     let (mut locker, lock) = lock_session(&mut run);
-    let refused = run.activation_token(&mut bar, serial);
-    assert!(!granted(&run, &refused), "no token while locked");
+    let (token, _) = run.state.xdg_activation_state.create_external_token(None);
+    let token = String::from(&**token);
     let before = stack(&run);
     let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
     activation.activate(token, &surface);
@@ -6511,6 +6527,33 @@ fn the_last_window_closing_after_a_click_keeps_it_superseded() {
     run.stop();
 }
 
+/// The window that held the keyboard at the click closes, the last one shown, and the keyboard
+/// leaves for no surface: that change supersedes the click too.
+#[test]
+fn the_focused_window_closing_after_a_click_supersedes_it() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    assert!(run.state.minimise(&fixture));
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    let toplevel = app.toplevel(&mut run);
+    let (surface, xdg) = app.window.clone().expect("the window");
+    let serial = click_bar(&mut run, &bar);
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    app.pump(&mut run, "the keyboard has no focus", |_, state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.current_focus().is_none())
+    });
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A press a window's move takes, over the bar, is delivered to no client: the bar gets no
 /// token from it.
 #[test]
@@ -6529,6 +6572,25 @@ fn a_press_a_move_takes_grants_no_token() {
     assert!(run.state.grab_serials.button.is_none(), "the press went to no client");
     let token = run.activation_token(&mut bar, serial.into());
     assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A press that ends a popup's grab goes to the surface under the pointer, and is that
+/// client's: the bar, clicked while a window's menu holds the pointer.
+#[test]
+fn a_press_that_ends_a_popup_grab_is_the_clients_under_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (_, xdg) = app.window.clone().expect("the window");
+    grabbing_popup(&mut app, &mut run, &xdg);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(pointer.is_grabbed(), "the menu holds the pointer");
+    // `click_bar` checks that the press is the bar's.
+    click_bar(&mut run, &bar);
+    assert!(!pointer.is_grabbed(), "the press ended the grab");
     run.stop();
 }
 

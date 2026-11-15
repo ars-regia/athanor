@@ -510,6 +510,24 @@ pub(super) fn pressure() -> AxisFrame {
     }
 }
 
+/// A pen's tip down after a click, on the bar, supersedes the click: the bar gets no token.
+#[test]
+fn a_tip_down_after_a_click_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let focus = keyboard_focus(&run);
+    bar.seat = Some(bar.bind(1));
+    let (_, tool, _) = pen_at(&mut run, &mut bar, (100.0, 10.0).into());
+    run.state
+        .tool_tip(&tool, TabletToolTipState::Down, InputTime::now());
+    assert_eq!(keyboard_focus(&run), focus, "the pen moves no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A tool that moves off a surface leaves it before its axes are sent, so the surface is not
 /// sent the axes of a position it does not have.
 #[test]

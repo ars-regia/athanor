@@ -202,6 +202,22 @@ fn a_release_and_a_touch_in_one_frame_each_get_their_frame() {
     run.stop();
 }
 
+/// A finger down after a click, on the bar, supersedes the click: the bar gets no token.
+#[test]
+fn a_touch_after_a_click_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let focus = keyboard_focus(&run);
+    down(&mut run, 0, (100.0, 10.0).into());
+    up(&mut run, 0);
+    assert_eq!(keyboard_focus(&run), focus, "the touch moves no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
 /// A touchscreen removed with a finger on a window: the window is sent `cancel`, and when a
 /// device of the same name returns its slot touches and focuses again.
 #[test]
