@@ -63,6 +63,12 @@ impl Icons {
             .clone()
     }
 
+    /// Whether the theme has the icon `icon` itself, not only the fallback [`Icons::image`]
+    /// draws in its place.
+    pub fn has(&self, icon: &str, size: u16, scale: u16) -> bool {
+        self.theme.lookup(icon, size, scale).is_some()
+    }
+
     /// A button with the icon `icon` and the name and tooltip `label`; a plain button with
     /// the label when the icon cannot be read.
     #[allow(clippy::too_many_arguments)]
