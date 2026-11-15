@@ -3,7 +3,7 @@
 
 use athanor_apps::sal::Icons;
 use athanor_controls::sal::widgets::Look;
-use athanor_sal::{Rgba, TextStyle, Theme};
+use athanor_sal::{Image, Rgba, TextStyle, Theme};
 use athanor_style::appearance::Appearance;
 use athanor_style::sal;
 
@@ -26,13 +26,13 @@ pub fn theme(popover: &Theme) -> Theme {
     theme
 }
 
-/// What a page is drawn with in a popover at `scale`: the bar's icons at a module's size, and
-/// secondary lines in the caption's size and the appearance's ink2, as calmo's
-/// `bar-popover-note`.
-pub fn look(icons: &mut Icons, scale: u16) -> Look<'_> {
+/// What a page is drawn with in a popover at `scale`: the bar's icons at a module's size, in
+/// their right-to-left variant when `rtl`, and secondary lines in the caption's size and the
+/// appearance's ink2, as calmo's `bar-popover-note`.
+pub fn look(icons: &mut Icons, scale: u16, rtl: bool) -> Look<'_> {
     let secondary = Rgba(sal::palette(&Appearance::read()).ink2);
     Look {
-        icon: Box::new(move |name| icons.image(name, ICON, scale)),
+        icon: Box::new(move |name| image(icons, name, scale, rtl)),
         icon_size: f32::from(ICON),
         caption: TextStyle {
             scale: sal::size::CAPTION.scale,
@@ -42,6 +42,12 @@ pub fn look(icons: &mut Icons, scale: u16) -> Look<'_> {
         secondary,
         radio_gap: Some(RADIO_GAP),
     }
+}
+
+/// The icon `name` at a module's size and `scale`, in its right-to-left variant when `rtl`.
+pub fn image(icons: &mut Icons, name: &str, scale: u16, rtl: bool) -> Option<Image> {
+    let name = icons.reading(name, ICON, scale, rtl);
+    icons.image(&name, ICON, scale)
 }
 
 /// What follows a page's model for the bar: each state wakes the bar, so that an open popover

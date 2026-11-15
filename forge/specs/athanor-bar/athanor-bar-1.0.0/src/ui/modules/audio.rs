@@ -38,10 +38,10 @@ fn icon(page: &Page) -> Option<&'static str> {
 impl Module for Audio {
     fn button(&mut self, cx: &mut Cx, ui: &mut Ui, group: WidgetId) -> Option<WidgetId> {
         self.drawn = icon(&self.page);
-        let icon = self.drawn?;
+        let icon = cx.icons.reading(self.drawn?, ICON, cx.scale, cx.rtl);
         Some(
             cx.icons
-                .button(ui, group, icon, ICON, cx.scale, &tr("Sound"), None),
+                .button(ui, group, &icon, ICON, cx.scale, &tr("Sound"), None),
         )
     }
 
@@ -59,8 +59,12 @@ impl Module for Audio {
         let (mut ui, frame) =
             look::popover(&tr("Sound"), controls::theme(cx.theme), cx.rtl, cx.top);
         let media = media_icons(cx);
-        self.page
-            .build(&mut ui, frame, media, &controls::look(cx.icons, cx.scale));
+        self.page.build(
+            &mut ui,
+            frame,
+            media,
+            &controls::look(cx.icons, cx.scale, cx.rtl),
+        );
         Some(ui)
     }
 
@@ -86,10 +90,11 @@ impl Module for Audio {
     }
 }
 
-/// The icons of the media controls at a module's size; `None` when the theme lacks one, and
-/// the buttons then show their names.
+/// The icons of the media controls at a module's size, in their right-to-left variants in a
+/// right-to-left reading; `None` when the theme lacks one, and the buttons then show their
+/// names.
 fn media_icons(cx: &mut Cx) -> Option<MediaIcons> {
-    let mut image = |name| cx.icons.image(name, ICON, cx.scale);
+    let mut image = |name| controls::image(cx.icons, name, cx.scale, cx.rtl);
     Some(MediaIcons {
         size: f32::from(ICON),
         previous: image(MediaIcons::PREVIOUS)?,
