@@ -38,7 +38,7 @@ use gio::glib;
 use gio::prelude::*;
 
 use crate::ui::look::{self, Look};
-use crate::ui::modules::{self, Cx, Reply, Wake, Wakeup, ICON};
+use crate::ui::modules::{self, Around, Cx, Reply, Wake, Wakeup, ICON};
 
 /// The program's name: of its failed-start notifications, as the GTK bar's (`Host::APP`).
 const APP: &str = "athanor-bar";
@@ -178,7 +178,8 @@ pub struct Bar {
     /// once it closes.
     modules_stale: bool,
     ready: bool,
-    /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), opened once ready.
+    /// The popover the captures of BR9 ask for (`ATHANOR_BAR_OPEN`), opened once the bar is
+    /// ready and shows the module's button.
     open_on_start: Option<Module>,
     /// The layout paths and the state directory of the first-session pick, until it is done.
     first_session: Option<(Paths, PathBuf)>,
@@ -592,8 +593,8 @@ impl Bar {
     }
 
     /// READY=1 once (Type=notify): at the first frame of a surface, as the GTK bar at its
-    /// window's `map`; then the popover the captures ask for. The first turns run before the
-    /// outputs are announced, so an empty output list is not a reason to be ready.
+    /// window's `map`. The first turns run before the outputs are announced, so an empty output
+    /// list is not a reason to be ready.
     fn notify_ready(&mut self, shell: &mut Shell) {
         if self.ready {
             return;
@@ -605,8 +606,51 @@ impl Bar {
         if let Err(err) = athanor_unit::notify::notify_ready() {
             tracing::error!(error = %err, "cannot tell systemd the bar is ready");
         }
-        if let Some(module) = self.open_on_start.take() {
+        if let Some(module) = self.open_on_start {
+            if !self.shows(module) {
+                tracing::info!(
+                    module = module.id(),
+                    "the popover asked for opens once the module shows its button"
+                );
+            }
+        }
+    }
+
+    /// Whether a surface shows `module`'s button.
+    fn shows(&self, module: Module) -> bool {
+        self.outs
+            .values()
+            .any(|out| out.button(Act::Popover(module)).is_some())
+    }
+
+    /// The popover the captures ask for, once the bar is ready and the module shows its
+    /// button: the notifications show theirs only once the daemon listed them.
+    fn open_asked(&mut self, shell: &mut Shell) {
+        let Some(module) = self.open_on_start.filter(|_| self.ready) else {
+            return;
+        };
+        if self.shows(module) {
+            self.open_on_start = None;
             self.open_module(shell, module);
+        }
+    }
+
+    /// The modules' own surfaces, after the bar's.
+    fn module_surfaces(&mut self, shell: &mut Shell) {
+        let covered = self
+            .popover
+            .as_ref()
+            .and_then(|p| self.outs.get(&p.parent))
+            .and_then(|out| out.info.name.clone());
+        let around = Around {
+            theme: &self.look.popover,
+            rtl: self.rtl,
+            top: self.layout.panel() == PanelEdge::Top,
+            covered: covered.as_deref(),
+            popover: self.popover.is_some(),
+        };
+        for (_, drawn) in &mut self.modules {
+            drawn.surfaces(shell, &around);
         }
     }
 
@@ -918,6 +962,12 @@ impl Application for Bar {
             self.popover_event(shell, event);
             return;
         }
+        if !self.outs.contains_key(&surface) {
+            for (_, drawn) in &mut self.modules {
+                drawn.surface_event(surface, &event);
+            }
+            return;
+        }
         match event {
             Event::Clicked(button) => self.press(shell, surface, button),
             // Only a running entry has a menu: `open_entry_menu` does nothing for another.
@@ -926,8 +976,39 @@ impl Application for Bar {
         }
     }
 
+    fn pointer(&mut self, _shell: &mut Shell, surface: SurfaceId, inside: bool) {
+        for (_, drawn) in &mut self.modules {
+            drawn.pointer(surface, inside);
+        }
+    }
+
+    fn pressed(&mut self, shell: &mut Shell, surface: SurfaceId, at: (f32, f32)) {
+        if self.outs.contains_key(&surface) {
+            return;
+        }
+        let Some(ui) = shell.ui(surface) else {
+            return;
+        };
+        match &self.popover {
+            Some(popover) if popover.popup == surface => {
+                let Open::Module(module) = popover.open else {
+                    return;
+                };
+                if let Some((_, drawn)) = self.modules.iter_mut().find(|(m, _)| *m == module) {
+                    drawn.pressed(ui, None, at);
+                }
+            }
+            _ => {
+                for (_, drawn) in &mut self.modules {
+                    drawn.pressed(ui, Some(surface), at);
+                }
+            }
+        }
+    }
+
     fn drawn(&mut self, shell: &mut Shell, _surface: SurfaceId) {
         self.notify_ready(shell);
+        self.open_asked(shell);
     }
 
     fn turn(&mut self, shell: &mut Shell) {
@@ -1031,6 +1112,8 @@ impl Application for Bar {
         if self.stale && self.popover.is_none() {
             self.refresh(shell);
         }
+        self.module_surfaces(shell);
         self.notify_ready(shell);
+        self.open_asked(shell);
     }
 }

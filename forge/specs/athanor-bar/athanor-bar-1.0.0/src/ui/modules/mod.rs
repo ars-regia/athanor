@@ -22,6 +22,7 @@ use std::rc::Rc;
 
 use athanor_apps::sal::Icons;
 use athanor_bar::order;
+use athanor_sal::driver::{Shell, SurfaceId};
 use athanor_sal::{Event, Theme, Ui, WidgetId};
 use athanor_sulphur_client::{Client, Event as Compositor};
 
@@ -60,6 +61,20 @@ pub struct Cx<'a> {
     pub scale: u16,
     /// The surface's output, by connector name.
     pub connector: Option<&'a str>,
+}
+
+/// What a module's own surfaces see of the bar, once a turn.
+pub struct Around<'a> {
+    /// The popovers' look.
+    pub theme: &'a Theme,
+    pub rtl: bool,
+    /// The bar is at the top of its outputs.
+    pub top: bool,
+    /// The output of the open popover, by name: a module's surface there shows nothing, so
+    /// that the overlap never depends on the compositor's drawing order (BR6, "Stacking").
+    pub covered: Option<&'a str>,
+    /// A popover of the bar is open.
+    pub popover: bool,
 }
 
 /// What the bar does after an event of a module's popover, or a refresh of it.
@@ -107,6 +122,24 @@ pub trait Module {
     fn heard(&mut self, _event: &Compositor) -> Option<String> {
         None
     }
+
+    /// The module's own layer surfaces, beside the bar's, drawn at the end of every turn: it
+    /// opens, draws and hides them through `shell`. The driver closes one whose output left,
+    /// and `shell.ui` then answers `None`.
+    fn surfaces(&mut self, _shell: &mut Shell, _around: &Around) {}
+
+    /// An event of a widget of `surface`, which is not the bar's nor its popover: one of the
+    /// module's own surfaces, or another module's.
+    fn surface_event(&mut self, _surface: SurfaceId, _event: &Event) {}
+
+    /// The pointer entered (`inside`) or left `surface`, which may be one of the module's own.
+    fn pointer(&mut self, _surface: SurfaceId, _inside: bool) {}
+
+    /// The primary button was pressed at `at`, in logical pixels, on `ui`: the module's open
+    /// popover for `None`, else `Some` surface that is not the bar's, which may be one of the
+    /// module's own. Where a widget that takes no focus answers the pointer, as GTK's click
+    /// gesture on a box.
+    fn pressed(&mut self, _ui: &Ui, _surface: Option<SurfaceId>, _at: (f32, f32)) {}
 }
 
 /// The module that draws `module`, or `None` for one without a popover or not ported yet.
