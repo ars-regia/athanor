@@ -164,6 +164,22 @@ def press_confirm(app, Atspi, name):
     return True
 
 
+def press_when_ready(app, Atspi, name, seconds=5):
+    """Waits, as a read, until the confirmation's button `name` is sensitive, then presses it
+    once outside the poll: an error from the press raises and is never pressed again."""
+    ready = []
+
+    def sensitive():
+        _, button = confirm_button(app, Atspi, name)
+        ready[:] = [button] if button is not None and button.get_state_set().contains(Atspi.StateType.SENSITIVE) else []
+        return bool(ready)
+
+    if not wait_for(sensitive, seconds):
+        return False
+    ready[0].do_action(0)
+    return True
+
+
 def mock_calls(bus, name, path, method):
     """The arguments of each call of `method` a dbusmock object received, from the mock's
     memory: nothing here goes through a log file."""
@@ -262,7 +278,7 @@ def network(ctx):
     type_password(app, Atspi, "short")
     check("Connect stays off for a password WPA2 refuses", not press_confirm(app, Atspi, "Connect"))
     type_password(app, Atspi, PASSWORDS[0])
-    check("Connect sends the password", wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5))
+    check("Connect sends the password", press_when_ready(app, Atspi, "Connect"))
 
     def joined():
         return mock_calls(bus, fx.NM, NM_PATH, "AddAndActivateConnection")
@@ -288,7 +304,7 @@ def network(ctx):
           wait_for(lambda: labelled(app, Atspi, "label", RETRY_NOTE), 5))
     type_password(app, Atspi, PASSWORDS[1])
     check("Connect answers GetSecrets with the typed password",
-          wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5)
+          press_when_ready(app, Atspi, "Connect")
           and wait_for(lambda: result(third) == f"reply:{PASSWORDS[1]}", 5))
     fourth = ask(ALLOW_INTERACTION)
     wait_for(prompt_open, 5)
@@ -446,7 +462,7 @@ def bluetooth(ctx):
         described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
         == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
     )
-    check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
+    check("Pair confirms", press_when_ready(app, Atspi, "Pair"))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))

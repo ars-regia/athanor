@@ -44,15 +44,12 @@ def alerts(app, Atspi):
 
 
 def never(seen, seconds):
-    """True when `seen` stays false for `seconds`. A GLib.Error from it, a node destroyed
-    mid-read, proves nothing either way: that poll is skipped, and the last one must read."""
+    """True when `seen` stays false for `seconds`. An error from it, such as a node destroyed
+    mid-read, raises: a tree rebuilt during the interval is the event this exists to catch."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
-        try:
-            if seen():
-                return False
-        except GLib.Error:
-            pass
+        if seen():
+            return False
         time.sleep(0.2)
     return not seen()
 
