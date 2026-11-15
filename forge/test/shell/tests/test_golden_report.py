@@ -165,6 +165,25 @@ class GoldenReportTest(unittest.TestCase):
             all("#1147" in e["reason"] for e in items if e["item"] in (1, 2, 3, 4, 6, 12))
         )
 
+    def test_the_bar_audio_and_battery_answer_every_item_of_their_port(self):
+        """Each difference of the Sal bar's audio and battery popovers against the GTK ones found
+        in their port is closed or recorded with its reason; the recorded look of VL10 names
+        #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface") in ("bar-audio", "bar-battery")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 14)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(all("#1147" in e["reason"] for e in items if e["item"] in (6, 12)))
+
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"
         dock = {"dock-workspaces", "dock-library"}
