@@ -115,6 +115,15 @@ class RustAuditTest(unittest.TestCase):
 
         self.assertEqual({as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"]))
 
+    def test_only_a_push_to_iso_v0_saves_the_audit_cache(self):
+        steps = yaml.safe_load(AUDIT.read_text())["jobs"]["security-audit"]["steps"]
+        caches = [s for s in steps if s.get("uses", "").startswith("Swatinem/rust-cache@")]
+        self.assertEqual(len(caches), 1)
+        self.assertEqual(
+            caches[0]["with"].get("save-if"),
+            "${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' }}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
