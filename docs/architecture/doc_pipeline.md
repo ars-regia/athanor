@@ -415,7 +415,7 @@ live repository.
 and release jobs never read a cache, volume or runner state the other wrote. On the
 self-hosted runner each job runs in an ephemeral guest (`scripts/runner/`) whose cache
 volumes are separate per trust level; a pull request from a fork never runs on it (PQ3).
-That separation does not exist yet (issue #1179): `scripts/runner/vm.sh` attaches one persistent
+That separation does not exist yet (issue #1191): `scripts/runner/vm.sh` attaches one persistent
 `cache.raw` to every guest, which the runner image exposes as `~/.cache/azoth`
 (`scripts/runner/build-image.sh`), and the self-hosted `build` job of `call-kernel.yml`, which
 `pr.yml` runs for a pull request from this repository, writes it from the pull request's
@@ -439,17 +439,14 @@ action they use. An action joins the list once it is checked to cache nothing. A
 `uses:` on the release path names a workflow of this repository as
 `./.github/workflows/<file>`: a call to another repository, to this one by its qualified name
 and a ref, or through `..` fails the check, which could not follow it. One store outlives the
-job and the check does not see it: the self-hosted `build` job of `kernel-build.yml` and the
-self-hosted `prep` job of `kernel-bump.yml` mount `$HOME/.cache/azoth`, a directory of the
-runner host that holds the downloaded kernel sources. For a build it is a store of verified
-inputs, not of build outputs: `forge/specs/azoth/build.sh` checks every file listed in
+job and the check does not see it: the self-hosted `build` job of `kernel-build.yml` mounts
+`$HOME/.cache/azoth`, a directory of the runner host that holds the downloaded kernel sources.
+It is a store of verified inputs, not of build outputs: `forge/specs/azoth/build.sh` checks every file listed in
 `SOURCES/sources.sha256` against it, and the CachyOS and kernel.org tarballs and the Fedora SRPM
-against their signatures, before it uses any. The `manifest` stage
-that `kernel-bump.yml` runs to write that list for a new version hashes the files as they are in
-the store and downloads only those absent by name, so an unsigned file already in the store
-(the CachyOS configuration, a patch) enters the manifest unverified, including one a pull
-request wrote there through `call-kernel.yml`; the bump that changes the list is reviewed by a
-code owner, and issue #1179 moves the bump's manifest onto an empty store. The mount is a `-v`
+against their signatures, before it uses any. The `prep` job of
+`kernel-bump.yml`, which writes that list for a new version, mounts an empty store made for the
+run, `$RUNNER_TEMP/azoth`, so no file a pull request left in the persistent store enters a
+manifest (#1181). The mount is a `-v`
 in a shell step, and telling a host path that outlives the job from one that does not would
 need to know each runner's disks, so the check does not try.
 
@@ -1661,6 +1658,5 @@ an action outside the allow-list `RELEASE_PATH_ACTIONS`, in its own steps or in 
 composite action; when a run step or an `env` gives a build sccache on the Actions cache or a
 `cache-from` or `cache-to`; or when its job-level `uses:` is not `./.github/workflows/<file>`.
 PL10 records the one store the check does not see, `$HOME/.cache/azoth`, mounted by the `build`
-job of `kernel-build.yml` and the `prep` job of `kernel-bump.yml`: a build checks the sources
-in it before use, but the bump's `manifest` stage hashes them as they are. It also records that
-the runner's cache volumes are not yet separate per trust level (issue #1179).
+job of `kernel-build.yml`, which checks the sources in it before use. It also records that the
+runner's cache volumes are not yet separate per trust level (issue #1191).
