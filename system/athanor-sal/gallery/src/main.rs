@@ -9,8 +9,8 @@
 
 use athanor_sal::driver::Role;
 use athanor_sal::{
-    driver, Application, CalendarText, Date, Event, IconTheme, Kind, Shell, Side, SurfaceId, Theme,
-    Ui, WidgetId, WindowButton, Wrap,
+    driver, Application, CalendarText, Date, Event, IconTheme, Kind, Rgba, Shell, Side, SurfaceId,
+    Theme, Ui, WidgetId, WindowButton, Wrap,
 };
 use std::num::NonZeroU32;
 use std::process::ExitCode;
@@ -28,6 +28,8 @@ const PAGES: [&str; 9] = [
 const DIALOGS: usize = 7;
 /// The page that opens a menu, with its menu open at the start.
 const MENUS: usize = 8;
+/// How far the menu's arrow stands out of its frame, as GTK's popover tail (12 px).
+const ARROW: f32 = 12.0;
 
 /// The window's widgets the gallery acts on.
 struct Gallery {
@@ -257,11 +259,19 @@ fn dialog(options: &Options) -> Result<Ui, String> {
 
 /// The menu of the menus page, laid out, and its check and radios: an item, a check, two radios,
 /// an item that takes no input and a submenu of one item, in three sections, as GTK draws a menu
-/// model's sections.
+/// model's sections, in a frame whose outline and arrow are GTK's popover's, as the bar's popovers.
 fn menu(options: &Options, choices: Choices) -> Result<(Ui, [WidgetId; 3]), String> {
     let t = |key| tr(options.lang, key);
-    let mut ui = Ui::new(t("menu.open")?, Theme::default(), options.rtl);
-    let menu = ui.add(Ui::ROOT, Kind::Menu);
+    let mut theme = Theme::default();
+    // The popup's surface is transparent around the frame and its arrow, as the bar's popovers.
+    theme.background = Rgba([0, 0, 0, 0]);
+    theme.island_padding = 8.0;
+    theme.island_border = 1.0;
+    theme.island_arrow = ARROW;
+    let mut ui = Ui::new(t("menu.open")?, theme, options.rtl);
+    let frame = ui.island(Ui::ROOT, true, [ARROW, 0.0, 0.0, 0.0]);
+    ui.set_arrow(frame);
+    let menu = ui.add(frame, Kind::Menu);
     ui.add(menu, Kind::MenuItem(t("menu.item")?.into()));
     let check = ui.menu_check(menu, t("menu.check")?, choices.check);
     ui.add(menu, Kind::Separator);
