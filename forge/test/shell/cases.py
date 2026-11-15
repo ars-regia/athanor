@@ -93,6 +93,9 @@ GALLERY_PAGES = {
     "text": 1,
     "states": 1,
     "dialogs": 1,
+    # Its menu, open at the start, takes the walk's Space and gives the focus back to its button,
+    # one control past the page's toggle: the walk counts no control after it.
+    "menus": 0,
 }
 GALLERIES = ("toolkit-gallery", "gtk-gallery")
 # doc_control_center.md, CC13 and CC5: each page Show opens, against system_fixtures.py, with the

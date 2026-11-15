@@ -31,3 +31,12 @@ dialog.open	Open a dialog	Apri una finestra di dialogo
 dialog.title	A dialog	Una finestra di dialogo
 dialog.text	A dialog holds its window until it is closed.	Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
 dialog.close	Close	Chiudi
+page.menus	Menus	Menu
+menu.open	Open a menu	Apri un menu
+menu.item	New window	Nuova finestra
+menu.check	Show hidden files	Mostra i file nascosti
+menu.radio1	Sort by name	Ordina per nome
+menu.radio2	Sort by date	Ordina per data
+menu.off	Not available	Non disponibile
+menu.more	More	Altro
+menu.about	About	Informazioni
