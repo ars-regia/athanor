@@ -607,7 +607,8 @@ impl State {
         let settled = Timer::from_duration(SWITCH_SETTLES);
         let timer = self.loop_handle.insert_source(settled, move |_, _, state| {
             let shown = shown_vt();
-            if state.leases.switch_settled(number, shown) && shown.is_none() {
+            let active = matches!(&state.backend, Backend::Drm(drm) if drm.session.is_active());
+            if state.leases.switch_settled(number, shown, active) && active && shown.is_none() {
                 tracing::error!(vt, "a switch of virtual terminal paused nothing, and the terminal shown cannot be read: no display is leased until the session resumes");
             }
             TimeoutAction::Drop

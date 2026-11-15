@@ -173,8 +173,9 @@ allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
 it offers the connectors the kernel marks `non-desktop`, such as a headset's, which never become
 outputs. No lease is granted from the lock request to the unlock, from a switch of virtual
 terminal the compositor starts or a pause to the resume, nor while a lease waits to end; a switch
-that paused nothing and left its own terminal shown is over after two seconds. A lease ends at
-the lock request, before a switch the compositor makes, at the resume, on a GPU removal, an
+that paused nothing, its session still active and its own terminal still shown, is over after two
+seconds, and a lease granted since that is held into a late pause is logged as an error. A lease
+ends at the lock request, before a switch the compositor makes, at the resume, on a GPU removal, an
 unplug and a connector that stops being `non-desktop`: it is revoked, counted ended only once the
 GPU's list of lessees no longer has it, and its CRTCs disabled. The types of `src/drm_lease.rs`
 ensure only that `locked` needs a `Revoked`, which `Leases::proof` makes once every lease has been

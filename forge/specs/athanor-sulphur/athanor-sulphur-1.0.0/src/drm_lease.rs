@@ -84,6 +84,9 @@ pub struct Leases<L> {
     switching: Option<Switch>,
     /// How many switches the compositor started: each one's number.
     switches: u32,
+    /// From a switch found to have paused nothing to the next pause, resume or switch: a pause
+    /// that comes late is that switch's, and the leases granted since should not have been.
+    settled: bool,
     /// From the pause to the resume: the device is not touched.
     paused: bool,
     held: Vec<Held<L>>,
@@ -97,6 +100,7 @@ impl<L> Default for Leases<L> {
             locked: false,
             switching: None,
             switches: 0,
+            settled: false,
             paused: false,
             held: Vec::new(),
             ending: Vec::new(),
@@ -156,6 +160,7 @@ impl<L> Leases<L> {
     /// be read. The switch's number, for `switch_settled`.
     pub fn switching(&mut self, from: Option<i32>) -> u32 {
         self.switches = self.switches.wrapping_add(1);
+        self.settled = false;
         self.switching = Some(Switch {
             number: self.switches,
             from,
@@ -168,31 +173,43 @@ impl<L> Leases<L> {
         self.switching = None;
     }
 
-    /// A while after switch `number` was asked for, terminal `shown` is shown. A switch that
-    /// paused nothing and left its own terminal shown is over; one whose terminal cannot be
-    /// read, or that another switch, a pause or the resume overtook, decides nothing: grants
-    /// stay refused until the resume. Whether this switch still refuses them.
-    pub fn switch_settled(&mut self, number: u32, shown: Option<i32>) -> bool {
+    /// A while after switch `number` was asked for, terminal `shown` is shown and the session
+    /// is `active` or not. Only a positive reading ends the switch: the session still active,
+    /// not paused, and its own terminal still shown. One whose terminal cannot be read, whose
+    /// session is no longer active, or that another switch, a pause or the resume overtook,
+    /// decides nothing: grants stay refused until the resume. Whether this switch still refuses
+    /// them.
+    pub fn switch_settled(&mut self, number: u32, shown: Option<i32>, active: bool) -> bool {
         let Some(switch) = &self.switching else {
             return false;
         };
         if switch.number != number {
             return false;
         }
-        if !self.paused && shown.is_some() && shown == switch.from {
+        if active && !self.paused && shown.is_some() && shown == switch.from {
             self.switching = None;
+            self.settled = true;
             return false;
         }
         true
     }
 
-    /// The session paused: the device is not touched until the resume.
+    /// The session paused: the device is not touched until the resume, when every lease ends.
+    /// A lease granted after a switch was taken to have paused nothing is held into the pause
+    /// that switch may have caused late: an error, named by its connectors.
     pub fn paused(&mut self) {
+        if self.settled {
+            for held in &self.held {
+                tracing::error!(lease = held.id, connectors = ?held.connectors, "a lease granted after a switch of virtual terminal was taken to have paused nothing is held into a pause: it ends at the resume");
+            }
+        }
+        self.settled = false;
         self.paused = true;
     }
 
     /// The session resumed: the device may be touched again.
     pub fn resumed(&mut self) {
+        self.settled = false;
         self.paused = false;
         self.switching = None;
     }
@@ -480,29 +497,33 @@ mod tests {
     fn a_switch_that_paused_nothing_ends_only_on_its_own_terminal() {
         let mut leases = Leases::<Logged>::default();
         let first = leases.switching(Some(2));
-        assert!(leases.switch_settled(first, None), "unreadable");
+        assert!(leases.switch_settled(first, None, true), "unreadable");
         assert!(
-            leases.switch_settled(first, Some(3)),
+            leases.switch_settled(first, Some(3), true),
             "another terminal is shown"
+        );
+        assert!(
+            leases.switch_settled(first, Some(2), false),
+            "the session is no longer active"
         );
         assert!(!leases.may_grant());
         let second = leases.switching(Some(2));
         assert!(
-            !leases.switch_settled(first, Some(2)),
+            !leases.switch_settled(first, Some(2), true),
             "an older switch decides nothing"
         );
         assert!(!leases.may_grant(), "the later switch still refuses");
         leases.paused();
-        assert!(leases.switch_settled(second, Some(2)), "paused");
+        assert!(leases.switch_settled(second, Some(2), true), "paused");
         leases.resumed();
         let unread = leases.switching(None);
         assert!(
-            leases.switch_settled(unread, None),
+            leases.switch_settled(unread, None, true),
             "its terminal was never read"
         );
         leases.switch_failed();
         let third = leases.switching(Some(2));
-        assert!(!leases.switch_settled(third, Some(2)));
+        assert!(!leases.switch_settled(third, Some(2), true));
         assert!(
             leases.may_grant(),
             "it paused nothing and its terminal is shown"
