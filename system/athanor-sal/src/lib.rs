@@ -30,7 +30,7 @@ mod wrap;
 pub use align::Align;
 pub use driver::{run_with, Application, KeyModifiers, LayerOptions, Shell, Side, SurfaceId};
 pub use drop_down::DropDown;
-pub use icon::{IconTheme, Image, FALLBACK_ICON, MAX_IMAGE_SIDE};
+pub use icon::{IconTheme, Image, Symbolic, FALLBACK_ICON, MAX_IMAGE_SIDE};
 pub use icon_toggle::IconToggle;
 pub use motion::{Curve, Motion, Pose};
 pub use render::Error;

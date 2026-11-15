@@ -667,7 +667,8 @@ pub struct Widget {
     pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
     /// The least width it measures, as GTK's `width-request`: see [`Ui::set_min_width`].
     pub(crate) min_w: f32,
-    /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
+    /// The colour of a label's text, or an island's outline, in place of the theme's: see
+    /// [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
     /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
     /// [`Ui::set_fill`].
@@ -1951,16 +1952,16 @@ impl Ui {
         live
     }
 
-    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or, with `None`,
-    /// in the theme's text colour again. `false`, and nothing changes, for a widget that is not a
-    /// label.
+    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or the outline of
+    /// island `id` in it, as a CSS `border-color`; with `None`, in the theme's text or border
+    /// colour again. `false`, and nothing changes, for a widget that is neither.
     ///
     /// # Panics
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn set_ink(&mut self, id: WidgetId, ink: Option<Rgba>) -> bool {
         let widget = &mut self.widgets[id];
-        if !matches!(widget.kind, Kind::Label(_)) {
+        if !matches!(widget.kind, Kind::Label(_) | Kind::Island { .. }) {
             return false;
         }
         widget.ink = ink;
@@ -2280,6 +2281,7 @@ impl Ui {
         let natural = self.widgets[id].natural;
         let between = match self.widgets[id].kind {
             Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
+            Kind::Inline { .. } => self.widgets[id].spacing.unwrap_or(gap),
             _ => gap,
         };
         let widget = &mut self.widgets[id];
@@ -2356,7 +2358,7 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
-            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, between, *padding),
             Kind::CenterBox => strip::measure_center(&sizes),
             Kind::LabelledButton {
                 image, size: side, text, ..

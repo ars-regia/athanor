@@ -47,6 +47,7 @@ pub use smithay_client_toolkit::{
     shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer},
 };
 use smithay_client_toolkit::{
+    activation::{ActivationHandler as TokenHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
     delegate_registry,
     dispatch2::Dispatch2,
@@ -287,6 +288,10 @@ pub trait Application {
     /// it (`zwlr_layer_surface_v1.closed`), or the output it was opened on left. It is no longer
     /// open, and the driver opens nothing in its place.
     fn closed(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
+
+    /// The compositor's token for the request [`Shell::request_activation_token`] numbered
+    /// `request`.
+    fn activation_token(&mut self, _shell: &mut Shell, _request: u64, _token: String) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -402,6 +407,10 @@ fn run_on(
         settled: Vec::new(),
         dialogs: dialog::Dialogs::bind(&globals, &qh),
         blocking: Vec::new(),
+        // Optional: without it, an application this one starts gets no token.
+        activation: ActivationState::bind(&globals, &qh).ok(),
+        next_token: 0,
+        input_surface: None,
     };
     let mut app = App {
         application: Box::new(application),
@@ -578,9 +587,56 @@ pub struct Shell {
     /// The windows a dialog opened on since the driver last ended the pointer's press and hover
     /// on them.
     blocking: Vec<SurfaceId>,
+    /// xdg_activation_v1, and the number of the next token asked for.
+    activation: Option<ActivationState>,
+    next_token: u64,
+    /// The surface of the last press of a button or a key, whose serial `grab` keeps.
+    input_surface: Option<SurfaceId>,
 }
 
 impl Shell {
+    /// The surface and the serial of the last press of a button or a key, after it ended too:
+    /// what [`Shell::request_activation_token`] names for an action the input started. `None`
+    /// before any press, or once its surface closed.
+    pub fn last_input(&self) -> Option<(SurfaceId, u32)> {
+        let surface = self
+            .input_surface
+            .filter(|&id| self.surfaces.iter().any(|s| s.id == id))?;
+        Some((surface, self.grab.last()?))
+    }
+
+    /// Asks the compositor for an xdg-activation-v1 token that lets an application this one
+    /// starts or calls raise its window, naming `surface` and the input's `serial` with the seat,
+    /// either left out when `None`. The token comes to [`Application::activation_token`] with
+    /// the number this returns, once the compositor answers; a compositor that does not grant it
+    /// still answers, and the token then activates nothing. `None` without the global: the
+    /// caller goes on without a token.
+    pub fn request_activation_token(
+        &mut self,
+        surface: Option<SurfaceId>,
+        serial: Option<u32>,
+    ) -> Option<u64> {
+        let activation = self.activation.as_ref()?;
+        let request = self.next_token;
+        self.next_token += 1;
+        let surface = surface.and_then(|id| {
+            self.surfaces
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.wl_surface().clone())
+        });
+        activation.request_token(
+            &self.qh,
+            RequestData {
+                app_id: None,
+                seat_and_serial: self.seat.clone().zip(serial),
+                surface,
+                udata: request,
+            },
+        );
+        Some(request)
+    }
+
     /// The surfaces open, in the order they were opened.
     pub fn surfaces(&self) -> impl Iterator<Item = SurfaceId> + '_ {
         self.surfaces.iter().map(|s| s.id)
@@ -2386,6 +2442,7 @@ impl App {
     /// as with GTK's popovers; a press on a window's title bar outside its buttons moves it.
     fn pointer_pressed(&mut self, id: SurfaceId, (x, y): (f32, f32), button: u32, serial: u32) {
         self.shell.grab.pressed(serial);
+        self.shell.input_surface = Some(id);
         self.hide_tooltip();
         if self
             .shell
@@ -2913,6 +2970,7 @@ impl KeyboardHandler for App {
         event: KeyEvent,
     ) {
         self.shell.grab.key(Some(serial));
+        self.shell.input_surface = self.keyboard_focus;
         self.key(event);
         self.shell.grab.key(None);
     }
@@ -3069,6 +3127,15 @@ impl ProvidesRegistryState for App {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(App);
+
+impl TokenHandler for App {
+    type RequestUdata = u64;
+
+    fn new_token(&mut self, token: String, data: &RequestData<u64>) {
+        self.application
+            .activation_token(&mut self.shell, data.udata, token);
+    }
+}
 
 /// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
 /// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut

@@ -110,12 +110,15 @@ pub(crate) struct GrabSerial {
     key: Option<u32>,
     /// The serial of the key pressed last, which its repeats are handled with.
     pressed_key: Option<u32>,
+    /// The serial of the last press of a button or a key, kept once it ends.
+    last: Option<u32>,
 }
 
 impl GrabSerial {
     /// A button was pressed with `serial`.
     pub fn pressed(&mut self, serial: u32) {
         self.press = Some(serial);
+        self.last = Some(serial);
     }
 
     /// A button was released, or the pointer left: no press is held.
@@ -127,6 +130,7 @@ impl GrabSerial {
     pub fn key(&mut self, serial: Option<u32>) {
         self.key = serial;
         self.pressed_key = serial.or(self.pressed_key);
+        self.last = serial.or(self.last);
     }
 
     /// The key pressed last repeats: it is handled again with its press's serial, until
@@ -138,6 +142,13 @@ impl GrabSerial {
     /// The serial to grab with, while an input is under way.
     pub fn serial(&self) -> Option<u32> {
         self.key.or(self.press)
+    }
+
+    /// The serial of the last press of a button or a key, after it ended too: what an
+    /// xdg-activation token names for an action the input started, as GTK names its seat's last
+    /// serial. A key's repeats are no new press.
+    pub fn last(&self) -> Option<u32> {
+        self.last
     }
 }
 
@@ -433,6 +444,24 @@ mod tests {
         // The pointer left with the button down: the release goes elsewhere.
         grab.released();
         assert_eq!(grab.serial(), None);
+    }
+
+    #[test]
+    fn an_activation_token_names_the_last_press_after_it_ended() {
+        let mut grab = GrabSerial::default();
+        assert_eq!(grab.last(), None, "no input yet");
+        // A click: the action runs at the release, once the press grabs no more.
+        grab.pressed(7);
+        grab.released();
+        assert_eq!(grab.last(), Some(7));
+        // A key handled, then its repeats: the press is the last input.
+        grab.key(Some(9));
+        grab.key(None);
+        grab.repeat();
+        grab.key(None);
+        assert_eq!(grab.last(), Some(9));
+        grab.pressed(11);
+        assert_eq!(grab.last(), Some(11), "the newer press");
     }
 
     #[test]

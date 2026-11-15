@@ -19,6 +19,7 @@ msgstr ""
 #: ../../../../system/athanor-apps/src/entries.rs:89
 #: ../../../../system/athanor-apps/src/entries.rs:243
 #: ../../../../system/athanor-apps/src/entries.rs:245
+#: src/ui/modules/notifications.rs:663
 msgid "Unknown application"
 msgstr ""
 
@@ -63,29 +64,30 @@ msgid "Running applications"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:160
-#: ../../../../system/athanor-apps/src/sal.rs:138
+#: ../../../../system/athanor-apps/src/sal.rs:144
 msgid "Running"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:388
-#: ../../../../system/athanor-apps/src/sal.rs:271
+#: ../../../../system/athanor-apps/src/sal.rs:277
 #, rust-format
 msgid "Minimise {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:392
-#: ../../../../system/athanor-apps/src/sal.rs:282
+#: ../../../../system/athanor-apps/src/sal.rs:288
+#: src/ui/modules/notifications.rs:899
 #, rust-format
 msgid "Close {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:419
-#: ../../../../system/athanor-apps/src/sal.rs:299
+#: ../../../../system/athanor-apps/src/sal.rs:305
 msgid "Open"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:421
-#: ../../../../system/athanor-apps/src/sal.rs:301
+#: ../../../../system/athanor-apps/src/sal.rs:307
 msgid "New Window"
 msgstr ""
 
@@ -153,7 +155,7 @@ msgstr ""
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
 #: ../../../../system/athanor-controls/src/network.rs:348
-#: src/ui/modules/power.rs:88
+#: src/ui/modules/power.rs:108 src/ui/modules/shield.rs:711
 msgid "Cancel"
 msgstr ""
 
@@ -298,19 +300,19 @@ msgstr ""
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr ""
 
-#: src/ui/bar.rs:437
+#: src/ui/bar.rs:441
 msgid "Control center"
 msgstr ""
 
-#: src/ui/bar.rs:475 src/ui/bar.rs:955
+#: src/ui/bar.rs:479 src/ui/bar.rs:1017
 msgid "Bar"
 msgstr ""
 
-#: src/ui/bar.rs:903
+#: src/ui/bar.rs:957
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/bar.rs:905
+#: src/ui/bar.rs:959
 msgid "Pin to Bar"
 msgstr ""
 
@@ -334,7 +336,7 @@ msgstr ""
 msgid "No colour filter"
 msgstr ""
 
-#: src/ui/modules/accessibility.rs:127 src/ui/modules/accessibility.rs:195
+#: src/ui/modules/accessibility.rs:127 src/ui/modules/accessibility.rs:196
 msgid "Accessibility"
 msgstr ""
 
@@ -358,7 +360,7 @@ msgstr ""
 msgid "Colour filter"
 msgstr ""
 
-#: src/ui/modules/accessibility.rs:150
+#: src/ui/modules/accessibility.rs:151
 msgid "Turn on"
 msgstr ""
 
@@ -418,23 +420,23 @@ msgstr ""
 msgid "No modifier held"
 msgstr ""
 
-#: src/ui/modules/clock.rs:75
+#: src/ui/modules/clock.rs:76
 msgid "Calendar"
 msgstr ""
 
-#: src/ui/modules/clock.rs:114
+#: src/ui/modules/clock.rs:125
 msgid "Previous month"
 msgstr ""
 
-#: src/ui/modules/clock.rs:115
+#: src/ui/modules/clock.rs:126
 msgid "Next month"
 msgstr ""
 
-#: src/ui/modules/clock.rs:116
+#: src/ui/modules/clock.rs:127
 msgid "Previous year"
 msgstr ""
 
-#: src/ui/modules/clock.rs:117
+#: src/ui/modules/clock.rs:128
 msgid "Next year"
 msgstr ""
 
@@ -452,48 +454,360 @@ msgstr ""
 msgid "Layout {number}"
 msgstr ""
 
-#: src/ui/modules/power.rs:36
+#: src/ui/modules/notifications.rs:929 src/ui/modules/notifications.rs:1100
+#: src/ui/modules/notifications.rs:1147
+msgid "Notifications"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:937
+msgid "Clear all"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:953
+msgid "No notifications"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:985
+msgid "Do not disturb"
+msgstr ""
+
+#: src/ui/modules/notifications.rs:1142
+#, rust-format
+msgid "Notifications, {count} waiting"
+msgstr ""
+
+#: src/ui/modules/power.rs:46
 msgid "Lock"
 msgstr ""
 
-#: src/ui/modules/power.rs:36
+#: src/ui/modules/power.rs:46
 msgid "Lock the screen?"
 msgstr ""
 
-#: src/ui/modules/power.rs:37
+#: src/ui/modules/power.rs:47
 msgid "Log Out"
 msgstr ""
 
-#: src/ui/modules/power.rs:37
+#: src/ui/modules/power.rs:47
 msgid "Log out now?"
 msgstr ""
 
-#: src/ui/modules/power.rs:38
+#: src/ui/modules/power.rs:48
 msgid "Suspend"
 msgstr ""
 
-#: src/ui/modules/power.rs:38
+#: src/ui/modules/power.rs:48
 msgid "Suspend now?"
 msgstr ""
 
-#: src/ui/modules/power.rs:39
+#: src/ui/modules/power.rs:49
 msgid "Restart"
 msgstr ""
 
-#: src/ui/modules/power.rs:39
+#: src/ui/modules/power.rs:49
 msgid "Restart now?"
 msgstr ""
 
-#: src/ui/modules/power.rs:40
+#: src/ui/modules/power.rs:50
 msgid "Shut Down"
 msgstr ""
 
-#: src/ui/modules/power.rs:40
+#: src/ui/modules/power.rs:50
 msgid "Shut down now?"
 msgstr ""
 
-#: src/ui/modules/power.rs:70 src/ui/modules/power.rs:140
+#: src/ui/modules/power.rs:51 src/ui/modules/shield.rs:525
+msgid "Restart and install the update now?"
+msgstr ""
+
+#: src/ui/modules/power.rs:51 src/ui/modules/shield.rs:525
+#: src/ui/modules/shield.rs:691
+msgid "Restart to update"
+msgstr ""
+
+#: src/ui/modules/power.rs:85 src/ui/modules/power.rs:166
 msgid "Power"
+msgstr ""
+
+#: src/ui/modules/shield.rs:339
+msgid "System image verified"
+msgstr ""
+
+#: src/ui/modules/shield.rs:340
+msgid "Not verified yet"
+msgstr ""
+
+#: src/ui/modules/shield.rs:341
+msgid "Update refused"
+msgstr ""
+
+#: src/ui/modules/shield.rs:347
+msgid "Signed with a key of the policy in force"
+msgstr ""
+
+#: src/ui/modules/shield.rs:348
+msgid "Not verified: installed from media"
+msgstr ""
+
+#: src/ui/modules/shield.rs:349
+msgid "Not verified: no signature"
+msgstr ""
+
+#: src/ui/modules/shield.rs:350
+msgid "Not verified: its key is not in the policy"
+msgstr ""
+
+#: src/ui/modules/shield.rs:351
+msgid "Not verified: fetched under a permissive policy"
+msgstr ""
+
+#: src/ui/modules/shield.rs:352
+msgid "Not verified: the image is outside the policy's scope"
+msgstr ""
+
+#: src/ui/modules/shield.rs:353
+msgid "Not verified: the system was changed on this machine"
+msgstr ""
+
+#: src/ui/modules/shield.rs:354
+msgid "Not verified: waiting for the stable channel to be published"
+msgstr ""
+
+#: src/ui/modules/shield.rs:355
+msgid "Not verified: this machine does not verify its updates"
+msgstr ""
+
+#: src/ui/modules/shield.rs:356
+msgid "Signed, but pinned to one build: it receives no updates"
+msgstr ""
+
+#: src/ui/modules/shield.rs:362
+msgid "Up to date"
+msgstr ""
+
+#: src/ui/modules/shield.rs:363
+msgid "An update is available; it downloads at the next check"
+msgstr ""
+
+#: src/ui/modules/shield.rs:364
+msgid "An update is ready; it installs when you restart"
+msgstr ""
+
+#: src/ui/modules/shield.rs:365
+msgid "The update installs at the next restart"
+msgstr ""
+
+#: src/ui/modules/shield.rs:366
+msgid "The last update was refused by the policy"
+msgstr ""
+
+#: src/ui/modules/shield.rs:368
+msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
+msgstr ""
+
+#: src/ui/modules/shield.rs:370
+msgid "This version is older than one this machine has run"
+msgstr ""
+
+#: src/ui/modules/shield.rs:377
+msgid "The last check failed: network error"
+msgstr ""
+
+#: src/ui/modules/shield.rs:378
+msgid "The last check failed: registry error"
+msgstr ""
+
+#: src/ui/modules/shield.rs:379
+msgid "The last check failed: refused by the policy"
+msgstr ""
+
+#: src/ui/modules/shield.rs:380
+msgid "The last check failed: storage error"
+msgstr ""
+
+#: src/ui/modules/shield.rs:381
+msgid "The last check failed: internal error"
+msgstr ""
+
+#: src/ui/modules/shield.rs:387
+msgid "No trust state yet: the first check has not run"
+msgstr ""
+
+#: src/ui/modules/shield.rs:389
+msgid "The trust state file is not owned by the system and was ignored"
+msgstr ""
+
+#: src/ui/modules/shield.rs:391
+msgid "The trust state file could not be read"
+msgstr ""
+
+#: src/ui/modules/shield.rs:392 src/ui/modules/shield.rs:410
+msgid "The update service did not answer"
+msgstr ""
+
+#: src/ui/modules/shield.rs:398
+msgid "Not authorised"
+msgstr ""
+
+#: src/ui/modules/shield.rs:399
+msgid "Another update request is running"
+msgstr ""
+
+#: src/ui/modules/shield.rs:401
+msgid "Nothing is downloaded yet; the update downloads at the next check"
+msgstr ""
+
+#: src/ui/modules/shield.rs:403
+msgid "There is no previous version to go back to"
+msgstr ""
+
+#: src/ui/modules/shield.rs:404
+msgid "A program is blocking the restart; close it and try again"
+msgstr ""
+
+#: src/ui/modules/shield.rs:405
+msgid "The request failed; the system journal says why"
+msgstr ""
+
+#: src/ui/modules/shield.rs:407
+msgid "This security update was already postponed once, or can no longer be"
+msgstr ""
+
+#: src/ui/modules/shield.rs:409
+msgid "Only security updates can be postponed"
+msgstr ""
+
+#: src/ui/modules/shield.rs:431
+msgid "January"
+msgstr ""
+
+#: src/ui/modules/shield.rs:432
+msgid "February"
+msgstr ""
+
+#: src/ui/modules/shield.rs:433
+msgid "March"
+msgstr ""
+
+#: src/ui/modules/shield.rs:434
+msgid "April"
+msgstr ""
+
+#: src/ui/modules/shield.rs:435
+msgid "May"
+msgstr ""
+
+#: src/ui/modules/shield.rs:436
+msgid "June"
+msgstr ""
+
+#: src/ui/modules/shield.rs:437
+msgid "July"
+msgstr ""
+
+#: src/ui/modules/shield.rs:438
+msgid "August"
+msgstr ""
+
+#: src/ui/modules/shield.rs:439
+msgid "September"
+msgstr ""
+
+#: src/ui/modules/shield.rs:440
+msgid "October"
+msgstr ""
+
+#: src/ui/modules/shield.rs:441
+msgid "November"
+msgstr ""
+
+#: src/ui/modules/shield.rs:442
+msgid "December"
+msgstr ""
+
+#: src/ui/modules/shield.rs:475
+#, rust-format
+msgid "Version {version}"
+msgstr ""
+
+#: src/ui/modules/shield.rs:476
+#, rust-format
+msgid "Built on {date}"
+msgstr ""
+
+#: src/ui/modules/shield.rs:479
+#, rust-format
+msgid "Last checked on {date}"
+msgstr ""
+
+#: src/ui/modules/shield.rs:480
+msgid "Never checked"
+msgstr ""
+
+#: src/ui/modules/shield.rs:487
+#, rust-format
+msgid "Host: {host}"
+msgstr ""
+
+#: src/ui/modules/shield.rs:491
+msgid "Signature policy in force"
+msgstr ""
+
+#: src/ui/modules/shield.rs:493
+msgid "Signature policy not in force"
+msgstr ""
+
+#: src/ui/modules/shield.rs:496
+msgid "The policy is the one Athanor ships"
+msgstr ""
+
+#: src/ui/modules/shield.rs:498
+msgid "The policy was changed on this machine"
+msgstr ""
+
+#: src/ui/modules/shield.rs:501
+msgid "Secure Boot on"
+msgstr ""
+
+#: src/ui/modules/shield.rs:503
+msgid "Secure Boot off: this machine runs in the declared degraded mode"
+msgstr ""
+
+#: src/ui/modules/shield.rs:507
+msgid "Automatic security updates are off: security fixes wait until someone installs them."
+msgstr ""
+
+#: src/ui/modules/shield.rs:512
+#, rust-format
+msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
+msgstr ""
+
+#: src/ui/modules/shield.rs:527
+msgid "Go back to the previous version and restart? This asks for an administrator's password."
+msgstr ""
+
+#: src/ui/modules/shield.rs:528
+msgid "Go back"
+msgstr ""
+
+#: src/ui/modules/shield.rs:531
+msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+msgstr ""
+
+#: src/ui/modules/shield.rs:532
+msgid "Turn Off"
+msgstr ""
+
+#: src/ui/modules/shield.rs:686
+msgid "Automatic security updates"
+msgstr ""
+
+#: src/ui/modules/shield.rs:690
+msgid "Postpone"
+msgstr ""
+
+#: src/ui/modules/shield.rs:694
+msgid "Go back to the previous version"
 msgstr ""
 
 #: src/ui/modules/tiling.rs:63 src/ui/modules/tiling.rs:74

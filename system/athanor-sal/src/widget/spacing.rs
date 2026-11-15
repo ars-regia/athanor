@@ -1,5 +1,5 @@
-//! The room one column keeps between its children, as a GTK box's spacing: every other column
-//! keeps the theme's section gap.
+//! The room one column or inline keeps between its children, as a GTK box's spacing: every
+//! other column keeps the theme's section gap, every other inline the theme's gap.
 
 use super::{Kind, Ui, WidgetId};
 
@@ -7,10 +7,11 @@ use super::{Kind, Ui, WidgetId};
 const SPACING_MAX: f32 = f32::MAX / 4.0;
 
 impl Ui {
-    /// Sets the logical pixels column `id` keeps between its children, `None` for the theme's
-    /// section gap; a spacing that is not a finite length of at least 0 counts as 0, and one
-    /// past a quarter of the largest `f32` as that quarter. Whether it changed: `false` for a
-    /// widget that is not a column. Call [`Ui::layout`] afterwards.
+    /// Sets the logical pixels column or inline `id` keeps between its children, `None` for
+    /// the theme's section gap in a column and its gap in an inline; a spacing that is not a
+    /// finite length of at least 0 counts as 0, and one past a quarter of the largest `f32` as
+    /// that quarter. Whether it changed: `false` for a widget that is neither. Call
+    /// [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
@@ -18,7 +19,7 @@ impl Ui {
     pub fn set_spacing(&mut self, id: WidgetId, spacing: Option<f32>) -> bool {
         let spacing = spacing.map(|s| if s.is_finite() { s.clamp(0.0, SPACING_MAX) } else { 0.0 });
         let widget = &mut self.widgets[id];
-        if !matches!(widget.kind, Kind::Column) {
+        if !matches!(widget.kind, Kind::Column | Kind::Inline { .. }) {
             return false;
         }
         let changed = widget.spacing != spacing;
@@ -56,7 +57,26 @@ mod tests {
     }
 
     #[test]
-    fn only_a_column_takes_a_spacing() {
+    fn an_inline_keeps_its_own_spacing_and_another_the_themes_gap() {
+        let mut ui = Ui::new("Page", Theme::default(), false);
+        let row = ui.inline(Ui::ROOT, [0.0, 0.0]);
+        let [first, second] = ["Seal", "Verified"].map(|t| ui.add(row, Kind::Label(t.into())));
+        let offset = |ui: &Ui| {
+            let first = ui.widget(first).rect;
+            ui.widget(second).rect.x - (first.x + first.w)
+        };
+        ui.layout();
+        assert_eq!(offset(&ui), ui.theme.gap, "the theme's gap");
+
+        assert!(ui.set_spacing(row, Some(8.0)));
+        ui.layout();
+        assert_eq!(offset(&ui), 8.0);
+        let width = ui.widget(first).rect.w + ui.widget(second).rect.w;
+        assert_eq!(ui.widgets[row].natural_w, width + 8.0, "measured with it");
+    }
+
+    #[test]
+    fn only_a_column_or_an_inline_takes_a_spacing() {
         let mut ui = Ui::new("Page", Theme::default(), false);
         let row = ui.add(Ui::ROOT, Kind::Row);
         assert!(!ui.set_spacing(row, Some(2.0)));

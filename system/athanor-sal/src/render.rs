@@ -309,12 +309,13 @@ fn arrow(ui: &Ui, id: WidgetId, fill: crate::widget::Rect) -> Option<[(f64, f64)
     })
 }
 
-/// An island's fill in `t.island`, with `t.island_border` of `t.border` inside its edge, and
+/// An island's fill in `t.island`, with `t.island_border` of `outline` inside its edge, and
 /// the `arrow` out of that edge drawn as part of the fill: the outline goes round the arrow,
 /// not under it.
 fn draw_island<C: Canvas>(
     ctx: &mut C,
     t: &Theme,
+    outline: Rgba,
     fill: crate::widget::Rect,
     arrow: Option<[(f64, f64); 3]>,
 ) {
@@ -323,7 +324,7 @@ fn draw_island<C: Canvas>(
     ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
     if border > 0.0 {
         ctx.set_stroke(Stroke::new(f64::from(border)));
-        ctx.set_paint(color(t.border));
+        ctx.set_paint(color(outline));
         ctx.stroke_path(&rounded(fill, -border / 2.0, t.island_radius));
     }
     let Some([a, tip, b]) = arrow else {
@@ -348,7 +349,7 @@ fn draw_island<C: Canvas>(
         sides.move_to(a);
         sides.line_to(tip);
         sides.line_to(b);
-        ctx.set_paint(color(t.border));
+        ctx.set_paint(color(outline));
         ctx.stroke_path(&sides);
     }
 }
@@ -584,7 +585,8 @@ pub fn paint<C: Canvas>(
             }
             Kind::Island { .. } => {
                 if let Some(fill) = island {
-                    draw_island(ctx, &t, fill, arrow(ui, id, fill));
+                    let outline = ui.widgets[id].ink.unwrap_or(t.border);
+                    draw_island(ctx, &t, outline, fill, arrow(ui, id, fill));
                 }
             }
             // Flat, filled only under the pointer or while its popup is open, as GTK's checked
@@ -1501,6 +1503,12 @@ mod tests {
         let slid = render(&mut ui, 1.0)?;
         let clear = f64::from(fill.x + fill.w) - 6.0 - 8.0;
         assert_eq!(pixel(&slid, clear, top - 3.0), island_fill);
+        // An island's ink outlines it in place of the theme's border, as a critical card's.
+        let warning = Rgba::rgb(0xff, 0xa0, 0x00);
+        assert!(ui.set_ink(island, Some(warning)));
+        let inked = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&inked, x + 20.0, top + 0.5), warning.0.to_vec());
+        assert_eq!(pixel(&inked, clear, top - 3.0), island_fill, "the arrow keeps its fill");
         Ok(())
     }
 

@@ -11,7 +11,9 @@ src/ui/modules/accessibility.rs
 src/ui/modules/aids.rs
 src/ui/modules/clock.rs
 src/ui/modules/input.rs
+src/ui/modules/notifications.rs
 src/ui/modules/power.rs
+src/ui/modules/shield.rs
 src/ui/modules/tiling.rs
 src/ui/modules/tray.rs
 ../../../../system/athanor-controls/src/audio.rs
