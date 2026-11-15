@@ -1,4 +1,4 @@
-//! The bar's input source (doc_bar.md, BR3), as the GTK bar's `ui/input.rs`: shown while the
+//! The bar's input source (doc_bar.md, BR3), as the GTK bar's `ui/input.rs` was: shown while the
 //! seat has more than one layout, named after the active one, with a radio per layout in its
 //! popover.
 
@@ -10,7 +10,7 @@ use athanor_sal::{Event, Ui, WidgetId};
 use athanor_sulphur_client::Client;
 
 use super::{Cx, Module, Reply, Start, ICON};
-use crate::look;
+use crate::ui::look;
 
 struct Input {
     client: Rc<Client>,

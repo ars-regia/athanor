@@ -1,4 +1,4 @@
-//! The bar's clock and its calendar (doc_bar.md, BR3), as the GTK bar's `ui/clock.rs`: the
+//! The bar's clock and its calendar (doc_bar.md, BR3), as the GTK bar's `ui/clock.rs` was: the
 //! date and time in semibold figures of one width, the long form as the button's name and
 //! tooltip, and a calendar on today, which takes the focus, in its popover.
 
@@ -7,7 +7,7 @@ use athanor_bar::i18n::tr;
 use athanor_sal::{CalendarText, Date, Event, TextStyle, Ui, WidgetId};
 
 use super::{Cx, Module, Reply, Start};
-use crate::look;
+use crate::ui::look;
 
 /// The size of the calendar's arrows, as GTK's.
 const ARROW: u16 = 16;

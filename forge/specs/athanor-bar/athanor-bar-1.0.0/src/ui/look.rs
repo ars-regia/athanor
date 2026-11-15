@@ -1,7 +1,7 @@
-//! The toolkit bar's colours and measures: the toolkit's theme (`athanor_style::sal`,
+//! The bar's colours and measures: the toolkit's theme (`athanor_style::sal`,
 //! doc_visual_language.md VL10) for the appearance's variant and accent, with the bar's
 //! measures of Calmo's stylesheet (`window.athanor-bar`, `button.bar-button`,
-//! `popover.athanor-bar-popover`), which the GTK bar reads.
+//! `popover.athanor-bar-popover`), which the GTK bar read.
 
 use athanor_layout::preset::Preset;
 use athanor_sal::{Rgba, Theme, Ui, WidgetId};

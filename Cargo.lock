@@ -427,8 +427,6 @@ dependencies = [
  "gio",
  "gio-unix",
  "glib",
- "gtk4",
- "gtk4-layer-shell",
  "libc",
  "tracing",
  "wayland-client",

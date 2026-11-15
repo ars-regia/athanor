@@ -25,7 +25,7 @@
 #   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
-#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose GTK tests need a display) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh build-control-center   clippy, tests and release build of athanor-control-center (with athanor-services and the Sal pages of athanor-controls) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through;
@@ -33,8 +33,6 @@
 #   rig.sh build-dock       clippy, tests and release build of athanor-dock (and athanor-apps) into <out>/bin, with the DT_NEEDED check
 #   rig.sh build-dock-toolkit   clippy, tests and release build of the toolkit dock into <out>/toolkit-dock/athanor-dock:
 #                           ATHANOR_DOCK_BIN=/out/toolkit-dock/athanor-dock runs it in the dock's scenes
-#   rig.sh build-bar-toolkit    clippy, tests and release build of the toolkit bar into <out>/toolkit-bar/athanor-bar:
-#                           ATHANOR_BAR_BIN=/out/toolkit-bar/athanor-bar runs it in the bar's captures and `atspi bar`
 #   rig.sh build-launcher   clippy, tests (qalc required) and release build of athanor-launcher and athanor-preview-render into <out>/bin, with the DT_NEEDED check (no GTK)
 #   rig.sh dock-roundtrip   the dock's surface off screen and back, three times, under cosmic-comp (BR7)
 #   rig.sh shelld-e2e       athanor-shelld on a session bus: names, notifications, refusal of the private interface, tray watcher, memory
@@ -46,7 +44,7 @@
 #   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
-#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
 #   rig.sh atspi <greeter|chooser|bar|bar-calendar|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
@@ -104,19 +102,6 @@ fi
 case $dock_app in
 '' | *[[:space:]]*)
     echo "rig.sh: ATHANOR_DOCK_BIN must end in a file name without spaces, not '$dock_bin'" >&2
-    exit 2
-    ;;
-esac
-# The bar the bar's captures and `atspi bar` run, as a path inside the rig; the toolkit
-# bar's captures are tagged as the toolkit dock's.
-bar_bin=${ATHANOR_BAR_BIN:-/out/bin/athanor-bar}
-bar_tag=
-if [ "$bar_bin" = /out/toolkit-bar/athanor-bar ]; then
-    bar_tag=toolkit-
-fi
-case $bar_bin in
-*[[:space:]]*)
-    echo "rig.sh: ATHANOR_BAR_BIN must be a path without spaces, not '$bar_bin'" >&2
     exit 2
     ;;
 esac
@@ -423,7 +408,7 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
 # system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
     local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable=""
-    local session=(python3 /repo/forge/test/shell/bar_session.py --client "$bar_bin")
+    local session=(python3 /repo/forge/test/shell/bar_session.py --client /out/bin/athanor-bar)
     case "$surface" in
     bar) preset=bar panel=bottom dock=- session+=(--window) ;;
     bar-power) open=power ;;
@@ -459,7 +444,6 @@ capture_bar() { # capture_bar <surface>
         msgfmt -o /out/locale/bar/rtl.mo /out/bar-pseudo-rtl.po'
     stage_greeter_icons
     while IFS=$'\t' read -r tag variant scale locale catalog; do
-        tag=$bar_tag$tag
         tags+=("$tag")
         seed_bar "$out/seed-$tag" "$preset" "$panel" "$dock" "$variant"
         override=()
@@ -918,12 +902,17 @@ build-bar)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls -p athanor-bar --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-apps -p athanor-bar \
+        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-bar --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-apps \
                  && forge/test/shell/with-display.sh cargo test --locked -p athanor-controls \
+                 && cargo test --locked -p athanor-bar \
                  && cargo build --release --locked -p athanor-bar \
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
-                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
+                 && needed=$(readelf -d /out/bin/athanor-bar) \
+                 && if grep -E "\(NEEDED\).*lib(gtk|gdk|adwaita)" <<<"$needed"; then \
+                        echo "rig.sh: athanor-bar links GTK (doc_own_stack.md OS8)" >&2; exit 1; \
+                    fi'
     ;;
 build-control-center)
     mkdir -p "$out/bin" "$out/target"
@@ -963,18 +952,6 @@ build-dock-toolkit)
                  && cargo test --locked -p athanor-dock --no-default-features --features toolkit \
                  && cargo build --release --locked -p athanor-dock --no-default-features --features toolkit --bin athanor-dock-toolkit \
                  && install -m 0755 /out/target/release/athanor-dock-toolkit /out/toolkit-dock/athanor-dock'
-    ;;
-build-bar-toolkit)
-    # Installed as athanor-bar in a directory of its own, as the toolkit dock: accesskit names
-    # the application after the executable.
-    mkdir -p "$out/toolkit-bar" "$out/target"
-    podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
-        -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-bar --no-default-features --features toolkit --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-bar --no-default-features --features toolkit \
-                 && cargo build --release --locked -p athanor-bar --no-default-features --features toolkit --bin athanor-bar-toolkit \
-                 && install -m 0755 /out/target/release/athanor-bar-toolkit /out/toolkit-bar/athanor-bar'
     ;;
 build-launcher)
     mkdir -p "$out/bin" "$out/target"
@@ -1141,10 +1118,9 @@ launcher-window-preview)
         /repo/forge/test/shell/golden/launcher-window-preview /out launcher-window-preview
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
-    bar) binary=athanor-bar ;;
     dock) binary=athanor-dock ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
@@ -1333,7 +1309,7 @@ atspi)
             ATSPI_TRANSCRIPT="/out/atspi-$2${3:+-$3}.json" \
             RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-$2" -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client $(printf %q "$bar_bin")"
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client /out/bin/athanor-bar"
         surface_not_closed atspi "$2" "atspi-$2"
         # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
         # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).

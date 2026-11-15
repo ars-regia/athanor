@@ -1,4 +1,4 @@
-//! The bar's accessibility menu (doc_bar.md, BR3), as the GTK bar's `ui/accessibility.rs`:
+//! The bar's accessibility menu (doc_bar.md, BR3), as the GTK bar's `ui/accessibility.rs` was:
 //! high contrast; the screen reader with its GNOME key; with the compositor's state, the
 //! magnifier, inverted colours and the colour filter; and the keyboard aids (AX11), whose
 //! state the button shows beside its icon and whose offer the menu accepts.
@@ -14,7 +14,7 @@ use gio::prelude::SettingsExt;
 
 use super::aids;
 use super::{Cx, Module, Reply, Start, ICON};
-use crate::look;
+use crate::ui::look;
 
 /// The filters a user can choose. `Unknown` is read, never offered.
 const FILTERS: [ScreenFilter; 5] = [

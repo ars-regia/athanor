@@ -67,7 +67,7 @@ impl Menu {
 
 /// The menu's `page`, in `theme`, in a popover below the bar when `top`.
 pub fn build(theme: Theme, rtl: bool, top: bool, page: Page, offered: &[bool; 5]) -> (Ui, Menu) {
-    let (mut ui, frame) = crate::look::popover(&tr("Power"), theme, rtl, top);
+    let (mut ui, frame) = crate::ui::look::popover(&tr("Power"), theme, rtl, top);
     let mut acts = Vec::new();
     match page {
         Page::Actions => {

@@ -1,10 +1,10 @@
-//! The toolkit bar's surfaces (doc_bar.md, BR3, BR6, BR7), as `ui/` draws the GTK bar's: one
-//! layer surface per output along the layout's panel edge, the preset's three groups in a
-//! centre box in the order of `order::groups`, which the toolkit mirrors under right-to-left
-//! text as `order::visual` does, and one popover open at a time. Its inputs are the GTK
-//! bar's: the layout's layers and the favourites file, watched live, the appearance, the
-//! installed applications and the compositor's windows. GLib's callbacks only queue a
-//! change, which `turn` applies with the shell in hand.
+//! The bar's surfaces (doc_bar.md, BR3, BR6, BR7): one layer surface per output along the
+//! layout's panel edge, the preset's three groups in a centre box in the order of
+//! `order::groups`, which the toolkit mirrors under right-to-left text as `order::visual`
+//! does, and one popover open at a time. Its inputs are the layout's layers and the
+//! favourites file, watched live, the appearance, the installed applications and the
+//! compositor's windows. GLib's callbacks only queue a change, which `turn` applies with the
+//! shell in hand.
 //!
 //! The launcher, application-library and workspaces openers, the running applications with
 //! their menus and the control center's button are drawn here; every module with a popover is
@@ -37,8 +37,8 @@ use athanor_sulphur_client::{Client, Event as Compositor, Opener};
 use gio::glib;
 use gio::prelude::*;
 
-use crate::look::{self, Look};
-use crate::modules::{self, Cx, Reply, Wake, Wakeup, ICON};
+use crate::ui::look::{self, Look};
+use crate::ui::modules::{self, Cx, Reply, Wake, Wakeup, ICON};
 
 /// The program's name: of its failed-start notifications, as the GTK bar's (`Host::APP`).
 const APP: &str = "athanor-bar";

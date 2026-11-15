@@ -150,7 +150,8 @@ pub fn prepare() -> Prepared {
     // Before any thread starts. Writes only (athanor-unit::sandbox): the launch sockets, the
     // bar's own runtime directory and dconf, never the rest of the runtime directory (the
     // compositor's and the bus's sockets); the caches, the favourites, the COSMIC theme
-    // keys, the first-session layout and marker, /tmp, and the DRM nodes. Each is granted by
+    // keys and the first-session layout and marker. No /tmp and no DRM node: Sal draws with
+    // vello_cpu into shared memory from memfd_create. Each is granted by
     // the descriptor its check opened: the parent of the launch sockets (BR2.2), made the way
     // launch() makes it, and dconf's are private to the user (`dirs::private_dir`).
     let mut write = dirs::private_dirs(&dirs.runtime, &["athanor", "dconf"]);
@@ -158,16 +159,14 @@ pub fn prepare() -> Prepared {
         dirs.unit_runtime.as_path(),
         dirs.cache.as_path(),
         favorites_dir.as_path(),
-        Path::new("/tmp"),
     ]
     .into_iter()
     .chain(cosmic_dirs.iter().map(PathBuf::as_path))
     .chain(first_session_dirs.iter().map(PathBuf::as_path))
     .collect();
     write.extend(dirs::existing(&checked, dirs::owned_dir));
-    let devices = dirs::existing(&[Path::new("/dev/dri")], dirs::owned_node);
     let confined =
-        sandbox::ensure_single_threaded().and_then(|()| sandbox::restrict_writes(&write, &devices));
+        sandbox::ensure_single_threaded().and_then(|()| sandbox::restrict_writes(&write, &[]));
     if let Err(err) = confined {
         tracing::error!(error = %err, "cannot confine the bar with Landlock; refusing to run unconfined");
         return Prepared::Exit(false);

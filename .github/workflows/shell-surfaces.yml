@@ -285,14 +285,14 @@ jobs:
           path: .scratch/shell-rig/bin
       - name: Verify the binaries of the build job
         run: bash forge/test/shell/rig.sh verify-bin athanor-bar athanor-shelld
-      - name: Layer-surface guard
-        run: bash forge/test/shell/rig.sh layer-guard bar
       - name: Accessibility tree of the bar
         run: bash forge/test/shell/rig.sh atspi bar
       - name: Accessibility tree of the bar in Italian
         run: bash forge/test/shell/rig.sh atspi bar it
       - name: Accessibility tree of the bar with every system module
         run: bash forge/test/shell/rig.sh atspi bar-modules
+      - name: Accessibility trees of the bar in every appearance and text scale (AX17)
+        run: bash forge/test/shell/rig.sh atspi bar --matrix
       - name: Orca's speech on the bar against its transcript
         run: bash forge/test/shell/rig.sh orca bar
       - name: Orca's speech on the bar in Italian against its transcript
@@ -331,7 +331,7 @@ jobs:
           persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
-      - name: Build and test the bar and check the DT_NEEDED order
+      - name: Build and test the bar and check that it links no GTK library
         run: bash forge/test/shell/rig.sh build-bar
       - name: Build and test the daemon
         run: bash forge/test/shell/rig.sh build-shelld

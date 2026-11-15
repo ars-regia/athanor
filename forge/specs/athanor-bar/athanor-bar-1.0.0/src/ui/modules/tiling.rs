@@ -1,4 +1,4 @@
-//! The bar's tiling switch (doc_bar.md, BR3), as the GTK bar's `ui/tiling.rs`: shown on a
+//! The bar's tiling switch (doc_bar.md, BR3), as the GTK bar's `ui/tiling.rs` was: shown on a
 //! surface while the active workspace of its output reports its mode, with a switch in its
 //! popover that tiles that workspace's windows or floats them.
 
@@ -11,7 +11,7 @@ use athanor_sal::{Event, Ui, WidgetId};
 use athanor_sulphur_client::{Client, WorkspaceId};
 
 use super::{Cx, Module, Reply, Start, ICON};
-use crate::look;
+use crate::ui::look;
 
 struct TilingModule {
     client: Rc<Client>,
