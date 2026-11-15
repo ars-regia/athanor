@@ -2050,6 +2050,7 @@ BUDGET = {
     "unreachable!(": 0,
     "todo!(": 0,
     "unimplemented!(": 0,
+    "process::abort(": 2,
 }
 
 
