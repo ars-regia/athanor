@@ -113,22 +113,25 @@ class ChildrenTest(unittest.TestCase):
     def test_a_child_gone_between_the_count_and_the_lookup_is_skipped(self):
         self.assertEqual(list(check.children(self.Fake(["a", None, "c"]))), ["a", "c"])
 
-    def test_walk_survives_a_gone_child(self):
-        class Node(self.Fake):
-            def get_state_set(self):
+    def test_window_of_skips_a_gone_window(self):
+        class Window(self.Fake):
+            def get_component_iface(self):
                 return self
 
-            def contains(self, _):
-                return True
+        class Rect:
+            x = y = 0
+            width, height = 30, 20
 
-            def get_role_name(self):
-                return "panel"
+        class Atspi:
+            class CoordType:
+                WINDOW = 0
 
-            def get_name(self):
-                return "n"
+            class Component:
+                @staticmethod
+                def get_extents(_, __):
+                    return Rect
 
-        atspi = type("Atspi", (), {"StateType": type("S", (), {"SHOWING": 0})})
-        self.assertEqual(len(check.walk(Node([Node([]), None]), atspi)), 2)
+        self.assertEqual(check.window_of(Window([Window([]), None]), Atspi), (0, 0, 30, 20))
 
 
 if __name__ == "__main__":
