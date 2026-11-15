@@ -7,7 +7,7 @@
 #
 # Environment (all steps):  PKG_NAME REGISTRY GITHUB_REPOSITORY_OWNER RUNNER_TEMP
 #   check:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE GITHUB_OUTPUT
-#   build:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE SCCACHE_CACHE_SIZE CONTENT_HASH
+#   build:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE CONTENT_HASH
 #   publish:  GITHUB_TOKEN GITHUB_ACTOR CONTENT_HASH
 #   tag:      CONTENT_HASH (the registry login of the caller, see tag_signed_image.sh)
 # $RUNNER_TEMP/image.digest is written by publish and read by sbom and tag.
@@ -55,7 +55,6 @@ step_check() {
 
 step_build() {
   mkdir -p RPMS
-  mkdir -p "${GITHUB_WORKSPACE}/.sccache"
   login_and_pull_builder
 
   local pkg_clean spec_dir=""
@@ -70,11 +69,11 @@ step_build() {
       exit 1
     fi
     echo "📦 Compiling Custom Spec: $spec_dir"
-    # Fetch with network, then build with --network=none (forge golden rule 4).
+    # Fetch with network, then build with --network=none (forge golden rule 4). No cache is
+    # mounted: a signed package is built only from inputs its provenance names, and sccache
+    # keeps its cache in the build's own volume, which run_spec_build.sh removes (PL10).
     bash "$here/run_spec_build.sh" "${BUILDER_IMAGE,,}" "$spec_dir" \
-      -e ATHANOR_CONTENT=".h${CONTENT_HASH:0:10}" \
-      -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-      -v "${GITHUB_WORKSPACE}/.sccache:/root/.cache/sccache"
+      -e ATHANOR_CONTENT=".h${CONTENT_HASH:0:10}"
   else
     echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
     exit 1

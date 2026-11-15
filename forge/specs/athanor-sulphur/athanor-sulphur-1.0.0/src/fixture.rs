@@ -3146,11 +3146,18 @@ const RENDER_NODE_GLOBALS: [&str; 3] = [
     "wl_drm",
 ];
 
-/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them.
+/// The globals offered only by the udev backend, on the GPU it draws on (decision 36).
+const UDEV_GLOBALS: [&str; 1] = ["wp_drm_lease_device_v1"];
+
+/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them headless.
 fn rows(admitted: impl Fn(Class) -> bool) -> BTreeSet<&'static str> {
     classified()
         .into_iter()
-        .filter(|(interface, class)| admitted(*class) && !RENDER_NODE_GLOBALS.contains(interface))
+        .filter(|(interface, class)| {
+            admitted(*class)
+                && !RENDER_NODE_GLOBALS.contains(interface)
+                && !UDEV_GLOBALS.contains(interface)
+        })
         .map(|(interface, _)| interface)
         .collect()
 }
@@ -12477,6 +12484,10 @@ mod wave2b;
 #[cfg(test)]
 mod background_effect;
 
-// Decision 36: content type and toplevel tag.
+// Decision 36: content type, toplevel tag and DRM lease.
 #[cfg(test)]
 mod decision36;
+
+// Nulls the wire signature forbids (vendor/wayland-backend/PATCHES.md).
+#[cfg(test)]
+mod null_arguments;
