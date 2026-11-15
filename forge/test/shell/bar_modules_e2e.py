@@ -539,7 +539,7 @@ def audio(ctx):
         return found is not None and abs(found.get_current_value() - percent) < 1.0
 
     def switch(name):
-        found = labelled(app, Atspi, "check box", name)
+        found = labelled(app, Atspi, "toggle button", name)
         return found[0] if found else None
 
     def default_sink():
@@ -557,7 +557,7 @@ def audio(ctx):
 
     switch("Mute output").do_action(0)
     check("the mute switch mutes the sink", wait_for(lambda: "yes" in fx.pactl("get-sink-mute", "headphones"), 5))
-    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.PRESSED), 5)
     switch("Mute output").do_action(0)
     check("and unmutes it", wait_for(lambda: "no" in fx.pactl("get-sink-mute", "headphones"), 5))
 
