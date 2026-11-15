@@ -18,6 +18,7 @@ mod constraints;
 mod cursor;
 mod decoration;
 mod dock_overlap;
+mod drm_lease;
 mod focus_theme;
 mod foreign;
 mod gestures;

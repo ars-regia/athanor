@@ -825,6 +825,8 @@ compositor-globals)
         echo "compositor-globals: $out/compositor-globals-compositor.log names no renderer" >&2
         exit 1
     fi
+    # Decision 36: the lease device exists only on the udev backend, never headless.
+    ! grep -q "interface: 'wp_drm_lease_device_v1'" "$out/compositor-globals.txt" || missing+=("absence of wp_drm_lease_device_v1")
     for interface in "${standard[@]}"; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
