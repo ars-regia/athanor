@@ -20,12 +20,13 @@ use protocol::wl_drm::{self, WlDrm};
 use smithay::backend::allocator::dmabuf::{Dmabuf, DmabufFlags};
 use smithay::backend::allocator::format::FormatSet;
 use smithay::backend::allocator::{Fourcc, Modifier};
-use smithay::backend::drm::DrmNode;
+use smithay::backend::drm::{DrmNode, NodeType};
 use smithay::reexports::wayland_server::{Client, DataInit, DisplayHandle, New, Resource};
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::os::fd::OwnedFd;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// The server side of Mesa's description, laid out as `wayland-protocols` lays out its own.
@@ -62,16 +63,16 @@ pub struct Drm {
     formats: Arc<[u32]>,
 }
 
-/// Offers the global for the render node `node`, whose renderer imports `formats`. A node
-/// without a path in UTF-8, which a device under /dev/dri never is, is not named: the global is
-/// then not offered, and a warning says so.
+/// Offers the global for the render node `node`, whose renderer imports `formats`. Any other
+/// node is not offered, and a warning says why: `authenticate` grants nothing only because the
+/// node named needs no authentication.
 pub fn global(dh: &DisplayHandle, node: DrmNode, formats: &FormatSet) {
-    let Some(device) = node
-        .dev_path()
-        .and_then(|path| path.into_os_string().into_string().ok())
-    else {
-        tracing::warn!(%node, "wl_drm is not offered: the render node has no path to name");
-        return;
+    let device = match named(node.ty(), node.dev_path()) {
+        Ok(device) => device,
+        Err(reason) => {
+            tracing::warn!(%node, "wl_drm is not offered: {reason}");
+            return;
+        }
     };
     let mut codes: Vec<u32> = formats
         .iter()
@@ -85,6 +86,16 @@ pub fn global(dh: &DisplayHandle, node: DrmNode, formats: &FormatSet) {
         formats: codes.into(),
     };
     dh.create_global::<State, WlDrm, _>(2, drm);
+}
+
+/// The path `device` sends for a node of type `ty` at `path`: only a render node's, in UTF-8,
+/// which a device under /dev/dri always is.
+fn named(ty: NodeType, path: Option<PathBuf>) -> Result<String, &'static str> {
+    if ty != NodeType::Render {
+        return Err("the node is not a render node, and a client of it would need authentication");
+    }
+    path.and_then(|path| path.into_os_string().into_string().ok())
+        .ok_or("the render node has no path to name")
 }
 
 impl GlobalDispatch2<WlDrm, State> for Drm {
@@ -158,10 +169,11 @@ impl Dispatch2<WlDrm, State> for Drm {
 }
 
 impl Drm {
-    /// The dmabuf of a `create_prime_buffer` on `fd`: a plane for the first pair of `planes`,
-    /// and for each other whose stride is not 0, as the description passes 0 and 0 for an
-    /// unused plane, all on `fd`, with the implicit modifier. The checks are linux-dmabuf's: a
-    /// format offered, a positive size, and when `fd`'s size is known, each plane inside it.
+    /// The dmabuf of a `create_prime_buffer` on `fd`: a plane for each pair of `planes` up to
+    /// the first unused one, which the description passes as 0 and 0, all on `fd`, with the
+    /// implicit modifier. The first plane is used, and no plane follows an unused one, so a
+    /// plane keeps its index. The other checks are linux-dmabuf's: a format offered, a
+    /// positive size, and when `fd`'s size is known, each plane inside it.
     fn prime(
         &self,
         fd: OwnedFd,
@@ -194,9 +206,25 @@ impl Drm {
             Modifier::Invalid,
             DmabufFlags::empty(),
         );
+        let mut unused = false;
         for (index, (offset, stride)) in planes.into_iter().enumerate() {
-            if index > 0 && stride == 0 {
-                continue;
+            match (index, offset, stride) {
+                (0, _, 0) => return Err(invalid("plane 0 has no stride".to_string())),
+                (_, 0, 0) => {
+                    unused = true;
+                    continue;
+                }
+                (_, _, 0) => {
+                    return Err(invalid(format!(
+                        "plane {index}: an unused plane has the offset {offset}"
+                    )))
+                }
+                _ if unused => {
+                    return Err(invalid(format!(
+                        "plane {index} follows an unused plane"
+                    )))
+                }
+                _ => {}
             }
             let (Ok(offset), Ok(stride)) = (u32::try_from(offset), u32::try_from(stride)) else {
                 return Err(invalid(format!(
@@ -287,6 +315,16 @@ mod tests {
     }
 
     #[test]
+    fn only_a_render_node_is_named() {
+        let path = || Some(PathBuf::from("/dev/dri/card0"));
+        assert!(named(NodeType::Primary, path()).is_err(), "a primary node");
+        assert!(named(NodeType::Control, path()).is_err(), "a control node");
+        let render = named(NodeType::Render, Some(PathBuf::from("/dev/dri/renderD128")));
+        assert_eq!(render.as_deref(), Ok("/dev/dri/renderD128"));
+        assert!(named(NodeType::Render, None).is_err(), "no path");
+    }
+
+    #[test]
     fn a_format_not_offered_is_invalid_format() {
         let planes = [(0, 256), (0, 0), (0, 0)];
         let xrgb = Fourcc::Xrgb8888 as u32;
@@ -317,6 +355,9 @@ mod tests {
                 [(0, 256), (256 * 64, 1), (0, 0)],
                 "a second row past the end",
             ),
+            ((64, 64), one(0, 0), "a first plane without a stride"),
+            ((64, 64), [(0, 256), (0, 0), (0, 64)], "a third plane after an unused one"),
+            ((64, 64), [(0, 256), (64, 0), (0, 0)], "an unused plane with an offset"),
         ] {
             let result = drm.prime(file(256 * 64, what), size, ARGB, planes);
             assert_eq!(error(result), wl_drm::Error::InvalidName, "{what}");
