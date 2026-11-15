@@ -600,13 +600,13 @@ impl Bar {
     }
 
     /// READY=1 once (Type=notify): at the first frame of a surface, as the GTK bar at its
-    /// window's `map`, or at once without an output; then the popover the captures ask for.
+    /// window's `map`; then the popover the captures ask for. The first turns run before the
+    /// outputs are announced, so an empty output list is not a reason to be ready.
     fn notify_ready(&mut self, shell: &mut Shell) {
         if self.ready {
             return;
         }
-        let ready = shell.outputs().next().is_none() || self.outs.keys().any(|id| shell.drawn(*id));
-        if !ready {
+        if !self.outs.keys().any(|id| shell.drawn(*id)) {
             return;
         }
         self.ready = true;

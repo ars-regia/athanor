@@ -65,10 +65,12 @@ pub fn build(theme: Theme, rtl: bool, page: Page, offered: &[bool; 5]) -> (Ui, M
     let mut acts = Vec::new();
     match page {
         Page::Actions => {
+            // A menu's rows, flat as the GTK popover's `bar-row` buttons.
+            let list = ui.add(Ui::ROOT, Kind::Menu);
             for action in Action::ALL {
                 if shown(action, offered) {
                     let (label, _) = texts(action);
-                    acts.push((ui.add(Ui::ROOT, Kind::Button(label)), Act::Ask(action)));
+                    acts.push((ui.add(list, Kind::Button(label)), Act::Ask(action)));
                 }
             }
         }
