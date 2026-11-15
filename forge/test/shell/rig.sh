@@ -1585,10 +1585,10 @@ orca)
         bar-running) walk=(Tab*3 shift+F10 Down*4 Escape) ;;
         *) echo "rig.sh orca: $2 has no walk; name its keys here" >&2; exit 2 ;;
         esac
-        if [ -n "$unit" ]; then
-            own=(--own-compositor "$preset" - "${3:-en}")
-            walk=(ctrl+alt+Tab "${walk[@]}")
-        fi
+        # No exemption of decision 28: a popover's walk, and bar-running's, which starts on the
+        # launcher, reach none of the buttons it hides, and orca_compare refuses an exemption
+        # that names no utterance of the reference.
+        if [ -n "$unit" ]; then walk=(ctrl+alt+Tab "${walk[@]}"); fi
         opened=()
         if [ -n "$open" ]; then opened=(ATHANOR_BAR_OPEN="$open"); fi
         stage_greeter_icons
