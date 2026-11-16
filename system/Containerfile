@@ -311,7 +311,8 @@ RUN for pkg in cosmic-panel cosmic-applets cosmic-notifications athanor-layout-t
         *) echo "cosmic-comp is not Athanor's build: $(rpm -q cosmic-comp)" >&2; exit 1;; esac && \
     for name in org.freedesktop.Notifications org.kde.StatusNotifierWatcher; do \
         owners=$(for dir in /usr/share/athanor/cosmic-defaults/dbus-1/services /usr/local/share/dbus-1/services /usr/share/dbus-1/services; do \
-            if [ -d "$dir" ]; then find "$dir" -maxdepth 1 -xtype f -name '*.service' -exec grep -lx "Name=$name" {} +; fi; \
+            if [ -d "$dir" ]; then find -H "$dir" -maxdepth 1 -xtype f -name '*.service' \
+                -exec grep -lE "^[[:space:]]*Name[[:space:]]*=[[:space:]]*${name//./\\.}[[:space:]]*\$" {} +; fi; \
         done); \
         test "$owners" = "/usr/share/dbus-1/services/$name.service" \
             || { echo "$name is activated by: $owners" >&2; exit 1; }; \

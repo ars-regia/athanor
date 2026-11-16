@@ -6,6 +6,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -329,7 +330,7 @@ class ActivationOwners(unittest.TestCase):
     NAMES = ("org.freedesktop.Notifications", "org.kde.StatusNotifierWatcher")
     DIRS = ("usr/share/athanor/cosmic-defaults/dbus-1/services", "usr/local/share/dbus-1/services")
 
-    def run_loop(self, extra=None):
+    def run_loop(self, extra=None, owner_line=None):
         lines = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ").splitlines()
         line = next(line for line in lines if "for name in org.freedesktop.Notifications" in line)
         loop = line[line.index("for name in org.freedesktop.Notifications"):]
@@ -342,9 +343,11 @@ class ActivationOwners(unittest.TestCase):
             if extra:
                 directory, name = extra
                 (root / directory).mkdir(parents=True, exist_ok=True)
-                (root / directory / "other.service").write_text(f"[D-BUS Service]\nName={name}\n")
+                (root / directory / "other.service").write_text(
+                    f"[D-BUS Service]\n{owner_line or f'Name={name}'}\n".replace("\n", "\r\n" if owner_line else "\n"))
             (main / "dangling.service").symlink_to(root / "nowhere")
-            r = subprocess.run(["sh", "-c", loop.replace("/usr/", f"{tmp}/usr/")],
+            # bash, as the Containerfile's SHELL runs it.
+            r = subprocess.run(["bash", "-c", loop.replace("/usr/", f"{tmp}/usr/")],
                                env={"PATH": os.environ["PATH"]}, capture_output=True, text=True)
         return r
 
@@ -360,10 +363,26 @@ class ActivationOwners(unittest.TestCase):
                 self.assertEqual(r.returncode, 1, (directory, name, r.stderr))
                 self.assertIn(f"{name} is activated by:", r.stderr)
 
+    def test_a_second_owner_the_bus_reads_with_spaces_fails(self):
+        # Spaces around = and a CRLF line end, which check_image_session.py also matches.
+        for name in self.NAMES:
+            r = self.run_loop((self.DIRS[1], name), f"  Name = {name} ")
+            self.assertEqual(r.returncode, 1, (name, r.stderr))
+
+    def test_a_dotted_name_matches_only_itself(self):
+        name = self.NAMES[1]
+        r = self.run_loop((self.DIRS[1], name), "Name=" + name.replace(".", "X", 1))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_the_directories_are_those_of_the_image_gate(self):
-        gate = (ROOT / "forge/scripts/check_image_session.py").read_text()
-        for directory in self.DIRS:
-            self.assertIn(f'"{directory}"', gate)
+        text = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ")
+        loop = re.search(r"for dir in ([^;]+);", text).group(1).split()
+        sys.path.insert(0, str(ROOT / "forge" / "scripts"))
+        try:
+            import check_image_session
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(loop, ["/" + d for d in check_image_session.SESSION_SERVICE_DIRS])
 
 
 if __name__ == "__main__":
