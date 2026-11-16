@@ -1533,8 +1533,10 @@ class KernelTagRetention(Tool):
         at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(**delta)
         return at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def prune(self, packages):
-        """Runs retention.sh on PACKAGES {package: [(digest, tags, created_at)]}; the deleted digests."""
+    def prune(self, packages, rc=0):
+        """Runs retention.sh on PACKAGES {package: [(digest, tags, created_at[, updated_at])]}.
+
+        Returns the digests it deleted, from the DELETE calls of the fake gh."""
         self.registry(
             {
                 "packages": {
@@ -1543,18 +1545,43 @@ class KernelTagRetention(Tool):
                             "id": i,
                             "name": digest,
                             "created_at": at,
-                            "updated_at": at,
+                            "updated_at": (updated or [at])[0],
                             "metadata": {"container": {"tags": tags}},
                         }
-                        for i, (digest, tags, at) in enumerate(versions)
+                        for i, (digest, tags, at, *updated) in enumerate(versions)
                     ]
                     for pkg, versions in packages.items()
                 }
             }
         )
         r = self.run_script(script=ROOT / "forge/specs/azoth/retention.sh")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return set(re.findall(r"deleting \d+ (sha256:[0-9a-f]{64})", r.stdout))
+        self.assertEqual(r.returncode != 0, rc != 0, r.stderr)
+        ids = {
+            call[-1].rsplit("/", 1)[1]
+            for call in map(json.loads, (self.dir / "calls.log").read_text().splitlines())
+            if call[:4] == ["gh", "api", "--method", "DELETE"]
+        }
+        return {
+            v[0]
+            for versions in packages.values()
+            for i, v in enumerate(versions)
+            if str(i) in ids
+        }
+
+    def test_an_error_of_jq_deletes_nothing(self):
+        cur, held, stray = ("sha256:" + c * 64 for c in "abc")
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    # A timestamp jq cannot read: the list of what survives stops short.
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], self.ago(hours=1), "yesterday"),
+                    (stray, [], self.ago(days=1)),
+                ]
+            },
+            rc=1,
+        )
+        self.assertEqual(deleted, set())
 
     def test_a_kernel_tag_left_by_a_republish_goes_fourteen_days_after_the_nvr_moved(self):
         old, old_vm, cur, cur_vm, held, cur2 = ("sha256:" + c * 64 for c in "abcdef")

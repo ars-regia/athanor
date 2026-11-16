@@ -70,16 +70,11 @@ prune() { # prune PACKAGE KEEP [KERNEL_TAG]: the third argument where Kernel Bui
   api="${PACKAGES_API}/container/${pkg}/versions"
   versions=$(gh api --paginate "${api}?per_page=100" | jq -s 'add // []')
 
-  while read -r digest; do
-    live[$digest]=1
-    hex=${digest#sha256:}
-    while read -r member; do live[$member]=1; done < <(jq -r --arg hex "$hex" '
-      .[] | select(.metadata.container.tags | any(startswith("sha256-" + $hex))) | .name' <<<"$versions")
-    if jq -e --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<<"$versions" > /dev/null; then
-      while read -r member; do live[$member]=1; done < <(
-        skopeo inspect --raw "docker://ghcr.io/${OWNER}/${pkg}:sha256-${hex}" | jq -r '.manifests[].digest')
-    fi
-  done < <(jq -r --argjson keep "$keep" --arg ktag "$ktag" --argjson since "$SINCE" '
+  # Every list that decides what survives is read into a variable first: an error of jq or
+  # skopeo then ends the run before any deletion, where a process substitution would hand
+  # the loop a partial list and delete what it left out.
+  local roots members indexed listing
+  roots=$(jq -r --argjson keep "$keep" --arg ktag "$ktag" --argjson since "$SINCE" '
     def release: (startswith("sha256-") or ($ktag != "" and test($ktag))) | not;
     # When each tag last moved: the newer of created_at and updated_at of the version it names.
     ([.[] | ([.created_at, .updated_at] | max) as $at | .metadata.container.tags[] | {key: ., value: $at}]
@@ -90,13 +85,28 @@ prune() { # prune PACKAGE KEEP [KERNEL_TAG]: the third argument where Kernel Bui
         | select(any(.metadata.container.tags[] | select(test($ktag)) | sub("-k[0-9a-f]{12}"; "");
             ($moved[.] // "1970-01-01T00:00:00Z" | fromdateiso8601) > $since))
         | .name end)' <<<"$versions")
+  while read -r digest; do
+    [[ $digest ]] || continue
+    live[$digest]=1
+    hex=${digest#sha256:}
+    members=$(jq -r --arg hex "$hex" '
+      .[] | select(.metadata.container.tags | any(startswith("sha256-" + $hex))) | .name' <<<"$versions")
+    indexed=$(jq --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<<"$versions")
+    if [[ $indexed == true ]]; then
+      members+=$'\n'$(skopeo inspect --raw "docker://ghcr.io/${OWNER}/${pkg}:sha256-${hex}" | jq -r '.manifests[].digest')
+    fi
+    while read -r member; do
+      [[ -z $member ]] || live[$member]=1
+    done <<<"$members"
+  done <<<"$roots"
 
   echo "${pkg}: ${#live[@]} manifests reachable from a retained release"
+  listing=$(jq -r '.[] | "\(.id) \(.name) \(.metadata.container.tags | join(","))"' <<<"$versions")
   while read -r id digest tags; do
-    [[ ${live[$digest]:-} ]] && continue
+    [[ $digest && -z ${live[$digest]:-} ]] || continue
     echo "${DRY:+[dry-run] }${pkg}: deleting ${id} ${digest} ${tags:-(untagged)}"
     [[ $DRY ]] || gh api --method DELETE "${api}/${id}" > /dev/null
-  done < <(jq -r '.[] | "\(.id) \(.name) \(.metadata.container.tags | join(","))"' <<<"$versions")
+  done <<<"$listing"
 }
 
 prune azoth 1000000 "$KERNEL_TAG"
