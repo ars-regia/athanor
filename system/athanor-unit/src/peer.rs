@@ -114,9 +114,12 @@ fn check(
         return Err(Refused::Gone);
     };
     let read = read_cgroup(first).map_err(Refused::Unreadable)?;
+    // The executable is read only when one is named, and kept with it, so no pair of
+    // "named" and "read" can disagree: a read that was asked for and failed is refused.
     let program = exe
-        .map(|_| read_exe(first).map_err(Refused::Unreadable))
-        .transpose()?;
+        .map(|want| read_exe(first).map(|got| (want, got)))
+        .transpose()
+        .map_err(Refused::Unreadable)?;
     if pid().map_err(Refused::Unreadable)? != Some(first)
         || !running().map_err(Refused::Unreadable)?
     {
@@ -125,9 +128,9 @@ fn check(
     if read.strip_suffix('\n').unwrap_or(&read) != cgroup {
         return Err(Refused::Cgroup(read));
     }
-    match (exe, program) {
-        (Some(want), Some(got)) if got != want => Err(Refused::Exe(got)),
-        _ => Ok(()),
+    match program {
+        Some((want, got)) if got != want => Err(Refused::Exe(got)),
+        Some(_) | None => Ok(()),
     }
 }
 
@@ -293,6 +296,22 @@ mod tests {
             || Ok(Some(7)),
             |_| Err(io::ErrorKind::PermissionDenied.into()),
             |_| Ok(PathBuf::from("/usr/bin/a")),
+            || Ok(true),
+        );
+        assert!(
+            matches!(refused, Err(Refused::Unreadable(_))),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_named_executable_that_cannot_be_read_is_refused() {
+        let refused = check(
+            WANT,
+            Some(Path::new("/usr/bin/a")),
+            || Ok(Some(7)),
+            |_| Ok(WANT.to_owned()),
+            |_| Err(io::ErrorKind::PermissionDenied.into()),
             || Ok(true),
         );
         assert!(
