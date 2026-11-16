@@ -21,7 +21,31 @@ use smithay::wayland::shell::wlr_layer::{
     WlrLayerShellState,
 };
 use smithay::wayland::shell::xdg::PopupSurface;
+use std::any::Any;
 use std::cell::Cell;
+
+/// Whether `request` of `resource` is refused before Smithay's handler sees it, its client
+/// ended with the protocol error. `set_size` takes two `uint`s, which Smithay stores as
+/// `(width as i32, height as i32)`: one above `i32::MAX` would turn negative, a `Size` that
+/// fails Smithay's assertion in a debug build and is laid out inverted in a release one. Such
+/// a size is `invalid_size` (issue #1199). The other requests of a layer surface take an `int`
+/// or an enum Smithay checks, and its layer map adds the margins with saturation.
+pub fn refused<I: Resource>(resource: &I, request: &dyn Any) -> bool {
+    use smithay::reexports::wayland_protocols_wlr::layer_shell::v1::server::zwlr_layer_surface_v1::{
+        Error, Request,
+    };
+    let Some(Request::SetSize { width, height }) = request.downcast_ref() else {
+        return false;
+    };
+    if i32::try_from(*width).is_ok() && i32::try_from(*height).is_ok() {
+        return false;
+    }
+    resource.post_error(
+        Error::InvalidSize,
+        format!("a size of {width}x{height} is above {}", i32::MAX),
+    );
+    true
+}
 
 impl WlrLayerShellHandler for State {
     fn shell_state(&mut self) -> &mut WlrLayerShellState {
