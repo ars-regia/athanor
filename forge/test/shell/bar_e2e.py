@@ -254,14 +254,18 @@ def switch_until(app, Atspi, label, reached):
     """Presses the switch called `label` until `reached` holds, up to three times. A change of
     the appearance rebuilds the open popover, and a press that lands on a switch the rebuild
     has just removed is lost; a press that lands shows within 2 s, because the bar writes the
-    keys and the built themes before it returns."""
-    for _ in range(3):
+    keys and the built themes before it returns. Each press after the first is reported on
+    stderr, so a switch that loses presses shows in the log even when the check passes."""
+    for attempt in range(1, 4):
+        if attempt > 1:
+            print(f"switch_until: pressing {label!r} again, press {attempt}", file=sys.stderr)
         try:
             found = labelled(app, Atspi, "toggle button", label)
-        except GLib.Error:
-            found = []
-        if found:
-            found[0].do_action(0)
+            if found:
+                found[0].do_action(0)
+        except GLib.Error as err:
+            # The switch the lookup found was removed before the press reached it.
+            print(f"switch_until: {err}", file=sys.stderr)
         if wait_for(reached, 2):
             return True
     return False
@@ -476,7 +480,7 @@ def main():
         wait_for(lambda: labelled(app, Atspi, "toggle button", "High contrast"), 5),
     )
     check(
-        "high contrast reaches the GNOME key and both built themes within 2 s",
+        "high contrast reaches the GNOME key and both built themes within 2 s of a press",
         switch_until(app, Atspi, "High contrast", high_contrast_is(True)),
     )
     check("the bar stays alive with high contrast on", alive(pid))
