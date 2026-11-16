@@ -971,6 +971,82 @@ class Cycle(Repo):
         self.assertEqual(self.run_script("get", "cycle").stdout.strip(), "defer")
 
 
+class CheckTier(Repo):
+    """check-tier: the kernel of the tier 0 the build installs against the pinned NVR."""
+
+    TIER0 = "sha256:" + "7" * 64
+    REF = f"{REG}/athanor-forge-tier0-repo@{TIER0}"
+
+    def prepare(self, rpms, gpus="none nvidia nvidia-legacy", **fx):
+        self.state("ready", check_gpus=gpus, check_delta="true")
+        self.tiers = self.dir / "tiers"
+        self.tiers.mkdir()
+        (self.tiers / "tier-digests.json").write_text(json.dumps({"registry": REG, "tier0": self.TIER0}))
+        self.env.update(TIER_DIGESTS_DIR=str(self.tiers), GITHUB_BASE_REF="rebase/fedora-45")
+        self.registry({"tier_rpms": {self.REF: rpms}, **fx})
+
+    def check(self, files):
+        self.commit(files)
+        return self.run_script("check-tier", "--base", "HEAD^1", "--head", "HEAD", cwd=self.work)
+
+    def plan(self):
+        state = self.state_file()
+        return state["check_gpus"], state["check_delta"]
+
+    def test_a_stale_tier_with_a_pin_move_skips_the_build_and_warns(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm", "./repodata/repomd.xml"])
+        r = self.check({**self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"), "system/Containerfile": "FROM x\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("", "false"))
+        for text in (OTHER_NVR, NVR, "branch-rebase-fedora-45", self.TIER0, "after the merge", "warning"):
+            self.assertIn(text, r.stdout)
+
+    def test_a_stale_tier_without_a_pin_move_fails(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check({"system/Containerfile": "FROM x\n"})
+        self.assertEqual(r.returncode, 1)
+        for text in (OTHER_NVR, NVR, "rebuilt first"):
+            self.assertIn(text, r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_stale_tier_with_only_an_nvidia_pin_move_fails(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP))
+        self.assertEqual(r.returncode, 1)
+
+    def test_a_stale_tier_with_only_a_cachyos_pin_move_fails(self):
+        # Only FEDORA_KERNEL_NVR moves the NVR: a CachyOS move cannot explain a tier that
+        # carries another kernel.
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check(self.pin_change(CACHYOS_RELEASE="99"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rebuilt first", r.stderr)
+
+    def test_a_tier_with_the_pinned_kernel_leaves_the_plan(self):
+        self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm", f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_that_cannot_be_read_fails(self):
+        self.prepare([f"./kernel-core-{NVR}.x86_64.rpm"], errors=[self.REF])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("copy failed", r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_without_a_kernel_fails(self):
+        self.prepare(["./repodata/repomd.xml"])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no kernel-core RPM", r.stderr)
+
+    def test_a_plan_without_images_reads_no_tier(self):
+        self.prepare([], gpus="", errors=[self.REF])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 class CheckPlan(Repo):
     def plan(self, files):
         self.commit(files)
