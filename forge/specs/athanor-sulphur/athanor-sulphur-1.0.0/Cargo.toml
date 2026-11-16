@@ -6,6 +6,10 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 license = "GPL-3.0-or-later"
 description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone C1)"
 
+[features]
+# `fuzz::run`, the entry of the protocol fuzz target, for athanor-fuzz-entries (issue #1172).
+fuzz = []
+
 [dependencies]
 # Readiness for the `Type=notify` unit of the preview session (`ready.rs`).
 athanor-unit = { path = "../../../../system/athanor-unit" }
