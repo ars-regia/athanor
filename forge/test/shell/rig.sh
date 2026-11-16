@@ -194,9 +194,11 @@ build_spec_rig() {
     cp "$rpm" "$ctx/cosmic-comp.rpm"
     # rpm -U, not dnf: no repository is read, and a requirement the rig lacks fails the install.
     # --oldpackage: a spec may also name an older build than the rig's. A bind mount, so the RPM
-    # itself stays out of the image's layers.
+    # itself stays out of the image's layers. --nosignature: the RPM was built a few lines above,
+    # in this run, and the forge signs only what it publishes; from Fedora 45, rpm 6 refuses an
+    # unsigned package by default (%_pkgverify_level all). Its digests are still checked.
     printf '%s\n' "FROM $base" \
-        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage /tmp/cosmic-comp.rpm' \
+        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage --nosignature /tmp/cosmic-comp.rpm' \
         > "$ctx/Containerfile"
     podman build --network=none --pull=never --iidfile "$ctx/iid" -t "$local_image:cosmic-comp-spec" \
         -f "$ctx/Containerfile" "$ctx"

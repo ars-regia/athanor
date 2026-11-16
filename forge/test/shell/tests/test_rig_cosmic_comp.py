@@ -218,7 +218,7 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertIn("--network=none", builds[0])
         containerfile = (self.tmp / "Containerfile").read_text()
         self.assertTrue(containerfile.startswith(f"FROM {rig.base}\n"), containerfile)
-        self.assertIn("rpm -U --oldpackage /tmp/cosmic-comp.rpm", containerfile)
+        self.assertIn("rpm -U --oldpackage --nosignature /tmp/cosmic-comp.rpm", containerfile)
         self.assertNotIn("COPY", containerfile)
         self.assertFalse([call for call in calls if call[0] == "push"])
         # The strict comparison reads the derived rig.
