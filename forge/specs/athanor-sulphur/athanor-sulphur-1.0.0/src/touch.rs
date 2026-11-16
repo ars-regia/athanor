@@ -133,6 +133,7 @@ impl State {
         let under = self.surface_under(location);
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
+        self.grab_serials.press = Some(serial);
         let to = under.as_ref().and_then(|(surface, _)| surface.client());
         if first {
             self.grab_serials.touch = to.map(|client| (serial, client.id()));

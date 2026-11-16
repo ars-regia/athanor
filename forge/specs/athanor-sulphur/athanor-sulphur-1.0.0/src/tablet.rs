@@ -218,6 +218,7 @@ impl State {
                 }
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                self.grab_serials.press = Some(serial);
                 handle.down(self, &DownEvent { serial, time });
             }
             TabletToolTipState::Up => {
@@ -260,6 +261,9 @@ impl State {
         }
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
+        if state == ButtonState::Pressed {
+            self.grab_serials.press = Some(serial);
+        }
         handle.button(
             self,
             &ButtonEvent {
