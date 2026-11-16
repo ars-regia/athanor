@@ -250,6 +250,23 @@ def high_contrast_is(value):
     return check_now
 
 
+def switch_until(app, Atspi, label, reached):
+    """Presses the switch called `label` until `reached` holds, up to three times. A change of
+    the appearance rebuilds the open popover, and a press that lands on a switch the rebuild
+    has just removed is lost; a press that lands shows within 2 s, because the bar writes the
+    keys and the built themes before it returns."""
+    for _ in range(3):
+        try:
+            found = labelled(app, Atspi, "toggle button", label)
+        except GLib.Error:
+            found = []
+        if found:
+            found[0].do_action(0)
+        if wait_for(reached, 2):
+            return True
+    return False
+
+
 def favorites_file():
     return Path(os.environ["XDG_CONFIG_HOME"]) / "athanor" / "favorites.toml"
 
@@ -458,20 +475,17 @@ def main():
         "High contrast shows",
         wait_for(lambda: labelled(app, Atspi, "toggle button", "High contrast"), 5),
     )
-    switches = labelled(app, Atspi, "toggle button", "High contrast")
-    if switches:
-        switches[0].do_action(0)
     check(
         "high contrast reaches the GNOME key and both built themes within 2 s",
-        wait_for(high_contrast_is(True), 2),
+        switch_until(app, Atspi, "High contrast", high_contrast_is(True)),
     )
     check("the bar stays alive with high contrast on", alive(pid))
-    switches = labelled(app, Atspi, "toggle button", "High contrast")
-    if switches:
-        switches[0].do_action(0)
     # Switched back off so the checks after this one run in the normal, non-high-contrast
     # variant, same as every other capture in the rig.
-    check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
+    check(
+        "high contrast is switched back off",
+        switch_until(app, Atspi, "High contrast", high_contrast_is(False)),
+    )
 
     # at-spi2-core 2.61 dropped org.a11y.Status.ScreenReaderEnabled; the row reads the key.
     check(
@@ -499,14 +513,11 @@ def main():
     dark_v2.rename(aside)
     dark_v2.write_text("", encoding="utf-8")
     try:
-        switches = labelled(app, Atspi, "toggle button", "High contrast")
         check(
-            "the High contrast switch is pressed with a theme directory unwritable",
-            bool(switches) and switches[0].do_action(0),
-        )
-        check(
-            "the GNOME key still turns on",
-            wait_for(lambda: high_contrast_key() == "true", 2),
+            "the GNOME key still turns on with a theme directory unwritable",
+            switch_until(
+                app, Atspi, "High contrast", lambda: high_contrast_key() == "true"
+            ),
         )
 
         def still_on():
@@ -536,12 +547,9 @@ def main():
     finally:
         dark_v2.unlink()
         aside.rename(dark_v2)
-    switches = labelled(app, Atspi, "toggle button", "High contrast")
-    if switches:
-        switches[0].do_action(0)
     check(
         "high contrast is switched off again, both built themes included",
-        wait_for(high_contrast_is(False), 2),
+        switch_until(app, Atspi, "High contrast", high_contrast_is(False)),
     )
 
     # The confirmation's focus is the keyboard's: AT-SPI reports FOCUSED only on a surface
