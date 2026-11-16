@@ -44,12 +44,22 @@ own the rest:
 Every package builds inside `athanor-builder`, an OCI image produced by Nix alone:
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
-`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists it is reused, otherwise
-the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>`. On the default
-branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points `:latest` at
-that `:<hash>`: `:latest` is the default branch's builder, which the pull request spec check
-(`spec-build-check.yml`) uses when a change leaves the builder's inputs alone.
-The hash is handed to the package and image jobs, so a run builds with exactly one builder.
+`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists and
+`forge/scripts/verify_image.sh` finds the digest it names signed by a trusted run of
+`call-build-builder.yml` (the identity and issuer of `system/tier-digests.sh`, issue #1205) and
+labelled `tier.content.sha256=<hash>`, it is reused; otherwise
+`forge/scripts/publish_builder.sh` runs `nix build .#builderImage`, loads it, adds that label,
+pushes it as `:<hash>` and signs the pushed digest keyless with the job's identity, as the
+package images are signed, with no key and no signing environment. An unsigned or foreign
+builder is a miss and is built again; a verification that cannot be answered fails the run. On
+the default branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points
+`:latest` at that digest, after verifying it again: `:latest` is the default branch's builder,
+which `rust-security-audit.yml` runs. The job outputs the verified digest,
+`athanor-builder@sha256:<hex>`; the hash is handed to the package and image jobs, so a run
+builds with exactly one builder, and they still pull it by its `:<hash>` tag until a follow-up
+of issue #1205 moves every consumer to that digest. The builders published before issue #1205
+are unsigned: the first Orchestrator run after it rebuilds and signs the builder, and until
+then the pull request spec check builds its own.
 
 ## 4. The DAG
 
@@ -164,7 +174,8 @@ rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). Only th
 are built: any other changed directory (the kernel, Nix-built packages, unlisted or deleted
 specs) is named in the log and skipped. The specs build in the builder of the checkout,
 named by its content hash (`check_idempotency.sh --package builder`): the published
-`athanor-builder:<hash>` when the registry has it, else a builder image built from the pull
+`athanor-builder:<hash>` when the registry has it signed by a trusted run of
+`call-build-builder.yml`, else a builder image built from the pull
 request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
 artifact and never pushed. Never `athanor-builder:latest`, the default branch's builder: a
 pull request into another branch would build against the default branch's libraries.

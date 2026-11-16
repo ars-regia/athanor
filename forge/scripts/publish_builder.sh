@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds the builder image of this checkout (flake output builderImage), pushes it as
-# REPOSITORY:CONTENT_HASH and signs the pushed digest keyless, with the identity of the running
+# Builds the builder image of this checkout (flake output builderImage), labels it
+# tier.content.sha256=CONTENT_HASH, pushes it as REPOSITORY:CONTENT_HASH and signs the pushed digest keyless, with the identity of the running
 # workflow, call-build-builder.yml (issue #1205). The tag exists before its signature, and that
 # is safe: every reader verifies the digest with forge/scripts/verify_image.sh, so a tag whose
 # digest is not yet signed, or never will be, is a miss and is built again. Prints
@@ -9,7 +9,7 @@
 #
 # Usage: publish_builder.sh REPOSITORY CONTENT_HASH
 #   REPOSITORY  REGISTRY/OWNER/athanor-builder
-# Needs nix, podman and cosign, GITHUB_TOKEN and GITHUB_ACTOR for the registry, and the job's
+# Needs nix, podman, buildah and cosign, GITHUB_TOKEN and GITHUB_ACTOR for the registry, and the job's
 # OIDC token (id-token: write) for the keyless signature.
 set -euo pipefail
 
@@ -25,7 +25,7 @@ content_hash=$2
     exit 2
 }
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-root=$(git -C "$here" rev-parse --show-toplevel)
+root=$(cd "$here/../.." && pwd)
 registry=${repository%%/*}
 
 archive=$(nix build --extra-experimental-features "nix-command flakes" --no-link \
@@ -36,7 +36,13 @@ loaded=$(podman load -i "$archive" | sed -n 's/^Loaded image[^:]*: //p')
     echo "publish_builder.sh: podman load reported no image name" >&2
     exit 1
 }
-podman tag "$loaded" "$repository:$content_hash"
+# The label binds the signed digest to its content hash, as dag_package.sh labels a package:
+# verify_image.sh reads it back, so a signed builder of other inputs copied under this tag is
+# not used. buildah shares podman's storage, so it reads the loaded image.
+ctr=$(buildah from --pull=never "$loaded")
+buildah config --label tier.content.sha256="$content_hash" "$ctr"
+buildah commit --omit-timestamp "$ctr" "$repository:$content_hash" >&2
+buildah rm "$ctr" >&2
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

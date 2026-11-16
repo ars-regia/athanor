@@ -979,8 +979,8 @@ Today the `dag-system-image` job of `call-system-image.yml` pushes the system im
 `:<run_id>` only, and `tag-latest` of `release.yml` moves their `:latest` after
 `verify-images` verified the key-based signature; on `main`, `main`'s own copy of the
 Orchestrator moves the ISO's `:latest` in its `tag-system-images` job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
-(`forge/scripts/promote_builder_latest.sh`, PR #228), which the pull-request spec check
-reads until it consumes the builder by digest (PL13).
+(`forge/scripts/promote_builder_latest.sh`, PR #228), only to a digest it verified signed by a
+trusted run of `call-build-builder.yml` (PL12, issue #1205); no build stage reads it (PL13).
 
 Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 

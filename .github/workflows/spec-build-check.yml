@@ -41,6 +41,10 @@ jobs:
           persist-credentials: false
           # The merge commit and its first parent, the base: the change is the diff.
           fetch-depth: 2
+      # The flake's cosign verifies the published builder (#1205).
+      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
 
       - name: Select the specs and the builder (forge/scripts/select_check_specs.py)
         id: select
@@ -54,11 +58,15 @@ jobs:
         working-directory: forge
         env:
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+          # Reads the rules of a rebase/* base branch, whose signatures system/tier-digests.sh
+          # trusts only when a ruleset protects it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # retry.sh: a transient registry error is asked again; one that outlasts the attempts
-          # fails the check. A failed attempt prints nothing on stdout.
-          bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+          # fails the check. A failed attempt prints nothing on stdout. A builder no trusted run
+          # of call-build-builder.yml signed is a miss: the pull request builds its own.
+          nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
             --registry "$REGISTRY_HOST" --owner "$GITHUB_REPOSITORY_OWNER" \
             --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
           source "$RUNNER_TEMP/idemp.out"

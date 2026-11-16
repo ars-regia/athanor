@@ -7,6 +7,8 @@ import os
 # The signer a package image needs: call-dag-compile.yml run on a trusted branch.
 WORKFLOWS = "https://github.com/ars-regia/athanor/.github/workflows/"
 TRUSTED = WORKFLOWS + "call-dag-compile.yml@refs/heads/iso-v0"
+# The signer the builder image needs: call-build-builder.yml run on a trusted branch (issue #1205).
+BUILDER_TRUSTED = WORKFLOWS + "call-build-builder.yml@refs/heads/iso-v0"
 DIGEST = "sha256:" + "0" * 64
 # cosign v3's answers, as system/tier-digests.sh classifies them: the verdict comes from the
 # signer file (absent: no signature), a cosign_error file is an outage of the trust root.
@@ -39,10 +41,12 @@ def stub_cosign(bin_dir):
     stub.chmod(0o755)
 
 
-# A registry where every tag names DIGEST. A status file other than 0 fails each call with the
+# A registry where every tag names DIGEST, and every call is logged to skopeo.log. A status file other than 0 fails each call with the
 # answer file on stderr. The config of DIGEST is labelled with the hash of the last hash tag
-# asked, as dag_package.sh labels a build, unless a label file says otherwise ("none": no label).
+# asked, hash-<H> or the builder's bare <H>, as dag_package.sh and publish_builder.sh label a
+# build, unless a label file says otherwise ("none": no label).
 SKOPEO_STUB = f"""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$ANSWER_DIR/skopeo.log"
 [[ -f $ANSWER_DIR/answer ]] && cat "$ANSWER_DIR/answer" >&2
 status=0
 [[ -f $ANSWER_DIR/status ]] && status=$(< "$ANSWER_DIR/status")
@@ -54,7 +58,9 @@ if [[ " $* " == *" --config "* ]]; then
   [[ $label == none ]] && labels='{{}}' || labels="{{\\"tier.content.sha256\\": \\"$label\\"}}"
   echo "{{\\"config\\": {{\\"Labels\\": $labels}}}}"
 else
-  [[ $ref == *:hash-* ]] && echo "${{ref##*:hash-}}" > "$ANSWER_DIR/tag_hash"
+  tag=${{ref##*:}}
+  [[ $ref != *@* && $tag == hash-* ]] && echo "${{tag#hash-}}" > "$ANSWER_DIR/tag_hash"
+  [[ $ref != *@* && $tag =~ ^[0-9a-f]{{64}}$ ]] && echo "$tag" > "$ANSWER_DIR/tag_hash"
   echo {DIGEST}
 fi
 """

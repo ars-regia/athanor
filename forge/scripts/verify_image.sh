@@ -9,8 +9,10 @@
 # digest of an older build, or of another package, copied with its signature to a new hash-<H>
 # tag would verify. So a hash-<H> tag counts only when the signed digest's config also carries
 # the label tier.content.sha256=<H> that dag_package.sh writes before the push; the hash covers
-# the package's own inputs, so it names the package as well. Any other tag (a tier's :latest)
-# is bound by its signature alone.
+# the package's own inputs, so it names the package as well. The builder's tag is its bare
+# content hash, <H> with no prefix, and under WORKFLOW call-build-builder.yml it is bound the
+# same way, by the label publish_builder.sh writes before the push (issue #1205). Any other tag
+# (a tier's or the builder's :latest) is bound by its signature alone.
 #
 # Prints one line and exits 0:
 #   absent               the registry has no such tag (registry_probe.sh)
@@ -24,7 +26,8 @@
 # retry.sh: it is never read as an answer.
 #
 # Usage: verify_image.sh REGISTRY/OWNER/IMAGE:TAG WORKFLOW
-#   WORKFLOW  call-dag-compile.yml for a package image, call-system-image.yml for a tier
+#   WORKFLOW  call-dag-compile.yml for a package image, call-system-image.yml for a tier,
+#             call-build-builder.yml for the builder image
 set -euo pipefail
 
 usage() {
@@ -73,11 +76,17 @@ unsigned) untrusted "${ref} names ${pinned#*@}, which no trusted run of ${2} sig
 esac
 
 tag=${ref##*:}
+want=
 if [[ $tag == hash-* ]]; then
+    want=${tag#hash-}
+elif [[ $2 == call-build-builder.yml && $tag =~ ^[0-9a-f]{64}$ ]]; then
+    want=$tag
+fi
+if [[ -n $want ]]; then
     # Read by digest, so the config is the one the signature covers.
     config=$(bash "$here/retry.sh" skopeo --command-timeout 30s inspect --config "docker://${pinned}")
     label=$(jq -r '.config.Labels["tier.content.sha256"] // ""' <<< "$config")
-    [[ $label == "${tag#hash-}" ]] ||
+    [[ $label == "$want" ]] ||
         untrusted "${ref} names ${pinned#*@}, signed but labelled tier.content.sha256='${label}', not the tag's hash: it is not used"
 fi
 echo "signed $pinned"

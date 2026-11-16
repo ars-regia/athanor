@@ -22,7 +22,7 @@ jobs:
     name: 🏗️ Build Base Builder
     outputs:
       content_hash: ${{ steps.check_idempotency.outputs.content_hash }}
-      image: ${{ steps.publish.outputs.image }}
+      image: ${{ steps.check_idempotency.outputs.image || steps.publish.outputs.image }}
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -50,11 +50,13 @@ jobs:
           echo "${GITHUB_TOKEN}" | podman login "${REGISTRY}" -u "${GITHUB_ACTOR}" --password-stdin
           # On the runner itself, not inside the builder image: the check decides whether
           # that image has to exist, so it cannot depend on it (first run, renamed image).
-          # The script only needs bash, coreutils and skopeo, all on the runner.
-          bash scripts/check_idempotency.sh --package builder --registry "${REGISTRY}" --owner "${GITHUB_REPOSITORY_OWNER}" --image-name athanor-builder > idemp.out
+          # The script needs bash, coreutils, skopeo and jq, all on the runner, and the
+          # flake's cosign: a hit is a digest a trusted run of this workflow signed (#1205).
+          nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/check_idempotency.sh --package builder --registry "${REGISTRY}" --owner "${GITHUB_REPOSITORY_OWNER}" --image-name athanor-builder > idemp.out
           source ./idemp.out
           if [ "$CACHE_HIT" = "true" ]; then
             echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+            echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           else
             echo "cache_hit=false" >> "$GITHUB_OUTPUT"
           fi
@@ -73,11 +75,11 @@ jobs:
             "${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/athanor-builder" "$CONTENT_HASH" > "$RUNNER_TEMP/builder.ref"
           echo "image=$(< "$RUNNER_TEMP/builder.ref")" >> "$GITHUB_OUTPUT"
 
-      - name: Point athanor-builder:latest at this builder (default branch only)
+      - name: Point the builder's latest tag at this verified digest (default branch only)
         env:
-          CONTENT_HASH: ${{ steps.check_idempotency.outputs.content_hash }}
+          IMAGE: ${{ steps.check_idempotency.outputs.image || steps.publish.outputs.image }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: bash scripts/promote_builder_latest.sh "${REGISTRY}/${{ github.repository_owner }}/athanor-builder" "$CONTENT_HASH" "$GITHUB_REF" "$DEFAULT_BRANCH"
+        run: nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/promote_builder_latest.sh "$IMAGE" "$GITHUB_REF" "$DEFAULT_BRANCH"
 
       - name: 🧹 Cleanup Workspace Permissions
         if: always()
