@@ -1,6 +1,7 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import datetime
 import hashlib
 import json
 import os
@@ -1471,7 +1472,7 @@ class DigestRace(Tool):
                 {
                     "id": i,
                     "name": digest,
-                    "created_at": f"2026-11-15T23:{i:02d}:00Z",
+                    "created_at": KernelTagRetention.ago(minutes=100 - i),
                     "metadata": {"container": {"tags": names}},
                 }
                 for i, (digest, names) in enumerate(versions.items())
@@ -1493,6 +1494,74 @@ class DigestRace(Tool):
             "an untagged manifest goes",
         )
         self.assertNotIn(pinned, r.stdout)
+
+
+class KernelTagRetention(Tool):
+    """retention.sh and the manifests a republished NVR leaves under their kernel tag (#1208)."""
+
+    NVR2 = "9.9.9-1.azoth.fc45"
+
+    @staticmethod
+    def ago(**delta):
+        at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(**delta)
+        return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def prune(self, packages):
+        """Runs retention.sh on PACKAGES {package: [(digest, tags, created_at)]}; the deleted digests."""
+        self.registry(
+            {
+                "packages": {
+                    pkg: [
+                        {
+                            "id": i,
+                            "name": digest,
+                            "created_at": at,
+                            "updated_at": at,
+                            "metadata": {"container": {"tags": tags}},
+                        }
+                        for i, (digest, tags, at) in enumerate(versions)
+                    ]
+                    for pkg, versions in packages.items()
+                }
+            }
+        )
+        r = self.run_script(script=ROOT / "forge/specs/azoth/retention.sh")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return set(re.findall(r"deleting \d+ (sha256:[0-9a-f]{64})", r.stdout))
+
+    def test_a_kernel_tag_left_by_a_republish_goes_fourteen_days_after_the_nvr_moved(self):
+        old, old_vm, cur, cur_vm, held, cur2 = ("sha256:" + c * 64 for c in "abcdef")
+        index = "sha256:" + "9" * 64
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (old, [boot_tag(old)], self.ago(days=30)),
+                    (index, ["sha256-" + old[7:]], self.ago(days=30)),
+                    (old_vm, [boot_tag(old_vm) + "-microvm"], self.ago(days=30)),
+                    (cur, [NVR, boot_tag(cur)], self.ago(days=20)),
+                    (cur_vm, [NVR + "-microvm", boot_tag(cur_vm) + "-microvm"], self.ago(days=20)),
+                    # Published a month ago and superseded an hour ago: a run may hold it.
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    (cur2, [self.NVR2, f"{self.NVR2}-k{cur2[7:19]}"], self.ago(hours=1)),
+                ]
+            }
+        )
+        self.assertEqual(deleted, {old, index, old_vm})
+
+    def test_a_republish_does_not_push_the_previous_nvr_out_of_the_debuginfo(self):
+        oldest, prev, republished, cur = ("sha256:" + c * 64 for c in "1234")
+        nvr0 = "0.0.1-1.azoth.fc45"
+        deleted = self.prune(
+            {
+                "azoth-debuginfo": [
+                    (oldest, [nvr0, f"{nvr0}-k{oldest[7:19]}"], self.ago(days=10)),
+                    (prev, [NVR, boot_tag(prev)], self.ago(days=3)),
+                    (republished, [f"{self.NVR2}-k{republished[7:19]}"], self.ago(hours=2)),
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], self.ago(hours=1)),
+                ]
+            }
+        )
+        self.assertEqual(deleted, {oldest})
 
 
 if __name__ == "__main__":
