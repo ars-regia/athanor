@@ -105,8 +105,11 @@ pub fn build(theme: Theme, rtl: bool, top: bool, page: Page, answers: Answers) -
             let text = ui.add(frame, Kind::Label(question));
             ui.set_wrap(text, Some(Wrap::default()));
             let buttons = ui.add(frame, Kind::Row);
-            acts.push((ui.add(buttons, Kind::Button(tr("Cancel"))), Act::Cancel));
+            let cancel = ui.add(buttons, Kind::Button(tr("Cancel")));
+            acts.push((cancel, Act::Cancel));
             acts.push((ui.add(buttons, Kind::Button(label)), Act::Run(choice)));
+            // The safe answer under the keyboard: Return cancels.
+            ui.set_focus(Some(cancel));
         }
     }
     (ui, Menu { acts })
@@ -248,6 +251,7 @@ mod tests {
         );
         let acts: Vec<Act> = menu.acts.iter().map(|(_, act)| *act).collect();
         assert_eq!(acts, [Act::Cancel, Act::Run(Choice::Logind(Action::Reboot))]);
+        assert_eq!(ui.focus(), Some(menu.acts[0].0), "Cancel takes the focus");
         assert!(ui.len() > 3, "the question, the row and its two buttons");
     }
 
