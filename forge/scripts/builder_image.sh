@@ -6,7 +6,8 @@
 #       call-build-builder.yml does) into the image archive ARCHIVE. Publishes nothing.
 #   builder_image.sh resolve ARCHIVE IMAGE
 #       Prints the image to run: ARCHIVE loaded into podman when it exists (the caller built
-#       the builder of the checkout), else IMAGE, a published builder, pulled from its registry.
+#       the builder of the checkout), else IMAGE, a published builder, pulled from its registry;
+#       IMAGE is needed only without ARCHIVE.
 set -euo pipefail
 
 usage="usage: builder_image.sh build ARCHIVE | resolve ARCHIVE IMAGE"
@@ -21,7 +22,6 @@ build)
     cp "$image" "$archive"
     ;;
 resolve)
-    published=${3:?$usage}
     if [[ -f $archive ]]; then
         loaded=$(podman load -i "$archive" | sed -n 's/^Loaded image[^:]*: //p')
         [[ -n $loaded ]] || {
@@ -30,6 +30,7 @@ resolve)
         }
         echo "$loaded"
     else
+        published=${3:?$usage}
         bash "$(dirname "${BASH_SOURCE[0]}")/retry.sh" podman pull "$published" >&2
         echo "$published"
     fi

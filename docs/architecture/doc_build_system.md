@@ -175,7 +175,8 @@ are built: any other changed directory (the kernel, Nix-built packages, unlisted
 specs) is named in the log and skipped. The specs build in the builder of the checkout,
 named by its content hash (`check_idempotency.sh --package builder`): the published
 `athanor-builder:<hash>` when the registry has it signed by a trusted run of
-`call-build-builder.yml`, else a builder image built from the pull
+`call-build-builder.yml`, pulled by the digest that lookup verified, never by the tag again
+(the shell rig's spec build, `rig.sh`, does the same), else a builder image built from the pull
 request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
 artifact and never pushed. Never `athanor-builder:latest`, the default branch's builder: a
 pull request into another branch would build against the default branch's libraries.

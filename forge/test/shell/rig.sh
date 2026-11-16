@@ -175,9 +175,10 @@ build_spec_rig() {
     # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
     idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
-    builder=$registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp")
-    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp"; then
-        echo "rig.sh: $builder, the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
+    # The digest check_idempotency.sh verified, never the tag again: the tag can move after it.
+    builder=$(sed -n 's/^IMAGE=//p' <<< "$idemp")
+    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp" || [ -z "$builder" ]; then
+        echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
             "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
         exit 1
     fi

@@ -33,7 +33,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       builder: ${{ steps.builder.outputs.build }}
-      builder_hash: ${{ steps.builder.outputs.hash }}
+      # The digest the lookup verified, on a hit: the build jobs pull it, never the tag again.
+      builder_image: ${{ steps.builder.outputs.image }}
       specs: ${{ steps.select.outputs.specs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -70,8 +71,11 @@ jobs:
             --registry "$REGISTRY_HOST" --owner "$GITHUB_REPOSITORY_OWNER" \
             --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
           source "$RUNNER_TEMP/idemp.out"
-          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
-          if [[ $CACHE_HIT == true ]]; then echo "build=false"; else echo "build=true"; fi >> "$GITHUB_OUTPUT"
+          if [[ $CACHE_HIT == true ]]; then
+            printf 'build=false\nimage=%s\n' "$IMAGE"
+          else
+            echo "build=true"
+          fi >> "$GITHUB_OUTPUT"
 
   builder:
     needs: select
@@ -116,8 +120,7 @@ jobs:
       matrix:
         spec: ${{ fromJSON(needs.select.outputs.specs) }}
     env:
-      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
-      BUILDER_HASH: ${{ needs.select.outputs.builder_hash }}
+      BUILDER_IMAGE: ${{ needs.select.outputs.builder_image }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -134,7 +137,7 @@ jobs:
           SPEC: ${{ matrix.spec }}
         run: |
           set -euo pipefail
-          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:${BUILDER_HASH}")
+          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "$BUILDER_IMAGE")
           bash forge/scripts/run_spec_build.sh "$image" "$SPEC"
 
   gate:

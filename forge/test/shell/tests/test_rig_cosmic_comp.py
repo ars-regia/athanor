@@ -237,12 +237,12 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertIn("TIER2_DIGEST", result.stderr)
         calls = rig.calls()
         # The forge's path: fetch with network, then build without, in the checkout's builder by
-        # its content hash, never latest.
+        # its content hash, never latest, run by the digest the lookup verified.
         stages = [call for call in calls if "scripts/build_spec.sh" in call]
         self.assertEqual([call[-2] for call in stages], ["fetch", "build"])
         self.assertIn("--network=none", stages[1])
         builder = stages[0][-5]
-        self.assertRegex(builder, r"^ghcr\.io/ars-regia/athanor-builder:[0-9a-f]{64}$")
+        self.assertRegex(builder, r"^ghcr\.io/ars-regia/athanor-builder@sha256:[0-9a-f]{64}$")
         self.assertIn(["pull", "-q", builder], calls)
         # Derived from the pinned rig with rpm -U, without network; nothing is pushed.
         builds = [call for call in calls if call[0] == "build"]
