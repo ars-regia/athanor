@@ -55,8 +55,6 @@ jobs:
       # (docs/architecture/doc_build_ordering.md, O9): a repository variable override must
       # reach this resolution too, or it would see kernel-missing forever.
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
-    outputs:
-      check_delta: ${{ steps.plan.outputs.check_delta }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -72,7 +70,6 @@ jobs:
           set -euo pipefail
           bash system/kernel-artifacts.sh resolve
           bash system/kernel-artifacts.sh check-plan --base HEAD^1 --head HEAD
-          grep -E '^check_delta=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -90,6 +87,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # The merge commit and its first parent: check-tier reads the pin diff between them.
+          fetch-depth: 2
 
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@cc0becac701cf642c8f0a6613bbdaf5dc36b259e # v9
@@ -128,7 +127,7 @@ jobs:
         id: tier
         run: |
           set -euo pipefail
-          bash system/kernel-artifacts.sh check-tier
+          bash system/kernel-artifacts.sh check-tier --base HEAD^1 --head HEAD
           grep -E '^check_delta=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
 
       - name: Build the planned images

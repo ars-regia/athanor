@@ -34,13 +34,14 @@
 #                                       and no other cycle owns it
 #   check-plan --base REV --head REV    after resolve, for System Image Check (O7): append
 #                                       check_gpus and check_delta; exit 1 for a failing row
-#   check-tier                          after check-plan and system/tier-digests.sh resolve, for
+#   check-tier --base REV --head REV    after check-plan and system/tier-digests.sh resolve, for
 #                                       System Image Check (O7): when the plan builds images, read
 #                                       the kernel RPM of the tier 0 the build will install and
-#                                       replace the plan by no image (check_gpus empty,
+#                                       when the diff moves a kernel pin, replace the plan by no image (check_gpus empty,
 #                                       check_delta=false) with a warning if it is not the pinned
 #                                       NVR, since the tiers follow the merge; exit 1 when the
-#                                       tier cannot be read or carries no kernel
+#                                       diff moves no kernel pin, or the tier cannot be read or
+#                                       carries no kernel
 #   get KEY                             print the value of KEY; exit 1 when the file lacks it
 #   has KEY                             exit 0 when KEY has a non-empty value
 #   registry                            print the registry and owner this run would resolve
@@ -535,6 +536,10 @@ cycle() {
   echo "kernel-artifacts: cycle=$decision kmod=$kmod"
 }
 
+moved_pins() { # moved_pins BASE HEAD: the keys of pins.env the diff changes, one per line
+  git diff -U0 "$1" "$2" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u
+}
+
 check_plan() {
   local base='' head='' state nvr files file keys key only_kernel_pins=true only_nvidia_pins=true nvidia_moved=false other_moved=false gpus delta
   while [[ $# -gt 0 ]]; do
@@ -555,7 +560,7 @@ check_plan() {
     matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_TREE_FILES[@]}" || only_kernel_pins=false
     matches_any "$file" "${NVIDIA_PIN_FILES[@]}" || only_nvidia_pins=false
   done <<< "$files"
-  keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
+  keys=$(moved_pins "$base" "$head")
   while IFS= read -r key; do
     [[ -n $key ]] || continue
     if [[ $key == NVIDIA_* ]]; then nvidia_moved=true; else other_moved=true; fi
@@ -589,8 +594,17 @@ check_plan() {
 }
 
 check_tier() {
-  [[ $# -eq 0 ]] || usage
-  local gpus nvr tiers registry digest base tag ref layer found
+  local base='' head='' gpus nvr tiers registry digest tag ref layer found key moved=false
+  while [[ $# -gt 0 ]]; do
+    [[ $# -ge 2 ]] || usage
+    case $1 in
+      --base) base=$2 ;;
+      --head) head=$2 ;;
+      *) usage ;;
+    esac
+    shift 2
+  done
+  [[ -n $base && -n $head ]] || usage
   gpus=$(get check_gpus)
   if [[ -z $gpus ]]; then return 0; fi
   nvr=$(get nvr)
@@ -599,9 +613,9 @@ check_tier() {
   registry=$(jq -er '.registry | strings' "$tiers") || die "$tiers names no registry"
   digest=$(jq -er '.tier0 | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$tiers") || die "$tiers has no valid tier0 digest"
   # The tag system/tier-digests.sh resolved the digest from, for the message only.
-  base=${GITHUB_BASE_REF:-} tag=latest
-  if [[ -n $base && $base != iso-v0 && $base != main ]]; then
-    tag=${base,,}
+  tag=latest
+  if [[ -n ${GITHUB_BASE_REF:-} && $GITHUB_BASE_REF != iso-v0 && $GITHUB_BASE_REF != main ]]; then
+    tag=${GITHUB_BASE_REF,,}
     tag=branch-${tag//[^a-z0-9._-]/-}
   fi
   ref=$registry/athanor-forge-tier0-repo@$digest
@@ -618,6 +632,12 @@ check_tier() {
     echo "kernel-artifacts: tier 0 $tag ($digest) carries $nvr"
     return 0
   fi
+  # A kernel pin that moves in this diff explains the stale tier (the tiers follow the merge); with
+  # the pin unmoved the base's tiers lag behind its own pin, and a green check would build nothing.
+  while IFS= read -r key; do
+    if [[ -n $key && $key != NVIDIA_* ]]; then moved=true; fi
+  done <<< "$(moved_pins "$base" "$head")"
+  [[ $moved == true ]] || die "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, and this diff does not move the kernel pin: the tiers of the base must be rebuilt first (the Orchestrator on the base)"
   set_kv "check_gpus=" "check_delta=false"
   annotate warning "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, which is published: the images are built after the merge, when the Orchestrator rebuilds the tiers"
 }
