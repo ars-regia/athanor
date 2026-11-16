@@ -15,22 +15,27 @@ struct Clock {
     texts: Texts,
     /// The calendar's first weekday, 0 for Sunday, the time locale's as GTK's calendar takes it.
     first_weekday: u8,
+    /// The short text and the long name now, formatted at a tick when the minute, the zone or
+    /// the 12/24-hour choice changed: [`Module::stale`] reads only what is held.
+    current: Option<(String, String)>,
     /// The short text and the long name, as last drawn.
     drawn: Option<(String, String)>,
 }
 
 pub fn new(_start: &Start) -> Option<Box<dyn Module>> {
+    let texts = Texts::new();
+    let current = texts.changed_texts();
     Some(Box::new(Clock {
-        texts: Texts::new(),
+        texts,
         first_weekday: athanor_i18n::first_weekday(),
+        current,
         drawn: None,
     }))
 }
 
 impl Module for Clock {
     fn button(&mut self, _cx: &mut Cx, ui: &mut Ui, group: WidgetId) -> Option<WidgetId> {
-        let texts = self.texts.texts();
-        let (short, long) = texts.clone().unwrap_or_default();
+        let (short, long) = self.current.clone().unwrap_or_default();
         let button = ui.labelled_button(group, &long, None, 0.0, &short);
         ui.set_tooltip(button, Some(&long));
         // `.bar-clock`: semibold figures of one width.
@@ -42,23 +47,29 @@ impl Module for Clock {
                 ..TextStyle::default()
             },
         );
-        self.drawn = texts;
+        self.drawn = self.current.clone();
         Some(button)
     }
 
+    fn tick(&mut self) {
+        if let Some(texts) = self.texts.changed_texts() {
+            self.current = Some(texts);
+        }
+    }
+
     fn stale(&self, _cx: &Cx) -> bool {
-        self.texts
-            .texts()
-            .is_some_and(|texts| self.drawn.as_ref() != Some(&texts))
+        self.current
+            .as_ref()
+            .is_some_and(|current| self.drawn.as_ref() != Some(current))
     }
 
     fn update(&mut self, _cx: &mut Cx, ui: &mut Ui, button: WidgetId) -> bool {
-        if let Some((short, long)) = self.texts.texts() {
-            ui.set_shown_text(button, &short);
-            ui.set_text(button, &long);
-            ui.set_tooltip(button, Some(&long));
+        if let Some((short, long)) = &self.current {
+            ui.set_shown_text(button, short);
+            ui.set_text(button, long);
+            ui.set_tooltip(button, Some(long));
             ui.layout();
-            self.drawn = Some((short, long));
+            self.drawn = self.current.clone();
         }
         true
     }

@@ -102,6 +102,10 @@ pub trait Module {
         false
     }
 
+    /// Once a second, at the bar's tick, before [`Module::stale`]: where a module reads a
+    /// source that no watch follows, as the clock's wall time and zone.
+    fn tick(&mut self) {}
+
     /// Sets `button` to what the source says now; false when the surface must be drawn
     /// again, as when the button comes, goes or changes shape.
     fn update(&mut self, _cx: &mut Cx, _ui: &mut Ui, _button: WidgetId) -> bool {

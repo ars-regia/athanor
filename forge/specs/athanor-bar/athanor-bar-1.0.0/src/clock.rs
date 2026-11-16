@@ -99,10 +99,21 @@ fn read_hours24(interface: Option<&gio::Settings>) -> bool {
     twenty_four_hour(chosen, &format("%X"), &format("%p"))
 }
 
+/// What the clock's texts are formatted from: the minute, the zone's offset from UTC, and
+/// whether the clock shows 24 hours. Equal values give equal texts.
+type Shown = (i64, glib::TimeSpan, bool);
+
+/// What `now` shows on a clock of 24 hours or not.
+fn shown(now: &glib::DateTime, hours24: bool) -> Shown {
+    (now.to_unix().div_euclid(60), now.utc_offset(), hours24)
+}
+
 /// The bar's clock: the zone last read and the zone it gave, and whether it shows 24 hours,
 /// the user's `clock-format` followed live, else the locale (BR3).
 pub struct Clock {
     zone: RefCell<Option<(Option<String>, glib::TimeZone)>>,
+    /// What the texts last given were formatted from.
+    shown: Cell<Option<Shown>>,
     /// The last tick could not read or format the time: logged once, not every second.
     failed: Cell<bool>,
     hours24: Rc<Cell<bool>>,
@@ -122,6 +133,7 @@ impl Clock {
         }
         Clock {
             zone: RefCell::new(None),
+            shown: Cell::new(None),
             failed: Cell::new(false),
             hours24,
             _interface: interface,
@@ -157,10 +169,18 @@ impl Clock {
         glib::DateTime::now(&self.current_zone())
     }
 
-    /// The text the bar shows and the one screen readers say, now; `None`, logged once until
-    /// it works again, when the time cannot be read or formatted.
-    pub fn texts(&self) -> Option<(String, String)> {
-        let (short_pattern, long_pattern) = if self.hours24.get() {
+    /// The text the bar shows and the one screen readers say, now, when they differ from the
+    /// last ones given: at a new minute, zone offset or 12/24-hour choice. `None` while they are
+    /// the same, and, logged once until it works again, when the time cannot be read or
+    /// formatted. The zone is read at each call, the texts formatted only when they change.
+    pub fn changed_texts(&self) -> Option<(String, String)> {
+        let hours24 = self.hours24.get();
+        let now = self.now();
+        let now_shown = now.as_ref().ok().map(|now| shown(now, hours24));
+        if now_shown.is_some() && now_shown == self.shown.get() {
+            return None;
+        }
+        let (short_pattern, long_pattern) = if hours24 {
             (
                 // TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
                 tr("%a %-d %b %H:%M"),
@@ -175,7 +195,7 @@ impl Clock {
                 tr("%A %-d %B %Y, %-I:%M %p"),
             )
         };
-        let texts = self.now().and_then(|now| {
+        let texts = now.and_then(|now| {
             let short = now.format(&short_pattern)?;
             let long = now.format(&long_pattern)?;
             Ok((short.to_string(), long.to_string()))
@@ -183,6 +203,7 @@ impl Clock {
         match texts {
             Ok(texts) => {
                 self.failed.set(false);
+                self.shown.set(now_shown);
                 Some(texts)
             }
             Err(err) => {
@@ -204,6 +225,21 @@ impl Default for Clock {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_texts_change_with_the_minute_the_offset_or_the_hours() {
+        let at = |offset: &str, minute: i32, second: f64| {
+            let zone = glib::TimeZone::from_identifier(Some(offset)).expect("an offset is a zone");
+            glib::DateTime::from_utc(2026, 11, 16, 12, minute, second)
+                .and_then(|utc| utc.to_timezone(&zone))
+                .expect("a valid time")
+        };
+        let noon = shown(&at("+01:00", 0, 5.0), true);
+        assert_eq!(shown(&at("+01:00", 0, 55.0), true), noon);
+        assert_ne!(shown(&at("+01:00", 1, 0.0), true), noon);
+        assert_ne!(shown(&at("+02:00", 0, 5.0), true), noon);
+        assert_ne!(shown(&at("+01:00", 0, 5.0), false), noon);
+    }
 
     #[test]
     fn only_the_two_formats_are_a_choice() {

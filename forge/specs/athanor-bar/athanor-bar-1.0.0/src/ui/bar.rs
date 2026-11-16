@@ -57,7 +57,7 @@ enum Change {
     Reload,
     Appearance(Appearance),
     Apps,
-    /// Once a second: a turn, at which the clock's button reads the time.
+    /// Once a second: the modules' tick, at which the clock reads the time.
     Tick,
     /// Whether the control center can be started on the session bus (CC1).
     ControlCenter(bool),
@@ -1196,7 +1196,11 @@ impl Application for Bar {
                     self.icons.reset(self.look.bar.text);
                     self.stale = true;
                 }
-                Change::Tick => {}
+                Change::Tick => {
+                    for (_, drawn) in &mut self.modules {
+                        drawn.tick();
+                    }
+                }
                 Change::ControlCenter(present) => {
                     if present != self.control_center {
                         self.control_center = present;
