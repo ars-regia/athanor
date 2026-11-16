@@ -6,7 +6,8 @@ name: Spec Build Check
 # inputs (flake.nix, flake.lock, forge/builder), forge/config/rpmmacros, build_spec.sh,
 # run_spec_build.sh or fetch_sources.sh. The specs build in the builder of the checkout, named by
 # its content hash (forge/scripts/check_idempotency.sh, the tag the DAG pulls): the published
-# athanor-builder:<hash> when the registry has it, else a builder image made from the pull request
+# athanor-builder:<hash> when the registry has it signed by a trusted run, pulled by the digest
+# that lookup verified, else a builder image made from the pull request
 # (forge/scripts/builder_image.sh, handed to the build jobs as a one-day workflow artifact, never
 # pushed). Never athanor-builder:latest: that is the default branch's builder, which lags a
 # change to the builder's inputs until the Orchestrator promotes the new one, and which a pull
