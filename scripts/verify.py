@@ -4951,6 +4951,46 @@ def shipped_user_units(root):
     return units, problems
 
 
+# A tmpfiles.d line that creates a directory under the user's state directory.
+TMPFILES_DIRECTORY = re.compile(r"^[dD]!?\s+%S/([^/\s]+)")
+
+
+def shipped_user_state_directories(root):
+    """The top-level names under the user's state directory that a user tmpfiles.d file creates
+    (`d %S/<name>`), counting only the files a spec lists in its %files."""
+    names = set()
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        text = read(spec)
+        files = text.split("%files", 1)[1].split("%changelog", 1)[0] if "%files" in text else ""
+        for conf in sorted((spec.parent / "SOURCES/usr/share/user-tmpfiles.d").glob("*.conf")):
+            if f"/usr/share/user-tmpfiles.d/{conf.name}" not in files:
+                continue
+            for line in read(conf).splitlines():
+                match = TMPFILES_DIRECTORY.match(line.strip())
+                if match:
+                    names.add(match.group(1))
+    return names
+
+
+def state_link_problems(units, created):
+    """A finding for every top-level name a user unit takes as StateDirectory= that `created`
+    does not hold. When that directory is missing and ~/.config/<name> exists, whoever made it,
+    systemd 254 and later links the first to the second, and the state lives in the configuration
+    (#1238); a tmpfiles.d entry creates it before any unit starts.
+    ponytail: top-level names only; a nested StateDirectory= whose own ~/.config path exists
+    would still be linked, check the full path if one ever appears."""
+    state = {}
+    for unit, text in units.items():
+        for path in unit_names(unit_section(text, "Service"), "StateDirectory"):
+            state.setdefault(path.split(":")[0].split("/")[0], set()).add(unit)
+    return [
+        f"'{name}' is StateDirectory= of {', '.join(sorted(state[name]))} and no shipped user tmpfiles.d "
+        f"line 'd %S/{name}' creates it: systemd links a missing ~/.local/state/{name} to an existing "
+        f"~/.config/{name} (#1238)"
+        for name in sorted(state.keys() - created)
+    ]
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -4959,6 +4999,8 @@ def check_session_units():
         r.fail(problem)
     enabled = {unit for verb, unit, _ in preset_lines(ROOT) if verb == "enable"}
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
+        r.fail(problem)
+    for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
         r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")
