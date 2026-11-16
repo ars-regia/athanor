@@ -44,7 +44,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
-      BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
+      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
+      BUILDER_TAG: ${{ vars.BUILDER_STABLE_TAG || 'latest' }}
       CARGO_NET_RETRY: 10
     steps:
       - name: Check out the repository
@@ -60,15 +61,29 @@ jobs:
           # default branch's entry, and the entries of their own refs filled the 10 GB (#1177).
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' }}
 
+      - name: Install Nix (the flake's cosign verifies the builder)
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+
       - name: Run the audit in the builder image
+        env:
+          # Reads the rules of a rebase/* base branch, whose signatures system/tier-digests.sh
+          # trusts only when a ruleset protects it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
+          # The digest BUILDER_TAG names, run only when a trusted run of call-build-builder.yml
+          # signed it (#1205), and pulled and run by that digest, never by the tag.
+          image=$(nix shell --inputs-from . nixpkgs#cosign -c \
+            bash forge/scripts/resolve_builder_image.sh "${REGISTRY,,}" "$BUILDER_TAG")
           # Only the download caches: the runner's ~/.cargo/bin holds rustup proxies that
           # cargo would run instead of the builder's own clippy.
           mkdir -p "$HOME/.cargo/registry" "$HOME/.cargo/git"
-          bash forge/scripts/retry.sh podman pull "${BUILDER_IMAGE,,}"
+          bash forge/scripts/retry.sh podman pull "$image"
           podman run --rm --security-opt label=disable -v "$GITHUB_WORKSPACE:/workspace" -w /workspace \
             -v "$HOME/.cargo/registry:/cargo/registry" -v "$HOME/.cargo/git:/cargo/git" \
-            -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "${BUILDER_IMAGE,,}" \
+            -e CARGO_HOME=/cargo -e CARGO_NET_RETRY "$image" \
             bash scripts/ci/security-audit.sh
 
       - name: Upload the audit logs

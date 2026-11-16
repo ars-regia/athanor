@@ -19,10 +19,11 @@ permissions:
 
 jobs:
   cleanup-janitor:
+    # On the runner, not in the builder image: clean_ghcr.sh needs only bash, gh, jq and skopeo,
+    # all on ubuntu-24.04, and the job holds FORGE_PAT, which no image should see that the job
+    # has not verified (#1205).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/athanor-builder:${{ vars.BUILDER_STABLE_TAG || 'latest' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

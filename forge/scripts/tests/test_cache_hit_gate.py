@@ -65,6 +65,12 @@ GATE_CALL = re.compile(
     re.M,
 )
 SHELL_SUFFIXES = {".sh", ".yml", ".yaml", ".nix", ".toml", ""}
+# The builder image named by a tag, or with no tag or digest (which means :latest) after a pull,
+# a run or an image: key. A name passed as a repository to a script that pins it is not a use.
+BUILDER_BY_TAG = re.compile(
+    r"athanor-builder:"
+    r"|(?:\bpull|\brun|\bimage:)[^\n]*?athanor-builder(?![\w.@:-])"
+)
 SUBPROCESS_CALLS = {"run", "call", "check_call", "check_output", "Popen"}
 COMMENT = re.compile(r"^\s*//")
 
@@ -192,6 +198,47 @@ class CacheHitGateTest(unittest.TestCase):
         self.assertTrue(gate_called("forge/scripts/check_idempotency.sh", text))
         self.assertRegex(text, r'\[\[ "\$PACKAGE" == "builder" \]\] && SIGNER=call-build-builder\.yml\n')
         self.assertRegex(text, r'verify_image\.sh" "\$\{IMAGE_URL_LOWER#docker://\}" "\$SIGNER"\)')
+
+    def test_no_workflow_or_forge_script_runs_the_builder_by_tag(self):
+        # A job pulls, runs or uses as its container the builder only by the digest that
+        # verify_image.sh verified signed by a trusted run of call-build-builder.yml (issue
+        # #1205): athanor-builder:<tag> is read for its digest by resolve_builder_image.sh, the
+        # one place that names it, through the gate. Like the scan above it reads the text: a
+        # tag assembled in a variable (${IMAGE_NAME}:${tag}) is not seen.
+        resolver = "forge/scripts/resolve_builder_image.sh"
+        seen = []
+        for rel, text in pipeline_files():
+            if not rel.startswith((".github/", "forge/")) or rel.startswith("forge/specs/"):
+                continue
+            seen.append(rel)
+            if rel == resolver:
+                self.assertTrue(gate_called(rel, text))
+                continue
+            with self.subTest(file=rel):
+                self.assertNotRegex(text, BUILDER_BY_TAG)
+        self.assertIn(".github/workflows/call-dag-compile.yml", seen)
+        self.assertIn(resolver, seen)
+
+    def test_a_builder_by_tag_is_seen_and_by_digest_is_not(self):
+        for text in (
+            "image: ghcr.io/${{ github.repository_owner }}/athanor-builder:${{ vars.TAG || 'latest' }}",
+            'podman run "ghcr.io/${OWNER,,}/athanor-builder:${HASH}" bash x.sh',
+            "BUILDER_IMAGE: r/o/athanor-builder:${{ inputs.builder_hash }}",
+            "podman pull ghcr.io/o/athanor-builder",
+            "container:\n      image: ghcr.io/o/athanor-builder\n",
+        ):
+            with self.subTest(text=text):
+                self.assertRegex(code(text, ".yml"), BUILDER_BY_TAG)
+        for text in (
+            "BUILDER_IMAGE: ${{ inputs.builder_image }}",
+            f"podman run ghcr.io/o/athanor-builder@sha256:{'0' * 64} bash x.sh",
+            '--image-name athanor-builder > idemp.out',
+            'publish_builder.sh "${REGISTRY}/${OWNER}/athanor-builder" "$HASH"',
+            "name: athanor-builder-image",
+            "# the builder runs as athanor-builder:latest",
+        ):
+            with self.subTest(text=text):
+                self.assertNotRegex(code(text, ".yml"), BUILDER_BY_TAG)
 
     def test_every_reader_of_a_hash_tag_verifies_it(self):
         for rel, text in pipeline_files():
