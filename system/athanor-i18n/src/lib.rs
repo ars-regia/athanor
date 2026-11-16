@@ -35,6 +35,13 @@ const RTL_LANGUAGES: [&str; 4] = ["ar", "he", "fa", "ur"];
 /// glibc's `_NL_TIME_FIRST_WEEKDAY`, `_NL_ITEM(LC_TIME, 104)` in `<langinfo.h>`, which the libc
 /// crate does not export.
 const NL_TIME_FIRST_WEEKDAY: libc::nl_item = (libc::LC_TIME << 16) | 104;
+/// glibc's `_NL_TIME_WEEK_1STDAY`, `_NL_ITEM(LC_TIME, 102)`: the week's origin, a date written
+/// as the number `YYYYMMDD`, from which [`NL_TIME_FIRST_WEEKDAY`] counts.
+const NL_TIME_WEEK_1STDAY: libc::nl_item = (libc::LC_TIME << 16) | 102;
+/// The week origins GTK's calendar knows: 30 November 1997, a Sunday, and 1 December 1997, a
+/// Monday.
+const ORIGIN_SUNDAY: u32 = 19_971_130;
+const ORIGIN_MONDAY: u32 = 19_971_201;
 /// The first weekday when the time locale cannot be read: Sunday, the C locale's, 0 as
 /// [`first_weekday`] counts.
 pub const DEFAULT_FIRST_WEEKDAY: u8 = 0;
@@ -410,8 +417,11 @@ fn first_weekday_of(name: &CStr) -> std::io::Result<u8> {
     // valid until the freelocale below, the only path out once it exists: nl_langinfo_l only
     // reads it, and the byte its answer points to, data of that object, is copied before the
     // object is freed, so no pointer into it outlives it. No process-global locale is touched.
-    // One block for the four operations, by the maintainer's decision of 2026-11-15: the
-    // object's whole life, from newlocale to freelocale, is read in one place.
+    // One block for the six operations, by the maintainer's decision of 2026-11-15: the
+    // object's whole life, from newlocale to freelocale, is read in one place. The week's
+    // origin is a number, not a string: glibc returns it in the bits of the pointer, as a
+    // `union { const char *string; unsigned int word; }` that GTK's calendar reads through
+    // `word`, so it is read the same way and never dereferenced.
     #[allow(unsafe_code, clippy::multiple_unsafe_ops_per_block)]
     let answer = unsafe {
         let locale = libc::newlocale(libc::LC_TIME_MASK, name.as_ptr(), std::ptr::null_mut());
@@ -420,17 +430,41 @@ fn first_weekday_of(name: &CStr) -> std::io::Result<u8> {
         }
         let item = libc::nl_langinfo_l(NL_TIME_FIRST_WEEKDAY, locale);
         let day = if item.is_null() { None } else { Some(*item as u8) };
+        let origin = LangInfo {
+            string: libc::nl_langinfo_l(NL_TIME_WEEK_1STDAY, locale),
+        }
+        .word;
         libc::freelocale(locale);
-        day
+        day.map(|day| (origin, day))
     };
-    // glibc counts from the week's origin, 1 for that day, and every locale it ships sets the
-    // origin on a Sunday, 30 November 1997 (`week 7;19971130;...`).
     match answer {
-        Some(day @ 1..=7) => Ok(day - 1),
-        other => Err(std::io::Error::new(
+        Some((origin, day)) => week_start(origin, day),
+        None => Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("glibc answered {other:?}, not a day from 1 to 7"),
+            "glibc gave no first weekday",
         )),
+    }
+}
+
+/// An answer of `nl_langinfo`, read as a string or as a number, as glibc's own union.
+#[repr(C)]
+union LangInfo {
+    string: *const libc::c_char,
+    word: libc::c_uint,
+}
+
+/// The first day of the week, 0 for Sunday, from glibc's week `origin` and the `day` that
+/// counts from it, 1 for the origin itself, as GTK's calendar computes it.
+fn week_start(origin: u32, day: u8) -> std::io::Result<u8> {
+    let invalid = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidData, what);
+    let origin_day = match origin {
+        ORIGIN_SUNDAY => 0,
+        ORIGIN_MONDAY => 1,
+        other => return Err(invalid(format!("unknown week origin {other}"))),
+    };
+    match day {
+        1..=7 => Ok((origin_day + day - 1) % 7),
+        other => Err(invalid(format!("glibc answered {other}, not a day from 1 to 7"))),
     }
 }
 
@@ -465,6 +499,18 @@ mod tests {
         if let Some(day) = installed(c"en_US.UTF-8") {
             assert_eq!(day, 0);
         }
+    }
+
+    #[test]
+    fn the_first_weekday_counts_from_the_weeks_origin() {
+        // `week 7;19971130` with `first_weekday 2`, as it_IT: Monday.
+        assert_eq!(week_start(ORIGIN_SUNDAY, 2).ok(), Some(1));
+        // `week 7;19971201` with `first_weekday 1`: Monday too, which a Sunday origin read
+        // for every locale would make Sunday.
+        assert_eq!(week_start(ORIGIN_MONDAY, 1).ok(), Some(1));
+        assert_eq!(week_start(ORIGIN_MONDAY, 7).ok(), Some(0));
+        assert!(week_start(19_971_202, 1).is_err());
+        assert!(week_start(ORIGIN_SUNDAY, 8).is_err());
     }
 
     #[test]
