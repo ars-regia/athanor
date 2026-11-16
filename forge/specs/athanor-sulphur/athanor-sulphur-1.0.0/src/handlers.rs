@@ -2,7 +2,7 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{is_full_screen, ClientState, State};
+use crate::state::{is_full_screen, unconfined, ClientState, State};
 use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
@@ -23,7 +23,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
@@ -1469,6 +1469,8 @@ impl SeatHandler for State {
     /// The text inputs follow the keyboard too, except while the session is locked
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // Smithay calls this for every new focus but none; `set_keyboard_focus` marks that.
+        self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
         // The focus outline moves.
         self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
@@ -1614,17 +1616,44 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation_state
     }
 
-    /// A token is good only when the client that asks for it holds the keyboard focus of this
-    /// seat, which it gets from the user's click or from mapping a window while nothing else
-    /// holds it (`place`). The serial must also be one this compositor sent since that focus;
-    /// the focused client always holds its own enter serial, so the range only keeps out serials
-    /// never sent, and the focus check is what keeps other clients out.
+    /// A token is good when its serial is the user's input to the client that asks for it, on
+    /// this seat, in one of two ways.
+    ///
+    /// The serial is the last button press, and this compositor delivered it to a surface of
+    /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
+    /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
+    /// The press must be the latest input: a later press of any kind, a key, a button, a finger
+    /// or a pen, to whichever client, or a later change of the keyboard focus, to a surface or
+    /// to none, supersedes it; its release does not. A client behind a security context gets no
+    /// token this way.
+    ///
+    /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
+    /// user's click or from mapping a window while nothing else holds it (`place`), and the
+    /// serial is one this compositor sent since that focus; the focused client always holds its
+    /// own enter serial, so the range only keeps out serials never sent, and the focus check is
+    /// what keeps other clients out.
+    ///
+    /// No client gets a token while the session is locked: the lock surfaces hold the input
+    /// (L14).
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
+        if self.lock.is_some() {
+            return false;
+        }
         let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
+        if Seat::from_resource(&seat).as_ref() != Some(&self.seat) {
+            return false;
+        }
+        // The seat named is a resource of the client that asks.
+        let outside = seat.client().is_some_and(|asking| unconfined(&asking));
+        let latest = self.grab_serials.press == Some(serial)
+            && self.grab_serials.focus.is_none_or(|focus| serial.is_no_older_than(&focus));
+        if outside && latest && self.grab_serials.clicked(serial, &client) {
+            return true;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
@@ -1635,9 +1664,7 @@ impl XdgActivationHandler for State {
             .current_focus()
             .and_then(|surface| surface.client())
             .map(|focused| focused.id());
-        Seat::from_resource(&seat).as_ref() == Some(&self.seat)
-            && focused == Some(client)
-            && serial_since_focus(serial, enter, self.last_input_serial)
+        focused == Some(client) && serial_since_focus(serial, enter, self.last_input_serial)
     }
 
     fn request_activation(
@@ -1649,19 +1676,20 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
-            // While the session is locked a token restores nothing (L14).
+            // While the session is locked a token restores, raises and focuses nothing (L14),
+            // as a popup grab takes nothing: the unlock gives the keyboard to the window on top
+            // before the lock.
             if self.lock.is_none() {
-                // A focused client can make a token at any time: it switches no workspace, and a
-                // window on an inactive one stays there.
+                // A token switches no workspace: a window on an inactive one stays there.
                 if let Some(window) = self
                     .window_or_minimised(&surface)
                     .filter(|window| self.on_active_workspace(window))
                 {
                     self.unminimise(&window);
                 }
-            }
-            if let Some(window) = self.window_for(&surface) {
-                self.focus(&window);
+                if let Some(window) = self.window_for(&surface) {
+                    self.focus(&window);
+                }
             }
         }
     }

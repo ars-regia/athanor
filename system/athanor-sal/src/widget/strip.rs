@@ -2,12 +2,7 @@
 //! as a GTK box that is not homogeneous, and [`Kind::CenterBox`], three children at the
 //! start, the centre and the end of a line, as GTK's `CenterBox`.
 
-use super::{Kind, Ui, WidgetId};
-
-/// The most padding [`Ui::inline`] keeps on each side: a quarter of the largest `f32`, so
-/// that both sides take at most half of it and leave the other half for the inline's content.
-/// It bounds one inline only: a container that adds up several children can still overflow.
-const PADDING_MAX: f32 = f32::MAX / 4.0;
+use super::{length, Kind, Ui, WidgetId};
 
 /// The size of an inline whose children measure `sizes`: their widths and the gaps between
 /// them, the tallest of them, and its padding, horizontal then vertical, on both sides.
@@ -127,23 +122,15 @@ impl Ui {
 
     /// Adds an inline: its children side by side in reading order at their own widths, with
     /// `padding` logical pixels kept free left and right, then above and below; a padding that
-    /// is not a finite length of at least 0 counts as 0, and one past a quarter of the largest
-    /// `f32` as that quarter, so that this inline's padding and content add up to a finite
-    /// size. A container that adds up several children, such as a column or a centre box
-    /// holding several inlines with such a padding, can still add up to an infinite size.
-    /// See [`Kind::Inline`].
+    /// is not a finite length of at least 0 counts as 0, and one past 2^64 times less than the
+    /// largest `f32` as that length, so that the inline and any container of it add up to a
+    /// finite size. See [`Kind::Inline`].
     ///
     /// # Panics
     ///
     /// When `parent` names no widget of this `Ui`.
     pub fn inline(&mut self, parent: WidgetId, padding: [f32; 2]) -> WidgetId {
-        let padding = padding.map(|p| {
-            if p.is_finite() {
-                p.clamp(0.0, PADDING_MAX)
-            } else {
-                0.0
-            }
-        });
+        let padding = padding.map(length);
         self.add(parent, Kind::Inline { padding })
     }
 

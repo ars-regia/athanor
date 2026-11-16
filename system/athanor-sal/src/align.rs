@@ -57,8 +57,9 @@ impl Ui {
 
     /// Gives widget `id` a width of at least `width` logical pixels, as GTK's `width-request`:
     /// it measures at that width when its content needs less, and its children are placed in
-    /// it as in any wider widget. A width that is not finite, or not above 0, is none. Whether
-    /// it changed; call [`Ui::layout`] afterwards.
+    /// it as in any wider widget. A width that is not finite, or not above 0, is none, and one
+    /// past 2^64 times less than the largest `f32` is that length. Whether it changed; call
+    /// [`Ui::layout`] afterwards.
     ///
     /// The floor holds where a [`Kind::Column`], the root included, a [`Kind::Group`] or a
     /// [`Kind::Alert`] places the widget; a row, a menu, a list, a scroll and an island place it
@@ -68,7 +69,7 @@ impl Ui {
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn set_min_width(&mut self, id: WidgetId, width: f32) -> bool {
-        let width = if width.is_finite() { width.max(0.0) } else { 0.0 };
+        let width = crate::widget::length(width);
         // A stale id writes to a widget nothing reads: it changes nothing.
         let live = self.contains(id);
         let widget = &mut self.widgets[id];

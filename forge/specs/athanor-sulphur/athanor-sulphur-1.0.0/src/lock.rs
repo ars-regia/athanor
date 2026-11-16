@@ -98,6 +98,9 @@ impl SessionLockHandler for State {
         self.cancel_touches();
         // Decision 36: from the lock request on no lease is granted, and every one ends now.
         self.leases_locked();
+        // A token made before the lock activates nothing after it (L14): every one pending is
+        // dropped, and none is made while locked (`token_created`).
+        self.xdg_activation_state.retain_tokens(|_, _| false);
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
             locker: Some(Confirmation::new(locker)),
@@ -185,6 +188,10 @@ impl State {
         // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
         // confinement follows the keyboard (decision 30, `constraints.rs`).
         if surface.is_none() {
+            // A click before the focus left grants no token (`GrabSerials::focus`).
+            if keyboard.current_focus().is_some() {
+                self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
+            }
             self.aids_focus_changed(None);
             self.loop_handle.insert_idle(|state| state.refresh_constraint());
         }

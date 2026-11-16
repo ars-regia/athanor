@@ -108,8 +108,11 @@ that is neither the last nor the active one is removed. A window maps on the fir
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
 back there when it is activated, at once, with no animation. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
-first; an xdg-activation token, which a focused client can make at any time, switches no
-workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+first; an xdg-activation token switches no workspace. A client gets one for a serial of its
+own input since it took the keyboard, or, outside a security context, for a button press
+delivered to its own surface while that press is the latest input, with no later key, button,
+finger or pen press and no keyboard focus change; no client gets one while the session is locked,
+when a token restores, raises and focuses nothing; leaving a workspace or minimising a window dismisses its popups, and a popup of a
 window on an inactive workspace, minimised or drawing nothing grabs nothing. A window
 a move drops with its centre on another output joins that output's active workspace, and a
 window its output no longer shows after the outputs change is centred on that output, on the
@@ -697,7 +700,7 @@ loses its bar and dock until step 6 or the end of the run:
 systemctl --user stop athanor-bar.service athanor-dock.service
 ```
 
-`--drm` takes no other option (`src/main.rs`). Then the clients: the bar and the dock as user
+`--drm` takes no other option (`options` in `src/lib.rs`). Then the clients: the bar and the dock as user
 units, so that the allow-list's unit names hold. Each keeps a crash record in the runtime
 directory its unit names (`RUNTIME_DIRECTORY`, an entry named `athanor-bar` or `athanor-dock`;
 `system/athanor-unit/src/dirs.rs`); the record is shared with the real units, and five failed
