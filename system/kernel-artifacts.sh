@@ -40,6 +40,12 @@
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
+#   tag NVR DIGEST                      print NVR-k<12 hex of the kernel DIGEST>, the tag that keys
+#                                       every kernel artefact on the kernel it belongs to: Kernel
+#                                       Build tags the images it publishes with it, so a digest a
+#                                       running Orchestrator pinned keeps a tag when the NVR moves,
+#                                       and azoth-boot and azoth-nvidia take it as their prefix;
+#                                       no network call
 #   identity kernel|modules|signer      print the certificate identity regexp of the workflow that
 #                                       signs that artifact, on the trusted branches only
 #   digest REF                          the digest of REF, empty when the tag does not exist or
@@ -137,6 +143,10 @@ annotate() { # annotate notice|warning MESSAGE
 retry() { bash "$ROOT/forge/scripts/retry.sh" "$@"; }
 ask() { retry bash "$SELF" probe "$@"; }
 identity() { [[ -n ${IDENTITY[${1:-}]:-} ]] || usage; echo "${IDENTITY[$1]}"; }
+kernel_tag() { # kernel_tag NVR DIGEST
+  [[ $2 =~ ^sha256:[0-9a-f]{64}$ ]] || die "'$2' is not a sha256 digest"
+  echo "$1-k${2:7:12}"
+}
 
 probe_digest() {
   local out status=0
@@ -375,7 +385,7 @@ resolve() {
     return 0
   fi
   lines+=("kernel_digest=$kernel" "devel_digest=$devel")
-  tag="$nvr-k${kernel:7:12}"
+  tag=$(kernel_tag "$nvr" "$kernel")
   lines+=("boot_tag=$tag")
   digest=$(ask digest "$REGISTRY/azoth-boot:$tag")
   verdict=unverified
@@ -389,7 +399,7 @@ resolve() {
   for branch in open legacy; do
     version=$(sed -n "s/^NVIDIA_${branch^^}_VERSION=//p" "$PINS")
     [[ -n $version ]] || die "NVIDIA_${branch^^}_VERSION is not set in $PINS"
-    tag="$nvr-k${kernel:7:12}-$branch-$version"
+    tag="$(kernel_tag "$nvr" "$kernel")-$branch-$version"
     lines+=("nvidia_${branch}_version=$version" "nvidia_${branch}_tag=$tag")
     digest=$(ask digest "$REGISTRY/azoth-nvidia:$tag")
     verdict=unverified
@@ -672,6 +682,7 @@ case $command in
   has) [[ $# -eq 1 ]] || usage; [[ -f $FILE ]] && grep -q "^$1=." "$FILE" ;;
   registry) [[ $# -eq 0 ]] || usage; echo "$REGISTRY" ;;
   identity) [[ $# -eq 1 ]] || usage; identity "$1" ;;
+  tag) [[ $# -eq 2 ]] || usage; kernel_tag "$1" "$2" ;;
   digest) [[ $# -eq 1 ]] || usage; ask digest "$1" ;;
   signed) [[ $# -eq 2 ]] || usage; ask signed "$1" "$2" ;;
   predicates) [[ $# -eq 2 ]] || usage; ask predicates "$1" "$2" ;;

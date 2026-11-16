@@ -195,7 +195,12 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
    kernel firmato, e separarla costa più di quanto rende;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
     tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
-    (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
+    (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`. Every image also
+    carries the tag of its kernel, `<nvr>-k<12 hex of the kernel digest>`
+    (`-microvm` after it for the guest kernel), the prefix azoth-boot and
+    azoth-nvidia take (`forge/specs/azoth/publish.sh`, `kernel-artifacts.sh tag`):
+    a repeated push of the same NVR moves `<nvr>`, and the digest a running
+    Orchestrator pinned stays a tagged release (#1208).
     Pacchetti separati e non suffissi del tag, perché la retention di ghcr è per
     pacchetto (`retention.sh`, prima del gate, che così verifica ciò che resta):
     del debuginfo restano le due release più recenti, di kernel e devel tutte; con
@@ -203,8 +208,8 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
     referrer che cosign v3 tiene sotto il tag di fallback `sha256-<hex>` (ghcr non
     ha l'API referrers) e i bundle Sigstore che elenca, manifesti senza tag. Tutto
     il resto se ne va: release oltre il limite con i loro referrer, indici
-    sostituiti da ogni attestazione successiva, manifesti di un push ripetuto
-    dello stesso NVR. Ogni immagine: firma cosign
+    sostituiti da ogni attestazione successiva, manifesti rimasti senza tag.
+    Ogni immagine: firma cosign
     keyless (identità OIDC del workflow), SBOM SPDX da syft come attestazione
     `spdxjson`, attestazione custom con i pin (pins.env, hash di manifest, delta,
     patches.list e Containerfile, immagine base del builder, lock della toolchain);

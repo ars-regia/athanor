@@ -1339,5 +1339,122 @@ class ProjectKey(Tool):
         self.assertIn("azoth-devel", r.stderr)
 
 
+# buildah for forge/specs/azoth/publish.sh: commit names a local image whose digest depends on
+# its name and on GENERATION (one build), push --digestfile publishes it under its own name and
+# push SRC docker://DEST under DEST, both into the tags of the fake registry.
+FAKE_BUILDAH = """#!/usr/bin/env python3
+import hashlib, json, os, pathlib, sys
+args = sys.argv[1:]
+local = pathlib.Path(os.environ["FAKE_LOCAL"])
+local.mkdir(exist_ok=True)
+def image(name):
+    return local / hashlib.sha256(name.encode()).hexdigest()
+def tag(dest, digest):
+    with open(os.environ["FAKE_REGISTRY"]) as f:
+        fx = json.load(f)
+    fx.setdefault("tags", {})[dest] = digest
+    with open(os.environ["FAKE_REGISTRY"], "w") as f:
+        json.dump(fx, f)
+if args[0] == "login":
+    sys.stdin.read()
+elif args[0] == "from":
+    print("ctr")
+elif args[0] == "commit":
+    name = args[-1]
+    image(name).write_text("sha256:" + hashlib.sha256(f"{name}:{os.environ['GENERATION']}".encode()).hexdigest())
+elif args[0] == "push" and args[1] == "--digestfile":
+    digest = image(args[3]).read_text()
+    pathlib.Path(args[2]).write_text(digest)
+    tag(args[3], digest)
+elif args[0] == "push":
+    tag(args[2].removeprefix("docker://"), image(args[1]).read_text())
+"""
+
+
+class DigestRace(Tool):
+    """Kernel Build republishes the NVR while an Orchestrator run holds its digest (#1208)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.dir / "bin/buildah").write_text(FAKE_BUILDAH)
+        (self.dir / "bin/buildah").chmod(0o755)
+        self.env["FAKE_LOCAL"] = str(self.dir / "local")
+
+    def publish(self, generation):
+        out = self.dir / "out"
+        for group in ("kernel", "devel", "debuginfo", "microvm"):
+            (out / group).mkdir(parents=True, exist_ok=True)
+        (out / "nvr").write_text(NVR + "\n")
+        run = dict(
+            self.env,
+            GENERATION=str(generation),
+            IMAGE=f"{REG}/azoth",
+            NVR_EXPECTED=NVR,
+            DEFAULT_BRANCH="iso-v0",
+            GH_TOKEN="token",
+            GITHUB_ACTOR="actor",
+            GITHUB_SHA="0" * 40,
+            GITHUB_REF="refs/heads/feature",
+        )
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge/specs/azoth/publish.sh"), str(out)],
+            capture_output=True,
+            text=True,
+            env=run,
+            cwd=self.dir,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return (self.dir / "digests/kernel").read_text()
+
+    def test_a_republished_nvr_leaves_the_pinned_digest_under_its_kernel_tag(self):
+        self.registry({"moves": True, "tags": {}, "errors": []})
+        pinned = self.publish(1)
+        latest = self.publish(2)
+        self.assertNotEqual(pinned, latest)
+        tags = json.loads((self.dir / "registry.json").read_text())["tags"]
+        self.assertEqual(tags[f"{REG}/azoth:{NVR}"], latest)
+        for digest in (pinned, latest):
+            r = self.run_script("digest", f"{REG}/azoth:{boot_tag(digest)}")
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, digest), r.stderr)
+        self.assertIn(f"{REG}/azoth:{boot_tag(pinned)}-microvm", tags)
+        self.assertIn(f"{REG}/azoth-devel:{boot_tag(pinned)}", tags)
+
+        # GHCR lists one version per manifest with its tags, and retention.sh deletes every
+        # version no retained release reaches: on 2026-11-15 that was the pinned kernel.
+        packages, stray = {}, "sha256:" + "8" * 64
+        for ref, digest in sorted(tags.items()):
+            repo, name = ref.removeprefix(f"{REG}/").split(":", 1)
+            packages.setdefault(repo, {}).setdefault(digest, []).append(name)
+        packages["azoth"][stray] = []
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["packages"] = {
+            repo: [
+                {
+                    "id": i,
+                    "name": digest,
+                    "created_at": f"2026-11-15T23:{i:02d}:00Z",
+                    "metadata": {"container": {"tags": names}},
+                }
+                for i, (digest, names) in enumerate(versions.items())
+            ]
+            for repo, versions in packages.items()
+        }
+        self.registry(fx)
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge/specs/azoth/retention.sh")],
+            capture_output=True,
+            text=True,
+            env=self.env,
+            cwd=self.dir,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"{stray} (untagged)",
+            r.stdout,
+            "an untagged manifest goes",
+        )
+        self.assertNotIn(pinned, r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
