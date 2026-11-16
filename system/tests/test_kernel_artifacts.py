@@ -1013,6 +1013,14 @@ class CheckTier(Repo):
         r = self.check(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP))
         self.assertEqual(r.returncode, 1)
 
+    def test_a_stale_tier_with_only_a_cachyos_pin_move_fails(self):
+        # Only FEDORA_KERNEL_NVR moves the NVR: a CachyOS move cannot explain a tier that
+        # carries another kernel.
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check(self.pin_change(CACHYOS_RELEASE="99"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rebuilt first", r.stderr)
+
     def test_a_tier_with_the_pinned_kernel_leaves_the_plan(self):
         self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm", f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
         r = self.check({"system/x": "1\n"})

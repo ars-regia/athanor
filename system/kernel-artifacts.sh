@@ -632,10 +632,11 @@ check_tier() {
     echo "kernel-artifacts: tier 0 $tag ($digest) carries $nvr"
     return 0
   fi
-  # A kernel pin that moves in this diff explains the stale tier (the tiers follow the merge); with
-  # the pin unmoved the base's tiers lag behind its own pin, and a green check would build nothing.
+  # A move of FEDORA_KERNEL_NVR in this diff, the only pin the NVR derives from (nvr.sh), explains
+  # the stale tier (the tiers follow the merge); without it the base's tiers lag behind its own
+  # pin, and a green check would build nothing.
   while IFS= read -r key; do
-    if [[ -n $key && $key != NVIDIA_* ]]; then moved=true; fi
+    if [[ $key == FEDORA_KERNEL_NVR ]]; then moved=true; fi
   done <<< "$(moved_pins "$base" "$head")"
   [[ $moved == true ]] || die "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, and this diff does not move the kernel pin: the tiers of the base must be rebuilt first (the Orchestrator on the base)"
   set_kv "check_gpus=" "check_delta=false"
