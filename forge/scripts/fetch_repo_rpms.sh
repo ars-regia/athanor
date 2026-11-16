@@ -83,6 +83,9 @@ for pkg in "${CUSTOM_TIER3[@]}"; do
   [[ -n "$pkg" ]] && ! is_external "$pkg" && TIER3_IMAGES+=("athanor-forge-$pkg")
 done
 
+# shellcheck source=forge/scripts/tier_cache.sh
+source "$(dirname "${BASH_SOURCE[0]}")/tier_cache.sh"
+
 declare -A OLD_DIGESTS
 declare -A NEW_DIGESTS
 
@@ -112,14 +115,19 @@ pull_and_extract() {
     fi
   fi
 
-  if [ -n "$old_digest" ] && [ -n "$new_digest" ] && [ "$old_digest" = "$new_digest" ]; then
+  # The directory restored from a tier stands in for the pull only when it was recorded for this
+  # hash and this very image digest: a tier restored by its signature alone can hold RPMs that an
+  # earlier, unverified image put under the same label hash (tier_cache.sh).
+  local entry
+  entry=$(tier_cache_entry "$new_digest" "$IMAGE_LOWER")
+  if tier_cache_reusable "$old_digest" "$new_digest" "$IMAGE_LOWER"; then
     echo "    [CACHE HIT] $img hasn't changed. Skipping pull."
-    echo "$new_digest" > "$TMP_DIR/digest_$img"
+    echo "$entry" > "$TMP_DIR/digest_$img"
     return 0
   fi
   
-  echo "    [CACHE MISS] Pulling $img (old: $old_digest, new: $new_digest)"
-  echo "$new_digest" > "$TMP_DIR/digest_$img"
+  echo "    [CACHE MISS] Pulling $img (old: $old_digest, new: $entry)"
+  echo "$entry" > "$TMP_DIR/digest_$img"
 
   local ctr=""
   if ctr=$(buildah from "$IMAGE_LOWER" 2>/dev/null); then
