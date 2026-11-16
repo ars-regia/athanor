@@ -814,31 +814,38 @@ impl Bar {
             .popover
             .as_ref()
             .is_some_and(|p| matches!(p.open, Open::Module(m) if m == module));
-        if !reopening {
-            if let Some(popover) = self.popover.take() {
-                self.closed(popover.open);
-            }
-        }
+        let replaced = !reopening
+            && self
+                .popover
+                .take()
+                .map(|popover| self.closed(popover.open))
+                .is_some();
         let top = self.layout.panel() == PanelEdge::Top;
-        let (Some(out), Some((_, drawn))) = (
+        let built = match (
             self.outs.get(&surface),
             self.modules.iter_mut().find(|(m, _)| *m == module),
-        ) else {
-            return;
+        ) {
+            (Some(out), Some((_, drawn))) => {
+                let mut cx = Cx {
+                    icons: &mut self.icons,
+                    theme: &self.look.popover,
+                    secondary: self.look.secondary,
+                    rtl: self.rtl,
+                    top,
+                    scale: out.scale(),
+                    connector: out.connector.as_deref(),
+                };
+                drawn.open(&mut cx)
+            }
+            _ => None,
         };
-        let mut cx = Cx {
-            icons: &mut self.icons,
-            theme: &self.look.popover,
-            secondary: self.look.secondary,
-            rtl: self.rtl,
-            top,
-            scale: out.scale(),
-            connector: out.connector.as_deref(),
-        };
-        let Some(ui) = drawn.open(&mut cx) else {
-            return;
-        };
-        self.show_popover(shell, surface, button, ui, Open::Module(module));
+        match built {
+            Some(ui) => self.show_popover(shell, surface, button, ui, Open::Module(module)),
+            // The bar no longer holds the popover it replaced: its popup closes too, rather
+            // than stay mapped with no one to close it.
+            None if replaced => shell.close_popup(),
+            None => {}
+        }
     }
 
     fn show_popover(
@@ -860,6 +867,9 @@ impl Bar {
             }
             Err(err) => {
                 tracing::error!(error = %err, "cannot open the popover");
+                // A refused popup leaves the one open before it mapped: it closes with the
+                // bar's record of it.
+                shell.close_popup();
                 self.popover = None;
                 self.closed(open);
             }
