@@ -1208,30 +1208,24 @@ impl Application for Bar {
                         None => self.hand_token(module, None),
                     }
                 }
-                Change::Module(Wakeup::Open(module)) => {
-                    let open = self
-                        .popover
-                        .as_ref()
-                        .filter(|p| matches!(p.open, Open::Module(m) if m == module))
-                        .map(|p| (p.parent, p.anchor));
-                    match open {
-                        Some((surface, button)) => {
-                            self.open_popover(shell, surface, button, module)
-                        }
-                        None => self.open_ready(shell, module),
-                    }
-                }
             }
         }
         // A source that asks for its popover, or whose open popover changed on its own, as the
-        // pages of athanor-controls, which follow their models themselves.
+        // pages of athanor-controls, which follow their models themselves. A popover already
+        // open on the module follows through its refresh.
         if self.ready {
             let asked = self
                 .modules
                 .iter_mut()
                 .find_map(|(module, drawn)| drawn.wants_open().then_some(*module));
             if let Some(module) = asked {
-                self.open_module(shell, module);
+                let shown = self
+                    .popover
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.open, Open::Module(m) if m == module));
+                if !shown {
+                    self.open_ready(shell, module);
+                }
             }
         }
         let open = self.popover.as_ref().and_then(|popover| match popover.open {

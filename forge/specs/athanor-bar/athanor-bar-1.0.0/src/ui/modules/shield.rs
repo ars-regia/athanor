@@ -18,7 +18,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use athanor_bar::bus;
 use athanor_bar::i18n::{tr, tr_with};
-use athanor_bar::order;
 use athanor_bar::shield::{self, Refusal, Request, Rows, Sheet, Unreadable};
 use athanor_sal::{
     Event, IconTheme, Image, Kind, Priority, Rgba, Symbolic, TextStyle, Ui, WidgetId, Wrap,
@@ -71,6 +70,8 @@ struct Trust {
     retrying: RefCell<Option<glib::SourceId>>,
     /// The last refusal of a request, shown in the sheet until the sheet closes.
     refusal: Cell<Option<Refusal>>,
+    /// A refusal came while the sheet was closed: the bar opens it (`Module::wants_open`).
+    open_asked: Cell<bool>,
     _monitor: Option<gio::FileMonitor>,
 }
 
@@ -130,6 +131,7 @@ impl Trust {
                 unanswered: Cell::new(0),
                 retrying: RefCell::new(None),
                 refusal: Cell::new(None),
+                open_asked: Cell::new(false),
                 _monitor: monitor,
             }
         });
@@ -217,7 +219,8 @@ impl Trust {
     /// an open sheet.
     fn refused(&self, refusal: Refusal) {
         self.refusal.set(Some(refusal));
-        (self.wake)(Wakeup::Open(order::Module::Shield));
+        self.open_asked.set(true);
+        (self.wake)(Wakeup::Changed);
     }
 
     /// Sends `request` if the state still offers it, as it may have stopped while a question
@@ -885,6 +888,10 @@ impl Module for Shield {
     }
 
     /// A refusal is shown until the sheet closes.
+    fn wants_open(&mut self) -> bool {
+        self.trust.open_asked.replace(false)
+    }
+
     fn closed(&mut self) {
         self.page = Page::Sheet;
         self.back_to = None;

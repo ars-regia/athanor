@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use athanor_bar::dbusmenu::{self, Entry, Layout, Toggle};
 use athanor_bar::i18n::tr;
-use athanor_bar::order;
 use athanor_bar::tray::{self as sni, Item, Status, MAX_ITEMS};
 use athanor_sal::{Event, Image, Kind, Theme, Ui, WidgetId};
 use gio::prelude::*;
@@ -150,6 +149,8 @@ struct Host {
     version: Cell<u64>,
     /// The captures asked for the menu before any item was listed.
     pending_open: Cell<bool>,
+    /// The menu's layout came for a press: the bar opens it (`Module::wants_open`).
+    open_asked: Cell<bool>,
     menu: RefCell<MenuState>,
 }
 
@@ -184,6 +185,7 @@ impl Host {
                 generation: Cell::new(0),
                 version: Cell::new(0),
                 pending_open: Cell::new(false),
+                open_asked: Cell::new(false),
                 menu: RefCell::new(MenuState::default()),
             }
         })
@@ -523,7 +525,8 @@ impl Host {
                 menu.layout = Some(layout);
                 menu.revision = menu.revision.wrapping_add(1);
             }
-            (host.wake)(Wakeup::Open(order::Module::Tray));
+            host.open_asked.set(true);
+            (host.wake)(Wakeup::Changed);
         });
     }
 
@@ -858,6 +861,10 @@ impl Module for Tray {
             Some((_, drawn)) if *drawn != menu.revision => Reply::Reopen,
             _ => Reply::Stay,
         }
+    }
+
+    fn wants_open(&mut self) -> bool {
+        self.host.open_asked.replace(false)
     }
 
     fn closed(&mut self) {

@@ -35,10 +35,6 @@ pub enum Wakeup {
     /// The source changed: the bar asks every module whether its buttons are stale and sets
     /// the open popover's widgets again.
     Changed,
-    /// The module's popover is ready, or a reply the person must see: the bar draws it again
-    /// when it is open, else opens it from [`Module::anchor`] on the surface of the module's
-    /// last input, as the tray's menu once its item answered.
-    Open(order::Module),
     /// The module asks for an xdg-activation token for an action of the input just handled,
     /// which lets the application it calls raise its window: the bar asks the compositor with
     /// the last input's surface and serial, and hands the token to `activation_token`.
@@ -129,8 +125,12 @@ pub trait Module {
         Reply::Stay
     }
 
-    /// Whether the module's source asks for its popover, as the network's password prompt:
-    /// polled at every turn of the loop once the bar is ready, and true once for each ask.
+    /// Whether the module's source asks for its popover, as the network's password prompt, the
+    /// tray's menu once its item answered, or a refusal the shield's sheet must show: polled at
+    /// every turn of the loop once the bar is ready, and true once for each ask. A source that
+    /// asks wakes the bar with [`Wakeup::Changed`], unless the page polls its own model. The bar
+    /// opens a closed popover from [`Module::anchor`] on the surface of the module's last
+    /// input; an open one follows through [`Module::refresh`].
     fn wants_open(&mut self) -> bool {
         false
     }
@@ -159,8 +159,8 @@ pub trait Module {
 
     /// An input on `widget`, one of the widgets inside `button` that [`Module::anchor`] can
     /// name: [`Event::Clicked`], [`Event::ContextMenu`], [`Event::MiddleClick`] or
-    /// [`Event::Wheel`]. A module that opens its popover from it wakes the bar with
-    /// [`Wakeup::Open`].
+    /// [`Event::Wheel`]. A module that opens its popover from it asks through
+    /// [`Module::wants_open`].
     fn input(&mut self, _ui: &Ui, _button: WidgetId, _widget: WidgetId, _event: &Event) {}
 
     /// The module's own layer surfaces, beside the bar's, drawn at the end of every turn: it
