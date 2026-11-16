@@ -4,9 +4,13 @@
 //!
 //! A frame of an output may honour a surface's `async` hint only when every condition of
 //! decision 33 holds (`tears`): the surface is full-screen and alone on its output, no layer
-//! surface is mapped on that output, the session is not locked, and for a confined client OS4's
-//! border is drawn in the same frame. The DRM backend reads the conditions from the frame it
-//! is about to draw (`conditions`).
+//! surface drawn above it is mapped on that output, the session is not locked, and for a
+//! confined client OS4's border is drawn in the same frame. Above it are the overlay layer, and
+//! the top layer unless the window is lifted above it (`marks::lifted`: focused, with the output
+//! whole and topmost); the background and bottom layers are always below. The DRM backend reads
+//! the conditions from each frame it is about to draw (`conditions`), so a flip in flight when
+//! the lock or such a layer arrives completes, and the next frame is presented with vsync
+//! (amendment of 2026-11-16).
 //!
 //! Smithay's DRM backend has no asynchronous page flip at the pinned revision, so every frame
 //! is presented with vsync, which the protocol allows: the compositor is free to ignore the
@@ -27,6 +31,7 @@ use smithay::reexports::wayland_server::{
     Client, DataInit, DisplayHandle, New, Resource, WEnum, Weak,
 };
 use smithay::wayland::compositor::{with_states, Cacheable};
+use smithay::wayland::shell::wlr_layer::Layer;
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
 use std::cell::Cell;
 
@@ -155,7 +160,7 @@ pub struct Conditions {
     pub asked: bool,
     /// The surface is full-screen and alone on its output.
     pub alone: bool,
-    /// A layer surface is mapped on that output.
+    /// A layer surface drawn above the surface is mapped on that output.
     pub layered: bool,
     /// The session is locked.
     pub locked: bool,
@@ -171,20 +176,20 @@ pub fn tears(c: Conditions) -> bool {
 }
 
 /// The conditions of the frame of `output` made of `elements`, drawn locked or not, with the
-/// input method's `popups` above the space. The surface is the toplevel of the window that has
-/// the output whole (`marks::whole_on`), or else of the topmost window on the output; it is
-/// alone when no other window meets the output and no popup is shown. With no window, nothing
-/// asks.
+/// input method's `popups` above the space and `focused` holding the keyboard. The surface is
+/// the toplevel of the window that has the output whole (`marks::whole_on`), or else of the
+/// topmost window on the output; it is alone when no other window meets the output and no popup
+/// is shown. With no window, nothing asks.
 pub fn conditions<E: Element>(
     space: &Space<Window>,
     output: &Output,
+    focused: Option<&Window>,
     locked: bool,
     popups: &[PlacedPopup],
     elements: &[E],
 ) -> Conditions {
-    let layered = layer_map_for_output(output).layers().next().is_some();
     let nothing = Conditions {
-        layered,
+        layered: above(output, false),
         locked,
         ..Conditions::default()
     };
@@ -193,15 +198,23 @@ pub fn conditions<E: Element>(
     };
     let on: Vec<&Window> = space
         .elements()
-        .filter(|window| space.element_bbox(window).is_some_and(|bbox| area.overlaps(bbox)))
+        .filter(|window| {
+            space
+                .element_bbox(window)
+                .is_some_and(|bbox| area.overlaps(bbox))
+        })
         .collect();
-    let whole = on.iter().rev().find(|window| crate::marks::whole_on(window, area));
+    let whole = on
+        .iter()
+        .rev()
+        .find(|window| crate::marks::whole_on(window, area));
     let Some((window, surface)) = whole
         .or(on.last())
         .and_then(|window| Some((window, window.toplevel()?.wl_surface().clone())))
     else {
         return nothing;
     };
+    let lifted = crate::marks::lifted(focused, space, output) == Some(*window);
     let alone = on.len() == 1
         && crate::marks::whole_on(window, area)
         && popups.is_empty()
@@ -209,11 +222,23 @@ pub fn conditions<E: Element>(
     Conditions {
         asked: asks(&surface),
         alone,
-        layered,
+        layered: above(output, lifted),
         locked,
         confined: surface.client().is_none_or(|client| !unconfined(&client)),
         bordered: crate::marks::bordered(&surface, elements, area, output),
     }
+}
+
+/// Whether a layer surface mapped on `output` is drawn above its windows: one on the overlay
+/// layer, or on the top layer unless the window is `lifted` above it, as `marks::stack` draws.
+fn above(output: &Output, lifted: bool) -> bool {
+    layer_map_for_output(output)
+        .layers()
+        .any(|layer| match layer.layer() {
+            Layer::Overlay => true,
+            Layer::Top => !lifted,
+            Layer::Background | Layer::Bottom => false,
+        })
 }
 
 #[cfg(test)]

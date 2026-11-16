@@ -1908,9 +1908,12 @@ fn render(
     };
     let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
+    // Read for each frame: a flip in flight when the lock or a layer above arrives completes,
+    // and the next frame follows the new state.
     let tears = crate::tearing::tears(crate::tearing::conditions(
         space,
         output,
+        marks.focused.as_ref(),
         lock.is_some(),
         popups,
         &zoomed,

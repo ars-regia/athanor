@@ -232,7 +232,23 @@ fn conditions(run: &mut Running, zoom: Option<(Point<i32, Physical>, f64)>) -> C
     let elements = crate::look::zoomed(elements, zoom);
     let popups = run.state.composing.popups_on(&run.state.space, &output);
     let locked = run.state.lock.is_some();
-    crate::tearing::conditions(&run.state.space, &output, locked, &popups, &elements)
+    let focused = marks.focused.as_ref();
+    crate::tearing::conditions(&run.state.space, &output, focused, locked, &popups, &elements)
+}
+
+/// A layer surface of a new client on `layer` of the first output, 100 by 100 pixels.
+fn layer(run: &mut Running, layer: zwlr_layer_shell_v1::Layer) -> Local {
+    let mut local = Local::connect(run, None);
+    let (kept, shell_layer, surface) = local.layer_kept(run, layer);
+    assert!(kept, "the layer surface is configured");
+    let (serial, _, _) = local.client.layer_configure.expect("a configure");
+    shell_layer.ack_configure(serial);
+    let shm: wl_shm::WlShm = local.bind(1);
+    let (buffer, _) = local.buffer(&shm, 100, 100, BLACK);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    local.roundtrip(run);
+    local
 }
 
 /// A window of a client, confined or not, alone on the first output: the fixture's window goes
@@ -404,17 +420,75 @@ fn another_window_on_the_output_refuses_the_tear() {
     run.stop();
 }
 
-/// A full-screen window with a layer surface mapped on its output is not torn, even below it.
+/// A layer surface on the overlay layer, drawn above a full-screen window, refuses the tear.
 #[test]
-fn a_mapped_layer_surface_refuses_the_tear() {
+fn an_overlay_layer_surface_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let _overlay = layer(&mut run, zwlr_layer_shell_v1::Layer::Overlay);
+    let refused = conditions(&mut run, None);
+    assert_eq!(refused, Conditions { layered: true, ..MET });
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// The top layer refuses the tear only while it is drawn above the full-screen window: once the
+/// window loses the keyboard, and not while it is lifted above the top layer.
+#[test]
+fn the_top_layer_refuses_the_tear_only_above_the_window() {
     let mut run = Running::start(None);
     let (mut local, _toplevel) = alone(&mut run, true, true);
     let _control = ask(&mut run, &mut local);
     let mut shell = Local::connect(&mut run, None);
     shell.bar(&mut run, 40);
+    let met = conditions(&mut run, None);
+    assert_eq!(met, MET, "lifted above the bar");
+    assert!(crate::tearing::tears(met));
+
+    let window = window_of(&run, local.id.as_ref().expect("an id"));
+    let elsewhere = run.state.space.elements().find(|other| **other != window).cloned();
+    run.state.focus(&elsewhere.expect("the fixture's window, on the second output"));
     let refused = conditions(&mut run, None);
-    assert_eq!(refused, Conditions { layered: true, ..MET });
+    assert_eq!(refused, Conditions { layered: true, ..MET }, "below the bar");
     assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// The background and bottom layers stay below a full-screen window and refuse nothing.
+#[test]
+fn the_background_and_bottom_layers_refuse_nothing() {
+    use zwlr_layer_shell_v1::Layer;
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let _background = layer(&mut run, Layer::Background);
+    let _bottom = layer(&mut run, Layer::Bottom);
+    let met = conditions(&mut run, None);
+    assert_eq!(met, MET);
+    assert!(crate::tearing::tears(met));
+    run.stop();
+}
+
+/// The conditions are read for each frame: when the lock or a layer above arrives after a frame
+/// that may tear, the lock is not held back for it, and the next frame is vsync.
+#[test]
+fn the_frame_after_the_lock_or_an_overlay_is_vsync() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    assert!(crate::tearing::tears(conditions(&mut run, None)), "before");
+    let _overlay = layer(&mut run, zwlr_layer_shell_v1::Layer::Overlay);
+    assert!(!crate::tearing::tears(conditions(&mut run, None)), "with the overlay");
+    run.stop();
+
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    assert!(crate::tearing::tears(conditions(&mut run, None)), "before the lock");
+    // `lock_the_session` returns once the compositor has confirmed the lock.
+    let _locker = lock_the_session(&mut run);
+    assert!(!crate::tearing::tears(conditions(&mut run, None)), "locked");
     run.stop();
 }
 
@@ -451,7 +525,9 @@ fn a_confined_window_without_its_border_is_not_torn() {
         .into_iter()
         .filter(|element| !matches!(element, crate::marks::Stacked::Line(_)))
         .collect();
-    let refused = crate::tearing::conditions(&run.state.space, &output, false, &[], &unlined);
+    let focused = marks.focused.as_ref();
+    let refused =
+        crate::tearing::conditions(&run.state.space, &output, focused, false, &[], &unlined);
     assert_eq!(refused, Conditions { bordered: false, ..MET });
     run.stop();
 }
