@@ -490,12 +490,17 @@ impl Page {
         let Some(ids) = &self.ids else {
             return;
         };
-        if let Some(state) = self.service.state.borrow().as_ref() {
+        let state = self.service.state.borrow();
+        // Nothing is nearby before the first state, and never on a page that does not pair.
+        let finding = self.pairing
+            && state
+                .as_ref()
+                .is_some_and(|state| state.powered && state.discovering);
+        ui.set_visible(ids.nearby_title, finding);
+        ui.set_visible(ids.nearby, finding);
+        if let Some(state) = state.as_ref() {
             ui.set_active(ids.power, state.powered);
             ui.set_visible(ids.paired, state.powered);
-            let finding = self.pairing && state.powered && state.discovering;
-            ui.set_visible(ids.nearby_title, finding);
-            ui.set_visible(ids.nearby, finding);
         }
         let prompt = self
             .service
