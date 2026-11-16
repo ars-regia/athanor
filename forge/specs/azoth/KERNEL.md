@@ -19,7 +19,7 @@ directory e come si usa.
 | `patches/redhat/` | patch di Athanor al codice della patch Red Hat: solo sull'albero Fedora, mai su Kconfig |
 | `fedora-wins.list` | percorsi in cui un conflitto tra base CachyOS e patch Red Hat si risolve con l'albero Fedora |
 | `cmdline` | la riga di comando base usata dalla matrice di avvio, generata da `athanor-kernel-profile/profile.toml` (`kernel_profile.py generate`); non modificarla a mano |
-| `build.sh` | dai pin agli RPM: stadi `manifest` (scarica i sorgenti dei pin e scrive il loro manifesto), `prep` (sorgenti, patch, gate dei config), `refresh` (propone le copie rinfrescate delle patch di CachyOS che non entrano senza fuzz e riscrive i lock `derived.config`, `cachyos-protected.sha256` e `cachyos-files.list`), `microvm` (prep e il solo kernel guest) e `build` (entrambi i kernel); `--variant NOME` per una variante di `variants/` |
+| `build.sh` | dai pin agli RPM: stadi `manifest` (scarica i sorgenti dei pin e scrive il loro manifesto), `prep` (sorgenti, patch, gate dei config), `refresh` (propone le copie rinfrescate delle patch di CachyOS che non entrano senza fuzz), `microvm` (prep e il solo kernel guest) e `build` (entrambi i kernel); `--variant NOME` per una variante di `variants/` |
 | `variants/` | frammenti che sovrascrivono righe di `kernel-local` per il confronto A/B del benchmark (`o3`: -O3 al posto di -O2); buildid `.azoth.NOME`, mai pubblicati |
 | `repro.py` | la riproducibilita': due build dello stesso pin a confronto (config, System.map, vmlinux per sezioni, moduli senza firma) |
 | `bench.sh`, `bench/init`, `bench-report.py` | il benchmark di tendenza: kernel in QEMU/KVM con hackbench, schbench, fio, netperf; tabelle, confronto A/B e grafici dai `results.json` |
@@ -43,14 +43,14 @@ directory e come si usa.
 <!-- pins:begin (table written by bump.py apply) -->
 | pin | value |
 | --- | --- |
-| `FEDORA_KERNEL_NVR` | `7.3.3-300.fc45` |
+| `FEDORA_KERNEL_NVR` | `7.2.11-300.fc45` |
 | `FEDORA_KEY_FPR` | `4f50a6114cd5c6976a7f1179655a4b02f577861e` |
 | `KERNEL_CHANNEL` | `stable` |
-| `CACHYOS_RELEASE` | `cachyos-7.3.3-1` |
-| `CACHYOS_CONFIG_COMMIT` | `cbd3c2573e7281c006e8f4dbf4e2dd781542d7f7` |
-| `CACHYOS_PATCHES_COMMIT` | `21d721415790e6717b2ece16e82e08eb98d16c00` |
-| `NVIDIA_OPEN_VERSION` | `615.78.08` |
-| `NVIDIA_OPEN_COMMIT` | `1a82fbfda8f321b056eb3568850f9316c5e465c5` |
+| `CACHYOS_RELEASE` | `cachyos-7.2.11-1` |
+| `CACHYOS_CONFIG_COMMIT` | `6676e72b85eb9e30d079a8c3dcdf93aedd1e8226` |
+| `CACHYOS_PATCHES_COMMIT` | `333b9269015584d1b31f75af9e23d838d7b3d0fe` |
+| `NVIDIA_OPEN_VERSION` | `615.71.09` |
+| `NVIDIA_OPEN_COMMIT` | `61dcc93722ecb418bb5f2e00923f05b4b8051dd1` |
 | `NVIDIA_LEGACY_VERSION` | `580.196.07` |
 <!-- pins:end -->
 
@@ -72,7 +72,7 @@ coincide con l'attestazione dei pin dell'immagine `<nvr>` gia' pubblicata; altri
 la boot matrix gira sul kernel-core pubblicato e non si pubblica nulla.
 
 Se `prep` si ferma con `refresh needed` (una patch di `patches.list` non entra piu'
-senza fuzz, oppure CachyOS cambia un'opzione derivata o un file dei percorsi protetti):
+senza fuzz):
 
 ```sh
 podman run --rm -v "$PWD:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
@@ -81,9 +81,7 @@ podman run --rm -v "$PWD:/forge" -v "$HOME/.cache/azoth:/var/cache/azoth" \
 ```
 
 Le copie da rivedere finiscono in `out/refreshed/`, da copiare sotto
-`patches/refreshed/` dopo aver riletto gli hunk applicati con fuzz. `derived.config`,
-`cachyos-protected.sha256` e `cachyos-files.list` vengono riscritti sul posto: ogni riga nuova del loro diff si
-legge prima del commit (spec sezione 8, "CachyOS locks").
+`patches/refreshed/` dopo aver riletto gli hunk applicati con fuzz.
 
 ## Boot matrix
 
