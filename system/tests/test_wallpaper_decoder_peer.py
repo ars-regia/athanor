@@ -5,11 +5,13 @@ regression check that fails on the old code is `scripts/verify.py peer-exe`.
 
 athanor-wallpaper-decode@.service sets namespacing properties, which under the user manager put
 it in a user namespace of its own. The kernel allows a ptrace-read (readlink /proc/<pid>/exe)
-only inside one user namespace, so a decoder in its own cannot read the executable of a peer in
-a sibling's, while /proc/<pid>/cgroup stays readable. That is why the decoder admits its peer
+to a reader in the target's user namespace or with CAP_SYS_PTRACE in it, so a decoder in its own
+cannot read the executable of a peer in a sibling's, while /proc/<pid>/cgroup stays readable. That is why the decoder admits its peer
 by cgroup alone (athanor_unit::peer::admit_user_unit_cgroup). The test starts a sandboxed peer
-and a reader with the shipped unit's own properties against a real user manager, and skips
-where there is none, as in CI containers (python3 -B -m unittest discover -s system/tests -v).
+and a reader with the shipped unit's own properties against a real user manager. It skips where
+there is none, as in CI containers, and where the manager cannot give a unit a namespace, as on
+Ubuntu, whose AppArmor restricts unprivileged user namespaces: the unit then exits with status
+226 before it runs (python3 -B -m unittest discover -s system/tests -v).
 """
 
 import pathlib
@@ -42,11 +44,21 @@ def user_manager_runs():
     return done.stdout.strip() in ("running", "degraded")
 
 
+def user_namespaces_work():
+    """Whether the user manager can start a unit with a namespacing property at all."""
+    try:
+        done = subprocess.run(["systemd-run", "--user", "--pipe", "--wait", "--collect", "-p", "PrivateNetwork=yes", "true"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return done.returncode == 0
+
+
 def run(*args, **kwargs):
     return subprocess.run(args, capture_output=True, text=True, timeout=60, **kwargs)
 
 
 @unittest.skipUnless(user_manager_runs(), "no user manager: systemctl --user is-system-running fails")
+@unittest.skipUnless(user_manager_runs() and user_namespaces_work(), "the user manager cannot give a unit a namespace here")
 class WallpaperDecoderKernelPremiseTest(unittest.TestCase):
     def test_a_namespaced_reader_reads_the_peers_cgroup_and_not_its_exe(self):
         props = namespacing_properties()
