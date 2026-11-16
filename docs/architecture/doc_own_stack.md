@@ -1606,9 +1606,7 @@ compositor and that the own compositor did not yet offer:
       (#1104). The bar, which holds the grant, sends `reduced_motion` with the value of
       `enable-animations` inverted after it binds the global and at each change, as it sends the
       accessibility keys. The compositor keeps the value it was last given, and false until a client
-      sends one, so without the bar its animations run. When `athanor-a11y watch` is built it takes
-      this over with the other keys (`doc_accessibility.md` AX3, AX10), and the night-light
-      temperature below stays the bar's. A fixture test sends the request and
+      sends one, so without the bar its animations run. A fixture test sends the request and
       observes the bell's widened outline in place of its blink (AX9). Not taken: an Athanor state
       file the compositor watches, a second store kept in step with the GNOME key, and reading
       dconf's database in the compositor, which would bring GLib into it;
@@ -1621,8 +1619,8 @@ compositor and that the own compositor did not yet offer:
       `org.athanor.desktop.night-light`: `enabled`, default false, `temperature`, default 4000, and
       the manual schedule's `from` and `to` (`doc_settings.md` SE24), written by the control center's
       Display page (CC5) and by Settings. The schema joins the writable keys of `doc_settings.md`
-      SE7 and the schemas of `doc_session_daemons.md` SD3 in the pull request that adds it, before
-      either writes it. The bar reads it at its start and at each change, applies
+      SE7 and the schemas of `doc_session_daemons.md` SD3 by an amendment of those documents,
+      approved before the code that adds it (ADR-0074). The bar reads it at its start and at each change, applies
       the schedule, and sends the temperature to show through a request of version 3 of
       `athanor_a11y_manager_v1`, 6500 K when night light is off; the grant is the bar's, so no client
       gains one. The bar clamps a value outside 2500 to 6500 K before it sends it, and logs it, since
