@@ -34,8 +34,9 @@ usage() {
 [[ $# -eq 2 ]] || usage
 ref=${1,,}
 image=${ref%:*}
-# A tag, not a digest: the digest is what this reads.
-[[ $image == */* && $image != "$ref" && $ref != *@* ]] || usage
+# A tag, not a digest: the digest is what this reads. An empty tag, or a hash tag with no hash,
+# is a usage error: the label of an unlabelled image is empty too, and would match it.
+[[ $image == */* && $image != "$ref" && $ref != *@* && -n ${ref##*:} && ${ref##*:} != hash- ]] || usage
 here=$(dirname "${BASH_SOURCE[0]}")
 
 answer=$(bash "$here/retry.sh" bash "$here/registry_probe.sh" "$ref")
