@@ -1941,8 +1941,8 @@ mod tests {
         assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
     }
 
-    /// A menu button taking the focus reports its expanded state with it, as GTK 4.20 does:
-    /// Orca then says "collapsed" for each one the first time, as for GTK's (AX6; the third
+    /// A menu button taking the focus reports its expanded state with it the first time, as GTK
+    /// 4.20 does: Orca then says "collapsed" for each one once, as for GTK's (AX6; the third
     /// change of `vendor/accesskit_atspi_common`). A plain button reports none.
     #[test]
     fn a_menu_button_taking_the_focus_reports_its_expanded_state() {
@@ -1962,6 +1962,13 @@ mod tests {
             adapter.update(update);
         }
         assert_eq!(heard.lock().expect("not poisoned").expanded, [false]);
+        for focus in [plain, menu] {
+            ui.set_focus(Some(focus));
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false], "once");
     }
 
     /// An announcement asked for before a surface leaves the accessibility tree and not yet

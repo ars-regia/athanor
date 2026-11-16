@@ -22,7 +22,7 @@ use std::fmt::{Debug, Formatter};
 use std::{
     collections::HashSet,
     sync::{
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -94,6 +94,7 @@ impl<'a> AdapterChangeHandler<'a> {
             return;
         }
         self.removed_nodes.insert(id);
+        self.adapter.forget_focus(id);
 
         let role = node.role();
         let is_root = node.is_root();
@@ -326,8 +327,10 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
             self.adapter
                 .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
             if let Some(expanded) = node.data().is_expanded() {
-                self.adapter
-                    .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
+                if self.adapter.first_focus(node.id()) {
+                    self.adapter
+                        .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
+                }
             }
             self.emit_text_selection_change(None, node);
         }
@@ -365,6 +368,8 @@ pub struct Adapter {
     id: usize,
     callback: Box<dyn AdapterCallback + Send + Sync>,
     context: Arc<Context>,
+    /// The nodes that have taken the focus, which have reported their expanded state with it.
+    focused_once: Mutex<HashSet<FullNodeId>>,
 }
 
 impl Debug for Adapter {
@@ -437,6 +442,7 @@ impl Adapter {
             id,
             callback: Box::new(callback),
             context,
+            focused_once: Mutex::new(HashSet::new()),
         };
         adapter.register_tree();
         if let Some(id) = focus_id {
@@ -540,6 +546,21 @@ impl Adapter {
         tree.update_and_process_changes(update, &mut handler);
         drop(tree);
         handler.emit_selection_changed();
+    }
+
+    /// Whether `id` takes the focus for the first time since it was added.
+    fn first_focus(&self, id: FullNodeId) -> bool {
+        match self.focused_once.lock() {
+            Ok(mut once) => once.insert(id),
+            Err(poisoned) => poisoned.into_inner().insert(id),
+        }
+    }
+
+    fn forget_focus(&self, id: FullNodeId) {
+        match self.focused_once.lock() {
+            Ok(mut once) => once.remove(&id),
+            Err(poisoned) => poisoned.into_inner().remove(&id),
+        };
     }
 
     pub fn update_window_focus_state(&mut self, is_focused: bool) {

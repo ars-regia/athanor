@@ -117,17 +117,21 @@ maintainer's decision.
 
 ### Why
 
-GTK 4.20 reports `state-changed:expanded` on a menu button when it takes the focus, and Orca
-says "collapsed" after the button the first time each one takes it: its reference walks of the
-bar, the dock and the gallery hold that line (`forge/test/shell/golden/orca/`). The bridge
+GTK 4.20 reports `state-changed:expanded` on a menu button the first time it takes the focus,
+and Orca says "collapsed" after the button then, and not when it takes the focus again: its
+reference walks of the bar, the dock and the gallery hold that line once for each button
+(`forge/test/shell/golden/orca/`). The bridge
 reports the expanded state only when it changes, so Orca never says it for a Sal surface, and
 AX6 of `doc_accessibility.md` asks for a control's state, expanded included, as GTK conveys it.
 Neither 0.21.1 nor AccessKit's main of 2026-11-09 reports it with the focus.
 
 ### The change
 
-`src/adapter.rs`, `AdapterChangeHandler::focus_moved`: a node that takes the focus and has an
-expanded state reports it after the focus.
+`src/adapter.rs`, `AdapterChangeHandler::focus_moved`: a node that takes the focus for the first
+time since it was added, and has an expanded state, reports it after the focus. `Adapter` keeps
+the nodes that have taken the focus (`focused_once`), and `remove_node` forgets a removed one.
+The diff below is the focus change; the field, its two helpers and the line in `remove_node`
+go with it.
 
 ```diff
 --- a/src/adapter.rs
@@ -137,8 +141,10 @@ expanded state reports it after the focus.
              self.adapter
                  .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
 +            if let Some(expanded) = node.data().is_expanded() {
-+                self.adapter
-+                    .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
++                if self.adapter.first_focus(node.id()) {
++                    self.adapter
++                        .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
++                }
 +            }
              self.emit_text_selection_change(None, node);
          }
