@@ -2754,8 +2754,8 @@ reason = "the network, Bluetooth and shield branches are merged into the bar's p
 surface = "bar-audio"
 item = 2
 what = "the module's button not drawn pressed while its popover is open"
-state = "recorded"
-reason = "Sal's popup draws no state on the widget it opens from; a change to how the bar opens every popover, not to the module"
+state = "closed"
+reason = "the bar's branch, merged with this module's, fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs), as the bar's item 2"
 
 [[gtk-difference]]
 surface = "bar-audio"
@@ -2796,8 +2796,8 @@ reason = "the network, Bluetooth and shield branches are merged into the bar's p
 surface = "bar-battery"
 item = 8
 what = "the module's button not drawn pressed while its popover is open"
-state = "recorded"
-reason = "Sal's popup draws no state on the widget it opens from; a change to how the bar opens every popover, not to the module"
+state = "closed"
+reason = "the bar's branch, merged with this module's, fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs), as the bar's item 2"
 
 [[gtk-difference]]
 surface = "bar-battery"

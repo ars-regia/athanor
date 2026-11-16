@@ -255,8 +255,8 @@ class GoldenReportTest(unittest.TestCase):
 
         table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
         merged = {
-            ("bar", 1), ("bar-calendar", 8), ("bar-tray", 1), ("bar-audio", 1),
-            ("bar-battery", 7), ("bar-network", 1), ("bar-network", 2), ("bar-network", 12),
+            ("bar", 1), ("bar-calendar", 8), ("bar-tray", 1), ("bar-audio", 1), ("bar-audio", 2),
+            ("bar-battery", 7), ("bar-battery", 8), ("bar-network", 1), ("bar-network", 2), ("bar-network", 12),
         }
         states = {
             (e.get("surface"), e.get("item")): e["state"]
