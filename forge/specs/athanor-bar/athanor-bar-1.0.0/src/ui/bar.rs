@@ -540,9 +540,19 @@ impl Bar {
         self.outs.insert(id, out);
     }
 
-    /// Draws every surface again: the look, the layout or a module's source changed.
+    /// Draws every surface again: the look, the layout or a module's source changed. A
+    /// module's popover stays open, as high contrast switched from the accessibility menu, and
+    /// opens again from its new button in the new look without being told it closed: a page
+    /// keeps what it shows, as a Bluetooth pairing's confirmation, which closing would refuse
+    /// for the user. It closes only when its button is gone. A running entry's menu closes.
     fn rebuild_all(&mut self, shell: &mut Shell) {
-        self.close_popover(shell);
+        let kept = self.popover.as_ref().and_then(|popover| match popover.open {
+            Open::Module(module) => Some((popover.parent, module)),
+            Open::Entry(_) => None,
+        });
+        if kept.is_none() {
+            self.close_popover(shell);
+        }
         self.modules_stale = false;
         let states = self.states();
         let ids: Vec<SurfaceId> = self.outs.keys().copied().collect();
@@ -550,6 +560,12 @@ impl Bar {
             self.build(shell, id, &states);
         }
         self.stale = false;
+        if let Some((surface, module)) = kept {
+            match self.anchor(shell, surface, module) {
+                Some(button) => self.open_popover(shell, surface, button, module),
+                None => self.close_popover(shell),
+            }
+        }
     }
 
     /// Draws again the surfaces whose running entries, or what their buttons show, changed.
@@ -1188,18 +1204,7 @@ impl Application for Bar {
                     self.appearance = current;
                     // After the look, whose ink tints the images anew.
                     self.icons.reset(self.look.bar.text);
-                    // A module's popover stays open in the new look, as high contrast
-                    // switched from the accessibility menu.
-                    let open = self.popover.as_ref().and_then(|popover| match popover.open {
-                        Open::Module(module) => Some((popover.parent, module)),
-                        Open::Entry(_) => None,
-                    });
                     self.rebuild_all(shell);
-                    if let Some((surface, module)) = open {
-                        if let Some(button) = self.anchor(shell, surface, module) {
-                            self.open_popover(shell, surface, button, module);
-                        }
-                    }
                 }
                 Change::Apps => {
                     self.apps = None;
