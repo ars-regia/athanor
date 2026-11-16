@@ -75,7 +75,11 @@ package jobs of one run:
   unanswered question as "clean" would ship stale images and reading it as "dirty" would
   silently rebuild the whole graph. The tier assembly (`fetch_repo_rpms.sh`) takes a package's RPMs only from the
   digest `resolve_node_image.sh` verified the same way, and restores a published tier only
-  when `call-system-image.yml` signed it. A dirty package does not dirty its dependents: builds
+  when `call-system-image.yml` signed it. The tier's manifest records, for each package,
+  the hash and the image digest (`tier_cache.sh`); a restored package directory stands in
+  for the pull only when both equal those of the image verified in the run, so RPMs that an
+  earlier, unverified image put under the same hash are replaced, and a manifest written
+  without a digest is never reused. A dirty package does not dirty its dependents: builds
   never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
   commit that changes no package schedules no matrix job.
 - **Cycle check**: `graphlib.TopologicalSorter.prepare()` on the graph; a cycle (a tier
