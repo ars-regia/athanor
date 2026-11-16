@@ -68,15 +68,19 @@ PODMAN = textwrap.dedent(
             (rpms / conf["rpm"]).write_text("rpm")
     """
 )
-# The skopeo of registry_probe.sh: the builder is published unless the test says otherwise.
+# The skopeo of registry_probe.sh: the builder is published unless the test says otherwise,
+# and `inspect --format '{{.Digest}}'` answers its digest, as registry_probe.sh requires.
 SKOPEO = textwrap.dedent(
     """\
     #!/bin/sh
-    [ -e "$(dirname "$0")/../builder-absent" ] || exit 0
+    if [ ! -e "$(dirname "$0")/../builder-absent" ]; then
+        echo "sha256:{digest}"
+        exit 0
+    fi
     echo "manifest unknown" >&2
     exit 1
     """
-)
+).replace("{digest}", "a" * 64)
 
 
 def spec(release):
