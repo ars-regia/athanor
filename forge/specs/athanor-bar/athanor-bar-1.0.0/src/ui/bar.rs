@@ -872,6 +872,10 @@ impl Bar {
             // The bar no longer holds the popover it replaced: its popup closes too, rather
             // than stay mapped with no one to close it.
             None if replaced => shell.close_popup(),
+            // The module's own popover, opened again by a second page or a rebuild, has
+            // nothing to show: it closes rather than stay mapped on a button that was drawn
+            // again, and the module, whose popover did close, is told.
+            None if reopening => self.close_popover(shell),
             None => {}
         }
     }
