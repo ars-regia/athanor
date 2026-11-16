@@ -22,6 +22,8 @@ COPIED = (
     "forge/scripts/retry.sh",
     "forge/scripts/check_idempotency.sh",
     "forge/scripts/registry_probe.sh",
+    "forge/scripts/verify_image.sh",
+    "system/tier-digests.sh",
     "system/Containerfile",
 )
 PUBLISHED = "1.11.0-2.fc43.athanor1"
@@ -68,19 +70,37 @@ PODMAN = textwrap.dedent(
             (rpms / conf["rpm"]).write_text("rpm")
     """
 )
-# The skopeo of registry_probe.sh: the builder is published unless the test says otherwise,
-# and `inspect --format '{{.Digest}}'` answers its digest, as registry_probe.sh requires.
+# The skopeo of registry_probe.sh and verify_image.sh: the builder is published unless the test
+# says otherwise, `inspect --format '{{.Digest}}'` answers its digest, as registry_probe.sh
+# requires, and `inspect --config` answers the config of the digest, which carries the label
+# tier.content.sha256 of the builder's hash, as publish_builder.sh writes it.
 SKOPEO = textwrap.dedent(
     """\
     #!/bin/sh
-    if [ ! -e "$(dirname "$0")/../builder-absent" ]; then
-        echo "sha256:{digest}"
+    here=$(dirname "$0")/..
+    if [ ! -e "$here/builder-absent" ]; then
+        case " $* " in
+        *" --config "*) printf '{"config":{"Labels":{"tier.content.sha256":"%s"}}}\\n' "$(cat "$here/builder-hash")" ;;
+        *) echo "sha256:{digest}" ;;
+        esac
         exit 0
     fi
     echo "manifest unknown" >&2
     exit 1
     """
 ).replace("{digest}", "a" * 64)
+# The cosign of tier-digests.sh: it verifies every digest as signed by a trusted run unless the
+# test says the builder is unsigned, which cosign answers as it does for an image no trusted run
+# signed.
+COSIGN = textwrap.dedent(
+    """\
+    #!/bin/sh
+    if [ -e "$(dirname "$0")/../builder-unsigned" ]; then
+        echo "Error: no signatures found" >&2
+        exit 1
+    fi
+    """
+)
 
 
 def spec(release):
@@ -104,6 +124,7 @@ class Rig:
         rpm=f"cosmic-comp-{SPEC}.x86_64.rpm",
         derived_nevr=SPEC,
         builder=True,
+        signed=True,
     ):
         self.tmp = tmp
         self.tree = tmp / "tree"
@@ -120,11 +141,22 @@ class Rig:
         )
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
-        for name, body in (("podman", PODMAN), ("skopeo", SKOPEO)):
+        for name, body in (("podman", PODMAN), ("skopeo", SKOPEO), ("cosign", COSIGN)):
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
         if not builder:
             (tmp / "builder-absent").write_text("")
+        if not signed:
+            (tmp / "builder-unsigned").write_text("")
+        # The builder's hash, as check_idempotency.sh computes it for this tree.
+        hashed = subprocess.run(
+            ["bash", "scripts/check_idempotency.sh", "--package", "builder", "--hash-only"],
+            cwd=self.tree / "forge",
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        (tmp / "builder-hash").write_text(hashed.split("CONTENT_HASH=")[1].strip())
         (tmp / "conf.json").write_text(
             json.dumps(
                 {
@@ -205,12 +237,12 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertIn("TIER2_DIGEST", result.stderr)
         calls = rig.calls()
         # The forge's path: fetch with network, then build without, in the checkout's builder by
-        # its content hash, never latest.
+        # its content hash, never latest, run by the digest the lookup verified.
         stages = [call for call in calls if "scripts/build_spec.sh" in call]
         self.assertEqual([call[-2] for call in stages], ["fetch", "build"])
         self.assertIn("--network=none", stages[1])
         builder = stages[0][-5]
-        self.assertRegex(builder, r"^ghcr\.io/ars-regia/athanor-builder:[0-9a-f]{64}$")
+        self.assertRegex(builder, r"^ghcr\.io/ars-regia/athanor-builder@sha256:[0-9a-f]{64}$")
         self.assertIn(["pull", "-q", builder], calls)
         # Derived from the pinned rig with rpm -U, without network; nothing is pushed.
         builds = [call for call in calls if call[0] == "build"]
@@ -323,6 +355,21 @@ class CosmicCompVersion(unittest.TestCase):
         result = rig.run("cosmic-comp-version")
         self.assertEqual(result.returncode, 1)
         self.assertIn("is not published", result.stderr)
+        self.assertFalse(rig.built())
+
+    def test_an_unsigned_builder_fails_before_any_build(self):
+        rig = Rig(self.tmp, signed=False)
+        result = rig.run("cosmic-comp-version")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
+        self.assertFalse(rig.built())
+
+    def test_a_builder_labelled_with_another_hash_fails_before_any_build(self):
+        rig = Rig(self.tmp)
+        (self.tmp / "builder-hash").write_text("0" * 64)
+        result = rig.run("cosmic-comp-version")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
         self.assertFalse(rig.built())
 
     def test_an_unreadable_spec_fails_before_the_rig_runs(self):

@@ -36,12 +36,11 @@ ROOTS = ("forge", "system", "scripts", ".github", "Justfile", "flake.nix")
 SUFFIXES = {".sh", ".py", ".yml", ".yaml", ".nix", ".rs", ".toml", ".mjs", ".js", ""}
 GATE = {"forge/scripts/verify_image.sh", "forge/scripts/registry_probe.sh"}
 # registry_probe.sh answers only whether a tag exists. verify_image.sh is the gate built on it;
-# check_idempotency.sh asks it directly for the builder alone, an image no run signs yet, and
 # check_idempotency_test.sh tests it against the live registry, and the CI path filter of
-# scripts/ci/changes.py names it without running it. Comments do not count.
+# scripts/ci/changes.py names it without running it. No hit asks it directly, the builder's
+# included (issue #1205). Comments do not count.
 PROBE_USERS = {
     "forge/scripts/verify_image.sh",
-    "forge/scripts/check_idempotency.sh",
     "forge/scripts/check_idempotency_test.sh",
     "scripts/ci/changes.py",
 }
@@ -185,19 +184,14 @@ class CacheHitGateTest(unittest.TestCase):
         }
         self.assertEqual(PROBE_USERS - GATE, users)
 
-    def test_the_builder_is_the_only_unverified_hit(self):
+    def test_no_probe_is_unverified(self):
+        # The builder too is a hit only when verify_image.sh finds it signed, by a trusted run
+        # of call-build-builder.yml (issue #1205): check_idempotency.sh has one probe, the gate.
         text = code((REPO / "forge/scripts/check_idempotency.sh").read_text(), ".sh")
-        branch = re.search(
-            r'"builder" \]\]; then\n  PROBE_CMD=\((.*?)\)\n.*?\nelse\n  PROBE_CMD=\((.*?)\)\n',
-            text,
-            re.S,
-        )
-        self.assertIsNotNone(
-            branch, "check_idempotency.sh no longer chooses its probe by package"
-        )
-        self.assertIn("registry_probe.sh", branch.group(1))
-        self.assertIn("verify_image.sh", branch.group(2))
-        self.assertEqual(1, len(PROBE_USE.findall(text)))
+        self.assertEqual([], PROBE_USE.findall(text))
+        self.assertTrue(gate_called("forge/scripts/check_idempotency.sh", text))
+        self.assertRegex(text, r'\[\[ "\$PACKAGE" == "builder" \]\] && SIGNER=call-build-builder\.yml\n')
+        self.assertRegex(text, r'verify_image\.sh" "\$\{IMAGE_URL_LOWER#docker://\}" "\$SIGNER"\)')
 
     def test_every_reader_of_a_hash_tag_verifies_it(self):
         for rel, text in pipeline_files():

@@ -20,7 +20,7 @@ class BuilderTest(unittest.TestCase):
             "athanor-builder:latest", WORKFLOW.read_text().split("\non:", 1)[1]
         )
 
-    def test_the_build_pulls_the_hash_the_select_job_looked_up(self):
+    def test_the_build_pulls_the_digest_the_select_job_verified(self):
         select = self.jobs["select"]
         lookup = next(s for s in select["steps"] if s.get("id") == "builder")
         self.assertIn("check_idempotency.sh --package builder", lookup["run"])
@@ -28,16 +28,20 @@ class BuilderTest(unittest.TestCase):
             select["outputs"]["builder"], "${{ steps.builder.outputs.build }}"
         )
         self.assertEqual(
-            select["outputs"]["builder_hash"], "${{ steps.builder.outputs.hash }}"
+            select["outputs"]["builder_image"], "${{ steps.builder.outputs.image }}"
         )
+        self.assertIn('image=%s', lookup["run"])
         build = self.jobs["build"]
         self.assertEqual(
-            build["env"]["BUILDER_HASH"], "${{ needs.select.outputs.builder_hash }}"
+            build["env"]["BUILDER_IMAGE"], "${{ needs.select.outputs.builder_image }}"
         )
         run = next(
             s["run"] for s in build["steps"] if "run_spec_build.sh" in s.get("run", "")
         )
-        self.assertIn("athanor-builder:${BUILDER_HASH}", run)
+        # The verified digest, never the tag again: the tag can move after the lookup.
+        self.assertIn('builder_image.sh resolve', run)
+        self.assertIn('"$BUILDER_IMAGE"', run)
+        self.assertNotIn("athanor-builder:", run)
 
     def test_the_builder_is_built_only_for_selected_specs(self):
         condition = self.jobs["builder"]["if"]
