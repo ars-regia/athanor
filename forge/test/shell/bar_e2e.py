@@ -24,7 +24,6 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -499,11 +498,13 @@ def main():
         )
 
     # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
-    # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
-    # directory's inode. Dark is written first, so COSMIC's themes keep the old contrast;
-    # the store, which the shell reads, holds the choice (VL4).
+    # create_dir_all meets a file. Dark is written first, so COSMIC's themes keep the old
+    # contrast; the store, which the shell reads, holds the choice (VL4). The directory is
+    # moved aside, not removed: the bar's Landlock grant is bound to its inode, so only the
+    # same directory, moved back, can be written again.
     dark_v2 = high_contrast_files()[0].parent
-    shutil.rmtree(dark_v2)
+    aside = dark_v2.with_name("v2.aside")
+    dark_v2.rename(aside)
     dark_v2.write_text("", encoding="utf-8")
     try:
         switches = labelled(app, Atspi, "toggle button", "High contrast")
@@ -542,7 +543,7 @@ def main():
         check("the bar stays alive after the failed write", alive(pid))
     finally:
         dark_v2.unlink()
-        dark_v2.mkdir()
+        aside.rename(dark_v2)
     switches = labelled(app, Atspi, "toggle button", "High contrast")
     if switches:
         switches[0].do_action(0)
