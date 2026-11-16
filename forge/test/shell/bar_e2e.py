@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_e2e.py - athanor-bar end to end in the rig, as scene.sh's RIG_HOLD, with the bar
-started by bar_session.py --hang CanReboot --window --pinnable and no favourites file:
+started by bar_session.py --hang CanReboot --window --pinnable --respawn and no favourites file:
 
 - READY=1 reaches NOTIFY_SOCKET (Type=notify);
 - the first start imports the favourites and saves the file (BR7);
@@ -552,6 +552,19 @@ def main():
         wait_for(high_contrast_is(False), 2),
     )
 
+    # The confirmation's focus is the keyboard's: AT-SPI reports FOCUSED only on a surface
+    # that holds the keyboard, and the test window holds it. A user gives it to the bar with a
+    # click, which the rig cannot make; cosmic-comp also gives it to a top-layer surface with
+    # on-demand interactivity when it maps (`Shell::map_layer`), so the bar starts again after
+    # the window, as orca_dock.py starts the dock (bar_session.py --respawn).
+    READY_FILE.unlink(missing_ok=True)
+    os.kill(pid, signal.SIGKILL)
+    if not check("the bar starts again with the keyboard", wait_for(READY_FILE.exists, 10)):
+        return 1
+    pid = int(PID_FILE.read_text(encoding="utf-8"))
+    app = find_application(Atspi, "athanor-bar")
+    if not check("the started bar is on the accessibility bus", app is not None):
+        return 1
     check("the power menu opens", press(app, Atspi, "Power"))
     check(
         "Shut Down is offered on challenge",
