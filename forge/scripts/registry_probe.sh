@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Ask the registry whether an image reference exists. Prints "present" or "absent" and
-# exits 0; any other answer (network failure, 5xx, a denied token that is not the ghcr
+# Ask the registry whether an image reference exists. Prints "present DIGEST", the digest
+# the reference names now, or "absent", and exits 0; any other answer (network failure, 5xx, a denied token that is not the ghcr
 # never-published case) is not an answer: the error goes to stderr and the exit status is
 # 1, so a caller under retry.sh retries it and a caller without it stops.
 #
@@ -24,8 +24,9 @@ fi
 err=$(mktemp)
 trap 'rm -f "$err"' EXIT
 
-if skopeo --command-timeout 30s inspect --no-tags --format '{{.Digest}}' "docker://${1,,}" > /dev/null 2> "$err"; then
-  echo present
+if digest=$(skopeo --command-timeout 30s inspect --no-tags --format '{{.Digest}}' "docker://${1,,}" 2> "$err"); then
+  [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "registry_probe: ${1}: malformed digest '${digest}'" >&2; exit 1; }
+  echo "present $digest"
 elif grep -qi 'manifest unknown\|name unknown' "$err"; then
   echo absent
 elif grep -qE 'Requesting bearer token: .*403' "$err"; then
