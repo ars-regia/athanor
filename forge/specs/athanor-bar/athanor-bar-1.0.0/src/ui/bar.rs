@@ -546,10 +546,7 @@ impl Bar {
     /// keeps what it shows, as a Bluetooth pairing's confirmation, which closing would refuse
     /// for the user. It closes only when its button is gone. A running entry's menu closes.
     fn rebuild_all(&mut self, shell: &mut Shell) {
-        let kept = self.popover.as_ref().and_then(|popover| match popover.open {
-            Open::Module(module) => Some((popover.parent, module)),
-            Open::Entry(_) => None,
-        });
+        let kept = self.kept_popover();
         if kept.is_none() {
             self.close_popover(shell);
         }
@@ -560,6 +557,21 @@ impl Bar {
             self.build(shell, id, &states);
         }
         self.stale = false;
+        self.reopen_kept(shell, kept);
+    }
+
+    /// The parent surface and the module of the open popover when a rebuild keeps it: a
+    /// module's, not a running entry's menu.
+    fn kept_popover(&self) -> Option<(SurfaceId, Module)> {
+        self.popover.as_ref().and_then(|popover| match popover.open {
+            Open::Module(module) => Some((popover.parent, module)),
+            Open::Entry(_) => None,
+        })
+    }
+
+    /// Opens the `kept` popover again from its button on the rebuilt surface, without telling
+    /// the module it closed; it closes, and the module is told, when the button is gone.
+    fn reopen_kept(&mut self, shell: &mut Shell, kept: Option<(SurfaceId, Module)>) {
         if let Some((surface, module)) = kept {
             match self.anchor(shell, surface, module) {
                 Some(button) => self.open_popover(shell, surface, button, module),
@@ -1095,11 +1107,17 @@ impl Application for Bar {
         if same {
             return;
         }
-        if self.popover.as_ref().is_some_and(|p| p.parent == surface) {
+        // A module's popover on this surface stays open and follows the new scale, by
+        // rebuild_all's rule: closing it would refuse a pairing the user has not decided.
+        let kept = self
+            .kept_popover()
+            .filter(|(parent, _)| *parent == surface);
+        if kept.is_none() && self.popover.as_ref().is_some_and(|p| p.parent == surface) {
             self.close_popover(shell);
         }
         let states = self.states();
         self.build(shell, surface, &states);
+        self.reopen_kept(shell, kept);
     }
 
     fn event(&mut self, shell: &mut Shell, surface: SurfaceId, event: Event) {
