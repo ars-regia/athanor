@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from atspi_check import children, find_application, walk  # noqa: E402
 from bar_e2e import check, failures, pss_kb, wait_for  # noqa: E402
+from gi.repository import GLib  # noqa: E402
 from bar_session import READY_FILE  # noqa: E402
 
 PSS_LIMIT_KB = 80 * 1024
@@ -69,6 +70,16 @@ def labels(Atspi):
 
     walk(app)
     return found
+
+
+def seen(read, Atspi):
+    """What `read` (labels, tree, label_texts) shows, for the message of a check. The tree can
+    change under the read, as the launcher hides: a destroyed node then gives the message the
+    error, so that the check keeps its own verdict and a failure says what happened."""
+    try:
+        return str(read(Atspi))
+    except GLib.Error as err:
+        return f"the tree changed while it was read: {err}"
 
 
 def launcher_pid():
@@ -123,11 +134,11 @@ def stage_e2e(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     owner = subprocess.run(["busctl", "--user", "status", NAME], capture_output=True, check=False)
     check("bus name", owner.returncode == 0, owner.stderr.decode(errors="replace"))
-    check("calculator", wait_for(lambda: "8, Calculation" in labels(Atspi), 5), str(labels(Atspi)))
+    check("calculator", wait_for(lambda: "8, Calculation" in labels(Atspi), 5), seen(labels, Atspi))
     show()  # hides
-    check("hidden", wait_for(lambda: not labels(Atspi), 3), str(labels(Atspi)))
+    check("hidden", wait_for(lambda: not labels(Atspi), 3), seen(labels, Atspi))
     show()  # shows again, with "2+2*3" remembered
-    check("query kept", wait_for(lambda: "8, Calculation" in labels(Atspi), 5), str(labels(Atspi)))
+    check("query kept", wait_for(lambda: "8, Calculation" in labels(Atspi), 5), seen(labels, Atspi))
     times = show_times()
     check("show time", len(times) >= 2 and max(times) <= SHOW_LIMIT_MS, f"shown ms: {times}")
     time.sleep(5)  # at rest
@@ -139,14 +150,14 @@ def stage_e2e(Atspi):
 
 def stage_frozen_provider(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
-    check("applications", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
+    check("applications", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), seen(labels, Atspi))
     time.sleep(2)  # past the deadline
     warnings = log_text().count(MISSED)
     check("one warning", warnings == 1, f"{warnings} warnings")
     # Timed: hide, then show again, which runs the remembered query anew (LA5). The other
     # groups must not wait for the frozen provider.
     show()
-    check("hidden", wait_for(lambda: not labels(Atspi), 3), str(labels(Atspi)))
+    check("hidden", wait_for(lambda: not labels(Atspi), 3), seen(labels, Atspi))
     started = time.monotonic()
     show()
     # The 1 s wait equals the provider deadline on purpose: a group that waited for the
@@ -154,7 +165,7 @@ def stage_frozen_provider(Atspi):
     check(
         "applications within the deadline",
         wait_for(lambda: "CC Window, Application" in labels(Atspi), 1),
-        f"{time.monotonic() - started:.2f} s: {labels(Atspi)}",
+        f"{time.monotonic() - started:.2f} s: {seen(labels, Atspi)}",
     )
     time.sleep(2)
     warnings = log_text().count(MISSED)
@@ -167,13 +178,13 @@ def stage_hostile(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     # text::line strips the bidi controls and the markup is shown literally (F13).
     expected = "gnp.exe <b>bold</b>, Application"
-    check("plain text", wait_for(lambda: expected in labels(Atspi), 5), repr(labels(Atspi)))
-    check("no bidi override", not any("\u202e" in row for row in labels(Atspi)), repr(labels(Atspi)))
+    check("plain text", wait_for(lambda: expected in labels(Atspi), 5), seen(labels, Atspi))
+    check("no bidi override", not any("\u202e" in row for row in labels(Atspi)), seen(labels, Atspi))
 
 
 def stage_no_localsearch(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
-    check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
+    check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), seen(labels, Atspi))
     time.sleep(2)
     rows = labels(Atspi)
     check("no file group", not any(row.endswith(", File") for row in rows), str(rows))
@@ -191,9 +202,9 @@ def stage_no_localsearch(Atspi):
 
 def stage_tree(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
-    check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), str(labels(Atspi)))
-    check("Results list", named(Atspi, LIST_ROLES, "Results"), str(tree(Atspi)))
-    check("preview region", region_holds(Atspi, "A window of the shell rig"), str(tree(Atspi)))
+    check("rows", wait_for(lambda: "CC Window, Application" in labels(Atspi), 5), seen(labels, Atspi))
+    check("Results list", named(Atspi, LIST_ROLES, "Results"), seen(tree, Atspi))
+    check("preview region", region_holds(Atspi, "A window of the shell rig"), seen(tree, Atspi))
     # The menu's "Actions" list is not checked: the rig has no way to press Tab (no virtual
     # keyboard, and Atspi key synthesis does not reach a Wayland client).
 
@@ -205,7 +216,7 @@ def label_texts(Atspi):
 
 def stage_command(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
-    check("command row", wait_for(lambda: "ls, Command" in labels(Atspi), 5), str(labels(Atspi)))
+    check("command row", wait_for(lambda: "ls, Command" in labels(Atspi), 5), seen(labels, Atspi))
     time.sleep(2)  # past the debounce and the deadline
     rows = labels(Atspi)
     check("alone", not any(", Web" in row for row in rows), str(rows))
@@ -214,7 +225,7 @@ def stage_command(Atspi):
 def stage_command_refused(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     why = "This command has an unclosed quote or escape and is not run"
-    check("refusal row", wait_for(lambda: why in label_texts(Atspi), 5), str(label_texts(Atspi)))
+    check("refusal row", wait_for(lambda: why in label_texts(Atspi), 5), seen(label_texts, Atspi))
     time.sleep(2)  # past the debounce and the deadline
     rows, texts = labels(Atspi), label_texts(Atspi)
     check("no web row", not any(", Web" in row for row in rows), str(rows))
@@ -226,9 +237,9 @@ def stage_window_preview(Atspi):
     check("READY=1", wait_for(lambda: READY_FILE.exists(), 10), "no READY=1 on NOTIFY_SOCKET")
     time.sleep(2)  # bar_session.py opens the window at READY
     show()  # hides
-    check("hidden", wait_for(lambda: not labels(Atspi), 3), str(labels(Atspi)))
+    check("hidden", wait_for(lambda: not labels(Atspi), 3), seen(labels, Atspi))
     show()
-    check("window row", wait_for(lambda: any(row.endswith(", Window") for row in labels(Atspi)), 5), str(labels(Atspi)))
+    check("window row", wait_for(lambda: any(row.endswith(", Window") for row in labels(Atspi)), 5), seen(labels, Atspi))
     time.sleep(2)  # the preview's delay and the capture
 
 

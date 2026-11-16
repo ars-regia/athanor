@@ -17,6 +17,10 @@ Exits 1 when a patch does not apply; 0 when all apply, or when the spec declares
 (exit 1 with a message), never an empty set, and so is a crate the manifest does not list,
 whose hash differs, whose name or URL is invalid or whose archive leaves vendor/. A crate that
 cannot be downloaded after the retries exits 2 with a message, apart from a patch that fails.
+A git command that fails for its own reasons, not because a patch does not apply, exits with
+its own status and a message that names the command and git's stderr, never a traceback:
+3 for `git ls-remote`, 4 for `git clone`, 5 for `git apply` (a `--check` answering anything but
+0 or 1 included).
 """
 
 import argparse
@@ -42,6 +46,7 @@ REPO = "https://github.com/pop-os/cosmic-comp"
 # A crate that cannot be downloaded exits with this status, apart from a patch that does not
 # apply (1). Like `curl --retry 3 --retry-delay 5` in forge/scripts/fetch_sources.sh.
 DOWNLOAD_FAILED = 2
+LS_REMOTE_FAILED, CLONE_FAILED, APPLY_FAILED = 3, 4, 5
 RETRIES, RETRY_DELAY, TIMEOUT = 3, 5, 60
 # Expansions of one Source line before the drill gives up on a macro that names itself.
 MAX_EXPANSIONS = 100
@@ -182,18 +187,26 @@ def select_tag(tags, pinned):
     return newest, True
 
 
+def git(args, status):
+    """Run git; a failure prints the command and git's stderr and exits with `status`."""
+    done = subprocess.run(["git", *args], capture_output=True, text=True)
+    if done.returncode != 0:
+        print(
+            f"git {' '.join(args)} exited {done.returncode}: {done.stderr.strip()}",
+            file=sys.stderr,
+        )
+        raise SystemExit(status)
+    return done
+
+
 def remote_tags(repo):
-    out = subprocess.run(
-        ["git", "ls-remote", "--tags", "--refs", repo],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout
+    out = git(["ls-remote", "--tags", "--refs", repo], LS_REMOTE_FAILED).stdout
     return [line.split("refs/tags/", 1)[1] for line in out.splitlines()]
 
 
 def apply_patches(src, patches):
-    """Apply each patch on top of the previous ones; a failing patch is left out."""
+    """Apply each patch on top of the previous ones; a failing patch is left out. Git answers 1
+    for a patch that does not apply; any other failure is git's own and stops the drill."""
     rows = []
     for patch in patches:
         check = subprocess.run(
@@ -201,10 +214,14 @@ def apply_patches(src, patches):
             capture_output=True,
             text=True,
         )
-        if check.returncode == 0:
-            subprocess.run(
-                ["git", "-C", str(src), "apply", "-p1", str(patch)], check=True
+        if check.returncode not in (0, 1):
+            print(
+                f"git apply --check {patch.name} exited {check.returncode}: {check.stderr.strip()}",
+                file=sys.stderr,
             )
+            raise SystemExit(APPLY_FAILED)
+        if check.returncode == 0:
+            git(["-C", str(src), "apply", "-p1", str(patch)], APPLY_FAILED)
         rows.append(
             {
                 "patch": patch.name,
@@ -255,19 +272,9 @@ def main(argv):
 
     with tempfile.TemporaryDirectory() as tmp:
         src = pathlib.Path(tmp) / "src"
-        subprocess.run(
-            [
-                "git",
-                "clone",
-                "--quiet",
-                "--depth",
-                "1",
-                "--branch",
-                tag,
-                args.repo,
-                str(src),
-            ],
-            check=True,
+        git(
+            ["clone", "--quiet", "--depth", "1", "--branch", tag, args.repo, str(src)],
+            CLONE_FAILED,
         )
         vendor_crates(src, spec_text, args.patches)
         rows = apply_patches(src, patches)
