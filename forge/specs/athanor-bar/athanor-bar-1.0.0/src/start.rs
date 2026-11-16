@@ -181,6 +181,11 @@ pub fn prepare() -> Prepared {
         Err(err) => tracing::error!(error = %err, "cannot start the runtime of the models"),
     }
     i18n::init();
+    // The clock and the calendar format on this thread: the names of the months and days, and
+    // the 12/24-hour default, in the person's time locale, as the GTK bar's setlocale gave them.
+    if let Err(err) = athanor_i18n::use_time_locale() {
+        tracing::error!(error = %err, "cannot load the time locale; dates are formatted in the C locale");
+    }
     Prepared::Run {
         source,
         favorites_file,

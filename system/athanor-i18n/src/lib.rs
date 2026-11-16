@@ -362,6 +362,46 @@ pub fn first_weekday() -> u8 {
     }
 }
 
+/// Makes the calling thread format times in the time locale the environment names (`LC_ALL`,
+/// `LC_TIME`, `LANG`), as a GTK program's start did for its whole process with `setlocale`:
+/// GLib's `g_date_time_format` reads the names of the months and days, `%X` and `%p` through
+/// `nl_langinfo`, which follows the thread's locale. Only the time category changes; the
+/// thread's other categories stay "C", as the process's, and no process-global locale is
+/// touched. Called once, on the thread that formats dates; on an error the thread keeps the
+/// locale it had.
+pub fn use_time_locale() -> std::io::Result<()> {
+    use_time_locale_of(c"")
+}
+
+/// [`use_time_locale`] with the time locale `name`, `""` for the one the environment names.
+fn use_time_locale_of(name: &CStr) -> std::io::Result<()> {
+    // SAFETY: `name` is a NUL-terminated string that outlives the call, and a null base asks
+    // newlocale for a new object whose other categories are "C", so no other object is changed.
+    // A null result returns before any other call, with errno still newlocale's. uselocale
+    // makes the object the calling thread's locale only; it is never freed, as the thread uses
+    // it until the thread ends, and the locale uselocale returns is not freed either, as it may
+    // be the global one. A failed uselocale leaves the thread's locale as it was, and the new
+    // object, used by no thread, is freed. One block for the object's whole life, as in
+    // `first_weekday_of`.
+    #[allow(unsafe_code, clippy::multiple_unsafe_ops_per_block)]
+    let used = unsafe {
+        let locale = libc::newlocale(libc::LC_TIME_MASK, name.as_ptr(), std::ptr::null_mut());
+        if locale.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let used = !libc::uselocale(locale).is_null();
+        if !used {
+            libc::freelocale(locale);
+        }
+        used
+    };
+    if used {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
 /// The first weekday of the time locale `name`, `""` for the one the environment names.
 fn first_weekday_of(name: &CStr) -> std::io::Result<u8> {
     // SAFETY: `name` is a NUL-terminated string that outlives the call, and a null base asks
@@ -435,5 +475,18 @@ mod tests {
     #[test]
     fn a_missing_locale_is_an_error_not_sunday() {
         assert!(first_weekday_of(c"xx_NOWHERE.UTF-8").is_err());
+    }
+
+    #[test]
+    fn a_thread_takes_a_time_locale_it_can_load() {
+        // On a thread of its own: the locale stays with it.
+        let outcome = std::thread::spawn(|| {
+            (
+                use_time_locale_of(c"xx_NOWHERE.UTF-8").is_err(),
+                use_time_locale_of(c"C").is_ok(),
+            )
+        })
+        .join();
+        assert_eq!(outcome.ok(), Some((true, true)));
     }
 }
