@@ -322,5 +322,49 @@ class SignedKernelStage(unittest.TestCase):
             self.assertIn("not of " + NVR, r.stderr)
 
 
+class ActivationOwners(unittest.TestCase):
+    """The stage 2 switch of system/Containerfile looks for a second owner of a bus name in every
+    directory the session bus reads (check_image_session.SESSION_SERVICE_DIRS)."""
+
+    NAMES = ("org.freedesktop.Notifications", "org.kde.StatusNotifierWatcher")
+    DIRS = ("usr/share/athanor/cosmic-defaults/dbus-1/services", "usr/local/share/dbus-1/services")
+
+    def run_loop(self, extra=None):
+        lines = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ").splitlines()
+        line = next(line for line in lines if "for name in org.freedesktop.Notifications" in line)
+        loop = line[line.index("for name in org.freedesktop.Notifications"):]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            main = root / "usr/share/dbus-1/services"
+            main.mkdir(parents=True)
+            for name in self.NAMES:
+                (main / f"{name}.service").write_text(f"[D-BUS Service]\nName={name}\n")
+            if extra:
+                directory, name = extra
+                (root / directory).mkdir(parents=True, exist_ok=True)
+                (root / directory / "other.service").write_text(f"[D-BUS Service]\nName={name}\n")
+            (main / "dangling.service").symlink_to(root / "nowhere")
+            r = subprocess.run(["sh", "-c", loop.replace("/usr/", f"{tmp}/usr/")],
+                               env={"PATH": os.environ["PATH"]}, capture_output=True, text=True)
+        return r
+
+    def test_the_exact_owner_alone_passes(self):
+        r = self.run_loop()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+
+    def test_a_second_owner_in_any_directory_fails(self):
+        for directory in self.DIRS + ("usr/share/dbus-1/services",):
+            for name in self.NAMES:
+                r = self.run_loop((directory, name))
+                self.assertEqual(r.returncode, 1, (directory, name, r.stderr))
+                self.assertIn(f"{name} is activated by:", r.stderr)
+
+    def test_the_directories_are_those_of_the_image_gate(self):
+        gate = (ROOT / "forge/scripts/check_image_session.py").read_text()
+        for directory in self.DIRS:
+            self.assertIn(f'"{directory}"', gate)
+
+
 if __name__ == "__main__":
     unittest.main()
