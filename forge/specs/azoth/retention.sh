@@ -76,14 +76,15 @@ prune() { # prune PACKAGE KEEP [KERNEL_TAG]: the third argument where Kernel Bui
   local roots members indexed listing
   roots=$(jq -r --argjson keep "$keep" --arg ktag "$ktag" --argjson since "$SINCE" '
     def release: (startswith("sha256-") or ($ktag != "" and test($ktag))) | not;
-    # When each tag last moved: the newer of created_at and updated_at of the version it names.
+    # When each tag last moved: the newer of created_at and updated_at of the version it names,
+    # without the fraction of a second fromdateiso8601 does not read.
     ([.[] | ([.created_at, .updated_at] | max) as $at | .metadata.container.tags[] | {key: ., value: $at}]
       | from_entries) as $moved
     | ([.[] | select(.metadata.container.tags | any(release))] | sort_by(.created_at) | reverse | .[:$keep][].name),
       (if $ktag == "" then empty else
         .[] | select(.metadata.container.tags | any(release) | not)
         | select(any(.metadata.container.tags[] | select(test($ktag)) | sub("-k[0-9a-f]{12}"; "");
-            ($moved[.] // "1970-01-01T00:00:00Z" | fromdateiso8601) > $since))
+            ($moved[.] // "1970-01-01T00:00:00Z" | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) > $since))
         | .name end)' <<<"$versions")
   while read -r digest; do
     [[ $digest ]] || continue

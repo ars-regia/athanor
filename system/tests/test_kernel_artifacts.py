@@ -1602,6 +1602,19 @@ class KernelTagRetention(Tool):
         )
         self.assertEqual(deleted, {old, index, old_vm})
 
+    def test_a_timestamp_with_a_fraction_of_a_second_keeps_the_held_digest(self):
+        cur, held = ("sha256:" + c * 64 for c in "ab")
+        moved = self.ago(hours=1).replace("Z", ".5Z")
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], moved),
+                ]
+            }
+        )
+        self.assertEqual(deleted, set())
+
     def test_a_republish_does_not_push_the_previous_nvr_out_of_the_debuginfo(self):
         oldest, prev, republished, cur = ("sha256:" + c * 64 for c in "1234")
         nvr0 = "0.0.1-1.azoth.fc45"
