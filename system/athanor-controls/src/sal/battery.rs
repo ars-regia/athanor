@@ -99,6 +99,8 @@ pub struct Page {
     service: Rc<Service>,
     /// The state and the failure the page shows last.
     seen: (u64, u64),
+    /// A failure's note is on screen: a page built again, while the old one is, shows it too.
+    noted: bool,
     ids: Option<Ids>,
 }
 
@@ -107,6 +109,7 @@ impl Page {
         Page {
             service: Service::get(services),
             seen: (0, 0),
+            noted: false,
             ids: None,
         }
     }
@@ -160,6 +163,9 @@ impl Page {
                 50.0,
             );
         let failure = Failure::new(ui, page, look);
+        if self.noted {
+            failure.restore(ui);
+        }
         self.ids = Some(Ids {
             charge,
             note,
@@ -183,7 +189,7 @@ impl Page {
         let failed = now.1 != self.seen.1;
         self.show(ui);
         if let (true, Some(ids)) = (failed, &self.ids) {
-            ids.failure.show(ui);
+            self.noted |= ids.failure.show(ui);
         }
         Turn::Updated
     }
@@ -198,9 +204,15 @@ impl Page {
 
     /// The page left the screen: a note says nothing of the actions to come.
     pub fn closed(&mut self, ui: &mut Ui) {
+        self.discarded();
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
+    }
+
+    /// The surface that showed the page closed: a page built again shows no note.
+    pub fn discarded(&mut self) {
+        self.noted = false;
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -281,6 +293,7 @@ mod tests {
         let page = Page {
             service,
             seen: (0, 0),
+            noted: false,
             ids: None,
         };
         (page, received)
@@ -396,5 +409,28 @@ mod tests {
         assert!(ui.is_active(page.ids.as_ref().map_or(saver, |ids| ids.profiles[1].1)));
         page.closed(&mut ui);
         assert!(!ui.is_visible(note));
+    }
+
+    #[test]
+    fn a_note_shown_stays_in_the_page_built_again_until_its_surface_closes() {
+        let note = |page: &Page| page.ids.as_ref().map(|ids| ids.failure.note);
+        let (mut page, _) = page();
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &Look::plain());
+        publish(&page, laptop());
+        page.turn(&mut ui);
+        publish(&page, BatteryState { refused: 1, ..laptop() });
+        page.turn(&mut ui);
+
+        // The note grew the popover, which the bar builds again at its new size.
+        let mut again = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut again, Ui::ROOT, &Look::plain());
+        assert_eq!(note(&page).map(|id| again.is_visible(id)), Some(true));
+
+        // The popover closed: the next one starts without the note.
+        page.discarded();
+        let mut next = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut next, Ui::ROOT, &Look::plain());
+        assert_eq!(note(&page).map(|id| next.is_visible(id)), Some(false));
     }
 }

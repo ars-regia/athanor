@@ -89,13 +89,19 @@ impl Failure {
         Failure { page, note }
     }
 
-    /// Says that an action did not complete, if the page is on screen.
-    pub fn show(&self, ui: &mut Ui) {
+    /// Says that an action did not complete, if the page is on screen: whether it did.
+    pub fn show(&self, ui: &mut Ui) -> bool {
         if !ui.is_visible(self.page) {
-            return;
+            return false;
         }
         ui.set_visible(self.note, true);
         ui.announce(&tr("The action did not complete."), athanor_sal::Priority::Polite);
+        true
+    }
+
+    /// Shows the note again, unannounced, in a page built again while the old one showed it.
+    pub fn restore(&self, ui: &mut Ui) {
+        ui.set_visible(self.note, true);
     }
 
     /// Hides the note: the page was hidden, and would show a stale note when shown again.

@@ -296,6 +296,8 @@ pub struct Page {
     service: Rc<Service>,
     /// The state and the failure the page shows last.
     seen: (u64, u64),
+    /// A failure's note is on screen: a page built again, while the old one is, shows it too.
+    noted: bool,
     ids: Option<Ids>,
 }
 
@@ -304,6 +306,7 @@ impl Page {
         Page {
             service: Service::get(services),
             seen: (0, 0),
+            noted: false,
             ids: None,
         }
     }
@@ -388,6 +391,9 @@ impl Page {
         }
         let [previous, play, next] = buttons;
         let failure = Failure::new(ui, page, look);
+        if self.noted {
+            failure.restore(ui);
+        }
         self.ids = Some(Ids {
             output,
             input,
@@ -414,20 +420,27 @@ impl Page {
             return Turn::Unchanged;
         }
         let failed = now.1 != self.seen.1;
-        if self.show(ui) {
-            return Turn::Rebuild;
-        }
+        let rebuild = self.show(ui);
         if let (true, Some(ids)) = (failed, &self.ids) {
-            ids.failure.show(ui);
+            self.noted |= ids.failure.show(ui);
+        }
+        if rebuild {
+            return Turn::Rebuild;
         }
         Turn::Updated
     }
 
     /// The page left the screen: a note says nothing of the actions to come.
     pub fn closed(&mut self, ui: &mut Ui) {
+        self.discarded();
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
+    }
+
+    /// The surface that showed the page closed: a page built again shows no note.
+    pub fn discarded(&mut self) {
+        self.noted = false;
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -503,6 +516,7 @@ mod tests {
         let page = Page {
             service,
             seen: (0, 0),
+            noted: false,
             ids: None,
         };
         (page, received)

@@ -73,6 +73,10 @@ impl Module for Audio {
         Reply::Stay
     }
 
+    fn closed(&mut self) {
+        self.page.discarded();
+    }
+
     fn refresh(&mut self, _cx: &mut Cx, ui: &mut Ui) -> Reply {
         if icon(&self.page).is_none() {
             // The last device left: the popover closes with its button.
