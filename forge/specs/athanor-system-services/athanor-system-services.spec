@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-system-services
 Version:        1.0.1
-Release:        33%{?athanor_content}%{?dist}
+Release:        34%{?athanor_content}%{?dist}
 Summary:        Athanor OS athanor-system-services
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -30,6 +30,8 @@ synchronization, for Athanor OS.
 mkdir -p %{buildroot}/usr/share/athanor-system-services
 mkdir -p %{buildroot}/usr/lib/systemd/user
 cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
+install -Dm0644 %{_sourcedir}/usr/share/user-tmpfiles.d/athanor-state.conf \
+  %{buildroot}/usr/share/user-tmpfiles.d/athanor-state.conf
 
 %files
 %dir /usr/share/athanor-system-services
@@ -38,8 +40,16 @@ cp -a %{_sourcedir}/usr/lib/systemd/user/* %{buildroot}/usr/lib/systemd/user/
 /usr/lib/systemd/user/athanor-skel-sync.service
 /usr/lib/systemd/user/cosmic-settings-daemon.service
 /usr/lib/systemd/user/cosmic-osd.service
+%dir /usr/share/user-tmpfiles.d
+/usr/share/user-tmpfiles.d/athanor-state.conf
 
 %changelog
+* Tue Nov 17 2026 Athanor Forge <forge@athanor.os> - 1.0.1-34
+- A user tmpfiles.d file creates ~/.local/state/athanor and ~/.local/state/cosmic before
+  any unit starts. Both names are also configuration directories, and systemd linked a
+  missing state directory to the existing configuration directory of the same name, so the
+  shell's state ended up in ~/.config (#1238). A link already in place is left alone.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.1-33
 - athanor-appearance-reset.service, its script and its preset leave (doc_session_daemons.md,
   SD22 step 3): athanor-sessiond resets COSMIC's appearance values at each of its starts, and
