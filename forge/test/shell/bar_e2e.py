@@ -462,13 +462,12 @@ def main():
     )
 
     check("the accessibility popover opens", press(app, Atspi, "Accessibility"))
-    # GtkSwitch reports as "check box" on the rig's at-spi2-core, the same naming
-    # variance atspi_check.py already notes for the push button role.
+    # A Sal switch is a toggle button, pressed when on.
     check(
         "High contrast shows",
-        wait_for(lambda: labelled(app, Atspi, "check box", "High contrast"), 5),
+        wait_for(lambda: labelled(app, Atspi, "toggle button", "High contrast"), 5),
     )
-    switches = labelled(app, Atspi, "check box", "High contrast")
+    switches = labelled(app, Atspi, "toggle button", "High contrast")
     if switches:
         switches[0].do_action(0)
     check(
@@ -476,7 +475,7 @@ def main():
         wait_for(high_contrast_is(True), 2),
     )
     check("the bar stays alive with high contrast on", alive(pid))
-    switches = labelled(app, Atspi, "check box", "High contrast")
+    switches = labelled(app, Atspi, "toggle button", "High contrast")
     if switches:
         switches[0].do_action(0)
     # Switched back off so the checks after this one run in the normal, non-high-contrast
@@ -486,12 +485,12 @@ def main():
     # at-spi2-core 2.61 dropped org.a11y.Status.ScreenReaderEnabled; the row reads the key.
     check(
         "Screen reader shows",
-        wait_for(lambda: labelled(app, Atspi, "check box", "Screen reader"), 5),
+        wait_for(lambda: labelled(app, Atspi, "toggle button", "Screen reader"), 5),
     )
     # The loop switches on, then off: it starts from the key's default.
     check("the screen reader key starts off", screen_reader_key() == "false")
     for value in ("true", "false"):
-        switches = labelled(app, Atspi, "check box", "Screen reader")
+        switches = labelled(app, Atspi, "toggle button", "Screen reader")
         if switches:
             switches[0].do_action(0)
         check(
@@ -507,7 +506,7 @@ def main():
     shutil.rmtree(dark_v2)
     dark_v2.write_text("", encoding="utf-8")
     try:
-        switches = labelled(app, Atspi, "check box", "High contrast")
+        switches = labelled(app, Atspi, "toggle button", "High contrast")
         check(
             "the High contrast switch is pressed with a theme directory unwritable",
             bool(switches) and switches[0].do_action(0),
@@ -518,9 +517,9 @@ def main():
         )
 
         def still_on():
-            found = labelled(app, Atspi, "check box", "High contrast")
+            found = labelled(app, Atspi, "toggle button", "High contrast")
             return bool(found) and found[0].get_state_set().contains(
-                Atspi.StateType.CHECKED
+                Atspi.StateType.PRESSED
             )
 
         time.sleep(0.5)
@@ -544,7 +543,7 @@ def main():
     finally:
         dark_v2.unlink()
         dark_v2.mkdir()
-    switches = labelled(app, Atspi, "check box", "High contrast")
+    switches = labelled(app, Atspi, "toggle button", "High contrast")
     if switches:
         switches[0].do_action(0)
     check(
