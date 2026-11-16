@@ -4971,14 +4971,17 @@ def check_session_units():
 NAMESPACING_PROPERTY = re.compile(
     r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
     r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
-    r"|ProcSubset|ExecPaths|NoExecPaths|MountImages|ExtensionDirectories|ExtensionImages)\s*=(.*)$"
+    r"|ProcSubset|ExecPaths|NoExecPaths|MountImages|ExtensionDirectories|ExtensionImages|PrivateBPF"
+    r"|ReadWriteDirectories|ReadOnlyDirectories|InaccessibleDirectories)\s*=(.*)$"
 )
-# The values that leave a namespacing property off: empty, a false boolean, or the default.
-NAMESPACING_OFF = ("", "no", "false", "0", "default", "all")
+# The values that leave a namespacing property off: empty, a false boolean in any of systemd's
+# spellings, ProtectProc=default or ProcSubset=all.
+NAMESPACING_OFF = ("", "0", "no", "n", "false", "f", "off", "default", "all")
 # The command lines of a unit, each a program its namespaces hold.
-UNIT_EXEC = re.compile(r"(ExecStart(?:Pre|Post)?)\s*=\s*[-@:+!]*(\S+)")
-# A read of a process's executable: `admit_user_unit` or a path `/proc/<pid>/exe` built in code.
-EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\s*\(|/proc/\{[^}]*\}/exe\b")
+UNIT_EXEC = re.compile(r"(Exec(?:Start(?:Pre|Post)?|Condition|Reload|Stop(?:Post)?))\s*=\s*[-@:+!]*(\S+)")
+# A read of a process's executable: any mention of `admit_user_unit` but its definition, an
+# import under another name included, or a path `/proc/<pid>/exe` built in code.
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\b|/proc/\{[^}]*\}/exe\b|\.join\(\s*\"exe\"\s*\)")
 # The namespaced user units' programs that are no binary of a crate here, each with why it
 # admits no peer by its executable. A wrapper (env, sh -c, systemd-run) is listed only with its
 # unit, so a wrapper that starts one of this repository's daemons is never passed by name.
@@ -4989,9 +4992,9 @@ FOREIGN_PROGRAMS = {
     ("cosmic-osd.service", "cosmic-osd"): "upstream COSMIC's program; no code of this repository runs in it",
     ("cosmic-settings-daemon.service", "cosmic-settings-daemon"): "upstream COSMIC's program; no code of this repository runs in it",
 }
-# A library whose own exe read is the body of a function matched by name at each call site, so
-# depending on it reads nothing: athanor-unit's read is admit_user_unit's.
-READ_BY_CALL = {"athanor-unit"}
+# A library file whose exe read is the body of a function matched by name at each call site, so
+# depending on its crate reads nothing: athanor-unit's peer.rs, the read of admit_user_unit.
+READ_BY_CALL = {"system/athanor-unit/src/peer.rs"}
 
 
 def crate_programs(root):
@@ -5011,17 +5014,18 @@ def crate_programs(root):
             bins.discard(None)
             tables = [package.get("dependencies", {})] + [t.get("dependencies", {}) for t in package.get("target", {}).values()]
             deps = {(spec.get("package", key) if isinstance(spec, dict) else key) for table in tables for key, spec in table.items()}
-            reads = None
+            reads = []
             for source in walk(manifest.parent / "src", ".rs"):
                 for number, line in enumerate(read(source).split("\n"), 1):
-                    if reads is None and EXE_READING_ADMISSION.search(line.split("//")[0]):
-                        reads = f"{rel(source)}:{number}"
+                    if EXE_READING_ADMISSION.search(line.split("//")[0]):
+                        reads.append((source.relative_to(root).as_posix(), number))
             crates[name or rel(manifest)] = (bins, deps, reads)
 
     def reads_of(name, seen):
         bins, deps, reads = crates[name]
-        if reads and (not seen or name not in READ_BY_CALL):
-            return reads
+        own = next((f"{path}:{number}" for path, number in reads if not seen or path not in READ_BY_CALL), None)
+        if own:
+            return own
         seen.add(name)
         return next((r for d in sorted(deps) if d in crates and d not in seen for r in [reads_of(d, seen)] if r), None)
 
@@ -5037,7 +5041,7 @@ def user_unit_texts(root, units):
     """{unit: text} of the shipped user units with every drop-in of `<unit>.d/*.conf` appended."""
     texts = dict(units)
     for conf in walk(root / "forge" / "specs", ".conf"):
-        if conf.parent.name.endswith(".service.d") and conf.parent.parent.name == "user" and "skel" not in conf.parts:
+        if conf.parent.name.endswith(".service.d") and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
             unit = conf.parent.name[:-2]
             texts[unit] = texts.get(unit, "") + "\n" + read(conf)
     return texts

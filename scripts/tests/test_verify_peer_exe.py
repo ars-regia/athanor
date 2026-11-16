@@ -61,7 +61,7 @@ class PeerExeTest(unittest.TestCase):
             "system/d/Cargo.toml": manifest("d", "athanor-unit"),
             "system/d/src/main.rs": PLAIN,
             "system/athanor-unit/Cargo.toml": UNIT_LIB,
-            "system/athanor-unit/src/lib.rs": READS,
+            "system/athanor-unit/src/peer.rs": READS,
         }
         self.assertEqual(problems(files, {"d.service": unit("d")}), [])
 
@@ -90,6 +90,48 @@ class PeerExeTest(unittest.TestCase):
         found = problems(files, {"d.service": unit("d", prop="NoNewPrivileges=yes")})
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].startswith("d.service:"))
+
+    def test_an_import_under_another_name_and_a_joined_exe_path_count(self):
+        aliased = "use athanor_unit::peer::admit_user_unit as admit;\nfn main() { admit(&fd, \"a\")?; }\n"
+        joined = 'fn main() { let _ = std::fs::read_link(Path::new("/proc").join(pid).join("exe")); }\n'
+        for source in (aliased, joined):
+            files = {"system/d/Cargo.toml": manifest("d"), "system/d/src/main.rs": source}
+            self.assertEqual(len(problems(files, {"d.service": unit("d")})), 1, source)
+
+    def test_the_cgroup_admission_does_not_count(self):
+        files = {"system/d/Cargo.toml": manifest("d"), "system/d/src/main.rs": "fn main() { athanor_unit::peer::admit_user_unit_cgroup(&fd, \"a\")?; }\n"}
+        self.assertEqual(problems(files, {"d.service": unit("d")}), [])
+
+    def test_every_exec_line_counts(self):
+        files = {"system/d/Cargo.toml": manifest("d"), "system/d/src/main.rs": CALLS}
+        for key in ("ExecCondition", "ExecReload", "ExecStop", "ExecStopPost"):
+            self.assertEqual(len(problems(files, {"d.service": unit("d", key=key)})), 1, key)
+
+    def test_systemd_false_spellings_leave_the_property_off(self):
+        files = {"system/d/Cargo.toml": manifest("d"), "system/d/src/main.rs": CALLS}
+        for value in ("off", "n", "f", "no", "false", "0"):
+            self.assertEqual(problems(files, {"d.service": unit("d", prop=f"PrivateNetwork={value}")}), [], value)
+        self.assertEqual(len(problems(files, {"d.service": unit("d", prop="PrivateBPF=yes")})), 1)
+
+    def test_a_drop_in_outside_systemd_user_is_not_merged(self):
+        files = {
+            "system/d/Cargo.toml": manifest("d"),
+            "system/d/src/main.rs": CALLS,
+            "forge/specs/p/SOURCES/usr/share/foo/user/d.service.d/10.conf": "[Service]\nPrivateIPC=yes\n",
+        }
+        self.assertEqual(problems(files, {"d.service": unit("d", prop="NoNewPrivileges=yes")}), [])
+
+    def test_only_peer_rs_of_athanor_unit_is_passed_over(self):
+        files = {
+            "system/d/Cargo.toml": manifest("d", "athanor-unit"),
+            "system/d/src/main.rs": PLAIN,
+            "system/athanor-unit/Cargo.toml": UNIT_LIB,
+            "system/athanor-unit/src/peer.rs": READS,
+            "system/athanor-unit/src/other.rs": READS,
+        }
+        found = problems(files, {"d.service": unit("d")})
+        self.assertEqual(len(found), 1)
+        self.assertIn("system/athanor-unit/src/other.rs:1", found[0])
 
 
 if __name__ == "__main__":
