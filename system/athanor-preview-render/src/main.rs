@@ -13,7 +13,6 @@
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
 use std::os::fd::{AsFd, OwnedFd};
-use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -171,7 +170,9 @@ fn decode(input: Vec<u8>, format: glycin::MemoryFormat, bounds: Bounds) -> Resul
 /// with fewer frames than asked, which the daemon reads as a failed decode.
 fn wallpaper() -> Result<(), String> {
     let connection = io::stdin().as_fd().try_clone_to_owned().map_err(|err| format!("the connection cannot be duplicated: {err}"))?;
-    athanor_unit::peer::admit_user_unit(connection.as_fd(), protocol::DAEMON_SLICE, protocol::DAEMON_UNIT, Path::new(protocol::DAEMON_EXE))
+    // The decoder's unit has user namespaces of its own, so it cannot read the daemon's executable
+    // (`athanor_unit::peer::admit_user_unit_cgroup`; `doc_session_daemons.md` SD17).
+    athanor_unit::peer::admit_user_unit_cgroup(connection.as_fd(), protocol::DAEMON_SLICE, protocol::DAEMON_UNIT)
         .map_err(|refused| format!("peer refused: {refused}"))?;
     let (sizes, file) = request(connection)?;
     let mut out = BufWriter::with_capacity(1 << 20, io::stdout().lock());
