@@ -1,18 +1,18 @@
 # Athanor's own compositor and toolkit
 
-Status: **revision 2, approved by the maintainer on 2026-10-23 (#755).** Revision 1 was approved by
+Status: **revision 3, decided by the maintainer on 2026-11-05 ([ADR-0135](../decisions/0135-faster-road-to-1-0.md)) and approved with the pull request that records it.** Revision 3 changes what release 1.0 waits for: 1.0 ships the own compositor as the default session of decision 28, with cosmic-comp's session as the second choice, and OS19 in full, the overview, the window switcher on Alt+Tab and cosmic-workspaces' retirement are release 1.1's. Revision 2 was approved by the maintainer on 2026-10-23 (#755). Revision 1 was approved by
 the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment approved by the
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
 two milestones (section 5), the requirements their results call for (OS12 to OS18 and OS20) and the
 compositor's acceptance (OS19). Section 7 records the maintainer's decisions of 2026-10-17,
-2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25, 2026-10-28, 2026-10-29 and 2026-10-31; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
-15 in ADR-0126, and decisions 16 to 31 in section 7. Text marked "(decision N)" is what the
+2026-10-18, 2026-10-19, 2026-10-23, 2026-10-25, 2026-10-28, 2026-10-29, 2026-10-31 and 2026-11-11; decisions 10 and 11 are recorded in ADR-0122, decisions 12 to
+15 in ADR-0126, and decisions 16 to 35 in section 7. Text marked "(decision N)" is what the
 maintainer chose for decision N of section 7.
 
 The milestones' plans are `docs/superpowers/plans/2026-10-17-spike-c1-smithay-compositor.md` and
@@ -47,7 +47,34 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   `doc_shell.md` SH2's exceptions; OS5, the tiling manager, with version 2 of the register;
   decision 32, with OS5, section 3's register rows 3 and 4 and the overview's amendment of the
   same date.
+- Amended on 2026-11-04: decision 31, the divider inside the geometry and the outline's shape,
+  approved by the maintainer with #957.
+- Amended on 2026-11-04: OS7, the text field's clipboard and primary selection.
+- Amended on 2026-11-04: OS7, the text field's context menu.
+- Amended on 2026-11-07: OS7, Sal's picture and full-size layer surface (`doc_session_daemons.md`
+  SD6), with revision 3 of `doc_session_daemons.md`, approved by the maintainer with #1023.
+- Amended on 2026-11-04: the compositor's identifiers renamed to Sulphur (ADR-0134), name only,
+  approved by the maintainer with #970.
+- Amended on 2026-11-05: the toolkit's identifiers renamed to Sal (ADR-0134), name only,
+  approved by the maintainer with #977.
+- Amended on 2026-11-11: decision 33, with OS17; decision 34, with section 6, step 5 and
+  section 8; decision 35, with OS17 and OS20.
+- Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
+  cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
+  `doc_visual_language.md` (VL13), proposed with #1077.
+- Amended on 2026-11-15: decision 36, with OS17 and decision 33's wave 2c.
+- Amended on 2026-11-15: decision 36's DRM lease, its device, the session switch, the
+  paused session and when `locked` is sent.
+- Amended on 2026-11-15: decision 36's switch when a lease cannot be ended.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
+
+**Changes in revision 3** (ADR-0135, 2026-11-05):
+
+- The status line and this list.
+- OS5, the list of what the compositor provides: cosmic-workspaces is replaced in 1.1.
+- OS19's lead-in, section 6 step 4, decision 28 and section 8: the own compositor replaces
+  cosmic-comp in release 1.1; release 1.0 ships it as the default session, with cosmic-comp's
+  session as the second choice.
 
 The facts of section 1 were read on 2026-10-17 from crates.io, the upstream repositories and the
 files this document names. Versions, issue states and sizes age quickly: each milestone reads them
@@ -60,7 +87,7 @@ results the paragraph above names.
 
 - **cosmic-comp 1.8 is the compositor** (`doc_shell.md` SH2, SH3; `doc_compositor.md`). Of COSMIC
   only cosmic-comp stays. The shell's bar, dock, greeter, launcher, layout chooser and control
-  centre are GTK4 programs of our own, and `athanor-compositor-client` is the only crate that knows
+  centre are GTK4 programs of our own, and `athanor-sulphur-client` is the only crate that knows
   the compositor (SH2).
 - **The patch register** (`doc_compositor.md` CO3) carries or plans the features that only a
   compositor can give: the trusted path for credential prompts (row 5, ADR-0041 as
@@ -150,7 +177,9 @@ register, one approved entry at a time.
 **OS3. A new compositor on Smithay** (ADR-0121). A program of the shell, packaged like the others
 under `forge/specs/`, `GPL-3.0-or-later`. Smithay is taken at a pinned git revision, as niri and
 cosmic-comp take it, added to `deny.toml` with its exact URL; moving the revision is its own pull
-request, as a cosmic-comp rebase is today (CO3). The GLES renderer draws; pixman draws in tests.
+request, as a cosmic-comp rebase is today (CO3). *Amended 2026-11-11 by the maintainer:*
+`smithay-bump.yml` opens that pull request weekly at the head of Smithay's master, one at a time,
+so that each move stays small (CI34). The GLES renderer draws; pixman draws in tests.
 X11 applications run through xwayland-satellite, a separate process the compositor starts when an
 X11 client connects, so that no X11 code runs inside the compositor. cosmic-comp is read, not
 copied, because it is `GPL-3.0-only`. Code may be ported from niri (`GPL-3.0-or-later`) and from
@@ -252,7 +281,7 @@ grab dropped while locked, is a requirement tested in the fixture of OS6 (#750).
 layer namespace counted only on overlay or top, waits for spike S3: no fixture test is written until
 S3 says what behaviour the namespace needs (OS9 plan, question 8).
 
-**OS5. The shell does not change to move.** `athanor-compositor-client` keeps its interface; its
+**OS5. The shell does not change to move.** `athanor-sulphur-client` keeps its interface; its
 inside is rewritten for the new compositor, as SH2 foresees. Before it replaces cosmic-comp, the
 own compositor provides what the shell and the components 1.0 keeps take from cosmic-comp today:
 
@@ -279,7 +308,7 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   32 adds what the overview needs: a private `athanor_workspace_manager_v1`, with a grant of its
   own.
   *Amended on 2026-10-30 (#862, ADR-0133), with revision 3 of `doc_accessibility.md`:* `athanor_a11y_v1` is
-  described in `system/athanor-compositor-client/protocols/athanor-a11y-v1.xml`, one privileged
+  described in `system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml`, one privileged
   global, `athanor_a11y_manager_v1`, granted to the bar and, once it exists, to `athanor-a11y watch`,
   each by its line, whose requests turn the magnifier on
   and off, zoom in and out, set the colour inversion and one of the four filters of
@@ -299,7 +328,8 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
   protocols each uses or its replacement by a component of Athanor's (ADR-0121); cosmic-workspaces
-  is replaced in 1.0 by `athanor-overview` (decision 28).
+  is replaced in 1.1 by `athanor-overview` (decision 28, ADR-0135), and runs until then only in
+  cosmic-comp's session.
   Under milestone C1, cosmic-workspaces' overview was closed for want of the top layer and the
   process then ended on SIGSEGV (C1 results, section 7.3, T9-6).
 
@@ -342,7 +372,7 @@ Super+Alt+S, and Super+Alt+A with Ctrl+Alt+Tab (`doc_accessibility.md` AX3, AX7)
 magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+Alt+T (OS4,
 decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
 (decision 29); and the switch to a text console. The bindings a user
-assigns in Settings, system actions and custom commands, keep `athanor_compositor_client::shortcuts`
+assigns in Settings, system actions and custom commands, keep `athanor_sulphur_client::shortcuts`
 as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
@@ -358,6 +388,16 @@ cosmic-settings-daemon, as cosmic-comp's session does, from one source file of t
 
 **OS14. Outputs.** The compositor drives every output of the GPU that boots the machine, each at its
 own scale, which the control center sets through `zwlr_output_manager_v1` (OS9 plan, question 10).
+Sulphur's wlr-output-management applies modes, positions, enabling and disabling and adaptive
+sync as well as scale and transform (maintainer decision, 2026-11-07; ADR-0138 decision 4). A
+configuration takes only a mode the monitor lists, or a custom mode of refresh 0 at the size of
+the current mode, and answers CVT custom timings `failed`. Positions within 2^24 pixels of the
+origin are taken as given, so that overlapping outputs mirror each other, and one further away is
+answered `failed`; an output given no position keeps its own. A disabled
+output is handled as an unplugged one, and its head stays in output management, reported
+disabled. A configuration is checked whole before anything is applied, a step the GPU refuses
+undoes the steps taken, and an applied one is sent to every manager with one `done`. A monitor
+whose modes change while it stays plugged in keeps its place, and its mode while it still offers it.
 For 1.0 (decision 20): fractional scale per output; damage tracked per output, so
 that an output redraws only what changed; on an output's removal, its layer surfaces closed and
 their clients told, and its windows moved to a remaining output; outputs of a second GPU recorded as
@@ -393,18 +433,23 @@ Decision 30 adds pointer constraints, relative pointer, keyboard shortcuts inhib
 pointer gestures and xdg-foreign, standard, and answers every request of xdg-decoration with
 client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
-per-client filter for it (C1 results, section 4).
+per-client filter for it (C1 results, section 4). Decision 33 gives the classes of the second
+wave: standard for all but the DRM lease, unconfined, whose class and design decision 36 now
+gives; the X11 keyboard grab waits for an amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+Decision 36 adds `wp_content_type_manager_v1` and `xdg_toplevel_tag_manager_v1`, standard, and
+`wp_drm_lease_device_v1`, unconfined.
 
 **OS18. The compositor is not restarted.** Its unit has no `Restart=`: Wayland clients do not
 survive their compositor, so its end ends the session and greetd shows the greeter (`doc_session.md`
 SN6, SN15). A console run checks in the compositor's log, at the start and after each resume, that
 libinput's devices are listed (C1 results, section 7.3, T9-2, fixed by #714).
 
-**OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.0
-(section 6, step 4) when each of the following holds, recorded in the pull request that takes
+**OS19. The compositor's acceptance.** The own compositor replaces cosmic-comp in release 1.1
+(section 6, step 4; ADR-0135) when each of the following holds, recorded in the pull request that takes
 cosmic-comp's session off the greeter, which also waits for the overview and the window
 switcher on Alt+Tab (decision 28). Decision 28 makes it the default session before then, on
-the parts of them it names, recorded in the pull request that makes it the default session:
+the parts of them it names, recorded in the pull request that makes it the default session, and
+release 1.0 ships it so, with cosmic-comp's session as the second choice (ADR-0135):
 
 1. **Every Athanor surface 1.0 carries is drawn in the rig against it, with its goldens matched.**
    `rig.sh golden-report` passes, against cosmic-comp's goldens, every case of `cases.py` but the
@@ -465,6 +510,54 @@ follows, where GTK gives `grouping`, so Orca says "panel" where it said "groupin
 5). The title bar the toolkit draws itself (maintainer decision of 2026-10-17) takes the names of
 its Minimize and Close buttons from `athanor-i18n` before the first surface moves: both choosers
 name them in English under Italian today (T1 results, task 5).
+*Amended on 2026-11-04, the amendment approved by the maintainer with #958:* the
+text field takes the clipboard and the primary selection. Ctrl+C, Ctrl+X, Ctrl+V and Ctrl+A
+copy, cut, paste and select all on `wl_data_device`; Ctrl+C, Ctrl+X and Ctrl+V act once per
+press, not as the key repeats. A field's selection, made with the keyboard or the pointer, is
+offered as the primary selection on `zwp_primary_selection_device_v1` with the serial of the key
+or button that made it, a held key's repeat with that of its press, and a middle click pastes it
+into the field under the pointer. The offer ends with that selection, when it collapses, is
+edited or its window closes, unless a later selection has replaced it. A field offers and reads
+`text/plain;charset=utf-8`, then `UTF8_STRING`, then `text/plain`. A paste is at most 64 KiB,
+refused whole above that or when it is not UTF-8, and the field keeps at most its character cap
+of it; the control characters, but a text area's newlines, and the invisible formatting
+characters (bidirectional marks, overrides and isolates, line and paragraph separators) are
+dropped, as from a value an assistive technology sets, and a field that is composing takes none.
+A paste with no text left after that changes nothing, the selection included.
+One paste at a time is pending: a new one replaces it, and one whose owner has not sent the whole
+text in 3 seconds is dropped, with a message. An offer whose reader has not taken the whole text
+in 3 seconds is dropped too, and its pipe closed. A cut deletes the selection only after the
+request to set the clipboard is sent with the serial of the key: without a clipboard or without
+that serial the text stays, and a refusal the compositor sends later leaves it deleted. A field
+that holds a secret refuses copy, cut and the primary selection, and the toolkit gets that mode
+before the greeter's password field moves to it. A field's context menu stays with #719, and
+Orca's "opens popup" with #638.
+*Amended on 2026-11-04, the amendment approved by the maintainer with #961:* the text field and
+the text area open their own context menu, the edit menu of GTK 4.24's entry, and the application
+gets no context-menu event for them (#719). The secondary button opens it under the pointer;
+Shift+F10 and the Menu key open it under the field. It holds GTK's items in GTK's order: Cut,
+Copy, Paste, Delete, a separator, Select All. Insert Emoji is left out, as the toolkit has no emoji
+chooser, and so are the labels' mnemonics, which its menus do not have. An item does what Ctrl+X,
+Ctrl+C, Ctrl+V, the Delete key on a selection and Ctrl+A do, with the serial of the click or the
+key that chose it, once the menu has closed and the focus is back on the field; Delete never
+deletes the character after the caret. An item that does not apply is disabled, as GTK's
+insensitive items: drawn faint, it takes neither the focus nor the pointer nor an assistive
+technology's click, and its node is disabled, which AT-SPI reads as neither enabled nor
+sensitive. Cut, Copy and Delete do not apply without a selection, Paste when the clipboard offers
+no text, Select All in an empty field, and no item while the input method composes. A field that
+holds a secret disables Cut and Copy in its menu, and a field that takes no edit disables Cut,
+Paste and Delete, once the toolkit has those modes. The menu opens with the focus on its first
+item that applies; Up and Down move through the items that apply, round from either end, Enter and
+Space choose one, and Escape or a press outside the menu closes it, the focus back on the field.
+Its labels are in English, as the title bar's buttons are, until the toolkit takes its own strings
+from `athanor-i18n`. The field's node says that it opens a menu (`HasPopup::Menu`), which Orca
+reads as "opens popup" once AccessKit's AT-SPI bridge passes it on (#638).
+*Amended on 2026-11-07, with revision 3 of `doc_session_daemons.md`, approved by the maintainer
+with #1023:* Sal gains a picture of decoded pixels that fills its surface with "zoom", and a layer
+surface anchored on opposite edges that takes the size the compositor configures, for
+`athanor-wallpaper`'s background layer surface on each output (`doc_session_daemons.md` SD6). The
+wallpaper's picture only decorates, so it carries an empty description for assistive
+technologies.
 
 **OS8. The accessibility gate.** No surface moves from GTK4 to the toolkit until, for that surface,
 Orca says no less than it says for the GTK version: the AT-SPI scenarios of AX17 pass, and Orca's
@@ -507,7 +600,7 @@ only the public API, and either a first user outside Athanor appears or the 1.0 
 (ADR-0098), whichever is first. It is published on crates.io only then, under the definitive name
 the maintainer chooses at the split, because a name there is permanent. Until then an application
 takes it as a git dependency pinned to a commit:
-`athanor-toolkit = { git = "https://github.com/ars-regia/athanor", rev = "..." }`.
+`athanor-sal = { git = "https://github.com/ars-regia/athanor", rev = "..." }`.
 
 **OS11. Stage 2: a toolkit of GTK's class** (direction, no date). Later, the toolkit grows toward
 what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
@@ -519,14 +612,16 @@ with its reason: the window's border and shadow, the title bar, the headings, th
 the accent, the background, the font, the padding, the dark variant, the right-to-left row height
 (42 px against GTK's 30, from Parley's locale fallback font) and the window's placement (T1 results,
 task 4). Before the dock moves, this document gains the tier measurement, the live blur and the
-dock's window geometry (ADR-0124).
+dock's window geometry (ADR-0124). *Amended 2026-11-11:* decision 35 gives the geometry, the blur and the tier's protocol. It
+leaves the tier's thresholds to spike VL-S5, with M0 until then; revision 4 of
+`doc_visual_language.md` records them (VL13).
 
 ## 5. The first two milestones
 
 Both start at once, beside release 0.9, as the first steps of the real crates: the compositor
-`athanor-compositor` under `forge/specs/`, built on the desktop, where it comes before release
+`athanor-sulphur` under `forge/specs/`, built on the desktop, where it comes before release
 0.9's rig work (decision 11), and the
-toolkit `athanor-toolkit` under `system/`, built on the reference laptop. Their measurements are
+toolkit `athanor-sal` under `system/`, built on the reference laptop. Their measurements are
 recorded under `docs/spikes/` and go into revision 2. Their plans are named in the status line.
 
 **Milestone C1: the shell on the own compositor.** The compositor's first version runs the current
@@ -549,7 +644,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 
 - **Lines:** 8297 in `src/` by `wc -l` at `f12b0cc7`, 5641 of them outside the fixture; 54 test
   attributes, 52 passing and 2 ignored (#679); `tokei` was not run (section 2).
-- **Protocols:** Smithay, pinned at `023b78b1`, gives the server side of the standard protocols the
+- **Protocols:** Smithay, pinned at the revision Sulphur's README records, gives the server side of the standard protocols the
   shell uses; the five COSMIC protocols have no equivalent yet, and the bar shows 6 of its 8
   interactive widgets (sections 1 and 4).
 - **Goldens:** the toolkit's chooser matches its goldens under the compositor with 0 differing
@@ -582,7 +677,7 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
 - **Binary:** 5.85 MiB stripped without the `gpu` feature and 10.18 MiB with it, against GTK's 1.34
   MiB; GTK maps 120 shared objects in the rig and 150 on the NVIDIA desktop, the toolkit with
   `vello_cpu` 20 (task 7).
-- **Lines:** 2532 in `system/athanor-toolkit`, 510 of them tests (task 7).
+- **Lines:** 2532 in `system/athanor-sal`, 510 of them tests (task 7).
 - **Not measured:** the development VM's virgl (task 7). Revision 2 does not ask for it, since the
   rig's llvmpipe gives the case without a GPU and virgl is no user's hardware.
 
@@ -593,8 +688,9 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    the laptop, each with the harnesses of OS9 it needs; then revision 2 of this document with
    their measurements.
 3. The rest of the harnesses of OS9.
-4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.0, with
-   the GTK4 shell unchanged on top. Its acceptance is OS19: every surface 1.0 carries
+4. The compositor, until it passes its acceptance and replaces cosmic-comp in release 1.1, with
+   the GTK4 shell unchanged on top; release 1.0 ships it as the default session of decision 28,
+   with cosmic-comp's as the second choice (ADR-0135). Its acceptance is OS19: every surface 1.0 carries
    drawn in the rig against it with its goldens matched; the requirements of OS4 and OS5 tested in
    the fixture of OS6; AX17's scenarios passing and Orca's transcripts no poorer than on
    cosmic-comp; and the hardware matrix of `release-1.0.md` section 4.3, NVIDIA's driver included,
@@ -605,7 +701,10 @@ against the GTK version: binary size, start-up time and memory, with `vello_cpu`
    staying at the greeter as the second choice until it does and the overview and the window switcher on Alt+Tab have come.
 5. The toolkit, in parallel with the compositor, one surface at a time under OS8 and OS20: the
    layout chooser first, then the dock, the launcher, the bar and the control centre; the greeter
-   last, because it handles the password (AGENTS.md, "Stop and ask before editing").
+   last, because it handles the password (AGENTS.md, "Stop and ask before editing"). *Amended
+   2026-11-11 by decision 34:* the dock makes the toolkit its default once this document gains what
+   OS20 asks before the dock moves, and the layout chooser, the launcher, the bar and the control centre move at the
+   same time; the greeter stays last.
 6. In parallel with steps 4 and 5 and with the rebase to Fedora 45, on the laptop: stage 1 of
    OS10, a toolkit developers outside Athanor can build on. Its widgets, most of which step 5
    needs, pass the gates of OS8 and OS9 in the gallery; the guide and the rustdoc complete it, and
@@ -697,7 +796,7 @@ audit found that the plan crossed SH2's boundary:
     it refuses (malformed, more than the four layouts LN9 allows, a keymap libxkbcommon cannot
     compile) changes nothing and is logged; without a file the keymap is the one `XKB_DEFAULT_*`
     gives (SN15). The reader is an exception to SH2's containment outside
-    `athanor-compositor-client`: one source file of the compositor, which reads that file, writes
+    `athanor-sulphur-client`: one source file of the compositor, which reads that file, writes
     nothing in the user's configuration and names no other COSMIC key, named by path in SH2's
     exceptions and in `verify.py boundary`. It leaves when the store moves with the compositor
     client (LN9). Not taken: `XKB_DEFAULT_*` alone, which has no live change and gives the
@@ -714,7 +813,7 @@ amendment's audit:
     "No fallback when the preview fails"). The own compositor becomes the image's default session before
     OS19 holds in full, in a pull request that records the evidence of each condition below.
     cosmic-comp's session stays at the greeter as the second choice until OS19 holds in full and
-    the overview and the window switcher on Alt+Tab have come, which release 1.0 waits for, and leaves the greeter then. The switch waits for:
+    the overview and the window switcher on Alt+Tab have come, which release 1.1 waits for (release 1.0 ships with both sessions, ADR-0135), and leaves the greeter then. The switch waits for:
     - the gaps of `doc_session.md` SN16 that would reach a user who signs in without choosing:
       the lock path (gap 1), with cosmic-greeter as the locker and cosmic-idle as the idle daemon
       under the own compositor, each started by a supervisor inside the logind
@@ -795,7 +894,7 @@ amendment's audit:
       missing element or utterance, gain with the switch's code a list of exemptions, each
       naming this decision as its reason and the control's issue, and an exemption for an
       element that is present fails, as `golden_report.py` fails an explanation without a
-      difference. `athanor-compositor-session`, before it starts the
+      difference. `athanor-sulphur-session`, before it starts the
       compositor, starts cosmic-comp's session in its place when the user has either on, and
       says why in the journal, whichever entry the greeter had checked. The magnifier is on
       when `ATHANOR_A11Y`, the greeter's hand-off (`doc_accessibility.md` AX13), names
@@ -804,7 +903,7 @@ amendment's audit:
       read; the script reads both, so it does not depend on `athanor-a11y apply-greeter`
       having run first. The filters persist in cosmic-comp's `a11y_screen_filter.ron`
       (`doc_accessibility.md` section 1): the script asks the compositor's binary,
-      `athanor-compositor --screen-filter-on`, since a shell script does not parse RON, whether
+      `athanor-sulphur --screen-filter-on`, since a shell script does not parse RON, whether
       the file holds an inversion or a filter; an absent file, or one that holds neither, is off
       (exit status 0), and a file that holds either is on (status 10); any other status, a
       file that cannot be read or parsed, an abort or a signal, counts as on. Its reader, one source file of the
@@ -819,7 +918,7 @@ amendment's audit:
       exception, so widened, keeps its path and leaves as before. The hand-off above and the
       hidden controls below, for the magnifier and the filters, leave when the own compositor
       has them (#864). *Done in #864 (2026-10-30):* the hand-off and
-      `athanor-compositor --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
+      `athanor-sulphur --screen-filter-on` have left, `src/screen_filter.rs` reads and writes
       these files for the compositor itself, and the bar's rows and Super+= and Super+- are back.
       Not taken: a state file of the
       compositor's own, with which the two sessions would diverge; GNOME's keys, which have none
@@ -861,7 +960,7 @@ amendment's audit:
       Super+1 to Super+0 and Super+Ctrl with the arrows stay bound and switch workspaces
       without the indicator of `doc_overview.md` OV12, a loss the switch's pull request names;
     - the Launcher buttons of the bar and of the dock, which open cosmic-launcher today
-      (`system/athanor-compositor-client/src/launch.rs`), a client without a line in the
+      (`system/athanor-sulphur-client/src/launch.rs`), a client without a line in the
       allow-list: under the own compositor they open `athanor-launcher`, which has its line,
       through its D-Bus activation (`doc_launcher.md` LA8), before LA12's switch, which this
       decision does not change for cosmic-comp's session. The client chooses the program by the
@@ -875,14 +974,15 @@ amendment's audit:
       chosen again, and the switch's pull request names the loss.
 
     The overview, `athanor-overview`, which replaces cosmic-workspaces (`doc_overview.md`), is not
-    an item of OS19: it follows the switch, and cosmic-workspaces' retirement moves from 1.1 to 1.0
-    with it (`release-1.0.md`), and release 1.0 waits for it and for the window switcher on Alt+Tab.
+    an item of OS19: it follows the switch, and cosmic-workspaces' retirement goes with it, in 1.1
+    (`release-1.0.md`, ADR-0135), and release 1.1 waits for it and for the window switcher on
+    Alt+Tab; release 1.0 ships without either (ADR-0135).
     The overview has come when its acceptance (`doc_overview.md`, section 5) is recorded under the
     own compositor after the change of OV19 step 5, and that change binds Super+W, `XF86LaunchA`
     and the three-finger swipe in OS13 to it, shows the workspaces module and button of the bar
     and the dock, and measures acceptance items 5 and 9 again through them; `doc_overview.md` OV17 and OV19
     step 5 are amended to say so in the first pull request of the overview's implementation
-    (`release-1.0.md`, section 1 and the 1.0 row of its timeline). Not taken: the switch on the full acceptance, which kept the own compositor out of
+    (`release-1.0.md`, section 3, the work moved to 1.1). Not taken: the switch on the full acceptance, which kept the own compositor out of
     daily use for weeks; the switch with SN16's gaps accepted, which left the default session
     without a lock, an idle blank or a polkit agent; the switch without cosmic-comp's session at
     the greeter, which left no way back on hardware the short runs did not cover, nor the magnifier
@@ -965,7 +1065,9 @@ compositor and that the own compositor did not yet offer:
     the lines of a mark stay equal at any scale:
     - **The focus outline** marks the window with the keyboard focus, and no other. It is drawn
       outside the window's geometry, as wide as the theme's `active_hint`, with corners concentric
-      with the 15 px window radius of `doc_visual_language.md`, in the theme's `window_hint` when it is set
+      with the window's: the theme's window radius grown by the outline's width, 15 px with
+      Calmo's (amended on 2026-11-04, approved by the maintainer with #957; it read "concentric with
+      the 15 px window radius of `doc_visual_language.md`"), in the theme's `window_hint` when it is set
       and in its accent otherwise (spike VL-S1, section 2.2). It follows the theme live, is not
       drawn when the `active_hint` setting of `doc_settings.md` is off or the theme's width is 0,
       as in cosmic-comp, and is not drawn on a maximised or full-screen window, which leaves it
@@ -1025,7 +1127,7 @@ compositor and that the own compositor did not yet offer:
       filters as every capture is, and a capture of a window shows neither. On the output the
       magnifier and the colour filters act on them as on the rest of the frame.
     - The theme is read by one source file of the compositor,
-      `forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/focus_theme.rs`, which reads
+      `forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/focus_theme.rs`, which reads
       the mode, `window_hint`, `active_hint` and the accent of `CosmicTheme` and the
       `active_hint` setting of `com.system76.CosmicComp`, follows them live and writes nothing. A
       confined application that can write those files (`doc_session_daemons.md` SD8) changes the
@@ -1048,11 +1150,7 @@ compositor and that the own compositor did not yet offer:
     fractional scale; that a tree at the far end of the coordinates ends nothing; that its popup
     is bordered and its layer surface refused; that an unconfined window is not bordered; that a
     maximised window has no outline; that the lock covers the marks; that a window above covers a mark of the window below; and that a mark
-    follows a theme change without a new client. The entries of #918 stay in
-    `forge/test/shell/golden/athanor-differences.toml` for what still differs, the divider
-    cosmic-comp draws inside the outline, the outline's corners and, at scale 1.5, its width, and
-    a case that shows a confined window takes an entry of #918 for the
-    border, which cosmic-comp does not draw. Not taken: one grey line of 1 px in `#808080`, which
+    follows a theme change without a new client. Not taken: one grey line of 1 px in `#808080`, which
     a grey backdrop hides and which, with the focus, tells the two apart by one pixel inside the
     outline; two lines, black outside and white inside, which a dark wallpaper and a white edge
     hide together; the border always around the tree, which stands off from nearly every window
@@ -1064,6 +1162,25 @@ compositor and that the own compositor did not yet offer:
     frame a whole wallpaper; for the outline, a fixed Calmo purple, which ignores the user's
     accent and `active_hint`; and the reveal key now, which adds drawing text to the compositor
     to a change that does not need it.
+    *Amended on 2026-11-04, approved by the maintainer with #957:* under
+    the own compositor, as under cosmic-comp, a divider ring of 1 px, in the theme's divider
+    colour and with the theme's window corners, lies just inside the geometry of every window
+    that is neither maximised nor full screen, focused or not, floating or tiled. The focus
+    outline of an unconfined window takes cosmic-comp's shape: its corners are the theme's window
+    radius grown by its width (the first item above, amended), and at a fractional scale each
+    straight side covers whole pixels, the left and the top side the fewer. The fixture tests the
+    divider on a focused, an unfocused, a confined and a maximised window, at scale 1.5, and
+    after a theme change. In `forge/test/shell/golden/athanor-differences.toml` the 18 entries
+    of #918 at scale 1 go, since the divider and the outline match the goldens there. The 18 at
+    scale 1.5 stay: both compositors place those windows at the same logical position and round
+    it to physical pixels differently, so the divider and the outline's inner edge land
+    one physical pixel apart on one or more sides. A case that shows a confined window takes an
+    entry of #918 for the border, which cosmic-comp does not draw. These sentences replace the
+    approved one that read: "The entries of #918 stay in
+    `forge/test/shell/golden/athanor-differences.toml` for what still differs, the divider
+    cosmic-comp draws inside the outline, the outline's corners and, at scale 1.5, its width, and
+    a case that shows a confined window takes an entry of #918 for the border, which cosmic-comp
+    does not draw."
 32. **The private protocol of the overview, and its gesture** (OS5; `doc_overview.md` OV3 and
     decisions 4 and 5; taken by the maintainer with #903). Decision 19's set gives no window's
     workspaces, no place, no move to a workspace, no pin and no reorder, which the overview needs
@@ -1101,6 +1218,253 @@ compositor and that the own compositor did not yet offer:
     tiling, the overview's pin and reorder with its grant; and writing the two patches, each to
     carry and rebase for a compositor this document replaces.
 
+33. **The second wave of protocols: cosmic-comp's set, and past it** (OS3, OS4, OS17; taken by
+    the maintainer on 2026-11-11, with the pull request that records it). On 2026-11-11 the
+    protocols of the own compositor at `origin/iso-v0` 6b14a4a2 were compared with those of
+    cosmic-comp at 2dd4239 (2026-10-24). cosmic-comp offers ten COSMIC globals:
+    - the own compositor's protocols cover six of them: the workspaces (`ext_workspace_manager_v1`
+      and decision 32), the toplevel information and its actions (decision 19), the outputs
+      (`zwlr_output_manager_v1`), the keyboard layouts and accessibility;
+    - four stay out, as this decision says below.
+
+    cosmic-comp also offers nine standard globals the own compositor lacks, besides
+    `xwayland_shell_v1`, and libei input. The own compositor takes them, and five that neither
+    offers. Each comes with its row in `data/globals` and its fixture test (OS17; OS19, item 2),
+    in three waves:
+    - **Wave 2a, the protocols Smithay implements at the pinned revision:**
+      - `wl_fixes`, standard;
+      - `xdg_wm_dialog_v1`, standard. A modal dialog stays above its parent, and a click on the
+        parent gives the keyboard to the dialog;
+      - `wp_alpha_modifier_v1`, standard;
+      - `wp_pointer_warp_v1`, standard, a security context included. A warp is honoured only
+        within the surface that has both the pointer focus and the keyboard focus. Ctrl+Alt+Tab's
+        suspension of decision 30 covers it as it covers the pointer lock;
+      - `org_kde_kwin_server_decoration_manager`, standard. It answers every request with
+        client-side decoration, as decision 30 answers xdg-decoration;
+      - `wp_fifo_manager_v1` and `wp_commit_timing_manager_v1`, standard;
+      - `xdg_toplevel_icon_manager_v1`, standard. The icon reaches the shell through
+        `athanor_toplevel_state_v1` (decision 19) in a later change. Until then the compositor
+        keeps it, and the shell keeps reading the desktop entry;
+      - touch input: the seat offers `wl_touch`, and no new global comes with it. On
+        2026-11-11 the own compositor had no touch path at all, while cosmic-comp delivers
+        touch, focuses on it, keeps it to the lock surface and maps it to its output. The rules:
+        - a touch reaches the surface under the finger;
+        - a touch-down gives the keyboard focus by the rule of a click;
+        - while the session is locked, a touch off the lock surface is refused. The touches
+          held at lock time get `wl_touch.cancel`, and their later release is swallowed;
+        - each touchscreen maps to its own output, with that output's transform, never to the
+          first output;
+        - a move, a resize or a drag starts from a touch serial as from a pointer one;
+        - injected touch comes only through libei (wave 2c) and follows its rule: no input
+          while the session is locked;
+      - `ext_background_effect_manager_v1`, standard, moved here from wave 2c by decision 35;
+      - `xdg_system_bell_v1`, standard. The compositor honours a bell only from the client of the
+        window with the keyboard focus, at most one a second, and never while the session is
+        locked. That window's focus outline (decision 31) blinks once: it is hidden for 250 ms
+        and drawn again, with no transition. Under reduced motion (`doc_accessibility.md` AX9)
+        it does not blink. The outline is drawn at twice its width for 500 ms instead, a steady
+        cue. A bell is dropped when decision 31 draws no outline: from any other client,
+        without a surface, on a maximised or full-screen window, with `active_hint` off, or at a
+        theme width of 0.
+    - **Wave 2b, the protocols Smithay lacks at the pinned revision:**
+      - `wl_drm`, standard. It names the render node that dmabuf feedback names, for older
+        Mesa clients. It is written from Mesa's `wayland-drm.xml`, under its permissive licence, and not
+        from cosmic-comp's code (OS3);
+      - `wp_tearing_control_manager_v1`, standard. Its asynchronous page flip is first proposed
+        to Smithay's DRM backend. A hint is honoured only when all of these hold:
+        - the surface is full-screen and alone on its output;
+        - no layer surface is mapped on that output;
+        - the session is not locked;
+        - for a confined client, OS4's border is drawn in the same frame.
+    - **Wave 2c, the protocols that need a design of their own.** Each is written as an amendment
+      of this decision before its code:
+      - `zwp_xwayland_keyboard_grab_manager_v1`. OS4 confines xwayland-satellite to the standard
+        globals, and Smithay has no filter for this one, so its class needs an amendment of OS4
+        first. That amendment keeps decision 30's protected keys, the Ctrl+Alt+Tab suspension and
+        the keyboard aids (AX4, AX11) with the compositor during a grab;
+      - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
+        `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
+        design, and it leaves this wave;
+      - libei through an EIS socket, given only to the portal backend for the RemoteDesktop and
+        InputCapture portals, behind the portal's consent. It delivers no input while the
+        session is locked, which is stricter than OS4's rule for the virtual keyboard;
+      - the capture of a workspace for the overview's thumbnails, through
+        `ext-image-copy-capture-v1` and a source of `athanor_workspace_manager_v1` (decision 32),
+        for release 1.1.
+
+    Apart from the bell's blink, none of these changes OS4's border or decision 31's outline. Both
+    are drawn at full opacity
+    whatever alpha the client sets, and in every frame, a scanned-out or torn one included.
+
+    Four COSMIC globals stay out: corner radius, overlap notify, the session lock's layer and the
+    workspace image capture source. The shell does not use corner radius or the session lock's
+    layer. The dock's intellihide takes its geometry from `athanor_dock_overlap_v1` (decision 35),
+    not from overlap notify. The overview's thumbnails come from wave 2c. `xwayland_shell_v1` stays out because X11 runs through
+    xwayland-satellite (decision 8). Colour stays 8-bit at 1.0 (decision 21). Color management and
+    HDR come after 1.0, as decision 21 says, in a revision of their own that follows waves 2a and
+    2b.
+
+    Not taken:
+    - cosmic-comp's set alone, which leaves the own compositor behind clients that already ask
+      for fifo, commit timing and tearing control;
+    - only the protocols applications use today, which leaves out headsets, remote desktop and
+      the overview's thumbnails;
+    - color management now, which waits for hardware to test it.
+34. **The shell's surfaces move to the toolkit in parallel** (OS8, OS20; section 6, step 5; taken
+    by the maintainer on 2026-11-11, with the pull request that records it). Section 6, step 5's
+    order of one surface at a time gives way to three groups:
+    - the dock makes the toolkit its default, once this document gains what OS20 asks before the
+      dock moves: the tier measurement, the live blur and the dock's window geometry
+      (ADR-0124);
+    - the layout chooser, the launcher, the bar and the control centre move at the same time,
+      each in its own pull request;
+    - the greeter still goes last, because it handles the password (AGENTS.md, "Stop and ask
+      before editing").
+
+    Each surface still moves only through the gates of OS8 and OS20 and the harnesses of OS9. A
+    widget the toolkit lacks is written in the pull request of the surface that needs it first,
+    and passes the gates of decision 13 in the gallery there. This amends section 8's note that
+    the widget layer is written before the first surface moves.
+
+    Not taken:
+    - one surface at a time, which is the slowest road;
+    - every widget before any surface, which writes widgets no surface has yet asked for.
+
+35. **What the dock takes from the own compositor** (OS17, OS20; ADR-0124; `doc_visual_language.md`,
+    the tiers and intellihide; taken by the maintainer on 2026-11-11, with the pull request that
+    records it). This decision gives the three things OS20 asks before the dock moves:
+    - **Intellihide's geometry.** A new private global, `athanor_dock_overlap_v1`, is privileged
+      by a grant of its own on the dock's allow-list line. The dock names its layer surface. The
+      compositor sends `overlapped` with true when a mapped, not minimised window of the current
+      workspace on that surface's output intersects the dock's shown rectangle, and with false
+      when none does. The dock sends its shown rectangle, the one it occupies when it is not
+      hidden, in its output's logical coordinates with a `set_rectangle` request. It sends the
+      rectangle again when its size, its position or the output's scale changes. The
+      compositor answers on that rectangle, whatever the surface's current geometry, so hiding
+      does not change the answer. While
+      intellihide is on, the dock sets no exclusive zone. While the session is locked, the
+      compositor sends nothing, and on unlock it sends the current answer. The dock learns at
+      most whether the rectangle it asks for is covered, and when that changes. Changing the
+      rectangle it sends lets it probe further, bounded by its grant: the dock is trusted
+      by its allow-list line. Decision 32 stands, and the dock gets no window places;
+    - **Live blur, tier M2.** `ext_background_effect_manager_v1` moves from wave 2c to wave 2a,
+      standard. On an output in tier M2, the compositor blurs what lies under the region the
+      surface sets, with `material.blur` and `material.saturate`. On an output in M0 or M1,
+      software rendering included, it draws the region unblurred, so a client cannot force a
+      blur per frame on an output that cannot afford it. The client never reads the blurred pixels, so the
+      blur shows a confined client nothing it could not see without it. Under cosmic-comp M2 is
+      never chosen (`doc_visual_language.md`);
+    - **The tier.** The compositor measures the time it takes to render each output. A second
+      private global, `athanor_material_v1`, is privileged by a grant on each shell surface's
+      allow-list line and sends each output's tier: M0, M1 or M2. Software rendering is M0
+      without a measurement. A measurement that fails or does not finish is M0. Spike VL-S5,
+      run on the laptop and the desktop, sets the measurement window and the thresholds. Until
+      its results are recorded here, every output is M0, so the dock moves in M0.
+      *Amended on 2026-11-11, with revision 4 of `doc_visual_language.md` (VL13):* the spike's
+      results are recorded there. The compositor measures each output with VL13's probe and
+      its live check, applies VL13's thresholds, and sends the result. An output is M0 until
+      its probe has run.
+
+    Not taken:
+    - the full geometry of every window through `athanor_toplevel_state_v1`, which shows the shell
+      where every window is;
+    - a private blur protocol, which is more code, and no application could use it;
+    - the toolkit measuring its own frames under the own compositor, which cannot see the cost
+      of the blur the compositor draws.
+
+    Whether a client-side measurement may offer M1 under cosmic-comp stays with spike VL-S5
+    (`doc_visual_language.md`). Until then the toolkit draws M0 there. *Amended on 2026-11-11,
+    with revision 4 of `doc_visual_language.md` (VL13):* under cosmic-comp the toolkit may offer
+    M1 on its own measurement, as VL13 says, and never M2.
+36. **The protocols KWin, Mutter, Hyprland and Sway offer past the second wave** (OS17;
+    amends decision 33's wave 2c; taken by the maintainer on 2026-11-15, with the pull request
+    that records it). On 2026-11-15 the globals of the own compositor at `origin/iso-v0`
+    8794c120 were compared with the snapshots of Wayland Explorer at f406667b (2026-11-14) for
+    cosmic-comp 1.11.0, niri 26.04, KWin 6.7, Mutter 51, Hyprland 0.52.1 and Sway 1.11, and with
+    Sway 1.12's release notes. Among the globals Smithay implements at the pinned revision,
+    and outside decision 21's colour management and wave 2b, three that at least three of
+    them offer are missing. Each comes with its row in `data/globals` and its fixture test
+    (OS17; OS19, item 2):
+    - `wp_content_type_manager_v1`, standard. The compositor keeps each surface's type, `none`,
+      `photo`, `video` or `game`, applied with the surface's commit. At 1.0 no behaviour reads
+      it: scheduling, tearing (wave 2b) and adaptive sync stay as they are. A rule that reads
+      it is written as an amendment of the decision that owns that behaviour;
+    - `xdg_toplevel_tag_manager_v1`, standard. The compositor keeps each toplevel's tag and
+      its description, applied with the toplevel's commit. A tag is the client's own word: it
+      never selects a privilege, a class of OS17, an allow-list line, OS4's border or the mark
+      of a trusted prompt. Those still come from the security context and the allow-list
+      alone. At 1.0 no window rule reads it;
+    - `wp_drm_lease_device_v1`, unconfined. The DRM device the compositor renders and scans
+      out on offers one global; a device the compositor does not drive offers none, so a
+      headset wired to another GPU is not leased until the compositor drives that GPU
+      (*amended on 2026-11-15*). A connector is
+      offered for lease only when the kernel marks it `non-desktop`, such as a headset's, and
+      such a connector is never an output of the session: no workspace, layer surface, cursor or
+      lock surface is placed on it. A lease is granted only while the session is unlocked:
+      from the moment a lock is requested, every new request is refused. Before the lock is
+      confirmed (`locked` of `ext_session_lock_v1`), every lease is revoked and the compositor
+      disables the leased connector and its CRTC, so a headset never shows a client's frame
+      over a locked session. After the unlock a client asks again. A lease is also revoked,
+      and its connector disabled, when its device is lost on a session switch or removed,
+      when its connector is disconnected, or when the connector stops being `non-desktop`.
+      *Amended on 2026-11-15:* revoking needs the device's DRM master, so the order is kept
+      by what the compositor waits for:
+      - `locked` is sent only once every lease has been revoked and its connector and CRTC
+        disabled, each step having succeeded. While the session is paused, or while a
+        revocation fails, `locked` waits; the outputs stay covered from the lock request on
+        as before, and only the confirmation waits. The compositor tries again at the
+        resume, before any output is drawn, and sends `locked` once the revocation succeeds;
+      - a lease counts as revoked only once the device no longer lists its lessee, read from
+        the device's list of lessees and not from the compositor's or Smithay's records, so a
+        lease a client destroyed while keeping its file descriptor, or one whose connector
+        is gone, is revoked like any other. Until the device confirms it, the lease is not
+        counted as ended: new requests stay refused, and the revocation is tried again at
+        the next scan of the device, at the resume, and, while the session is active and a
+        lock waits on it, once a second. A failure is logged as an error naming the
+        connector the first time and whenever its cause changes;
+      - new requests are also refused from the moment the compositor starts a session
+        switch on its own keys, or the session is paused, until the resume, or until the
+        switch fails or names the session already shown. A switch the compositor makes
+        revokes every lease and disables its connector before the switch. When a lease
+        cannot be ended, the compositor does not switch: it keeps its terminal and logs
+        the lease's connectors as an error (*amended on 2026-11-15*). Smithay's
+        `DrmLeaseHandler::drm_lease_state` returns no `Option` at the pinned revision, so
+        its arm with no lease state ends the compositor; no request reaches it, and its
+        removal is tracked by #1186;
+      - a switch logind makes on another request is acknowledged to logind before the
+        compositor is told, and libseat's contract forbids using the device after that, so
+        the compositor does not touch the device at the pause: it revokes at the resume,
+        before any output is drawn. Until then the client holding the lease can go on
+        driving the headset with new frames, while another session has the seat;
+      - fixture tests drive the real `ext_session_lock_v1` through the lease rules, with a
+        probe in place of DRM: the refusal from the lock request on, `locked` withheld
+        while the probe's revocation fails or the session is paused and sent once it
+        succeeds, and the grant again after the unlock. Unit tests on the same rules cover
+        the disabled connector, the revocation on a lost device, on a disconnected
+        connector and on a connector that stops being `non-desktop`, and the switch the
+        compositor makes. The DRM calls themselves, the revocation, the disabled CRTC, the
+        list of lessees and the `non-desktop` property, have no automatic test, since the
+        fixture runs without a DRM device: this is an exception to OS19, item 2.
+
+    Not taken:
+    - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
+      Smithay has the protocol;
+    - keeping leases across the lock, which leaves a client's frames on a headset the locked
+      session does not cover;
+    - holding a switch logind makes until the leases are revoked, which Smithay's session
+      cannot do at the pinned revision: it acknowledges the pause to logind before the
+      compositor's callback runs (*amended on 2026-11-15*);
+    - sending `locked` while the session is paused and ending the lease at the resume, which
+      confirms a lock while a client may still drive a headset (*amended on 2026-11-15*);
+    - one global for each DRM device the kernel lists, which offers connectors on a GPU the
+      compositor neither drives nor scans (*amended on 2026-11-15*);
+    - reading the tag for window rules now, which waits for a rule the maintainer decides.
+
+    Left for a later decision: `zwlr_gamma_control_manager_v1`, which Smithay does not
+    implement and which would be privileged, since it changes what every output shows; and
+    `xdg_toplevel_drag_manager_v1`, which Smithay does not implement and which, in the
+    snapshots, only KWin and Mutter offer.
+
 ## 8. Risks
 
 - **Smithay has no release this year** and its main branch breaks its API; every revision bump is
@@ -1114,15 +1478,19 @@ compositor and that the own compositor did not yet offer:
   spoken as "panel" where GTK gives "grouping" (OS7, OS8).
 - **The widget layer is ours** (decision 7): widgets, layout, focus, menus and the test harness
   are written before the first surface moves, where Masonry would have given some of them.
+  *Amended 2026-11-11 by decision 34:* a widget the toolkit lacks is written in the pull request
+  of the surface that needs it first.
 - **Stage 1 of the toolkit runs beside the compositor** (decision 12): the widgets the surfaces
   need are written anyway, but the gallery, the guide, the rustdoc and the other widgets take the
   maintainer's time from the compositor, for which release 1.0 waits (decision 5).
-- **Release 1.0 waits for the compositor** (decision 5): its date follows the compositor's
-  acceptance, a defect of the hardware matrix found late moves it, and until then each Fedora
-  rebase ships as a release 0.x.
+- **Release 1.0 waits for the compositor** (decision 5): its date follows the conditions under
+  which decision 28 makes the compositor the default session, held on the 1.0 build, and the
+  full acceptance follows in 1.1 (ADR-0135); a defect of the hardware matrix found late moves
+  it, and until then each Fedora rebase ships as a release 0.x.
 - **Colour management and HDR** are not in Smithay; the own compositor would have neither until
   upstream or we add them, and drives 8-bit formats at 1.0 (OS15).
-- **Release 1.0 also waits for the overview and the window switcher on Alt+Tab** (decision 28).
+- **Release 1.1 waits for the overview and the window switcher on Alt+Tab** (decision 28);
+  release 1.0 ships without them (ADR-0135).
 - **Maintenance.** One maintainer carries a compositor, a toolkit and the shell; SH2's reason,
   "more maintainers", is not yet met. The public repository and open pull requests (ADR-0121) are
   the answer to it, not a guarantee.

@@ -36,7 +36,7 @@ mod tests {
             .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
             .flat_map(str::split_whitespace)
             .collect();
-        for dir in athanor_compositor_client::theme::theme_dirs_in(Path::new("cosmic")) {
+        for dir in athanor_sulphur_client::theme::theme_dirs_in(Path::new("cosmic")) {
             assert!(
                 declared.iter().any(|name| Path::new(name) == dir),
                 "{declared:?} lacks {dir:?}"

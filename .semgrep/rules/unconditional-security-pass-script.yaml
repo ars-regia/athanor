@@ -1,0 +1,21 @@
+# The rule of unconditional-security-pass.yaml for Python scripts without an extension, in a
+# file of its own: semgrep --test runs every rule of a file on each of its test files.
+rules:
+  # semgrep reads a Python file by its extension only; a script without one, as the SOURCES of
+  # the specs ship (usr/bin, usr/libexec), is Python when its first line is a Python shebang.
+  - id: unconditional-security-pass-script
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      $F answers yes unconditionally (AGENTS.md, "No fake security"): verify for real, or remove
+      the function and say what is missing.
+    paths:
+      exclude:
+        - '*.py'
+        - tests/
+    patterns:
+      - pattern-regex: '(?s)\A#![^\n]*\bpython[0-9.]*\b.*'
+      - pattern-regex: '(?m)^[ \t]*def[ \t]+(?P<F>\w+)\([^)]*\)[^:\n]*:[ \t]*\n[ \t]+return[ \t]+True[ \t]*$'
+      - metavariable-regex:
+          metavariable: $F
+          regex: '.*?(?:^|(?<=_)|(?<=[a-z0-9])(?=[A-Z]))(?:(?i:verif|auth|attest|trust|permit|seal|passw|token|cred)[a-z]*|(?i:valid)(?:ate|ates|ated|ating|ation|ator|ity)?|(?i:sign)(?:s|ed|er|ers|ing|ature|atures)?|(?i:allow)(?:s|ed|ing|list)?|(?i:polkit))(?=_|$|[A-Z0-9])'

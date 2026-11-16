@@ -15,7 +15,7 @@ spec.loader.exec_module(verify)
 OWN = verify.OWN_LICENCE
 CRATE = '[package]\nname = "x"\nversion = "1.0.0"\nlicense = "%s"\n'
 UPSTREAM = sorted(verify.UPSTREAM_SPECS)[0]
-TOOLKIT = "system/athanor-toolkit/Cargo.toml"
+TOOLKIT = "system/athanor-sal/Cargo.toml"
 
 
 def GREETER_ENTRIES():
@@ -111,6 +111,16 @@ class ExceptionSelfCheckTest(unittest.TestCase):
         problems = verify.licence_problems(root)
         self.assertEqual(len(problems), 1)
         self.assertIn("no entry in OWN_LICENCE_EXCEPTIONS", problems[0])
+
+    def test_a_vendored_crate_declares_upstreams_licence_exactly(self):
+        crate, lic = sorted(verify.VENDORED_CRATES.items())[0]
+        root = self.tree(None)
+        self.write(root, crate + "/Cargo.toml", CRATE % lic)
+        self.assertEqual(verify.licence_problems(root), [])
+        self.write(root, crate + "/Cargo.toml", CRATE % OWN)
+        problems = verify.licence_problems(root)
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"expected {lic!r}", problems[0])
 
 
 class LicenceProblemsTest(unittest.TestCase):

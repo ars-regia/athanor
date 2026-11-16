@@ -1,0 +1,2 @@
+# doc_session_daemons.md, SD22 step 1: the idle daemon starts with every user's session.
+enable athanor-idle.service

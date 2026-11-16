@@ -114,13 +114,13 @@ pub fn session_command() -> String {
 
 /// The session on Athanor's own compositor (doc_session.md, SN14 and SN15): its script,
 /// which the compositor's package installs.
-const OWN_SESSION_COMMAND: &str = "/usr/bin/athanor-compositor-session";
+const OWN_SESSION_COMMAND: &str = "/usr/bin/athanor-sulphur-session";
 
 /// A session the greeter offers (doc_session.md revision 4, SN14). Both entries are in this
 /// code: no file another package drops adds a login path.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Session {
-    /// "Athanor", `athanor-compositor-session` on the own compositor: the default where the
+    /// "Athanor", `athanor-sulphur-session` on the own compositor: the default where the
     /// compositor's package is installed, checked at every start of the greeter, which
     /// writes no choice anywhere.
     Own,
@@ -500,7 +500,7 @@ mod tests {
     fn the_own_compositor_is_offered_first_only_where_its_script_is_installed() {
         let dir = scratch("own");
         let script = dir
-            .join("athanor-compositor-session")
+            .join("athanor-sulphur-session")
             .to_str()
             .expect("utf-8 path")
             .to_string();
@@ -517,7 +517,7 @@ mod tests {
         );
         assert_eq!(
             Session::Own.command(),
-            "/usr/bin/athanor-compositor-session"
+            "/usr/bin/athanor-sulphur-session"
         );
         std::fs::remove_dir_all(&dir).expect("cleaning up");
     }
@@ -746,7 +746,7 @@ mod tests {
         assert_eq!(sent[0].0, serde_json::json!(["athanor-session"]));
         assert_eq!(
             sent[1].0,
-            serde_json::json!(["/usr/bin/athanor-compositor-session"])
+            serde_json::json!(["/usr/bin/athanor-sulphur-session"])
         );
         assert_eq!(sent[0].1, sent[1].1, "the environment is the same for both");
     }
@@ -775,7 +775,7 @@ mod tests {
         );
         assert_eq!(
             start_session(&requests)["cmd"],
-            serde_json::json!(["/usr/bin/athanor-compositor-session"])
+            serde_json::json!(["/usr/bin/athanor-sulphur-session"])
         );
     }
 

@@ -63,6 +63,10 @@ class ContrastTest(unittest.TestCase):
         failing = [row for row in contrast.check(tk.load()) if row[4] < row[5]]
         self.assertEqual(failing, [])
 
+    def test_the_toolkits_palette_passes_with_every_accent_case(self):
+        failing = [row for row in contrast.check(tk.sal(tk.load())) if row[4] < row[5]]
+        self.assertEqual(failing, [])
+
 
 if __name__ == "__main__":
     unittest.main()

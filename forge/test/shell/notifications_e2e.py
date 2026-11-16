@@ -39,19 +39,13 @@ LONG = "x" * 100_000
 
 
 def alerts(app, Atspi):
-    """The names of the showing popups, or None when a rebuild removed a node mid-walk."""
-    try:
-        return [
-            name
-            for role, name, shown, _ in walk(app, Atspi)
-            if shown and role in ALERT_ROLES
-        ]
-    except GLib.Error:
-        return None
+    """The names of the showing popups."""
+    return [name for role, name, shown, _ in walk(app, Atspi) if shown and role in ALERT_ROLES]
 
 
 def never(seen, seconds):
-    """True when `seen` stays false for `seconds`."""
+    """True when `seen` stays false for `seconds`. An error from it, such as a node destroyed
+    mid-read, raises: a tree rebuilt during the interval is the event this exists to catch."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if seen():
@@ -148,20 +142,14 @@ def main():
         return lambda: line in log.read_text(encoding="utf-8").splitlines()
 
     def shows(name):
-        return lambda: name in (alerts(app, Atspi) or [])
+        return lambda: name in alerts(app, Atspi)
 
     def in_list(name):
         """A showing node named `name`: with the list open the popups are hidden, so it is
         a card of the list."""
 
         def seen():
-            try:
-                return any(
-                    node_name == name and shown
-                    for _, node_name, shown, _ in walk(app, Atspi)
-                )
-            except GLib.Error:
-                return False
+            return any(node_name == name and shown for _, node_name, shown, _ in walk(app, Atspi))
 
         return seen
 
@@ -174,7 +162,7 @@ def main():
 
     check(
         "three popups show and the fourth waits (BR4)",
-        wait_for(lambda: len(alerts(app, Atspi) or []) == 3, 5),
+        wait_for(lambda: len(alerts(app, Atspi)) == 3, 5),
         repr(alerts(app, Atspi)),
     )
     check(

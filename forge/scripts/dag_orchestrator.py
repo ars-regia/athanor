@@ -144,8 +144,9 @@ def repo_relative(path):
 def package_inputs(pkg):
     """Every repo path whose content decides what the build of pkg produces, relative to
     the forge directory: its spec directory, the path dependencies of its crates, the repo
-    paths the spec declares, the workspace manifest and lock of an in-place cargo build,
-    and the build scripts and builder identity every build shares."""
+    paths the spec declares and the path dependencies of the crates under them, the
+    workspace manifest and lock of an in-place cargo build, and the build scripts and builder
+    identity every build shares."""
     spec_dir = spec_dir_for(pkg)
     inputs = {spec_dir, *path_dependencies(spec_dir), *filter(os.path.exists, BUILD_INPUTS)}
     for declared in declared_inputs(spec_dir):
@@ -153,6 +154,7 @@ def package_inputs(pkg):
         if not os.path.exists(target):
             sys.exit(f"dag_orchestrator: {spec_dir} declares repo-input {declared}, which does not exist")
         inputs.add(target)
+        inputs.update(path_dependencies(target))
     if builds_in_place(spec_dir) and uses_cargo(spec_dir):
         inputs.update(path for path in WORKSPACE_INPUTS if os.path.exists(path))
     return sorted(os.path.relpath(p) for p in inputs)

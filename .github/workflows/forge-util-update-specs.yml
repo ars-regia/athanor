@@ -27,7 +27,7 @@ jobs:
       # and PRs it opened would start no checks. The action fails the job when the App id or the
       # key is missing or refused, so a missing credential is a red run, not one that pretends to work.
       - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
@@ -36,10 +36,11 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
+      # create-pull-request sets up its own credentials from its token input, so none persist here.
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # fetch_sources.sh --pin expands the Source URLs with rpmspec.
       - name: Install rpmspec
@@ -54,7 +55,7 @@ jobs:
 
       - name: Create Pull Request
         if: hashFiles('forge/out/spec-updates.md') != ''
-        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
         with:
           token: ${{ steps.app-token.outputs.token }}
           commit-message: "chore(forge): update the watched specs to their latest upstream releases"

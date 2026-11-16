@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/%{name}/%{name}-%{version}
 Name:           athanor-backup
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        7%{?athanor_content}%{?dist}
 Summary:        Hourly btrfs snapshots of /var/home with retention and restore
 
 License:        GPL-3.0-or-later

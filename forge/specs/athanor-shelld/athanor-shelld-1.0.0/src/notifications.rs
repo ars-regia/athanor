@@ -9,17 +9,17 @@ use std::time::Instant;
 
 use serde::de::{IgnoredAny, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use zbus::fdo::{self, DBusProxy};
+use zbus::fdo;
 use zbus::message::Header;
 use zbus::names::OwnedUniqueName;
 use zbus::object_server::SignalEmitter;
 use zbus::{interface, Connection};
-use zbus::zvariant::{Signature, Type};
+use zbus::{Signature, Type};
 
 use crate::dnd;
 use crate::hints::Hints;
 use crate::icon;
-use crate::sender::BarUnit;
+use crate::sender::{BarUnit, BAR};
 use crate::server::{NOTIFICATIONS_PATH, PRIVATE_PATH};
 use crate::store::{self, Content, Reason, Store, Urgency, Visual};
 use crate::wire::WireNotification;
@@ -297,30 +297,26 @@ impl Notifications {
 
 pub struct Private {
     pub state: Shared,
+    /// Asks on the query connections, never on the one this object is served on (issue #1035).
     pub bar: BarUnit,
 }
 
 impl Private {
     /// The caller's unique name, once admitted: `list` records it as the private signals'
     /// destination.
-    async fn admit(&self, header: &Header<'_>, conn: &Connection) -> fdo::Result<OwnedUniqueName> {
+    async fn admit(&self, header: &Header<'_>) -> fdo::Result<OwnedUniqueName> {
         let sender = header
             .sender()
             .ok_or_else(|| fdo::Error::AccessDenied("a call with no sender".into()))?;
-        let credentials = DBusProxy::new(conn)
-            .await?
-            .get_connection_credentials(sender.clone().into())
-            .await?;
-        let pid = credentials.process_id().ok_or_else(|| {
-            fdo::Error::AccessDenied("the bus gave no process id for the caller".into())
-        })?;
-        if self.bar.admits(pid) {
-            Ok(sender.to_owned().into())
-        } else {
-            Err(fdo::Error::AccessDenied(format!(
-                "only {} may call this interface",
-                self.bar.unit()
-            )))
+        match self.bar.admit(sender.as_str()).await {
+            Ok(()) => Ok(sender.to_owned().into()),
+            Err(why) => {
+                tracing::warn!(%sender, "refused on the private interface: {why}");
+                Err(fdo::Error::AccessDenied(format!(
+                    "only {} may call this interface",
+                    BAR.unit
+                )))
+            }
         }
     }
 }
@@ -333,9 +329,8 @@ impl Private {
     async fn list(
         &self,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<(bool, Vec<WireNotification>)> {
-        let sender = self.admit(&header, conn).await?;
+        let sender = self.admit(&header).await?;
         let mut state = lock(&self.state);
         state.bar_destination = Some(sender);
         let (now, dnd) = (state.now_ms(), state.store.dnd());
@@ -357,7 +352,7 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let reason = match reason {
             1 => Reason::Expired,
             2 => Reason::Dismissed,
@@ -384,7 +379,7 @@ impl Private {
         #[zbus(header)] header: Header<'_>,
         #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let resident = {
             let state = lock(&self.state);
             let held = state
@@ -419,9 +414,8 @@ impl Private {
         &self,
         on: bool,
         #[zbus(header)] header: Header<'_>,
-        #[zbus(connection)] conn: &Connection,
     ) -> fdo::Result<()> {
-        self.admit(&header, conn).await?;
+        self.admit(&header).await?;
         let mut state = lock(&self.state);
         dnd::save(&state.state_dir, on)
             .map_err(|err| fdo::Error::IOError(format!("cannot keep the switch: {err}")))?;
@@ -496,8 +490,8 @@ mod tests {
 
     #[test]
     fn a_hundred_thousand_actions_yield_at_most_max_actions_pairs() {
-        use zbus::zvariant::serialized::Context;
-        use zbus::zvariant::{to_bytes, LE};
+        use zbus::wire::serialized::Context;
+        use zbus::wire::{to_bytes, LE};
 
         let many: Vec<String> = (0..100_000usize)
             .map(|n| {
@@ -508,7 +502,7 @@ mod tests {
                 }
             })
             .collect();
-        let encoded = to_bytes(Context::new_dbus(LE, 0), &many).expect("encode");
+        let encoded = to_bytes(Context::new(LE, 0), &many).expect("encode");
         let actions: Actions<'_> = encoded.deserialize().expect("decode").0;
         assert_eq!(actions.0.len(), 2 * MAX_ACTIONS);
         assert_eq!(&actions.0[..2], ["k0", "v"]);

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        20%{?dist}
+Release:        24%{?athanor_content}%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
@@ -73,6 +73,25 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+- Landlock grants the bar's writes by descriptors athanor_unit::dirs opened and checked
+  (#1052): a directory that is a link or another user's is left out with a warning, and the
+  launch directory and dconf are private_dir's, mode 0700.
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+- Watch the windows at start: athanor-sulphur-client binds the window globals only for a
+  client that asks for them, and this one reads the window list and the windows of the
+  notifications.
+
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
+- Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
+  binaries, user unit, session script and data directory.
+
+* Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
+- Under athanor-compositor the tiling switch reads and sets the active workspace's tiling
+  through athanor_workspace_tiling_v1, and is shown there as under cosmic-comp, whose session
+  keeps its workspace extension (doc_bar.md BR3, doc_own_stack.md OS5 and OS12, #894).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-20
 - The accessibility menu's screen reader row reads and writes the GNOME key
   screen-reader-enabled in place of org.a11y.Status.ScreenReaderEnabled, which

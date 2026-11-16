@@ -90,6 +90,52 @@ class CssTest(unittest.TestCase):
         self.assertRegex(generate.css(self.tokens, "light"), r"@define-color ath_d1 rgba\(\d+, \d+, \d+, 0\.5\);")
 
 
+class SalTest(unittest.TestCase):
+    """The toolkit's theme (doc_visual_language.md VL10)."""
+
+    def setUp(self):
+        self.tokens = tk.load()
+        self.rust = generate.sal_rs(self.tokens)
+
+    def test_the_tint_is_derived_from_the_factory_accent(self):
+        sal = tk.sal(self.tokens)
+        # #9141ac in HSL: hue 285.2, saturation 44.9 %.
+        self.assertEqual((sal["accent"]["hue"], sal["accent"]["saturation"]), (285, 45))
+        self.assertEqual(self.tokens["accent"]["hue"], 231, "the GTK shell keeps its tint")
+
+    def test_the_factory_accent_is_the_toolkits_acc(self):
+        self.assertIn("pub const LIGHT: Palette = Palette {\n    acc: [145, 65, 172, 255],", self.rust)
+
+    def test_every_table_becomes_a_module(self):
+        for table in ("font", "radius", "size", "space", "motion", "material"):
+            self.assertIn(f"pub mod {table} {{", self.rust)
+        self.assertIn("pub const DOCK: f32 = 22.0;", self.rust)
+        self.assertIn("pub const TITLE_1: Step = Step { scale: 1.81, weight: 800 };", self.rust)
+        self.assertIn("pub const NORMAL: Duration = Duration::from_millis(200);", self.rust)
+        self.assertIn("pub const CURVE: [f32; 4] = [0.25, 0.46, 0.45, 0.94];", self.rust)
+
+    def test_the_dark_ink_is_the_tokens_not_the_factory_accents_ink(self):
+        # The factory accent takes white, so the dark palette's acc_ink is no dark ink.
+        self.assertIn("pub const DARK_INK: [u8; 4] = [32, 13, 38, 255];", self.rust)
+
+    def test_every_variant_is_a_palette(self):
+        for variant in tk.VARIANTS:
+            self.assertIn(f"pub const {variant.upper().replace('-', '_')}: Palette", self.rust)
+
+    def test_a_duration_that_is_not_whole_milliseconds_is_refused(self):
+        tokens = {**self.tokens, "sal": {**self.tokens["sal"],
+                                         "motion": {**self.tokens["sal"]["motion"], "fast": 0.1}}}
+        with self.assertRaises(ValueError):
+            generate.sal_rs(tokens)
+
+    def test_the_gtk_stylesheets_do_not_read_the_toolkits_tables(self):
+        themed = tk.sal(self.tokens)
+        for variant in tk.VARIANTS:
+            self.assertEqual(generate.css(self.tokens, variant), generate.css(
+                {**self.tokens, "sal": {}}, variant), variant)
+            self.assertNotEqual(tk.colors(themed, variant), tk.colors(self.tokens, variant), variant)
+
+
 class CosmicTest(unittest.TestCase):
     def test_inputs_are_the_five_builder_keys_per_mode(self):
         inputs = json.loads(generate.cosmic_inputs(tk.load()))

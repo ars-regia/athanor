@@ -152,7 +152,7 @@ stage_unit() {
 # either does or does not make %t/athanor writable), so a plain SSH mkdir on the host proves
 # nothing about it. --setuid/--setgid drop nsenter's root back to the session user before the
 # mkdir, since RuntimeDirectoryMode=0700 makes the directory owned by that user, not root.
-# This is what launch() (athanor-compositor-client) relies on for a started application's
+# This is what launch() (athanor-sulphur-client) relies on for a started application's
 # Wayland security context.
 runtime_athanor_writable() {
     local uid

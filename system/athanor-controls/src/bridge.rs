@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 use athanor_services::Buses;
-use gtk4::glib;
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
 

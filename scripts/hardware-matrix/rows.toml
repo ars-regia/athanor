@@ -98,7 +98,7 @@ machines = ["desktop", "laptop"]
 [[row]]
 id = "compositor"
 area = "shell"
-title = "The session runs on the own compositor (athanor-compositor)"
+title = "The session runs on the own compositor (athanor-sulphur)"
 check = "compositor"
 machines = ["desktop", "laptop"]
 since = "1.0"

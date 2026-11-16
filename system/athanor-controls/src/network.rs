@@ -11,7 +11,7 @@ use std::rc::{Rc, Weak};
 
 use athanor_services::network::{
     self, Link, Network, NetworkCommand, NetworkState, PasswordPage, PasswordPrompt, Security, Vpn,
-    Wifi,
+    Wifi, Zeroizing,
 };
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
@@ -43,7 +43,7 @@ enum Ask {
 
 /// A request of NetworkManager the person has not answered.
 struct Pending {
-    reply: oneshot::Sender<Option<String>>,
+    reply: oneshot::Sender<Option<Zeroizing<String>>>,
     view: Weak<View>,
 }
 
@@ -177,7 +177,7 @@ impl Service {
             return;
         };
         // The model has stopped waiting when the send fails.
-        pending.reply.send(password.map(str::to_owned)).ok();
+        pending.reply.send(password.map(|p| Zeroizing::new(p.to_owned()))).ok();
     }
 
     /// The model no longer waits for request `serial`: closes its page.
@@ -561,7 +561,7 @@ impl View {
             match ask {
                 Ask::Join { network } => service.send(NetworkCommand::Join {
                     network,
-                    password: Some(password.to_string()),
+                    password: Some(Zeroizing::new(password.to_string())),
                 }),
                 Ask::Secrets => service.answer(Some(password.as_str())),
             }

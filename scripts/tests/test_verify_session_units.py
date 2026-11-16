@@ -187,7 +187,7 @@ class SessionUnitsTest(unittest.TestCase):
     def test_the_compositor_is_started_by_its_script_alone_and_never_restarts(self):
         compositor = (
             "[Unit]\nPartOf=graphical-session.target\n"
-            "[Service]\nType=notify\nExecStart=/usr/bin/athanor-compositor --drm\n"
+            "[Service]\nType=notify\nExecStart=/usr/bin/athanor-sulphur --drm\n"
         )
         table = dict(TABLE, **{"x-compositor.service": ("compositor", False, "script")})
         target = TARGET.replace("Wants=x-wanted.service", "Wants=x-compositor.service")

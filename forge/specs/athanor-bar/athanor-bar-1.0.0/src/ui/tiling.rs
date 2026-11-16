@@ -1,11 +1,12 @@
 //! The tiling switch (doc_bar.md, BR3), for the active workspace of this surface's output.
-//! Hidden until the compositor reports the workspace's mode.
+//! Hidden until the compositor reports the workspace's mode: cosmic-comp through its workspace
+//! extension, athanor-sulphur through a manager bound only by who watches the tiling.
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use athanor_bar::tiling::{self, Tiling, WorkspaceView};
-use athanor_compositor_client::WorkspaceId;
+use athanor_sulphur_client::WorkspaceId;
 use gtk4::glib;
 use gtk4::prelude::*;
 
@@ -59,7 +60,9 @@ impl ModuleUi for TilingUi {
 }
 
 pub fn new(bar: &Rc<Bar>, connector: Option<&str>) -> Option<Box<dyn ModuleUi>> {
-    bar.client()?;
+    if let Err(err) = bar.client()?.watch_tiling() {
+        tracing::warn!("the tiling of the workspaces is not followed: {err}");
+    }
     let icon = gtk4::Image::from_icon_name("view-grid-symbolic");
     let popup = Popup::new(bar, &icon, &tr("Tiling"));
     let (row, switch) = switch_row(&tr("Tile windows"));

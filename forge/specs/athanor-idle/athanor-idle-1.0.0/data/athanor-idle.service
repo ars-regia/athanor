@@ -1,0 +1,52 @@
+[Unit]
+Description=Athanor idle daemon
+# A guard (doc_session.md, SN6 and SN7): it restarts for as long as the session lasts, and
+# while it is down the session runs without automatic blank, lock or suspend. It connects to
+# the compositor, so it starts after the readiness gate and requires it (SN3, SD17).
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+# Ready once it owns org.freedesktop.ScreenSaver (SN4). NotifyAccess=main lets the program
+# send RESTART_RESET=1 after a healthy run, as SN6 asks of every guard.
+Type=dbus
+BusName=org.freedesktop.ScreenSaver
+NotifyAccess=main
+ExecStart=/usr/bin/athanor-idle
+# Bounded as athanor-shelld is: the session target waits for this unit (doc_session.md SN6).
+TimeoutStartSec=10s
+Restart=always
+RestartSec=100ms
+RestartSteps=5
+RestartMaxDelaySec=30s
+Slice=session.slice
+
+# inhibitors.json survives a restart (SN7), so the directory outlives the stop and leaves with
+# $XDG_RUNTIME_DIR. "dconf" because GSettings maps dconf's shared-memory flag beneath
+# %t/dconf read-write to learn that a key changed, as xdg-desktop-portal-athanor.service
+# explains; Landlock grants the same path (SD17). Both private, as the grants require
+# (athanor_unit::dirs::private_dir).
+RuntimeDirectory=athanor-idle dconf
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Wayland, both D-Buses and journald, all over Unix sockets.
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=athanor-session.target

@@ -1,0 +1,194 @@
+# A test catalog of the rig, German for length (doc_shell.md, SH13), for the control
+# center's cases; the page strings are those of bar-de.po.
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-control-center test catalog\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "{device}, in use"
+msgstr "{device}, in Verwendung"
+
+msgid "Output"
+msgstr "Ausgabe"
+
+msgid "Output volume"
+msgstr "Ausgabelautstärke"
+
+msgid "Mute output"
+msgstr "Ausgabe stummschalten"
+
+msgid "Input"
+msgstr "Eingabe"
+
+msgid "Input volume"
+msgstr "Eingabelautstärke"
+
+msgid "Mute microphone"
+msgstr "Mikrofon stummschalten"
+
+msgid "Previous track"
+msgstr "Vorheriger Titel"
+
+msgid "Pause"
+msgstr "Pause"
+
+msgid "Next track"
+msgstr "Nächster Titel"
+
+msgid "Play"
+msgstr "Wiedergabe"
+
+msgid "{percent} %"
+msgstr "{percent} %"
+
+msgid "{hours} h {minutes} min left"
+msgstr "Noch {hours} h {minutes} min"
+
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min bis voll"
+
+msgid "Charging"
+msgstr "Wird geladen"
+
+msgid "Fully charged"
+msgstr "Vollständig geladen"
+
+msgid "Power saver"
+msgstr "Energiesparen"
+
+msgid "Performance"
+msgstr "Leistung"
+
+msgid "Balanced"
+msgstr "Ausgewogen"
+
+msgid "Power mode"
+msgstr "Energiemodus"
+
+msgid "Screen brightness"
+msgstr "Bildschirmhelligkeit"
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "Nearby devices"
+msgstr "Geräte in der Nähe"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Pair"
+msgstr "Koppeln"
+
+msgid "{device}, connected"
+msgstr "{device}, verbunden"
+
+msgid "Pair with {device}?"
+msgstr "Mit {device} koppeln?"
+
+msgid "Pair only if {device} shows the same number."
+msgstr "Nur koppeln, wenn {device} dieselbe Zahl zeigt."
+
+msgid "Pairing with {device}"
+msgstr "Kopplung mit {device}"
+
+msgid "Type this code on {device}, then press Enter there."
+msgstr "Diesen Code auf {device} eingeben und dort die Eingabetaste drücken."
+
+msgid "Network"
+msgstr "Netzwerk"
+
+msgid "Wi-Fi"
+msgstr "WLAN"
+
+msgid "Airplane mode"
+msgstr "Flugmodus"
+
+msgid "The password was not accepted. Try again."
+msgstr "Das Passwort wurde nicht akzeptiert. Bitte erneut versuchen."
+
+msgid "Connect"
+msgstr "Verbinden"
+
+msgid "Wired: connected"
+msgstr "Kabel: verbunden"
+
+msgid "Wired: not connected"
+msgstr "Kabel: nicht verbunden"
+
+msgid "{network}, connected"
+msgstr "{network}, verbunden"
+
+msgid "{network}, connecting"
+msgstr "{network}, wird verbunden"
+
+msgid "{network}, needs Settings"
+msgstr "{network}, erfordert Einstellungen"
+
+msgid "{network}, secured"
+msgstr "{network}, gesichert"
+
+msgid "Password for {network}"
+msgstr "Passwort für {network}"
+
+msgid "The action did not complete."
+msgstr "Die Aktion wurde nicht abgeschlossen."
+
+msgid "Settings"
+msgstr "Einstellungen"
+
+msgid "{percent}%"
+msgstr "{percent} %"
+
+msgid "Battery {level}"
+msgstr "Akku {level}"
+
+msgid "Cover"
+msgstr "Albumcover"
+
+msgid "Media player"
+msgstr "Medienwiedergabe"
+
+msgid "Seek"
+msgstr "Spulen"
+
+msgid "Media"
+msgstr "Medien"
+
+msgid "Control center"
+msgstr "Kontrollzentrum"
+
+msgid "Back"
+msgstr "Zurück"
+
+msgid "Off"
+msgstr "Aus"
+
+msgid "On"
+msgstr "Ein"
+
+msgid "Sound"
+msgstr "Ton"
+
+msgid "Power"
+msgstr "Ein/Aus"
+
+msgid "The {name} page is not available yet."
+msgstr "Die Seite {name} ist noch nicht verfügbar."
+
+msgid "Dark mode"
+msgstr "Dunkelmodus"
+
+msgid "Brightness"
+msgstr "Bildschirmhelligkeit"
+
+msgid "Connecting"
+msgstr "Verbindung wird hergestellt"
+
+msgid "Open the {name} page"
+msgstr "Die Seite {name} öffnen"

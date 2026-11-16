@@ -140,7 +140,7 @@ fn candidate_class<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &St
     };
     // The copy goes to a sibling and replaces the stored attestation only once complete: skopeo
     // leaves a partial directory behind when it fails, and a registry that fails on purpose must
-    // not erase an attestation that verified. The copy is bounded neither in size nor in time: #658.
+    // not erase an attestation that verified. The fetch is bounded in size and in time (#658).
     let partial = dir.with_extension("partial");
     let fetched = remove_dir(&partial).map_err(|err| tracing::error!(%err, "cannot clear an earlier partial attestation copy")).and_then(|()| {
         ctx.tools.fetch_attestation(repository, digest, &partial).map_err(|failure| {

@@ -9,12 +9,14 @@ so a run that did not select the specs merges nothing. The script reads the
 changed files from the GitHub API (status, path and patch of each), checks every changed line
 against the bot's shape, waits for the required checks of the branch protection and merges
 at HEAD_SHA, so a push after the check makes the merge fail instead of landing unchecked.
-Nothing stays armed: a pull request the script does not merge waits for a person.
+On a base with a merge queue (`iso-v0`, ADR-0137) the merge is a queue entry at HEAD_SHA, and
+the queue merges it only if its merge group passes. Nothing else stays armed: a pull request
+the script does not merge, or one the queue removes, waits for a person.
 
 spec   — branch chore/update-specs-zero-trust (forge-util-update-specs.yml); only modified
          *.spec and SOURCES/sources.sha256 of the packages forge/upstream-watch.json lists
          (read from the checkout, the base branch); only Version
-         lines (numeric), Release lines (N%{?dist}) and manifest entries; every Version keeps
+         lines (numeric), Release lines (N%{?athanor_content}%{?dist}) and manifest entries; every Version keeps
          its leftmost non-zero component (1.6.0 -> 1.7.1 merges, 1.9 -> 2.0 and 0.3 -> 0.4 do
          not).
 system — branch bump/system-* with label system-bump (kernel-bump.yml, system group); only
@@ -61,7 +63,7 @@ CHECK_WORKFLOWS = {
 SPECS_JOB = "specs / Spec gate"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
-RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
+RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?athanor_content\}%\{\?dist\}")
 MANIFEST = re.compile(rf"{HEX64}  {NAME}")
 LOCK_ENTRY = re.compile(rf"{HEX64}  (https://\S+)")
 FROM = re.compile(rf"FROM ([^\s@]+)@sha256:{HEX64} AS (\S+)")
@@ -191,7 +193,7 @@ def check(kind, pr, sha, gh):
         raise Refused(f"head moved past the checked commit {sha}")
     if not BRANCH[kind].fullmatch(view["headRefName"]):
         raise Refused(f"branch {view['headRefName']} is not the {kind} bot's")
-    if kind == "system" and "system-bump" not in {l["name"] for l in view["labels"]}:
+    if kind == "system" and "system-bump" not in {ln["name"] for ln in view["labels"]}:
         raise Refused("has no system-bump label")
 
     repo = (
@@ -315,7 +317,7 @@ def main(kind, pr, sha, build, gh=run_gh, merge=merge_gh):
         return 0
     wait_for_required_checks(sha, required_checks(base), gh)
     merge("pr", "merge", pr, "--squash", "--match-head-commit", sha)
-    report(pr, f"merged at {sha} ({kind} bot, the change has the bot's shape)")
+    report(pr, f"merge requested at {sha}, queued if the base has a merge queue ({kind} bot, the change has the bot's shape)")
     return 0
 
 

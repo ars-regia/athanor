@@ -25,34 +25,43 @@ pub const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 pub struct Config {
     /// `$XDG_STATE_HOME/athanor/shelld`: the do-not-disturb switch.
     pub state_dir: PathBuf,
-    pub bar: BarUnit,
+    /// The address of the system bus the bar's admission asks (BR1); `None` is the system's
+    /// own. Not reachable at start, the private interface refuses every caller until it is.
+    pub system_address: Option<String>,
 }
 
-pub async fn start(builder: Builder<'_>, config: Config) -> zbus::Result<Connection> {
+/// `query` builds the second connection, the one the watcher asks the bus through (issue #1035).
+pub async fn start(
+    builder: Builder<'_>,
+    query: Builder<'_>,
+    config: Config,
+) -> zbus::Result<Connection> {
     let dnd = dnd::load(&config.state_dir).map_err(|err| {
         zbus::Error::Failure(format!("cannot read the do-not-disturb switch: {err}"))
     })?;
     let state = Arc::new(Mutex::new(State::new(Store::new(dnd), config.state_dir)));
+    let query = query.build().await?;
+    let bar = BarUnit::new(&query, config.system_address).await?;
     let conn = builder
         .serve_at(
             NOTIFICATIONS_PATH,
             Notifications {
                 state: Arc::clone(&state),
             },
-        )?
+        )
         .serve_at(
             PRIVATE_PATH,
             Private {
                 state,
-                bar: config.bar,
+                bar,
             },
-        )?
-        .serve_at(WATCHER_PATH, Watcher::default())?
+        )
+        .serve_at(WATCHER_PATH, Watcher::new(query))
         .build()
         .await?;
     watcher::follow_owners(&conn).await?;
     for name in [NOTIFICATIONS_NAME, WATCHER_NAME] {
-        conn.request_name_with_flags(name, RequestNameFlags::DoNotQueue.into())
+        conn.request_name_with_flags(name, RequestNameFlags::DO_NOT_QUEUE)
             .await?;
     }
     Ok(conn)

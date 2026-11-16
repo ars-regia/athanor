@@ -39,7 +39,7 @@ MemoryMax=192M
 # one the next time the unit starts. Only the session ending clears it.
 # Under ProtectSystem=strict /run/user is read-only except the unit's own runtime
 # directories: "athanor" is also declared here because launch() creates %t/athanor/<random>
-# for the Wayland security context of a started application (athanor-compositor-client).
+# for the Wayland security context of a started application (athanor-sulphur-client).
 # "dconf" because the accessibility menu's high contrast writes the GNOME key through
 # GSettings, which maps dconf's shared-memory flag beneath %t/dconf read-write, as
 # xdg-desktop-portal-athanor.service explains; every GSettings client of the session shares

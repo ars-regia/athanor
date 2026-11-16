@@ -14,8 +14,8 @@ use std::path::Path;
 pub const LAYER_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
 pub const SIGNATURE_ANNOTATION: &str = "dev.cosignproject.cosign/signature";
 pub const PAYLOAD_TYPE: &str = "cosign container image signature";
-const MAX_MANIFEST: u64 = 1 << 20;
-const MAX_PAYLOAD: u64 = 64 << 10;
+pub(crate) const MAX_MANIFEST: u64 = 1 << 20;
+pub(crate) const MAX_PAYLOAD: u64 = 64 << 10;
 
 /// What one verified signature layer states.
 #[derive(Debug, Clone, PartialEq, Eq)]

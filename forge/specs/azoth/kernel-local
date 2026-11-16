@@ -35,6 +35,10 @@ CONFIG_ZERO_CALL_USED_REGS=y
 # RANDSTRUCT stays NONE as in Fedora: RUST depends on !RANDSTRUCT.
 CONFIG_RANDSTRUCT_NONE=y
 # CONFIG_RANDSTRUCT_FULL is not set
+# No ACS override: since 7.3 the CachyOS tree carries it as PCI_ACS_OVERRIDE, default y.
+# pcie_acs_override= splits IOMMU groups the hardware does not isolate, which breaks the
+# DMA isolation zero-trust relies on (doc_kernel_build.md, section 4).
+# CONFIG_PCI_ACS_OVERRIDE is not set
 CONFIG_MODULE_SIG_FORCE=y
 # External modules (NVIDIA) are trusted through the project module signing certificate
 # compiled into the kernel, whatever the firmware state; retired project keys are

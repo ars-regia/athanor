@@ -91,16 +91,16 @@ pub fn focused_output(activated: Option<&[String]>, outputs: &[Option<String>]) 
         .unwrap_or(0)
 }
 
-/// The write grants of the Landlock ruleset (CC2). Reads are never restricted (a GTK program
-/// cannot name what it reads, `sandbox::restrict_writes`), which covers `/proc` for the
+/// The write grants of the Landlock ruleset (CC2). Reads are never restricted
+/// (`sandbox::restrict_writes`), which covers `/proc` for the
 /// system page, the icon and theme directories, and the artwork files a player names; TCP is
 /// denied separately, which keeps `https:` artwork out.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Grants {
-    /// Directories written below: the control center's own state, what GTK writes at start
-    /// (the bar's list: its runtime directory, dconf, the cache, `/tmp`), the launch sockets,
-    /// and the directories
-    /// of the COSMIC theme that the dark-mode tile writes.
+    /// Directories written below: the control center's own state, its runtime directory,
+    /// dconf's (GSettings maps its shared-memory flag there to read the appearance), the
+    /// cache (fontconfig's), the launch sockets, and the directories of the COSMIC theme that
+    /// the dark-mode tile writes. No `/tmp`: GTK wrote there at start, Sal does not.
     pub write: Vec<PathBuf>,
     /// Device nodes opened for writing.
     pub devices: Vec<PathBuf>,
@@ -116,15 +116,14 @@ pub fn grants(dirs: &Dirs, state: &Path, theme_dirs: &[PathBuf], rfkill: bool) -
         dirs.runtime.join("dconf"),
         launch_dir(dirs),
         dirs.cache.clone(),
-        PathBuf::from("/tmp"),
     ];
     write.extend_from_slice(theme_dirs);
-    // /dev/rfkill is CC8's; /dev/dri is what GDK opens at start, as the bar's ruleset says.
-    let mut devices = Vec::new();
-    if rfkill {
-        devices.push(PathBuf::from(RFKILL));
-    }
-    devices.push(PathBuf::from("/dev/dri"));
+    // /dev/rfkill is CC8's. Sal draws with vello_cpu into shared memory: no DRM node.
+    let devices = if rfkill {
+        vec![PathBuf::from(RFKILL)]
+    } else {
+        Vec::new()
+    };
     Grants { write, devices }
 }
 
@@ -159,7 +158,7 @@ pub const RFKILL: &str = "/dev/rfkill";
 #[cfg(test)]
 mod tests {
     use super::*;
-    use athanor_unit::sandbox;
+    use athanor_unit::{dirs, sandbox};
     use std::ffi::OsString;
 
     #[test]
@@ -246,11 +245,11 @@ mod tests {
     /// The theme directories under `/home/u`, named through the compositor client, which
     /// owns COSMIC's configuration names.
     fn theme_dirs() -> Vec<PathBuf> {
-        athanor_compositor_client::theme::theme_dirs_in(Path::new("/home/u/.config/cosmic"))
+        athanor_sulphur_client::theme::theme_dirs_in(Path::new("/home/u/.config/cosmic"))
     }
 
     #[test]
-    fn the_ruleset_grants_the_state_the_theme_what_gtk_writes_and_two_devices() {
+    fn the_ruleset_grants_the_state_the_theme_the_session_directories_and_rfkill() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
         let theme = theme_dirs();
         let grants = grants(&dirs(), state, &theme, true);
@@ -260,14 +259,13 @@ mod tests {
             "/run/user/1000/dconf",
             "/run/user/1000/athanor",
             "/home/u/.cache",
-            "/tmp",
         ]
         .map(String::from)
         .to_vec();
         expected.extend(paths(&theme));
         assert_eq!(theme.len(), 3, "the theme's mode and its two built variants");
         assert_eq!(paths(&grants.write), expected);
-        assert_eq!(paths(&grants.devices), ["/dev/rfkill", "/dev/dri"]);
+        assert_eq!(paths(&grants.devices), ["/dev/rfkill"], "no DRM node: Sal draws on the CPU");
         assert!(
             !grants
                 .write
@@ -308,7 +306,7 @@ mod tests {
             .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
             .flat_map(str::split_whitespace)
             .collect();
-        for dir in athanor_compositor_client::theme::theme_dirs_in(Path::new("cosmic")) {
+        for dir in athanor_sulphur_client::theme::theme_dirs_in(Path::new("cosmic")) {
             assert!(
                 declared.iter().any(|name| Path::new(name) == dir),
                 "{declared:?} lacks {dir:?}"
@@ -320,31 +318,38 @@ mod tests {
     fn a_machine_without_rfkill_is_granted_no_rfkill_device() {
         let state = Path::new("/home/u/.local/state/athanor/control-center");
         let grants = grants(&dirs(), state, &[], false);
-        assert_eq!(paths(&grants.devices), ["/dev/dri"]);
-        assert_eq!(grants.write.len(), 6, "no theme directory to grant either");
+        assert!(grants.devices.is_empty(), "{:?}", grants.devices);
+        assert_eq!(grants.write.len(), 5, "no theme directory to grant either");
     }
 
     /// The ruleset the grants build is enforceable and confines a thread: a write outside the
-    /// grants is refused, one inside them is not. A thread of its own, since Landlock stays.
+    /// grants is refused, one inside them is not, and a link put at a granted path is not
+    /// followed. A thread of its own, since Landlock stays.
     #[test]
     fn the_ruleset_confines_writes_to_its_grants() {
         let root = std::env::temp_dir().join(format!("athanor-cc-landlock-{}", std::process::id()));
-        let (inside, outside) = (root.join("state"), root.join("elsewhere"));
+        let (inside, outside, link) = (
+            root.join("state"),
+            root.join("elsewhere"),
+            root.join("cache"),
+        );
         std::fs::create_dir_all(&inside).expect("test directory");
         std::fs::create_dir_all(&outside).expect("test directory");
+        std::os::unix::fs::symlink(&outside, &link).expect("a link at a granted path");
         let result = std::thread::spawn({
             let (inside, outside) = (inside.clone(), outside.clone());
             move || {
                 let grants = Grants {
-                    write: vec![inside.clone()],
+                    write: vec![inside.clone(), link],
                     devices: Vec::new(),
                 };
                 let write: Vec<&Path> = grants.write.iter().map(PathBuf::as_path).collect();
+                let write = dirs::existing(&write, dirs::owned_dir);
                 sandbox::restrict_writes(&write, &[]).map_err(|err| err.to_string())?;
                 std::fs::write(inside.join("ok"), "x").map_err(|err| format!("inside: {err}"))?;
                 match std::fs::write(outside.join("no"), "x") {
                     Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
-                    other => Err(format!("outside: {other:?}")),
+                    other => Err(format!("outside, through the link: {other:?}")),
                 }
             }
         })

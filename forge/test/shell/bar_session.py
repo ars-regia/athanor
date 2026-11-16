@@ -38,7 +38,7 @@ registered. --respawn starts the bar again when it is killed with SIGKILL, and r
 
 --fixtures starts system_fixtures.py's services before the bar (NetworkManager, BlueZ, UPower
 and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
-and points the bar at the fake backlight. Session.SetBrightness is logged like the other
+and points the bar and the control center at the fake backlight. Session.SetBrightness is logged like the other
 acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
 A level under 100 is refused as logind refuses a session that is not in the foreground, so
 that a test can see the bar put its slider back.
@@ -50,7 +50,7 @@ layout cases run athanor-dock beside the bar this way, and chooser-e2e the choos
 appends the bar's stderr to /out/$RIG_TAG-<client>.log and each --beside program's to
 /out/$RIG_TAG-<basename>.log, where the checks read the "layout applied" lines.
 
---unit runs the client as its unit would for athanor-compositor's allow-list (doc_own_stack.md
+--unit runs the client as its unit would for athanor-sulphur's allow-list (doc_own_stack.md
 OS4): from /usr/bin/<client>, a copy of /out/bin/<client>, inside the cgroup <client>.service,
 which it joins before it runs, so that the compositor reads that unit when it connects; each
 --beside program does the same as its own unit. It needs
@@ -456,6 +456,7 @@ def main():
         env = {k: v for k, v in env.items() if k != "LD_PRELOAD" and not k.startswith("FAKETIME")}
     if args.fixtures:
         env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
+        env["ATHANOR_CONTROL_CENTER_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
     running = {"bar": start_bar(args.client, env, args.log, args.unit), "shelld": shelld}
     status = {"code": None}
     loop = GLib.MainLoop()

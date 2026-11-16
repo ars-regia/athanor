@@ -34,7 +34,7 @@ use std::time::Duration;
 use athanor_apps::favorites::Store;
 use athanor_apps::Host;
 use athanor_bar::order::{self, Module};
-use athanor_compositor_client::{outputs, Client, Event, Opener};
+use athanor_sulphur_client::{outputs, Client, Event, Opener};
 use athanor_layout::loader::Source;
 use athanor_layout::placement::Output;
 use athanor_layout::preset::{Layout, PanelEdge};
@@ -185,7 +185,13 @@ pub fn start(app: &gtk4::Application, source: Source, favorites_file: Option<Pat
     }
     appearance::load(&display, &Appearance::read());
     let client = match Client::connect(&display) {
-        Ok(client) => Some(client),
+        Ok(client) => {
+            // The window list and the windows of the notifications.
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
         Err(err) => {
             tracing::error!(error = %err, "no compositor client; the modules that need it stay hidden");
             None

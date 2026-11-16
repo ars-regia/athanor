@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 """gallery_gtk.py [--lang en|it] [--rtl] [--page <name>]
 
-doc_own_stack.md, OS10: the GTK 4 twin of athanor-toolkit's gallery
-(system/athanor-toolkit/gallery). It shows the same pages with GTK widgets, from the same
+doc_own_stack.md, OS10: the GTK 4 twin of athanor-sal's gallery
+(system/athanor-sal/gallery). It shows the same pages with GTK widgets, from the same
 strings.tsv, and takes the same command line. What a screen reader is told about it, and how it
 draws, are the references the toolkit's gallery is checked against (rig.sh orca gallery, atspi
-gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start.
+gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start;
+the dialogs page starts with its dialog open, the focus on the dialog's button.
 """
 
 import argparse
@@ -15,13 +16,14 @@ from pathlib import Path
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from cases import GALLERY_PAGES  # noqa: E402
 
 STRINGS = (
     Path(__file__).resolve().parents[3]
-    / "system/athanor-toolkit/gallery/strings.tsv"
+    / "system/athanor-sal/gallery/strings.tsv"
 )
 LANGUAGES = ("en", "it")
 
@@ -60,8 +62,33 @@ def group(title):
     return container
 
 
+# The rows of the lists page, a heading among them every ROWS_PER_HEADING, as the toolkit's.
+ROWS = 50
+ROWS_PER_HEADING = 25
+
+
+def fill_rows(rows, text, first):
+    """The rows numbered from first + 1 into the list box `rows`, each holding its name and a
+    second line and named by the first. A heading opens each ROWS_PER_HEADING rows past the
+    first ones: a row that is neither selectable, activatable nor focusable, as the toolkit's
+    list_heading, so that Tab enters the list at its first row."""
+    for n in range(first + 1, first + ROWS + 1):
+        if n > first + 1 and (n - first - 1) % ROWS_PER_HEADING == 0:
+            last = min(n + ROWS_PER_HEADING - 1, first + ROWS)
+            label = Gtk.Label(label=f"{text['rows']} {n}\u2013{last}", xalign=0)
+            rows.append(Gtk.ListBoxRow(child=label, selectable=False, activatable=False,
+                                       focusable=False))
+        name = f"{text['row']} {n}"
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(Gtk.Label(label=name, xalign=0))
+        column.append(Gtk.Label(label=text["row.detail"], xalign=0))
+        row = Gtk.ListBoxRow(child=column)
+        row.update_property([Gtk.AccessibleProperty.LABEL], [name])
+        rows.append(row)
+
+
 def fill_page(page, container, text):
-    """The widgets of `page`, as system/athanor-toolkit/gallery/src/main.rs adds them."""
+    """The widgets of `page`, as system/athanor-sal/gallery/src/main.rs adds them."""
     if page == "buttons":
         container.append(Gtk.Label(label=text["label"], xalign=0))
         container.append(Gtk.Button(label=text["button"]))
@@ -91,6 +118,9 @@ def fill_page(page, container, text):
         scale.update_property([Gtk.AccessibleProperty.LABEL], [text["slider"]])
         container.append(scale)
     elif page == "lists":
+        # The button comes first: Tab steps through the list's rows, not past them.
+        replace = Gtk.Button(label=text["replace"])
+        container.append(replace)
         scroll = Gtk.ScrolledWindow(
             min_content_height=200,
             max_content_height=200,
@@ -98,11 +128,28 @@ def fill_page(page, container, text):
         )
         rows = Gtk.ListBox()
         rows.update_property([Gtk.AccessibleProperty.LABEL], [text["list"]])
-        for n in range(1, 51):
-            rows.append(Gtk.Label(label=f"{text['row']} {n}", xalign=0))
+        first = [0]
+        fill_rows(rows, text, first[0])
+
+        def again(_):
+            first[0] = ROWS - first[0]
+            rows.remove_all()
+            fill_rows(rows, text, first[0])
+
+        replace.connect("clicked", again)
         scroll.set_child(rows)
         container.append(scroll)
     elif page == "text":
+        container.append(
+            Gtk.Label(
+                label=text["wrap"],
+                xalign=0,
+                wrap=True,
+                max_width_chars=40,
+                lines=3,
+                ellipsize=Pango.EllipsizeMode.END,
+            )
+        )
         view = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR, accepts_tab=False)
         view.get_buffer().set_text(text["notes.text"].replace("\\n", "\n"))
         view.update_property([Gtk.AccessibleProperty.LABEL], [text["notes"]])
@@ -116,8 +163,61 @@ def fill_page(page, container, text):
         )
         scroll.set_child(view)
         container.append(scroll)
+    elif page == "states":
+        # The button takes input once the switch is on.
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        label = Gtk.Label(label=text["enable"], xalign=0, hexpand=True)
+        switch = Gtk.Switch(active=False, valign=Gtk.Align.CENTER)
+        switch.update_property([Gtk.AccessibleProperty.LABEL], [text["enable"]])
+        row.append(label)
+        row.append(switch)
+        container.append(row)
+        button = Gtk.Button(label=text["waiting"], sensitive=False)
+        switch.connect("notify::active", lambda s, _: button.set_sensitive(s.get_active()))
+        container.append(button)
+    elif page == "dialogs":
+        button = Gtk.Button(label=text["dialog.open"])
+        button.connect("clicked", lambda b: open_dialog(b.get_root(), text))
+        container.append(button)
     else:
         raise ValueError(f"no page {page!r}")
+
+
+def open_dialog(parent, text):
+    """The dialog of the dialogs page, as the toolkit's Shell::open_dialog opens one: a modal
+    window of `parent` that reads as a dialog, with a sentence that wraps and a button that
+    closes it, which holds the focus. Escape closes it, as GTK's dialogs."""
+    dialog = Gtk.Window(
+        transient_for=parent,
+        modal=True,
+        title=text["dialog.title"],
+        default_width=360,
+        resizable=False,
+        accessible_role=Gtk.AccessibleRole.DIALOG,
+    )
+    content = Gtk.Box(
+        orientation=Gtk.Orientation.VERTICAL,
+        spacing=18,
+        margin_top=24,
+        margin_bottom=24,
+        margin_start=24,
+        margin_end=24,
+    )
+    content.append(Gtk.Label(label=text["dialog.text"], xalign=0, wrap=True))
+    close = Gtk.Button(label=text["dialog.close"])
+    close.connect("clicked", lambda _: dialog.close())
+    content.append(close)
+    escape = Gtk.ShortcutController()
+    escape.add_shortcut(
+        Gtk.Shortcut(
+            trigger=Gtk.KeyvalTrigger(keyval=Gdk.KEY_Escape, modifiers=0),
+            action=Gtk.CallbackAction.new(lambda *_: dialog.close() or True),
+        )
+    )
+    dialog.add_controller(escape)
+    dialog.set_child(content)
+    dialog.set_focus(close)
+    dialog.present()
 
 
 def present(application, options, text):
@@ -161,6 +261,8 @@ def present(application, options, text):
     window.set_child(content)
     window.set_focus(toggles[pages.index(options.page)])
     window.present()
+    if options.page == "dialogs":
+        open_dialog(window, text)
 
 
 def main(argv):

@@ -53,6 +53,36 @@ class HiddenFailuresTest(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(verify.hidden_failures(line), [1])
 
+    def test_the_constructs_listed_in_801_are_found(self):
+        for line in ("run 2>|/dev/null", "run >| /dev/null 2>&1", "run || { true; }",
+                     "run || { : }", "run || (exit 0)", "run || (true)", "run || echo x; true",
+                     "run || echo x; :",
+                     "run || ( exit 0 ; )", "run || (true; )", "run || echo x; exit 0",
+                     "run || echo x; return 0", "run || echo x; /bin/true",
+                     "run || echo x && true", "run || { echo x; true; }", "run || (echo x; true)",
+                     'run || echo "$(date)"; true', "run || echo ${x}; true",
+                     'run || echo "a (b)"; true'):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [1])
+        for line in ("run || (exit 1)", "run || { echo x; }",
+                     "run || { echo unverified; return 0; }", "run || (echo x; exit 0)", "run || echo x; true_value",
+                     "run || echo x; echo y", "run 2>|\"$log\""):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [])
+
+    def test_an_or_continued_on_the_next_line_is_read_as_one(self):
+        for text in ("run || \\\ntrue", "run || \\\n  { true; }", "run || \\\n  \\\n:",
+                     "run 2>/dev/null || \\\ntrue"):
+            with self.subTest(text=text):
+                self.assertEqual(verify.hidden_failures(text), [1])
+                self.assertEqual(verify.workflow_failures(text), [1])
+        for text in ("run 2>/dev/null || \\", "a\nrun 2>/dev/null || \\"):
+            with self.subTest(text=text):
+                self.assertEqual(verify.hidden_failures(text), [text.count("\n") + 1])
+                self.assertEqual(verify.workflow_failures(text), [text.count("\n") + 1])
+        text = "run || \\\nexit 1\nrun 2>/dev/null\n"
+        self.assertEqual(verify.hidden_failures(text), [3])
+
     def test_a_bogus_here_document_does_not_hide_the_rest(self):
         for first in ("x=$((1<<2))", "read a <<<foo", 'echo "<<EOF"', "(( x = 1<<2 ))",
                       "echo '<<EOF'", "echo \\<<EOF"):
@@ -89,6 +119,26 @@ class HiddenFailuresTest(unittest.TestCase):
         self.assertEqual(verify.hidden_failures("echo $'it\\'s #x' 2>/dev/null"), [1])
         self.assertEqual(verify.hidden_failures("echo $'it\\'s' # 2>/dev/null"), [])
         self.assertEqual(verify.scan_shell("echo $'a\\'<<EOF'\nrun 2>/dev/null\n"), ([2], 0))
+
+    def test_a_kill_probe_is_not_a_hidden_failure(self):
+        for line in ('kill -0 "$pid" 2> /dev/null', "kill -0 $pid 2>/dev/null && x",
+                     "! kill -0 '$p' 2> /dev/null", "until kill -0 1 2> /dev/null; do :; done",
+                     "if kill -0 \"$p\" 2>/dev/null; then", "while kill -0 $p 2>/dev/null; do",
+                     "a && ! kill -0 \"${p}\" 2>/dev/null", "x; kill -0 12 2>/dev/null"):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [])
+        for line in ('kill "$pid" 2> /dev/null', 'kill -0 "$pid" > /dev/null 2>&1',
+                     'kill -0 "$pid" 2> /dev/null || true', "kill -9 $pid 2> /dev/null",
+                     "kill -0 $(x 2>/dev/null) 2>/dev/null", "kill -0 `x 2>/dev/null` 2>/dev/null",
+                     "echo kill -0 $p 2>/dev/null", "my-kill -0 $p 2>/dev/null",
+                     "sudo kill -0 $p 2>/dev/null", "kill -0 $(x 2>/dev/null)",
+                     'kill -0 "$a" "$b" 2> /dev/null'):
+            with self.subTest(line=line):
+                self.assertEqual(verify.hidden_failures(line), [1])
+
+    def test_a_probe_in_a_guest_string_or_a_workflow_is_not_counted(self):
+        self.assertEqual(verify.guest_failures('A = b"kill -0 $p 2>/dev/null;"\n'), ([], []))
+        self.assertEqual(verify.workflow_failures("        kill -0 $p 2>/dev/null"), [])
 
     def test_comments_are_ignored(self):
         text = "# run a 2>/dev/null || true\nrun b # not 2> /dev/null\n    # || true\n"

@@ -43,7 +43,7 @@ def is_echo(line, reference):
 
 
 def answered_a_command(lines, reference, size=3):
-    """Whether Orca spoke a command's answer: under athanor-compositor the walk presses KP_Enter,
+    """Whether Orca spoke a command's answer: under athanor-sulphur the walk presses KP_Enter,
     "where am I", on a button, and Orca says again what it said when the last Tab gave the button
     the focus, between the echoes of the two keys. Without the keyboard monitor (AX4) the key
     goes to the button instead, which opens its menu and says nothing of the kind. `reference`

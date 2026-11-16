@@ -131,6 +131,12 @@ KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha
 # pull request (call-kernel.yml) builds and boots them with the pins. Changed without a kernel pin,
 # they leave the published kernel built from other inputs, which no pull request can check.
 KERNEL_CONFIG_FILES=(forge/specs/azoth/kernel-local forge/specs/azoth/build.sh)
+# The kernel's own patches and configuration fragments: Kernel Build attests them
+# (build-inputs.py) and a pin bump may have to follow the new tree in them (a refreshed or
+# rebased patch, an option the tree introduces). Kernel Build on the pull request builds and
+# boots them, so check-plan accepts them next to the pins when the kernel is not published.
+KERNEL_TREE_FILES=(forge/specs/azoth/patches.list 'forge/specs/azoth/patches/*' forge/specs/azoth/kernel-local forge/specs/azoth/microvm/kernel-local
+  forge/specs/azoth/derived.config forge/specs/azoth/cachyos-protected.sha256 forge/specs/azoth/cachyos-files.list)
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -552,7 +558,7 @@ check_plan() {
   files=$(changed_files "$base" "$head")
   while IFS= read -r file; do
     [[ -n $file ]] || continue
-    matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" || only_kernel_pins=false
+    matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" "${KERNEL_TREE_FILES[@]}" || only_kernel_pins=false
     matches_any "$file" "${NVIDIA_PIN_FILES[@]}" "${NVIDIA_PIN_COMPANIONS[@]}" || only_nvidia_pins=false
   done <<< "$files"
   keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
@@ -567,7 +573,7 @@ check_plan() {
     kernel-missing)
       # only_kernel_pins alone would also be true when the diff moves NVIDIA pins alone: that
       # never explains a missing kernel, so this row requires an actual kernel pin to move too.
-      [[ $only_kernel_pins == true && $other_moved == true ]] || die "azoth:$nvr is not published: a pin bump mixed with other changes cannot be checked, move the pins in their own pull request"
+      [[ $only_kernel_pins == true && $other_moved == true ]] || die "azoth:$nvr is not published: a pin bump mixed with changes outside the kernel's pins, patches and configuration cannot be checked, move the pins in their own pull request"
       gpus='' delta=false
       annotate warning "azoth:$nvr is not published yet: Kernel Build on this pull request proves the kernel and the modules build and boot; the images are built after the merge"
       ;;

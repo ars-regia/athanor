@@ -11,6 +11,10 @@ ExecStart=/usr/local/libexec/athanor-runner/vm.sh
 Restart=always
 RestartSec=10s
 # kernel-build.yml allows a job six hours; a guest that never powers off stops at eight.
+# The limit counts from the guest's boot, idle time included: vm.sh recycles a guest that
+# has taken no job within an hour, so a job starts with about seven hours left, more than
+# the six kernel-build.yml allows. A guest is recycled only once GitHub has removed its
+# registration: while the API cannot be read or refuses the removal, it keeps waiting.
 RuntimeMaxSec=8h
 
 # The runner executes workflow code: nothing of the host is reachable but /dev/kvm, the

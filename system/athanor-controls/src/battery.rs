@@ -7,13 +7,15 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
-use athanor_services::battery::{self, BatteryCommand, BatteryState, Charge, Profiles};
+use athanor_services::battery::{self, BatteryCommand, BatteryState, Profiles};
 use gtk4::accessible::{Property, Relation};
 use gtk4::prelude::*;
 use tokio::sync::mpsc;
 
 use crate::bridge;
-use crate::i18n::{tr, tr_with};
+use crate::i18n::tr;
+use crate::labels::profile_label;
+pub use crate::labels::{note, percent_text};
 use crate::widgets::{expose_choose_action, Failure};
 use crate::Services;
 
@@ -116,47 +118,6 @@ impl Service {
             raw: backlight.raw(percent),
             device: backlight.name,
         });
-    }
-}
-
-/// The charge as the button and the page say it.
-pub fn percent_text(percent: f64) -> String {
-    // At most 100 after `battery::battery`, so the cast cannot truncate.
-    tr_with(
-        "{percent} %",
-        "percent",
-        &(percent.round() as u32).to_string(),
-    )
-}
-
-/// A translated `text` with `{hours}` and `{minutes}` filled in. The callers pass `tr(...)`
-/// with the literal message id, so xgettext finds it.
-fn duration(text: &str, seconds: u64) -> String {
-    let (hours, minutes) = battery::hours_minutes(seconds);
-    text.replace("{hours}", &hours.to_string())
-        .replace("{minutes}", &minutes.to_string())
-}
-
-/// The line under the charge: the time left, the time until full, or the state.
-pub fn note(battery: &battery::Battery) -> Option<String> {
-    match (battery.charge, battery.seconds) {
-        (Charge::Discharging, Some(seconds)) => {
-            Some(duration(&tr("{hours} h {minutes} min left"), seconds))
-        }
-        (Charge::Charging, Some(seconds)) => {
-            Some(duration(&tr("{hours} h {minutes} min until full"), seconds))
-        }
-        (Charge::Charging, None) => Some(tr("Charging")),
-        (Charge::Full, _) => Some(tr("Fully charged")),
-        (Charge::Discharging | Charge::Unknown, _) => None,
-    }
-}
-
-fn profile_label(profile: &str) -> String {
-    match profile {
-        "power-saver" => tr("Power saver"),
-        "performance" => tr("Performance"),
-        _ => tr("Balanced"),
     }
 }
 

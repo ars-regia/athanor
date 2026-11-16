@@ -1,10 +1,10 @@
 #!/usr/bin/python3
-"""toolkit_popup_check.py - the dock plan, task 4: athanor-toolkit's popups against sway on its
+"""toolkit_popup_check.py - the dock plan, task 4: athanor-sal's popups against sway on its
 headless backend.
 
-Runs inside the rig. Starts sway, then `athanor-toolkit-popup` with WAYLAND_DEBUG: one layer
+Runs inside the rig. Starts sway, then `athanor-sal-popup` with WAYLAND_DEBUG: one layer
 surface along the bottom edge, holding a button with a menu and a tooltip. The rig has no pointer
-device, so `athanor-toolkit-pointer` adds a virtual one. From the client's own trace and output:
+device, so `athanor-sal-pointer` adds a virtual one. From the client's own trace and output:
 
 - resting on the button shows its tooltip, an `xdg_popup` of the layer surface without a grab,
   placed under the button's bounds grown by 4 pixels;
@@ -13,7 +13,8 @@ device, so `athanor-toolkit-pointer` adds a virtual one. From the client's own t
 - a click on the layer surface outside the menu closes it, without the compositor's popup_done;
 - a click outside the client closes it through the compositor's popup_done;
 - the secondary button opens it, the down arrow moves past the separator and Return activates
-  the second item; Escape closes the next one; a click activates an item;
+  the second item; Escape closes the next one, and the application hears of an Escape only
+  once no menu is open (Sal's requirement S5); a click activates an item;
 - Shift+F10 on an item asks for a popup of the menu, which the driver refuses, and the menu
   stays open;
 - the output goes with the menu open: the client destroys the popup before its layer surface.
@@ -27,8 +28,8 @@ import sys
 import time
 from pathlib import Path
 
-CLIENT = "/out/bin/athanor-toolkit-popup"
-POINTER = "/out/bin/athanor-toolkit-pointer"
+CLIENT = "/out/bin/athanor-sal-popup"
+POINTER = "/out/bin/athanor-sal-pointer"
 TRACE = Path("/out/toolkit-popup.trace")
 OUTPUT = Path("/out/toolkit-popup.out")
 WIDTH, HEIGHT = 1280, 800
@@ -57,7 +58,7 @@ CONFIGURE = re.compile(
 
 # xdg_positioner's enums.
 TOP, BOTTOM = 1, 2
-SLIDE_X, FLIP_Y = 1, 8
+SLIDE_X, SLIDE_Y, FLIP_Y = 1, 2, 8
 
 
 def popups(lines):
@@ -228,7 +229,8 @@ def main():
             "set_anchor_rect": whole(bx, by, bw, bh),
             "set_anchor": (TOP,),
             "set_gravity": (TOP,),
-            "set_constraint_adjustment": (FLIP_Y | SLIDE_X,),
+            # A menu also slides along its axis, so that one as high as the output stays on it.
+            "set_constraint_adjustment": (FLIP_Y | SLIDE_X | SLIDE_Y,),
         }
         for key, value in expect.items():
             if menu["positioner"].get(key) != value:
@@ -281,6 +283,15 @@ def main():
         subprocess.run([*TYPE, "-k", "Escape"], env=wayland, check=True)
         step(
             "Escape closes it", lambda: made()[4]["destroyed"] and not made()[4]["done"]
+        )
+        if "escape" in printed().split():
+            raise SystemExit(
+                "toolkit_popup_check: the Escape that closed the menu reached the application"
+            )
+        subprocess.run([*TYPE, "-k", "Escape"], env=wayland, check=True)
+        step(
+            "Escape with no menu open reaches the application",
+            lambda: printed().split().count("escape") == 1,
         )
 
         send("click 272")

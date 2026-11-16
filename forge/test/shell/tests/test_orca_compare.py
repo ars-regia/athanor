@@ -1,7 +1,10 @@
 """Unit tests of forge/test/shell/orca_compare.py
 (python3 -B -m unittest discover -s forge/test/shell/tests -v)."""
 
+import contextlib
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -35,6 +38,13 @@ class WalksTest(unittest.TestCase):
         self.assertEqual(len(compare.walk_problems(self.walks("Minimize button."))), 1)
         self.assertEqual(len(compare.walk_problems([])), 1)
         self.assertEqual(len(compare.walk_problems([self.ON, self.OFF])), 1)
+
+    def test_a_key_echo_before_or_after_a_walks_last_line_is_not_part_of_the_walk(self):
+        for echo in ("tab", "tabulazione"):
+            before = [self.ON, "Galleria", echo, "Minimize button.", self.OFF]
+            after = [self.ON, "Galleria", "Minimize button.", echo, self.OFF]
+            with self.subTest(echo=echo):
+                self.assertEqual(compare.walk_problems(before + after), [])
 
     def test_walks_that_speak_nothing_fail(self):
         silent = [self.ON, self.OFF, self.ON, self.OFF]
@@ -110,6 +120,19 @@ class CompareTest(unittest.TestCase):
             ["'Name text': missing", "'Screen reader off.': missing"],
         )
 
+    def test_a_field_and_the_query_the_recipe_types_may_be_heard_as_one_entry_utterance(self):
+        reference = ["Search text", "cc window", "Cerca testo", "cc window"]
+        transcript = ["Search entry cc window", "Cerca campo inserimento cc window"]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Search entry cc window'", lines[0])
+
+    def test_a_field_is_not_joined_to_a_query_the_recipe_does_not_type(self):
+        self.assertEqual(
+            compare.compare(["Search text", "cc terminal"], ["Search entry cc terminal"])[1],
+            ["'Search text': missing", "'cc terminal': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch on switch", "A switch off switch",
@@ -133,6 +156,54 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
             )
+
+    def test_a_control_center_switch_is_heard_as_a_toggle_button_and_a_check_box_is_not(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        lines, failures = compare.compare(
+            ["Mute output off switch", "Wi-Fi on switch", "Silenzia l'uscita non attivo selettore"],
+            ["Mute output toggle button not pressed", "Wi-Fi toggle button pressed",
+             "Silenzia l'uscita pulsante di commutazione non premuto"],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Mute output toggle button not pressed'", lines[0])
+        # A check box of the control center that is none of its switches still fails.
+        reference = "Speakers on switch"
+        self.assertEqual(
+            compare.compare([reference], ["Speakers toggle button pressed"])[1],
+            [f"{reference!r}: missing"],
+        )
+
+    def test_the_vpn_of_the_control_center_fixture_is_heard_as_a_switch(self):
+        lines, failures = compare.compare(
+            ["Office VPN off switch"], ["Office VPN toggle button not pressed"]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Office VPN toggle button not pressed'", lines[0])
+
+    def test_a_control_center_switch_the_catalog_lacks_is_named(self):
+        compare.control_center_labels.cache_clear()
+        try:
+            with self.assertRaisesRegex(LookupError, "no translation of Nowhere"):
+                compare.control_center_labels("Wi-Fi", "Nowhere")
+        finally:
+            compare.control_center_labels.cache_clear()
+
+    def test_the_gallery_strings_are_read_only_for_a_switch_or_a_text_area(self):
+        # Another surface's walk passes without the file; a gallery's fails with its name.
+        compare.gallery_labels.cache_clear()
+        moved = compare.STRINGS
+        compare.STRINGS = moved.with_name("moved.tsv")
+        try:
+            self.assertEqual(compare.compare(REFERENCE, REFERENCE)[1], [])
+            with self.assertRaises(FileNotFoundError):
+                compare.compare(["A switch on switch"], ["A switch toggle button pressed"])
+        finally:
+            compare.STRINGS = moved
+            compare.gallery_labels.cache_clear()
+
+    def test_a_missing_key_of_the_gallery_strings_is_named(self):
+        with self.assertRaisesRegex(LookupError, "no key nowhere"):
+            compare.gallery_labels("switch", "nowhere")
 
     def test_a_label_that_ends_in_text_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Sample text"], ["Sample text"])[1], [])
@@ -165,6 +236,24 @@ class CompareTest(unittest.TestCase):
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/orca"
 
 
+class SecondLineTest(unittest.TestCase):
+    """A focused list row that holds more labels than its name is read with them: Orca 49 speaks
+    the row's name, then each label its name does not repeat (_generate_descendants), which a
+    label offers only through AT-SPI's Text interface. The gallery's lists page pins it."""
+
+    def test_the_gallery_walk_reads_the_first_rows_second_line(self):
+        for lang, golden, row, line in (
+            ("en", "orca-gallery.txt", "Row 1", "A second line"),
+            ("it", "orca-gallery-it.txt", "Riga 1", "Una seconda riga"),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                self.assertIn(row, reference)
+                self.assertEqual(reference[reference.index(row) + 1], line)
+                spoken = [u for u in reference if u != line]
+                self.assertEqual(compare.compare(reference, spoken)[1], [f"{line!r}: missing"])
+
+
 class HiddenTest(unittest.TestCase):
     """doc_own_stack.md, decision 28 item 3: under the own compositor the buttons it hides are
     exempt, each with the decision and its control's issue, from golden_report.exemptions."""
@@ -180,31 +269,25 @@ class HiddenTest(unittest.TestCase):
                 self.assertEqual(failures, [], (surface, lang))
                 self.assertEqual(sum(" hidden; decision 28 hides " in line for line in lines), 2)
 
-    def test_the_bar_walk_exempts_the_tiling_button_it_lacks(self):
+    def test_the_bar_walk_under_the_own_compositor_speaks_the_tiling_button(self):
+        # athanor-sulphur serves athanor_workspace_tiling_v1, so the bar shows its tiling
+        # button there as under cosmic-comp: only the buttons decision 28 hides are exempt.
         for lang, golden in (("en", "orca-bar.txt"), ("it", "orca-bar-it.txt")):
             with self.subTest(lang=lang):
                 reference = (GOLDEN / golden).read_text().splitlines()
-                exempt = compare.own_exemptions("float", "-", lang)
-                absent = {f"{name} {compare.BUTTON[lang]}" for name in exempt}
-                self.assertEqual(len(absent), 3)
-                spoken = [u for u in reference if u not in absent]
-                lines, failures = compare.compare(reference, spoken, exempt, lang)
-                self.assertEqual(failures, [])
-                self.assertIn(
-                    f"'{compare.TILING[lang]} {compare.BUTTON[lang]}': hidden; "
-                    "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)",
-                    lines,
-                )
-                self.assertEqual(
-                    compare.compare(reference, reference, exempt, lang)[1][2:],
-                    [
-                        f"'{compare.TILING[lang]} {compare.BUTTON[lang]}': spoken, but exempt: "
-                        "the bar lacks the tiling button, which needs athanor_workspace_tiling_v1 (#739)"
-                    ],
-                )
-
-    def test_a_walk_with_no_bar_exempts_no_tiling_button(self):
-        self.assertNotIn("Tiling collapsed", compare.own_exemptions(None, "visible", "en"))
+                hidden = {f"{name} {compare.BUTTON[lang]}" for name in gr.exemptions("float", "-", lang)}
+                tiling = {"en": "Tiling collapsed button", "it": "Affiancamento contratto pulsante"}[lang]
+                self.assertIn(tiling, reference)
+                spoken = [u for u in reference if u not in hidden]
+                with tempfile.TemporaryDirectory() as tmp:
+                    ref, said = Path(tmp) / "reference.txt", Path(tmp) / "transcript.txt"
+                    ref.write_text("\n".join(reference) + "\n")
+                    own = ["--own-compositor", "float", "-", lang]
+                    for transcript, code in ((spoken, 0), ([u for u in spoken if u != tiling], 1)):
+                        said.write_text("\n".join(transcript) + "\n")
+                        with contextlib.redirect_stdout(io.StringIO()), \
+                                contextlib.redirect_stderr(io.StringIO()):
+                            self.assertEqual(compare.main([str(ref), str(said), *own]), code)
 
     def test_an_exemption_for_a_spoken_or_absent_button_fails(self):
         reference = (GOLDEN / "orca-dock.txt").read_text().splitlines()
@@ -223,6 +306,52 @@ class HiddenTest(unittest.TestCase):
                 "exemption 'Workspaces button' names no utterance of the reference",
             ],
         )
+
+
+class FocusReturnTest(unittest.TestCase):
+    """The line Orca says when the focus returns from the gallery's dialog (#1123)."""
+
+    RETURN = ["Chiudi pulsante", "spazio", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+    HEARD = ["Chiudi pulsante", "spazio", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+
+    def setUp(self):
+        # The gallery's strings, as its strings.tsv holds them.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        strings = Path(folder.name) / "strings.tsv"
+        strings.write_text("title\tGallery\tGalleria\ndialog.close\tClose\tChiudi\n", encoding="utf-8")
+        moved = compare.STRINGS
+        compare.STRINGS = strings
+        compare.gallery_labels.cache_clear()
+        self.addCleanup(compare.gallery_labels.cache_clear)
+        self.addCleanup(setattr, compare, "STRINGS", moved)
+
+    def test_the_frame_title_after_a_dialog_close_is_heard_as_the_title(self):
+        lines, failures = compare.compare(self.RETURN, self.HEARD)
+        self.assertEqual(failures, [])
+        self.assertIn(f"'Galleria cornice': spoken as 'Galleria'; note: {compare.FOCUS_RETURN}", lines)
+
+    def test_the_same_line_outside_a_dialog_return_fails(self):
+        reference = ["Lettore schermo attivo.", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+        transcript = ["Lettore schermo attivo.", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(reference, transcript)[1], ["'Galleria cornice': missing"])
+        # A line that also follows something else is not covered by its return either.
+        self.assertEqual(
+            compare.compare(reference + self.RETURN, transcript + self.HEARD)[1],
+            ["'Galleria cornice': missing"],
+        )
+
+    def test_the_title_heard_elsewhere_than_after_the_dialog_close_fails(self):
+        # The gallery says its title as a walk starts; that is not the focus's return.
+        transcript = ["Galleria", "Chiudi pulsante", "spazio", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(self.RETURN, transcript)[1], ["'Galleria cornice': missing"])
+
+    def test_another_missing_word_after_a_dialog_close_fails(self):
+        for line in ("Galleria finestra", "Pagine cornice", "Gallery cornice"):
+            with self.subTest(line=line):
+                reference = ["Chiudi pulsante", "spazio", line]
+                transcript = ["Chiudi pulsante", "spazio", line.split()[0]]
+                self.assertEqual(compare.compare(reference, transcript)[1], [f"{line!r}: missing"])
 
 
 if __name__ == "__main__":

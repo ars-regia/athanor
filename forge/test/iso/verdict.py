@@ -57,8 +57,11 @@ picture says it started *correctly*, and the second question is not one this scr
 answer.
 """
 
+import hashlib
 import json
+import os
 import pathlib
+import re
 import sys
 
 # A serial getty is not a greeter, and neither is greetd starting. The getty comes up on
@@ -113,6 +116,33 @@ BOOT_CHECKS = (
     ("secure-boot", "secureboot-enabled"),
 )
 BOOTS = (("upgraded-", "on the candidate"), ("rolled-back-", "after GoBack()"))
+
+
+BOOTED_LAYERS = re.compile(rb"BOOTED_LAYERS (sha256:[0-9a-f]{64})")
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def layers_digest(diff_ids: list[str]) -> str:
+    """The digest of an image's layers: its `rootfs.diff_ids` in order, one per line. The
+    guest (BOOTED_PROBE) and run_iso_test.sh (jq and sha256sum on the registry config)
+    compute the same. Layer digests are those of the uncompressed layers, so they survive
+    what the ISO build does to the manifest and the config (issue 402)."""
+    return "sha256:" + hashlib.sha256("".join(f"{d}\n" for d in diff_ids).encode()).hexdigest()
+
+
+def check_booted_layers(serial: bytes, expected: str) -> tuple[bool, str, str | None]:
+    """Whether the image the installed system booted has the layers of the image the ISO
+    was built from. `serial` is the console log, where BOOTED_PROBE of console.py leaves
+    BOOTED_LAYERS. A mismatch, no answer, and BOOTED_UNREADABLE all fail. Returns the pass,
+    the report text and the booted layers digest when one was read."""
+    answers = BOOTED_LAYERS.findall(serial)
+    if not answers:
+        unreadable = b"BOOTED_UNREADABLE" in serial
+        return False, "UNREADABLE, the guest found no layers" if unreadable else "NO ANSWER", None
+    booted = answers[-1].decode()
+    if booted != expected:
+        return False, f"MISMATCH, booted layers {booted}, expected {expected}", booted
+    return True, f"layers {booted}", booted
 
 
 def read_phases(path: pathlib.Path) -> dict[str, int]:
@@ -180,6 +210,27 @@ def main() -> int:
     lines.append(f"- btrfs compression karg: {karg if karg else 'NO'}")
     origin_text = origin or ("unreadable (origin-unreadable)" if "origin-unreadable" in phases else "NO")
     lines.append(f"- follows :stable, signed: {origin_text}")
+    # The layers of the image the ISO was built from (run_iso_test.sh resolves them from the
+    # registry config of ISO_DIGEST). Both are empty in the upgrade case, whose ISO is the
+    # previous :stable's and whose image the run does not know: that is said, not skipped
+    # in silence.
+    expected_digest = os.environ.get("ATHANOR_ISO_DIGEST", "")
+    expected_layers = os.environ.get("ATHANOR_ISO_LAYERS", "")
+    if bool(expected_digest) != bool(expected_layers) or not all(
+        DIGEST.fullmatch(x) for x in (expected_digest, expected_layers) if x
+    ):
+        print("ATHANOR_ISO_DIGEST and ATHANOR_ISO_LAYERS go together, as digests", file=sys.stderr)
+        return 2
+    booted_ok, booted_layers = None, None
+    if expected_digest:
+        booted_ok, booted_text, booted_layers = check_booted_layers(
+            log.read_bytes() if log.exists() else b"", expected_layers
+        )
+        lines.append(f"- booted the image the ISO was built from ({expected_digest}): {booted_text}")
+    else:
+        lines.append(
+            "- booted the digest the ISO was built from: skipped (upgrade case, ISO digest not known)"
+        )
     lines.append(f"- greeter reached: {greeter if greeter else 'NO'}")
     lines.append(f"- session started: {session if session else 'NO'}")
     lines.append(f"- settings opened: {settings if settings else 'NO'}")
@@ -226,6 +277,8 @@ def main() -> int:
         "mok": mok is not None,
         "no-guest-failure": not failures,
     }
+    if booted_ok is not None:
+        checks["booted-layers"] = booted_ok
     if secure_boot_required:
         checks["mok"] = mok == "mok-enrolled"
         checks["secure-boot"] = secure_boot == "secureboot-enabled"
@@ -243,7 +296,13 @@ def main() -> int:
     report = "\n".join(lines) + "\n"
 
     (out / "verdict.md").write_text(report)
-    (out / "verdict.json").write_text(json.dumps({"pass": ok, "checks": checks}, indent=2) + "\n")
+    record = {"pass": ok, "checks": checks, "image": None}
+    if expected_digest:
+        record["image"] = {
+            "manifest_digest": expected_digest,
+            "layers": {"expected": expected_layers, "booted": booted_layers},
+        }
+    (out / "verdict.json").write_text(json.dumps(record, indent=2) + "\n")
     print(report)
     return 0 if ok else 1
 
