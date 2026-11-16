@@ -957,6 +957,8 @@ pub struct Ui {
     /// items are the old ones.
     pub(crate) stale_popup: bool,
     pub(crate) focus: Option<WidgetId>,
+    /// The focus given without its ring, until a key is pressed: see [`Ui::focus_quietly`].
+    pub(crate) quiet_focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     pub(crate) title_bar: Option<WidgetId>,
     /// A modal dialog's widgets: see [`Ui::set_dialog`].
@@ -1014,6 +1016,7 @@ impl Ui {
             resizable: true,
             stale_popup: false,
             focus: None,
+            quiet_focus: None,
             text: TextContext::default(),
             title_bar: None,
             modal: false,
@@ -2046,6 +2049,23 @@ impl Ui {
         }
     }
 
+    /// Focuses `id` without drawing its ring until a key is pressed, as GTK focuses a window's
+    /// first control at map and shows the ring once the keyboard is used (AX7; AX8's
+    /// `:focus-visible`). Moved elsewhere, the focus shows its ring as usual.
+    pub(crate) fn focus_quietly(&mut self, id: WidgetId) {
+        self.set_focus(Some(id));
+        self.quiet_focus = self.focus.filter(|&focus| focus == id);
+    }
+
+    /// Focuses `id`, a rebuilt surface's counterpart of `old`'s focus, without its ring while
+    /// `old`'s focus had none yet (AX8): the rebuild does not show what no key has asked for.
+    pub fn carry_focus(&mut self, old: &Ui, id: Option<WidgetId>) {
+        match id {
+            Some(id) if old.quiet_focus.is_some() => self.focus_quietly(id),
+            _ => self.set_focus(id),
+        }
+    }
+
     /// Moves the focus to `to`. A field that loses it ends its input method's composition: the
     /// input method sends a preedit only for the focused field, so another would stay shown.
     fn move_focus(&mut self, to: Option<WidgetId>) {
@@ -2054,6 +2074,7 @@ impl Ui {
         }
         self.end_composition();
         self.focus = to;
+        self.quiet_focus = None;
     }
 
     /// Ends the input method's composition in the focused field, without its text, as when the
@@ -3132,6 +3153,7 @@ impl Ui {
     /// shows the input method's preedit: the input method's to cancel, as GTK's input method
     /// filters keys before a dialog's bindings.
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        self.quiet_focus = None;
         if key == Key::Escape && self.modal {
             return (!self.composing()).then_some(Event::Window(WindowButton::Close));
         }

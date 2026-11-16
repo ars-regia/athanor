@@ -361,7 +361,7 @@ impl Dock {
             ui.min_height = current.min_height;
         }
         if keep_focus {
-            ui.set_focus(current.focus());
+            ui.carry_focus(current, current.focus());
         }
         *current = ui;
         let Some(out) = self.outs.get_mut(&id) else {

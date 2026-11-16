@@ -1071,7 +1071,7 @@ pub fn paint<C: Canvas>(
                 ctx.pop_clip();
             }
         }
-        if focus == Some(id) {
+        if focus == Some(id) && ui.quiet_focus != Some(id) {
             // A list row's and a menu item's ring stays inside it, where the list's or menu's
             // edge and a scroll's viewport do not cut it. A tile's follows its larger corners.
             let parent = ui.widgets[id].parent.map(|p| &ui.widgets[p].kind);
@@ -1424,6 +1424,26 @@ mod tests {
         let band = (0..(t.focus_width as usize + 3)).map(|dx| r.x + dx as f32);
         let inside = band.filter(|&x| at(x, y) == t.focus.0.to_vec()).count();
         assert!(inside > 0, "the ring is drawn inside the item at {r:?}");
+        Ok(())
+    }
+
+    /// The focus the keyboard's entering gives draws no ring until a key is pressed (AX8).
+    #[test]
+    fn a_quiet_focus_draws_its_ring_once_a_key_is_pressed() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Bar", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.layout();
+        let ring = ui.theme.focus.0.to_vec();
+        let has_ring = |ui: &mut crate::Ui| -> Result<bool, Error> {
+            let pixmap = render(ui, 1.0)?;
+            Ok(pixmap.data_as_u8_slice().chunks(4).any(|px| px == ring.as_slice()))
+        };
+        ui.focus_quietly(button);
+        assert_eq!(ui.focus(), Some(button));
+        assert!(!has_ring(&mut ui)?, "no ring before a key");
+        ui.key(crate::widget::Key::Tab);
+        assert_eq!(ui.focus(), Some(button), "Tab comes back round to the one control");
+        assert!(has_ring(&mut ui)?, "the ring once a key is pressed");
         Ok(())
     }
 

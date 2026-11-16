@@ -2948,11 +2948,12 @@ impl KeyboardHandler for App {
     ) {
         let entered = self.shell.find(wl).map(|surface| surface.id);
         self.keyboard_focus = entered;
-        // AX7: a surface opens with the focus on its first control, as GTK's at map.
+        // AX7: a surface opens with the focus on its first control, as GTK's at map, its ring
+        // shown once a key is pressed (AX8).
         if let Some(id) = entered {
             if let Some(first) = self.shell.ui(id).and_then(focus::on_enter) {
                 if let Some(ui) = self.shell.ui_mut(id) {
-                    ui.set_focus(Some(first));
+                    ui.focus_quietly(first);
                 }
             }
         }
