@@ -149,5 +149,27 @@ class RingTest(unittest.TestCase):
         self.assertIsNone(check.ring_note(None, True))
 
 
+class ChildrenTest(unittest.TestCase):
+    class Fake:
+        def __init__(self, kids):
+            self.kids = kids
+
+        def get_child_count(self):
+            return len(self.kids)
+
+        def get_child_at_index(self, index):
+            return self.kids[index]
+
+    def test_a_child_gone_between_the_count_and_the_lookup_is_skipped(self):
+        self.assertEqual(list(check.children(self.Fake(["a", None, "c"]))), ["a", "c"])
+
+    def test_with_extents_skips_a_gone_window(self):
+        app = Fake("application", (0, 0, 0, 0), [Fake("frame", (0, 0, 30, 20)), None])
+        self.assertEqual(
+            [node[:4] for node in check.with_extents(app, FakeAtspi)],
+            [("application", "", True, (0, 0, 0, 0)), ("frame", "", True, (0, 0, 30, 20))],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

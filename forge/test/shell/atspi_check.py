@@ -67,14 +67,22 @@ def problems(nodes, expected, required=(), window=None):
     return found
 
 
+def children(accessible):
+    """The live children of `accessible`. A child that goes away between the count and the
+    lookup reads as None and is skipped: a tree that changes during a walk is expected, and a
+    poll sees the next state on its next pass."""
+    for index in range(accessible.get_child_count()):
+        child = accessible.get_child_at_index(index)
+        if child is not None:
+            yield child
+
+
 def walk(accessible, Atspi, depth=0, out=None):
     out = [] if out is None else out
     states = accessible.get_state_set()
     out.append((accessible.get_role_name(), accessible.get_name() or "", states.contains(Atspi.StateType.SHOWING), depth))
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        if child is not None:
-            walk(child, Atspi, depth + 1, out)
+    for child in children(accessible):
+        walk(child, Atspi, depth + 1, out)
     return out
 
 
@@ -93,10 +101,8 @@ def transcript(accessible, Atspi, depth=0, out=None):
     states = sorted(state.value_nick for state in accessible.get_state_set().get_states())
     out.append({"depth": depth, "role": accessible.get_role_name(), "name": accessible.get_name() or "",
                 "states": states, "value": value_of(accessible, Atspi)})
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        if child is not None:
-            transcript(child, Atspi, depth + 1, out)
+    for child in children(accessible):
+        transcript(child, Atspi, depth + 1, out)
     return out
 
 
@@ -120,10 +126,8 @@ def with_extents(accessible, Atspi, out=None, window=None, depth=0):
         window = (0, 0, extents[2], extents[3])
     node = (accessible.get_role_name(), accessible.get_name() or "", showing, extents)
     out.append(node if window is None else node + (window,))
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        if child is not None:
-            with_extents(child, Atspi, out, window, depth + 1)
+    for child in children(accessible):
+        with_extents(child, Atspi, out, window, depth + 1)
     return out
 
 
@@ -140,10 +144,8 @@ def password_texts(accessible, Atspi):
         for granularity in (Atspi.TextGranularity.CHAR, Atspi.TextGranularity.WORD, Atspi.TextGranularity.LINE):
             texts.append(Atspi.Text.get_string_at_offset(accessible, 0, granularity).content)
         nodes.append((accessible.get_role_name(), accessible.get_name() or "", texts))
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        if child is not None:
-            nodes.extend(password_texts(child, Atspi))
+    for child in children(accessible):
+        nodes.extend(password_texts(child, Atspi))
     return nodes
 
 
@@ -159,9 +161,8 @@ def focused_extents(accessible, Atspi):
         outer = parent and extents_of(parent, Atspi)
         inset = (outer[2] - width) // 2 if outer else 0
         return (x + inset, y + inset, width, height)
-    for index in range(accessible.get_child_count()):
-        child = accessible.get_child_at_index(index)
-        box = child and focused_extents(child, Atspi)
+    for child in children(accessible):
+        box = focused_extents(child, Atspi)
         if box:
             return box
     return None
@@ -171,9 +172,8 @@ def find_application(Atspi, name, seconds=20):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         desktop = Atspi.get_desktop(0)
-        for index in range(desktop.get_child_count()):
-            app = desktop.get_child_at_index(index)
-            if app is not None and app.get_name() == name:
+        for app in children(desktop):
+            if app.get_name() == name:
                 return app
         time.sleep(0.5)
     return None

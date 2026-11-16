@@ -1,7 +1,8 @@
-"""PL54, PL56, PL57, PL60: verify.py refuses a job of release.yml that does not check the ref
-first, a request-release job that does not wait for every job of the build or dispatches the
-release off iso-v0, another trigger or concurrency group, an input interpolated into run:, and a
-signing job, a writer of :latest or of :stable outside the place the spec gives it."""
+"""PL10, PL54, PL56, PL57, PL60: verify.py refuses a cache step on the release path, a job of
+release.yml that does not check the ref first, a request-release job that does not wait for
+every job of the build or dispatches the release off iso-v0, another trigger or concurrency
+group, an input interpolated into run:, and a signing job, a writer of :latest or of :stable
+outside the place the spec gives it."""
 
 import importlib.util
 import pathlib
@@ -218,6 +219,142 @@ class PolicyPullProblems(unittest.TestCase):
         self.assertEqual(verify.policy_pull_problems(root), [
             f"scripts/ci/{name}: pulls through a policy outside system/verify-images.sh, which runs it "
             "in the builder image (runner skopeo 1.13)" for name in ("global.sh", "promote.sh")])
+
+
+class ReleaseCacheProblems(unittest.TestCase):
+    """PL10: a job of a release-path workflow, one that signs, attests, pushes or promotes, or of a
+    reusable workflow one calls, restores and saves no cache; a pull-request job may."""
+
+    RELEASING = ("on: workflow_dispatch\njobs:\n  sign:\n    environment: signing\n    runs-on: x\n"
+                 "    steps:\n      - run: true\n  build:\n    uses: ./.github/workflows/call-build.yml\n")
+    CALLED = "on: workflow_call\njobs:\n  compile:\n    runs-on: x\n    steps:\n{steps}"
+    PULL_REQUEST = "on: pull_request\njobs:\n  check:\n    runs-on: x\n    steps:\n{steps}"
+    PIN = "0" * 40
+
+    def problems(self, actions=(), **workflows):
+        root = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        (root / ".github/workflows").mkdir(parents=True)
+        for name, text in workflows.items():
+            (root / ".github/workflows" / name).write_text(text)
+        for name, text in dict(actions).items():
+            (root / ".github/actions" / name).mkdir(parents=True)
+            (root / ".github/actions" / name / "action.yml").write_text(text)
+        return verify.release_cache_problems(root)
+
+    def called(self, steps, actions=()):
+        """The problems of a reusable workflow with these steps, called by a signing workflow."""
+        return self.problems(actions, **{"release.yml": self.RELEASING,
+                                         "call-build.yml": self.CALLED.format(steps=steps)})
+
+    @staticmethod
+    def unlisted(action, job="compile", name="call-build.yml"):
+        return (f"{name}: job {job} uses {action}, which is not in RELEASE_PATH_ACTIONS: add it once "
+                "it is checked to restore and save no cache (PL10)")
+
+    def test_the_repository_passes(self):
+        self.assertEqual(verify.release_cache_problems(ROOT), [])
+
+    def test_a_cache_action_in_a_called_workflow_fails(self):
+        for action in ("actions/cache", "actions/cache/restore", "actions/cache/save", "Swatinem/rust-cache"):
+            with self.subTest(action=action):
+                steps = f"      - uses: {action}@{self.PIN}\n"
+                self.assertEqual(
+                    self.problems(**{"release.yml": self.RELEASING,
+                                     "call-build.yml": self.CALLED.format(steps=steps)}),
+                    [self.unlisted(action)])
+
+    def test_a_cache_action_in_the_releasing_workflow_fails(self):
+        text = self.RELEASING.replace("      - run: true\n", f"      - uses: actions/cache@{self.PIN}\n")
+        self.assertEqual(len(self.problems(**{"release.yml": text})), 1)
+
+    def test_a_cache_backend_on_the_actions_cache_fails(self):
+        for steps in ("      - run: cargo build\n        env:\n          SCCACHE_GHA_ENABLED: 'true'\n",
+                      "      - run: docker buildx build --cache-from type=gha .\n"):
+            with self.subTest(steps=steps):
+                self.assertEqual(
+                    self.problems(**{"release.yml": self.RELEASING,
+                                     "call-build.yml": self.CALLED.format(steps=steps)}),
+                    ["call-build.yml: job compile gives a build a cache from outside the job (sccache "
+                     "on the Actions cache, cache-from or cache-to) on the release path, which "
+                     "restores and saves no cache (PL10)"])
+
+    def test_any_cache_from_or_cache_to_fails(self):
+        self.assertEqual(self.called("      - run: podman build --cache-from ghcr.io/o/cache .\n"),
+                         ["call-build.yml: job compile gives a build a cache from outside the job (sccache "
+                          "on the Actions cache, cache-from or cache-to) on the release path, which "
+                          "restores and saves no cache (PL10)"])
+        self.assertEqual(len(self.called("      - run: buildah build --cache-to ghcr.io/o/cache .\n")), 1)
+
+    def test_an_action_outside_the_list_fails(self):
+        for action in ("mozilla-actions/sccache-action", "actions/setup-go", "actions/setup-python",
+                       "docker/build-push-action", "Actions/Cache", "docker://alpine"):
+            with self.subTest(action=action):
+                self.assertEqual(self.called(f"      - uses: {action}@{self.PIN}\n"), [self.unlisted(action)])
+
+    def test_a_listed_action_passes_at_any_ref_and_case(self):
+        steps = ("      - uses: Actions/Checkout@v4\n      - uses: sigstore/cosign-installer@main\n"
+                 f"      - uses: actions/upload-artifact@{self.PIN}\n      - uses: ./.github/actions/kvm\n")
+        self.assertEqual(self.called(steps), [])
+
+    def test_a_local_composite_action_is_read_step_by_step(self):
+        inner = f"runs:\n  using: composite\n  steps:\n    - uses: actions/cache/save@{self.PIN}\n"
+        outer = "runs:\n  using: composite\n  steps:\n    - uses: ./.github/actions/kvm\n"
+        self.assertEqual(self.called("      - uses: ./.github/actions/outer\n",
+                                     {"outer": outer, "kvm": inner}),
+                         [self.unlisted("./.github/actions/outer"), self.unlisted("actions/cache/save")])
+
+    def test_a_reusable_workflow_the_check_cannot_follow_fails(self):
+        for called in ("other/repo/.github/workflows/build.yml@" + self.PIN,
+                       "ars-regia/athanor/.github/workflows/call-build.yml@" + self.PIN,
+                       "./.github/workflows/../workflows/call-build.yml"):
+            with self.subTest(called=called):
+                text = self.RELEASING.replace("./.github/workflows/call-build.yml", called)
+                self.assertEqual(self.problems(**{"release.yml": text}),
+                                 [f"release.yml: job build calls {called}, which the check cannot follow: "
+                                  "call a workflow of this repository as ./.github/workflows/<file> (PL10)"])
+
+    def test_a_composite_action_that_is_not_yaml_is_reported(self):
+        self.assertEqual(self.called("      - uses: ./.github/actions/kvm\n", {"kvm": "runs: [\n"})[0].split(":")[0],
+                         "./.github/actions/kvm/action.yml")
+
+    def test_a_workflow_level_backend_reaches_every_job(self):
+        text = "env:\n  SCCACHE_GHA_ENABLED: 'true'\n" + self.CALLED.format(steps="      - run: true\n")
+        self.assertEqual(len(self.problems(**{"release.yml": self.RELEASING, "call-build.yml": text})), 1)
+
+    def test_a_pull_request_job_with_a_cache_passes(self):
+        steps = f"      - uses: Swatinem/rust-cache@{self.PIN}\n      - uses: actions/cache@{self.PIN}\n"
+        self.assertEqual(self.problems(**{"release.yml": self.RELEASING,
+                                          "call-build.yml": self.CALLED.format(steps="      - run: true\n"),
+                                          "pr.yml": self.PULL_REQUEST.format(steps=steps)}), [])
+
+    def test_a_keyless_signer_or_a_registry_push_is_on_the_release_path(self):
+        cache = f"      - uses: actions/cache@{self.PIN}\n"
+        cases = {
+            "sign.yml": ("on: push\njobs:\n  publish:\n    runs-on: x\n    permissions:\n"
+                         "      id-token: write\n    steps:\n" + cache, "publish"),
+            "push.yml": ("on: push\npermissions:\n  packages: write\njobs:\n  check:\n    runs-on: x\n"
+                         "    steps:\n" + cache, "check"),
+        }
+        for name, (text, job) in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(self.problems(**{name: text}), [self.unlisted("actions/cache", job, name)])
+
+    def test_a_job_that_narrows_the_token_leaves_the_grant_of_its_workflow(self):
+        text = ("on: push\npermissions:\n  packages: write\njobs:\n  check:\n    runs-on: x\n"
+                f"    permissions:\n      contents: read\n    steps:\n      - uses: actions/cache@{self.PIN}\n")
+        self.assertEqual(self.problems(**{"check.yml": text}), [])
+
+    def test_the_signer_image_and_the_kernel_build_are_on_the_release_path(self):
+        path = verify.release_path_workflows(ROOT)
+        for name in ("azoth-signer.yml", "kernel-build.yml", "call-dag-compile.yml", "release.yml"):
+            self.assertIn(name, path)
+        self.assertNotIn("pr.yml", path)
+
+    def test_a_promotion_in_release_is_on_the_release_path(self):
+        text = self.RELEASING.replace("environment: signing", "environment: release").replace(
+            "      - run: true\n", f"      - uses: actions/cache/restore@{self.PIN}\n")
+        self.assertEqual(len(self.problems(**{"promote.yml": text})), 1)
 
 
 if __name__ == "__main__":

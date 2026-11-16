@@ -238,6 +238,8 @@ pub struct State {
     pub lock_state: SessionLockManagerState,
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
+    /// The DRM leases granted (decision 36); only the udev backend grants one.
+    pub leases: crate::drm_lease::Leases<crate::drm_lease::Lease>,
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
@@ -305,6 +307,12 @@ pub struct GrabSerials {
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
+    /// The last press of any kind, a key, a button, a finger or a pen, whether a client or the
+    /// compositor took it: a click grants a token only while it is the last (`token_created`).
+    pub press: Option<Serial>,
+    /// A serial taken at the last change of the keyboard focus, to a surface or to none: a
+    /// click older than it grants no token (`token_created`).
+    pub focus: Option<Serial>,
 }
 
 impl GrabSerials {
@@ -411,6 +419,10 @@ impl State {
         crate::bell::global(&dh);
         // Decision 35.
         crate::background_effect::global(&dh);
+        // Decision 36. A surface's content type and a toplevel's tag are kept, applied with the
+        // commit; nothing reads the type at 1.0, and the tag grants nothing.
+        smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
+        crate::toplevel_tag::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -486,6 +498,7 @@ impl State {
             captures: Vec::new(),
             lock_state,
             lock: None,
+            leases: Default::default(),
             idle_notifier_state,
             inhibitors: HashMap::new(),
             input_hold,
@@ -2224,6 +2237,8 @@ mod tests {
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),
+            press: Some(s(10)),
+            focus: None,
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");

@@ -90,6 +90,13 @@ class ClassifyTest(unittest.TestCase):
             {**NONE, "specs": True, "shell": True, "rust_audit": True},
         )
 
+    def test_the_rigs_compositor_selects_the_visual_tests_and_its_package(self):
+        # rig.sh cosmic-comp-version builds the spec when the rig holds another build.
+        self.assertEqual(
+            changes.classify(["forge/specs/cosmic-comp/cosmic-comp.spec"]),
+            {**NONE, "specs": True, "shell": True},
+        )
+
     def test_a_crate_the_rig_does_not_draw_selects_the_audit_only(self):
         # Its unit tests run in `just check` on every change; no build area is needed for them.
         for path in ("system/athanor-bus-api/src/lib.rs", "system/athanor-portal/src/lib.rs"):

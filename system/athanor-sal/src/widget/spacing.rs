@@ -1,23 +1,20 @@
 //! The room one column or inline keeps between its children, as a GTK box's spacing: every
 //! other column keeps the theme's section gap, every other inline the theme's gap.
 
-use super::{Kind, Ui, WidgetId};
-
-/// The largest spacing, a quarter of the largest `f32`, as an inline's padding.
-const SPACING_MAX: f32 = f32::MAX / 4.0;
+use super::{length, Kind, Ui, WidgetId};
 
 impl Ui {
     /// Sets the logical pixels column or inline `id` keeps between its children, `None` for
     /// the theme's section gap in a column and its gap in an inline; a spacing that is not a
-    /// finite length of at least 0 counts as 0, and one past a quarter of the largest `f32` as
-    /// that quarter. Whether it changed: `false` for a widget that is neither. Call
+    /// finite length of at least 0 counts as 0, and one past 2^64 times less than the largest
+    /// `f32` as that length. Whether it changed: `false` for a widget that is neither. Call
     /// [`Ui::layout`] afterwards.
     ///
     /// # Panics
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn set_spacing(&mut self, id: WidgetId, spacing: Option<f32>) -> bool {
-        let spacing = spacing.map(|s| if s.is_finite() { s.clamp(0.0, SPACING_MAX) } else { 0.0 });
+        let spacing = spacing.map(length);
         let widget = &mut self.widgets[id];
         if !matches!(widget.kind, Kind::Column | Kind::Inline { .. }) {
             return false;

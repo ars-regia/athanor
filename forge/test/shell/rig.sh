@@ -10,6 +10,7 @@
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp
+#                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -85,6 +86,16 @@
 # RIG_HEADLESS_OUTPUTS (default 1) outputs side by side in each capture; `surface layout` sets
 # it from RIG_LAYOUT_OUTPUTS. RIG_STABLE applies under both compositors. Under it every capture
 # client runs as its unit (bar_session.py --unit, in-unit.sh), for the compositor's allow-list.
+#
+# ATHANOR_RIG_SCCACHE=<absolute directory> caches the rustc calls of every cargo run in the build
+# stage there through sccache, bounded by ATHANOR_RIG_SCCACHE_SIZE (20G), so a new worktree
+# compiles only what changed. It turns incremental compilation off, which sccache cannot cache.
+# Unset, cargo runs without a wrapper. Nothing built here ships: the RPMs build in the forge.
+# Build scripts and proc macros run with the directory writable, and binaries of this rig reach
+# development machines (scripts/devvm/*-acceptance.sh, scripts/shell-bench/deploy.py), so a
+# directory serves one trust level: never point a build of an untrusted branch at the directory
+# of trusted ones. Concurrent runs on one directory each start their own sccache server, which
+# counts and evicts on its own, so together they can exceed the bound while they run.
 set -euo pipefail
 
 root=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
@@ -112,7 +123,7 @@ local_image=localhost/athanor-shell-rig
 build_label=org.athanor.rig.build-inputs
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.
-rig_image() {
+pinned_rig_image() {
     if [ -n "${ATHANOR_RIG_IMAGE:-}" ]; then
         echo "$ATHANOR_RIG_IMAGE"
     elif [ -s "$rig/rig-image.digest" ]; then
@@ -120,6 +131,78 @@ rig_image() {
     else
         echo "$local_image:rig"
     fi
+}
+
+# The Version-Release of forge/specs/cosmic-comp, or nothing (spec_nevr.awk).
+cosmic_comp_nevr() {
+    awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec"
+}
+
+# The rig the recipes run: the image `rig.sh cosmic-comp-version` derived from the pinned rig
+# with forge/specs/cosmic-comp's own build installed, while it is derived from that same rig and
+# the spec still names the build it holds and the image is still here; else the pinned rig.
+# $spec_rig holds "<pinned rig's image id> <Version-Release> <image id>": the id, not the name,
+# so a rig rebuilt under the same name (build-image) leaves the derived rig unused.
+spec_rig=$out/cosmic-comp-spec/rig
+rig_image() {
+    local base derived_from nevr id
+    base=$(pinned_rig_image)
+    if [ -s "$spec_rig" ] && read -r derived_from nevr id < "$spec_rig" &&
+        [ "$nevr" = "$(cosmic_comp_nevr)" ] && podman image exists "$id" &&
+        podman image exists "$base" && [ "$(image_id "$base")" = "$derived_from" ]; then
+        echo "$id"
+    else
+        echo "$base"
+    fi
+}
+
+# The id of a local image, without its sha256: prefix.
+image_id() {
+    local id
+    id=$(podman image inspect --format '{{.Id}}' "$1")
+    echo "${id#sha256:}"
+}
+
+# Builds forge/specs/cosmic-comp the way the forge does and derives from the pinned rig an image
+# with that RPM installed, recorded in $spec_rig: build_spec_rig <pinned rig> <Version-Release>.
+# run_spec_build.sh is the DAG's and Spec Build Check's path: the sources checked against
+# SOURCES/sources.sha256, rpmbuild without network, sccache in a volume removed at the end, so
+# no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
+# content hash, as Spec Build Check takes it, never latest. The RPM is a pull-request test
+# artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
+build_spec_rig() {
+    local base=$1 want=$2 idemp builder rpm ctx id
+    # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
+    # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
+    idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+        --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
+    builder=$registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp")
+    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp"; then
+        echo "rig.sh: $builder, the builder of this checkout, is not published, so forge/specs/cosmic-comp" \
+            "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
+        exit 1
+    fi
+    bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
+    rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
+    rm -f "$rpm"
+    bash "$root/forge/scripts/run_spec_build.sh" "$builder" specs/cosmic-comp
+    if [ ! -f "$rpm" ]; then
+        echo "rig.sh: the build of forge/specs/cosmic-comp produced no ${rpm##*/}" >&2
+        exit 1
+    fi
+    ctx=$out/cosmic-comp-spec
+    mkdir -p "$ctx"
+    cp "$rpm" "$ctx/cosmic-comp.rpm"
+    # rpm -U, not dnf: no repository is read, and a requirement the rig lacks fails the install.
+    # --oldpackage: a spec may also name an older build than the rig's. A bind mount, so the RPM
+    # itself stays out of the image's layers.
+    printf '%s\n' "FROM $base" \
+        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage /tmp/cosmic-comp.rpm' \
+        > "$ctx/Containerfile"
+    podman build --network=none --pull=never --iidfile "$ctx/iid" -t "$local_image:cosmic-comp-spec" \
+        -f "$ctx/Containerfile" "$ctx"
+    id=$(cat "$ctx/iid")
+    echo "$(image_id "$base") $want ${id#sha256:}" > "$spec_rig"
 }
 
 # The build stage, where cargo runs: an explicit one, else the published one pinned by digest,
@@ -134,6 +217,34 @@ build_image() {
     else
         echo "$local_image:build"
     fi
+}
+
+# The podman options of the compiler cache, empty unless ATHANOR_RIG_SCCACHE asks for it; the
+# recipes that run cargo set them up before they start. A relative path would reach podman as the
+# name of a volume, so it is refused, and a build stage without sccache would fail every rustc
+# call with an error that does not name the cache, so it is refused before cargo starts.
+cargo_cache=()
+cargo_cache_setup() {
+    if [ -z "${ATHANOR_RIG_SCCACHE:-}" ]; then
+        return 0
+    fi
+    case $ATHANOR_RIG_SCCACHE in
+    /*) ;;
+    *)
+        echo "rig.sh: ATHANOR_RIG_SCCACHE must be an absolute path, not '$ATHANOR_RIG_SCCACHE'" >&2
+        exit 2
+        ;;
+    esac
+    local image
+    image=$(build_image)
+    if ! podman run --rm --network=none "$image" sh -c 'command -v sccache > /dev/null'; then
+        echo "rig.sh: ATHANOR_RIG_SCCACHE is set, but the build stage $image has no sccache;" \
+            "publish the stage (publish-rig-build-image.yml) and commit its pin, or unset the variable" >&2
+        exit 2
+    fi
+    mkdir -p "$ATHANOR_RIG_SCCACHE"
+    cargo_cache=(-v "$ATHANOR_RIG_SCCACHE:/sccache" -e RUSTC_WRAPPER=sccache -e SCCACHE_DIR=/sccache
+        -e "SCCACHE_CACHE_SIZE=${ATHANOR_RIG_SCCACHE_SIZE:-20G}" -e CARGO_INCREMENTAL=0)
 }
 
 # The base of the fixtures' layer: the published rig when there is one (see the Containerfile),
@@ -610,12 +721,17 @@ require_for() { # require_for <surface>
 }
 
 case "${1:-}" in
+build-image | build-image-ref | build-inputs) ;;
+build-* | no-gtk | cargo) cargo_cache_setup ;;
+esac
+
+case "${1:-}" in
 build-image-ref)
     build_image
     ;;
 build-image)
     build_ref=$(build_image)
-    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
+    if [ "$(pinned_rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     fi
     if [ "$build_ref" = "$local_image:build" ]; then
@@ -666,18 +782,45 @@ publish-build-image)
     ;;
 cosmic-comp-version)
     # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
-    # carries the session's build (#965). Publishing the rig again does not move it: the
-    # Containerfile pins the tier 2 repository it installs from by TIER2_DIGEST.
-    # The spec's Release is a macro and rpmbuild is not on the host: spec_nevr.awk expands it and
-    # prints nothing for anything it cannot expand, which fails the check.
-    want=$(awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
-    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
-    if [ -n "$want" ] && [ "$have" = "$want" ]; then
-        echo "the rig runs cosmic-comp $have, the build forge/specs/cosmic-comp ships"
-    else
-        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); if TIER2_DIGEST in forge/test/shell/Containerfile already holds that build, republish the rig (rig.sh publish-image) and commit rig-image.digest; otherwise move TIER2_DIGEST to a tier 2 repository that holds it first" >&2
+    # carries the session's build (#965). The published rig installs it from the tier 2
+    # repository the Containerfile pins by TIER2_DIGEST, and the forge publishes a new build there
+    # only after the change lands on iso-v0. So when the rig holds another build than the spec
+    # names, as on a pull request that changes forge/specs/cosmic-comp, this recipe builds the
+    # spec as the forge does and installs it into an image derived from the rig, which every
+    # later recipe runs (build_spec_rig, rig_image). Either way it passes only when the rig runs
+    # exactly the spec's Version-Release: the Release a change to the spec raises (the spec is one
+    # of verify.py's RELEASE_BY_HAND) is what tells its build from the rig's. The spec's Release is a macro and rpmbuild is not on the
+    # host: spec_nevr.awk expands it and prints nothing for anything it cannot expand, which fails
+    # the check.
+    want=$(cosmic_comp_nevr)
+    if [ -z "$want" ]; then
+        echo "rig.sh: spec_nevr.awk cannot read the Version-Release of forge/specs/cosmic-comp/cosmic-comp.spec" >&2
         exit 1
     fi
+    base=$(pinned_rig_image)
+    rm -f "$spec_rig"
+    if ! published=$(in_rig "$base" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp); then
+        echo "rig.sh: the rig $base has no cosmic-comp package: $published" >&2
+        exit 1
+    fi
+    if [ "$published" = "$want" ]; then
+        echo "the rig runs cosmic-comp $want, the build forge/specs/cosmic-comp ships"
+        exit 0
+    fi
+    echo "the rig holds cosmic-comp $published and forge/specs/cosmic-comp names $want: building the spec as the forge does"
+    build_spec_rig "$base" "$want"
+    if ! have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp); then
+        echo "rig.sh: the rig built from forge/specs/cosmic-comp has no cosmic-comp package: $have" >&2
+        exit 1
+    fi
+    if [ "$have" != "$want" ]; then
+        echo "rig.sh: the rig built from forge/specs/cosmic-comp runs cosmic-comp $have, not the $want the spec names" >&2
+        exit 1
+    fi
+    echo "the rig runs cosmic-comp $want, built here from forge/specs/cosmic-comp"
+    echo "rig.sh: the published rig still holds cosmic-comp $published, so every run builds $want again until it moves:" \
+        "once the forge has published $want to tier 2 from iso-v0, point TIER2_DIGEST in forge/test/shell/Containerfile" \
+        "at that tier 2 repository, republish the rig (rig.sh publish-image) and commit rig-image.digest" >&2
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true
@@ -714,7 +857,7 @@ cosmic-preview)
 build-greeter)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-greeter-ui -p athanor-style --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-greeter-ui -p athanor-style \
@@ -725,7 +868,7 @@ build-greeter)
 build-layout)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-layout -p athanor-layout-chooser -p athanor-unit \
@@ -735,7 +878,7 @@ build-layout)
 build-compositor-client)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sulphur-client --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sulphur-client --no-default-features --features calloop --all-targets -- -D warnings \
@@ -748,13 +891,13 @@ build-compositor-client)
 no-gtk)
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" bash forge/test/shell/no_gtk.sh
     ;;
 build-shelld)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-unit -p athanor-shelld --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-unit -p athanor-shelld \
@@ -764,7 +907,7 @@ build-shelld)
 build-compositor)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sulphur --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-sulphur \
@@ -774,7 +917,7 @@ build-compositor)
 build-toolkit)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sal --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sal --all-targets --features gpu -- -D warnings \
@@ -821,17 +964,22 @@ compositor-globals)
         org_kde_kwin_server_decoration_manager xdg_toplevel_icon_manager_v1)
     # Decision 35.
     standard+=(ext_background_effect_manager_v1)
+    # Decision 36.
+    standard+=(wp_content_type_manager_v1 xdg_toplevel_tag_manager_v1)
     standard+=(xdg_wm_dialog_v1 wp_pointer_warp_v1 xdg_system_bell_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
-        dmabuf="no linux-dmabuf, as Pixman draws without a render node"
+        dmabuf="no linux-dmabuf nor wl_drm, as Pixman draws without a render node"
         ! grep -q "interface: 'zwp_linux_dmabuf_v1'" "$out/compositor-globals.txt" || missing+=("absence of zwp_linux_dmabuf_v1")
+        ! grep -q "interface: 'wl_drm'" "$out/compositor-globals.txt" || missing+=("absence of wl_drm")
     elif grep -q 'explicit sync: .* render node' "$out/compositor-globals-compositor.log"; then
-        dmabuf="linux-dmabuf on the render node"
-        standard+=(zwp_linux_dmabuf_v1)
+        dmabuf="linux-dmabuf and wl_drm on the render node"
+        standard+=(zwp_linux_dmabuf_v1 wl_drm)
     else
         echo "compositor-globals: $out/compositor-globals-compositor.log names no renderer" >&2
         exit 1
     fi
+    # Decision 36: the lease device exists only on the udev backend, never headless.
+    ! grep -q "interface: 'wp_drm_lease_device_v1'" "$out/compositor-globals.txt" || missing+=("absence of wp_drm_lease_device_v1")
     for interface in "${standard[@]}"; do
         grep -q "interface: '$interface'" "$out/compositor-globals.txt" || missing+=("$interface")
     done
@@ -870,7 +1018,7 @@ cargo)
     shift
     mkdir -p "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         ${RIG_CARGO_MUTANTS:+-v "$RIG_CARGO_MUTANTS:/usr/local/bin/cargo-mutants:ro"} \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC -w /repo "$(build_image)" cargo "$@"
     ;;
@@ -910,7 +1058,7 @@ verify-bin)
 build-bar)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-bar --all-targets -- -D warnings \
@@ -927,7 +1075,7 @@ build-bar)
 build-control-center)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-services -p athanor-control-center --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-controls --no-default-features --features sal --all-targets -- -D warnings \
@@ -943,7 +1091,7 @@ build-control-center)
 build-dock)
     mkdir -p "$out/bin" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-apps -p athanor-dock --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-apps -p athanor-dock \
@@ -956,7 +1104,7 @@ build-dock-toolkit)
     # after the executable, and the toolkit dock keeps the GTK dock's name on the bus.
     mkdir -p "$out/toolkit-dock" "$out/target"
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-dock --no-default-features --features toolkit --all-targets -- -D warnings \
                  && cargo test --locked -p athanor-dock --no-default-features --features toolkit \
@@ -971,7 +1119,7 @@ build-launcher)
     # so a command that holds both packages does not compile glycin-core. The decoder's own
     # spec builds with -p, as here.
     podman run --rm --memory 6g --security-opt label=disable \
-        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry \
+        -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -e ATHANOR_REQUIRE_QALC=1 -w /repo "$(build_image)" \
         bash -c 'set -euo pipefail
                  for packages in "-p athanor-search -p athanor-preview -p athanor-launcher" "-p athanor-preview-render"; do

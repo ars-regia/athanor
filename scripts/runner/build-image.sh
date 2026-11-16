@@ -34,7 +34,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # The guest side of one job. The disks vm.sh attaches are found by their virtio serial:
-# the cache persists across jobs, the scratch disk is recreated empty for each one, and
+# vm.sh recreates both empty for each job (doc_pipeline.md PL10), and
 # x-systemd.makefs formats a disk that has no file system. Their SELinux context makes
 # them usable by the rootless containers of the jobs, which bind-mount the workspace and
 # ~/.cache/azoth without :z. The runner user has a fixed UID because system units cannot

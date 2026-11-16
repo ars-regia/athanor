@@ -22,7 +22,7 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import system_fixtures as fx  # noqa: E402
-from atspi_check import find_application  # noqa: E402
+from atspi_check import children, find_application  # noqa: E402
 from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
@@ -140,15 +140,10 @@ def showing_role(app, Atspi, role):
     found = []
 
     def visit(accessible):
-        try:
-            if accessible.get_role_name() == role and showing(accessible, Atspi):
-                found.append(accessible)
-            children = [accessible.get_child_at_index(index) for index in range(accessible.get_child_count())]
-        except GLib.Error:
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if accessible.get_role_name() == role and showing(accessible, Atspi):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found
@@ -173,6 +168,22 @@ def press_confirm(app, Atspi, name):
     if button is None or not button.get_state_set().contains(Atspi.StateType.SENSITIVE):
         return False
     button.do_action(0)
+    return True
+
+
+def press_when_ready(app, Atspi, name, seconds=5):
+    """Waits, as a read, until the confirmation's button `name` is sensitive, then presses it
+    once outside the poll: an error from the press raises and is never pressed again."""
+    ready = []
+
+    def sensitive():
+        _, button = confirm_button(app, Atspi, name)
+        ready[:] = [button] if button is not None and button.get_state_set().contains(Atspi.StateType.SENSITIVE) else []
+        return bool(ready)
+
+    if not wait_for(sensitive, seconds):
+        return False
+    ready[0].do_action(0)
     return True
 
 
@@ -283,7 +294,7 @@ def network(ctx):
     type_password(app, Atspi, "short")
     check("Connect stays off for a password WPA2 refuses", not press_confirm(app, Atspi, "Connect"))
     type_password(app, Atspi, PASSWORDS[0])
-    check("Connect sends the password", wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5))
+    check("Connect sends the password", press_when_ready(app, Atspi, "Connect"))
 
     def joined():
         return mock_calls(bus, fx.NM, NM_PATH, "AddAndActivateConnection")
@@ -309,7 +320,7 @@ def network(ctx):
           wait_for(lambda: labelled(app, Atspi, "label", RETRY_NOTE), 5))
     type_password(app, Atspi, PASSWORDS[1])
     check("Connect answers GetSecrets with the typed password",
-          wait_for(lambda: press_confirm(app, Atspi, "Connect"), 5)
+          press_when_ready(app, Atspi, "Connect")
           and wait_for(lambda: result(third) == f"reply:{PASSWORDS[1]}", 5))
     fourth = ask(ALLOW_INTERACTION)
     wait_for(prompt_open, 5)
@@ -480,7 +491,7 @@ def bluetooth(ctx):
         description(confirm_button(app, Atspi, "Pair")[1])
         == f"Pair with Phone? {fx.PAIRING_CODE} Pair only if Phone shows the same number.",
     )
-    check("Pair confirms", wait_for(lambda: press_confirm(app, Atspi, "Pair"), 5))
+    check("Pair confirms", press_when_ready(app, Atspi, "Pair"))
     phone = device_path("Phone")
     check("the device is paired", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Paired") is True, 10))
     check("trusts it", wait_for(lambda: property_of(bus, fx.BLUEZ, phone, device1, "Trusted") is True, 5))

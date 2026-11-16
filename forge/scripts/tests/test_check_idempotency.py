@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 import unittest
 
+from signed_registry import TRUSTED, WORKFLOWS, signed_registry_env, stub_cosign, stub_skopeo
+
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "check_idempotency.sh"
 
 
@@ -140,6 +142,63 @@ class PackageHashTest(unittest.TestCase):
         shutil.copytree(self.root, moved)
         self.forge = moved / "forge"
         self.assertEqual(before, self.dock_hash())
+
+
+class PackageCacheHitTest(unittest.TestCase):
+    """A package's hash tag is a cache hit only when a trusted run of call-dag-compile.yml
+    signed the digest it names (issue #1176); otherwise the package is rebuilt."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name)
+        self.forge = root / "forge"
+        (self.forge / "config").mkdir(parents=True)
+        (self.forge / "specs/athanor-dock").mkdir(parents=True)
+        (self.forge / "specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
+        (root / "bin").mkdir()
+        stub_skopeo(root / "bin")
+        stub_cosign(root / "bin")
+        self.root = root
+
+    def check(self, signer):
+        if signer:
+            (self.root / "signer").write_text(signer)
+        result = subprocess.run(
+            ["bash", SCRIPT, "--package", "dock", "--registry", "ghcr.io", "--owner", "owner",
+             "--image-name", "athanor-forge-dock"],
+            cwd=self.forge, capture_output=True, text=True,
+            env=signed_registry_env(self.root / "bin", self.root),
+        )
+        return result
+
+    def test_a_signed_image_is_a_hit(self):
+        result = self.check(TRUSTED)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("CACHE_HIT=true", result.stdout.splitlines())
+
+    def test_an_unsigned_or_foreign_image_is_a_miss_and_an_error(self):
+        for signer in (None, WORKFLOWS + "release.yml@refs/heads/iso-v0"):
+            with self.subTest(signer=signer):
+                result = self.check(signer)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+                self.assertIn("no trusted run of call-dag-compile.yml signed", result.stderr)
+
+    def test_a_signed_image_labelled_with_another_hash_or_none_is_a_miss_and_an_error(self):
+        for label in ("f" * 64, "none"):
+            with self.subTest(label=label):
+                (self.root / "label").write_text(label)
+                result = self.check(TRUSTED)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+                self.assertIn("not the tag's hash", result.stderr)
+
+    def test_a_verification_that_cannot_be_answered_fails_the_check(self):
+        (self.root / "cosign_error").write_text("")
+        result = self.check(TRUSTED)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("CACHE_HIT=", result.stdout)
 
 
 if __name__ == "__main__":

@@ -92,8 +92,9 @@ FROM rig AS build
 # athanor-toolkit's keyboard (smithay-client-toolkit) links libxkbcommon (libxkbcommon-devel).
 # athanor-sulphur's headless backend links libgbm (mesa-libgbm-devel) and Pixman (pixman-devel);
 # its DRM backend links libseat (libseat-devel) and libinput (libinput-devel).
+# sccache is the compiler cache rig.sh puts in front of rustc when ATHANOR_RIG_SCCACHE is set.
 RUN dnf5 -y install --setopt=install_weak_deps=False \
-      rust cargo clippy gcc gcc-c++ clang-devel pkgconf-pkg-config \
+      rust cargo clippy sccache gcc gcc-c++ clang-devel pkgconf-pkg-config \
       gtk4-devel glib2-devel gtk4-layer-shell-devel gsettings-desktop-schemas \
       speech-dispatcher-devel upower-devel pam-devel tpm2-tss-devel systemd-devel \
       pulseaudio-libs-devel tinysparql-devel poppler-glib-devel \

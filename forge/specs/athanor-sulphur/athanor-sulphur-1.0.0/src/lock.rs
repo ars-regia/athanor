@@ -2,8 +2,9 @@
 //! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
 //! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
 //! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
-//! output has been drawn locked.
+//! output has been drawn locked, and every DRM lease revoked (decision 36, `drm_lease.rs`).
 
+use crate::drm_lease::Confirmation;
 use crate::state::{Backend, State};
 use smithay::backend::input::InputTime;
 use smithay::desktop::{find_popup_root_surface, Window};
@@ -18,14 +19,20 @@ use smithay::wayland::compositor::get_parent;
 use smithay::wayland::session_lock::{
     LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
 };
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+/// How often the DRM leases a lock waits on are tried again (decision 36).
+const LEASE_RETRY: Duration = Duration::from_secs(1);
+
 /// A locked session: the client's lock, its confirmation until the outputs have been drawn
-/// locked, and the lock surface of each output.
+/// locked and every DRM lease has ended (decision 36), whether the leases are tried again once
+/// a second, and the lock surface of each output.
 pub struct Lock {
     lock: ExtSessionLockV1,
-    locker: Option<SessionLocker>,
+    locker: Option<Confirmation>,
+    retrying: bool,
     surfaces: Vec<(Output, LockSurface)>,
 }
 
@@ -89,9 +96,15 @@ impl SessionLockHandler for State {
         // A finger held on a window goes on reaching it no more: its surface is told the touch
         // is cancelled, and its release is no event (`touch.rs`).
         self.cancel_touches();
+        // Decision 36: from the lock request on no lease is granted, and every one ends now.
+        self.leases_locked();
+        // A token made before the lock activates nothing after it (L14): every one pending is
+        // dropped, and none is made while locked (`token_created`).
+        self.xdg_activation_state.retain_tokens(|_, _| false);
         self.lock = Some(Lock {
             lock: locker.ext_session_lock().clone(),
-            locker: Some(locker),
+            locker: Some(Confirmation::new(locker)),
+            retrying: false,
             surfaces: Vec::new(),
         });
         self.aids_quiet_changed();
@@ -104,6 +117,7 @@ impl SessionLockHandler for State {
 
     fn unlock(&mut self) {
         self.lock = None;
+        self.leases.unlocked();
         // Decision 35: nothing was sent while locked; the current answer is sent now.
         self.resend_dock_overlaps();
         self.aids_drop_pending();
@@ -174,6 +188,10 @@ impl State {
         // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
         // confinement follows the keyboard (decision 30, `constraints.rs`).
         if surface.is_none() {
+            // A click before the focus left grants no token (`GrabSerials::focus`).
+            if keyboard.current_focus().is_some() {
+                self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
+            }
             self.aids_focus_changed(None);
             self.loop_handle.insert_idle(|state| state.refresh_constraint());
         }
@@ -231,11 +249,54 @@ impl State {
         }
     }
 
-    /// After a frame of every output: a lock waiting for its confirmation has been drawn, and
-    /// is confirmed.
+    /// The backend found every output showing the lock, now: `locked` is sent once every DRM
+    /// lease has ended as well (decision 36). Until then the leases are tried again once a
+    /// second, and after each attempt the backend looks at its outputs again (`confirm_lock`),
+    /// so that an output plugged in or turned on meanwhile must show the lock first; the
+    /// outputs show the lock from the request on, and only the confirmation waits.
     pub fn locked_drawn(&mut self) {
-        if let Some(locker) = self.lock.as_mut().and_then(|lock| lock.locker.take()) {
-            locker.lock();
+        let Some(lock) = &mut self.lock else {
+            return;
+        };
+        if lock.locker.is_none() {
+            return;
+        }
+        if let Some(revoked) = self.leases.proof() {
+            if let Some(locker) = lock.locker.take() {
+                locker.confirm(revoked);
+            }
+            return;
+        }
+        if lock.retrying {
+            return;
+        }
+        let epoch = self.lock_epoch.load(std::sync::atomic::Ordering::SeqCst);
+        let timer = Timer::from_duration(LEASE_RETRY);
+        let retrying = self.loop_handle.insert_source(timer, move |_, _, state| {
+            // A lock confirmed, unlocked or replaced since needs this timer no more.
+            let waits = |state: &State| {
+                state.lock_epoch.load(std::sync::atomic::Ordering::SeqCst) == epoch
+                    && state
+                        .lock
+                        .as_ref()
+                        .is_some_and(|lock| lock.locker.is_some())
+            };
+            if !waits(state) {
+                return TimeoutAction::Drop;
+            }
+            state.retry_leases();
+            state.confirm_lock();
+            if waits(state) {
+                TimeoutAction::ToDuration(LEASE_RETRY)
+            } else {
+                TimeoutAction::Drop
+            }
+        });
+        match retrying {
+            Ok(_) => lock.retrying = true,
+            Err(error) => {
+                tracing::error!(%error, "the leases have no timer: they are tried again at the next scan")
+            }
         }
     }
 }

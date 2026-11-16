@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, value_of
+from atspi_check import children, find_application, value_of
 
 PREEDIT, COMMIT = "ni", "你"
 METHOD = "/out/bin/athanor-sal-input-method"
@@ -38,7 +38,7 @@ def entry(Atspi):
         node = stack.pop()
         if node.get_editable_text_iface() is not None:
             return node
-        stack.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
+        stack.extend(children(node))
     return None
 
 

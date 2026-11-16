@@ -46,9 +46,10 @@ exclude = [
   "fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
-  # A published crate carried with a patch, not code of ours: no workspace lint, format or test
-  # runs over it (system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md).
+  # Published crates carried with a patch, not code of ours: no workspace lint, format or test
+  # runs over them (each one's PATCHES.md).
   "system/athanor-sal/vendor/accesskit_atspi_common",
+  "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend",
 ]
 
 resolver = "2"
@@ -136,5 +137,9 @@ overflow-checks = true
 # AccessKit's AT-SPI bridge with the expandable, expanded, collapsed and has-popup states (#638),
 # until an AccessKit release maps them; the gallery's manifest carries the same entry.
 # system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md says what it changes and when it goes.
+# wayland-backend with a wire parser that rejects a null its signature forbids, as libwayland
+# does, until a release of wayland-backend does. PATCHES.md, in its directory under
+# forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/, says what it changes and when it goes.
 [patch.crates-io]
 accesskit_atspi_common = { path = "system/athanor-sal/vendor/accesskit_atspi_common" }
+wayland-backend = { path = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }
