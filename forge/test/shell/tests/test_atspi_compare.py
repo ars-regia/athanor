@@ -285,6 +285,33 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("menu", "A list", ["focusable", "showing"])])
         self.assertEqual(failures, ["list 'A list': role 'menu'"])
 
+    def test_the_states_of_a_row_with_no_name_are_compared(self):
+        def at(depth, role, name, states):
+            return {**node(role, name, states), "depth": depth}
+
+        row = ["focusable", "selectable", "showing"]
+        reference = [at(0, "list item", "", row), at(1, "label", "Rows 26", ["showing"])]
+        same = [at(0, "list item", "", row), at(1, "label", "Rows 26", ["showing"])]
+        self.assertEqual(compare.compare(reference, same)[1], [])
+        lost = [at(0, "list item", "", ["focusable", "showing"]), same[1]]
+        self.assertEqual(
+            compare.compare(reference, lost)[1], ["list item '': state 'selectable' missing"]
+        )
+
+    def test_a_heading_row_with_no_name_is_no_element(self):
+        # The states of the recorded references' only nameless row (atspi-gallery-lists.json and
+        # atspi-launcher.json): GTK's heading row, not selectable, not focusable.
+        def at(depth, role, name, states):
+            return {**node(role, name, states), "depth": depth}
+
+        heading = ["sensitive", "showing", "visible"]
+        reference = [at(0, "list item", "", heading), at(1, "label", "Rows 26", heading)]
+        for transcript in (
+            [at(0, "label", "Rows 26", heading)],
+            [at(0, "list item", "", heading), at(0, "list item", "", heading), reference[1]],
+        ):
+            self.assertEqual(compare.compare(reference, transcript)[1], [])
+
     def test_a_scroll_bar_and_its_subtree_have_no_counterpart_in_a_tree_without_one(self):
         def at(depth, role, name, value=""):
             return {**node(role, name, ["showing"], value), "depth": depth}
