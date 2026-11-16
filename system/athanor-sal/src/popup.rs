@@ -40,7 +40,8 @@ pub(crate) enum Dismiss<S> {
 impl<S: Copy + PartialEq> OpenPopup<S> {
     /// Records `popup`, opened from `anchor` of `parent`, and marks it a popup, which raises no
     /// [`Event::PressedOutside`]: a menu expands its button and puts the focus on its first item,
-    /// as GTK's popover does when it shows.
+    /// as GTK's popover does when it shows, unless the application gave it to another, as GTK's
+    /// default widget.
     pub fn opened(
         parent_surface: S,
         anchor: WidgetId,
@@ -52,7 +53,9 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
         popup.popup = true;
         if menu {
             parent.set_expanded(anchor, true);
-            popup.set_focus(focus::step(popup, false));
+            if popup.focus().is_none() {
+                popup.set_focus(focus::step(popup, false));
+            }
         }
         Self {
             surface,
@@ -353,6 +356,16 @@ mod tests {
             (parent.focus(), parent.is_expanded(app)),
             (Some(app), false)
         );
+
+        // A focus the application gave stays: a confirmation's Cancel, not the item after it.
+        let mut asked = Ui::new("Files", Theme::default(), false);
+        let row = asked.add(Ui::ROOT, Kind::Row);
+        let cancel = asked.add(row, Kind::Button("Cancel".into()));
+        asked.add(row, Kind::Button("Quit".into()));
+        asked.set_focus(Some(cancel));
+        let open = OpenPopup::opened(1, app, 2, &mut parent, &mut asked, true);
+        assert_eq!(asked.focus(), Some(cancel));
+        open.closed(&mut parent);
 
         // A tooltip changes neither the focus nor the button's state.
         parent.set_focus(Some(other));
