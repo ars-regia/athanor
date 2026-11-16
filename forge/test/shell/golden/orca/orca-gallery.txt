@@ -13,6 +13,8 @@ Text toggle button not pressed.
 tab
 States toggle button not pressed.
 tab
+Calendar toggle button not pressed.
+tab
 Dialogs toggle button not pressed.
 tab
 Menus toggle button not pressed.
@@ -40,6 +42,8 @@ Text toggle button not pressed.
 tab
 States toggle button not pressed.
 tab
+Calendar toggle button not pressed.
+tab
 Dialogs toggle button not pressed.
 tab
 Menus toggle button not pressed.
@@ -61,6 +65,8 @@ Text toggle button not pressed.
 tab
 States toggle button not pressed.
 tab
+Calendar toggle button not pressed.
+tab
 Dialogs toggle button not pressed.
 tab
 Menus toggle button not pressed.
@@ -75,6 +81,8 @@ tab
 Text toggle button not pressed.
 tab
 States toggle button not pressed.
+tab
+Calendar toggle button not pressed.
 tab
 Dialogs toggle button not pressed.
 tab
@@ -93,6 +101,8 @@ space
 tab
 States toggle button not pressed.
 tab
+Calendar toggle button not pressed.
+tab
 Dialogs toggle button not pressed.
 tab
 Menus toggle button not pressed.
@@ -105,11 +115,31 @@ Gallery
 States toggle button pressed.
 space
 tab
+Calendar toggle button not pressed.
+tab
 Dialogs toggle button not pressed.
 tab
 Menus toggle button not pressed.
 tab
 Enable the button check box not checked.
+Screen reader off.
+Screen reader on.
+Gallery
+Calendar toggle button pressed.
+space
+tab
+Dialogs toggle button not pressed.
+tab
+Menus toggle button not pressed.
+tab
+tab
+button.
+tab
+button.
+tab
+button.
+tab
+button.
 Screen reader off.
 Screen reader on.
 A dialog A dialog holds its window until it is closed.

@@ -13,6 +13,8 @@ Testo pulsante di commutazione non premuto.
 tabulazione
 Stati pulsante di commutazione non premuto.
 tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
 Menu pulsante di commutazione non premuto.
@@ -40,6 +42,8 @@ Testo pulsante di commutazione non premuto.
 tabulazione
 Stati pulsante di commutazione non premuto.
 tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
 Menu pulsante di commutazione non premuto.
@@ -60,8 +64,10 @@ tabulazione
 Testo pulsante di commutazione non premuto.
 tabulazione
 Stati pulsante di commutazione non premuto.
-Dialoghi pulsante di commutazione non premuto.
 tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
 tabulazione
 Menu pulsante di commutazione non premuto.
 tabulazione
@@ -75,6 +81,8 @@ tabulazione
 Testo pulsante di commutazione non premuto.
 tabulazione
 Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
 tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
@@ -93,6 +101,8 @@ spazio
 tabulazione
 Stati pulsante di commutazione non premuto.
 tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
 Menu pulsante di commutazione non premuto.
@@ -105,11 +115,31 @@ Galleria
 Stati pulsante di commutazione premuto.
 spazio
 tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
 Dialoghi pulsante di commutazione non premuto.
 tabulazione
 Menu pulsante di commutazione non premuto.
 tabulazione
 Abilita il pulsante casella di spunta non spuntata.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Calendario pulsante di commutazione premuto.
+spazio
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Una finestra di dialogo Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.

@@ -206,6 +206,29 @@
  {
   "depth": 5,
   "role": "toggle button",
+  "name": "Calendario",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Calendario",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
   "name": "Dialoghi",
   "states": [
    "focusable",
