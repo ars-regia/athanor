@@ -9,8 +9,6 @@
 
 /// The socket the decoder's unit listens on, beneath `$XDG_RUNTIME_DIR`.
 pub const SOCKET: &str = "athanor-wallpaper/decode";
-/// The only program the decoder admits as its peer.
-pub const DAEMON_EXE: &str = "/usr/bin/athanor-wallpaper";
 /// The only unit, in the user manager's `session.slice`, the decoder admits its peer from.
 pub const DAEMON_UNIT: &str = "athanor-wallpaper.service";
 /// The slice of [`DAEMON_UNIT`].

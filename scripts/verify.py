@@ -4989,6 +4989,124 @@ def check_session_units():
     return r
 
 
+# Properties that put a user unit in namespaces of its own. Under the user manager each one
+# gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
+# ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
+NAMESPACING_PROPERTY = re.compile(
+    r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
+    r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
+    r"|ProcSubset|ExecPaths|NoExecPaths|MountImages|ExtensionDirectories|ExtensionImages|PrivateBPF"
+    r"|ReadWriteDirectories|ReadOnlyDirectories|InaccessibleDirectories)\s*=(.*)$"
+)
+# The values that leave a namespacing property off: empty, a false boolean in any of systemd's
+# spellings, ProtectProc=default or ProcSubset=all.
+NAMESPACING_OFF = ("", "0", "no", "n", "false", "f", "off", "default", "all")
+# The command lines of a unit, each a program its namespaces hold.
+UNIT_EXEC = re.compile(r"(Exec(?:Start(?:Pre|Post)?|Condition|Reload|Stop(?:Post)?))\s*=\s*[-@:+!]*(\S+)")
+# A read of a process's executable: any mention of `admit_user_unit` but its definition, an
+# import under another name included, or a path `/proc/<pid>/exe` built in code.
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\b|/proc/\{[^}]*\}/exe\b|\.join\(\s*\"exe\"\s*\)")
+# The namespaced user units' programs that are no binary of a crate here, each with why it
+# admits no peer by its executable. A wrapper (env, sh -c, systemd-run) is listed only with its
+# unit, so a wrapper that starts one of this repository's daemons is never passed by name.
+FOREIGN_PROGRAMS = {
+    ("athanor-launcher-rates.service", "mkdir"): "an ExecStartPre= that creates qalculate's directory",
+    ("athanor-launcher-rates.service", "qalc"): "Qalculate's command line refreshes the currency rates and accepts no connection",
+    ("athanor-skel-sync.service", "bash"): "a script that copies /etc/skel once and accepts no connection",
+    ("cosmic-osd.service", "cosmic-osd"): "upstream COSMIC's program; no code of this repository runs in it",
+    ("cosmic-settings-daemon.service", "cosmic-settings-daemon"): "upstream COSMIC's program; no code of this repository runs in it",
+}
+# A library file whose exe read is the body of a function matched by name at each call site, so
+# depending on its crate reads nothing: athanor-unit's peer.rs, the read of admit_user_unit.
+READ_BY_CALL = {"system/athanor-unit/src/peer.rs"}
+
+
+def crate_programs(root):
+    """({binary: first file:line of an exe-reading call or None}) for every crate under system/
+    and forge/specs: its package name, its [[bin]] names and its src/bin/*.rs files. A read in
+    a crate of this repository that the binary's crate depends on, directly or not, counts."""
+    crates = {}
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            name = package.get("package", {}).get("name")
+            bins = {name} | {b.get("name") for b in package.get("bin", [])}
+            bins |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
+            bins.discard(None)
+            tables = [package.get("dependencies", {})] + [t.get("dependencies", {}) for t in package.get("target", {}).values()]
+            deps = {(spec.get("package", key) if isinstance(spec, dict) else key) for table in tables for key, spec in table.items()}
+            reads = []
+            for source in walk(manifest.parent / "src", ".rs"):
+                for number, line in enumerate(read(source).split("\n"), 1):
+                    if EXE_READING_ADMISSION.search(line.split("//")[0]):
+                        reads.append((source.relative_to(root).as_posix(), number))
+            crates[name or rel(manifest)] = (bins, deps, reads)
+
+    def reads_of(name, seen):
+        bins, deps, reads = crates[name]
+        own = next((f"{path}:{number}" for path, number in reads if not seen or path not in READ_BY_CALL), None)
+        if own:
+            return own
+        seen.add(name)
+        return next((r for d in sorted(deps) if d in crates and d not in seen for r in [reads_of(d, seen)] if r), None)
+
+    programs = {}
+    for name, (bins, _, _) in crates.items():
+        reads = reads_of(name, set())
+        for binary in bins:
+            programs[binary] = programs.get(binary) or reads
+    return programs
+
+
+def user_unit_texts(root, units):
+    """{unit: text} of the shipped user units with every drop-in of `<unit>.d/*.conf` appended."""
+    texts = dict(units)
+    for conf in walk(root / "forge" / "specs", ".conf"):
+        if conf.parent.name.endswith(".service.d") and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+            unit = conf.parent.name[:-2]
+            texts[unit] = texts.get(unit, "") + "\n" + read(conf)
+    return texts
+
+
+def peer_admission_problems(units, programs):
+    """A unit that sets a namespacing property and runs a program that reads its peer's
+    executable fails with EACCES and refuses every peer. A unit that sets one and runs a
+    program this scan cannot place is a problem too: it would otherwise pass unseen."""
+    problems = []
+    for unit, text in sorted(units.items()):
+        lines = [line.strip() for line in text.split("\n")]
+        namespaced = next((m for m in map(NAMESPACING_PROPERTY.match, lines) if m and m.group(2).strip().lower() not in NAMESPACING_OFF), None)
+        if not namespaced:
+            continue
+        for line in lines:
+            m = UNIT_EXEC.match(line)
+            if not m:
+                continue
+            program = m.group(2).rsplit("/", 1)[-1]
+            if program in programs:
+                if programs[program]:
+                    problems.append(f"{unit}: runs {program}, which reads a peer's executable at {programs[program]}, and sets {namespaced.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer by control group (athanor_unit::peer::admit_user_unit_cgroup, doc_session_daemons.md SD17)")
+            elif (unit, program) not in FOREIGN_PROGRAMS:
+                problems.append(f"{unit}: sets {namespaced.group(1)}= and its {m.group(1)}= runs {m.group(2)}, which is neither a binary of a crate under system/ or forge/specs nor in FOREIGN_PROGRAMS: say which it is")
+    return problems
+
+
+@check("peer-exe", "A user unit with namespacing properties runs no program that reads its peer's executable")
+def check_peer_exe():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    for problem in peer_admission_problems(user_unit_texts(ROOT, units), crate_programs(ROOT)):
+        r.fail(problem)
+    for (unit, program), why in FOREIGN_PROGRAMS.items():
+        r.note(f"foreign: {unit}: {program}: {why}")
+    return r
+
+
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
