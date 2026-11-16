@@ -10,6 +10,7 @@
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp
+#                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -121,7 +122,7 @@ local_image=localhost/athanor-shell-rig
 build_label=org.athanor.rig.build-inputs
 
 # The image: an explicit one, else the published one pinned by digest, else the local build.
-rig_image() {
+pinned_rig_image() {
     if [ -n "${ATHANOR_RIG_IMAGE:-}" ]; then
         echo "$ATHANOR_RIG_IMAGE"
     elif [ -s "$rig/rig-image.digest" ]; then
@@ -129,6 +130,78 @@ rig_image() {
     else
         echo "$local_image:rig"
     fi
+}
+
+# The Version-Release of forge/specs/cosmic-comp, or nothing (spec_nevr.awk).
+cosmic_comp_nevr() {
+    awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec"
+}
+
+# The rig the recipes run: the image `rig.sh cosmic-comp-version` derived from the pinned rig
+# with forge/specs/cosmic-comp's own build installed, while it is derived from that same rig and
+# the spec still names the build it holds and the image is still here; else the pinned rig.
+# $spec_rig holds "<pinned rig's image id> <Version-Release> <image id>": the id, not the name,
+# so a rig rebuilt under the same name (build-image) leaves the derived rig unused.
+spec_rig=$out/cosmic-comp-spec/rig
+rig_image() {
+    local base derived_from nevr id
+    base=$(pinned_rig_image)
+    if [ -s "$spec_rig" ] && read -r derived_from nevr id < "$spec_rig" &&
+        [ "$nevr" = "$(cosmic_comp_nevr)" ] && podman image exists "$id" &&
+        podman image exists "$base" && [ "$(image_id "$base")" = "$derived_from" ]; then
+        echo "$id"
+    else
+        echo "$base"
+    fi
+}
+
+# The id of a local image, without its sha256: prefix.
+image_id() {
+    local id
+    id=$(podman image inspect --format '{{.Id}}' "$1")
+    echo "${id#sha256:}"
+}
+
+# Builds forge/specs/cosmic-comp the way the forge does and derives from the pinned rig an image
+# with that RPM installed, recorded in $spec_rig: build_spec_rig <pinned rig> <Version-Release>.
+# run_spec_build.sh is the DAG's and Spec Build Check's path: the sources checked against
+# SOURCES/sources.sha256, rpmbuild without network, sccache in a volume removed at the end, so
+# no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
+# content hash, as Spec Build Check takes it, never latest. The RPM is a pull-request test
+# artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
+build_spec_rig() {
+    local base=$1 want=$2 idemp builder rpm ctx id
+    # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
+    # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
+    idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+        --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
+    builder=$registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp")
+    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp"; then
+        echo "rig.sh: $builder, the builder of this checkout, is not published, so forge/specs/cosmic-comp" \
+            "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
+        exit 1
+    fi
+    bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
+    rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
+    rm -f "$rpm"
+    bash "$root/forge/scripts/run_spec_build.sh" "$builder" specs/cosmic-comp
+    if [ ! -f "$rpm" ]; then
+        echo "rig.sh: the build of forge/specs/cosmic-comp produced no ${rpm##*/}" >&2
+        exit 1
+    fi
+    ctx=$out/cosmic-comp-spec
+    mkdir -p "$ctx"
+    cp "$rpm" "$ctx/cosmic-comp.rpm"
+    # rpm -U, not dnf: no repository is read, and a requirement the rig lacks fails the install.
+    # --oldpackage: a spec may also name an older build than the rig's. A bind mount, so the RPM
+    # itself stays out of the image's layers.
+    printf '%s\n' "FROM $base" \
+        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage /tmp/cosmic-comp.rpm' \
+        > "$ctx/Containerfile"
+    podman build --network=none --pull=never --iidfile "$ctx/iid" -t "$local_image:cosmic-comp-spec" \
+        -f "$ctx/Containerfile" "$ctx"
+    id=$(cat "$ctx/iid")
+    echo "$(image_id "$base") $want ${id#sha256:}" > "$spec_rig"
 }
 
 # The build stage, where cargo runs: an explicit one, else the published one pinned by digest,
@@ -648,7 +721,7 @@ build-image-ref)
     ;;
 build-image)
     build_ref=$(build_image)
-    if [ "$(rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
+    if [ "$(pinned_rig_image)" = "$local_image:rig" ] || [ "$build_ref" = "$local_image:build" ]; then
         podman build "${rig_base[@]}" --target rig -t "$local_image:rig" -f "$rig/Containerfile" "$rig"
     fi
     if [ "$build_ref" = "$local_image:build" ]; then
@@ -699,18 +772,45 @@ publish-build-image)
     ;;
 cosmic-comp-version)
     # The cosmic goldens and compositor-e2e test the compositor users run only while the rig
-    # carries the session's build (#965). Publishing the rig again does not move it: the
-    # Containerfile pins the tier 2 repository it installs from by TIER2_DIGEST.
-    # The spec's Release is a macro and rpmbuild is not on the host: spec_nevr.awk expands it and
-    # prints nothing for anything it cannot expand, which fails the check.
-    want=$(awk -f "$rig/spec_nevr.awk" "$root/forge/specs/cosmic-comp/cosmic-comp.spec")
-    have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp)
-    if [ -n "$want" ] && [ "$have" = "$want" ]; then
-        echo "the rig runs cosmic-comp $have, the build forge/specs/cosmic-comp ships"
-    else
-        echo "rig.sh: the rig runs cosmic-comp $have, the session ships ${want:-an unreadable Version-Release} (forge/specs/cosmic-comp); if TIER2_DIGEST in forge/test/shell/Containerfile already holds that build, republish the rig (rig.sh publish-image) and commit rig-image.digest; otherwise move TIER2_DIGEST to a tier 2 repository that holds it first" >&2
+    # carries the session's build (#965). The published rig installs it from the tier 2
+    # repository the Containerfile pins by TIER2_DIGEST, and the forge publishes a new build there
+    # only after the change lands on iso-v0. So when the rig holds another build than the spec
+    # names, as on a pull request that changes forge/specs/cosmic-comp, this recipe builds the
+    # spec as the forge does and installs it into an image derived from the rig, which every
+    # later recipe runs (build_spec_rig, rig_image). Either way it passes only when the rig runs
+    # exactly the spec's Version-Release: the Release a change to the spec raises (the spec is one
+    # of verify.py's RELEASE_BY_HAND) is what tells its build from the rig's. The spec's Release is a macro and rpmbuild is not on the
+    # host: spec_nevr.awk expands it and prints nothing for anything it cannot expand, which fails
+    # the check.
+    want=$(cosmic_comp_nevr)
+    if [ -z "$want" ]; then
+        echo "rig.sh: spec_nevr.awk cannot read the Version-Release of forge/specs/cosmic-comp/cosmic-comp.spec" >&2
         exit 1
     fi
+    base=$(pinned_rig_image)
+    rm -f "$spec_rig"
+    if ! published=$(in_rig "$base" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp); then
+        echo "rig.sh: the rig $base has no cosmic-comp package: $published" >&2
+        exit 1
+    fi
+    if [ "$published" = "$want" ]; then
+        echo "the rig runs cosmic-comp $want, the build forge/specs/cosmic-comp ships"
+        exit 0
+    fi
+    echo "the rig holds cosmic-comp $published and forge/specs/cosmic-comp names $want: building the spec as the forge does"
+    build_spec_rig "$base" "$want"
+    if ! have=$(in_rig "$(rig_image)" rpm -q --qf '%{VERSION}-%{RELEASE}' cosmic-comp); then
+        echo "rig.sh: the rig built from forge/specs/cosmic-comp has no cosmic-comp package: $have" >&2
+        exit 1
+    fi
+    if [ "$have" != "$want" ]; then
+        echo "rig.sh: the rig built from forge/specs/cosmic-comp runs cosmic-comp $have, not the $want the spec names" >&2
+        exit 1
+    fi
+    echo "the rig runs cosmic-comp $want, built here from forge/specs/cosmic-comp"
+    echo "rig.sh: the published rig still holds cosmic-comp $published, so every run builds $want again until it moves:" \
+        "once the forge has published $want to tier 2 from iso-v0, point TIER2_DIGEST in forge/test/shell/Containerfile" \
+        "at that tier 2 repository, republish the rig (rig.sh publish-image) and commit rig-image.digest" >&2
     ;;
 probe-sandbox)
     in_rig "$(rig_image)" bwrap --unshare-all --ro-bind /usr /usr --symlink usr/lib64 /lib64 --dev /dev /usr/bin/true

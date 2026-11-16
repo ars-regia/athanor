@@ -18,14 +18,17 @@ test = false
 doctest = false
 
 [features]
-default = ["update", "shelld", "layout", "gtk"]
+default = ["update", "shelld", "layout", "gtk", "sulphur"]
 update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:chrono", "dep:tracing"]
 shelld = ["dep:athanor-shelld", "dep:zbus"]
 layout = ["dep:athanor-layout", "dep:athanor-trust-state"]
 gtk = ["dep:athanor-bar", "dep:athanor-sulphur-client", "dep:glib"]
+# The compositor links libgbm, Pixman, libseat and libinput.
+sulphur = ["dep:athanor-sulphur"]
 
 [dependencies]
 athanor-bar = { path = "../../forge/specs/athanor-bar/athanor-bar-1.0.0", optional = true }
+athanor-sulphur = { path = "../../forge/specs/athanor-sulphur/athanor-sulphur-1.0.0", features = ["fuzz"], optional = true }
 athanor-sulphur-client = { path = "../athanor-sulphur-client", optional = true }
 athanor-layout = { path = "../athanor-layout", optional = true }
 athanor-shelld = { path = "../../forge/specs/athanor-shelld/athanor-shelld-1.0.0", optional = true }

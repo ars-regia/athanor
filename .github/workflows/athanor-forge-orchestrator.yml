@@ -77,7 +77,11 @@ jobs:
     # failing registry therefore ends the run within 375 s. For a slow registry where every
     # wave has a lookup that only succeeds on its last attempt: ceil(35/8) = 5 waves x 375 s
     # = 1875 s = 31.25 min. Checkout and hashing 35 packages take under 2 min: 40 minutes
-    # leaves about 7 minutes of margin.
+    # leaves about 7 minutes of margin. The signature check of a present image
+    # (verify_image.sh, issue #1176) adds one cosign verify under retry.sh, a few seconds when
+    # Rekor and TUF answer; one that keeps failing ends the run after its retries, and a
+    # signature check slow in every wave is not covered by the margin: the job then times out,
+    # which fails the run as well.
     timeout-minutes: 40
     permissions:
       contents: read
@@ -93,12 +97,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # cosign verifies the signature of every hash tag the registry has (issue #1176): the
+      # locked flake's, as the package builds sign with.
+      - name: ❄️ Install Nix (Bedrock Cache)
+        uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+
       - name: Compute Dependency DAG & Topological Matrix
         id: brain
         env:
           # REGISTRY_HOST repository variable, default ghcr.io (as in forge-ghcr-cleanup.yml).
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
-        run: ./scripts/dynamic-matrix.sh
+        run: nix shell --inputs-from .. nixpkgs#cosign -c ./scripts/dynamic-matrix.sh
 
       - name: Hashes of this run (read by the system image build)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

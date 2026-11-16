@@ -50,7 +50,8 @@ here=$(dirname "${BASH_SOURCE[0]}")
 probe() { bash "$here/registry_probe.sh" "${image}:$1" 2> /dev/null || echo error; }
 
 # A real image reads as present, with no credentials involved.
-check "present image"  present "$(probe "$h_present")"
+# The first word: a present image is also named by its digest, which verify_image.sh checks.
+check "present image"  present "$(probe "$h_present" | cut -d" " -f1)"
 # A tag that genuinely does not exist must read as absent, not as an error.
 check "missing image"  absent  "$(probe "$h_absent")"
 

@@ -4,13 +4,14 @@
 //! on stable, so a crash a fuzzer once found stays a regression test.
 
 /// What an entry point returns: `Err` is a failure of the harness (a scratch directory, a
-/// fixed type string), never a finding. A panic is the finding.
+/// fixed type string) or, for a target that checks more than the absence of a panic, a broken
+/// property (`sulphur::protocol`). A panic is a finding too.
 pub type Setup = std::io::Result<()>;
 
-/// For the fuzz targets: a harness failure ends the run loudly instead of passing as coverage.
+/// For the fuzz targets: an `Err` ends the run loudly instead of passing as coverage.
 pub fn must(result: Setup) {
     if let Err(error) = result {
-        eprintln!("fuzz harness failed: {error}");
+        eprintln!("fuzz entry failed: {error}");
         std::process::abort();
     }
 }
@@ -23,6 +24,8 @@ pub mod compositor;
 pub mod layout;
 #[cfg(feature = "shelld")]
 pub mod shelld;
+#[cfg(feature = "sulphur")]
+pub mod sulphur;
 #[cfg(feature = "update")]
 pub mod update;
 

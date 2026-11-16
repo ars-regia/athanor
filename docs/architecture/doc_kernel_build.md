@@ -10,7 +10,12 @@ a pull request whose kernel inputs equal its base's does not build the kernel (s
 introduces it, on the maintainer's decision of the same day (section 13, decision 9): CachyOS
 does not decide Athanor's security. The options its config gives the tree and its files in the
 protected paths are two locks a person reviews (section 8, "CachyOS locks"), and
-`PCI_ACS_OVERRIDE` stays off (section 4). Sostituisce il
+`PCI_ACS_OVERRIDE` stays off (section 4). Revision 5 of 2026-11-16, decided by the
+maintainer on 2026-11-16 (#1208) and approved with the pull request that introduces it
+(section 3, step 10): every Kernel Build image also carries the tag of its kernel,
+`<nvr>-k<12 hex>`, written before `<nvr>` moves; a manifest a republish leaves under that tag
+alone is pruned fourteen days after `<nvr>` moved and does not count among the releases the
+retention keeps; the clause on manifests left by a repeated push of the same NVR is removed. Sostituisce il
 README "Testo Sacro" di `forge/specs/azoth/` e lo script
 `prepare-chimera.sh`. Il profilo del kernel e della piattaforma (configurazione, riga di
 comando, ruoli, integrità) è definito in [doc_kernel_profile.md](doc_kernel_profile.md):
@@ -195,7 +200,12 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
    kernel firmato, e separarla costa più di quanto rende;
 10. pubblicazione (job `publish` su runner GitHub, dall'artefatto del job `build`):
     tre pacchetti OCI con i soli RPM dentro, `ghcr.io/ars-regia/azoth`
-    (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`.
+    (binari), `azoth-devel`, `azoth-debuginfo`, tag `<nvr>`. Every image also
+    carries the tag of its kernel, `<nvr>-k<12 hex of the kernel digest>`
+    (`-microvm` after it for the guest kernel), the prefix azoth-boot and
+    azoth-nvidia take (`forge/specs/azoth/publish.sh`, `kernel-artifacts.sh tag`),
+    written before `<nvr>` moves: a repeated push of the same NVR moves `<nvr>`, and
+    the digest a running Orchestrator pinned stays under its kernel tag (#1208).
     Pacchetti separati e non suffissi del tag, perché la retention di ghcr è per
     pacchetto (`retention.sh`, prima del gate, che così verifica ciò che resta):
     del debuginfo restano le due release più recenti, di kernel e devel tutte; con
@@ -203,8 +213,11 @@ ynl --without selftests --without doc`: patch e `process_configs.sh -w -n -c`.
     referrer che cosign v3 tiene sotto il tag di fallback `sha256-<hex>` (ghcr non
     ha l'API referrers) e i bundle Sigstore che elenca, manifesti senza tag. Tutto
     il resto se ne va: release oltre il limite con i loro referrer, indici
-    sostituiti da ogni attestazione successiva, manifesti di un push ripetuto
-    dello stesso NVR. Ogni immagine: firma cosign
+    sostituiti da ogni attestazione successiva, manifesti rimasti senza tag.
+    A kernel tag is not a release: a manifest under its kernel tag alone stays
+    fourteen days after `<nvr>` moved, far above the longest Orchestrator run,
+    then goes with its referrers (`KERNEL_TAG_DAYS`).
+    Ogni immagine: firma cosign
     keyless (identità OIDC del workflow), SBOM SPDX da syft come attestazione
     `spdxjson`, attestazione custom con i pin (pins.env, hash di manifest, delta,
     patches.list e Containerfile, immagine base del builder, lock della toolchain);

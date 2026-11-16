@@ -15,6 +15,7 @@ on:
       - "system/athanor-sulphur-client/**"
       - "system/athanor-sal/**"
       - "forge/specs/athanor-sulphur/**"
+      - "forge/specs/cosmic-comp/**"
       - "system/athanor-i18n/**"
       - "forge/specs/athanor-shelld/**"
       - "forge/specs/athanor-bar/**"
@@ -150,14 +151,17 @@ jobs:
     name: Compositor client against cosmic-comp and against a compositor without COSMIC
     needs: lint
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The build of forge/specs/cosmic-comp, when the rig holds another, takes about eight minutes.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Rig image
         run: bash forge/test/shell/rig.sh build-image
-      - name: The rig runs the cosmic-comp the session ships
+      # When the rig holds another build than forge/specs/cosmic-comp names, the spec is built as
+      # the forge builds it and installed into the rig the next steps run; nothing is published.
+      - name: The rig runs the cosmic-comp the spec describes
         run: bash forge/test/shell/rig.sh cosmic-comp-version
       - name: Build and test the compositor client
         run: bash forge/test/shell/rig.sh build-compositor-client

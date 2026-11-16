@@ -1,5 +1,5 @@
 # Athanor's cosmic-comp: the upstream release at Fedora's version, built from upstream's
-# archive with four patches of ours; Fedora's own downstream patches are not carried, and
+# archive with five patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
 # forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc45.athanor1 sorts
@@ -11,13 +11,17 @@
 
 Name:           cosmic-comp
 Version:        1.11.0
-Release:        %{fedora_release}.athanor1
+Release:        %{fedora_release}.athanor2
 Summary:        Wayland compositor of the COSMIC desktop, with Athanor's focus fix
 
 # Fedora's full expression: the binary statically links the crates. GPL-3.0-only is cosmic-comp's own.
 License:        (0BSD OR Apache-2.0 OR MIT) AND (Apache-2.0 OR Apache-2.0 WITH LLVM-exception OR MIT) AND (Apache-2.0 OR BSD-2-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause OR MIT) AND (Apache-2.0 OR BSD-3-Clause) AND (Apache-2.0 OR CC0-1.0 OR MIT) AND (Apache-2.0 OR GPL-2.0-only) AND (Apache-2.0 OR LGPL-2.1-or-later OR MIT) AND (Apache-2.0 OR MIT OR Zlib) AND (Apache-2.0 OR MIT) AND (LGPL-3.0-or-later OR MIT) AND (MIT OR Unlicense) AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND CC0-1.0 AND GPL-3.0-only AND ISC AND MIT AND MPL-2.0 AND Unicode-3.0 AND Zlib
 URL:            https://github.com/pop-os/cosmic-comp
 Source0:        https://github.com/pop-os/cosmic-comp/archive/epoch-%{version}/cosmic-comp-%{version}.tar.gz
+# The wayland-backend that Source0's Cargo.lock resolves, its checksum the lock's, unpacked
+# under vendor/ for Patch4.
+%global wayland_backend_version 0.3.15
+Source1:        https://static.crates.io/crates/wayland-backend/wayland-backend-%{wayland_backend_version}.crate
 # Patch0 and Patch1 are submitted upstream; drop each when a release carries it.
 Patch0:         0001-shell-focus-Reconcile-focus-when-a-layer-surface-cha.patch
 Patch1:         0002-build-Take-the-commit-hash-from-GIT_HASH-when-it-is-.patch
@@ -27,6 +31,13 @@ Patch2:         0003-main-Add-keep-shortcuts-to-keep-the-key-bindings-wit.patch
 # A session locked with no window and no keyboard focus never focused the lock surface, so the
 # locker's password field took no keys until a click (pop-os/cosmic-greeter#474). Not submitted yet.
 Patch3:         0004-shell-focus-Focus-the-lock-surface-when-nothing-hold.patch
+# wayland-backend's wire parser accepted nulls the signature forbids; Patch4 rejects them as
+# libwayland does and answers a malformed request with a protocol error. Its hunks are those of
+# changes 1 and 2 that Sulphur carries on wayland-backend 0.3.17, applied to 0.3.15, whose two
+# files they touch are the same (forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/
+# wayland-backend/PATCHES.md). Not submitted. Drop it with a wayland-backend release that
+# rejects these nulls.
+Patch4:         0005-wayland-backend-Reject-nulls-the-wire-signature-forb.patch
 
 BuildRequires:  cargo rust
 
@@ -41,7 +52,10 @@ pinned by its Cargo.lock, plus a patch that reconciles the keyboard focus when a
 changes its keyboard interactivity. Athanor's launcher needs it.
 
 %prep
-%autosetup -p1 -n cosmic-comp-epoch-%{version}
+%autosetup -N -n cosmic-comp-epoch-%{version}
+mkdir vendor
+tar -xzf %{SOURCE1} -C vendor
+%autopatch -p1
 
 %build
 %set_build_flags
@@ -66,6 +80,14 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Mon Nov 16 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor2
+- Build against wayland-backend 0.3.15 with a wire parser that rejects a null its signature
+  forbids, as libwayland does, and answers a malformed request with a protocol error.
+
+* Sun Nov 15 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc43.athanor2
+- Build against wayland-backend 0.3.15 with a wire parser that rejects a null its signature
+  forbids, as libwayland does, and answers a malformed request with a protocol error.
+
 * Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor1
 - Fedora's cosmic-comp 1.11.0-2.fc45.
 

@@ -1,0 +1,115 @@
+From d3dc0e010d4089d4ff73ea4a8882660494e33766 Mon Sep 17 00:00:00 2001
+From: Ermete Architect <esenese@proton.me>
+Date: Sun, 15 Nov 2026 20:45:33 +0100
+Subject: [PATCH] wayland-backend: Reject nulls the wire signature forbids
+
+The pure-Rust backend of wayland-backend 0.3.15 parses an empty string,
+an object id of 0 and a new id of 0 into arguments whatever the
+signature says, and leaves each handler to cope with a null it does not
+expect. Carry the crate under vendor/, extracted from its crates.io
+archive by the spec, with two changes:
+
+- parse_message treats a null that the signature forbids as a malformed
+  message, as libwayland's demarshaller does, so every request is
+  covered in one place;
+- the server answers a malformed request with a wl_display.error
+  invalid_method and ends only that client, instead of closing it
+  without a word.
+
+Cargo.toml points [patch.crates-io] at the copy, and Cargo.lock drops
+the registry source and checksum of wayland-backend, as cargo writes it.
+---
+ Cargo.lock                                          |  2 --
+ Cargo.toml                                          |  3 +++
+ .../src/rs/server_impl/client.rs                    |  7 ++++++-
+ vendor/wayland-backend-0.3.15/src/rs/wire.rs        | 13 ++++++++++---
+ 4 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 78c16c2..c0a83e3 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -5821,8 +5821,6 @@ dependencies = [
+ [[package]]
+ name = "wayland-backend"
+ version = "0.3.15"
+-source = "registry+https://github.com/rust-lang/crates.io-index"
+-checksum = "2857dd20b54e916ec7253b3d6b4d5c4d7d4ca2c33c2e11c6c76a99bd8744755d"
+ dependencies = [
+  "cc",
+  "downcast-rs",
+diff --git a/Cargo.toml b/Cargo.toml
+index 1f3e055..c062747 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -148,3 +148,6 @@ cosmic-protocols = { git = "https://github.com/pop-os//cosmic-protocols", branch
+ [patch.crates-io]
+ smithay = { git = "https://github.com/smithay/smithay.git", rev = "8a27023" }
+ smithay-egui = { git = "https://github.com/Smithay/smithay-egui.git", rev = "6511552" }
++# wayland-backend with a wire parser that rejects a null its signature forbids, as libwayland
++# does, and a server that answers a malformed request with a protocol error (Athanor).
++wayland-backend = { path = "vendor/wayland-backend-0.3.15" }
+diff --git a/vendor/wayland-backend-0.3.15/src/rs/server_impl/client.rs b/vendor/wayland-backend-0.3.15/src/rs/server_impl/client.rs
+index d3ec7b0..dab7ece 100644
+--- a/vendor/wayland-backend-0.3.15/src/rs/server_impl/client.rs
++++ b/vendor/wayland-backend-0.3.15/src/rs/server_impl/client.rs
+@@ -369,7 +369,12 @@ impl<D> Client<D> {
+                     continue;
+                 }
+                 Err(MessageParseError::Malformed) => {
+-                    self.kill(DisconnectReason::ConnectionClosed);
++                    // The client learns why, as libwayland tells it: an unknown object or
++                    // opcode, or arguments its signature does not admit.
++                    self.post_display_error(
++                        DisplayError::InvalidMethod,
++                        CString::new("Malformed request.").unwrap(),
++                    );
+                     return Err(rustix::io::Errno::PROTO.into());
+                 }
+             };
+diff --git a/vendor/wayland-backend-0.3.15/src/rs/wire.rs b/vendor/wayland-backend-0.3.15/src/rs/wire.rs
+index 23395f4..df84a0a 100644
+--- a/vendor/wayland-backend-0.3.15/src/rs/wire.rs
++++ b/vendor/wayland-backend-0.3.15/src/rs/wire.rs
+@@ -4,7 +4,7 @@ use std::collections::VecDeque;
+ use std::ffi::CStr;
+ use std::os::unix::io::{BorrowedFd, OwnedFd, RawFd};
+ 
+-use crate::protocol::{Argument, ArgumentType, Message};
++use crate::protocol::{AllowNull, Argument, ArgumentType, Message};
+ 
+ use smallvec::SmallVec;
+ 
+@@ -204,7 +204,7 @@ pub fn parse_message<'a>(
+                     ArgumentType::Int => Ok(Argument::Int(front as i32)),
+                     ArgumentType::Uint => Ok(Argument::Uint(front)),
+                     ArgumentType::Fixed => Ok(Argument::Fixed(front as i32)),
+-                    ArgumentType::Str(_) => {
++                    ArgumentType::Str(allow_null) => {
+                         read_array_from_payload(front as usize, tail).and_then(|(v, rest)| {
+                             tail = rest;
+                             if !v.is_empty() {
+@@ -212,12 +212,19 @@ pub fn parse_message<'a>(
+                                     Ok(s) => Ok(Argument::Str(Some(Box::new(s.into())))),
+                                     Err(_) => Err(MessageParseError::Malformed),
+                                 }
+-                            } else {
++                            } else if allow_null == AllowNull::Yes {
+                                 Ok(Argument::Str(None))
++                            } else {
++                                // A null where the signature forbids one, as libwayland rejects it.
++                                Err(MessageParseError::Malformed)
+                             }
+                         })
+                     }
++                    ArgumentType::Object(AllowNull::No) if front == 0 => {
++                        Err(MessageParseError::Malformed)
++                    }
+                     ArgumentType::Object(_) => Ok(Argument::Object(front)),
++                    ArgumentType::NewId if front == 0 => Err(MessageParseError::Malformed),
+                     ArgumentType::NewId => Ok(Argument::NewId(front)),
+                     ArgumentType::Array => {
+                         read_array_from_payload(front as usize, tail).map(|(v, rest)| {
+-- 
+2.56.1
+

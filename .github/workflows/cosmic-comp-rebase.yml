@@ -3,8 +3,10 @@ name: cosmic-comp rebase drill
 # Tries Athanor's cosmic-comp patch set (forge/specs/cosmic-comp/SOURCES) on the newest
 # upstream tag and reports which patches apply. The logic is in
 # scripts/cosmic-comp-rebase/rebase.py; this file checks out, calls it and uploads its
-# output. The run is red when a patch no longer applies, which is what it is for. It
-# changes nothing in the repository: the bump itself is cosmic-comp-bump.yml.
+# output. The run is red when a patch no longer applies, which is what it is for, and
+# when the drill cannot run: a crate that cannot be downloaded (exit 2) or a spec, manifest
+# or crate that fails validation (exit 1 with a message, before any report).
+# It changes nothing in the repository: the bump itself is cosmic-comp-bump.yml.
 # `schedule` only works from the default branch; by hand on any branch.
 
 on:

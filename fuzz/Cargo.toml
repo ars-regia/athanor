@@ -13,12 +13,13 @@ cargo-fuzz = true
 [workspace]
 
 [features]
-default = ["update", "shelld", "layout", "gtk"]
+default = ["update", "shelld", "layout", "gtk", "sulphur"]
 update = ["athanor-fuzz-entries/update"]
 shelld = ["athanor-fuzz-entries/shelld"]
 layout = ["athanor-fuzz-entries/layout"]
 # The bar and the compositor client link GTK.
 gtk = ["athanor-fuzz-entries/gtk"]
+sulphur = ["athanor-fuzz-entries/sulphur"]
 
 # The shipped profile checks overflow (the root Cargo.toml); fuzzing should too.
 [profile.release]
@@ -28,6 +29,12 @@ debug-assertions = true
 [dependencies]
 libfuzzer-sys = "0.4"
 athanor-fuzz-entries = { path = "../system/athanor-fuzz-entries", default-features = false }
+
+# A workspace of its own takes no [patch] of the root Cargo.toml: the fuzzed compositor must
+# parse the wire as the shipped one does, with the wire parser that rejects a null its
+# signature forbids (its PATCHES.md). The same directory as the root entry, not a copy.
+[patch.crates-io]
+wayland-backend = { path = "../forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }
 
 [[bin]]
 name = "update_claims"
@@ -124,5 +131,12 @@ doc = false
 name = "trust_state"
 path = "fuzz_targets/trust_state.rs"
 required-features = ["layout"]
+test = false
+doc = false
+
+[[bin]]
+name = "sulphur_protocol"
+path = "fuzz_targets/sulphur_protocol.rs"
+required-features = ["sulphur"]
 test = false
 doc = false

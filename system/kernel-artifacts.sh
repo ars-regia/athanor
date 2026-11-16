@@ -34,12 +34,26 @@
 #                                       and no other cycle owns it
 #   check-plan --base REV --head REV    after resolve, for System Image Check (O7): append
 #                                       check_gpus and check_delta; exit 1 for a failing row
+#   check-tier --base REV --head REV    after check-plan and system/tier-digests.sh resolve, for
+#                                       System Image Check (O7): when the plan builds images, read
+#                                       the kernel RPM of the tier 0 the build will install and
+#                                       when the diff moves a kernel pin, replace the plan by no image (check_gpus empty,
+#                                       check_delta=false) with a warning if it is not the pinned
+#                                       NVR, since the tiers follow the merge; exit 1 when the
+#                                       diff moves no kernel pin, or the tier cannot be read or
+#                                       carries no kernel
 #   get KEY                             print the value of KEY; exit 1 when the file lacks it
 #   has KEY                             exit 0 when KEY has a non-empty value
 #   registry                            print the registry and owner this run would resolve
 #                                       against (the same $REGISTRY resolve writes to the file);
 #                                       no network call, so a caller can compose an image
 #                                       reference before resolve has ever run
+#   tag NVR DIGEST                      print NVR-k<12 hex of the kernel DIGEST>, the tag that keys
+#                                       every kernel artefact on the kernel it belongs to: Kernel
+#                                       Build tags the images it publishes with it, so a digest a
+#                                       running Orchestrator pinned keeps a tag when the NVR moves,
+#                                       and azoth-boot and azoth-nvidia take it as their prefix;
+#                                       no network call
 #   identity kernel|modules|signer      print the certificate identity regexp of the workflow that
 #                                       signs that artifact, on the trusted branches only
 #   digest REF                          the digest of REF, empty when the tag does not exist or
@@ -149,6 +163,10 @@ annotate() { # annotate notice|warning MESSAGE
 retry() { bash "$ROOT/forge/scripts/retry.sh" "$@"; }
 ask() { retry bash "$SELF" probe "$@"; }
 identity() { [[ -n ${IDENTITY[${1:-}]:-} ]] || usage; echo "${IDENTITY[$1]}"; }
+kernel_tag() { # kernel_tag NVR DIGEST
+  [[ $2 =~ ^sha256:[0-9a-f]{64}$ ]] || die "'$2' is not a sha256 digest"
+  echo "$1-k${2:7:12}"
+}
 
 probe_digest() {
   local out status=0
@@ -372,7 +390,9 @@ resolve() {
     write kernel-missing "${lines[@]}"
     return 0
   fi
-  [[ -z $expect || $kernel == "$expect" ]] || die "$REGISTRY/azoth:$nvr is $kernel, the caller resolved $expect: the kernel was republished since"
+  # A Kernel Build that republishes the NVR while a run holds its digest moves the tag under
+  # that run: name the race, both digests and the tag that still holds the pinned kernel.
+  [[ -z $expect || $kernel == "$expect" ]] || die "$REGISTRY/azoth:$nvr is $kernel, the caller resolved $expect: the kernel was republished since, a race with Kernel Build; the pinned kernel stays at $REGISTRY/azoth:$(kernel_tag "$nvr" "$expect"), and the next run resolves the new one"
   kernel_signed=$(ask signed "$REGISTRY/azoth@$kernel" kernel)
   devel_signed=$(ask signed "$REGISTRY/azoth-devel@$devel" kernel)
   if [[ $kernel_signed != signed || $devel_signed != signed ]]; then
@@ -387,7 +407,7 @@ resolve() {
     return 0
   fi
   lines+=("kernel_digest=$kernel" "devel_digest=$devel")
-  tag="$nvr-k${kernel:7:12}"
+  tag=$(kernel_tag "$nvr" "$kernel")
   lines+=("boot_tag=$tag")
   digest=$(ask digest "$REGISTRY/azoth-boot:$tag")
   verdict=unverified
@@ -401,7 +421,7 @@ resolve() {
   for branch in open legacy; do
     version=$(sed -n "s/^NVIDIA_${branch^^}_VERSION=//p" "$PINS")
     [[ -n $version ]] || die "NVIDIA_${branch^^}_VERSION is not set in $PINS"
-    tag="$nvr-k${kernel:7:12}-$branch-$version"
+    tag="$(kernel_tag "$nvr" "$kernel")-$branch-$version"
     lines+=("nvidia_${branch}_version=$version" "nvidia_${branch}_tag=$tag")
     digest=$(ask digest "$REGISTRY/azoth-nvidia:$tag")
     verdict=unverified
@@ -541,6 +561,10 @@ cycle() {
   echo "kernel-artifacts: cycle=$decision kmod=$kmod"
 }
 
+moved_pins() { # moved_pins BASE HEAD: the keys of pins.env the diff changes, one per line
+  git diff -U0 "$1" "$2" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u
+}
+
 check_plan() {
   local base='' head='' state nvr files file keys key only_kernel_pins=true only_nvidia_pins=true nvidia_moved=false other_moved=false gpus delta
   while [[ $# -gt 0 ]]; do
@@ -561,7 +585,7 @@ check_plan() {
     matches_any "$file" "${KERNEL_PIN_FILES[@]}" "${KERNEL_CONFIG_FILES[@]}" "${KERNEL_TREE_FILES[@]}" || only_kernel_pins=false
     matches_any "$file" "${NVIDIA_PIN_FILES[@]}" "${NVIDIA_PIN_COMPANIONS[@]}" || only_nvidia_pins=false
   done <<< "$files"
-  keys=$(git diff -U0 "$base" "$head" -- forge/specs/azoth/pins.env | sed -n 's/^[-+]\([A-Z_][A-Z0-9_]*\)=.*/\1/p' | sort -u)
+  keys=$(moved_pins "$base" "$head")
   while IFS= read -r key; do
     [[ -n $key ]] || continue
     if [[ $key == NVIDIA_* ]]; then nvidia_moved=true; else other_moved=true; fi
@@ -592,6 +616,56 @@ check_plan() {
   esac
   set_kv "check_gpus=$gpus" "check_delta=$delta"
   echo "kernel-artifacts: check_gpus='$gpus' check_delta=$delta"
+}
+
+check_tier() {
+  local base='' head='' gpus nvr tiers registry digest tag ref layer found key moved=false
+  while [[ $# -gt 0 ]]; do
+    [[ $# -ge 2 ]] || usage
+    case $1 in
+      --base) base=$2 ;;
+      --head) head=$2 ;;
+      *) usage ;;
+    esac
+    shift 2
+  done
+  [[ -n $base && -n $head ]] || usage
+  gpus=$(get check_gpus)
+  if [[ -z $gpus ]]; then return 0; fi
+  nvr=$(get nvr)
+  tiers=${TIER_DIGESTS_DIR:-$ROOT/tier-digests}/tier-digests.json
+  [[ -f $tiers ]] || die "$tiers does not exist: run system/tier-digests.sh resolve first"
+  registry=$(jq -er '.registry | strings' "$tiers") || die "$tiers names no registry"
+  digest=$(jq -er '.tier0 | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$tiers") || die "$tiers has no valid tier0 digest"
+  # The tag system/tier-digests.sh resolved the digest from, for the message only.
+  tag=latest
+  if [[ -n ${GITHUB_BASE_REF:-} && $GITHUB_BASE_REF != iso-v0 && $GITHUB_BASE_REF != main ]]; then
+    tag=${GITHUB_BASE_REF,,}
+    tag=branch-${tag//[^a-z0-9._-]/-}
+  fi
+  ref=$registry/athanor-forge-tier0-repo@$digest
+  # A tier image is its RPMs and repodata: the kernel it carries is the name of its kernel-core RPM.
+  retry skopeo copy "docker://$ref" "dir:$TMP/tier0"
+  jq -er '.layers[].digest' "$TMP/tier0/manifest.json" > "$TMP/layers" || die "$ref: no layers in its manifest"
+  : > "$TMP/listing"
+  while IFS= read -r layer; do
+    tar -tf "$TMP/tier0/${layer#sha256:}" >> "$TMP/listing" || die "$ref: cannot list layer $layer"
+  done < "$TMP/layers"
+  found=$(sed -nE 's#(^|.*/)kernel-core-([0-9][^/]*)\.x86_64\.rpm$#\2#p' "$TMP/listing")
+  [[ -n $found ]] || die "tier 0 $tag ($digest) carries no kernel-core RPM: the tier cannot tell which kernel the images would install"
+  if grep -qxF "$nvr" <<< "$found"; then
+    echo "kernel-artifacts: tier 0 $tag ($digest) carries $nvr"
+    return 0
+  fi
+  # A move of FEDORA_KERNEL_NVR in this diff, the only pin the NVR derives from (nvr.sh), explains
+  # the stale tier (the tiers follow the merge); without it the base's tiers lag behind its own
+  # pin, and a green check would build nothing.
+  while IFS= read -r key; do
+    if [[ $key == FEDORA_KERNEL_NVR ]]; then moved=true; fi
+  done <<< "$(moved_pins "$base" "$head")"
+  [[ $moved == true ]] || die "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, and this diff does not move the kernel pin: the tiers of the base must be rebuilt first (the Orchestrator on the base)"
+  set_kv "check_gpus=" "check_delta=false"
+  annotate warning "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, which is published: the images are built after the merge, when the Orchestrator rebuilds the tiers"
 }
 
 release_digests() { # release_digests ALL UNSIGNED
@@ -679,12 +753,14 @@ case $command in
   check-ready) [[ $# -eq 0 ]] || usage; check_ready ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;
+  check-tier) check_tier "$@" ;;
   release-digests) release_digests "$@" ;;
   verify-key) verify_key "$@" ;;
   get) [[ $# -eq 1 ]] || usage; get "$1" ;;
   has) [[ $# -eq 1 ]] || usage; [[ -f $FILE ]] && grep -q "^$1=." "$FILE" ;;
   registry) [[ $# -eq 0 ]] || usage; echo "$REGISTRY" ;;
   identity) [[ $# -eq 1 ]] || usage; identity "$1" ;;
+  tag) [[ $# -eq 2 ]] || usage; kernel_tag "$1" "$2" ;;
   digest) [[ $# -eq 1 ]] || usage; ask digest "$1" ;;
   signed) [[ $# -eq 2 ]] || usage; ask signed "$1" "$2" ;;
   predicates) [[ $# -eq 2 ]] || usage; ask predicates "$1" "$2" ;;

@@ -5,7 +5,8 @@
 #
 # Environment: GITHUB_TOKEN GITHUB_ACTOR GITHUB_REPOSITORY_OWNER GITHUB_REF, and for the keyless
 # signature of the tiers (UD44) GITHUB_REPOSITORY GITHUB_SERVER_URL ACTIONS_ID_TOKEN_REQUEST_URL
-# ACTIONS_ID_TOKEN_REQUEST_TOKEN
+# ACTIONS_ID_TOKEN_REQUEST_TOKEN; KERNEL_REGISTRY when the kernel lives elsewhere than
+# ghcr.io/<owner> (system/kernel-artifacts.sh).
 # Writes /workspace/tier-digests/tier-digests.json, the digests the image build installs (UD28).
 set -euo pipefail
 
