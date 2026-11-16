@@ -2852,8 +2852,8 @@ reason = "the audio, battery and shield branches are merged into the bar's port:
 surface = "bar-network"
 item = 2
 what = "the text in the system sans, where GTK drew Inter"
-state = "recorded"
-reason = "the Sal bar's theme names no family, so the bar's clock, buttons and popovers take the system sans; the change is the bar's, across every surface of it, as bar-popups item 5 records, not the popovers'"
+state = "closed"
+reason = "the tray's branch, merged into the bar's port, sets Calmo's family, Inter, on the bar's and the popovers' themes, as the bar's item 3 (look::FONT_FAMILY)"
 
 [[gtk-difference]]
 surface = "bar-network"
