@@ -704,7 +704,7 @@ fn build(
                     acts.push((ui.add(list, Kind::Button(label)), act));
                 }
             }
-            focus_before(&mut ui, switch, &acts, back_to);
+            focus_back(&mut ui, switch, &acts, back_to);
         }
         Some((request, (asked, label))) => {
             let text = ui.add(frame, Kind::Label(asked));
@@ -718,31 +718,21 @@ fn build(
     (ui, Widgets { acts, switch })
 }
 
-/// Gives the focus back to the widget whose question was cancelled, as GTK's Cancel did. A menu
-/// popup puts the focus on the widget after the focused one when it opens (from none, on the
-/// first), so the focus goes on the one before it: the sheet's focusable widgets are the switch
-/// and the actions, in that order.
-fn focus_before(
+/// Gives the focus back to the widget whose question was cancelled, as GTK's Cancel did: the
+/// switch, or the action that asked. The menu popup keeps it when it opens.
+fn focus_back(
     ui: &mut Ui,
     switch: Option<WidgetId>,
     acts: &[(WidgetId, Act)],
     back_to: Option<Request>,
 ) {
     let Some(back_to) = back_to else { return };
-    let chain: Vec<(WidgetId, Option<Request>)> = switch
-        .map(|switch| (switch, Some(Request::SetAutomatic(false))))
-        .into_iter()
-        .chain(acts.iter().map(|(id, act)| match act {
-            Act::Ask(request) | Act::Send(request) => (*id, Some(*request)),
-            Act::Cancel => (*id, None),
-        }))
-        .collect();
-    let at = chain
+    let asked = acts
         .iter()
-        .position(|(_, request)| *request == Some(back_to));
-    if let Some(before) = at.and_then(|at| at.checked_sub(1)) {
-        ui.set_focus(Some(chain[before].0));
-    }
+        .find(|(_, act)| matches!(act, Act::Ask(r) | Act::Send(r) if *r == back_to))
+        .map(|(id, _)| *id)
+        .or(switch.filter(|_| back_to == Request::SetAutomatic(false)));
+    ui.set_focus(asked);
 }
 
 /// The power menu's share of the trust state (BR3): "Restart to update" stands beside
@@ -968,16 +958,16 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_question_puts_the_focus_before_the_action_that_asked() {
-        let (ui, widgets) = built(&shown([true; 3]), Page::Sheet, Some(Request::GoBack));
-        let restart = widgets
-            .acts
-            .iter()
-            .find(|(_, act)| *act == Act::Ask(Request::Apply))
-            .map(|(id, _)| *id);
-        assert_eq!(ui.focus(), restart);
-        // The first focusable widget needs nothing: the popup starts there.
-        let (ui, _) = built(&shown([true; 3]), Page::Sheet, Some(Request::Postpone));
-        assert_eq!(ui.focus(), None);
+    fn a_cancelled_question_gives_the_focus_back_to_the_action_that_asked() {
+        for request in [Request::Postpone, Request::Apply, Request::GoBack] {
+            let (ui, widgets) = built(&shown([true; 3]), Page::Sheet, Some(request));
+            let asked = widgets
+                .acts
+                .iter()
+                .find(|(_, act)| matches!(act, Act::Ask(r) | Act::Send(r) if *r == request))
+                .map(|(id, _)| *id);
+            assert!(asked.is_some());
+            assert_eq!(ui.focus(), asked);
+        }
     }
 }
