@@ -94,6 +94,47 @@ class Drill(unittest.TestCase):
         lines = [f"Patch{i}:         {n}" for i, n in enumerate(names)]
         self.spec.write_text(SPEC + "\n".join(lines) + "\n")
 
+    def exit_of(self, *extra, repo=None):
+        """The exit status and stderr of a drill that stops before its report."""
+        stderr = io.StringIO()
+        with unittest.mock.patch.object(sys, "stderr", stderr), self.assertRaises(SystemExit) as stopped:
+            rebase.main(
+                [str(self.tmp / "out"), "--spec", str(self.spec), "--patches", str(self.patches),
+                 "--repo", repo or str(self.upstream), *extra]
+            )
+        return stopped.exception.code, stderr.getvalue()
+
+    def test_a_failing_ls_remote_has_its_own_status_and_names_the_command(self):
+        code, stderr = self.exit_of(repo=str(self.tmp / "no-such-repo"))
+        self.assertEqual(code, rebase.LS_REMOTE_FAILED)
+        self.assertIn("git ls-remote", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_a_failing_clone_has_its_own_status_and_names_the_command(self):
+        code, stderr = self.exit_of("--tag", "epoch-9.9.9")
+        self.assertEqual(code, rebase.CLONE_FAILED)
+        self.assertIn("git clone", stderr)
+
+    def test_a_git_apply_check_that_answers_128_stops_the_drill_and_1_is_a_failing_patch(self):
+        (self.patches / "p.patch").write_text("x")
+        self.declare("p.patch")
+        real = subprocess.run
+
+        def answering(status):
+            def run(cmd, **kwargs):
+                if "--check" in cmd:
+                    return subprocess.CompletedProcess(cmd, status, "", "fatal: corrupt patch")
+                return real(cmd, **kwargs)
+            return run
+
+        with unittest.mock.patch.object(rebase.subprocess, "run", answering(128)):
+            code, stderr = self.exit_of()
+        self.assertEqual(code, rebase.APPLY_FAILED)
+        self.assertIn("exited 128", stderr)
+        with unittest.mock.patch.object(rebase.subprocess, "run", answering(1)):
+            status, report, _ = self.run_drill()
+        self.assertEqual((status, report["patches"][0]["applies"]), (1, False))
+
     def test_a_spec_that_declares_no_patches_is_a_clean_empty_set(self):
         status, report, text = self.run_drill()
         self.assertEqual((status, report["tag"], report["patches"]), (0, "epoch-1.9.0", []))
