@@ -64,7 +64,8 @@ impl Module for Clock {
     }
 
     fn open(&mut self, cx: &mut Cx) -> Option<Ui> {
-        let (Some(text), Some(today)) = (calendar_text(), today()) else {
+        let now = self.texts.now().ok();
+        let (Some(text), Some(today)) = (calendar_text(), now.as_ref().and_then(today)) else {
             tracing::error!("cannot read the date or the names of the months; no calendar");
             return None;
         };
@@ -94,9 +95,10 @@ fn arrow_icons(rtl: bool) -> [&'static str; 2] {
     }
 }
 
-/// Today, in the local time zone.
-fn today() -> Option<Date> {
-    let now = glib::DateTime::now_local().ok()?;
+/// The date of `now`, the time the clock's button shows: GLib's local zone is read once for
+/// the life of the process, so the calendar takes the clock's zone, which follows
+/// /etc/localtime, and its today is the button's.
+fn today(now: &glib::DateTime) -> Option<Date> {
     Some(Date {
         year: now.year(),
         month: u8::try_from(now.month()).ok()?,
@@ -138,6 +140,22 @@ mod tests {
     fn the_arrows_point_to_their_edges_in_both_directions() {
         assert_eq!(arrow_icons(false), ["pan-start-symbolic", "pan-end-symbolic"]);
         assert_eq!(arrow_icons(true), ["pan-end-symbolic", "pan-start-symbolic"]);
+    }
+
+    #[test]
+    fn today_is_the_date_in_the_clocks_zone() {
+        let zone = glib::TimeZone::from_identifier(Some("+09:00")).expect("an offset is a zone");
+        let now = glib::DateTime::from_utc(2026, 1, 1, 23, 30, 0.0)
+            .and_then(|utc| utc.to_timezone(&zone))
+            .expect("a valid time");
+        assert_eq!(
+            today(&now),
+            Some(Date {
+                year: 2026,
+                month: 1,
+                day: 2
+            })
+        );
     }
 
     #[test]
