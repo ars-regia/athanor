@@ -48,6 +48,7 @@ mod session_calls;
 mod shutdown;
 mod state;
 mod tablet;
+mod tearing;
 mod tiling;
 mod toplevel_icon;
 mod toplevel_tag;

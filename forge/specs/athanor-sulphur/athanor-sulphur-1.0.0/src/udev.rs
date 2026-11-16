@@ -271,6 +271,8 @@ struct Head {
     not_before: Option<Instant>,
     /// Whether it is on: an output the power client turned off draws nothing (`power_output`).
     powered: bool,
+    /// Whether its last frame met decision 33's conditions for a torn flip (`tearing.rs`).
+    tears: bool,
 }
 
 /// The connector of the monitor an output shows, so that a configuration finds it again.
@@ -1142,6 +1144,7 @@ impl State {
                 wanted: true,
                 not_before: None,
                 powered: true,
+                tears: false,
             },
         );
         // An output the power client turned off stays off when a refused configuration drives
@@ -1905,6 +1908,23 @@ fn render(
     };
     let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
+    let tears = crate::tearing::tears(crate::tearing::conditions(
+        space,
+        output,
+        lock.is_some(),
+        popups,
+        &zoomed,
+    ));
+    if tears != head.tears {
+        head.tears = tears;
+        // ponytail: every frame is a vsync flip; pass PresentationMode::Async to render_frame
+        // here once Smithay's DRM backend has an asynchronous page flip (Smithay #1948).
+        tracing::info!(
+            output = output.name(),
+            tears,
+            "decision 33's conditions for a torn flip changed; the frames stay vsync, as Smithay's DRM backend has no asynchronous page flip"
+        );
+    }
     let (frame, filtered) = match look.filter {
         Some(affine) => {
             let (element, states) = crate::look::filtered(renderer, output, &zoomed, affine)

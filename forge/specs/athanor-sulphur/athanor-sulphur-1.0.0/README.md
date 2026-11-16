@@ -181,6 +181,16 @@ on 2026-11-15), path `src/egl/wayland/wayland-drm/wayland-drm.xml`, SHA-256
 `<copyright>` element: HPND-sell-variant, 2008-2011 Kristian Høgsberg and 2010-2011 Intel
 Corporation. No compositor's code was read for it (`doc_own_stack.md` OS3).
 
+Decision 33, wave 2b, also adds `wp_tearing_control_manager_v1`, standard (`src/tearing.rs`,
+`src/fixture/wave2b.rs`). A surface's presentation hint is applied with its next commit, and
+destroying its object takes it back to vsync; a second object for a surface is the
+`tearing_control_exists` error. The DRM backend reads decision 33's conditions from each frame
+it draws (`tearing::conditions`): the surface is full-screen and alone on its output, no layer
+surface is mapped there, the session is not locked, and for a confined client every line of
+OS4's border is in the frame and inside the output. Smithay's DRM backend has no asynchronous
+page flip at the pinned revision, so every frame is presented with vsync, which the protocol
+allows; the backend logs when the conditions change.
+
 Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
 the content type its client sets, applied with the surface's commit, and no behaviour reads it at
 1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag

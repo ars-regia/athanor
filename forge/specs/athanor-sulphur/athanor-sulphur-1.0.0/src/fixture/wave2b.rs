@@ -2,6 +2,10 @@
 //! linux-dmabuf's feedback names. Without a render node the fixture runs on Pixman, where the
 //! global must be absent; on a GPU, `ATHANOR_RENDER_NODE=/dev/dri/renderD128 cargo test --
 //! --ignored` binds it, reads `device` and creates a prime buffer.
+//!
+//! wp_tearing_control_manager_v1 (`tearing.rs`): the hint is applied with the commit, a second
+//! object for a surface is the protocol's error, and each condition of decision 33 refuses the
+//! tear on its own, read from the frame as the DRM backend reads it.
 
 use super::*;
 use smithay::backend::allocator::gbm::{GbmBufferFlags, GbmDevice};
@@ -13,6 +17,14 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
 use wl_drm_client::wl_drm;
+use super::marks::{at, clear_the_fixture, confined, frame, lock_the_session, paint};
+use crate::tearing::Conditions;
+use smithay::backend::renderer::pixman::PixmanRenderer;
+use smithay::utils::Physical;
+use wayland_protocols::wp::tearing_control::v1::client::{
+    wp_tearing_control_manager_v1::WpTearingControlManagerV1,
+    wp_tearing_control_v1::{PresentationHint, WpTearingControlV1},
+};
 
 /// The client side of Mesa's wayland-drm.xml, which the compositor serves.
 #[allow(
@@ -200,5 +212,246 @@ fn wave2b_wl_drm_names_the_feedback_node_and_takes_a_prime_buffer() {
     let error = super::devices::protocol_error(&mut run, &mut flink);
     assert_eq!(error.object_interface, "wl_drm");
     assert_eq!(error.code, 2, "invalid_name");
+    run.stop();
+}
+
+delegate_noop!(Client: ignore WpTearingControlManagerV1);
+delegate_noop!(Client: ignore WpTearingControlV1);
+
+const PAINT: [u8; 4] = [0x60, 0x20, 0x60, 255];
+const WHITE: [u8; 4] = [255, 255, 255, 255];
+const BLACK: [u8; 4] = [0, 0, 0, 255];
+
+/// Decision 33's conditions for the first output's next frame, read from the elements the DRM
+/// backend draws, at a magnifier `zoom` if any.
+fn conditions(run: &mut Running, zoom: Option<(Point<i32, Physical>, f64)>) -> Conditions {
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let mut renderer = PixmanRenderer::new().expect("a renderer");
+    let marks = run.state.marks();
+    let elements = crate::marks::stack(&mut renderer, &run.state.space, &output, &marks);
+    let elements = crate::look::zoomed(elements, zoom);
+    let popups = run.state.composing.popups_on(&run.state.space, &output);
+    let locked = run.state.lock.is_some();
+    crate::tearing::conditions(&run.state.space, &output, locked, &popups, &elements)
+}
+
+/// A window of a client, confined or not, alone on the first output: the fixture's window goes
+/// to the second. With `full_screen`, it takes the output.
+fn alone(run: &mut Running, confine: bool, full_screen: bool) -> (Local, xdg_toplevel::XdgToplevel) {
+    let fixture = clear_the_fixture(run);
+    let (mut local, toplevel) = if confine {
+        confined(run)
+    } else {
+        let mut local = Local::connect(run, None);
+        let toplevel = local.toplevel(run);
+        (local, toplevel)
+    };
+    let second = run.state.space.outputs().nth(1).expect("a second output").clone();
+    let area = run.state.space.output_geometry(&second).expect("placed");
+    run.state.space.map_element(fixture, area.loc, false);
+    if full_screen {
+        local.roundtrip(run);
+        local.client.configure = None;
+        toplevel.set_fullscreen(None);
+        let (width, height, _) = local.redraw(run);
+        paint(run, &mut local, width, height, PAINT);
+    }
+    (local, toplevel)
+}
+
+/// Asks for an async presentation, which the next commit applies.
+fn ask(run: &mut Running, local: &mut Local) -> WpTearingControlV1 {
+    let manager: WpTearingControlManagerV1 = local.bind(1);
+    let (surface, _) = local.window.clone().expect("a window");
+    let control = manager.get_tearing_control(&surface, &local.queue.handle(), ());
+    control.set_presentation_hint(PresentationHint::Async);
+    surface.commit();
+    local.roundtrip(run);
+    control
+}
+
+/// Every condition of decision 33 met: a confined client's full-screen window, alone, with its
+/// border in the frame.
+const MET: Conditions = Conditions {
+    asked: true,
+    alone: true,
+    layered: false,
+    locked: false,
+    confined: true,
+    bordered: true,
+};
+
+/// Every client sees the manager; the hint is double-buffered, and destroying the object takes
+/// it back to vsync with the next commit.
+#[test]
+fn a_presentation_hint_is_applied_with_the_commit() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    assert!(local.sees("wp_tearing_control_manager_v1"));
+    let manager: WpTearingControlManagerV1 = local.bind(1);
+    let (surface, _) = local.window.clone().expect("a window");
+    let control = manager.get_tearing_control(&surface, &local.queue.handle(), ());
+    control.set_presentation_hint(PresentationHint::Async);
+    local.roundtrip(&mut run);
+    assert!(!conditions(&mut run, None).asked, "before the commit");
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert!(conditions(&mut run, None).asked, "after the commit");
+
+    control.destroy();
+    local.roundtrip(&mut run);
+    assert!(conditions(&mut run, None).asked, "destroyed, before the commit");
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert!(!conditions(&mut run, None).asked, "destroyed, after the commit");
+    // A destroyed object leaves room for a new one.
+    let again = manager.get_tearing_control(&surface, &local.queue.handle(), ());
+    again.set_presentation_hint(PresentationHint::Vsync);
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert!(local.connection.protocol_error().is_none());
+    run.stop();
+}
+
+/// A second wp_tearing_control_v1 for a surface is the manager's tearing_control_exists error.
+#[test]
+fn a_second_tearing_control_is_the_protocol_error() {
+    let mut run = Running::start(None);
+    let mut local = Local::connect(&mut run, None);
+    local.toplevel(&mut run);
+    let manager: WpTearingControlManagerV1 = local.bind(1);
+    let (surface, _) = local.window.clone().expect("a window");
+    let qh = local.queue.handle();
+    let _first = manager.get_tearing_control(&surface, &qh, ());
+    let _second = manager.get_tearing_control(&surface, &qh, ());
+    let error = super::devices::protocol_error(&mut run, &mut local);
+    assert_eq!(error.code, 0, "tearing_control_exists");
+    assert_eq!(error.object_interface, "wp_tearing_control_manager_v1");
+    run.stop();
+}
+
+/// A confined client's full-screen window alone on its output, asking for async, meets every
+/// condition, and OS4's border is drawn, at full opacity, in that frame.
+#[test]
+fn a_frame_that_may_tear_draws_the_border() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let met = conditions(&mut run, None);
+    assert_eq!(met, MET);
+    assert!(crate::tearing::tears(met));
+    let shown = frame(&mut run);
+    assert_eq!(at(&shown, 1, 400), WHITE, "the border's white line");
+    assert_eq!(at(&shown, 0, 400), BLACK, "the border's outer line");
+    run.stop();
+}
+
+/// A window outside a security context has no border, and needs none.
+#[test]
+fn an_unconfined_window_may_tear_without_a_border() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, false, true);
+    let _control = ask(&mut run, &mut local);
+    let met = conditions(&mut run, None);
+    assert_eq!(
+        met,
+        Conditions {
+            confined: false,
+            bordered: false,
+            ..MET
+        }
+    );
+    assert!(crate::tearing::tears(met));
+    run.stop();
+}
+
+/// A surface that has not asked for async is never torn.
+#[test]
+fn vsync_refuses_the_tear() {
+    let mut run = Running::start(None);
+    alone(&mut run, true, true);
+    let refused = conditions(&mut run, None);
+    assert_eq!(refused, Conditions { asked: false, ..MET });
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A window that is alone but not full-screen is not torn.
+#[test]
+fn a_window_not_full_screen_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, false);
+    let _control = ask(&mut run, &mut local);
+    let refused = conditions(&mut run, None);
+    assert!(refused.asked && !refused.alone, "{refused:?}");
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A full-screen window with another window on its output is not torn.
+#[test]
+fn another_window_on_the_output_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let window = window_of(&run, other.id.as_ref().expect("an id"));
+    run.state.space.map_element(window, (40, 40), false);
+    let refused = conditions(&mut run, None);
+    assert_eq!(refused, Conditions { alone: false, ..MET });
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A full-screen window with a layer surface mapped on its output is not torn, even below it.
+#[test]
+fn a_mapped_layer_surface_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let mut shell = Local::connect(&mut run, None);
+    shell.bar(&mut run, 40);
+    let refused = conditions(&mut run, None);
+    assert_eq!(refused, Conditions { layered: true, ..MET });
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// No frame tears while the session is locked.
+#[test]
+fn the_lock_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let _locker = lock_the_session(&mut run);
+    let refused = conditions(&mut run, None);
+    assert_eq!(refused, Conditions { locked: true, ..MET });
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A confined client's window whose border is not wholly in the frame is not torn: the
+/// magnifier pushes its edges off the output, or the frame leaves the lines out.
+#[test]
+fn a_confined_window_without_its_border_is_not_torn() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let middle = Point::from((OUTPUTS[0].width / 2, OUTPUTS[0].height / 2));
+    let refused = conditions(&mut run, Some((middle, 2.0)));
+    assert_eq!(refused, Conditions { bordered: false, ..MET });
+    assert!(!crate::tearing::tears(refused));
+
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let mut renderer = PixmanRenderer::new().expect("a renderer");
+    let marks = run.state.marks();
+    let elements = crate::marks::stack(&mut renderer, &run.state.space, &output, &marks);
+    let unlined: Vec<_> = elements
+        .into_iter()
+        .filter(|element| !matches!(element, crate::marks::Stacked::Line(_)))
+        .collect();
+    let refused = crate::tearing::conditions(&run.state.space, &output, false, &[], &unlined);
+    assert_eq!(refused, Conditions { bordered: false, ..MET });
     run.stop();
 }
