@@ -622,7 +622,7 @@ fn an_unknown_presentation_hint_is_ignored() {
 }
 
 /// Each of the twelve lines of OS4's border is needed: the frame without any one of them, or
-/// with any one of them moved off the output, refuses the tear.
+/// with any one of them moved wholly or half off the output, refuses the tear.
 #[test]
 fn every_line_of_the_border_is_needed_on_the_output() {
     use crate::marks::Stacked;
@@ -665,27 +665,38 @@ fn every_line_of_the_border_is_needed_on_the_output() {
             "line {n} missing"
         );
 
-        let mut off = crate::marks::stack(&mut renderer, space, &output, &marks);
-        let Stacked::Line(line) = &off[index] else {
-            panic!("line {n} is a line");
-        };
-        let mut geometry = line.geometry(1.0.into());
-        geometry.loc.x += OUTPUTS[0].width;
-        off[index] = Stacked::Line(SolidColorRenderElement::new(
-            line.id().clone(),
-            geometry,
-            line.current_commit(),
-            line.color(),
-            Kind::Unspecified,
-        ));
-        assert_eq!(
-            read(&off),
-            Conditions {
-                bordered: false,
-                ..MET
-            },
-            "line {n} off the output"
-        );
+        for half in [false, true] {
+            let mut off = crate::marks::stack(&mut renderer, space, &output, &marks);
+            let Stacked::Line(line) = &off[index] else {
+                panic!("line {n} is a line");
+            };
+            let mut geometry = line.geometry(1.0.into());
+            if half {
+                // Half the line past the right or bottom edge, the rest still on the output.
+                geometry.loc += Point::from((geometry.size.w / 2, geometry.size.h / 2));
+                assert!(
+                    whole.overlaps(geometry) && !whole.contains_rect(geometry),
+                    "line {n} is partly on the output"
+                );
+            } else {
+                geometry.loc.x += OUTPUTS[0].width;
+            }
+            off[index] = Stacked::Line(SolidColorRenderElement::new(
+                line.id().clone(),
+                geometry,
+                line.current_commit(),
+                line.color(),
+                Kind::Unspecified,
+            ));
+            assert_eq!(
+                read(&off),
+                Conditions {
+                    bordered: false,
+                    ..MET
+                },
+                "line {n} off the output, half {half}"
+            );
+        }
     }
     run.stop();
 }
