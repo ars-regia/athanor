@@ -44,10 +44,11 @@ def user_manager_runs():
     return done.stdout.strip() in ("running", "degraded")
 
 
-def user_namespaces_work():
-    """Whether the user manager can start a unit with a namespacing property at all."""
+def namespaced_units_start():
+    """Whether the user manager can start a unit with the shipped unit's namespacing properties
+    at all: `true` under them, so a failure here is the host's, not the premise's."""
     try:
-        done = subprocess.run(["systemd-run", "--user", "--pipe", "--wait", "--collect", "-p", "PrivateNetwork=yes", "true"], capture_output=True, text=True, timeout=60)
+        done = subprocess.run(["systemd-run", "--user", "--pipe", "--wait", "--collect", *namespacing_properties(), "true"], capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return done.returncode == 0
@@ -58,7 +59,7 @@ def run(*args, **kwargs):
 
 
 @unittest.skipUnless(user_manager_runs(), "no user manager: systemctl --user is-system-running fails")
-@unittest.skipUnless(user_manager_runs() and user_namespaces_work(), "the user manager cannot give a unit a namespace here")
+@unittest.skipUnless(user_manager_runs() and namespaced_units_start(), "the user manager cannot start a unit with the decoder's namespacing properties here")
 class WallpaperDecoderKernelPremiseTest(unittest.TestCase):
     def test_a_namespaced_reader_reads_the_peers_cgroup_and_not_its_exe(self):
         props = namespacing_properties()
