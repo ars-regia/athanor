@@ -1913,16 +1913,16 @@ fn render(
     let tears = crate::tearing::tears(crate::tearing::conditions(
         space,
         output,
-        marks.focused.as_ref(),
-        lock.is_some(),
+        lock,
         popups,
+        marks,
         &zoomed,
     ));
     if tears != head.tears {
         head.tears = tears;
         // ponytail: every frame is a vsync flip; pass PresentationMode::Async to render_frame
         // here once Smithay's DRM backend has an asynchronous page flip (Smithay #1948).
-        tracing::info!(
+        tracing::debug!(
             output = output.name(),
             tears,
             "decision 33's conditions for a torn flip changed; the frames stay vsync, as Smithay's DRM backend has no asynchronous page flip"

@@ -643,7 +643,7 @@ fn a_zone_that_leaves_no_room_hides_no_border() {
 
 /// A blue popup of 60 by 40 on `local`'s window at `origin`, centred on the window and moved by
 /// `shift` upwards or downwards; where it lies. The compositor draws its surface red.
-fn popup(run: &mut Running, local: &mut Local, origin: (i32, i32), shift: i32) -> (i32, i32) {
+pub(super) fn popup(run: &mut Running, local: &mut Local, origin: (i32, i32), shift: i32) -> (i32, i32) {
     popup_as(run, local, origin, shift, None, true)
 }
 

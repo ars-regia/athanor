@@ -18,6 +18,8 @@
 //! backend logs when a frame would have honoured a hint.
 
 use crate::input_method::PlacedPopup;
+use crate::lock::Lock;
+use crate::marks::Marks;
 use crate::state::{unconfined, State};
 use smithay::backend::renderer::element::Element;
 use smithay::desktop::{layer_map_for_output, PopupManager, Space, Window};
@@ -175,19 +177,22 @@ pub fn tears(c: Conditions) -> bool {
     c.asked && c.alone && !c.layered && !c.locked && (!c.confined || c.bordered)
 }
 
-/// The conditions of the frame of `output` made of `elements`, drawn locked or not, with the
-/// input method's `popups` above the space and `focused` holding the keyboard. The surface is
+/// The conditions of the frame of `output` made of `elements`, drawn under `lock` if any, with
+/// the input method's `popups` above the space and the `marks` the frame was stacked with: the
+/// DRM backend passes what it draws the frame from, and the fixture what its frames are drawn
+/// from, so that both read the same state. The surface is
 /// the toplevel of the window that has the output whole (`marks::whole_on`), or else of the
 /// topmost window on the output; it is alone when no other window meets the output and no popup
 /// is shown. With no window, nothing asks.
 pub fn conditions<E: Element>(
     space: &Space<Window>,
     output: &Output,
-    focused: Option<&Window>,
-    locked: bool,
+    lock: Option<&Lock>,
     popups: &[PlacedPopup],
+    marks: &Marks,
     elements: &[E],
 ) -> Conditions {
+    let locked = lock.is_some();
     let nothing = Conditions {
         layered: above(output, false),
         locked,
@@ -214,7 +219,7 @@ pub fn conditions<E: Element>(
     else {
         return nothing;
     };
-    let lifted = crate::marks::lifted(focused, space, output) == Some(*window);
+    let lifted = crate::marks::lifted(marks.focused.as_ref(), space, output) == Some(*window);
     let alone = on.len() == 1
         && crate::marks::whole_on(window, area)
         && popups.is_empty()

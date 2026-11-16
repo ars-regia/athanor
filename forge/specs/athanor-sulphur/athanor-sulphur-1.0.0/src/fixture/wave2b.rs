@@ -17,7 +17,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_dmabuf_feedback_v1, zwp_linux_dmabuf_v1,
 };
 use wl_drm_client::wl_drm;
-use super::marks::{at, clear_the_fixture, confined, frame, lock_the_session, paint};
+use super::marks::{at, clear_the_fixture, confined, frame, lock_the_session, paint, popup};
 use crate::tearing::Conditions;
 use smithay::backend::renderer::pixman::PixmanRenderer;
 use smithay::utils::Physical;
@@ -231,9 +231,8 @@ fn conditions(run: &mut Running, zoom: Option<(Point<i32, Physical>, f64)>) -> C
     let elements = crate::marks::stack(&mut renderer, &run.state.space, &output, &marks);
     let elements = crate::look::zoomed(elements, zoom);
     let popups = run.state.composing.popups_on(&run.state.space, &output);
-    let locked = run.state.lock.is_some();
-    let focused = marks.focused.as_ref();
-    crate::tearing::conditions(&run.state.space, &output, focused, locked, &popups, &elements)
+    let lock = run.state.lock.as_ref();
+    crate::tearing::conditions(&run.state.space, &output, lock, &popups, &marks, &elements)
 }
 
 /// A layer surface of a new client on `layer` of the first output, 100 by 100 pixels.
@@ -525,9 +524,202 @@ fn a_confined_window_without_its_border_is_not_torn() {
         .into_iter()
         .filter(|element| !matches!(element, crate::marks::Stacked::Line(_)))
         .collect();
-    let focused = marks.focused.as_ref();
+    let lock = run.state.lock.as_ref();
     let refused =
-        crate::tearing::conditions(&run.state.space, &output, focused, false, &[], &unlined);
+        crate::tearing::conditions(&run.state.space, &output, lock, &[], &marks, &unlined);
     assert_eq!(refused, Conditions { bordered: false, ..MET });
+    run.stop();
+}
+/// An xdg popup of the full-screen window is drawn above it, so the window is not alone.
+#[test]
+fn a_popup_of_the_window_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    assert_eq!(conditions(&mut run, None), MET, "before the popup");
+    popup(&mut run, &mut local, (0, 0), 0);
+    let refused = conditions(&mut run, None);
+    assert_eq!(
+        refused,
+        Conditions {
+            alone: false,
+            ..MET
+        }
+    );
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// An input method's popup over the full-screen window is drawn above it, so the window is not
+/// alone.
+#[test]
+fn an_input_method_popup_refuses_the_tear() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, false, true);
+    let _control = ask(&mut run, &mut local);
+    let met = Conditions {
+        confined: false,
+        bordered: false,
+        ..MET
+    };
+    assert_eq!(conditions(&mut run, None), met, "before the popup");
+    let mut ime = Local::connect(&mut run, None);
+    let method = SimulatedInputMethod::new(&mut ime, &mut run);
+    let field = text_input(&mut local, &mut run);
+    enable(&field, &mut local, &mut run, "caf");
+    ime.pump(&mut run, "the input method is activated", |_, _| {
+        method.method.names_after(0).contains(&"activate")
+    });
+    let (_surface, _popup) = method.popup(&mut ime, &mut run);
+    let output = run.state.space.outputs().next().expect("an output");
+    assert_eq!(
+        run.state
+            .composing
+            .popups_on(&run.state.space, output)
+            .len(),
+        1
+    );
+    let refused = conditions(&mut run, None);
+    assert_eq!(
+        refused,
+        Conditions {
+            alone: false,
+            ..met
+        }
+    );
+    assert!(!crate::tearing::tears(refused));
+    run.stop();
+}
+
+/// A hint value the protocol does not define is ignored: the hint set before it stays, and the
+/// client is not disconnected.
+#[test]
+fn an_unknown_presentation_hint_is_ignored() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let control = ask(&mut run, &mut local);
+    assert!(conditions(&mut run, None).asked, "async before");
+    // set_presentation_hint, opcode 0, with a value neither vsync (0) nor async (1).
+    let message = Message {
+        sender_id: control.id(),
+        opcode: 0,
+        args: [Argument::Uint(7)].into_iter().collect(),
+    };
+    local
+        .connection
+        .backend()
+        .send_request(message, None, None)
+        .expect("a raw set_presentation_hint");
+    let (surface, _) = local.window.clone().expect("a window");
+    surface.commit();
+    local.roundtrip(&mut run);
+    assert!(
+        local.connection.protocol_error().is_none(),
+        "no protocol error"
+    );
+    assert!(conditions(&mut run, None).asked, "the async hint stays");
+    run.stop();
+}
+
+/// Each of the twelve lines of OS4's border is needed: the frame without any one of them, or
+/// with any one of them moved off the output, refuses the tear.
+#[test]
+fn every_line_of_the_border_is_needed_on_the_output() {
+    use crate::marks::Stacked;
+    use smithay::backend::renderer::element::{solid::SolidColorRenderElement, Element, Kind};
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let output = run.state.space.outputs().next().expect("an output").clone();
+    let mut renderer = PixmanRenderer::new().expect("a renderer");
+    let marks = run.state.marks();
+    let lock = run.state.lock.as_ref();
+    let space = &run.state.space;
+    let read = |elements: &[Stacked<PixmanRenderer>]| {
+        crate::tearing::conditions(space, &output, lock, &[], &marks, elements)
+    };
+    let whole = smithay::utils::Rectangle::<i32, Physical>::from_size((OUTPUTS[0].width, OUTPUTS[0].height).into());
+    let lines: Vec<usize> = crate::marks::stack(&mut renderer, space, &output, &marks)
+        .iter()
+        .enumerate()
+        // The full-screen backdrop, a line of the whole output, is not one of the border's.
+        .filter(|(_, element)| {
+            matches!(element, Stacked::Line(line) if line.geometry(1.0.into()) != whole)
+        })
+        .map(|(index, _)| index)
+        .collect();
+    assert_eq!(lines.len(), 12, "three rings of four lines");
+    assert_eq!(
+        read(&crate::marks::stack(&mut renderer, space, &output, &marks)),
+        MET
+    );
+    for (n, &index) in lines.iter().enumerate() {
+        let mut missing = crate::marks::stack(&mut renderer, space, &output, &marks);
+        missing.remove(index);
+        assert_eq!(
+            read(&missing),
+            Conditions {
+                bordered: false,
+                ..MET
+            },
+            "line {n} missing"
+        );
+
+        let mut off = crate::marks::stack(&mut renderer, space, &output, &marks);
+        let Stacked::Line(line) = &off[index] else {
+            panic!("line {n} is a line");
+        };
+        let mut geometry = line.geometry(1.0.into());
+        geometry.loc.x += OUTPUTS[0].width;
+        off[index] = Stacked::Line(SolidColorRenderElement::new(
+            line.id().clone(),
+            geometry,
+            line.current_commit(),
+            line.color(),
+            Kind::Unspecified,
+        ));
+        assert_eq!(
+            read(&off),
+            Conditions {
+                bordered: false,
+                ..MET
+            },
+            "line {n} off the output"
+        );
+    }
+    run.stop();
+}
+
+/// At a fractional scale of 1.25 the border of a full-screen window lies wholly on the output,
+/// and the frame may tear.
+#[test]
+fn at_a_fractional_scale_the_border_is_on_the_output() {
+    let mut run = Running::start(None);
+    let first = run
+        .state
+        .space
+        .outputs()
+        .next()
+        .cloned()
+        .expect("an output");
+    first.change_current_state(
+        None,
+        None,
+        Some(smithay::output::Scale::Fractional(1.25)),
+        None,
+    );
+    layer_map_for_output(&first).arrange();
+    run.state.arrange_outputs();
+    let (mut local, _toplevel) = alone(&mut run, true, true);
+    let _control = ask(&mut run, &mut local);
+    let area = run.state.space.output_geometry(&first).expect("placed");
+    assert_eq!(
+        (area.size.w, area.size.h),
+        (1024, 640),
+        "the logical size at 1.25"
+    );
+    let met = conditions(&mut run, None);
+    assert_eq!(met, MET);
+    assert!(crate::tearing::tears(met));
     run.stop();
 }
