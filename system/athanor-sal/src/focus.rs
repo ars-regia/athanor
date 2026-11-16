@@ -81,6 +81,12 @@ pub fn step(ui: &Ui, backwards: bool) -> Option<WidgetId> {
     wrap(ui, chain(ui), backwards)
 }
 
+/// The control to focus when the keyboard enters a surface: its first, as GTK focuses a
+/// window's at map, if it has no focus yet; none if it kept one (AX7).
+pub fn on_enter(ui: &Ui) -> Option<WidgetId> {
+    ui.focus().is_none().then(|| step(ui, false)).flatten()
+}
+
 /// The next item of `menu` after the focused one, or before it when `backwards`, wrapping
 /// around: what the arrows do in a menu.
 pub fn cycle(ui: &Ui, menu: WidgetId, backwards: bool) -> Option<WidgetId> {
@@ -216,6 +222,16 @@ mod tests {
         let field = ui.field(Ui::ROOT, "Name", "");
         ui.layout();
         (ui, before, [a, b, c], field)
+    }
+
+    #[test]
+    fn the_keyboard_entering_a_surface_focuses_its_first_control_unless_it_has_one() {
+        let (mut ui, [a, _, c, ..]) = form(false);
+        assert_eq!(on_enter(&ui), Some(a));
+        ui.set_focus(Some(c));
+        assert_eq!(on_enter(&ui), None, "the focus it kept stays");
+        let (ui, before, ..) = choices(false, Some(1));
+        assert_eq!(on_enter(&ui), Some(before));
     }
 
     #[test]

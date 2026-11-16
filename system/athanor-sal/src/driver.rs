@@ -11,6 +11,7 @@ mod modifiers;
 pub use modifiers::KeyModifiers;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
+use crate::focus;
 use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
@@ -2945,7 +2946,16 @@ impl KeyboardHandler for App {
         _: &[u32],
         _: &[Keysym],
     ) {
-        self.keyboard_focus = self.shell.find(wl).map(|surface| surface.id);
+        let entered = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = entered;
+        // AX7: a surface opens with the focus on its first control, as GTK's at map.
+        if let Some(id) = entered {
+            if let Some(first) = self.shell.ui(id).and_then(focus::on_enter) {
+                if let Some(ui) = self.shell.ui_mut(id) {
+                    ui.set_focus(Some(first));
+                }
+            }
+        }
         self.keyboard_moved(wl, true);
     }
 
