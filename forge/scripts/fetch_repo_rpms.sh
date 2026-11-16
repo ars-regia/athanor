@@ -21,6 +21,7 @@ TMP_DIR=$(mktemp -d)
 trap "rm -rf $TMP_DIR" EXIT
 
 OWNER="${1:-ars-regia}"
+REGISTRY=$(echo "ghcr.io/$OWNER" | tr '[:upper:]' '[:lower:]')
 
 # Fetch package lists dynamically from Single Source of Truth
 readarray -t CUSTOM_TIER0 < <(jq -r '.custom_tier0[] // empty' config/packages.json)
@@ -82,20 +83,25 @@ for pkg in "${CUSTOM_TIER3[@]}"; do
   [[ -n "$pkg" ]] && ! is_external "$pkg" && TIER3_IMAGES+=("athanor-forge-$pkg")
 done
 
+# shellcheck source=forge/scripts/tier_cache.sh
+source "$(dirname "${BASH_SOURCE[0]}")/tier_cache.sh"
+
 declare -A OLD_DIGESTS
 declare -A NEW_DIGESTS
 
 pull_and_extract() {
   local img="$1"
   local target_dir="$2"
-  local ref="$img"
-  # A package image is pulled by the hash the brain verified for this run, never by
-  # :latest, which a revert or a second branch moves away from that content. Everything
-  # else here is the kernel, named by digest.
+  local IMAGE_LOWER
+  # A package image is pulled by the digest its hash tag names for this run's hash, and only
+  # when a trusted run of call-dag-compile.yml signed that digest (resolve_node_image.sh,
+  # issue #1176): never by :latest, which a revert or a second branch moves away from that
+  # content, and never by the tag, which can move between the check and the pull. Everything
+  # else here is the kernel, named by the digest system/kernel-artifacts.sh verified.
   case "$img" in
-    athanor-forge-*) ref=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${img#athanor-forge-}") || return 1 ;;
+    athanor-forge-*) IMAGE_LOWER=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${REGISTRY}" "${img#athanor-forge-}") || return 1 ;;
+    *) IMAGE_LOWER=$(echo "${REGISTRY}/$img" | tr '[:upper:]' '[:lower:]') ;;
   esac
-  local IMAGE_LOWER=$(echo "ghcr.io/$OWNER/$ref" | tr '[:upper:]' '[:lower:]')
   
   local old_digest="${OLD_DIGESTS[$img]:-}"
   local new_digest=""
@@ -109,14 +115,19 @@ pull_and_extract() {
     fi
   fi
 
-  if [ -n "$old_digest" ] && [ -n "$new_digest" ] && [ "$old_digest" = "$new_digest" ]; then
+  # The directory restored from a tier stands in for the pull only when it was recorded for this
+  # hash and this very image digest: a tier restored by its signature alone can hold RPMs that an
+  # earlier, unverified image put under the same label hash (tier_cache.sh).
+  local entry
+  entry=$(tier_cache_entry "$new_digest" "$IMAGE_LOWER")
+  if tier_cache_reusable "$old_digest" "$new_digest" "$IMAGE_LOWER"; then
     echo "    [CACHE HIT] $img hasn't changed. Skipping pull."
-    echo "$new_digest" > "$TMP_DIR/digest_$img"
+    echo "$entry" > "$TMP_DIR/digest_$img"
     return 0
   fi
   
-  echo "    [CACHE MISS] Pulling $img (old: $old_digest, new: $new_digest)"
-  echo "$new_digest" > "$TMP_DIR/digest_$img"
+  echo "    [CACHE MISS] Pulling $img (old: $old_digest, new: $entry)"
+  echo "$entry" > "$TMP_DIR/digest_$img"
 
   local ctr=""
   if ctr=$(buildah from "$IMAGE_LOWER" 2>/dev/null); then
@@ -149,11 +160,19 @@ pull_and_extract() {
 
 echo "=== Restoring Aggregate Tier Repos (Caching) ==="
 for tier in tier0 tier1 tier2 tier3; do
-  img="athanor-forge-${tier}-repo:latest"
-  IMAGE_LOWER=$(echo "ghcr.io/$OWNER/$img" | tr '[:upper:]' '[:lower:]')
-  echo "    Pulling previous $IMAGE_LOWER..."
-  ctr=""
-  if ctr=$(buildah from "$IMAGE_LOWER" 2>/dev/null); then
+  # The published tier is restored only by the digest of :latest, and only when a trusted run
+  # of call-system-image.yml signed it (UD44): its package directories stand in for the pulls
+  # the cache hits below skip, so an image without that signature is not restored, and every
+  # package of the tier is pulled from its own verified image instead.
+  verdict=$(bash "$(dirname "${BASH_SOURCE[0]}")/verify_image.sh" "${REGISTRY}/athanor-forge-${tier}-repo:latest" call-system-image.yml)
+  case $verdict in
+    absent) echo "    No published $tier: nothing to restore" ;;
+    "unsigned "*) echo "    [UNTRUSTED] ${verdict#unsigned } is not signed by a trusted run: not restored" ;;
+  esac
+  if [[ $verdict == "signed "* ]]; then
+    IMAGE_LOWER=${verdict#signed }
+    echo "    Pulling previous $IMAGE_LOWER..."
+    ctr=$(buildah from "$IMAGE_LOWER")
     mnt=$(buildah mount "$ctr")
     # The published repository keeps one directory per package image: restore them as
     # they are, so that a cache hit below finds its RPMs in place and a package that

@@ -2353,7 +2353,7 @@ def check_panics():
 SHELL_BUDGETS = {
     "forge/build": 7,
     "forge/builder": 1,
-    "forge/scripts": 15,
+    "forge/scripts": 14,
     "forge/test": 9,
     "forge/tools": 0,
     "scripts": 40,

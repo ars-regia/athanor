@@ -155,11 +155,23 @@ echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
 # absent (including ghcr's 403 for a never-published package) and fails on anything else,
 # which stops here rather than reading as a hit or a miss. Anonymous: the forge images are
 # public, and credentials a registry rejects fail even a public read.
-if ! PROBE=$(bash "$(dirname "${BASH_SOURCE[0]}")/registry_probe.sh" "${IMAGE_URL_LOWER#docker://}"); then
+# A package image is a hit only when verify_image.sh finds the digest of its tag signed by a
+# trusted run of call-dag-compile.yml and labelled with the tag's hash (issue #1176): any
+# other image is a miss, reported as an error, so the build replaces it. The builder is not signed by any run
+# yet: its tag alone still decides.
+SCRIPTS="$(dirname "${BASH_SOURCE[0]}")"
+if [[ "$PACKAGE" == "builder" ]]; then
+  PROBE_CMD=(bash "$SCRIPTS/registry_probe.sh" "${IMAGE_URL_LOWER#docker://}")
+  HIT_ANSWER="present"
+else
+  PROBE_CMD=(bash "$SCRIPTS/verify_image.sh" "${IMAGE_URL_LOWER#docker://}" call-dag-compile.yml)
+  HIT_ANSWER="signed"
+fi
+if ! PROBE=$("${PROBE_CMD[@]}"); then
   echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
   exit 1
 fi
-[[ "$PROBE" == "present" ]] && CACHE_HIT="true" || CACHE_HIT="false"
+[[ "${PROBE%% *}" == "$HIT_ANSWER" ]] && CACHE_HIT="true" || CACHE_HIT="false"
 
 echo "CACHE_HIT=${CACHE_HIT}"
 echo "CONTENT_HASH=${CONTENT_HASH}"
