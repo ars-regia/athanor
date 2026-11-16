@@ -1305,6 +1305,19 @@ compositor and that the own compositor did not yet offer:
         - no layer surface is mapped on that output;
         - the session is not locked;
         - for a confined client, OS4's border is drawn in the same frame.
+
+        *Amended 2026-11-16 (maintainer decision, 2026-11-16):* only a layer surface drawn
+        above the full-screen window refuses the hint: one on the overlay layer, and one on the
+        top layer while the compositor draws the top layer above the window, which it does
+        unless the window holds the keyboard, has the output whole and is the topmost window
+        there. Background and bottom layers are ignored. The conditions are read for each
+        frame: when the lock or such a layer arrives while a torn flip is in flight, that flip
+        completes and every frame from the next one on is presented with vsync; nothing is held
+        back for it. "Alone" also excludes a popup on that output, the input method's included;
+        the lock counts from the moment it is requested, not from its confirmation; and for a
+        confined client every line of OS4's border lies in the frame and inside the output, so a
+        window whose border runs past the output's edge is presented with vsync (*amended on
+        2026-11-16*).
     - **Wave 2c, the protocols that need a design of their own.** Each is written as an amendment
       of this decision before its code:
       - `zwp_xwayland_keyboard_grab_manager_v1`, satellite (OS17). *Amended on 2026-11-16:*

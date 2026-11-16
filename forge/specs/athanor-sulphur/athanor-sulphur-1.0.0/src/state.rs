@@ -423,6 +423,9 @@ impl State {
         // commit; nothing reads the type at 1.0, and the tag grants nothing.
         smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
         crate::toplevel_tag::global(&dh);
+        // Decision 33, wave 2b. A surface's presentation hint is kept, applied with the commit;
+        // the DRM backend presents every frame with vsync (`tearing.rs`).
+        crate::tearing::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
