@@ -101,6 +101,8 @@ EXPECTED_DIFFERENCES = {}
 # publish elsewhere still fails as missing.
 INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer, 2026-11-05, #982)"
 INDICATOR_PAGES = {"lists"}
+# A row of a list.
+ROW = "list item"
 
 
 def in_scroll_bar(nodes):
@@ -117,10 +119,12 @@ def in_scroll_bar(nodes):
 
 
 def significant(node):
-    """What a screen reader speaks: a node with a name or a value, or a control. The
-    application's own node is named after the binary, so it is left out."""
+    """What a screen reader speaks: a node with a name or a value, or a control or a list row. A
+    row with no name of its own, such as a heading row that holds only a label, is compared by its
+    states too: they are what makes it selectable. The application's own node is named after the
+    binary, so it is left out."""
     return node["role"] != "application" and bool(
-        node["name"] or node["value"] or node["role"] in INTERACTIVE
+        node["name"] or node["value"] or node["role"] in INTERACTIVE or node["role"] == ROW
     )
 
 
