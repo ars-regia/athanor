@@ -1363,12 +1363,12 @@ elif args[0] == "from":
 elif args[0] == "commit":
     name = args[-1]
     image(name).write_text("sha256:" + hashlib.sha256(f"{name}:{os.environ['GENERATION']}".encode()).hexdigest())
-elif args[0] == "push" and args[1] == "--digestfile":
-    digest = image(args[3]).read_text()
-    pathlib.Path(args[2]).write_text(digest)
-    tag(args[3], digest)
 elif args[0] == "push":
-    tag(args[2].removeprefix("docker://"), image(args[1]).read_text())
+    rest = args[1:]
+    if rest[0] == "--digestfile":
+        digestfile, rest = rest[1], rest[2:]
+        pathlib.Path(digestfile).write_text(image(rest[0]).read_text())
+    tag(rest[-1].removeprefix("docker://"), image(rest[0]).read_text())
 """
 
 
@@ -1420,7 +1420,7 @@ class DigestRace(Tool):
             "the verified file stays as it was",
         )
 
-    def publish(self, generation):
+    def publish(self, generation, rc=0, **env):
         out = self.dir / "out"
         for group in ("kernel", "devel", "debuginfo", "microvm"):
             (out / group).mkdir(parents=True, exist_ok=True)
@@ -1435,6 +1435,7 @@ class DigestRace(Tool):
             GITHUB_ACTOR="actor",
             GITHUB_SHA="0" * 40,
             GITHUB_REF="refs/heads/feature",
+            **env,
         )
         r = subprocess.run(
             ["bash", str(ROOT / "forge/specs/azoth/publish.sh"), str(out)],
@@ -1443,8 +1444,19 @@ class DigestRace(Tool):
             env=run,
             cwd=self.dir,
         )
-        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.returncode, rc, r.stderr)
         return (self.dir / "digests/kernel").read_text()
+
+    def test_a_publish_cut_before_the_nvr_moves_leaves_its_digest_tagged(self):
+        self.registry({"moves": True, "tags": {}, "errors": []})
+        pinned = self.publish(1)
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["errors"] = [f"{REG}/azoth:{NVR}"]  # the run is cancelled at this copy
+        self.registry(fx)
+        cut = self.publish(2, rc=1, RETRY_ATTEMPTS="1")
+        tags = json.loads((self.dir / "registry.json").read_text())["tags"]
+        self.assertEqual(tags[f"{REG}/azoth:{NVR}"], pinned)
+        self.assertEqual(tags[f"{REG}/azoth:{boot_tag(cut)}"], cut)
 
     def test_a_republished_nvr_leaves_the_pinned_digest_under_its_kernel_tag(self):
         self.registry({"moves": True, "tags": {}, "errors": []})

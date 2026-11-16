@@ -46,16 +46,23 @@ for group in kernel devel debuginfo microvm; do
         --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
         "$ctr"
     buildah commit --omit-timestamp "$ctr" "${repo}:${tag}"
-    buildah push --digestfile "digests/${group}" "${repo}:${tag}"
+    # The kernel tag goes up before <nvr> moves, so a cancel between the two never leaves a
+    # pushed digest without a tag. Its name needs the kernel digest: the manifest is first
+    # written to a local layout, which gives the digest the registry then keeps.
+    buildah push --digestfile "digests/${group}" "${repo}:${tag}" "oci:layout:${group}"
     digest=$(cat "digests/${group}")
     # The kernel comes first: its digest keys every group.
     [[ -n $ktag ]] || ktag=$(bash "$ROOT/system/kernel-artifacts.sh" tag "$nvr" "$digest")
-    # By digest, so the kernel tag names exactly what <nvr> got.
     bash "$ROOT/forge/scripts/retry.sh" skopeo copy --preserve-digests \
-        "docker://${repo}@${digest}" "docker://${repo}:${ktag}${tag#"$nvr"}"
+        "oci:layout:${group}" "docker://${repo}:${ktag}${tag#"$nvr"}"
+    # By digest, so <nvr> and latest name exactly what the kernel tag got.
+    bash "$ROOT/forge/scripts/retry.sh" skopeo copy --preserve-digests \
+        "docker://${repo}@${digest}" "docker://${repo}:${tag}"
     if [[ ${GITHUB_REF:-} == "refs/heads/${DEFAULT_BRANCH}" ]]; then
-        buildah push "${repo}:${tag}" "docker://${repo}:${latest}"
+        bash "$ROOT/forge/scripts/retry.sh" skopeo copy --preserve-digests \
+            "docker://${repo}@${digest}" "docker://${repo}:${latest}"
     fi
+    rm -rf layout
     echo "${repo}@${digest}"
     [[ -z ${GITHUB_OUTPUT:-} ]] || echo "${group}=${digest}" >> "$GITHUB_OUTPUT"
 done
