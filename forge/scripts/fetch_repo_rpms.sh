@@ -44,6 +44,10 @@ KERNEL_NVR=$(bash "$ARTIFACTS" get nvr)
 PINNED_NVR=$(bash "$(dirname "${BASH_SOURCE[0]}")/../specs/azoth/nvr.sh")
 [[ $KERNEL_NVR == "$PINNED_NVR" ]] || { echo "[FATAL] kernel artifacts were resolved for ${KERNEL_NVR}, the pins give ${PINNED_NVR}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
 KERNEL_DIGEST=$(bash "$ARTIFACTS" get kernel_digest)
+# Kernel Build may have republished the NVR since the Orchestrator pinned this digest (#1208):
+# resolve the tag again against it, so a moved tag ends the run here, naming the race and both
+# digests, instead of at a pull. In a directory of its own, so the verified file stays as it is.
+KERNEL_ARTIFACTS_DIR="$TMP_DIR/kernel-recheck" bash "$ARTIFACTS" resolve --expect-kernel-digest "$KERNEL_DIGEST"
 
 # Packages published by a dedicated workflow, not the DAG, so no athanor-forge-<pkg>
 # image is ever built for them -- the same exclusion dag_orchestrator.py applies. The

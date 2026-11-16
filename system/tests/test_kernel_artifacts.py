@@ -1380,6 +1380,45 @@ class DigestRace(Tool):
         (self.dir / "bin/buildah").chmod(0o755)
         self.env["FAKE_LOCAL"] = str(self.dir / "local")
 
+    def test_the_aggregation_ends_at_once_when_the_tag_moved(self):
+        self.registry(published())
+        self.assertEqual(
+            self.run_script("resolve").returncode, 0
+        )  # the Orchestrator pins KERNEL
+        fx = published()
+        fx["tags"][f"{REG}/azoth:{NVR}"] = OTHER_KERNEL
+        self.registry(fx)
+        forge = self.dir / "forge"
+        (forge / "config").mkdir(parents=True)
+        lists = (
+            "custom_tier0",
+            "custom_tier1",
+            "custom_tier2",
+            "custom_tier3",
+            "upstream_core",
+            "upstream_desktop",
+            "upstream_media",
+            "upstream_cli",
+        )
+        (forge / "config/packages.json").write_text(
+            json.dumps({name: [] for name in lists})
+        )
+        r = self.run_script(
+            "ars-regia", cwd=forge, script=ROOT / "forge/scripts/fetch_repo_rpms.sh"
+        )
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(
+            f"azoth:{NVR} is {OTHER_KERNEL}, the caller resolved {KERNEL}", r.stderr
+        )
+        self.assertIn("a race with Kernel Build", r.stderr)
+        self.assertIn(f"azoth:{boot_tag()}", r.stderr)
+        self.assertNotIn("Image not found", r.stderr)
+        self.assertEqual(
+            self.state_file()["kernel_digest"],
+            KERNEL,
+            "the verified file stays as it was",
+        )
+
     def publish(self, generation):
         out = self.dir / "out"
         for group in ("kernel", "devel", "debuginfo", "microvm"):

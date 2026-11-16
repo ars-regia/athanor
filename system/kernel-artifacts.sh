@@ -370,7 +370,9 @@ resolve() {
     write kernel-missing "${lines[@]}"
     return 0
   fi
-  [[ -z $expect || $kernel == "$expect" ]] || die "$REGISTRY/azoth:$nvr is $kernel, the caller resolved $expect: the kernel was republished since"
+  # A Kernel Build that republishes the NVR while a run holds its digest moves the tag under
+  # that run: name the race, both digests and the tag that still holds the pinned kernel.
+  [[ -z $expect || $kernel == "$expect" ]] || die "$REGISTRY/azoth:$nvr is $kernel, the caller resolved $expect: the kernel was republished since, a race with Kernel Build; the pinned kernel stays at $REGISTRY/azoth:$(kernel_tag "$nvr" "$expect"), and the next run resolves the new one"
   kernel_signed=$(ask signed "$REGISTRY/azoth@$kernel" kernel)
   devel_signed=$(ask signed "$REGISTRY/azoth-devel@$devel" kernel)
   if [[ $kernel_signed != signed || $devel_signed != signed ]]; then
