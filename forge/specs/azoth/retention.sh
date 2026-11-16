@@ -49,7 +49,9 @@ esac
 # How long a manifest left under its kernel tag alone outlives the move of `<nvr>`. An
 # Orchestrator run pins the digest when it starts and pulls it within its own timeouts, a
 # matter of hours; fourteen days is far above the longest run, so the prune never takes a
-# digest a run still holds.
+# digest a run still holds. A release whose signing is approved more than fourteen days after a
+# republish of its NVR re-runs the Orchestrator: the digest it pinned is pruned by then, and
+# cosign fails loudly on it.
 KERNEL_TAG_DAYS=14
 KERNEL_TAG='-k[0-9a-f]{12}(-microvm)?$'
 SINCE=$(($(date -u +%s) - KERNEL_TAG_DAYS * 86400))
