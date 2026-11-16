@@ -330,7 +330,7 @@ class ActivationOwners(unittest.TestCase):
     NAMES = ("org.freedesktop.Notifications", "org.kde.StatusNotifierWatcher")
     DIRS = ("usr/share/athanor/cosmic-defaults/dbus-1/services", "usr/local/share/dbus-1/services")
 
-    def run_loop(self, extra=None, owner_line=None):
+    def run_loop(self, extra=None, owner_line=None, linked=False):
         lines = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ").splitlines()
         line = next(line for line in lines if "for name in org.freedesktop.Notifications" in line)
         loop = line[line.index("for name in org.freedesktop.Notifications"):]
@@ -342,6 +342,10 @@ class ActivationOwners(unittest.TestCase):
                 (main / f"{name}.service").write_text(f"[D-BUS Service]\nName={name}\n")
             if extra:
                 directory, name = extra
+                if linked:  # the directory is a link to one elsewhere, which find -H follows
+                    (root / "elsewhere").mkdir()
+                    (root / directory).parent.mkdir(parents=True, exist_ok=True)
+                    (root / directory).symlink_to(root / "elsewhere")
                 (root / directory).mkdir(parents=True, exist_ok=True)
                 (root / directory / "other.service").write_text(
                     f"[D-BUS Service]\n{owner_line or f'Name={name}'}\n".replace("\n", "\r\n" if owner_line else "\n"))
@@ -367,6 +371,11 @@ class ActivationOwners(unittest.TestCase):
         # Spaces around = and a CRLF line end, which check_image_session.py also matches.
         for name in self.NAMES:
             r = self.run_loop((self.DIRS[1], name), f"  Name = {name} ")
+            self.assertEqual(r.returncode, 1, (name, r.stderr))
+
+    def test_a_second_owner_in_a_linked_directory_fails(self):
+        for name in self.NAMES:
+            r = self.run_loop((self.DIRS[1], name), linked=True)
             self.assertEqual(r.returncode, 1, (name, r.stderr))
 
     def test_a_dotted_name_matches_only_itself(self):
