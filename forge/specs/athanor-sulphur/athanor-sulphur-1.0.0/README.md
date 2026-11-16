@@ -185,9 +185,10 @@ Decision 33, wave 2b, also adds `wp_tearing_control_manager_v1`, standard (`src/
 `src/fixture/wave2b.rs`). A surface's presentation hint is applied with its next commit, and
 destroying its object takes it back to vsync; a second object for a surface is the
 `tearing_control_exists` error. The DRM backend reads decision 33's conditions from each frame
-it draws (`tearing::conditions`): the surface is full-screen and alone on its output, no layer
-surface drawn above it is mapped there (the overlay layer, and the top layer unless the window
-is lifted above it), the session is not locked, and for a confined client every line of OS4's
+it draws (`tearing::conditions`): the surface is full-screen and alone on its output, with no
+popup there, the input method's included, no layer surface drawn above it is mapped there (the
+overlay layer, and the top layer unless the window is lifted above it), the session is not
+locked, counting from the moment the lock is requested, and for a confined client every line of OS4's
 border is in the frame and inside the output. A flip in flight when a condition stops holding
 completes, and the next frame is vsync (amendment of 2026-11-16). Smithay's DRM backend has no asynchronous
 page flip at the pinned revision, so every frame is presented with vsync, which the protocol

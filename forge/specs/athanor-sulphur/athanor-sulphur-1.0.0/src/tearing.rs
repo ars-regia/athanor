@@ -15,7 +15,7 @@
 //! Smithay's DRM backend has no asynchronous page flip at the pinned revision, so every frame
 //! is presented with vsync, which the protocol allows: the compositor is free to ignore the
 //! hint. The flip is to be proposed to Smithay first (decision 33); until it lands the DRM
-//! backend logs when a frame would have honoured a hint.
+//! backend logs, at debug level, each time the conditions start or stop holding.
 
 use crate::input_method::PlacedPopup;
 use crate::lock::Lock;
