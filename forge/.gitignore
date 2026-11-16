@@ -1,4 +1,6 @@
 RPMS_OUT/
+# What build_spec.sh leaves in the checkout: Spec Build Check and rig.sh cosmic-comp-version.
+/RPMS/
 .ccache_local/
 target/
 **/target/
