@@ -121,6 +121,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/tier-digests.sh resolve
 
+      - name: Kernel of tier 0 (system/kernel-artifacts.sh check-tier)
+        # The tiers a pull request reads are those of its base, rebuilt only after a merge: a pin
+        # that moves to a kernel already published, on a base whose tier 0 carries the old one,
+        # cannot be installed, so the plan builds no image then (O7).
+        id: tier
+        run: |
+          set -euo pipefail
+          bash system/kernel-artifacts.sh check-tier
+          grep -E '^check_delta=' kernel-artifacts/kernel-artifacts.env >> "$GITHUB_OUTPUT"
+
       - name: Build the planned images
         # Which GPUs to build, none, one or all three, follows the kernel artifacts of this pull
         # request's pins (system/kernel-artifacts.sh check-plan, O7): an empty list is a pure
@@ -137,7 +147,7 @@ jobs:
           done
 
       - name: Package delta of the default image
-        if: ${{ needs.kernel-artifacts.outputs.check_delta == 'true' }}
+        if: ${{ steps.tier.outputs.check_delta == 'true' }}
         env:
           OWNER: ${{ github.repository_owner }}
         # tee: the job summary cannot be read through the REST API, the log can (gh run view --log).

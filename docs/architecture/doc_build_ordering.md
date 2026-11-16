@@ -108,7 +108,7 @@ and the same with `-legacy-<NVIDIA_LEGACY_VERSION>`. A republished kernel with t
 
 | State | What the check does |
 |---|---|
-| `ready` | builds the three images |
+| `ready` | builds the three images, unless the tier 0 the build installs carries another kernel than the pinned one (a pull request into a branch whose tiers the merge has not rebuilt yet): then it skips every build and the package delta and adds a warning annotation naming both NVRs, the tier tag and digest. A tier 0 whose kernel cannot be read fails (`check-tier`) |
 | `kernel-missing`, a kernel pin moves, and the PR diff touches only the pin files (`forge/specs/azoth/pins.env` and the files the bump bot regenerates with it) and the kernel's patches and configuration fragments (`patches.list`, `patches/**`, `kernel-local`, `microvm/kernel-local`), which a bump may have to adapt to the new tree (doc_kernel_build.md, section 8; amended on 2026-11-12, maintainer decision) | skips every build and the package delta, adds a warning annotation. Kernel Build on the PR proves the kernel and the modules build and boot, patches and configuration included |
 | `modules-missing`, and the PR diff moves only the NVIDIA pins | builds the default image, skips the two variants, adds a warning annotation |
 | `kernel-missing` or `modules-missing` in any other PR | fails. A pin bump mixed with other changes cannot be checked; the pins move in their own PR. With unchanged pins, missing modules mean the bootstrap or an interrupted publication: fixing that is the Orchestrator's job, not a reason to skip the variants |

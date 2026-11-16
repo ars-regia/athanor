@@ -34,6 +34,13 @@
 #                                       and no other cycle owns it
 #   check-plan --base REV --head REV    after resolve, for System Image Check (O7): append
 #                                       check_gpus and check_delta; exit 1 for a failing row
+#   check-tier                          after check-plan and system/tier-digests.sh resolve, for
+#                                       System Image Check (O7): when the plan builds images, read
+#                                       the kernel RPM of the tier 0 the build will install and
+#                                       replace the plan by no image (check_gpus empty,
+#                                       check_delta=false) with a warning if it is not the pinned
+#                                       NVR, since the tiers follow the merge; exit 1 when the
+#                                       tier cannot be read or carries no kernel
 #   get KEY                             print the value of KEY; exit 1 when the file lacks it
 #   has KEY                             exit 0 when KEY has a non-empty value
 #   registry                            print the registry and owner this run would resolve
@@ -581,6 +588,40 @@ check_plan() {
   echo "kernel-artifacts: check_gpus='$gpus' check_delta=$delta"
 }
 
+check_tier() {
+  [[ $# -eq 0 ]] || usage
+  local gpus nvr tiers registry digest base tag ref layer found
+  gpus=$(get check_gpus)
+  if [[ -z $gpus ]]; then return 0; fi
+  nvr=$(get nvr)
+  tiers=${TIER_DIGESTS_DIR:-$ROOT/tier-digests}/tier-digests.json
+  [[ -f $tiers ]] || die "$tiers does not exist: run system/tier-digests.sh resolve first"
+  registry=$(jq -er '.registry | strings' "$tiers") || die "$tiers names no registry"
+  digest=$(jq -er '.tier0 | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$tiers") || die "$tiers has no valid tier0 digest"
+  # The tag system/tier-digests.sh resolved the digest from, for the message only.
+  base=${GITHUB_BASE_REF:-} tag=latest
+  if [[ -n $base && $base != iso-v0 && $base != main ]]; then
+    tag=${base,,}
+    tag=branch-${tag//[^a-z0-9._-]/-}
+  fi
+  ref=$registry/athanor-forge-tier0-repo@$digest
+  # A tier image is its RPMs and repodata: the kernel it carries is the name of its kernel-core RPM.
+  retry skopeo copy "docker://$ref" "dir:$TMP/tier0"
+  jq -er '.layers[].digest' "$TMP/tier0/manifest.json" > "$TMP/layers" || die "$ref: no layers in its manifest"
+  : > "$TMP/listing"
+  while IFS= read -r layer; do
+    tar -tf "$TMP/tier0/${layer#sha256:}" >> "$TMP/listing" || die "$ref: cannot list layer $layer"
+  done < "$TMP/layers"
+  found=$(sed -nE 's#(^|.*/)kernel-core-([0-9][^/]*)\.x86_64\.rpm$#\2#p' "$TMP/listing")
+  [[ -n $found ]] || die "tier 0 $tag ($digest) carries no kernel-core RPM: the tier cannot tell which kernel the images would install"
+  if grep -qxF "$nvr" <<< "$found"; then
+    echo "kernel-artifacts: tier 0 $tag ($digest) carries $nvr"
+    return 0
+  fi
+  set_kv "check_gpus=" "check_delta=false"
+  annotate warning "tier 0 $tag ($digest) carries kernel ${found//$'\n'/, }, not the pinned $nvr, which is published: the images are built after the merge, when the Orchestrator rebuilds the tiers"
+}
+
 release_digests() { # release_digests ALL UNSIGNED
   [[ $# -eq 2 ]] || usage
   check_ready
@@ -666,6 +707,7 @@ case $command in
   check-ready) [[ $# -eq 0 ]] || usage; check_ready ;;
   cycle) cycle "$@" ;;
   check-plan) check_plan "$@" ;;
+  check-tier) check_tier "$@" ;;
   release-digests) release_digests "$@" ;;
   verify-key) verify_key "$@" ;;
   get) [[ $# -eq 1 ]] || usage; get "$1" ;;

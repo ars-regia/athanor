@@ -970,6 +970,57 @@ class Cycle(Repo):
         self.assertEqual(self.run_script("get", "cycle").stdout.strip(), "defer")
 
 
+class CheckTier(Tool):
+    """check-tier: the kernel of the tier 0 the build installs against the pinned NVR."""
+
+    TIER0 = "sha256:" + "7" * 64
+    REF = f"{REG}/athanor-forge-tier0-repo@{TIER0}"
+
+    def prepare(self, rpms, gpus="none nvidia nvidia-legacy", **fx):
+        self.artifacts.mkdir(exist_ok=True)
+        (self.artifacts / "kernel-artifacts.env").write_text(f"state=ready\nnvr={NVR}\ncheck_gpus={gpus}\ncheck_delta=true\n")
+        self.tiers = self.dir / "tiers"
+        self.tiers.mkdir()
+        (self.tiers / "tier-digests.json").write_text(json.dumps({"registry": REG, "tier0": self.TIER0}))
+        self.env.update(TIER_DIGESTS_DIR=str(self.tiers), GITHUB_BASE_REF="rebase/fedora-45")
+        self.registry({"tier_rpms": {self.REF: rpms}, **fx})
+
+    def plan(self):
+        state = self.state_file()
+        return state["check_gpus"], state["check_delta"]
+
+    def test_a_tier_with_another_kernel_skips_the_build_and_warns(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm", "./repodata/repomd.xml"])
+        r = self.run_script("check-tier")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("", "false"))
+        for text in (OTHER_NVR, NVR, "branch-rebase-fedora-45", self.TIER0, "after the merge", "warning"):
+            self.assertIn(text, r.stdout)
+
+    def test_a_tier_with_the_pinned_kernel_leaves_the_plan(self):
+        self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm", f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.run_script("check-tier")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_that_cannot_be_read_fails(self):
+        self.prepare([f"./kernel-core-{NVR}.x86_64.rpm"], errors=[self.REF])
+        r = self.run_script("check-tier")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_without_a_kernel_fails(self):
+        self.prepare(["./repodata/repomd.xml"])
+        r = self.run_script("check-tier")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no kernel-core RPM", r.stderr)
+
+    def test_a_plan_without_images_reads_no_tier(self):
+        self.prepare([], gpus="", errors=[self.REF])
+        r = self.run_script("check-tier")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 class CheckPlan(Repo):
     def plan(self, files):
         self.commit(files)
