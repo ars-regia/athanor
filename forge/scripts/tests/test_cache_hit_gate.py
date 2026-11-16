@@ -7,7 +7,17 @@ The scan is a heuristic, not a proof: it reads shell with regular expressions an
 the tokenizer and the AST, and a determined author can still build a call it does not see (a
 command assembled in a variable, `bash -c`, a string run through eval). It stops the slips the
 tests below name: a mention in a comment, a string or a docstring, a dead assignment of the
-path, and a hash tag spelled so that no pattern finds it. The behaviour tests are the guard."""
+path, and a hash tag spelled so that no pattern finds it.
+
+What it does not see, and is not meant to close with more regular expressions:
+- a gate path at the start of a line inside a multi-line string or a heredoc counts as a call;
+- a call in dead code (`if false`, a function never called) counts;
+- it works per file, so a file that runs the gate once can add a second, unverified read of a
+  hash tag;
+- a Python call through a prebuilt argv variable is not seen;
+- `.service`, `.container` and `.json` files are not scanned.
+The behaviour tests of verify_image.sh, resolve_node_image.sh, check_idempotency.sh and the
+brain, and the tier restore test (test_tier_cache.py), are the real guard."""
 
 import ast
 import io
@@ -46,7 +56,7 @@ HASH_TAG_WRITERS = {"forge/scripts/tag_signed_image.sh"}
 # mention in a string, an assignment of the path and an argument of another command are not.
 _WORD = r"""(?:\$\((?:[^()]|\([^()]*\))*\)|[^\s;|&()<>=])*"""
 GATE_CALL = re.compile(
-    r"(?:^|&&|\|\||[;|!`(]|\$\(|\b(?:if|then|do|else|elif|while|until)\b)\s*"
+    r"(?:^|&&|\|\||[;|!`(]|\$\(|\b(?:if|then|do|else|elif|while|until|run:)(?!\w))\s*"
     r"(?:(?:(?:bash|sh|exec)\s+)*|\w+=\(\s*bash\s+)"
     + _WORD
     + r"""verify_image\.sh["']?(?=[\s;|&)"']|$)""",
@@ -227,6 +237,8 @@ class CacheHitGateTest(unittest.TestCase):
             'true && bash "$here/verify_image.sh" "$ref" w\n',
             'PROBE_CMD=(bash "$S/verify_image.sh" "$ref" w)\n',
             'bash \\\n  "$here/verify_image.sh" "$ref" w\n',
+            "    - run: bash forge/scripts/verify_image.sh \"$ref\" w\n",
+            "    run: bash forge/scripts/verify_image.sh \"$ref\" w\n",
         )
         for call in calls:
             with self.subTest(call=call):
