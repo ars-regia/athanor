@@ -529,12 +529,12 @@ impl Bar {
         };
         // Across the output the surface keeps the width the compositor configured.
         ui.min_width = current.min_width;
-        // The focus stays on the control of the same action, as on GTK's widgets kept across
-        // an update: a rebuild while the user tabs along the bar would send it back to the start.
-        let kept = current
-            .focus()
-            .zip(self.outs.get(&id))
-            .and_then(|(focused, old)| same_act(&old.acts, focused, &out.acts));
+        // The focus stays on the control of the same action, or on the same running app's
+        // button: a rebuild while the user tabs along the bar would send it back to the start.
+        let kept = current.focus().zip(self.outs.get(&id)).and_then(|(focused, old)| {
+            same_act(&old.acts, focused, &out.acts)
+                .or_else(|| out.row.same_entry(&old.row, focused))
+        });
         ui.carry_focus(current, kept);
         *current = ui;
         self.outs.insert(id, out);

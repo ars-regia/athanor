@@ -181,6 +181,13 @@ impl Row {
         self.states.get(index)
     }
 
+    /// This row's button for the entry `old`'s `widget` showed (`model::same_entry`).
+    pub fn same_entry(&self, old: &Row, widget: WidgetId) -> Option<WidgetId> {
+        let (entry, _) = old.entry(widget)?;
+        let index = model::same_entry(entry, self.states.iter().map(|(entry, _)| entry))?;
+        self.buttons.get(index).copied()
+    }
+
     /// The desktop id of a pinned entry's button.
     pub fn pinned(&self, widget: WidgetId) -> Option<String> {
         let (entry, _) = self.entry(widget)?;
