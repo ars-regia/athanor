@@ -4970,44 +4970,68 @@ def check_session_units():
 # ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
 NAMESPACING_PROPERTY = re.compile(
     r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
-    r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage)=(.*)$"
+    r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage)\s*=(.*)$"
 )
-EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\s*\(")
+# A read of a process's executable: `admit_user_unit` or a path `/proc/<pid>/exe` built in code.
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\s*\(|/proc/\{[^}]*\}/exe\b")
+# Programs of shipped user units that are no workspace binary (shells, systemd tools, qalc and
+# upstream COSMIC's daemons): this repository's code reads no peer's executable in them.
+NON_RUST_PROGRAMS = {"sh", "bash", "env", "systemctl", "systemd-run", "dbus-send", "busctl", "gdbus", "qalc", "cosmic-osd", "cosmic-settings-daemon"}
 
 
-def exe_reading_programs(root):
-    """{binary name: first file:line} of every crate under system/ whose code calls
-    `admit_user_unit`, the admission that reads the peer's executable."""
+def crate_programs(root):
+    """({binary: first file:line of an exe-reading call or None}) for every crate under system/
+    and forge/specs: its package name, its [[bin]] names and its src/bin/*.rs files."""
     programs = {}
-    for manifest in walk(root / "system", "Cargo.toml"):
-        try:
-            package = tomllib.loads(read(manifest))
-        except tomllib.TOMLDecodeError:
-            continue
-        names = [package.get("package", {}).get("name")] + [b.get("name") for b in package.get("bin", [])]
-        for source in walk(manifest.parent / "src", ".rs"):
-            for number, line in enumerate(read(source).split("\n"), 1):
-                if EXE_READING_ADMISSION.search(line.split("//")[0]):
-                    for name in filter(None, names):
-                        programs.setdefault(name, f"{rel(source)}:{number}")
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            names = {package.get("package", {}).get("name")} | {b.get("name") for b in package.get("bin", [])}
+            names |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
+            names.discard(None)
+            reads = None
+            for source in walk(manifest.parent / "src", ".rs"):
+                for number, line in enumerate(read(source).split("\n"), 1):
+                    if reads is None and EXE_READING_ADMISSION.search(line.split("//")[0]):
+                        reads = f"{rel(source)}:{number}"
+            for name in names:
+                programs[name] = programs.get(name) or reads
     return programs
+
+
+def user_unit_texts(root, units):
+    """{unit: text} of the shipped user units with every drop-in of `<unit>.d/*.conf` appended."""
+    texts = dict(units)
+    for conf in walk(root / "forge" / "specs", ".conf"):
+        if conf.parent.name.endswith((".service.d")) and "skel" not in conf.parts:
+            unit = conf.parent.name[:-2]
+            texts[unit] = texts.get(unit, "") + "\n" + read(conf)
+    return texts
 
 
 def peer_admission_problems(units, programs):
     """A unit that sets a namespacing property and runs a program that reads its peer's
-    executable: the read fails with EACCES, and the program refuses every peer."""
+    executable fails with EACCES and refuses every peer. A unit that sets one and runs a
+    program this scan cannot place is a problem too: it would otherwise pass unseen."""
     problems = []
     for unit, text in sorted(units.items()):
         lines = [line.strip() for line in text.split("\n")]
-        exec_start = next((line.partition("=")[2].lstrip("-@:+!") for line in lines if line.startswith("ExecStart=")), "")
-        program = exec_start.split()[0].rsplit("/", 1)[-1] if exec_start.split() else ""
-        if program not in programs:
+        namespaced = next((m for m in map(NAMESPACING_PROPERTY.match, lines) if m and m.group(2).strip().lower() not in ("", "no", "false", "0", "default")), None)
+        if not namespaced:
             continue
         for line in lines:
-            m = NAMESPACING_PROPERTY.match(line)
-            if m and m.group(2).strip().lower() not in ("", "no", "false", "0", "default"):
-                problems.append(f"{unit}: runs {program}, which calls admit_user_unit at {programs[program]}, and sets {m.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer with admit_user_unit_cgroup (doc_session_daemons.md SD17)")
-                break
+            m = re.match(r"ExecStart\s*=\s*[-@:+!]*(\S+)", line)
+            if not m:
+                continue
+            program = m.group(1).rsplit("/", 1)[-1]
+            if program in programs:
+                if programs[program]:
+                    problems.append(f"{unit}: runs {program}, which reads a peer's executable at {programs[program]}, and sets {namespaced.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer by control group (athanor_unit::peer::admit_user_unit_cgroup, doc_session_daemons.md SD17)")
+            elif program not in NON_RUST_PROGRAMS:
+                problems.append(f"{unit}: sets {namespaced.group(1)}= and runs {m.group(1)}, which is neither a binary of a crate under system/ or forge/specs nor in NON_RUST_PROGRAMS: say which it is")
     return problems
 
 
@@ -5017,7 +5041,7 @@ def check_peer_exe():
     units, problems = shipped_user_units(ROOT)
     for problem in problems:
         r.fail(problem)
-    for problem in peer_admission_problems(units, exe_reading_programs(ROOT)):
+    for problem in peer_admission_problems(user_unit_texts(ROOT, units), crate_programs(ROOT)):
         r.fail(problem)
     return r
 

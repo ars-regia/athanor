@@ -1,4 +1,7 @@
-"""The wallpaper's decoder cannot read its peer's executable (doc_session_daemons.md SD17).
+"""The kernel premise of the decoder's admission by cgroup (doc_session_daemons.md SD17).
+
+This test does not fail on the code of #1222: it documents the rule the fix relies on. The
+regression check that fails on the old code is `scripts/verify.py peer-exe`.
 
 athanor-wallpaper-decode@.service sets namespacing properties, which under the user manager put
 it in a user namespace of its own. The kernel allows a ptrace-read (readlink /proc/<pid>/exe)
@@ -44,7 +47,7 @@ def run(*args, **kwargs):
 
 
 @unittest.skipUnless(user_manager_runs(), "no user manager: systemctl --user is-system-running fails")
-class WallpaperDecoderPeerTest(unittest.TestCase):
+class WallpaperDecoderKernelPremiseTest(unittest.TestCase):
     def test_a_namespaced_reader_reads_the_peers_cgroup_and_not_its_exe(self):
         props = namespacing_properties()
         self.assertTrue({p.partition("=")[0] for p in props[1::2]} >= NAMESPACING, props)
