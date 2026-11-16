@@ -5,8 +5,8 @@
 //!
 //! `athanor-preview-render wallpaper` is the decoder of `athanor-wallpaper`
 //! (doc_session_daemons.md SD17, maintainer decision, 2026-11-07), started by its socket unit
-//! for each connection, the connection on standard input and output. It admits only the
-//! wallpaper daemon as its peer, receives the image file as a descriptor with the sizes of a
+//! for each connection, the connection on standard input and output. It admits only a peer in
+//! the wallpaper daemon's control group, receives the image file as a descriptor with the sizes of a
 //! request (`athanor_wallpaper::protocol`), and answers one frame of straight RGBA per size,
 //! scaled with zoom.
 
