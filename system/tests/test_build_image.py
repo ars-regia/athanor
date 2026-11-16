@@ -6,6 +6,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -320,6 +321,77 @@ class SignedKernelStage(unittest.TestCase):
                                    capture_output=True, text=True)
                 self.assertEqual(r.returncode, status, r.stderr)
             self.assertIn("not of " + NVR, r.stderr)
+
+
+class ActivationOwners(unittest.TestCase):
+    """The stage 2 switch of system/Containerfile looks for a second owner of a bus name in every
+    directory the session bus reads (check_image_session.SESSION_SERVICE_DIRS)."""
+
+    NAMES = ("org.freedesktop.Notifications", "org.kde.StatusNotifierWatcher")
+    DIRS = ("usr/share/athanor/cosmic-defaults/dbus-1/services", "usr/local/share/dbus-1/services")
+
+    def run_loop(self, extra=None, owner_line=None, linked=False):
+        lines = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ").splitlines()
+        line = next(line for line in lines if "for name in org.freedesktop.Notifications" in line)
+        loop = line[line.index("for name in org.freedesktop.Notifications"):]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            main = root / "usr/share/dbus-1/services"
+            main.mkdir(parents=True)
+            for name in self.NAMES:
+                (main / f"{name}.service").write_text(f"[D-BUS Service]\nName={name}\n")
+            if extra:
+                directory, name = extra
+                if linked:  # the directory is a link to one elsewhere, which find -H follows
+                    (root / "elsewhere").mkdir()
+                    (root / directory).parent.mkdir(parents=True, exist_ok=True)
+                    (root / directory).symlink_to(root / "elsewhere")
+                (root / directory).mkdir(parents=True, exist_ok=True)
+                (root / directory / "other.service").write_text(
+                    f"[D-BUS Service]\n{owner_line or f'Name={name}'}\n".replace("\n", "\r\n" if owner_line else "\n"))
+            (main / "dangling.service").symlink_to(root / "nowhere")
+            # bash, as the Containerfile's SHELL runs it.
+            r = subprocess.run(["bash", "-c", loop.replace("/usr/", f"{tmp}/usr/")],
+                               env={"PATH": os.environ["PATH"]}, capture_output=True, text=True)
+        return r
+
+    def test_the_exact_owner_alone_passes(self):
+        r = self.run_loop()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+
+    def test_a_second_owner_in_any_directory_fails(self):
+        for directory in self.DIRS + ("usr/share/dbus-1/services",):
+            for name in self.NAMES:
+                r = self.run_loop((directory, name))
+                self.assertEqual(r.returncode, 1, (directory, name, r.stderr))
+                self.assertIn(f"{name} is activated by:", r.stderr)
+
+    def test_a_second_owner_the_bus_reads_with_spaces_fails(self):
+        # Spaces around = and a CRLF line end, which check_image_session.py also matches.
+        for name in self.NAMES:
+            r = self.run_loop((self.DIRS[1], name), f"  Name = {name} ")
+            self.assertEqual(r.returncode, 1, (name, r.stderr))
+
+    def test_a_second_owner_in_a_linked_directory_fails(self):
+        for name in self.NAMES:
+            r = self.run_loop((self.DIRS[1], name), linked=True)
+            self.assertEqual(r.returncode, 1, (name, r.stderr))
+
+    def test_a_dotted_name_matches_only_itself(self):
+        name = self.NAMES[1]
+        r = self.run_loop((self.DIRS[1], name), "Name=" + name.replace(".", "X", 1))
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_the_directories_are_those_of_the_image_gate(self):
+        text = (ROOT / "system" / "Containerfile").read_text().replace("\\\n", " ")
+        loop = re.search(r"for dir in ([^;]+);", text).group(1).split()
+        sys.path.insert(0, str(ROOT / "forge" / "scripts"))
+        try:
+            import check_image_session
+        finally:
+            sys.path.pop(0)
+        self.assertEqual(loop, ["/" + d for d in check_image_session.SESSION_SERVICE_DIRS])
 
 
 if __name__ == "__main__":
