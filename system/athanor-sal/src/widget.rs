@@ -913,6 +913,20 @@ pub enum Key {
     ControlDown,
 }
 
+impl Key {
+    /// The arrow a Ctrl+arrow is outside a calendar, its Ctrl left to the modifiers: what an
+    /// application's key hook and every other widget read.
+    pub(crate) fn control_arrow(&self) -> Option<Key> {
+        match self {
+            Key::ControlLeft => Some(Key::Left),
+            Key::ControlRight => Some(Key::Right),
+            Key::ControlUp => Some(Key::Up),
+            Key::ControlDown => Some(Key::Down),
+            _ => None,
+        }
+    }
+}
+
 /// What the root of a surface is to assistive technologies, named by [`Ui::title`]. New roles
 /// may be added: match with a `_` arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -3164,12 +3178,9 @@ impl Ui {
             return done;
         }
         // Outside a calendar, Ctrl leaves an arrow what it is.
-        let key = match key {
-            Key::ControlLeft => Key::Left,
-            Key::ControlRight => Key::Right,
-            Key::ControlUp => Key::Up,
-            Key::ControlDown => Key::Down,
-            key => key,
+        let key = match key.control_arrow() {
+            Some(arrow) => arrow,
+            None => key,
         };
         let focused = self.focus;
         if let Some(id) = focused {

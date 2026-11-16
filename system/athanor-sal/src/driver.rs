@@ -255,7 +255,8 @@ pub trait Application {
     /// Page Up, Page Down, Enter, Backspace, Delete, Escape, Menu and Shift+F10, Ctrl+A, Ctrl+C,
     /// Ctrl+X and Ctrl+V, and a key that types text, which comes as [`Key::Text`] whatever the
     /// modifiers held, Alt or Super included. Shift with Left or Right comes as
-    /// [`Key::SelectLeft`] or [`Key::SelectRight`]. The other keys reach neither this call nor
+    /// [`Key::SelectLeft`] or [`Key::SelectRight`], and Ctrl with an arrow as the arrow, with
+    /// `modifiers.ctrl`: only a calendar reads it apart. The other keys reach neither this call nor
     /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
     /// keys that type nothing, such as Insert.
     fn key(
@@ -2591,8 +2592,11 @@ impl App {
             return forget(&mut key);
         };
         let modifiers = KeyModifiers::from(self.modifiers);
+        let arrow = key.control_arrow();
         if self.shell.get_mut(id).is_some()
-            && self.application.key(&mut self.shell, id, &key, modifiers)
+            && self
+                .application
+                .key(&mut self.shell, id, arrow.as_ref().unwrap_or(&key), modifiers)
         {
             self.changed(id, None);
             return forget(&mut key);
@@ -3182,6 +3186,23 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use wayland_client::protocol::wl_registry;
+
+    /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
+    /// move with Ctrl+Up and Ctrl+Down: a calendar alone reads Ctrl+arrow apart.
+    #[test]
+    fn an_application_reads_ctrl_with_an_arrow_as_the_arrow() {
+        let arrows = [
+            (Key::ControlLeft, Key::Left),
+            (Key::ControlRight, Key::Right),
+            (Key::ControlUp, Key::Up),
+            (Key::ControlDown, Key::Down),
+        ];
+        for (held, arrow) in arrows {
+            assert_eq!(held.control_arrow(), Some(arrow));
+        }
+        assert_eq!(Key::Up.control_arrow(), None, "an arrow is itself");
+        assert_eq!(Key::Text("a".into()).control_arrow(), None);
+    }
 
     #[test]
     fn a_turn_no_scroll_takes_reaches_the_widget_as_whole_steps_and_each_axis_apart() {
