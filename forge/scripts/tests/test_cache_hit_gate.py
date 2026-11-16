@@ -6,16 +6,19 @@ tested next to each script; this test fails when a new path skips the gate
 The scan is a heuristic, not a proof: it reads shell with regular expressions and Python with
 the tokenizer and the AST, and a determined author can still build a call it does not see (a
 command assembled in a variable, `bash -c`, a string run through eval). It stops the slips the
-tests below name: a mention in a comment, a string or a docstring, a dead assignment of the
-path, and a hash tag spelled so that no pattern finds it.
+tests below name: a mention in a comment, a plain string or a docstring, a dead assignment of
+the path, and a hash tag spelled so that no pattern finds it.
 
 What it does not see, and is not meant to close with more regular expressions:
-- a gate path at the start of a line inside a multi-line string or a heredoc counts as a call;
+- a gate path inside a string or a heredoc counts as a call where it stands as a command would:
+  at the start of a line, or after a separator such as `;`, `&&` or `$(` (`echo "x; bash
+  verify_image.sh"`);
 - a call in dead code (`if false`, a function never called) counts;
 - it works per file, so a file that runs the gate once can add a second, unverified read of a
   hash tag;
 - a Python call through a prebuilt argv variable is not seen;
-- `.service`, `.container` and `.json` files are not scanned.
+- only the suffixes in SUFFIXES are scanned: `.service`, `.container`, `.json`, `.conf` or a
+  template such as `.j2` is not.
 The behaviour tests of verify_image.sh, resolve_node_image.sh, check_idempotency.sh and the
 brain, and the tier restore test (test_tier_cache.py), are the real guard."""
 
@@ -50,13 +53,13 @@ PROBE_USE = re.compile(r"registry_probe\.sh")
 HASH_TAG = re.compile(r"(?<![\w-])hash-(?!object\b)")
 HASH_TAG_WRITERS = {"forge/scripts/tag_signed_image.sh"}
 # A call of the gate: verify_image.sh is the command run, at the start of a command (after an
-# optional bash or exec), or after && || ; | ! if then do else elif while until $( ` or (, or
-# the first word of an array that is run later (PROBE_CMD=(bash ... verify_image.sh)). The path
+# optional bash or exec, or a YAML step's `run:` key at the start of its line), or after
+# && || ; | ! if then do else elif while until $( ` or (, or the first word of an array that is run later (PROBE_CMD=(bash ... verify_image.sh)). The path
 # may hold a quoted word or a $(...) ("$(dirname "${BASH_SOURCE[0]}")/verify_image.sh"). A
 # mention in a string, an assignment of the path and an argument of another command are not.
 _WORD = r"""(?:\$\((?:[^()]|\([^()]*\))*\)|[^\s;|&()<>=])*"""
 GATE_CALL = re.compile(
-    r"(?:^|&&|\|\||[;|!`(]|\$\(|\b(?:if|then|do|else|elif|while|until|run:)(?!\w))\s*"
+    r"(?:^|^[ \t]*(?:-[ \t]+)?run:|&&|\|\||[;|!`(]|\$\(|\b(?:if|then|do|else|elif|while|until)(?!\w))\s*"
     r"(?:(?:(?:bash|sh|exec)\s+)*|\w+=\(\s*bash\s+)"
     + _WORD
     + r"""verify_image\.sh["']?(?=[\s;|&)"']|$)""",
@@ -218,6 +221,8 @@ class CacheHitGateTest(unittest.TestCase):
             "trailing comment": (".sh", reader + 'true # "$here/verify_image.sh"\n'),
             "dead assignment": (".sh", 'gate="$here/verify_image.sh"\n' + reader),
             "echo string": (".sh", 'echo "run $here/verify_image.sh first"\n' + reader),
+            "run: in a string": (".sh", 'echo "run: bash forge/scripts/verify_image.sh"\n' + reader),
+            "run: after a key": (".yml", "description: run: forge/scripts/verify_image.sh\n" + reader),
             "docstring": (".py", '"""Calls verify_image.sh."""\nref = f"{r}:hash-{h}"\n'),
             "python assignment": (".py", 'gate = "verify_image.sh"\nref = f"{r}:hash-{h}"\n'),
             "python echo argv": (".py", 'subprocess.run(["echo", "verify_image.sh"])\nref = f"{r}:hash-{h}"\n'),
