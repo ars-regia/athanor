@@ -39,6 +39,9 @@ readarray -t UPSTREAM_CLI < <(jq -r '.upstream_cli[] // empty' config/packages.j
 # repeats its decision on the file, so a missing legacy branch alone passes (ADR-0103 D24).
 # The NVIDIA modules are not RPMs: system/Containerfile copies them from their image by digest.
 ARTIFACTS="$(dirname "${BASH_SOURCE[0]}")/../../system/kernel-artifacts.sh"
+# The registry of the kernel, as kernel-artifacts.sh reads it: the re-resolve below and the
+# pull of azoth@<digest> name the same one.
+export KERNEL_REGISTRY="${KERNEL_REGISTRY:-ghcr.io/${OWNER,,}}"
 bash "$ARTIFACTS" check-ready
 KERNEL_NVR=$(bash "$ARTIFACTS" get nvr)
 PINNED_NVR=$(bash "$(dirname "${BASH_SOURCE[0]}")/../specs/azoth/nvr.sh")
@@ -99,7 +102,9 @@ pull_and_extract() {
   case "$img" in
     athanor-forge-*) ref=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${img#athanor-forge-}") || return 1 ;;
   esac
-  local IMAGE_LOWER=$(echo "ghcr.io/$OWNER/$ref" | tr '[:upper:]' '[:lower:]')
+  local base="ghcr.io/$OWNER"
+  [[ $img != azoth@* ]] || base=$KERNEL_REGISTRY
+  local IMAGE_LOWER=$(echo "$base/$ref" | tr '[:upper:]' '[:lower:]')
   
   local old_digest="${OLD_DIGESTS[$img]:-}"
   local new_digest=""

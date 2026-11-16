@@ -1389,6 +1389,33 @@ class DigestRace(Tool):
         fx = published()
         fx["tags"][f"{REG}/azoth:{NVR}"] = OTHER_KERNEL
         self.registry(fx)
+        r = self.aggregate("ars-regia")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(
+            f"azoth:{NVR} is {OTHER_KERNEL}, the caller resolved {KERNEL}", r.stderr
+        )
+        self.assertIn("a race with Kernel Build", r.stderr)
+        self.assertIn(f"azoth:{boot_tag()}", r.stderr)
+        self.assertNotIn("Image not found", r.stderr)
+        self.assertEqual(
+            self.state_file()["kernel_digest"],
+            KERNEL,
+            "the verified file stays as it was",
+        )
+
+    def test_the_aggregation_pulls_the_kernel_from_the_registry_it_resolved_against(self):
+        self.registry(published())
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.env["KERNEL_REGISTRY"] = REG
+        self.aggregate("another-owner")
+        pulls = [
+            call[-1]
+            for call in map(json.loads, (self.dir / "calls.log").read_text().splitlines())
+            if call[:3] == ["skopeo", "inspect", "--config"] and "/azoth@" in call[-1]
+        ]
+        self.assertEqual(pulls, [f"docker://{REG}/azoth@{KERNEL}"])
+
+    def aggregate(self, owner):
         forge = self.dir / "forge"
         (forge / "config").mkdir(parents=True)
         lists = (
@@ -1404,20 +1431,8 @@ class DigestRace(Tool):
         (forge / "config/packages.json").write_text(
             json.dumps({name: [] for name in lists})
         )
-        r = self.run_script(
-            "ars-regia", cwd=forge, script=ROOT / "forge/scripts/fetch_repo_rpms.sh"
-        )
-        self.assertEqual(r.returncode, 1, r.stderr)
-        self.assertIn(
-            f"azoth:{NVR} is {OTHER_KERNEL}, the caller resolved {KERNEL}", r.stderr
-        )
-        self.assertIn("a race with Kernel Build", r.stderr)
-        self.assertIn(f"azoth:{boot_tag()}", r.stderr)
-        self.assertNotIn("Image not found", r.stderr)
-        self.assertEqual(
-            self.state_file()["kernel_digest"],
-            KERNEL,
-            "the verified file stays as it was",
+        return self.run_script(
+            owner, cwd=forge, script=ROOT / "forge/scripts/fetch_repo_rpms.sh"
         )
 
     def publish(self, generation, rc=0, **env):
