@@ -40,11 +40,18 @@ readarray -t UPSTREAM_CLI < <(jq -r '.upstream_cli[] // empty' config/packages.j
 # repeats its decision on the file, so a missing legacy branch alone passes (ADR-0103 D24).
 # The NVIDIA modules are not RPMs: system/Containerfile copies them from their image by digest.
 ARTIFACTS="$(dirname "${BASH_SOURCE[0]}")/../../system/kernel-artifacts.sh"
+# The registry of the kernel, as kernel-artifacts.sh reads it: the re-resolve below and the
+# pull of azoth@<digest> name the same one.
+export KERNEL_REGISTRY="${KERNEL_REGISTRY:-ghcr.io/${OWNER,,}}"
 bash "$ARTIFACTS" check-ready
 KERNEL_NVR=$(bash "$ARTIFACTS" get nvr)
 PINNED_NVR=$(bash "$(dirname "${BASH_SOURCE[0]}")/../specs/azoth/nvr.sh")
 [[ $KERNEL_NVR == "$PINNED_NVR" ]] || { echo "[FATAL] kernel artifacts were resolved for ${KERNEL_NVR}, the pins give ${PINNED_NVR}: run system/kernel-artifacts.sh resolve again" >&2; exit 2; }
 KERNEL_DIGEST=$(bash "$ARTIFACTS" get kernel_digest)
+# Kernel Build may have republished the NVR since the Orchestrator pinned this digest (#1208):
+# resolve the tag again against it, so a moved tag ends the run here, naming the race and both
+# digests, instead of at a pull. In a directory of its own, so the verified file stays as it is.
+KERNEL_ARTIFACTS_DIR="$TMP_DIR/kernel-recheck" bash "$ARTIFACTS" resolve --expect-kernel-digest "$KERNEL_DIGEST"
 
 # Packages published by a dedicated workflow, not the DAG, so no athanor-forge-<pkg>
 # image is ever built for them -- the same exclusion dag_orchestrator.py applies. The
@@ -100,6 +107,7 @@ pull_and_extract() {
   # else here is the kernel, named by the digest system/kernel-artifacts.sh verified.
   case "$img" in
     athanor-forge-*) IMAGE_LOWER=$(bash "$(dirname "${BASH_SOURCE[0]}")/resolve_node_image.sh" "${REGISTRY}" "${img#athanor-forge-}") || return 1 ;;
+    azoth@*) IMAGE_LOWER=$(echo "${KERNEL_REGISTRY}/$img" | tr '[:upper:]' '[:lower:]') ;;
     *) IMAGE_LOWER=$(echo "${REGISTRY}/$img" | tr '[:upper:]' '[:lower:]') ;;
   esac
   
