@@ -1,4 +1,4 @@
-# base: registry.fedoraproject.org/fedora:43@sha256:086bb30fc7dd0f84b266b9c93d14298f06e30d04421dcd6813629ea00542fa8a
+# base: registry.fedoraproject.org/fedora:43@sha256:c981fdec0dbcc88cd910db0b31cd7185d9a58ee77c36ff142c8d6f6e25c41036
 # kernel: 7.3.3-300.fc45
 # inputs: b0cfec56625e7ce792b3f93d1e427f8a57c5b72b8bcb7f611471d8c796450762
 # key: c6e7f081cf80e13146676e88829b606631645531
