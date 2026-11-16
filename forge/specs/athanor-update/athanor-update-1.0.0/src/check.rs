@@ -372,7 +372,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     }
     // UT12 holds a feature update on a metered connection; a security update downloads, unless
     // the opt-out holds it too (UT13).
-    if ctx.tools.metered() && !(security && automatic) {
+    // The link is read once: the gate and the warning below must agree on it.
+    let metered = ctx.tools.metered();
+    if metered && !(security && automatic) {
         return (UpdateState::Available, None);
     }
     // Residual: the class is the candidate's, but `bootc upgrade --download-only` takes what
@@ -396,7 +398,7 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
                 return (UpdateState::Available, None);
             }
             let staged = status.staged.as_ref().map(|staged| staged.digest.clone()).unwrap_or_default();
-            if ctx.tools.metered() && staged != candidate.digest {
+            if metered && staged != candidate.digest {
                 tracing::warn!(%staged, candidate = %candidate.digest, "a tag moved after the candidate was classified: bootc downloaded another digest over a metered connection; it is not unlocked");
             }
             let failure = downloaded(ctx, status, &staged);
@@ -699,6 +701,8 @@ pub(crate) mod tests {
         /// `greenboot-success.target` is active: greenboot's required health checks passed.
         pub boot_healthy: bool,
         pub calls: RefCell<Vec<String>>,
+        /// How many times `metered` was asked, kept out of `calls` so their exact-match assertions hold.
+        pub metered_asked: Cell<usize>,
     }
 
     impl Fake {
@@ -719,6 +723,7 @@ pub(crate) mod tests {
                 served: Cell::new(None),
                 boot_healthy: true,
                 calls: RefCell::new(Vec::new()),
+                metered_asked: Cell::new(0),
             }
         }
 
@@ -837,6 +842,7 @@ pub(crate) mod tests {
             Ok(())
         }
         fn metered(&self) -> bool {
+            self.metered_asked.set(self.metered_asked.get() + 1);
             self.metered
         }
         fn boot_healthy(&self) -> bool {
@@ -1478,6 +1484,18 @@ pub(crate) mod tests {
         tools.download = Ok(Deployed { download_only: true, ..in_att_repo(deployed(&moved, 3000)) });
         let (_, log) = logged(|| run(&machine.ctx(&tools, NOW), false).expect("check"));
         assert!(!log.contains(MOVED), "{log}");
+    }
+
+    #[test]
+    fn the_metered_link_is_read_once_per_check() {
+        // The gate before the download and the warning after it share one reading, so a link
+        // that changes in between cannot let one pass and the other disagree.
+        let (machine, mut tools) = offered_attested("metered-read-once", Some(security()));
+        tools.metered = true;
+        tools.download = Ok(Deployed { download_only: true, ..in_att_repo(deployed(&digest(7), 3000)) });
+        run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert!(tools.called("download"), "{:?}", tools.calls.borrow());
+        assert_eq!(tools.metered_asked.get(), 1);
     }
 
     #[test]
