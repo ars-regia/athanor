@@ -2591,6 +2591,10 @@ impl App {
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return forget(&mut key);
         };
+        // A key shows the ring, the application's hook's too (AX8's `:focus-visible`).
+        if let Some(ui) = self.shell.ui_mut(id) {
+            ui.quiet_focus = None;
+        }
         let modifiers = KeyModifiers::from(self.modifiers);
         let arrow = key.control_arrow();
         if self.shell.get_mut(id).is_some()
@@ -2948,18 +2952,12 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
         _: &[u32],
-        _: &[Keysym],
+        held: &[Keysym],
     ) {
         let entered = self.shell.find(wl).map(|surface| surface.id);
         self.keyboard_focus = entered;
-        // AX7: a surface opens with the focus on its first control, as GTK's at map, its ring
-        // shown once a key is pressed (AX8).
-        if let Some(id) = entered {
-            if let Some(first) = self.shell.ui(id).and_then(focus::on_enter) {
-                if let Some(ui) = self.shell.ui_mut(id) {
-                    ui.focus_quietly(first);
-                }
-            }
+        if let Some(ui) = entered.and_then(|id| self.shell.ui_mut(id)) {
+            enter_focus(ui, !held.is_empty());
         }
         self.keyboard_moved(wl, true);
     }
@@ -3173,6 +3171,19 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
 
 /// Forgets the settling of a motion of `id` that a new one replaces, so that the application
 /// is not told of it during the new one, and queues `id` once if the new motion `ended` at once.
+/// Focuses the first control of a surface the keyboard enters (AX7), as GTK's at map. Entered
+/// by a key, as Ctrl+Alt+Tab with its keys still held, it shows the ring at once, as a bar or
+/// dock that holds the keyboard does; entered with no key held, as at map, the ring waits for
+/// the first key (AX8's `:focus-visible`).
+fn enter_focus(ui: &mut Ui, by_key: bool) {
+    if let Some(first) = focus::on_enter(ui) {
+        ui.focus_quietly(first);
+    }
+    if by_key {
+        ui.quiet_focus = None;
+    }
+}
+
 fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
     settled.retain(|s| *s != id);
     if ended {
@@ -3189,6 +3200,25 @@ mod tests {
 
     /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
     /// move with Ctrl+Up and Ctrl+Down: a calendar alone reads Ctrl+arrow apart.
+    /// Entered at map, a surface focuses its first control without its ring; entered by a key,
+    /// as Ctrl+Alt+Tab, the ring shows at once, on the focus it kept too.
+    #[test]
+    fn a_surface_entered_by_a_key_shows_its_ring_at_once() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.add(Ui::ROOT, Kind::Button("Clock".into()));
+        ui.layout();
+        enter_focus(&mut ui, false);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), Some(first)));
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.layout();
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+    }
+
     #[test]
     fn an_application_reads_ctrl_with_an_arrow_as_the_arrow() {
         let arrows = [
