@@ -1758,7 +1758,54 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
 /// need this handler.
 impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
-smithay::delegate_dispatch2!(State);
+/// What `smithay::delegate_dispatch2!(State)` writes, with one step before Smithay's handler: a
+/// request `crate::layer::refused` refuses ends its client and never reaches that handler.
+impl<I, U> smithay::reexports::wayland_server::Dispatch<I, U> for State
+where
+    I: Resource,
+    I::Request: 'static,
+    U: smithay::wayland::Dispatch2<I, State>,
+{
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &I,
+        request: I::Request,
+        data: &U,
+        dhandle: &DisplayHandle,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        if crate::layer::refused(resource, &request) {
+            return;
+        }
+        data.request(state, client, resource, request, dhandle, data_init);
+    }
+
+    fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &U) {
+        data.destroyed(state, client, resource);
+    }
+}
+
+impl<I, U> smithay::reexports::wayland_server::GlobalDispatch<I, U> for State
+where
+    I: Resource,
+    U: smithay::wayland::GlobalDispatch2<I, State>,
+{
+    fn bind(
+        state: &mut Self,
+        dhandle: &DisplayHandle,
+        client: &Client,
+        resource: smithay::reexports::wayland_server::New<I>,
+        data: &U,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        data.bind(state, dhandle, client, resource, data_init);
+    }
+
+    fn can_view(client: Client, data: &U) -> bool {
+        data.can_view(&client)
+    }
+}
 
 #[cfg(test)]
 mod tests {

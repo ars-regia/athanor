@@ -5065,6 +5065,35 @@ fn task5_top_layers_are_closed_to_a_client_not_granted_them() {
     run.stop();
 }
 
+/// A layer surface's size above `i32::MAX`, which Smithay would store negative, is
+/// `invalid_size` (issue #1199): its client is ended and the compositor serves the others.
+#[test]
+fn a_layer_size_above_i32_max_is_a_protocol_error() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = bar.bind(4);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = bar.bind(4);
+    let qh = bar.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Bottom,
+        "1199".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, i32::MAX.unsigned_abs());
+    bar.roundtrip(&mut run);
+    assert!(bar.connection.protocol_error().is_none(), "i32::MAX is a size");
+    layer.set_size(100, u32::MAX);
+    let error = devices::protocol_error(&mut run, &mut bar);
+    assert_eq!(error.object_interface, "zwlr_layer_surface_v1");
+    assert_eq!(error.code, zwlr_layer_surface_v1::Error::InvalidSize as u32);
+    Local::connect(&mut run, None).roundtrip(&mut run);
+    run.stop();
+}
+
 /// Each client is offered exactly the globals `data/globals` gives its class of client (OS4,
 /// OS5): the bar every one but the output manager, which its line does not name; the control
 /// center the unprivileged ones and the output manager; a client with no line the unprivileged
