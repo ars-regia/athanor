@@ -325,6 +325,10 @@ impl TreeChangeHandler for AdapterChangeHandler<'_> {
         if let Some(node) = new_node {
             self.adapter
                 .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
+            if let Some(expanded) = node.data().is_expanded() {
+                self.adapter
+                    .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
+            }
             self.emit_text_selection_change(None, node);
         }
         if let (None, Some(new_node)) = (old_node, new_node) {

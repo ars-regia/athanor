@@ -1614,6 +1614,8 @@ mod tests {
         /// The focus gained, the window state made active and the windows activated, in the
         /// order the bus heard them: `focused`, `active` and `activate <name>`.
         activation: Vec<String>,
+        /// The expanded states reported, in order: `true` for expanded, `false` for collapsed.
+        expanded: Vec<bool>,
         /// The nodes with interfaces registered on the bus, and their interfaces' bits.
         registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
     }
@@ -1670,6 +1672,10 @@ mod tests {
                         event: ObjectEvent::StateChanged(State::Active, true),
                         ..
                     } => heard.activation.push("active".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Expanded, expanded),
+                        ..
+                    } => heard.expanded.push(expanded),
                     _ => {}
                 }
             }
@@ -1933,6 +1939,29 @@ mod tests {
         adapter.update_window_focus_state(true);
         let heard = heard.lock().expect("not poisoned");
         assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
+    }
+
+    /// A menu button taking the focus reports its expanded state with it, as GTK 4.20 does:
+    /// Orca then says "collapsed" for each one the first time, as for GTK's (AX6; the third
+    /// change of `vendor/accesskit_atspi_common`). A plain button reports none.
+    #[test]
+    fn a_menu_button_taking_the_focus_reports_its_expanded_state() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let plain = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        let menu = ui.add(Ui::ROOT, Kind::Button("Power".into()));
+        ui.set_has_popup(menu, true);
+        ui.layout();
+        let (mut adapter, heard) = at_spi_focused(&ui, true);
+        ui.set_focus(Some(plain));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert!(heard.lock().expect("not poisoned").expanded.is_empty());
+        ui.set_focus(Some(menu));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false]);
     }
 
     /// An announcement asked for before a surface leaves the accessibility tree and not yet
