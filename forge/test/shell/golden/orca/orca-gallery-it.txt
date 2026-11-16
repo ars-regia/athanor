@@ -5,6 +5,8 @@ Scelte pulsante di commutazione non premuto
 Valori pulsante di commutazione non premuto
 Elenchi pulsante di commutazione non premuto
 Testo pulsante di commutazione non premuto
+Stati pulsante di commutazione non premuto
+Dialoghi pulsante di commutazione non premuto
 Un pulsante pulsante
 Uno pulsante di commutazione premuto
 Due pulsante di commutazione non premuto
@@ -18,6 +20,8 @@ Scelte pulsante di commutazione premuto
 Valori pulsante di commutazione non premuto
 Elenchi pulsante di commutazione non premuto
 Testo pulsante di commutazione non premuto
+Stati pulsante di commutazione non premuto
+Dialoghi pulsante di commutazione non premuto
 Opzione uno casella di spunta spuntata
 Opzione due casella di spunta non spuntata
 Un interruttore attivo selettore
@@ -27,18 +31,37 @@ Galleria
 Valori pulsante di commutazione premuto
 Elenchi pulsante di commutazione non premuto
 Testo pulsante di commutazione non premuto
+Stati pulsante di commutazione non premuto
+Dialoghi pulsante di commutazione non premuto
 Un cursore controllo scorrevole orizzontale 50 50 percento.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Elenchi pulsante di commutazione premuto
 Testo pulsante di commutazione non premuto
-Un elenco Elenco con 50 voci
+Stati pulsante di commutazione non premuto
+Dialoghi pulsante di commutazione non premuto
+Sostituisci le righe pulsante
+Un elenco Elenco con 51 voci
 Riga 1
+Una seconda riga
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Testo pulsante di commutazione premuto
+Stati pulsante di commutazione non premuto
+Dialoghi pulsante di commutazione non premuto
 Note testo
 Il cursore parte da qui.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Stati pulsante di commutazione premuto
+Dialoghi pulsante di commutazione non premuto
+Abilita il pulsante non attivo selettore
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria 1 dialogo senza focus
+Dialoghi pulsante di commutazione premuto
+Apri una finestra di dialogo pulsante
 Lettore schermo disattivato.
