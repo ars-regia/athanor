@@ -103,6 +103,8 @@ INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer,
 INDICATOR_PAGES = {"lists"}
 # A row of a list.
 ROW = "list item"
+# The states that make a row a thing to choose, not a heading.
+CHOOSABLE = {"selectable", "focusable"}
 
 
 def in_scroll_bar(nodes):
@@ -119,12 +121,17 @@ def in_scroll_bar(nodes):
 
 
 def significant(node):
-    """What a screen reader speaks: a node with a name or a value, or a control or a list row. A
-    row with no name of its own, such as a heading row that holds only a label, is compared by its
-    states too: they are what makes it selectable. The application's own node is named after the
-    binary, so it is left out."""
+    """What a screen reader speaks: a node with a name or a value, or a control, or a list row
+    that can be chosen. A row with no name of its own is compared by its states when it is
+    selectable or focusable, since a toolkit row that lost either would otherwise pass unseen; a
+    heading row that holds only a label (GTK's, with the states sensitive, showing and visible) is
+    no element, so a toolkit that draws it differently, or not as a row, is not reported as
+    missing. The application's own node is named after the binary, so it is left out."""
     return node["role"] != "application" and bool(
-        node["name"] or node["value"] or node["role"] in INTERACTIVE or node["role"] == ROW
+        node["name"]
+        or node["value"]
+        or node["role"] in INTERACTIVE
+        or (node["role"] == ROW and CHOOSABLE & set(node["states"]))
     )
 
 
