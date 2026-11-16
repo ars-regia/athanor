@@ -108,6 +108,16 @@ enum Act {
     ControlCenter,
 }
 
+/// The widget of `acts` that does what `focused` did among `old`.
+fn same_act(
+    old: &[(WidgetId, Act)],
+    focused: WidgetId,
+    acts: &[(WidgetId, Act)],
+) -> Option<WidgetId> {
+    let act = old.iter().find(|(w, _)| *w == focused)?.1;
+    acts.iter().find(|(_, a)| *a == act).map(|(w, _)| *w)
+}
+
 /// One output's surface.
 struct Out {
     info: OutputInfo,
@@ -519,6 +529,13 @@ impl Bar {
         };
         // Across the output the surface keeps the width the compositor configured.
         ui.min_width = current.min_width;
+        // The focus stays on the control of the same action, as on GTK's widgets kept across
+        // an update: a rebuild while the user tabs along the bar would send it back to the start.
+        let kept = current
+            .focus()
+            .zip(self.outs.get(&id))
+            .and_then(|(focused, old)| same_act(&old.acts, focused, &out.acts));
+        ui.carry_focus(current, kept);
         *current = ui;
         self.outs.insert(id, out);
     }
@@ -1251,5 +1268,27 @@ impl Application for Bar {
         self.module_surfaces(shell);
         self.notify_ready(shell);
         self.open_asked(shell);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use athanor_sal::{Kind, Theme};
+
+    #[test]
+    fn a_rebuilt_bar_keeps_the_focus_on_the_control_of_the_same_action() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let [a, b, c] =
+            ["Clock", "Power", "Tiling"].map(|n| ui.add(Ui::ROOT, Kind::Button(n.into())));
+        let old = [(a, Act::Popover(Module::Clock)), (b, Act::Popover(Module::Power))];
+        // The rebuilt surface has a button before them, which moves their widgets.
+        let new = [
+            (a, Act::Popover(Module::Tiling)),
+            (b, Act::Popover(Module::Clock)),
+            (c, Act::Popover(Module::Power)),
+        ];
+        assert_eq!(same_act(&old, b, &new), Some(c));
+        assert_eq!(same_act(&old, c, &new), None, "a widget with no action keeps none");
     }
 }
