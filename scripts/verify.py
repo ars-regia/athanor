@@ -4965,6 +4965,63 @@ def check_session_units():
     return r
 
 
+# Properties that put a user unit in namespaces of its own. Under the user manager each one
+# gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
+# ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
+NAMESPACING_PROPERTY = re.compile(
+    r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
+    r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage)=(.*)$"
+)
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\s*\(")
+
+
+def exe_reading_programs(root):
+    """{binary name: first file:line} of every crate under system/ whose code calls
+    `admit_user_unit`, the admission that reads the peer's executable."""
+    programs = {}
+    for manifest in walk(root / "system", "Cargo.toml"):
+        try:
+            package = tomllib.loads(read(manifest))
+        except tomllib.TOMLDecodeError:
+            continue
+        names = [package.get("package", {}).get("name")] + [b.get("name") for b in package.get("bin", [])]
+        for source in walk(manifest.parent / "src", ".rs"):
+            for number, line in enumerate(read(source).split("\n"), 1):
+                if EXE_READING_ADMISSION.search(line.split("//")[0]):
+                    for name in filter(None, names):
+                        programs.setdefault(name, f"{rel(source)}:{number}")
+    return programs
+
+
+def peer_admission_problems(units, programs):
+    """A unit that sets a namespacing property and runs a program that reads its peer's
+    executable: the read fails with EACCES, and the program refuses every peer."""
+    problems = []
+    for unit, text in sorted(units.items()):
+        lines = [line.strip() for line in text.split("\n")]
+        exec_start = next((line.partition("=")[2].lstrip("-@:+!") for line in lines if line.startswith("ExecStart=")), "")
+        program = exec_start.split()[0].rsplit("/", 1)[-1] if exec_start.split() else ""
+        if program not in programs:
+            continue
+        for line in lines:
+            m = NAMESPACING_PROPERTY.match(line)
+            if m and m.group(2).strip().lower() not in ("", "no", "false", "0", "default"):
+                problems.append(f"{unit}: runs {program}, which calls admit_user_unit at {programs[program]}, and sets {m.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer with admit_user_unit_cgroup (doc_session_daemons.md SD17)")
+                break
+    return problems
+
+
+@check("peer-exe", "A user unit with namespacing properties runs no program that reads its peer's executable")
+def check_peer_exe():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    for problem in peer_admission_problems(units, exe_reading_programs(ROOT)):
+        r.fail(problem)
+    return r
+
+
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
