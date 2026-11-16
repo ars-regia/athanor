@@ -2,9 +2,9 @@
 Description=Athanor wallpaper decoder, one connection
 Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_session_daemons.md
 # Static, started by athanor-wallpaper-decode.socket for each connection (doc_session_daemons.md,
-# SD17). The program admits only athanor-wallpaper.service's /usr/bin/athanor-wallpaper as its
-# peer, through SO_PEERPIDFD, decodes the one picture it is handed with glycin in bubblewrap and
-# answers the pixels scaled to each size asked.
+# SD17). The program admits only a peer in athanor-wallpaper.service's control group, read
+# through SO_PEERPIDFD, and not its executable: the namespaces below forbid that read. It decodes
+# the one picture it is handed with glycin in bubblewrap and answers the pixels scaled to each size asked.
 # Unloaded once it ends, failed or not, as the launcher's transient decodes are (--collect).
 CollectMode=inactive-or-failed
 
