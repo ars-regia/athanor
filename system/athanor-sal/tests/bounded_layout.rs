@@ -103,3 +103,18 @@ fn inlines_nested_with_a_huge_padding() {
     }
     assert_finite(&mut ui, &ids, "nested");
 }
+
+#[test]
+fn nested_islands_with_a_huge_or_unset_margin() {
+    for margin in [[0.0, 0.0, 0.0, f32::MAX], [f32::MAX; 4], [f32::NAN; 4]] {
+        let mut ui = Ui::new("Bounds", Theme::default(), false);
+        let mut parent = Ui::ROOT;
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            parent = ui.island(parent, true, margin);
+            ids.push(parent);
+        }
+        ids.push(ui.add(parent, Kind::Button("A".into())));
+        assert_finite(&mut ui, &ids, &format!("islands {margin:?}"));
+    }
+}

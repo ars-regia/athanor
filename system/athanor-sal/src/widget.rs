@@ -2197,6 +2197,9 @@ impl Ui {
                 (side, side)
             }
             Kind::Island { vertical, margin } => {
+                // A margin set through `Ui::island` or `Ui::add` is checked here, as a scroll's
+                // height is, before `place` adds it into the children's offsets.
+                *margin = margin.map(length);
                 let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
                 let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
                 let mut content = [0.0; 2];
