@@ -28,6 +28,10 @@ Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
        GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a token of
        the bots GitHub App, so that the merge triggers the push workflows)
 
+A pull request whose files have a code owner (ADR-0107) merges once the owner has approved it
+at HEAD_SHA: the run before that reports it as waiting, and the next run of this script
+(another pr.yml run on the pull request) or the maintainer merges it.
+
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
 refused merge exits non-zero.
@@ -180,7 +184,7 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
+            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles,reviewDecision",
         )
     )
     if view["state"] != "OPEN":
@@ -233,6 +237,12 @@ def check(kind, pr, sha, gh):
             check_spec(f)
         else:
             check_system(f, contents)
+    if view["reviewDecision"] == "REVIEW_REQUIRED":
+        # ADR-0107: the files of the pull request have a code owner, whose approval at this head
+        # the merge needs. Trying it would end the job red on "the base branch policy prohibits
+        # the merge" (#569). A pull request the owner approved reads APPROVED or empty (ADR-0107
+        # keeps the approving count at 0), and an unowned path reads empty.
+        raise Refused("waits for the code owner's approval at this head")
     return view["baseRefName"]
 
 

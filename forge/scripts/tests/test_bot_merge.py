@@ -109,6 +109,7 @@ class BotMergeTest(unittest.TestCase):
             isCrossRepository=False,
             labels=[{"name": ln} for ln in labels],
             changedFiles=len(files),
+            reviewDecision="",
         )
         data.update(view)
         self.calls = []
@@ -254,6 +255,13 @@ class BotMergeTest(unittest.TestCase):
     def test_pull_request_of_another_author_stays(self):
         self.assertEqual(self.spec(author={"login": "hr-mes"}), [])
         self.assertEqual(self.system(author={"login": "app/athanor-agent"}), [])
+
+    def test_a_pull_request_waiting_for_its_code_owner_stays(self):
+        self.assertEqual(self.system(reviewDecision="REVIEW_REQUIRED"), [])
+        self.assertEqual(self.spec(reviewDecision="REVIEW_REQUIRED"), [])
+        # Approved, or on an unowned path: gh reports APPROVED or an empty decision.
+        self.assertEqual(len(self.system(reviewDecision="APPROVED")), 1)
+        self.assertEqual(len(self.system(reviewDecision="")), 1)
 
     def test_missing_pull_request_number_fails(self):
         for pr in ("", "null"):
