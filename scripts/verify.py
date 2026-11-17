@@ -1522,6 +1522,384 @@ def check_cargo_locks():
     return r
 
 
+# --------------------------------------------------------------------------- #
+# translations — a string that is not extracted stays in English (issue #1211)
+# --------------------------------------------------------------------------- #
+
+# A call xgettext extracts with the keywords of the update.sh scripts: tr or tr_with on a literal.
+GETTEXT_CALL = re.compile(r'\btr(?:_with)?\(\s*r?#*"')
+# An out-of-line module and the attributes before it.
+MOD_DECL = re.compile(
+    r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(\w+)\s*;"
+)
+# An inline module, whose out-of-line children resolve under its name.
+INLINE_MOD = re.compile(
+    r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(\w+)\s*\{"
+)
+RUST_CHAR = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)|[^\\'\n])'")
+RUST_RAW = re.compile(r'b?r(#*)"')
+
+
+def block_end(masked, brace):
+    """The index just past the brace that closes the one at `brace`, in text whose strings,
+    characters and comments are blanked."""
+    depth, end = 0, brace
+    while end < len(masked):
+        depth += {"{": 1, "}": -1}.get(masked[end], 0)
+        end += 1
+        if depth == 0:
+            break
+    return end
+
+
+def rust_code(text):
+    """`text` as a build reads it, twice and of the same length: with its comments and its
+    `#[cfg(test)]` items blanked, and the same with the contents of its strings blanked too,
+    where braces and declarations can be searched."""
+    code, masked = list(text), list(text)
+
+    def blank(chars, start, end):
+        for k in range(start, end):
+            if chars[k] != "\n":
+                chars[k] = " "
+
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            blank(code, i, end)
+            blank(masked, i, end)
+            i = end
+        elif text.startswith("/*", i):
+            # ponytail: a nested block comment ends at its first */; no source here nests one.
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            blank(code, i, end)
+            blank(masked, i, end)
+            i = end
+        elif text[i] == "'":
+            char = RUST_CHAR.match(text, i)
+            if char:
+                # '{' and '}' would unbalance the braces of a test module.
+                blank(masked, i + 1, char.end() - 1)
+            i = char.end() if char else i + 1
+        elif (raw := RUST_RAW.match(text, i)) and (
+            i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")
+        ):
+            close = '"' + raw.group(1)
+            end = text.find(close, raw.end())
+            end = n if end < 0 else end
+            blank(masked, raw.end(), end)
+            i = end + len(close)
+        elif text[i] == '"':
+            k = i + 1
+            while k < n and text[k] != '"':
+                k += 2 if text[k] == "\\" else 1
+            blank(masked, i + 1, min(k, n))
+            i = k + 1
+        else:
+            i += 1
+    flat = "".join(masked)
+    for attr in re.finditer(r"#\[cfg\(test\)\]", flat):
+        start = attr.end()
+        brace, semi = flat.find("{", start), flat.find(";", start)
+        if brace < 0 or 0 <= semi < brace:
+            end = n if semi < 0 else semi + 1
+        else:
+            end = block_end(flat, brace)
+        blank(code, attr.start(), end)
+        blank(masked, attr.start(), end)
+    return "".join(code), "".join(masked)
+
+
+def cfg_value(predicate, features):
+    """Whether `#[cfg(predicate)]` holds in a build with `features`, and not under test: True,
+    False, or None for a predicate this cannot judge, such as `target_os`."""
+    tokens = re.findall(r'"[^"]*"|\w+|[(),=]', predicate)
+
+    # True, False, or None for what cannot be judged.
+    def parse(i):
+        name, i = tokens[i], i + 1
+        if i < len(tokens) and tokens[i] == "(":
+            args, i = [], i + 1
+            while tokens[i] != ")":
+                value, i = parse(i)
+                args.append(value)
+                if tokens[i] == ",":
+                    i += 1
+            if name == "not":
+                value = None if args[0] is None else not args[0]
+            elif name == "all":
+                value = False if False in args else None if None in args else True
+            elif name == "any":
+                value = True if True in args else None if None in args else False
+            else:
+                value = None
+            return value, i + 1
+        if i < len(tokens) and tokens[i] == "=":
+            value = tokens[i + 1].strip('"') in features if name == "feature" else None
+            return value, i + 2
+        return (False if name == "test" else None), i
+
+    try:
+        return parse(0)[0]
+    except IndexError:
+        return None
+
+
+def cfg_holds(predicate, features):
+    """Whether `#[cfg(predicate)]` holds; a predicate `cfg_value` cannot judge holds, and so
+    does its `not`: its module is kept."""
+    return cfg_value(predicate, features) is not False
+
+
+def cfg_attr_paths(attrs, features):
+    """The `path = "..."` of each `#[cfg_attr(predicate, path = "...")]` in `attrs`, with the
+    predicate's `cfg_value`: [(True, False or None, path)]. Each attribute is read on its
+    own, its parentheses balanced."""
+    found = []
+    for start in re.finditer(r"#\[cfg_attr\(", attrs):
+        depth, quoted, parts, begin, i = 1, False, [], start.end(), start.end()
+        while i < len(attrs) and depth:
+            c = attrs[i]
+            if c == '"':
+                quoted = not quoted
+            elif not quoted:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                if c == "," and depth == 1:
+                    parts.append(attrs[begin:i])
+                    begin = i + 1
+            i += 1
+        parts.append(attrs[begin : i - 1])
+        for part in parts[1:]:
+            path = re.fullmatch(r'\s*path\s*=\s*"([^"]*)"\s*', part)
+            if path:
+                found.append((cfg_value(parts[0], features), path.group(1)))
+    return found
+
+
+def module_files(root_file, features):
+    """The source files of the module tree under `root_file` that a build with `features`
+    compiles, test modules left out, and the modules declared there whose file is missing:
+    (files, [(declaring file, expected file)])."""
+    files, missing, todo = [], [], [(Path(root_file), True)]
+
+    def holds(code, match):
+        attrs = code[match.start(1) : match.end(1)]
+        return all(
+            cfg_holds(c, features) for c in re.findall(r"#\[cfg\((.*)\)\]", attrs)
+        )
+
+    while todo:
+        path, owns_dir = todo.pop()
+        if path in files:
+            continue
+        files.append(path)
+        code, masked = rust_code(read(path))
+        base = (
+            path.parent
+            if owns_dir or path.name == "mod.rs"
+            else path.parent / path.stem
+        )
+        inline = [
+            (m.end() - 1, block_end(masked, m.end() - 1), m.group(2), holds(code, m))
+            for m in INLINE_MOD.finditer(masked)
+        ]
+        for decl in MOD_DECL.finditer(masked):
+            outer = sorted(b for b in inline if b[0] < decl.start() < b[1])
+            if not holds(code, decl) or not all(b[3] for b in outer):
+                continue
+            here = base.joinpath(*(b[2] for b in outer))
+            attrs = code[decl.start(1) : decl.end(1)]
+            explicit = re.search(r'#\[path\s*=\s*"([^"]*)"\]', attrs)
+            # `#[cfg_attr(predicate, path = "...")]`: the path applies when the predicate
+            # holds; when it cannot be judged, either file will do.
+            conditional = cfg_attr_paths(attrs, features)
+            name = decl.group(2)
+            normal = [(here / f"{name}.rs", False), (here / name / "mod.rs", True)]
+            candidates = normal
+            for value, target in conditional:
+                if value is not False:
+                    candidates = [((here if outer else path.parent) / target, True)]
+                    candidates += normal if value is None else []
+            if explicit:
+                candidates = [((here if outer else path.parent) / explicit.group(1), True)]
+            found = [c for c in candidates if c[0].is_file()][:1]
+            if not found:
+                missing.append((path, candidates[0][0]))
+            todo += found
+    return files, missing
+
+
+def crate_features(manifest, requested, defaults):
+    """The features of a crate that `requested` turn on, with its default ones when `defaults`,
+    and what they ask of its dependencies: (features, {dependency key: features},
+    optional dependencies turned on)."""
+    table = manifest.get("features", {})
+    on = set(requested) | ({"default"} if defaults and "default" in table else set())
+    asked, optional, todo = collections.defaultdict(set), set(), list(on)
+    while todo:
+        for entry in table.get(todo.pop(), []):
+            if entry.startswith("dep:"):
+                optional.add(entry[4:])
+            elif "/" in entry:
+                dep, feature = entry.split("/", 1)
+                asked[dep.rstrip("?")].add(feature)
+                if not dep.endswith("?"):
+                    optional.add(dep)
+            elif entry not in on:
+                on.add(entry)
+                todo.append(entry)
+    optional |= on
+    return on, asked, optional
+
+
+def potfiles_problems(root):
+    """Every source file a translated program compiles, its own or a path dependency's, that
+    calls tr or tr_with on a literal is listed in the program's po/POTFILES.in, which its
+    update.sh hands to xgettext: a file left out never reaches the catalog. A dependency counts
+    with the features the program turns on in it, as the gtk and sal pages of a shared crate
+    belong to different programs; the program itself counts with every feature, as each builds
+    one of its binaries."""
+    root = Path(root).resolve()
+    problems = []
+    for potfiles in sorted(walk(root / "forge/specs", "POTFILES.in")):
+        package = potfiles.parent.parent
+        listed = {
+            (package / line.strip()).resolve()
+            for line in read(potfiles).splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+        manifests, state, todo = {}, {}, [package]
+
+        def load(crate):
+            """The manifest of `crate`, or None after a problem says why it cannot be read."""
+            if crate not in manifests:
+                try:
+                    manifests[crate] = tomllib.loads(read(crate / "Cargo.toml"))
+                except (OSError, tomllib.TOMLDecodeError) as err:
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                        f"cannot be read ({err})"
+                    )
+                    manifests[crate] = None
+            return manifests[crate]
+
+        def workspace(crate):
+            """The directory and manifest of the workspace `crate` belongs to, or None."""
+            for d in [crate, *crate.parents]:
+                if d != root and root not in d.parents:
+                    return None
+                if (d / "Cargo.toml").is_file() and "workspace" in (load(d) or {}):
+                    return d, manifests[d]
+            return None
+
+        if load(package) is None:
+            continue
+        state[package] = (set(manifests[package].get("features", {})), True)
+        while todo:
+            crate = todo.pop()
+            manifest = manifests[crate]
+            on, asked, optional = crate_features(manifest, *state[crate])
+            if crate == package:
+                optional |= {
+                    k
+                    for k, v in manifest.get("dependencies", {}).items()
+                    if isinstance(v, dict)
+                }
+            tables = [manifest.get("dependencies", {})] + [
+                t.get("dependencies", {}) for t in manifest.get("target", {}).values()
+            ]
+            for key, spec in ((k, v) for table in tables for k, v in table.items()):
+                if not isinstance(spec, dict):
+                    continue
+                if spec.get("optional") and key not in optional:
+                    continue
+                base = crate
+                if spec.get("workspace"):
+                    ws = workspace(crate)
+                    entry = ws and ws[1].get("workspace", {}).get("dependencies", {}).get(key)
+                    if entry is None:
+                        problems.append(
+                            f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                            f"takes {key} from a workspace that does not declare it"
+                        )
+                        continue
+                    if not isinstance(entry, dict):
+                        continue
+                    # The workspace sets the source and default-features; the member adds features.
+                    base, spec = ws[0], {
+                        **entry,
+                        "features": entry.get("features", []) + spec.get("features", []),
+                    }
+                if "path" not in spec:
+                    continue
+                dep = (base / spec["path"]).resolve()
+                if load(dep) is None:
+                    continue
+                features, defaults = state.get(dep, (set(), False))
+                merged = (
+                    features | set(spec.get("features", [])) | asked[key],
+                    defaults or spec.get("default-features", True),
+                )
+                if dep not in state or merged != (features, defaults):
+                    state[dep] = merged
+                    todo.append(dep)
+            state[crate] = (on, state[crate][1])
+        for crate, (features, defaults) in sorted(state.items()):
+            on = crate_features(manifests[crate], features, defaults)[0]
+            manifest = manifests[crate]
+            implicit, roots = [], []
+            if "path" in manifest.get("lib", {}):
+                roots.append(crate / manifest["lib"]["path"])
+            else:
+                implicit.append(crate / "src/lib.rs")
+            if crate == package:
+                implicit += [crate / "src/main.rs"]
+                implicit += sorted((crate / "src/bin").glob("*.rs"))
+                implicit += sorted((crate / "src/bin").glob("*/main.rs"))
+                roots += [
+                    crate / b["path"] for b in manifest.get("bin", []) if "path" in b
+                ]
+            for named in roots:
+                if not named.is_file():
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                        f"names {named.relative_to(root)}, which does not exist"
+                    )
+            roots = [r for r in roots + implicit if r.is_file()]
+            sources = set()
+            for found, missing in (module_files(r, on) for r in roots):
+                sources |= set(found)
+                for declaring, expected in missing:
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {declaring.relative_to(root)} declares a "
+                        f"module whose file {expected.relative_to(root)} does not exist"
+                    )
+            for source in sorted(sources):
+                if source.resolve() not in listed and GETTEXT_CALL.search(
+                    rust_code(read(source))[0]
+                ):
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {source.relative_to(root)} calls tr or tr_with "
+                        f"and is compiled into the program, but is not listed: xgettext never extracts "
+                        f"its strings, and they stay in English"
+                    )
+    return list(dict.fromkeys(problems))
+
+
+@check(
+    "potfiles",
+    "Every source a translated program compiles that calls tr or tr_with is in its POTFILES.in",
+)
+def check_potfiles():
+    r = Result()
+    for problem in potfiles_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 @check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
 def check_paths():
     r = Result()
