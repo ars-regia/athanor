@@ -491,7 +491,7 @@ impl Page {
         });
         let failed = now.1 != self.seen.1;
         if rebuild {
-            self.unheard |= failed && self.ids.is_some();
+            self.unheard |= failed && self.shown;
             return Turn::Rebuild;
         }
         self.show(ui);
@@ -1132,6 +1132,52 @@ mod tests {
         page.dropped();
         let mut last = Ui::new("t", Theme::default(), false);
         page.build(&mut last, Ui::ROOT, &mut Look::plain());
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
+    }
+
+    #[test]
+    fn a_page_closed_with_its_ui_kept_forgets_its_note_and_says_nothing() {
+        let note = |page: &Page, ui: &Ui| ui.is_visible(ids(page).failure.note);
+        let home = || network("Home Network", Security::Open);
+        let (mut page, _received, mut ui) = page(state(vec![home()], vec![]));
+        let fresh = |page: &mut Page| {
+            let mut ui = Ui::new("t", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+            ui
+        };
+
+        // A note shown in place, then the page closes: the page built again has none.
+        page.service.failed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated);
+        assert!(note(&page, &ui));
+        page.closed(&mut ui);
+        let mut next = fresh(&mut page);
+        assert!(!note(&page, &next));
+
+        // A refusal with a rebuild, then the page closes before it is built again.
+        page.service.failed();
+        page.service.state.replace(Some(state(
+            vec![home(), network("Lab", Security::Open)],
+            vec![],
+        )));
+        page.service.changed();
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        page.closed(&mut next);
+        let mut later = fresh(&mut page);
+        assert!(!note(&page, &later));
+        assert_eq!(later.announcement(), None);
+
+        // A refusal with a rebuild while the page is closed, as another surface's action
+        // fails: the hidden page says nothing, and shows no note when it is built again.
+        page.closed(&mut later);
+        page.service.failed();
+        page.service
+            .state
+            .replace(Some(state(vec![home()], vec![])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut later), Turn::Rebuild);
+        let last = fresh(&mut page);
         assert!(!note(&page, &last));
         assert_eq!(last.announcement(), None);
     }

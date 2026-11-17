@@ -301,6 +301,8 @@ pub struct Page {
     /// A failure came with a rebuild: the surface drops the old page's [`Ui`] unannounced, so
     /// the page built again announces it.
     unheard: bool,
+    /// The page is on screen: built, and not closed or discarded since.
+    shown: bool,
     ids: Option<Ids>,
 }
 
@@ -311,6 +313,7 @@ impl Page {
             seen: (0, 0),
             noted: false,
             unheard: false,
+            shown: false,
             ids: None,
         }
     }
@@ -414,6 +417,7 @@ impl Page {
             },
             failure,
         });
+        self.shown = true;
         self.show(ui);
         page
     }
@@ -427,7 +431,7 @@ impl Page {
         }
         let failed = now.1 != self.seen.1;
         if self.show(ui) {
-            self.unheard |= failed;
+            self.unheard |= failed && self.shown;
             return Turn::Rebuild;
         }
         if let (true, Some(ids)) = (failed, &self.ids) {
@@ -448,6 +452,7 @@ impl Page {
     pub fn discarded(&mut self) {
         self.noted = false;
         self.unheard = false;
+        self.shown = false;
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -525,6 +530,7 @@ mod tests {
             seen: (0, 0),
             noted: false,
             unheard: false,
+            shown: false,
             ids: None,
         };
         (page, received)
@@ -728,6 +734,69 @@ mod tests {
         assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
         page.discarded();
         let last = build(&mut page);
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
+    }
+
+    #[test]
+    fn a_page_closed_with_its_ui_kept_forgets_its_note_and_says_nothing() {
+        let note = |page: &Page, ui: &Ui| {
+            page.ids
+                .as_ref()
+                .is_some_and(|ids| ui.is_visible(ids.failure.note))
+        };
+        let fresh = |page: &mut Page| {
+            let mut ui = Ui::new("Sound", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, None, &Look::plain());
+            ui
+        };
+        let (mut page, _received) = page();
+        let mut refused = 0;
+        publish(&page, speakers_and_headset());
+        let mut ui = fresh(&mut page);
+
+        // A note shown in place, then the page closes: the page built again has none.
+        refused += 1;
+        publish(
+            &page,
+            AudioState {
+                refused,
+                ..speakers_and_headset()
+            },
+        );
+        assert_eq!(page.turn(&mut ui), Turn::Updated);
+        assert!(note(&page, &ui));
+        page.closed(&mut ui);
+        let mut next = fresh(&mut page);
+        assert!(!note(&page, &next));
+
+        // A refusal with a rebuild, then the page closes before it is built again.
+        refused += 1;
+        let mut headset = AudioState {
+            refused,
+            ..speakers_and_headset()
+        };
+        headset.outputs.remove(0);
+        publish(&page, headset);
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        page.closed(&mut next);
+        let mut later = fresh(&mut page);
+        assert!(!note(&page, &later));
+        assert_eq!(later.announcement(), None);
+
+        // A refusal with a rebuild while the page is closed, as another surface's action
+        // fails: the hidden page says nothing, and shows no note when it is built again.
+        page.closed(&mut later);
+        refused += 1;
+        publish(
+            &page,
+            AudioState {
+                refused,
+                ..speakers_and_headset()
+            },
+        );
+        assert_eq!(page.turn(&mut later), Turn::Rebuild);
+        let last = fresh(&mut page);
         assert!(!note(&page, &last));
         assert_eq!(last.announcement(), None);
     }
