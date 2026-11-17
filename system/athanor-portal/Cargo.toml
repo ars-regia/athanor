@@ -13,4 +13,5 @@ tracing = { workspace = true }
 zbus = { workspace = true }
 
 [dev-dependencies]
+futures-util = { workspace = true }
 nix = { workspace = true, features = ["user"] }

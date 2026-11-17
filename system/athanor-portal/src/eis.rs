@@ -234,9 +234,12 @@ pub(crate) mod tests {
     #[derive(Default)]
     pub(crate) struct Compositor {
         pub(crate) calls: Arc<Mutex<Vec<Call>>>,
-        held: Arc<Mutex<Vec<(String, UnixStream)>>>,
+        pub(crate) held: Arc<Mutex<Vec<(String, UnixStream)>>>,
         /// Every `ConnectToEIS` is refused, as a compositor that cannot open a context does.
         pub(crate) refuse: Arc<AtomicBool>,
+        /// Each `ConnectToEIS` waits for one `release` before it answers.
+        pub(crate) hold: Arc<AtomicBool>,
+        pub(crate) release: Arc<tokio::sync::Notify>,
     }
 
     #[zbus::interface(name = "os.athanor.Eis1")]
@@ -252,6 +255,9 @@ pub(crate) mod tests {
                 .lock()
                 .expect("calls")
                 .push(Call::Connect(session_handle.to_string(), device_types));
+            if self.hold.load(Ordering::SeqCst) {
+                self.release.notified().await;
+            }
             if self.refuse.load(Ordering::SeqCst) {
                 return Err(zbus::fdo::Error::Failed("no context".into()));
             }

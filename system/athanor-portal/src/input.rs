@@ -648,6 +648,9 @@ mod tests {
         compositor: Connection,
         calls: Arc<Mutex<Vec<Call>>>,
         refuse: Arc<AtomicBool>,
+        hold: Arc<AtomicBool>,
+        release: Arc<tokio::sync::Notify>,
+        held: Arc<Mutex<Vec<(String, UnixStream)>>>,
         frontend: Connection,
         bar: Connection,
         stranger: Connection,
@@ -662,6 +665,9 @@ mod tests {
         let mock = Compositor::default();
         let calls = mock.calls.clone();
         let refuse = mock.refuse.clone();
+        let hold = mock.hold.clone();
+        let release = mock.release.clone();
+        let held = mock.held.clone();
         let compositor = bus
             .builder()
             .name(crate::eis::NAME)
@@ -701,6 +707,9 @@ mod tests {
             compositor,
             calls,
             refuse,
+            hold,
+            release,
+            held,
             frontend,
             bar,
             stranger,
@@ -835,6 +844,18 @@ mod tests {
 
         fn calls(&self) -> Vec<Call> {
             lock(&self.calls).clone()
+        }
+
+        /// Waits until the compositor is asked for session `n`'s file descriptor.
+        async fn connecting(&self, n: u32) {
+            let call = Call::Connect(session(n).to_string(), KEYBOARD);
+            for _ in 0..200 {
+                if self.calls().contains(&call) {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            panic!("the compositor was not asked for {call:?}");
         }
 
         fn asked(&self) -> usize {
@@ -1286,6 +1307,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn input_the_input_sessions_signal_carries_no_value() {
+        use futures_util::StreamExt;
+
+        let rd = rd("invalidated", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        let properties = zbus::fdo::PropertiesProxy::builder(&rd.stranger)
+            .destination(rd.backend.as_str())
+            .path(PORTAL1_PATH)
+            .build()
+            .await
+            .expect("proxy");
+        let mut changes = properties
+            .receive_properties_changed()
+            .await
+            .expect("subscribe");
+        rd.create(1).await;
+        rd.start(1).await;
+        let _stream = rd.connect(1).await.expect("fd");
+        let change = tokio::time::timeout(Duration::from_secs(2), changes.next())
+            .await
+            .expect("in time")
+            .expect("a signal");
+        let args = change.args().expect("args");
+        assert_eq!(args.interface_name().as_str(), "os.athanor.Portal1");
+        assert!(
+            args.changed_properties().is_empty(),
+            "{:?}",
+            args.changed_properties()
+        );
+        assert_eq!(args.invalidated_properties(), &vec!["InputSessions"]);
+    }
+
+    #[tokio::test]
+    async fn input_a_late_eis_answer_is_dropped_and_closed_only_when_no_session_holds_the_handle() {
+        let rd = rd("late", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        rd.hold.store(true, Ordering::SeqCst);
+        for n in [1, 2] {
+            rd.create(n).await;
+            rd.start(n).await;
+        }
+
+        let (late, ()) = tokio::join!(rd.connect(1), async {
+            rd.connecting(1).await;
+            rd.close(1).await.expect("Close");
+            rd.create(1).await;
+            rd.release.notify_one();
+        });
+        assert!(late.is_err(), "the late descriptor reaches no session");
+        assert_eq!(
+            rd.calls(),
+            [
+                Call::Connect(session(1).to_string(), KEYBOARD),
+                Call::Close(session(1).to_string())
+            ],
+            "the handle a new session holds is not closed"
+        );
+        let given = {
+            let mut held = lock(&rd.held);
+            let at = held
+                .iter()
+                .position(|(handle, _)| *handle == session(1).as_str())
+                .expect("the compositor's end of the late descriptor");
+            held.remove(at).1
+        };
+        assert!(ended(given), "the backend dropped the late descriptor");
+        assert!(rd.listed().await.is_empty());
+
+        let (late, ()) = tokio::join!(rd.connect(2), async {
+            rd.connecting(2).await;
+            rd.close(2).await.expect("Close");
+            rd.release.notify_one();
+        });
+        assert!(late.is_err());
+        assert_eq!(
+            rd.calls()[2..],
+            [
+                Call::Connect(session(2).to_string(), KEYBOARD),
+                Call::Close(session(2).to_string()),
+                Call::Close(session(2).to_string())
+            ],
+            "no session holds the handle: its late context is closed"
+        );
+        assert!(rd.listed().await.is_empty());
+    }
+
+    #[tokio::test]
     async fn input_calls_not_from_the_frontend_are_refused() {
         let rd = rd("stranger", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
         let desktop = ObjectPath::from_static_str(DESKTOP).expect("path");
@@ -1303,6 +1409,38 @@ mod tests {
             "{created:?}"
         );
         rd.create(1).await;
+        let selected = rd
+            .call(
+                &rd.stranger,
+                &desktop,
+                RD,
+                "SelectDevices",
+                &(
+                    request(1),
+                    session(1),
+                    APP,
+                    Options::from([("types", Value::from(KEYBOARD))]),
+                ),
+            )
+            .await;
+        assert!(
+            matches!(fdo_error(&selected), Some(fdo::Error::AccessDenied(_))),
+            "{selected:?}"
+        );
+        let started = rd
+            .call(
+                &rd.stranger,
+                &desktop,
+                RD,
+                "Start",
+                &(request(1), session(1), APP, "", Options::new()),
+            )
+            .await;
+        assert!(
+            matches!(fdo_error(&started), Some(fdo::Error::AccessDenied(_))),
+            "{started:?}"
+        );
+        assert_eq!(rd.asked(), 0, "a stranger's Start opens no dialog");
         rd.start(1).await;
         let connected = rd
             .call(
