@@ -55,6 +55,10 @@ impl Bus {
         }
     }
 
+    pub fn address(&self) -> &str {
+        &self.address
+    }
+
     pub fn builder(&self) -> zbus::connection::Builder<'static> {
         zbus::connection::Builder::address(self.address.as_str())
     }

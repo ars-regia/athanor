@@ -15,8 +15,10 @@ use std::os::fd::{BorrowedFd, OwnedFd};
 use std::time::Duration;
 
 use athanor_unit::bus_caller::{self, Credentials, Manager, Questions, Service, Unit};
+use tokio::sync::Mutex;
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
+use zbus::proxy::CacheProperties;
 use zbus::Connection;
 use zbus::ObjectPath;
 use zbus::OwnedObjectPath;
@@ -54,32 +56,56 @@ pub async fn compositor(identity: &impl Identity) -> Result<String, String> {
     Ok(owner)
 }
 
-/// [`Identity`] on the buses: `bus` is the session bus's proxy on `session`, and `system` a
-/// connection from [`bus_caller::system_bus`]. Each serves nothing, so a handler can await them
+/// [`Identity`] on the buses: the session bus's proxy on a connection of the caller's, and a
+/// system bus connection of its own, built at the first question and again whenever it is
+/// closed, as [`crate::bar::BarUnit`]'s is. Each serves nothing, so a handler can await them
 /// (issue #1035).
 pub struct OnBus {
-    pub bus: DBusProxy<'static>,
-    pub session: Connection,
-    pub system: Connection,
+    bus: DBusProxy<'static>,
+    session: Connection,
+    /// Where the system bus is; `None` is the system's own, from [`bus_caller::system_bus`].
+    address: Option<String>,
+    system: Mutex<Option<Connection>>,
 }
 
 impl OnBus {
-    fn questions(&self) -> bus_caller::OnBus<'_> {
+    /// Asks on `query`, a session bus connection that serves nothing.
+    pub async fn new(query: &Connection, address: Option<String>) -> zbus::Result<OnBus> {
+        let bus = DBusProxy::builder(query)
+            .cache_properties(CacheProperties::No)
+            .build()
+            .await?;
+        Ok(OnBus {
+            bus,
+            session: query.clone(),
+            address,
+            system: Mutex::new(None),
+        })
+    }
+
+    /// The system bus connection, connected again if it closed.
+    async fn system(&self) -> Result<Connection, String> {
+        crate::bar::system(&self.system, self.address.as_deref()).await
+    }
+
+    fn questions<'a>(&'a self, system: &'a Connection) -> bus_caller::OnBus<'a> {
         bus_caller::OnBus {
             bus: &self.bus,
             session: &self.session,
-            system: &self.system,
+            system,
         }
     }
 }
 
 impl Questions for OnBus {
     async fn user_manager(&self) -> Result<String, String> {
-        self.questions().user_manager().await
+        let system = self.system().await?;
+        self.questions(&system).user_manager().await
     }
 
     async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
-        self.questions().credentials(peer).await
+        let system = self.system().await?;
+        self.questions(&system).credentials(peer).await
     }
 
     async fn unit_by_pidfd(
@@ -87,15 +113,18 @@ impl Questions for OnBus {
         manager: Manager<'_>,
         pidfd: BorrowedFd<'_>,
     ) -> Result<(OwnedObjectPath, String), String> {
-        self.questions().unit_by_pidfd(manager, pidfd).await
+        let system = self.system().await?;
+        self.questions(&system).unit_by_pidfd(manager, pidfd).await
     }
 
     async fn main_pid(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<u32, String> {
-        self.questions().main_pid(manager, path).await
+        let system = self.system().await?;
+        self.questions(&system).main_pid(manager, path).await
     }
 
     async fn unit(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<Unit, String> {
-        self.questions().unit(manager, path).await
+        let system = self.system().await?;
+        self.questions(&system).unit(manager, path).await
     }
 }
 
@@ -500,6 +529,30 @@ pub(crate) mod tests {
                 Err(Refused::Compositor(_))
             ),
             "a second ConnectToEIS for a held handle"
+        );
+    }
+
+    #[tokio::test]
+    async fn eis_the_system_bus_is_connected_again_once_closed() {
+        let session = Bus::start("onbus-session");
+        let system = Bus::start("onbus-system");
+        let query = session.builder().build().await.expect("query");
+        let on = OnBus::new(&query, Some(system.address().to_owned()))
+            .await
+            .expect("OnBus");
+        let first = on.system().await.expect("first connection");
+        let again = on.system().await.expect("the same connection");
+        assert_eq!(first.unique_name(), again.unique_name(), "kept while open");
+        first.clone().close().await.expect("close");
+        assert!(first.is_closed());
+        let second = on.system().await.expect("connected again");
+        assert!(!second.is_closed());
+        assert_ne!(first.unique_name(), second.unique_name());
+        drop(system);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            on.user_manager().await.is_err(),
+            "no system bus: the question fails"
         );
     }
 }

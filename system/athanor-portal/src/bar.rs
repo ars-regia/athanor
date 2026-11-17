@@ -31,6 +31,22 @@ async fn connect(address: Option<&str>) -> zbus::Result<Connection> {
     }
 }
 
+/// The connection in `slot`, built anew at `address` when it is missing or closed.
+pub(crate) async fn system(
+    slot: &Mutex<Option<Connection>>,
+    address: Option<&str>,
+) -> Result<Connection, String> {
+    let mut slot = slot.lock().await;
+    if slot.as_ref().is_none_or(Connection::is_closed) {
+        let system = connect(address)
+            .await
+            .map_err(|err| format!("no system bus to verify the user's systemd: {err}"))?;
+        *slot = Some(system);
+    }
+    slot.clone()
+        .ok_or_else(|| "no system bus to verify the user's systemd".into())
+}
+
 pub struct BarUnit {
     bus: DBusProxy<'static>,
     session: Connection,
@@ -74,17 +90,7 @@ impl BarUnit {
     /// by [`ASK`].
     pub async fn admit(&self, peer: &str) -> Result<(), String> {
         let admission = async {
-            let system = {
-                let mut slot = self.system.lock().await;
-                if slot.as_ref().is_none_or(Connection::is_closed) {
-                    let system = connect(self.address.as_deref()).await.map_err(|err| {
-                        format!("no system bus to verify the user's systemd: {err}")
-                    })?;
-                    *slot = Some(system);
-                }
-                slot.clone()
-                    .ok_or("no system bus to verify the user's systemd")?
-            };
+            let system = system(&self.system, self.address.as_deref()).await?;
             let questions = OnBus {
                 bus: &self.bus,
                 session: &self.session,
