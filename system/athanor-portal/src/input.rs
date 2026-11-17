@@ -258,8 +258,8 @@ impl<H: Host> RemoteDesktop<H> {
             tracing::warn!(%session_handle, "Start refused: no such session");
             return Ok(answer(2));
         };
-        let types = match self.0.sessions().ask(&session_handle, &app_id) {
-            Ok(types) => types,
+        let (types, ticket) = match self.0.sessions().ask(&session_handle, &app_id) {
+            Ok(asked) => asked,
             Err(why) => {
                 tracing::warn!(%why, "Start refused");
                 return Ok(answer(2));
@@ -267,7 +267,9 @@ impl<H: Host> RemoteDesktop<H> {
         };
         if let Err(why) = self.0.eis.check().await {
             tracing::warn!(%why, "Start refused without a dialog");
-            self.0.sessions().answer(&session_handle, Answer::Refused);
+            self.0
+                .sessions()
+                .answer(&session_handle, ticket, Answer::Refused);
             return Ok(answer(2));
         }
         let request = Request {
@@ -276,7 +278,9 @@ impl<H: Host> RemoteDesktop<H> {
         };
         if !matches!(server.at(&handle, request).await, Ok(None)) {
             tracing::warn!(%handle, "Start refused: the request's object path is taken");
-            self.0.sessions().answer(&session_handle, Answer::Refused);
+            self.0
+                .sessions()
+                .answer(&session_handle, ticket, Answer::Refused);
             return Ok(answer(2));
         }
         let name = display_name(&app_id, self.0.host.app_name(&app_id).as_deref());
@@ -295,13 +299,15 @@ impl<H: Host> RemoteDesktop<H> {
             tracing::error!(%error, %handle, "the request's object was not removed");
         }
         match given {
-            Answer::Granted(types) if self.0.sessions().answer(&session_handle, given) => {
+            Answer::Granted(types) if self.0.sessions().answer(&session_handle, ticket, given) => {
                 let mut results = Results::new();
                 results.insert("devices".into(), OwnedValue::from(types));
                 Ok((0, results))
             }
             _ => {
-                self.0.sessions().answer(&session_handle, Answer::Refused);
+                self.0
+                    .sessions()
+                    .answer(&session_handle, ticket, Answer::Refused);
                 Ok(answer(1))
             }
         }

@@ -147,8 +147,8 @@ pub struct Sessions {
     created: u64,
 }
 
-/// One `ConnectToEIS` in flight: the compositor's answer is accepted only for the session that
-/// asked, still connecting.
+/// One dialog or one `ConnectToEIS` in flight: its answer is accepted only for the session that
+/// asked, still at the stage that asked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ticket(u64);
 
@@ -198,27 +198,32 @@ impl Sessions {
         }
     }
 
-    /// `Start` opens the dialog: the types it lists.
-    pub fn ask(&mut self, handle: &str, app_id: &str) -> Result<u32, Refusal> {
+    /// `Start` opens the dialog: the types it lists, and the ticket its answer is given back
+    /// with.
+    pub fn ask(&mut self, handle: &str, app_id: &str) -> Result<(u32, Ticket), Refusal> {
         let session = self.of(handle, app_id)?;
         match session.stage {
             Stage::Created(types) => {
                 session.stage = Stage::Asking(types);
-                Ok(types)
+                Ok((types, Ticket(session.generation)))
             }
             stage => Err(format!("{handle} cannot start once {stage:?}")),
         }
     }
 
-    /// The dialog's answer. A grant is kept only for types the session asked for; a refusal
-    /// leaves the session spent. `false` when the session closed meanwhile.
-    pub fn answer(&mut self, handle: &str, answer: Answer) -> bool {
+    /// The answer of the dialog of `ticket`. A grant is kept only for types the session asked
+    /// for; a refusal leaves the session spent. `false` when the session that asked closed
+    /// meanwhile, even if another session holds the handle now.
+    pub fn answer(&mut self, handle: &str, ticket: Ticket, answer: Answer) -> bool {
         let Some(session) = self.sessions.get_mut(handle) else {
             return false;
         };
         let Stage::Asking(asked) = session.stage else {
             return false;
         };
+        if Ticket(session.generation) != ticket {
+            return false;
+        }
         session.stage = match answer {
             Answer::Granted(types) if types != 0 && types & !asked == 0 => Stage::Granted(types),
             Answer::Granted(_) | Answer::Refused => Stage::Spent,
@@ -356,8 +361,9 @@ mod tests {
     fn started(sessions: &mut Sessions, answer: Answer) -> bool {
         sessions.create(H, APP, "Remote").expect("create");
         sessions.select(H, APP, KEYBOARD | POINTER).expect("select");
-        assert_eq!(sessions.ask(H, APP), Ok(KEYBOARD | POINTER));
-        sessions.answer(H, answer)
+        let (types, ticket) = sessions.ask(H, APP).expect("ask");
+        assert_eq!(types, KEYBOARD | POINTER);
+        sessions.answer(H, ticket, answer)
     }
 
     #[test]
@@ -381,8 +387,12 @@ mod tests {
     fn a_grant_beyond_what_was_asked_is_no_grant() {
         let mut sessions = Sessions::new();
         assert!(!started(&mut sessions, Answer::Granted(TOUCHSCREEN)));
+        let mut other = Sessions::new();
+        other.create(H, APP, "Remote").expect("create");
+        let (_, ticket) = other.ask(H, APP).expect("ask");
+        other.close(H);
         assert!(
-            !Sessions::new().answer(H, Answer::Granted(KEYBOARD)),
+            !other.answer(H, ticket, Answer::Granted(KEYBOARD)),
             "no session"
         );
         let mut zero = Sessions::new();
@@ -474,6 +484,30 @@ mod tests {
         assert_eq!(sessions.stage(H), Some(Stage::Connecting(KEYBOARD)));
         assert!(sessions.connected(H, new, true));
         assert!(sessions.exists(H));
+    }
+
+    #[test]
+    fn a_late_dialog_answer_never_reaches_a_session_created_again_on_the_handle() {
+        let mut sessions = Sessions::new();
+        sessions.create(H, APP, "Remote").expect("create S1");
+        let (_, first) = sessions.ask(H, APP).expect("S1 asks");
+        sessions.close(H);
+        sessions.create(H, APP, "Remote").expect("create S2");
+        assert!(
+            !sessions.answer(H, first, Answer::Granted(KEYBOARD)),
+            "S2 is not asking"
+        );
+        assert_eq!(sessions.stage(H), Some(Stage::Created(AVAILABLE)));
+        let (_, second) = sessions.ask(H, APP).expect("S2 asks");
+        assert_ne!(first, second);
+        assert!(
+            !sessions.answer(H, first, Answer::Granted(KEYBOARD)),
+            "S2 is asking, but S1's grant is not S2's"
+        );
+        assert_eq!(sessions.stage(H), Some(Stage::Asking(AVAILABLE)));
+        assert!(sessions.connect(H, APP).is_err(), "S2 is not granted");
+        assert!(sessions.answer(H, second, Answer::Granted(KEYBOARD)));
+        assert_eq!(sessions.stage(H), Some(Stage::Granted(KEYBOARD)));
     }
 
     #[test]
