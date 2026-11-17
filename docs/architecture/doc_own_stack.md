@@ -1517,7 +1517,7 @@ compositor and that the own compositor did not yet offer:
           unique only within one connection. Releasing the held input of one context touches
           no other context's, and none of the seat's physical keys, buttons and touches.
           An injected press of a key, button or touch point the seat or another context holds
-          is dropped with its release, and a touch point's motion with them, since the client
+          is dropped with its release and, for a touch point, its motion, since the client
           keeps one set of held keys, buttons and touch points: it never sees a second press
           without a release between, and one source's release never lets go for the other. The
           physical input wins the other way: a physical press of a key, button or touch point a
@@ -1525,9 +1525,10 @@ compositor and that the own compositor did not yet offer:
           with `wl_touch.up`, to the keyboard, pointer or touch focus as a release of the seat
           would reach it; the context then counts that input as let go, its xkb state and
           modifiers included, and drops its own first release of it after that, delivered or
-          not, while a press of it by the context, or the context's end, clears that mark
-          first. That release starts and cancels no Super tap: the physical press after it
-          decides (maintainer decisions, 2026-11-17 and 2026-11-18);
+          not, and a touch point's motion until then, unless a press of it by the context, or
+          the context's end, has cleared that mark first. That release starts and cancels no
+          Super tap: the physical press after it decides (maintainer decisions, 2026-11-17 and
+          2026-11-18);
         - the lock and the paused session. From the lock request on (decision 36) until the
           unlock, and while the session is paused on another virtual terminal until its
           resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
@@ -1610,10 +1611,10 @@ compositor and that the own compositor did not yet offer:
             client, nor do its release and a touch point's motion, and the other source's
             release still reaches it; a physical press of a key, button or touch point a
             context holds reaches the client after the release of the held one, that context's
-            next release reaches no client, its modifiers no longer count the key, and a press
-            of the context after the physical release reaches the client with its own release;
-            a physical Super pressed over a Super a context holds still opens the launcher on
-            its release;
+            next release and a touch point's motion before it reach no client, its modifiers no
+            longer count the key, and a press of the context after the physical release reaches
+            the client with its own release; a physical Super pressed over a Super a context
+            holds still opens the launcher on its release;
           - the device types: a context granted the keyboard alone is offered no pointer or
             touch device and is refused one it asks for, and likewise for each other granted
             set; each portal type yields the capabilities of the mapping above and no text
