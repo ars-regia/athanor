@@ -445,29 +445,29 @@ impl Caller {
     }
 }
 
-/// The admission's answer to one call, shared by its two ends.
-#[derive(Default)]
-struct Slot {
-    admitted: bool,
+/// The answer to one call, shared by its two ends: the value given, once it is answered.
+struct Slot<T> {
+    value: Option<T>,
     answered: bool,
     waker: Option<Waker>,
 }
 
-fn slot(slot: &Mutex<Slot>) -> MutexGuard<'_, Slot> {
+fn slot<T>(slot: &Mutex<Slot<T>>) -> MutexGuard<'_, Slot<T>> {
     // A slot holds three plain fields, which no panic leaves half written.
     slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The admission's end of a call: `admit` it, or drop it, which refuses it.
-struct Answer(Arc<Mutex<Slot>>);
+/// The answering end of a call: `give` it its value, or drop it, which refuses it. The keyboard
+/// monitor's admission answers with `()`, the EIS service's with what the loop did.
+pub(crate) struct Answer<T>(Arc<Mutex<Slot<T>>>);
 
-impl Answer {
-    fn admit(self) {
-        slot(&self.0).admitted = true;
+impl<T> Answer<T> {
+    pub(crate) fn give(self, value: T) {
+        slot(&self.0).value = Some(value);
     }
 }
 
-impl Drop for Answer {
+impl<T> Drop for Answer<T> {
     fn drop(&mut self) {
         let mut slot = slot(&self.0);
         slot.answered = true;
@@ -477,40 +477,45 @@ impl Drop for Answer {
     }
 }
 
-/// The call's end: whether the call was admitted, once it is answered.
-struct Answered(Arc<Mutex<Slot>>);
+/// The call's end: the value given, or `None` when the answer was dropped, once it is answered.
+pub(crate) struct Answered<T>(Arc<Mutex<Slot<T>>>);
 
-impl Future for Answered {
-    type Output = bool;
+impl<T> Future for Answered<T> {
+    type Output = Option<T>;
 
-    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<bool> {
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<T>> {
         let mut slot = slot(&self.0);
         if slot.answered {
-            return Poll::Ready(slot.admitted);
+            return Poll::Ready(slot.value.take());
         }
         slot.waker = Some(context.waker().clone());
         Poll::Pending
     }
 }
 
-fn answer() -> (Answer, Answered) {
-    let shared = Arc::new(Mutex::new(Slot::default()));
+pub(crate) fn answer<T>() -> (Answer<T>, Answered<T>) {
+    let shared = Arc::new(Mutex::new(Slot {
+        value: None,
+        answered: false,
+        waker: None,
+    }));
     (Answer(shared.clone()), Answered(shared))
 }
 
 /// What the `keyboard-monitor` thread admits.
 enum Job {
-    Call(String, Change, Answer),
+    Call(String, Change, Answer<()>),
     /// Read the flags of `Names`.
     Wake,
 }
 
-/// What `keyboard-monitor-names` saw: a change it raises, which the admission lowers before it
+/// What a reader of names saw: a change it raises, which the admission lowers before it
 /// admits each client again, and the end of the changes; and a wake-up queued, not yet taken.
+/// The keyboard monitor's and the EIS service's admissions each read one (`eis.rs`).
 #[derive(Default)]
-struct Names {
-    changed: AtomicBool,
-    blind: AtomicBool,
+pub(crate) struct Names {
+    pub(crate) changed: AtomicBool,
+    pub(crate) blind: AtomicBool,
     waking: AtomicBool,
 }
 
@@ -519,11 +524,11 @@ impl Names {
     /// connection that comes and goes in a loop leaves room for Orca's call. A full queue holds a
     /// job already, after which the admission reads the flags: a wake-up dropped then is not
     /// needed.
-    fn wake(&self, jobs: &SyncSender<Job>) -> bool {
+    pub(crate) fn wake<J>(&self, jobs: &SyncSender<J>, wake: J) -> bool {
         if self.waking.swap(true, Ordering::SeqCst) {
             return true;
         }
-        match jobs.try_send(Job::Wake) {
+        match jobs.try_send(wake) {
             Ok(()) => true,
             Err(TrySendError::Full(_)) => {
                 self.waking.store(false, Ordering::SeqCst);
@@ -534,7 +539,7 @@ impl Names {
     }
 
     /// The admission took the wake-up: a change after this point queues another.
-    fn woken(&self) {
+    pub(crate) fn woken(&self) {
         self.waking.store(false, Ordering::SeqCst);
     }
 }
@@ -560,7 +565,7 @@ impl Interface {
                 "the keyboard monitor cannot take the call: {error}"
             )));
         }
-        if answered.await {
+        if answered.await.is_some() {
             Ok(())
         } else {
             Err(zbus::fdo::Error::AccessDenied(format!(
@@ -691,13 +696,13 @@ pub(crate) fn serve(
                     let name = args.name();
                     if matches!(name, BusName::Unique(_)) || name.as_str() == ORCA {
                         seen.changed.store(true, Ordering::SeqCst);
-                        if !seen.wake(&watcher) {
+                        if !seen.wake(&watcher, Job::Wake) {
                             return;
                         }
                     }
                 }
                 seen.blind.store(true, Ordering::SeqCst);
-                if !seen.wake(&watcher) {
+                if !seen.wake(&watcher, Job::Wake) {
                     tracing::debug!("the keyboard monitor ended before its reader of names");
                 }
             })
@@ -781,7 +786,7 @@ pub(crate) fn serve(
                 admitted.insert(client.clone());
                 // The loop has the change before the client has its answer.
                 updates(Update { client, change })?;
-                answer.admit();
+                answer.give(());
             }
             Err(error) => {
                 if let Some(held) = refusals.now() {
@@ -875,18 +880,18 @@ mod tests {
     #[test]
     fn a_dropped_answer_refuses_the_call() {
         let mut context = Context::from_waker(Waker::noop());
-        let (refused, mut answered) = answer();
+        let (refused, mut answered) = answer::<()>();
         assert_eq!(Pin::new(&mut answered).poll(&mut context), Poll::Pending);
         drop(refused);
         assert_eq!(
             Pin::new(&mut answered).poll(&mut context),
-            Poll::Ready(false)
+            Poll::Ready(None)
         );
         let (admitted, mut answered) = answer();
-        admitted.admit();
+        admitted.give(());
         assert_eq!(
             Pin::new(&mut answered).poll(&mut context),
-            Poll::Ready(true)
+            Poll::Ready(Some(()))
         );
     }
 
@@ -897,7 +902,7 @@ mod tests {
         let (jobs, admissions) = sync_channel(JOBS);
         let names = Names::default();
         for _ in 0..100 {
-            assert!(names.wake(&jobs));
+            assert!(names.wake(&jobs, Job::Wake));
         }
         let (answer, _answered) = answer();
         let call = jobs.try_send(Job::Call(ORCA.into(), Change::Watch(true), answer));
@@ -906,11 +911,11 @@ mod tests {
         assert!(matches!(admissions.try_recv(), Ok(Job::Call(..))));
         assert!(admissions.try_recv().is_err(), "one wake-up, one call");
         names.woken();
-        assert!(names.wake(&jobs));
+        assert!(names.wake(&jobs, Job::Wake));
         assert!(matches!(admissions.try_recv(), Ok(Job::Wake)));
         names.woken();
         drop(admissions);
-        assert!(!names.wake(&jobs), "the admission has ended");
+        assert!(!names.wake(&jobs, Job::Wake), "the admission has ended");
     }
 
     /// A repeated warning is said once, then held back and counted.
