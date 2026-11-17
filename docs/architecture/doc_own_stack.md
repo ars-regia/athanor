@@ -68,6 +68,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-15: decision 36's switch when a lease cannot be ended.
 - Amended on 2026-11-16: decision 33's X11 keyboard grab, with OS4, OS17 and
   `doc_threat_model.md` TM2.
+- Amended on 2026-11-17: decision 33's libei input for the RemoteDesktop portal, with
+  `doc_portal.md` PT1, PT15 and PT18.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1424,7 +1426,71 @@ compositor and that the own compositor did not yet offer:
         design, and it leaves this wave;
       - libei through an EIS socket, given only to the portal backend for the RemoteDesktop and
         InputCapture portals, behind the portal's consent. It delivers no input while the
-        session is locked, which is stricter than OS4's rule for the virtual keyboard;
+        session is locked, which is stricter than OS4's rule for the virtual keyboard.
+        *Amended on 2026-11-17 (maintainer decisions, 2026-11-17):* the first portal is
+        RemoteDesktop, served through libei sender contexts. InputCapture, which needs a
+        receiver context, stays excluded by `doc_portal.md` PT15 and gets an amendment of its
+        own before its code. The compositor serves EIS through Smithay's `backend_libei`
+        feature, which the pinned revision has and the compositor's `Cargo.toml` does not
+        enable (#1131). The file descriptor is handed over the session bus, not through a
+        Wayland global: the code's pull request adds no row to `data/globals`, no class to
+        OS17 and nothing to `CLASSES` in `scripts/verify.py`, since this design needs none.
+        The rules:
+        - the interface. The compositor owns `os.athanor.Eis` on the session bus and serves
+          `os.athanor.Eis1` at `/os/athanor/Eis1`, with two methods. `ConnectToEIS(o
+          session_handle) -> h` creates a socket pair, serves one end as an EIS context and
+          returns the other; `session_handle` is the portal session's object path, and a
+          second call for a handle that holds a file descriptor is refused, so a portal
+          session has one file descriptor. `CloseSession(o session_handle)` ends that
+          session's context. A context that announces itself as a receiver is disconnected:
+          only sender contexts are served;
+        - the admission, at every call, as the keyboard monitor's (OS4,
+          `keyboard_monitor.rs`): the caller is the current owner of
+          `org.freedesktop.impl.portal.desktop.athanor`; its process, read through the pidfd
+          the bus returns as `ProcessFD`, or through one opened on its `ProcessID` with the
+          monitor's reuse check, lies in the cgroup of `xdg-desktop-portal-athanor.service`;
+          and it runs `/usr/libexec/xdg-desktop-portal-athanor`, the very file at that path.
+          Any other caller is answered `AccessDenied`, receives no file descriptor and changes
+          nothing; the journal names it, at most once a minute. As the monitor's, this is an
+          integrity check against mistakes and against tier 2, which owns no bus name outside
+          its filter and has no unit manager, not a barrier against unconfined code
+          (`doc_threat_model.md` TM1, TM2);
+        - consent stays in the portal backend: its dialog asks the user for each portal
+          session, and the backend calls `ConnectToEIS` only for a session the user has
+          granted (`doc_portal.md` PT15). The compositor shows no dialog of its own;
+        - the revocation. The compositor ends a session's EIS context, and with it the file
+          descriptor the application holds, when the backend calls `CloseSession` for it,
+          when `org.freedesktop.impl.portal.desktop.athanor` changes owner, and when the
+          backend's connection or process ends. What the context holds at that moment is
+          released as at the lock;
+        - the lock. From the lock request on (decision 36) until the unlock, the compositor
+          pauses every EIS device. The keys, buttons and touches held through EIS at the lock
+          request are released, so that no client sees them held after the unlock, and each
+          such touch is cancelled with `wl_touch.cancel`, as wave 2a's touch rule cancels the
+          hardware's. No event is delivered until the unlock: an event a context sends while
+          its devices are paused is dropped, not queued. The devices are resumed at the
+          unlock;
+        - clients only. Injected input reaches Wayland clients only. It never triggers a key
+          or pointer binding of the compositor (OS13), a protected key of decision 30,
+          Super+Escape, the reveal key Super+Alt+T and Ctrl+Alt+Tab among them, or the
+          keyboard aids (AX11);
+        - the code's pull request enables `backend_libei` and adds fixture tests with an EIS
+          client, one case each, and each gate has an assertion that fails when the gate is
+          removed:
+          - the admission: a caller in another unit, a caller in the backend's unit that runs
+            another executable, and a caller that does not own the backend's bus name are each
+            answered `AccessDenied` and receive no file descriptor, and a second
+            `ConnectToEIS` for one session is refused;
+          - the revocation: a session's context ends on `CloseSession`, when the backend's
+            bus name changes owner, and when the backend exits, and its file descriptor then
+            delivers nothing;
+          - the lock: an event injected from the lock request on reaches no client, while the
+            session is locked or after the unlock;
+          - held input: a key, a pointer button and a touch held through EIS at the lock
+            request are released, the touch with `wl_touch.cancel`;
+          - clients only: an injected key of a binding and each injected protected key trigger
+            no action of the compositor, an injected pointer binding triggers none, and the
+            keyboard aids do not act on injected keys;
       - the capture of a workspace for the overview's thumbnails, through
         `ext-image-copy-capture-v1` and a source of `athanor_workspace_manager_v1` (decision 32),
         for release 1.1.
