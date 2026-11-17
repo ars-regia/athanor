@@ -5970,20 +5970,21 @@ def check_agent_docs():
 # line-citations: a `path:N` in an architecture document still names what the sentence names
 # --------------------------------------------------------------------------- #
 
-# What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path cited last.
+# What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
 LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
 # `cosmic-osd.service`), or a bare snake_case or `::` path.
 CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
 FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
 CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
+# A cited path that starts so names a file of this repository: it must exist.
+REPO_PREFIXES = ("system/", "forge/", "scripts/", "docs/", ".github/")
 
-# Findings the heuristic cannot settle, each (document, cited path, token) with the reason; an entry
-# that matches no finding fails, so the list only shrinks.
+# Findings the heuristic cannot settle, each (document, cited path, cited lines, token) with the
+# reason: one entry covers one citation. An entry that matches no finding fails, so the list only
+# shrinks.
 LINE_CITATIONS_KEPT = {
-    ("doc_notification_center.md", "system/athanor-sulphur-client/src/windows.rs", "zcosmic_toplevel_info_v1"):
-        "the line binds the protocol through its Rust type, ZcosmicToplevelInfoV1",
-    ("doc_tetragon.md", "system/Containerfile", "tmpfiles.d"):
+    ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d"):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
 }
 
@@ -5994,41 +5995,58 @@ def holds_token(text, token):
     return re.search(rf"(?<![A-Za-z0-9-]){word}(?![\w-])", text) is not None
 
 
-def citation_findings(doc, text, read_file):
+def citation_findings(doc, text, tracked, read_file):
     """The citations of the document's `text` that no longer name what they cite, as
-    (line, path, token, message); `token` is None for a range that is no line range.
-    `read_file(path)` is a tracked file's text, None for any other path.
+    (line, path, lines, token, message); `token` is None when the finding is not a moved line.
+    `tracked` is the repository's files, `read_file(path)` the text of one.
 
-    A citation is `path:N`, `path:N-M` or a list `path:N, M-K`; `:N` alone cites the path cited
-    last in the same line, until a file name without a line or another path comes between; a
-    `src/`, `data/` or `tests/` path is read from the crate whose full path the line names before
-    it; a bare file name (`Cargo.toml:9`) is relative to a crate the sentence names loosely and is
-    not read. The token is the nearest code token before the citation in its sentence (after the
-    last `. `, `; `, `: `, `), ` or ` | `) that the cited file holds as a whole word; the cited
-    lines must hold it.
+    A citation is `path:N`, `path:N-M` or a list `path:N, M-K`; `:N` alone cites the file named
+    last in the same line, with or without a line of its own, until a name that is no file comes
+    between. A path resolves as written, then under the crate whose full path the line names
+    before it, then by the one tracked file whose path ends with it; a name that several files
+    end with (`Cargo.toml`) is not read. A path that starts with a prefix of REPO_PREFIXES and
+    resolves to no file is a finding. A range is no line range when it starts at 0, ends before
+    it starts, or reaches past the end of the file.
+
+    The token is the nearest code token before the citation in its sentence (after the last `. `,
+    `; `, `: `, `), ` or ` | `) that the cited file holds as a whole word; the cited lines must
+    hold it. For a list the lines of all its entries count together: a list names the places of
+    several words of one sentence (`packages.json:2, 51` for two lists), so the token cannot be
+    attributed to one entry; each entry must still be a line range.
 
     Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
     place holding the token (#1089)."""
+    known = set(tracked)
+    suffixes = {}
+    for path in known:
+        parts = path.split("/")
+        for i in range(len(parts)):
+            suffixes.setdefault("/".join(parts[i:]), []).append(path)
+
+    def resolve(name, crate):
+        for candidate in (f"{crate}/{name}" if crate else None, name):
+            if candidate in known:
+                return candidate
+        found = suffixes.get(name, [])
+        return found[0] if len(found) == 1 else None
+
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
-                if FILE_LIKE.search(span.group(1)):
-                    last = None
+                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
                 continue
             named, spec = m.groups()
-            path = last if named is None else None
-            if named:
-                for candidate in (named, f"{crate}/{named}" if crate else None):
-                    if candidate and read_file(candidate) is not None and "/" in named:
-                        path = candidate
-                        break
-            body = read_file(path) if path else None
+            path = last if named is None else resolve(named, crate)
+            if path is None and named and named.startswith(REPO_PREFIXES):
+                out.append((number, named, spec, None,
+                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
             last = path
-            if body is None:
+            if path is None:
                 continue
+            body = read_file(path)
             if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
             ranges = []
@@ -6036,10 +6054,11 @@ def citation_findings(doc, text, read_file):
                 first, _, end = part.partition("-")
                 ranges.append((int(first), int(end or first)))
             rows = body.split("\n")
-            label = f"{path}:{spec}"
-            bad = next((r for r in ranges if r[0] < 1 or r[1] < r[0] or r[0] > len(rows)), None)
-            if bad:
-                out.append((number, path, None, f"{doc}:{number}: `{label}` is not a line range of its file"))
+            if rows[-1] == "":
+                rows.pop()
+            if any(f < 1 or e < f or e > len(rows) for f, e in ranges):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` is not a line range of its file"))
                 continue
             start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
             own = {part.split(".")[0] for part in path.split("/")}
@@ -6047,7 +6066,7 @@ def citation_findings(doc, text, read_file):
                       if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             if tokens and not holds_token(held, tokens[-1]):
-                out.append((number, path, tokens[-1], f"{doc}:{number}: `{label}` does not hold "
+                out.append((number, path, spec, tokens[-1], f"{doc}:{number}: `{path}:{spec}` does not hold "
                             f"`{tokens[-1]}`, which its sentence names: the lines moved"))
     return out
 
@@ -6063,15 +6082,15 @@ def check_line_citations():
 
     def read_file(path):
         try:
-            return read(ROOT / path) if path in tracked else None
+            return read(ROOT / path)
         except OSError:
-            return None
+            return ""
 
     seen = set()
     for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
-        for _, path, token, problem in citation_findings(doc.name, read(doc), read_file):
-            seen.add((doc.name, path, token))
-            if (doc.name, path, token) not in LINE_CITATIONS_KEPT:
+        for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
+            seen.add((doc.name, path, spec, token))
+            if (doc.name, path, spec, token) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
         r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
