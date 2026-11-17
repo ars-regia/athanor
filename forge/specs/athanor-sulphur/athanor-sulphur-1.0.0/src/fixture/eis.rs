@@ -397,6 +397,34 @@ fn eis_keys_reach_the_window_and_never_a_binding() {
     run.stop();
 }
 
+/// Only an injected key delivered to a client cancels a pending tap of Super (decision 33):
+/// with no keyboard focus none is delivered, and the hardware Super's release is still Super
+/// alone.
+#[test]
+fn eis_undelivered_key_keeps_the_super_tap() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+    run.state.set_keyboard_focus(None);
+    window.roundtrip(&mut run);
+
+    let fired = run.state.fired.len();
+    key(&mut run.state, KEY_LEFTMETA, true);
+    ei.keys(&mut run, &[KEY_C]);
+    key(&mut run.state, KEY_LEFTMETA, false);
+    window.roundtrip(&mut run);
+    assert!(
+        !window.client.keys.contains(&KEY_C),
+        "the injected key reaches no client"
+    );
+    assert_eq!(
+        run.state.fired.len(),
+        fired + 1,
+        "and Super's release is still Super alone"
+    );
+    run.stop();
+}
+
 /// A protected key of decision 30 is dropped under the context's modifiers, its release with it;
 /// a key the seat or another context holds is neither pressed again nor released by the context,
 /// and the holder's own release still reaches the client (decision 33).

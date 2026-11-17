@@ -1045,8 +1045,6 @@ impl State {
             }
             keys.state.update_key(code, xkb::KeyDirection::Down);
             keys.held.insert(raw);
-            // A key the client gets cancels a hardware Super alone, as an injected button does.
-            self.super_tap = None;
             KeyState::Pressed
         } else {
             if keys.dropped.remove(&raw) || !keys.held.remove(&raw) {
@@ -1085,6 +1083,11 @@ impl State {
         let serial = SERIAL_COUNTER.next_serial();
         if key_state == KeyState::Pressed {
             self.grab_serials.press = Some(serial);
+            // A key a client gets cancels a hardware Super alone, as an injected button does;
+            // with no keyboard focus none is sent, and the tap stays pending (decision 33).
+            if keyboard.current_focus().is_some() {
+                self.super_tap = None;
+            }
         }
         keyboard.input_forward_bypassing_grab(self, code, key_state, serial, time, true);
         keyboard.with_xkb_state(self, |mut context| {
