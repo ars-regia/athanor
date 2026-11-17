@@ -49,9 +49,12 @@ pub const AGENT_IFACE: &str = "org.freedesktop.NetworkManager.SecretAgent";
 /// Fixed by NetworkManager: it calls every agent at this path.
 pub const AGENT_PATH: &str = "/org/freedesktop/NetworkManager/SecretAgent";
 pub const AGENT_ID: &str = "os.athanor.Bar";
-/// NetworkManager's answer to a registration when an agent with the same ID is already
-/// registered for the same user (`nm-agent-manager.c`): another bar of this user holds it.
+/// NetworkManager's error and message when an agent with the same ID is already registered
+/// for the same user, by any process of it (`nm-agent-manager.c`, 1.58.1, lines 474-480):
+/// another bar of this user holds it. NetworkManager answers the same error, with other
+/// messages, for a caller whose uid it cannot read.
 const PERMISSION_DENIED: &str = "org.freedesktop.NetworkManager.AgentManager.PermissionDenied";
+const ALREADY_REGISTERED: &str = "An agent with this ID is already registered for this user.";
 /// The first wait before registering again with a NetworkManager that did not answer, doubled
 /// at each attempt up to the cap.
 const REGISTER_RETRY: Duration = Duration::from_secs(1);
@@ -888,7 +891,8 @@ type Running = Pin<Box<dyn Future<Output = zbus::Result<()>> + Send>>;
 enum Refusal {
     /// Another process of this user holds the agent ID: final.
     Held,
-    /// NetworkManager is starting, stopping or did not answer: try again.
+    /// NetworkManager is starting, stopping, did not answer or denied the registration for
+    /// another reason: try again.
     Transient,
     /// Anything else: final.
     Other,
@@ -896,18 +900,22 @@ enum Refusal {
 
 fn refusal(err: &zbus::Error) -> Refusal {
     match err {
-        zbus::Error::MethodError(name, ..) => refusal_named(name.as_str()),
-        zbus::Error::FDO(err) => refusal_named(err.name().as_str()),
+        zbus::Error::MethodError(name, message, _) => {
+            refusal_named(name.as_str(), message.as_deref())
+        }
+        zbus::Error::FDO(err) => refusal_named(err.name().as_str(), None),
         // A call of ours that timed out, or a connection that broke.
         zbus::Error::InputOutput(_) => Refusal::Transient,
         _ => Refusal::Other,
     }
 }
 
-fn refusal_named(name: &str) -> Refusal {
+fn refusal_named(name: &str, message: Option<&str>) -> Refusal {
     match name {
-        PERMISSION_DENIED => Refusal::Held,
-        "org.freedesktop.DBus.Error.NoReply"
+        PERMISSION_DENIED if message == Some(ALREADY_REGISTERED) => Refusal::Held,
+        // The warning quotes NetworkManager's message, in `error`.
+        PERMISSION_DENIED
+        | "org.freedesktop.DBus.Error.NoReply"
         | "org.freedesktop.DBus.Error.ServiceUnknown"
         | "org.freedesktop.DBus.Error.NameHasNoOwner"
         | "org.freedesktop.DBus.Error.Timeout"
@@ -1315,6 +1323,7 @@ async fn register(connection: &Connection, owner: &str) -> zbus::Result<()> {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -2010,9 +2019,10 @@ mod tests {
     enum RegisterError {
         #[zbus(error)]
         ZBus(zbus::Error),
-        /// NetworkManager's answer when another process of the user holds the ID.
+        /// NetworkManager's answer when another process of the user holds the ID, or when it
+        /// cannot read the caller's uid.
         #[zbus(name = "NetworkManager.AgentManager.PermissionDenied")]
-        Held(String),
+        Denied(String),
         #[zbus(name = "DBus.Error.NoReply")]
         NoReply(String),
     }
@@ -2293,6 +2303,55 @@ mod tests {
         drop(nm);
     }
 
+    /// Counts the warnings whose message is `text`, while it is this thread's subscriber: the
+    /// model runs on the test's current-thread runtime.
+    struct Warnings {
+        text: &'static str,
+        seen: Arc<AtomicUsize>,
+    }
+
+    impl tracing::Subscriber for Warnings {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Message(String);
+            impl tracing::field::Visit for Message {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{value:?}");
+                    }
+                }
+            }
+            let mut message = Message(String::new());
+            event.record(&mut message);
+            if *event.metadata().level() == tracing::Level::WARN && message.0 == self.text {
+                self.seen.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// The warnings that another process holds the agent ID, counted from now.
+    fn held_warnings() -> (tracing::subscriber::DefaultGuard, Arc<AtomicUsize>) {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let warnings = Warnings {
+            text: "another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets",
+            seen: seen.clone(),
+        };
+        (tracing::subscriber::set_default(warnings), seen)
+    }
+
     /// The registrations a new owner of NetworkManager sees, each answered by `answers` first.
     async fn registrations_with_new_owner(answers: Vec<RegisterError>, seen: usize) -> usize {
         let mut rig = rig(REPLY_TIMEOUT).await;
@@ -2311,10 +2370,26 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn an_agent_id_held_by_another_process_is_not_asked_for_again() {
-        let held = RegisterError::Held(
-            "An agent with this ID is already registered for this user.".into(),
-        );
+        let (_guard, warned) = held_warnings();
+        let held = RegisterError::Denied(ALREADY_REGISTERED.into());
         assert_eq!(registrations_with_new_owner(vec![held], 1).await, 1);
+        assert_eq!(
+            warned.load(Ordering::SeqCst),
+            1,
+            "one warning names the cause"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_registration_denied_for_another_reason_is_tried_again() {
+        let (_guard, warned) = held_warnings();
+        let denied = RegisterError::Denied("Unable to determine UID of request.".into());
+        assert_eq!(registrations_with_new_owner(vec![denied], 2).await, 2);
+        assert_eq!(
+            warned.load(Ordering::SeqCst),
+            0,
+            "no claim that another process holds the ID"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2325,7 +2400,26 @@ mod tests {
 
     #[test]
     fn a_held_agent_id_is_final_and_an_unanswered_registration_is_transient() {
-        assert_eq!(refusal_named(PERMISSION_DENIED), Refusal::Held);
+        // NetworkManager's text, from nm-agent-manager.c; the rig's mock answers the same.
+        assert_eq!(
+            ALREADY_REGISTERED,
+            "An agent with this ID is already registered for this user."
+        );
+        assert_eq!(
+            refusal_named(PERMISSION_DENIED, Some(ALREADY_REGISTERED)),
+            Refusal::Held
+        );
+        for message in [
+            None,
+            Some("Unable to determine UID of request."),
+            Some("Session not found"),
+        ] {
+            assert_eq!(
+                refusal_named(PERMISSION_DENIED, message),
+                Refusal::Transient,
+                "{message:?}"
+            );
+        }
         for name in [
             "org.freedesktop.DBus.Error.NoReply",
             "org.freedesktop.DBus.Error.ServiceUnknown",
@@ -2334,10 +2428,13 @@ mod tests {
             "org.freedesktop.DBus.Error.TimedOut",
             "org.freedesktop.DBus.Error.Disconnected",
         ] {
-            assert_eq!(refusal_named(name), Refusal::Transient, "{name}");
+            assert_eq!(refusal_named(name, None), Refusal::Transient, "{name}");
         }
         assert_eq!(
-            refusal_named("org.freedesktop.NetworkManager.AgentManager.InvalidIdentifier"),
+            refusal_named(
+                "org.freedesktop.NetworkManager.AgentManager.InvalidIdentifier",
+                None
+            ),
             Refusal::Other
         );
         let fdo = |err| zbus::Error::FDO(Box::new(err));

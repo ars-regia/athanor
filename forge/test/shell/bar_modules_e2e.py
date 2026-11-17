@@ -245,10 +245,13 @@ def network(ctx):
             bus, fx.NM, fx.NM_AGENT_MANAGER, "org.freedesktop.NetworkManager.AgentManager",
             "RegisterWithCapabilities", "(su)", ("os.athanor.Bar", 0),
         )
-        second = ""
+        second, message = "", ""
     except GLib.Error as err:
         second = Gio.DBusError.get_remote_error(err) or ""
+        # PyGObject hands a copy of the error, so strip_remote_error cannot strip it.
+        message = err.message.removeprefix(f"GDBus.Error:{second}: ")
     check("a second registration of the agent ID is refused", second == fx.NM_AGENT_HELD, second)
+    check("with NetworkManager's message", message == fx.NM_AGENT_HELD_MESSAGE, message)
     check("and the bar's registration stands", registrations() == 1)
     check(
         "the network list opens with the connected network",
@@ -376,7 +379,7 @@ def network(ctx):
 
     def held_lines():
         text = client_log.read_text(encoding="utf-8", errors="replace") if client_log.exists() else ""
-        return text.count("already holds the NetworkManager secret agent")
+        return text.count("another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets")
 
     before = held_lines()
     restart(held=bus.get_unique_name())

@@ -107,15 +107,18 @@ self.UpdateProperties('org.bluez.Device1', {{'Paired': dbus.Boolean(True)}})
 """
 
 # NetworkManager keeps one agent per ID and user: another registration of an ID that a
-# connected process of the same user holds is refused with this error and message
-# (nm-agent-manager.c). nm_agent_template.py passes the caller to these methods as _["sender"].
+# connected process of the same user holds, the holder included, is refused with this error
+# and message (nm-agent-manager.c, 1.58.1, lines 474-480), and a holder that leaves the bus
+# frees it (lines 441-444, 485). nm_agent_template.py passes the caller to these methods as
+# _["sender"].
 NM_AGENT_HELD = "org.freedesktop.NetworkManager.AgentManager.PermissionDenied"
+NM_AGENT_HELD_MESSAGE = "An agent with this ID is already registered for this user."
 NM_AGENT_REGISTER = f"""
 key = (self.connection.get_unix_user(_["sender"]), args[0])
 holder = self.agents.get(key)
 if holder is not None and self.connection.name_has_owner(holder):
     raise dbus.exceptions.DBusException(
-        "An agent with this ID is already registered for this user.", name="{NM_AGENT_HELD}")
+        "{NM_AGENT_HELD_MESSAGE}", name="{NM_AGENT_HELD}")
 self.agents[key] = _["sender"]
 self.registered = getattr(self, "registered", 0) + 1
 """
