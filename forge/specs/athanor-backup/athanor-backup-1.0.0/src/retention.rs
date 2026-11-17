@@ -1,6 +1,6 @@
 //! Which snapshots survive a prune.
 
-use chrono::{Datelike, NaiveDateTime, Timelike};
+use jiff::civil::DateTime;
 use std::collections::HashSet;
 
 /// How many distinct hours, days and ISO weeks keep their newest snapshot.
@@ -15,17 +15,17 @@ pub const WEEKLY: usize = 4;
 /// kept, and likewise for [`DAILY`] days and [`WEEKLY`] ISO weeks; the union survives.
 /// Counting hours that hold a snapshot rather than wall-clock hours means a machine that
 /// stayed off for a week still has its last snapshots when it comes back.
-pub fn keep(times_newest_first: &[NaiveDateTime]) -> Vec<bool> {
+pub fn keep(times_newest_first: &[DateTime]) -> Vec<bool> {
     let mut keep = vec![false; times_newest_first.len()];
     mark(&mut keep, times_newest_first, HOURLY, |t| {
-        (t.year(), t.ordinal(), t.hour())
+        (t.year(), t.day_of_year(), t.hour())
     });
     mark(&mut keep, times_newest_first, DAILY, |t| {
-        (t.year(), t.ordinal(), 0)
+        (t.year(), t.day_of_year(), 0)
     });
     mark(&mut keep, times_newest_first, WEEKLY, |t| {
-        let week = t.iso_week();
-        (week.year(), week.week(), 0)
+        let week = t.iso_week_date();
+        (week.year(), i16::from(week.week()), 0)
     });
     keep
 }
@@ -33,9 +33,9 @@ pub fn keep(times_newest_first: &[NaiveDateTime]) -> Vec<bool> {
 /// Marks the first snapshot of each new bucket until `limit` buckets have been seen.
 fn mark(
     keep: &mut [bool],
-    times_newest_first: &[NaiveDateTime],
+    times_newest_first: &[DateTime],
     limit: usize,
-    bucket: impl Fn(&NaiveDateTime) -> (i32, u32, u32),
+    bucket: impl Fn(&DateTime) -> (i16, i16, i8),
 ) {
     let mut seen = HashSet::new();
     for (kept, time) in keep.iter_mut().zip(times_newest_first) {
@@ -51,12 +51,10 @@ fn mark(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, NaiveDate};
+    use jiff::SignedDuration;
 
-    fn at(day: u32, hour: u32, minute: u32) -> NaiveDateTime {
-        NaiveDate::from_ymd_opt(2026, 9, day)
-            .and_then(|date| date.and_hms_opt(hour, minute, 0))
-            .expect("valid test time")
+    fn at(day: i8, hour: i8, minute: i8) -> DateTime {
+        DateTime::new(2026, 9, day, hour, minute, 0, 0).expect("valid test time")
     }
 
     #[test]
@@ -72,7 +70,7 @@ mod tests {
         // Monday 21 to Wednesday 23 September 2026: one ISO week, three days, 72 hours.
         let newest = at(23, 23, 0);
         let times: Vec<_> = (0..72)
-            .map(|hours| newest - Duration::hours(hours))
+            .map(|hours| newest - SignedDuration::from_hours(hours))
             .collect();
         let kept = keep(&times);
 
@@ -91,10 +89,10 @@ mod tests {
         // Hourly snapshots for 40 days up to Wednesday 30 September 2026, 23:00.
         let newest = at(30, 23, 0);
         let times: Vec<_> = (0..40 * 24)
-            .map(|hours| newest - Duration::hours(hours))
+            .map(|hours| newest - SignedDuration::from_hours(hours))
             .collect();
         let kept = keep(&times);
-        let is_kept = |time: NaiveDateTime| times.iter().zip(&kept).any(|(&t, &k)| t == time && k);
+        let is_kept = |time: DateTime| times.iter().zip(&kept).any(|(&t, &k)| t == time && k);
 
         // 24 hours of the 30th, the 23:00 of the six days before it, and the newest of
         // the two ISO weeks before the one of the 21st (whose newest, the 27th, is a day).
