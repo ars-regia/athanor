@@ -385,7 +385,8 @@ fn eis_keys_reach_the_window_and_never_a_binding() {
 }
 
 /// A protected key of decision 30 is dropped under the context's modifiers, its release with it;
-/// a key the seat or another context holds is not pressed again.
+/// a key the seat or another context holds is neither pressed again nor released by the context,
+/// and the holder's own release still reaches the client (decision 33).
 #[test]
 fn eis_drops_protected_and_held_keys() {
     let mut run = Running::start(None);
@@ -408,7 +409,7 @@ fn eis_drops_protected_and_held_keys() {
 
     key(&mut run.state, KEY_A, true);
     window.roundtrip(&mut run);
-    let pressed = window.client.keys.len();
+    let (pressed, released) = (window.client.keys.len(), window.client.released.len());
     ei.keys(&mut run, &[KEY_A]);
     window.roundtrip(&mut run);
     assert_eq!(
@@ -416,26 +417,36 @@ fn eis_drops_protected_and_held_keys() {
         pressed,
         "a key the hardware holds is not pressed again"
     );
+    assert_eq!(
+        window.client.released.len(),
+        released,
+        "nor released by the context"
+    );
     key(&mut run.state, KEY_A, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.released[released..],
+        [KEY_A],
+        "the hardware's release still reaches the client"
+    );
 
+    let cs = |codes: &[u32]| codes.iter().filter(|code| **code == KEY_C).count();
     ei.key(&mut run, KEY_C, true);
     other.keys(&mut run, &[KEY_C]);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        cs(&window.client.keys),
+        1,
+        "a key another context holds is not pressed again"
+    );
+    assert_eq!(cs(&window.client.released), 0, "nor released by it");
     ei.key(&mut run, KEY_C, false);
     window.roundtrip(&mut run);
-    let cs = window
-        .client
-        .keys
-        .iter()
-        .filter(|code| **code == KEY_C)
-        .count();
-    assert_eq!(cs, 1, "a key another context holds is not pressed again");
-    let cs = window
-        .client
-        .released
-        .iter()
-        .filter(|code| **code == KEY_C)
-        .count();
-    assert_eq!(cs, 1, "nor released by it");
+    assert_eq!(
+        cs(&window.client.released),
+        1,
+        "the holding context's release still reaches the client"
+    );
     run.stop();
 }
 
