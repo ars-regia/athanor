@@ -637,7 +637,7 @@ mod tests {
         let bar = bus.builder().build().await.expect("bar");
         let stranger = bus.builder().build().await.expect("stranger");
         let query = bus.builder().build().await.expect("query");
-        let mut identity = Fixture::new(&query).await;
+        let mut identity = Fixture::new(&query, &compositor).await;
         change(&mut identity);
         let asks = Arc::new(Mutex::new(Vec::new()));
         let host = TestHost {
@@ -903,23 +903,14 @@ mod tests {
 
     #[tokio::test]
     async fn input_start_is_refused_without_a_dialog_when_the_owner_is_not_the_compositor() {
-        let other_unit = |f: &mut Fixture| {
-            f.cgroup = athanor_unit::peer::user_unit_cgroup(
-                nix::unistd::getuid().as_raw(),
-                crate::eis::SLICE,
-                "evil.service",
-            )
-        };
-        let other_exe = |f: &mut Fixture| f.executable = "/usr/bin/sh".into();
-        let reused = |f: &mut Fixture| {
-            f.hide_pidfd = true;
-            f.reuse_pid = true;
-        };
         type Change = Box<dyn FnOnce(&mut Fixture)>;
         let checks: [(&str, Change); 3] = [
-            ("another unit", Box::new(other_unit)),
-            ("another executable", Box::new(other_exe)),
-            ("a reused pid", Box::new(reused)),
+            ("another unit", Box::new(|f| f.unit = "evil.service".into())),
+            (
+                "another executable",
+                Box::new(|f| f.exec = "/usr/bin/sh".into()),
+            ),
+            ("no pidfd", Box::new(|f| f.hide_pidfd = true)),
         ];
         for (n, (what, change)) in (1..).zip(checks) {
             let rd = rd(
@@ -944,17 +935,6 @@ mod tests {
         no_owner.create(1).await;
         assert_eq!(no_owner.start(1).await.0, 2, "no owner");
         assert_eq!(no_owner.asked(), 0, "no owner: no dialog");
-
-        let by_pid = self::rd("by-pid", Some(Answer::Granted(KEYBOARD)), |f| {
-            f.hide_pidfd = true
-        })
-        .await;
-        by_pid.create(1).await;
-        assert_eq!(
-            by_pid.start(1).await.0,
-            0,
-            "the pid fallback admits the compositor"
-        );
     }
 
     #[tokio::test]
@@ -1277,7 +1257,7 @@ mod tests {
         use zbus::object_server::Interface;
         let bus = Bus::start("introspect");
         let query = bus.builder().build().await.expect("query");
-        let identity = Fixture::new(&query).await;
+        let identity = Fixture::new(&query, &query).await;
         let host = TestHost {
             frontend: String::new(),
             bar: String::new(),

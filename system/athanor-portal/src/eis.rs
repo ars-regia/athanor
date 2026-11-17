@@ -3,66 +3,43 @@
 //! name `os.athanor.Eis` on the session bus.
 //!
 //! Before the dialog, and again before each call, the owner of `os.athanor.Eis` is read anew
-//! and checked to be the compositor: its process, through the pidfd the bus returns or, when it
-//! returns none, through one opened on its pid, lies in the cgroup of `athanor-sulphur.service`
-//! and runs `/usr/bin/athanor-sulphur`, the very file at that path. A pid read without a pidfd
-//! is asked of the bus again after the reads, so a pid reused in between is refused. The call
-//! then goes to the unique name that was checked, never to the well-known one, so the name
-//! cannot change hands between the check and the call. Every failure refuses: no owner, a bus
-//! that does not answer in time, any read that fails.
+//! and admitted by its unit, as [`athanor_unit::bus_caller::admit`] checks it: through the
+//! pidfd the bus returns, the verified user systemd places the owner in exactly
+//! `athanor-sulphur.service`, whose main process it is and whose one `ExecStart` runs
+//! `/usr/bin/athanor-sulphur`. Nothing is read under `/proc` (issue #1047), and a bus that
+//! gives no pidfd is refused. The call then goes to the unique name that was checked, never to
+//! the well-known one, so the name cannot change hands between the check and the call. Every
+//! failure refuses: no owner, a bus that does not answer in time, any question that fails.
 
-#![allow(unsafe_code)]
-
-use std::io;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
-use std::path::{Path, PathBuf};
+use std::os::fd::{BorrowedFd, OwnedFd};
 use std::time::Duration;
 
+use athanor_unit::bus_caller::{self, Credentials, Manager, Questions, Service, Unit};
 use zbus::fdo::DBusProxy;
 use zbus::names::BusName;
 use zbus::Connection;
 use zbus::ObjectPath;
+use zbus::OwnedObjectPath;
 
 /// The compositor's name and object.
 pub const NAME: &str = "os.athanor.Eis";
 pub const PATH: &str = "/os/athanor/Eis1";
 pub const INTERFACE: &str = "os.athanor.Eis1";
-/// The compositor's unit, its slice and its executable.
-pub const UNIT: &str = "athanor-sulphur.service";
-pub const SLICE: &str = "session.slice";
-pub const EXECUTABLE: &str = "/usr/bin/athanor-sulphur";
+/// The compositor's unit and the executable of its one `ExecStart`.
+pub const COMPOSITOR: Service<'static> = Service {
+    unit: "athanor-sulphur.service",
+    exec: "/usr/bin/athanor-sulphur",
+};
 
 /// Bound on each check and each call to the bus.
 pub const ASK: Duration = Duration::from_secs(2);
 
-/// What the bus says of a peer (`GetConnectionCredentials`).
-#[derive(Debug, Default)]
-pub struct Credentials {
-    pub pid: Option<u32>,
-    pub pidfd: Option<OwnedFd>,
-}
-
-/// The seam of the owner check: what the bus answers, and what `/proc` says of a pid. CI runs
-/// the check through it with fixture answers; the backend through [`OnBus`].
-pub trait Identity {
+/// The seam of the owner check: who owns [`NAME`], and the questions of
+/// [`athanor_unit::bus_caller`]. CI runs the check through it with fixture answers for systemd;
+/// the backend through [`OnBus`].
+pub trait Identity: Questions {
     /// The unique name that owns [`NAME`], `None` when nobody does.
     fn owner(&self) -> impl std::future::Future<Output = Result<Option<String>, String>> + Send;
-    /// `GetConnectionCredentials` of `peer`.
-    fn credentials(
-        &self,
-        peer: &str,
-    ) -> impl std::future::Future<Output = Result<Credentials, String>> + Send;
-    /// `/proc/<pid>/cgroup`.
-    fn cgroup(&self, pid: i32) -> io::Result<String>;
-    /// The target of `/proc/<pid>/exe`.
-    fn executable(&self, pid: i32) -> io::Result<PathBuf>;
-    /// Whether `/proc/<pid>/exe` is the file now at `path`: same device and inode.
-    fn runs_file(&self, pid: i32, path: &Path) -> io::Result<bool>;
-}
-
-/// The cgroup a main process of the compositor's unit reads, for the user `uid`.
-pub fn compositor_cgroup(uid: u32) -> String {
-    athanor_unit::peer::user_unit_cgroup(uid, SLICE, UNIT)
 }
 
 /// The unique name of the compositor, checked as the module says, or why not.
@@ -71,88 +48,55 @@ pub async fn compositor(identity: &impl Identity) -> Result<String, String> {
         .owner()
         .await?
         .ok_or_else(|| format!("no process owns {NAME}"))?;
-    let credentials = identity.credentials(&owner).await?;
-    let opened;
-    let pidfd = match &credentials.pidfd {
-        Some(fd) => fd.as_fd(),
-        None => {
-            let pid = credentials
-                .pid
-                .ok_or_else(|| format!("the bus names neither a pidfd nor a pid for {owner}"))?;
-            opened = pidfd_open(pid).map_err(|e| format!("no pidfd for pid {pid}: {e}"))?;
-            opened.as_fd()
-        }
-    };
-    let pid = pidfd_pid(pidfd)?;
-    let want = compositor_cgroup(nix::unistd::getuid().as_raw());
-    let cgroup = identity
-        .cgroup(pid)
-        .map_err(|e| format!("the cgroup of {owner}: {e}"))?;
-    if cgroup.strip_suffix('\n').unwrap_or(&cgroup) != want {
-        return Err(format!("{owner} is not in {UNIT}: {cgroup:?}"));
-    }
-    let executable = identity
-        .executable(pid)
-        .map_err(|e| format!("the executable of {owner}: {e}"))?;
-    let runs = identity
-        .runs_file(pid, Path::new(EXECUTABLE))
-        .map_err(|e| format!("the executable of {owner}: {e}"))?;
-    if executable != Path::new(EXECUTABLE) || !runs {
-        return Err(format!(
-            "{owner} runs {}, not {EXECUTABLE}",
-            executable.display()
-        ));
-    }
-    if pidfd_pid(pidfd)? != pid || !athanor_unit::bus_caller::alive(pidfd)? {
-        return Err(format!("{owner} exited while it was read"));
-    }
-    if credentials.pidfd.is_none() {
-        // The pidfd was opened after the bus named the pid: the connection, still open with
-        // that pid, shows the pid was not reused in between.
-        let again = identity.credentials(&owner).await?;
-        if again.pid.map(i64::from) != Some(i64::from(pid)) {
-            return Err(format!("{owner}'s pid changed while it was read"));
-        }
-    }
+    bus_caller::admit(identity, &owner, COMPOSITOR)
+        .await
+        .map_err(|why| format!("{owner}: {why}"))?;
     Ok(owner)
 }
 
-fn pidfd_open(pid: u32) -> io::Result<OwnedFd> {
-    let pid = nix::libc::pid_t::try_from(pid).map_err(io::Error::other)?;
-    // SAFETY: pidfd_open takes a pid and flags by value and touches no memory of this process.
-    let fd = unsafe { nix::libc::syscall(nix::libc::SYS_pidfd_open, pid, 0) };
-    if fd < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let fd = nix::libc::c_int::try_from(fd).map_err(io::Error::other)?;
-    // SAFETY: on success the kernel installed a new pidfd at `fd` that nothing else owns.
-    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
-}
-
-/// The pid `pidfd` names, from its fdinfo. A process reaped (-1) or outside this pid
-/// namespace (0) is refused.
-fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<i32, String> {
-    let info = std::fs::read_to_string(format!("/proc/self/fdinfo/{}", pidfd.as_raw_fd()))
-        .map_err(|e| format!("the pidfd's fdinfo: {e}"))?;
-    let pid: i32 = info
-        .lines()
-        .find_map(|line| line.strip_prefix("Pid:"))
-        .ok_or("the pidfd's fdinfo names no pid")?
-        .trim()
-        .parse()
-        .map_err(|e| format!("the pidfd's pid: {e}"))?;
-    if pid <= 0 {
-        return Err(format!(
-            "the process is gone or outside the namespace (pid {pid})"
-        ));
-    }
-    Ok(pid)
-}
-
-/// [`Identity`] on the bus and `/proc`. `bus` is a proxy on a connection that serves nothing,
-/// so a handler can await it (issue #1035).
+/// [`Identity`] on the buses: `bus` is the session bus's proxy on `session`, and `system` a
+/// connection from [`bus_caller::system_bus`]. Each serves nothing, so a handler can await them
+/// (issue #1035).
 pub struct OnBus {
     pub bus: DBusProxy<'static>,
+    pub session: Connection,
+    pub system: Connection,
+}
+
+impl OnBus {
+    fn questions(&self) -> bus_caller::OnBus<'_> {
+        bus_caller::OnBus {
+            bus: &self.bus,
+            session: &self.session,
+            system: &self.system,
+        }
+    }
+}
+
+impl Questions for OnBus {
+    async fn user_manager(&self) -> Result<String, String> {
+        self.questions().user_manager().await
+    }
+
+    async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
+        self.questions().credentials(peer).await
+    }
+
+    async fn unit_by_pidfd(
+        &self,
+        manager: Manager<'_>,
+        pidfd: BorrowedFd<'_>,
+    ) -> Result<(OwnedObjectPath, String), String> {
+        self.questions().unit_by_pidfd(manager, pidfd).await
+    }
+
+    async fn main_pid(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<u32, String> {
+        self.questions().main_pid(manager, path).await
+    }
+
+    async fn unit(&self, manager: Manager<'_>, path: &OwnedObjectPath) -> Result<Unit, String> {
+        self.questions().unit(manager, path).await
+    }
 }
 
 impl Identity for OnBus {
@@ -163,39 +107,6 @@ impl Identity for OnBus {
             Err(zbus::fdo::Error::NameHasNoOwner(_)) => Ok(None),
             Err(e) => Err(format!("the owner of {NAME}: {e}")),
         }
-    }
-
-    async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
-        let name = BusName::try_from(peer).map_err(|e| e.to_string())?;
-        let credentials = self
-            .bus
-            .get_connection_credentials(name)
-            .await
-            .map_err(|e| format!("the credentials of {peer}: {e}"))?;
-        let pidfd = credentials
-            .process_fd()
-            .map(|fd| fd.as_fd().try_clone_to_owned())
-            .transpose()
-            .map_err(|e| format!("the pidfd of {peer}: {e}"))?;
-        Ok(Credentials {
-            pid: credentials.process_id(),
-            pidfd,
-        })
-    }
-
-    fn cgroup(&self, pid: i32) -> io::Result<String> {
-        std::fs::read_to_string(format!("/proc/{pid}/cgroup"))
-    }
-
-    fn executable(&self, pid: i32) -> io::Result<PathBuf> {
-        std::fs::read_link(format!("/proc/{pid}/exe"))
-    }
-
-    fn runs_file(&self, pid: i32, path: &Path) -> io::Result<bool> {
-        use std::os::unix::fs::MetadataExt;
-        let running = std::fs::metadata(format!("/proc/{pid}/exe"))?;
-        let file = std::fs::metadata(path)?;
-        Ok(running.dev() == file.dev() && running.ino() == file.ino())
     }
 }
 
@@ -339,66 +250,113 @@ pub(crate) mod tests {
         }
     }
 
-    /// The identity seam: the bus's real answer for the owner and its credentials, with the
-    /// pidfd hidden for the pid fallback and the pid changed on every second read for reuse, and
-    /// fixture answers for what `/proc` says of the owner's process.
+    /// The identity seam: the bus's real answer for the owner and its credentials, the pidfd
+    /// hidden on demand, and fixture answers for both systemds. The user's systemd is the
+    /// compositor's connection here, so its credentials are real; the system's places it in
+    /// `user@<uid>.service` with its own pid as the main process.
     pub(crate) struct Fixture {
-        bus: OnBus,
-        pub(crate) cgroup: String,
-        pub(crate) executable: PathBuf,
-        pub(crate) same_file: bool,
+        bus: DBusProxy<'static>,
+        manager: String,
+        pub(crate) unit: String,
+        pub(crate) exec: String,
+        pub(crate) fragment: String,
+        /// The compositor unit's `MainPID`, the owner's own pid when `None`.
+        pub(crate) main_pid: Option<u32>,
         pub(crate) hide_pidfd: bool,
-        pub(crate) reuse_pid: bool,
-        asked: Mutex<u32>,
     }
 
     impl Fixture {
-        pub(crate) async fn new(conn: &Connection) -> Fixture {
+        pub(crate) async fn new(conn: &Connection, manager: &Connection) -> Fixture {
             Fixture {
-                bus: OnBus {
-                    bus: DBusProxy::new(conn).await.expect("proxy"),
-                },
-                cgroup: format!("{}\n", compositor_cgroup(nix::unistd::getuid().as_raw())),
-                executable: PathBuf::from(EXECUTABLE),
-                same_file: true,
+                bus: DBusProxy::new(conn).await.expect("proxy"),
+                manager: manager.unique_name().expect("name").to_string(),
+                unit: COMPOSITOR.unit.into(),
+                exec: COMPOSITOR.exec.into(),
+                fragment: format!("{}/{}", bus_caller::IMAGE_USER_UNITS, COMPOSITOR.unit),
+                main_pid: None,
                 hide_pidfd: false,
-                reuse_pid: false,
-                asked: Mutex::new(0),
             }
+        }
+    }
+
+    const UNIT_PATH: &str = "/org/freedesktop/systemd1/unit/fixture";
+
+    fn unit_path() -> OwnedObjectPath {
+        OwnedObjectPath::try_from(UNIT_PATH).expect("path")
+    }
+
+    impl Questions for Fixture {
+        async fn user_manager(&self) -> Result<String, String> {
+            Ok(self.manager.clone())
+        }
+
+        async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
+            let name = BusName::try_from(peer).map_err(|e| e.to_string())?;
+            let credentials = self
+                .bus
+                .get_connection_credentials(name)
+                .await
+                .map_err(|e| e.to_string())?;
+            let pidfd = match credentials.process_fd() {
+                Some(fd) if !self.hide_pidfd => Some(
+                    std::os::fd::AsFd::as_fd(fd)
+                        .try_clone_to_owned()
+                        .expect("dup"),
+                ),
+                _ => None,
+            };
+            Ok(Credentials {
+                uid: credentials.unix_user_id(),
+                pid: credentials.process_id(),
+                pidfd,
+            })
+        }
+
+        async fn unit_by_pidfd(
+            &self,
+            manager: Manager<'_>,
+            _pidfd: BorrowedFd<'_>,
+        ) -> Result<(OwnedObjectPath, String), String> {
+            let unit = match manager {
+                Manager::System => format!("user@{}.service", nix::unistd::getuid().as_raw()),
+                Manager::User(_) => self.unit.clone(),
+            };
+            Ok((unit_path(), unit))
+        }
+
+        async fn main_pid(
+            &self,
+            _manager: Manager<'_>,
+            _path: &OwnedObjectPath,
+        ) -> Result<u32, String> {
+            Ok(std::process::id())
+        }
+
+        async fn unit(
+            &self,
+            _manager: Manager<'_>,
+            _path: &OwnedObjectPath,
+        ) -> Result<Unit, String> {
+            Ok(Unit {
+                main_pid: self.main_pid.unwrap_or_else(std::process::id),
+                exec_start: vec![self.exec.clone()],
+                fragment_path: self.fragment.clone(),
+                drop_in_paths: Vec::new(),
+            })
         }
     }
 
     impl Identity for Fixture {
         async fn owner(&self) -> Result<Option<String>, String> {
-            self.bus.owner().await
-        }
-
-        async fn credentials(&self, peer: &str) -> Result<Credentials, String> {
-            let mut credentials = self.bus.credentials(peer).await?;
-            let asked = {
-                let mut asked = self.asked.lock().expect("asked");
-                *asked += 1;
-                *asked
-            };
-            if self.hide_pidfd {
-                credentials.pidfd = None;
+            match self
+                .bus
+                .get_name_owner(BusName::try_from(NAME).expect("name"))
+                .await
+            {
+                Ok(owner) => Ok(Some(owner.to_string())),
+                Err(zbus::fdo::Error::NameHasNoOwner(_)) => Ok(None),
+                Err(e) => Err(e.to_string()),
             }
-            if self.reuse_pid && asked % 2 == 0 {
-                credentials.pid = credentials.pid.map(|pid| pid + 1);
-            }
-            Ok(credentials)
-        }
-
-        fn cgroup(&self, _pid: i32) -> io::Result<String> {
-            Ok(self.cgroup.clone())
-        }
-
-        fn executable(&self, _pid: i32) -> io::Result<PathBuf> {
-            Ok(self.executable.clone())
-        }
-
-        fn runs_file(&self, _pid: i32, _path: &Path) -> io::Result<bool> {
-            Ok(self.same_file)
         }
     }
 
@@ -430,7 +388,7 @@ pub(crate) mod tests {
     }
 
     async fn eis(rig: &Rig, change: impl FnOnce(&mut Fixture)) -> Eis<Fixture> {
-        let mut identity = Fixture::new(&rig.backend).await;
+        let mut identity = Fixture::new(&rig.backend, &rig.compositor).await;
         change(&mut identity);
         Eis {
             conn: rig.backend.clone(),
@@ -445,52 +403,34 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn eis_the_compositor_is_its_unit_and_executable_through_the_pidfd_and_the_pid() {
+    async fn eis_the_compositor_is_the_main_process_of_its_unit() {
         let rig = rig("owner").await;
         let owner = rig.compositor.unique_name().expect("name").to_string();
         assert_eq!(
             eis(&rig, |_| ()).await.check().await.expect("admitted"),
             owner
         );
-        let by_pid = eis(&rig, |f| f.hide_pidfd = true).await;
-        assert_eq!(by_pid.check().await.expect("admitted by pid"), owner);
     }
 
     #[tokio::test]
-    async fn eis_no_owner_another_unit_or_another_executable_is_refused_and_nothing_sent() {
+    async fn eis_no_owner_another_unit_or_no_pidfd_is_refused_and_nothing_sent() {
         let rig = rig("refused").await;
         type Change = Box<dyn FnOnce(&mut Fixture)>;
-        let refusals: [(&str, Change); 6] = [
-            (
-                "another unit",
-                Box::new(|f| {
-                    f.cgroup = athanor_unit::peer::user_unit_cgroup(
-                        nix::unistd::getuid().as_raw(),
-                        SLICE,
-                        "evil.service",
-                    )
-                }),
-            ),
-            (
-                "app scope",
-                Box::new(|f| f.cgroup = "0::/user.slice/app.slice/app-x.scope\n".into()),
-            ),
-            (
-                "a sub-cgroup",
-                Box::new(|f| f.cgroup = format!("{}/sub\n", f.cgroup.trim_end())),
-            ),
+        let refusals: [(&str, Change); 5] = [
+            ("another unit", Box::new(|f| f.unit = "evil.service".into())),
             (
                 "another executable",
-                Box::new(|f| f.executable = "/usr/bin/sh".into()),
+                Box::new(|f| f.exec = "/usr/bin/sh".into()),
             ),
-            ("a replaced file", Box::new(|f| f.same_file = false)),
             (
-                "a reused pid",
-                Box::new(|f| {
-                    f.hide_pidfd = true;
-                    f.reuse_pid = true;
-                }),
+                "a unit outside the image",
+                Box::new(|f| f.fragment = format!("/etc/systemd/user/{}", COMPOSITOR.unit)),
             ),
+            (
+                "not the main process",
+                Box::new(|f| f.main_pid = Some(std::process::id() + 1)),
+            ),
+            ("no pidfd", Box::new(|f| f.hide_pidfd = true)),
         ];
         for (what, change) in refusals {
             let eis = eis(&rig, change).await;
