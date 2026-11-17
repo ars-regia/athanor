@@ -78,7 +78,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-17: decision 30, the keyboard's return when a popup that holds it is
   destroyed (#1217, #1231).
 - Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
-  directions, for keys, buttons and touch points.
+  directions, for keys and buttons; touch points never collide.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1512,23 +1512,23 @@ compositor and that the own compositor did not yet offer:
           of its slot, never with `wl_touch.cancel`, which the seat applies to every touch,
           the user's own touches included. Only the lock and the paused session cancel
           touches (below);
-        - held input, per context. The keys, buttons and touches held through EIS are
-          tracked for each EIS context, by context and device, since Smithay's device id is
-          unique only within one connection. Releasing the held input of one context touches
-          no other context's, and none of the seat's physical keys, buttons and touches.
-          An injected press of a key, button or touch point the seat or another context holds
-          is dropped with its release and, for a touch point, its motion, since the client
-          keeps one set of held keys, buttons and touch points: it never sees a second press
-          without a release between, and one source's release never lets go for the other. The
-          physical input wins the other way: a physical press of a key, button or touch point a
-          context holds first sends the client the release of the held one, a touch point's
-          with `wl_touch.up`, to the keyboard, pointer or touch focus as a release of the seat
-          would reach it; the context then counts that input as let go, its xkb state and
-          modifiers included, and drops its own first release of it after that, delivered or
-          not, and a touch point's motion until then, unless a press of it by the context, or
+        - held input, per context. The keys, buttons and touches held through EIS are tracked
+          for each EIS context, by context and device, since Smithay's device id is unique only
+          within one connection. Releasing the held input of one context touches no other
+          context's, and none of the seat's physical keys, buttons and touches. An injected
+          press of a key or button the seat or another context holds is dropped with its
+          release, since the client keeps one set of held keys and buttons: it never sees a
+          second press without a release between, and one source's release never lets go for
+          the other. The physical input wins the other way: a physical press of a key or button
+          a context holds first sends the client the release of the held one, to the keyboard
+          or pointer focus as a release of the seat would reach it; the context then counts
+          that input as let go, its xkb state and modifiers included, and drops its own first
+          release of it after that, delivered or not, unless a press of it by the context, or
           the context's end, has cleared that mark first. That release starts and cancels no
-          Super tap: the physical press after it decides (maintainer decisions, 2026-11-17 and
-          2026-11-18);
+          Super tap: the physical press after it decides. Touch points never collide: each
+          touch point of a context, as each of the seat's, takes a slot of the seat no other
+          touch holds, so no source holds a touch point another holds (maintainer decisions,
+          2026-11-17 and 2026-11-18);
         - the lock and the paused session. From the lock request on (decision 36) until the
           unlock, and while the session is paused on another virtual terminal until its
           resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
@@ -1607,14 +1607,14 @@ compositor and that the own compositor did not yet offer:
           - held input: a key, a pointer button and a touch held through EIS at the lock
             request, and at a pause, are released, the touch with `wl_touch.cancel`; two
             contexts that hold input with the same device id are tracked apart; an injected
-            press of a key, button or touch point the seat or another context holds reaches no
-            client, nor do its release and a touch point's motion, and the other source's
-            release still reaches it; a physical press of a key, button or touch point a
-            context holds reaches the client after the release of the held one, that context's
-            next release and a touch point's motion before it reach no client, its modifiers no
-            longer count the key, and a press of the context after the physical release reaches
-            the client with its own release; a physical Super pressed over a Super a context
-            holds still opens the launcher on its release;
+            press of a key or button the seat or another context holds reaches no client, nor
+            does its release, and the other source's release still reaches it; a physical press
+            of a key or button a context holds reaches the client after the release of the held
+            one, that context's next release reaches no client, its modifiers no longer count
+            the key, and a press of the context after the physical release reaches the client
+            with its own release; a physical Super pressed over a Super a context holds still
+            opens the launcher on its release; an injected touch point and a physical one with
+            the same slot number reach the client as two touch points;
           - the device types: a context granted the keyboard alone is offered no pointer or
             touch device and is refused one it asks for, and likewise for each other granted
             set; each portal type yields the capabilities of the mapping above and no text
