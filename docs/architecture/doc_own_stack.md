@@ -1513,7 +1513,11 @@ compositor and that the own compositor did not yet offer:
         - held input, per context. The keys, buttons and touches held through EIS are
           tracked for each EIS context, by context and device, since Smithay's device id is
           unique only within one connection. Releasing the held input of one context touches
-          no other context's, and none of the seat's physical keys, buttons and touches;
+          no other context's, and none of the seat's physical keys, buttons and touches. An
+          injected press of a key the seat or another context holds is dropped, its release
+          included, since the client keeps one set of held keys: it never sees a second press
+          without a release between, and one source's release never lets the key go for the
+          other (maintainer decision, 2026-11-17);
         - the lock and the paused session. From the lock request on (decision 36) until the
           unlock, and while the session is paused on another virtual terminal until its
           resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
