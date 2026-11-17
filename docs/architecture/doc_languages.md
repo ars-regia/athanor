@@ -5,7 +5,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 ## 1. Context
 
 - **What binds this document.**
-  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-sulphur-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:177-184`). "All strings go through gettext from the first commit" (`doc_shell.md:184`).
+  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-sulphur-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:192-195`). "All strings go through gettext from the first commit" (`doc_shell.md:199`).
   - `doc_shell_standard.md`: no text is truncated in German, and the layout mirrors under a right-to-left locale (ST7).
   - `doc_bar.md`: the input-source module shows the active layout and switches between the configured ones through the compositor client (`doc_bar.md:64`). The clock follows the locale and COSMIC's `military_time` (`doc_bar.md:65`). Right-to-left mirroring is designed in `doc_bar.md:136`. Behind `wp_security_context_v1` a client loses, among other globals, the input-method and virtual-keyboard globals (`doc_bar.md:9`).
   - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:92`).
@@ -52,7 +52,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - `doc_shell.md` (row 8 of the replacement table, `doc_shell.md:69`) has cosmic-settings-daemon leave in stage 8, so all three behaviours must have a replacement by then.
   - **The live configuration on this machine.** The user's `xkb_config` is `layout:"us", variant:"intl"`. `/etc/vconsole.conf` holds `KEYMAP=us-intl`, `XKBLAYOUT=us` and `XKBVARIANT=intl`. `/etc/locale.conf` holds `LANG=it_IT.utf8`.
   - **What the shell does with layouts today.**
-    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:214-283`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
+    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:54-56, 268-274, 320-325`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
     - The greeter shows a read-only label (`athanor-greeter-ui`, `ui.rs:88-122`).
     - `athanor-greeter-session` exports only `LANG`, `LANGUAGE`, `LC_MESSAGES` and `LC_TIME` from `/etc/locale.conf` and no XKB variable. The greeter cosmic-comp's own `~/.config/cosmic/com.system76.CosmicComp/v1/` under `/var/lib/greetd` is empty. So the greeter's layout follows neither `/etc/vconsole.conf` nor localed (inferred, spike S4).
     - The greeter's client binds the compositor's main socket (`/usr/libexec/athanor-greeter-client`), so it sees the keyboard-layout global.
@@ -119,9 +119,9 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - GNOME's wall clock looks up its time-format strings in the catalog of the `LC_TIME` locale, not of the messages locale (gnome-desktop `libgnome-desktop/gnome-wall-clock.c:288-306`, master, read 2026-10-05).
   - `org.gnome.desktop.interface clock-format` (`'24h'` or `'12h'`) exists in gsettings-desktop-schemas 49.1.
 - **Where the session starts today.**
-  - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no locale, XKB or input-method variable.
-  - `athanor-desktop` imports only `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS` into the user manager (`athanor-desktop:34`). So the bar and every other user unit run with the user manager's locale, which comes from `/etc/locale.conf`, not the user's own.
-  - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:268-274`).
+  - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no XKB variable. It sources `session-environment` (`athanor-session:42-43`), which exports the user's language, region and cursor (SN13, #823).
+  - `athanor-desktop` imports the names of `/usr/share/athanor-system-config/session-import` into the user manager (`athanor-desktop:35-37`): `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS`, then `LANG`, `LANGUAGE`, the `LC_*` formats of the region and the cursor variables. So the bar and every other user unit run with the user's own language and region, read by `session-environment`, and with `/etc/locale.conf` only where that script exports nothing.
+  - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:331-335`).
   - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document. ADR-0073 deleted it from the tree.
 
 ## 2. Decisions
@@ -416,11 +416,11 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 ## 3. Changes to other documents
 
-Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into `doc_software.md` are of revision 3 as merged (PR #117), and those into the other desktop specifications are of their text on 2026-10-05.
+Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into `doc_software.md` are of revision 3 as merged (PR #117), and those into the other desktop specifications are of their text on 2026-10-05. Line numbers corrected against `iso-v0` at b1f3e0bb on 2026-11-17 (#1089).
 
 - **`doc_shell.md`.**
   - SH13's "Italian and English are the shipped locales" (`doc_shell.md:177`) stays. Its rig gains the clock cases of LN17 and the font case of LN13.
-  - "All strings go through gettext from the first commit" (`doc_shell.md:184`) gains: "read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md`, LN1)".
+  - "All strings go through gettext from the first commit" (`doc_shell.md:199`) gains: "read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md`, LN1)".
   - The change of the interface family at `doc_shell.md:96` is `doc_visual_language.md`'s, not repeated here.
 - **`doc_bar.md`.**
   - The clock row (`doc_bar.md:65`): "the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format" becomes "the system clock, in 12 or 24 hours as `org.gnome.desktop.interface clock-format` says, else as the region's time format; date and time patterns from the catalog of the `LC_TIME` locale (`doc_languages.md`, LN8)".

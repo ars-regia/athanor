@@ -278,7 +278,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
 - remove `cosmic-workspaces` from `forge/config/packages.json:123`;
-- point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:466-509`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
+- point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:511-515, 573-574`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;
 - enable `athanor-overview.service` by preset.
@@ -490,7 +490,7 @@ The program `athanor-switcher`: its bus interface, the bindings of both sessions
 
 ### Rationale: context and verified facts
 
-Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the maintainer's desktop.
+Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the maintainer's desktop. Line numbers corrected against `iso-v0` at b1f3e0bb on 2026-11-17 (#1089).
 
 - **What binds it.** ADR-0138 decisions 2 and 6; section 7 (A2-24) and `doc_launcher.md` LA12, which remove cosmic-launcher only with this switcher bound to Alt+Tab; SH1's rule for replacing a surface (`doc_shell.md`); `doc_own_stack.md` OS8 (Orca's transcript), OS13 (every default binding has a fixture test) and decision 30 (the compositor draws no title bars, with their text, theme and accessibility work).
 - **cosmic-comp's session today.** COSMIC's `defaults` bind Alt+Tab and Super+Tab to `System(WindowSwitcher)`, and Alt+Shift+Tab and Super+Shift+Tab to `System(WindowSwitcherPrevious)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:109-112`, cosmic-comp-1.11.0-2.fc43.athanor1). `system_actions:53,55` run `cosmic-launcher alt-tab` and `cosmic-launcher shift-alt-tab` (cosmic-settings-daemon-1.11.0-2.fc43). The compositor client writes a user's system action once with `shortcuts::set_system_action_once` (`system/athanor-sulphur-client/src/shortcuts.rs:69`), as the launcher does for `Launcher` (`forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/main.rs:87`).
@@ -564,10 +564,10 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 
 **OV27. Sal prerequisites** (proposed, revision 3), in one Sal pull request agreed with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display, which need items 1 to 3 too:
 
-1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:717`, and `close`, `:837`). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
-2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:2009-2082`).
+1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:1046`, and `close`, `:2189`; `Shell::open_layer`, `:789`, and a public `close`, `:810`, have since landed). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
+2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:2471-2530`).
 3. **Focus at map.** The focused widget is reported to AT-SPI when the surface first takes the keyboard, proven by an AT-SPI golden.
-4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:156-171`). Enter raises `Event::Selected` on the selected row, as it does today.
+4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:364-376`). Enter raises `Event::Selected` on the selected row, as it does today.
 
 **OV28. Construction** (proposed, revision 3). Each step merges on its own, in this order, and each is judged on the reference laptop:
 
