@@ -111,7 +111,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     | my                      | Padauk                          |
     | el / ru / vi            | Noto Sans                       |
 
-  - The shell test rig installs Inter and two Noto families but not `adwaita-sans-fonts` (`forge/test/shell/Containerfile:54`).
+  - The shell test rig installs Inter and two Noto families (`forge/test/shell/Containerfile:23`) and, in a later stage, `adwaita-sans-fonts` and `adwaita-mono-fonts` (`:54`), but not the Hebrew and CJK Noto families.
 - **Accounts and region** (checked on 2026-10-05).
   - AccountsService 23.13.9 stores a user's language as `Language` (one locale) and `Languages` (an ordered list), set through `SetLanguage` and `SetLanguages`. It has no property for formats.
   - GNOME stores the region in the GSettings key `org.gnome.system.locale region`. At login gnome-session sets `LC_NUMERIC`, `LC_TIME`, `LC_MONETARY`, `LC_PAPER`, `LC_ADDRESS`, `LC_TELEPHONE` and `LC_MEASUREMENT` to it, and leaves them unset when the region equals `LANG` (gnome-session `leader-main.c:129-158`, main at d3c610c1, 2026-09-20).
@@ -454,8 +454,8 @@ Applied with the approval of this document. Line numbers into code are those of 
   - Software applies the Chromium input-method override (LN11);
   - Software extends Flatpak's `extra-languages` if spike S3 requires it (LN14).
 - **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules` and its `%files` line in `athanor-base-config.spec` (LN5, LN19 step 3).
-- **`forge/test/shell/Containerfile:17`:** adds `adwaita-sans-fonts`, `adwaita-mono-fonts`, `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13).
-- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:104-105`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
+- **`forge/test/shell/Containerfile:23`:** adds `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13); `adwaita-sans-fonts` and `adwaita-mono-fonts` are there already, at `:54` (#532).
+- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:96-97`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
 - Amendments received, from the maintainer's rulings of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.
 
 ## 4. Open doubts
