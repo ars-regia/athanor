@@ -171,11 +171,12 @@ image_id() {
 # content hash, as Spec Build Check takes it, never latest: the published one when a trusted run
 # of call-build-builder.yml signed it, else the one forge/scripts/builder_image.sh builds from this
 # checkout (doc_build_system.md, section 5). That one is unsigned (the exception to PL12 of
-# doc_pipeline.md, for this recipe), loaded into the local podman only, never tagged, pushed,
-# signed or cached under its hash, and used for the RPM installed in the test rig. The RPM is a
+# doc_pipeline.md, for this recipe), loaded into the local podman only, under the archive's own
+# local tag and run by its image ID, never pushed, signed or cached under its hash, and used for
+# the RPM installed in the test rig. The RPM is a
 # pull-request test artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
 build_spec_rig() {
-    local base=$1 want=$2 idemp builder rpm ctx id
+    local base=$1 want=$2 idemp builder rpm ctx id archive name
     # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
     # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
     idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
@@ -194,9 +195,19 @@ build_spec_rig() {
         echo "rig.sh: no signed builder for this checkout: building it with builder_image.sh, unsigned, for this test only" >&2
         # Outside $out/cosmic-comp-spec, which is the build context of the derived image.
         mkdir -p "$out/builder-local"
-        bash "$root/forge/scripts/builder_image.sh" build "$out/builder-local/athanor-builder.tar.gz"
-        builder=$(bash "$root/forge/scripts/builder_image.sh" resolve "$out/builder-local/athanor-builder.tar.gz")
-        rm -f "$out/builder-local/athanor-builder.tar.gz"
+        archive=$out/builder-local/athanor-builder.tar.gz
+        # The archive goes whether or not the build and the load worked; their errors stay on stderr.
+        if ! { bash "$root/forge/scripts/builder_image.sh" build "$archive" &&
+            name=$(bash "$root/forge/scripts/builder_image.sh" resolve "$archive"); }; then
+            rm -f "$archive"
+            echo "rig.sh: the builder of this checkout could not be built or loaded" >&2
+            exit 1
+        fi
+        rm -f "$archive"
+        # The image ID, not the name podman load applied: a concurrent build, or an older image
+        # under the same local name, cannot swap the builder between here and the spec build.
+        builder=$(podman image inspect --format '{{.Id}}' "$name")
+        builder=${builder#sha256:}
     fi
     rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
     rm -f "$rpm"

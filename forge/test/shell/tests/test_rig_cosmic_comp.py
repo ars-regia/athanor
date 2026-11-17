@@ -31,6 +31,8 @@ PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
+LOCAL_BUILDER_ID = "c" * 64
+LOCAL_BUILDER = "localhost/athanor-builder:latest"
 
 # The podman of the tests: `run ... rpm -q` answers the Version-Release of the image it names,
 # `run ... build_spec.sh build` leaves the RPM the test names in the checkout's forge/RPMS, and
@@ -49,7 +51,10 @@ PODMAN = textwrap.dedent(
     if args[0] == "volume" and args[1] == "create":
         print("home")
     elif args[0] == "load":
-        print("Loaded image: localhost/athanor-builder:local")
+        if (tmp / "load-fails").exists():
+            print("Error: payload does not match", file=sys.stderr)
+            sys.exit(125)
+        print("Loaded image: localhost/athanor-builder:latest")
     elif args[:2] == ["image", "exists"]:
         sys.exit(1 if args[2] in conf["absent"] else 0)
     elif args[:2] == ["image", "inspect"]:
@@ -81,6 +86,7 @@ SKOPEO = textwrap.dedent(
     """\
     #!/bin/sh
     here=$(dirname "$0")/..
+    echo "$*" >> "$here/skopeo.log"
     if [ ! -e "$here/builder-absent" ]; then
         case " $* " in
         *" --config "*) printf '{"config":{"Labels":{"tier.content.sha256":"%s"}}}\\n' "$(cat "$here/builder-hash")" ;;
@@ -98,6 +104,7 @@ SKOPEO = textwrap.dedent(
 COSIGN = textwrap.dedent(
     """\
     #!/bin/sh
+    echo "$*" >> "$(dirname "$0")/../cosign.log"
     if [ -e "$(dirname "$0")/../builder-unsigned" ]; then
         echo "Error: no signatures found" >&2
         exit 1
@@ -188,7 +195,7 @@ class Rig:
             json.dumps(
                 {
                     "derived_id": DERIVED_ID,
-                    "ids": {self.base: BASE_ID},
+                    "ids": {self.base: BASE_ID, LOCAL_BUILDER: LOCAL_BUILDER_ID},
                     "absent": [],
                     "rpm": rpm,
                     "nevr": {
@@ -406,9 +413,22 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertEqual([call[-2] for call in stages], ["fetch", "build"])
         # The spec builds in the image podman loaded; nothing is pulled, tagged or pushed, and the
         # builder is never signed or copied.
-        self.assertEqual(stages[0][-5], "localhost/athanor-builder:local")
-        self.assertFalse([c for c in calls if c[0] in ("push", "tag", "login")])
+        # The spec builds in the image by its ID, not by the name load applied.
+        self.assertEqual(stages[0][-5], LOCAL_BUILDER_ID)
+        self.assertIn(
+            ["image", "inspect", "--format", "{{.Id}}", LOCAL_BUILDER], calls
+        )
+        # No podman call of any form pushes, tags, logs in or touches a manifest.
+        self.assertFalse(
+            [c for c in calls if {"push", "tag", "login", "manifest"} & set(c)]
+        )
         self.assertFalse([c for c in calls if c[0] == "pull" and "athanor-builder" in c[-1]])
+        # Nor does skopeo copy the builder, or cosign sign or attest it.
+        for log, forbidden in (("skopeo.log", "copy"), ("cosign.log", "sign"), ("cosign.log", "attest")):
+            path = rig.tmp / log
+            lines = path.read_text().splitlines() if path.exists() else []
+            words = {w for line in lines for w in line.split()}
+            self.assertNotIn(forbidden, words, log)
         self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
 
     def test_an_unpublished_builder_is_built_here_and_used_unpushed(self):
@@ -437,6 +457,18 @@ class CosmicCompVersion(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("builderImage does not build", result.stderr)
         self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_builder_that_does_not_load_fails_before_any_spec_build(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "nix-fails").unlink(missing_ok=True)
+        (self.tmp / "load-fails").write_text("")
+        result = rig.run("cosmic-comp-version")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("payload does not match", result.stderr)
+        self.assertIn("could not be built or loaded", result.stderr)
+        self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
 
     def test_a_miss_without_nix_refuses_with_a_message(self):
         rig = Rig(self.tmp, signed=False, nix=False)

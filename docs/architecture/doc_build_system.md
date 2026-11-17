@@ -180,8 +180,8 @@ named by its content hash (`check_idempotency.sh --package builder`): the publis
 request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
 artifact and never pushed. The shell rig's spec build (`rig.sh cosmic-comp-version`) on such a
 miss builds the checkout's builder with `builder_image.sh` itself and loads it into the local
-podman: unsigned, never tagged, pushed, signed or cached under its hash, and used only to build
-the RPM that the job installs in the test rig, which nothing publishes; a host without `nix`
+podman under the archive's own local tag: unsigned, never pushed, signed or cached under its
+hash, run by its image ID, and used only to build the RPM that the job installs in the test rig, which nothing publishes; a host without `nix`
 refuses with a message. Like the one-day artifact, this builder never leaves the job; it differs
 in being loaded into the local podman, and its RPM goes only into the test rig. PL12
 (`doc_pipeline.md`) names both. Never `athanor-builder:latest`, the default branch's builder: a
