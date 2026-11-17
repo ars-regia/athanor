@@ -148,17 +148,50 @@ mod tests {
         std::fs::remove_dir_all(base).expect("cleanup");
     }
 
+    /// Whether "/" is root's and not the user's: false when the suite runs as root, and in a user
+    /// namespace that does not map root, where "/" reads as the overflow id. The tests that
+    /// need a directory of another owner return early then.
+    fn slash_is_roots_and_not_ours() -> bool {
+        use std::os::unix::fs::MetadataExt;
+        dirs::own_dir(Path::new("/")).is_err()
+            && std::fs::metadata("/").is_ok_and(|found| found.uid() == 0)
+    }
+
     #[test]
     fn a_document_directory_not_the_users_stops_the_chooser() {
-        // "/" is root's: granted only when the suite itself runs as root, which proves nothing.
-        let Err(error) = opened(&[PathBuf::from("/")], dirs::own_dir) else {
+        if !slash_is_roots_and_not_ours() {
             return;
-        };
+        }
+        let error = opened(&[PathBuf::from("/")], dirs::own_dir).expect_err("root's directory");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         assert!(
             error.to_string().starts_with("/ is not granted: "),
             "{error}"
         );
+    }
+
+    #[test]
+    fn apply_stops_on_a_linked_document_in_a_directory_of_root() {
+        if !slash_is_roots_and_not_ours() {
+            return;
+        }
+        let base = probe("apply-root");
+        let link = base.join("config/athanor/layout.toml");
+        std::os::unix::fs::symlink("/layout.toml", &link).expect("symlink");
+        // The check fails before the ruleset, but the thread keeps a failure from confining
+        // the test process, as the other tests here do.
+        let outcome = std::thread::spawn(move || {
+            apply(&link).map_err(|error| {
+                let kind = error.downcast_ref::<io::Error>().map(io::Error::kind);
+                (kind, error.to_string())
+            })
+        })
+        .join()
+        .expect("sandbox test thread");
+        let (kind, message) = outcome.expect_err("root's directory");
+        assert_eq!(kind, Some(io::ErrorKind::PermissionDenied), "{message}");
+        assert!(message.starts_with("/ is not granted: "), "{message}");
+        std::fs::remove_dir_all(base).expect("cleanup");
     }
 
     #[test]

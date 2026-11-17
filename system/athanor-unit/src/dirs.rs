@@ -300,8 +300,9 @@ mod tests {
 
     #[test]
     fn an_own_dir_refuses_a_directory_of_root() {
-        // "/" is root's; the test is vacuous when the suite itself runs as root.
-        if nix::unistd::geteuid().is_root() {
+        // "/" must be root's and not ours: not so when the suite runs as root, nor in a user
+        // namespace that does not map root, where "/" reads as the overflow id.
+        if nix::unistd::geteuid().is_root() || fs::metadata("/").map(|m| m.uid()).ok() != Some(0) {
             return;
         }
         owned_dir(Path::new("/")).expect("root's directory passes owned_dir");
