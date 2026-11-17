@@ -1078,13 +1078,14 @@ compositor and that the own compositor did not yet offer:
     *Amended on 2026-11-17 (maintainer decision, 2026-11-17; #1217, a layer surface's popup
     grab, and #1231, the dock menu's focus):* when a popup that holds the keyboard is destroyed,
     the keyboard returns at once to the next popup of its chain that holds a grab, or to the
-    popups' root surface, and not at the next key or click. When the root is gone or can no
-    longer take the keyboard, the keyboard goes where a destroyed window's keyboard goes. It
-    never leaves a lock surface, or a layer surface that holds the keyboard exclusively. The
+    popups' root surface, and not at the next key or click. A parent popup that is already
+    destroyed or holds no grab is passed over, so that the keyboard falls back to the root. The
     client sees `wl_keyboard.enter` on that surface as the popup closes, so that a toolkit can
-    give the focus back to the control that opened the popup with nothing pressed. AX7 of
+    give the focus back to the control that opened the popup with nothing pressed. A fixture
+    test of Sulphur covers the return to a parent popup that holds a grab, the fall back to the
+    root past a destroyed or grab-less parent, and a popup whose parent is the root. AX7 of
     `doc_accessibility.md` says that Escape closes the innermost popover; where the keyboard
-    goes then is this decision.
+    goes after any destroy of a popup, Escape included, is this decision.
 
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
     MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
