@@ -145,8 +145,11 @@ def switch_on(app, Atspi):
     node = switch_node(app, Atspi)
     if node is None:
         return None
+    # GTK's switch is a checked check box; AccessKit's Role::Switch a pressed toggle button.
     states = node.get_state_set()
-    return states.contains(Atspi.StateType.CHECKED)
+    return states.contains(Atspi.StateType.CHECKED) or states.contains(
+        Atspi.StateType.PRESSED
+    )
 
 
 def press_switch(app, Atspi):

@@ -6,7 +6,8 @@ doc_own_stack.md, OS10: the GTK 4 twin of athanor-sal's gallery
 strings.tsv, and takes the same command line. What a screen reader is told about it, and how it
 draws, are the references the toolkit's gallery is checked against (rig.sh orca gallery, atspi
 gallery and surface gtk-gallery). The page toggle of the page shown holds the focus at the start;
-the dialogs page starts with its dialog open, the focus on the dialog's button.
+the dialogs page starts with its dialog open, the focus on the dialog's button, and the menus page
+with its menu open.
 """
 
 import argparse
@@ -17,7 +18,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
-from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from cases import GALLERY_PAGES  # noqa: E402
 
@@ -85,6 +86,75 @@ def fill_rows(rows, text, first):
         row = Gtk.ListBoxRow(child=column)
         row.update_property([Gtk.AccessibleProperty.LABEL], [name])
         rows.append(row)
+
+
+def menu_model(text):
+    """The menu of the menus page, as the toolkit's: an item and a check, two radios, then an item
+    that takes no input and a submenu of one item, each group a section."""
+    first, radios, last, more = Gio.Menu(), Gio.Menu(), Gio.Menu(), Gio.Menu()
+    first.append(text["menu.item"], "menu.item")
+    first.append(text["menu.check"], "menu.check")
+    radios.append(text["menu.radio1"], "menu.sort::name")
+    radios.append(text["menu.radio2"], "menu.sort::date")
+    last.append(text["menu.off"], "menu.off")
+    more.append(text["menu.about"], "menu.item")
+    last.append_submenu(text["menu.more"], more)
+    model = Gio.Menu()
+    for section in (first, radios, last):
+        model.append_section(None, section)
+    return model
+
+
+def menu_actions():
+    """The menu's actions: GLib's default handlers toggle the check and select a radio."""
+    group = Gio.SimpleActionGroup()
+    group.add_action(Gio.SimpleAction.new("item", None))
+    group.add_action(Gio.SimpleAction.new_stateful("check", None, GLib.Variant.new_boolean(True)))
+    group.add_action(
+        Gio.SimpleAction.new_stateful(
+            "sort", GLib.VariantType.new("s"), GLib.Variant.new_string("name")
+        )
+    )
+    off = Gio.SimpleAction.new("off", None)
+    off.set_enabled(False)
+    group.add_action(off)
+    return group
+
+
+MENU_ROLES = (
+    Gtk.AccessibleRole.MENU_ITEM,
+    Gtk.AccessibleRole.MENU_ITEM_CHECKBOX,
+    Gtk.AccessibleRole.MENU_ITEM_RADIO,
+)
+
+
+def label_text(widget):
+    """The first non-empty label under `widget`: the entry's own label comes before its accelerator."""
+    child = widget.get_first_child()
+    while child is not None:
+        if isinstance(child, Gtk.Label) and child.get_text():
+            return child.get_text()
+        text = label_text(child)
+        if text:
+            return text
+        child = child.get_next_sibling()
+    return None
+
+
+def name_items(widget):
+    """Names every menu entry after its label, as the GTK bar's menu did: GTK 4.20 names a model
+    button only through a LabelledBy relation to a label whose accessible name is empty, and the
+    relation outranks the Label property, so it goes."""
+    child = widget.get_first_child()
+    while child is not None:
+        if child.get_accessible_role() in MENU_ROLES:
+            text = label_text(child)
+            if text:
+                child.reset_relation(Gtk.AccessibleRelation.LABELLED_BY)
+                child.update_property([Gtk.AccessibleProperty.LABEL], [text])
+        else:
+            name_items(child)
+        child = child.get_next_sibling()
 
 
 def fill_page(page, container, text):
@@ -175,10 +245,30 @@ def fill_page(page, container, text):
         button = Gtk.Button(label=text["waiting"], sensitive=False)
         switch.connect("notify::active", lambda s, _: button.set_sensitive(s.get_active()))
         container.append(button)
+    elif page == "calendar":
+        # GTK's calendar is on today, the rig's frozen date, and starts its weeks on the locale's
+        # first weekday, as the toolkit's strings.tsv says for each language.
+        container.append(Gtk.Calendar())
     elif page == "dialogs":
         button = Gtk.Button(label=text["dialog.open"])
         button.connect("clicked", lambda b: open_dialog(b.get_root(), text))
         container.append(button)
+    elif page == "menus":
+        button = Gtk.Button(label=text["menu.open"])
+        button.insert_action_group("menu", menu_actions())
+        popover = Gtk.PopoverMenu.new_from_model(menu_model(text))
+        popover.set_parent(button)
+        # The toolkit's button says it has a popup and whether it is open, as a GtkMenuButton
+        # does for its own toggle.
+        button.update_property([Gtk.AccessibleProperty.HAS_POPUP], [True])
+        button.update_state([Gtk.AccessibleState.EXPANDED], [False])
+        popover.connect("show", lambda _: button.update_state([Gtk.AccessibleState.EXPANDED], [True]))
+        popover.connect("closed", lambda _: button.update_state([Gtk.AccessibleState.EXPANDED], [False]))
+        # The tracker adds an entry once its action resolves, so the entries are named when shown.
+        popover.connect("map", name_items)
+        button.connect("clicked", lambda _: popover.popup())
+        container.append(button)
+        return popover
     else:
         raise ValueError(f"no page {page!r}")
 
@@ -243,9 +333,10 @@ def present(application, options, text):
     selector.append(row)
     content.append(selector)
     shown = []
+    menu = None
     for page in pages:
         container = group(text[f"page.{page}"])
-        fill_page(page, container, text)
+        menu = fill_page(page, container, text) or menu
         container.set_visible(page == options.page)
         content.append(container)
         shown.append(container)
@@ -263,6 +354,9 @@ def present(application, options, text):
     window.present()
     if options.page == "dialogs":
         open_dialog(window, text)
+    elif options.page == "menus":
+        # Once the window is mapped: a popover opens over a mapped parent.
+        GLib.idle_add(menu.popup)
 
 
 def main(argv):

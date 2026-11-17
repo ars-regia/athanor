@@ -15,4 +15,4 @@ tokio = { workspace = true }
 futures-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+jiff = { workspace = true }

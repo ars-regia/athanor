@@ -168,7 +168,7 @@ impl Center {
             }
         }
         if let Some(ui) = shell.ui_mut(surface) {
-            ui.announce(&tr("Control center"));
+            ui.announce(&tr("Control center"), athanor_sal::Priority::Polite);
         }
         self.bus.set_open(true);
     }

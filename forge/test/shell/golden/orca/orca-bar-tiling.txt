@@ -1,0 +1,4 @@
+Screen reader on.
+Tile windows check box not checked.
+tab
+Screen reader off.

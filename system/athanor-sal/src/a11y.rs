@@ -2,7 +2,7 @@
 //! the same paths as the keyboard and the pointer.
 
 use crate::focus::list_stop;
-use crate::widget::{Event, Kind, RootRole, Ui, WidgetId};
+use crate::widget::{Event, Kind, Mark, Priority, RootRole, Ui, WidgetId};
 use accesskit::{
     Action, ActionData, ActionRequest, HasPopup, Live, Node, NodeId, Orientation, Rect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
@@ -81,6 +81,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
+        // GTK's calendar reaches AT-SPI as an unnamed panel, which AccessKit's Group is; a
+        // GenericContainer would leave no node at all (accesskit_consumer, filters.rs).
+        Kind::Calendar(_) => Node::new(Role::Group),
         Kind::Alert(name) => {
             // A column as a group is, and says so as GTK's vertical box does.
             let mut node = Node::new(Role::Alert);
@@ -101,6 +104,16 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_value(text.as_str());
             node
         }
+        // GTK's day and weekday labels; a day takes the focus, so it is named by its number too.
+        Kind::CalendarCell(cell) => {
+            let mut node = Node::new(Role::Label);
+            node.set_value(cell.text.as_str());
+            if let Some(mark) = cell.day {
+                node.set_label(cell.text.as_str());
+                node.set_selected(mark.selected);
+            }
+            node
+        }
         Kind::WindowButton(button) => {
             let mut node = Node::new(Role::Button);
             node.set_label(button.name());
@@ -119,6 +132,28 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::MenuItem(label) => {
             let mut node = Node::new(Role::MenuItem);
             node.set_label(label.as_str());
+            node.add_action(Action::Click);
+            node
+        }
+        // GTK's model buttons: a check or a radio menu item with its state; a submenu's item and
+        // its page's title are menu items, expanded while the page is shown, as GTK sets them.
+        Kind::MenuEntry { label, mark } => {
+            let mut node = Node::new(match mark {
+                Mark::Check(_) => Role::MenuItemCheckBox,
+                Mark::Radio(_) => Role::MenuItemRadio,
+                Mark::Submenu(_) | Mark::Back(_) => Role::MenuItem,
+            });
+            node.set_label(label.as_str());
+            match *mark {
+                Mark::Check(on) | Mark::Radio(on) => {
+                    node.set_toggled(if on { Toggled::True } else { Toggled::False });
+                }
+                Mark::Submenu(page) => {
+                    node.set_has_popup(HasPopup::Menu);
+                    node.set_expanded(ui.is_visible(page));
+                }
+                Mark::Back(_) => node.set_expanded(true),
+            }
             node.add_action(Action::Click);
             node
         }
@@ -460,13 +495,17 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
-/// The announcement of [`Ui::announce`]: a polite live region, which the AT-SPI bridge announces
-/// as the node is added (`accesskit_atspi_common`, `adapter.rs`, `add_node`).
+/// The announcement of [`Ui::announce`]: a live region, polite or assertive as its priority,
+/// which the AT-SPI bridge announces as the node is added (`accesskit_atspi_common`,
+/// `adapter.rs`, `add_node`).
 fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
-    let text = ui.announcement.as_deref()?;
+    let (text, priority) = ui.announcement.as_ref()?;
     let mut node = Node::new(Role::Label);
-    node.set_value(text);
-    node.set_live(Live::Polite);
+    node.set_value(text.as_str());
+    node.set_live(match priority {
+        Priority::Polite => Live::Polite,
+        Priority::Assertive => Live::Assertive,
+    });
     node.set_bounds(bounds(ui, Ui::ROOT, scale));
     Some((ANNOUNCEMENT, node))
 }
@@ -933,6 +972,35 @@ mod tests {
             .find(|(n, _)| *n == text_run_id(field, 0))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
+    }
+
+    #[test]
+    fn a_menus_checks_radios_and_submenus_read_as_gtks_model_buttons() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", true);
+        let radio = ui.menu_radio(menu, "Low", false);
+        let (item, page) = ui.submenu(menu, "More");
+        ui.layout();
+        let read = |ui: &Ui, id: WidgetId| {
+            let n = node(ui, id, 1.0);
+            (n.role(), n.label().map(str::to_owned), n.toggled(), n.is_expanded())
+        };
+        assert_eq!(
+            read(&ui, check),
+            (Role::MenuItemCheckBox, Some("Mute".into()), Some(Toggled::True), None)
+        );
+        assert_eq!(
+            read(&ui, radio),
+            (Role::MenuItemRadio, Some("Low".into()), Some(Toggled::False), None)
+        );
+        assert_eq!(read(&ui, item), (Role::MenuItem, Some("More".into()), None, Some(false)));
+        assert_eq!(node(&ui, item, 1.0).has_popup(), Some(HasPopup::Menu));
+        assert_eq!(ui.activate(item), None);
+        let title = ui.widget(page).children[0];
+        assert_eq!(read(&ui, item).3, Some(true));
+        assert_eq!(read(&ui, title), (Role::MenuItem, Some("More".into()), None, Some(true)));
     }
 
     #[test]
@@ -1546,6 +1614,8 @@ mod tests {
         /// The focus gained, the window state made active and the windows activated, in the
         /// order the bus heard them: `focused`, `active` and `activate <name>`.
         activation: Vec<String>,
+        /// The expanded states reported, in order: `true` for expanded, `false` for collapsed.
+        expanded: Vec<bool>,
         /// The nodes with interfaces registered on the bus, and their interfaces' bits.
         registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
     }
@@ -1602,6 +1672,10 @@ mod tests {
                         event: ObjectEvent::StateChanged(State::Active, true),
                         ..
                     } => heard.activation.push("active".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Expanded, expanded),
+                        ..
+                    } => heard.expanded.push(expanded),
                     _ => {}
                 }
             }
@@ -1768,7 +1842,7 @@ mod tests {
         };
         let before = children(&adapter);
         for _ in 0..2 {
-            ui.announce("Volume 45 percent");
+            ui.announce("Volume 45 percent", Priority::Polite);
             let updates = tree_updates(&mut ui, 1.0);
             assert_eq!(updates.len(), 2);
             for update in updates {
@@ -1783,6 +1857,32 @@ mod tests {
         let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
         let heard = heard.lock().expect("not poisoned");
         assert_eq!(heard.announcements, [polite.clone(), polite]);
+    }
+
+    /// An assertive announcement reaches AT-SPI as assertive, which interrupts the screen reader:
+    /// a critical notification's (doc_bar.md BR4, doc_notification_center.md NC11,
+    /// doc_accessibility.md AX6). The priority goes with its text: a later polite one is polite.
+    #[test]
+    fn an_assertive_announcement_is_heard_as_assertive() {
+        let mut ui = Ui::new("Notifications", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Label("Battery".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi(&ui);
+        for (text, priority) in [
+            ("Battery critically low", Priority::Assertive),
+            ("Battery charging", Priority::Polite),
+        ] {
+            ui.announce(text, priority);
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        let heard = heard.lock().expect("not poisoned");
+        let expected = [
+            ("Battery critically low".to_owned(), "Assertive".to_owned()),
+            ("Battery charging".to_owned(), "Polite".to_owned()),
+        ];
+        assert_eq!(heard.announcements, expected);
     }
 
     /// A row's labels offer AT-SPI's Text interface, as GTK's labels do: Orca reads a focused
@@ -1841,6 +1941,36 @@ mod tests {
         assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
     }
 
+    /// A menu button taking the focus reports its expanded state with it the first time, as GTK
+    /// 4.20 does: Orca then says "collapsed" for each one once, as for GTK's (AX6; the third
+    /// change of `vendor/accesskit_atspi_common`). A plain button reports none.
+    #[test]
+    fn a_menu_button_taking_the_focus_reports_its_expanded_state() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let plain = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        let menu = ui.add(Ui::ROOT, Kind::Button("Power".into()));
+        ui.set_has_popup(menu, true);
+        ui.layout();
+        let (mut adapter, heard) = at_spi_focused(&ui, true);
+        ui.set_focus(Some(plain));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert!(heard.lock().expect("not poisoned").expanded.is_empty());
+        ui.set_focus(Some(menu));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false]);
+        for focus in [plain, menu] {
+            ui.set_focus(Some(focus));
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false], "once");
+    }
+
     /// An announcement asked for before a surface leaves the accessibility tree and not yet
     /// published, or while it is out, is never heard (`Ui::announce`).
     #[test]
@@ -1849,10 +1979,10 @@ mod tests {
         ui.add(Ui::ROOT, Kind::Button("Mute".into()));
         ui.layout();
         let (mut adapter, heard) = at_spi(&ui);
-        ui.announce("Volume 45 percent");
+        ui.announce("Volume 45 percent", Priority::Polite);
         leave(&mut adapter, &Mutex::new(None), &mut ui, 1.0, false);
         assert!(ui.announcement.is_none(), "the next adapter would announce it");
-        ui.announce("Volume 50 percent");
+        ui.announce("Volume 50 percent", Priority::Polite);
         let tree = rejoining(&mut ui, 1.0);
         assert!(tree.nodes.iter().all(|(id, _)| *id != ANNOUNCEMENT));
         let (mut adapter, again) = at_spi(&ui);
