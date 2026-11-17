@@ -48,6 +48,8 @@ const SUPER: u32 = 1 << 6;
 /// The backend's process, as the compositor reads it.
 const BACKEND_CGROUP: &str = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/xdg-desktop-portal-athanor.service\n";
 const BACKEND_IDENTITY: (&str, &str) = (BACKEND_EXECUTABLE, BACKEND_CGROUP);
+/// A process whose identity cannot be read (`Fake`).
+const UNREADABLE: (&str, &str) = ("", "");
 
 /// How long a bus call waits.
 const WAIT: Duration = Duration::from_secs(10);
@@ -272,8 +274,19 @@ fn park_the_fixture(run: &mut Running) {
 /// A window at `at`, focused, with its seat's keyboard, pointer and touch, of a client that
 /// connects as `identity`.
 fn window_at(run: &mut Running, at: (i32, i32), identity: (&'static str, &'static str)) -> Local {
+    window_in(run, at, identity, None)
+}
+
+/// A window as `window_at` makes it, of a client that connects through `context` when one is
+/// given.
+fn window_in(
+    run: &mut Running,
+    at: (i32, i32),
+    identity: (&'static str, &'static str),
+    context: Option<SecurityContext>,
+) -> Local {
     *run.identity.lock().expect("identity") = identity;
-    let mut local = Local::connect(run, None);
+    let mut local = Local::connect(run, context);
     *run.identity.lock().expect("identity") = BAR;
     let _toplevel = local.toplevel(run);
     let seat = local.seat.clone().expect("a seat");
@@ -715,6 +728,38 @@ fn eis_offers_the_granted_devices_alone() {
         "the receiver's context and the gone ones are ended",
         |state| state.eis.open() == 1,
     );
+    run.stop();
+}
+
+/// The backend's surfaces fail closed: a client outside a security context whose identity
+/// cannot be read gets no injected key, as the backend gets none; a confined client, which has
+/// no identity by design and is never the backend, still gets one.
+#[test]
+fn eis_counts_an_unreadable_client_as_the_backend() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut unreadable = window_at(&mut run, (300, 200), UNREADABLE);
+    let context = sandbox(&run);
+    let mut confined = window_in(&mut run, (700, 200), BAR, Some(context));
+    let mut ei = Ei::sender(&mut run, "/session/1", 7, 4);
+
+    ei.keys(&mut run, &[KEY_A]);
+    confined.roundtrip(&mut run);
+    assert_eq!(
+        confined.client.keys,
+        [KEY_A],
+        "a confined client gets an injected key"
+    );
+    assert_eq!(confined.client.released, [KEY_A], "and its release");
+
+    focus(&mut run, &mut unreadable);
+    ei.keys(&mut run, &[KEY_C]);
+    unreadable.roundtrip(&mut run);
+    assert!(
+        unreadable.client.keys.is_empty(),
+        "a client whose identity cannot be read gets no injected key"
+    );
+    assert!(unreadable.client.released.is_empty(), "nor its release");
     run.stop();
 }
 

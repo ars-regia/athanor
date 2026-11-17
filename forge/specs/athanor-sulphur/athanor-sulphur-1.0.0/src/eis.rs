@@ -611,14 +611,18 @@ pub(crate) fn delivers(locked: bool, paused: bool) -> bool {
 }
 
 /// Whether `surface` is the portal backend's, named by its unit or its executable as the
-/// admission names it: no injected input reaches the consent dialog.
+/// admission names it: no injected input reaches the consent dialog. It fails closed: a client
+/// outside a security context whose identity could not be read, or a surface whose client is
+/// gone, counts as the backend's; a confined client never is.
 pub(crate) fn backend_surface(surface: &WlSurface) -> bool {
     surface
         .client()
-        .and_then(|client| crate::state::identity_of(&client))
-        .is_some_and(|identity| {
-            identity.unit.as_deref() == Some(BACKEND_UNIT)
-                || identity.executable == Path::new(BACKEND_EXECUTABLE)
+        .is_none_or(|client| match crate::state::identity_of(&client) {
+            Some(identity) => {
+                identity.unit.as_deref() == Some(BACKEND_UNIT)
+                    || identity.executable == Path::new(BACKEND_EXECUTABLE)
+            }
+            None => crate::state::unidentified(&client),
         })
 }
 

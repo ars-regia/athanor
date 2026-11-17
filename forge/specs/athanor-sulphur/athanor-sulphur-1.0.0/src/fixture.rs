@@ -1384,8 +1384,12 @@ struct Fake(
 );
 
 impl Process for Fake {
+    /// An empty executable cannot be read, as a process that exits while it is read.
     fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.0.lock().expect("identity").0.into())
+        match self.0.lock().expect("identity").0 {
+            "" => Err(std::io::ErrorKind::NotFound.into()),
+            executable => Ok(executable.into()),
+        }
     }
     fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
         self.2.fetch_add(1, Ordering::SeqCst);

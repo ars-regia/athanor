@@ -1737,6 +1737,15 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
         .and_then(|data| data.identity.clone())
 }
 
+/// Whether `client` has no identity though it could have one: it connected outside a security
+/// context and its process could not be read, or it has no client state. A confined client has
+/// none by design.
+pub fn unidentified(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_none_or(|data| !data.confined && data.identity.is_none())
+}
+
 /// Whether `a` and `b` connected through security contexts that name one application instance:
 /// the same creator, which is the launcher, and the same instance id. A context without an
 /// instance id names none, and neither does xwayland-satellite's socket.
