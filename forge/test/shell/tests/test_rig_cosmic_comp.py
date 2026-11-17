@@ -28,6 +28,7 @@ COPIED = (
 )
 PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
+RUNNER_ENV = ("GITHUB_BASE_REF", "GH_TOKEN", "GITHUB_TOKEN")
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
 
@@ -185,7 +186,14 @@ class Rig:
         path.write_text(spec(release))
 
     def run(self, *args):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("ATHANOR_")}
+        # A pull request into a rebase/* branch sets GITHUB_BASE_REF, which makes tier-digests.sh
+        # read that branch's rules over the network: the tests answer the registry through their
+        # own skopeo and cosign, so nothing of the runner's environment may reach them.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("ATHANOR_") and k not in RUNNER_ENV
+        }
         env.update(
             PATH=f"{self.tmp / 'bin'}:{env['PATH']}",
             ATHANOR_RIG_OUT=str(self.out),
