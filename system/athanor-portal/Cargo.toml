@@ -7,3 +7,8 @@ description = "The decisions of Athanor's desktop portal backend that tests reac
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
+athanor-unit = { path = "../athanor-unit", features = ["bus-caller"] }
+nix = { workspace = true, features = ["user"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zbus = { workspace = true }
