@@ -106,15 +106,28 @@ self.paired = True
 self.UpdateProperties('org.bluez.Device1', {{'Paired': dbus.Boolean(True)}})
 """
 
+# NetworkManager keeps one agent per ID and user: another registration of an ID that a
+# connected process of the same user holds is refused with this error and message
+# (nm-agent-manager.c). nm_agent_template.py passes the caller to these methods as _["sender"].
+NM_AGENT_HELD = "org.freedesktop.NetworkManager.AgentManager.PermissionDenied"
+NM_AGENT_REGISTER = f"""
+key = (self.connection.get_unix_user(_["sender"]), args[0])
+holder = self.agents.get(key)
+if holder is not None and self.connection.name_has_owner(holder):
+    raise dbus.exceptions.DBusException(
+        "An agent with this ID is already registered for this user.", name="{NM_AGENT_HELD}")
+self.agents[key] = _["sender"]
+self.registered = getattr(self, "registered", 0) + 1
+"""
 NM_AGENT_METHODS = [
-    ("Register", "s", "", "self.registered = getattr(self, 'registered', 0) + 1"),
+    ("Register", "s", "", NM_AGENT_REGISTER),
+    ("RegisterWithCapabilities", "su", "", NM_AGENT_REGISTER),
     (
-        "RegisterWithCapabilities",
-        "su",
+        "Unregister",
         "",
-        "self.registered = getattr(self, 'registered', 0) + 1",
+        "",
+        'self.agents = {key: holder for key, holder in self.agents.items() if holder != _["sender"]}',
     ),
-    ("Unregister", "", "", ""),
 ]
 NM_FIXTURE_METHODS = [
     ("Registrations", "", "u", "ret = getattr(self, 'registered', 0)"),
@@ -287,9 +300,10 @@ def spawn_mock(template, log, parameters=None):
     )
 
 
-def networkmanager(bus):
+def networkmanager(bus, held=None):
     # The agent manager comes with the template, so that it answers the first Register a
-    # running bar sends when a restarted NetworkManager appears.
+    # running bar sends when a restarted NetworkManager appears. `held`: a bus name that
+    # holds the bar's agent ID from the start, as a second bar of the same user would.
     process = spawn_mock(
         NM_TEMPLATE,
         "/dev/null",
@@ -298,6 +312,7 @@ def networkmanager(bus):
             "fixture": FIXTURE,
             "agent_methods": NM_AGENT_METHODS,
             "fixture_methods": NM_FIXTURE_METHODS,
+            "held": held,
         },
     )
     wait_for_name(bus, NM)

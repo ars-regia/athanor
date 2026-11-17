@@ -21,7 +21,7 @@ use std::time::Duration;
 use athanor_unit::text::{line, NAME_CHARS};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::time::timeout;
+use tokio::time::{sleep_until, timeout, Instant};
 use zbus::message::Header;
 use zbus::proxy::MethodFlags;
 use zbus::{Array, ObjectPath, OwnedObjectPath, Variant};
@@ -49,6 +49,13 @@ pub const AGENT_IFACE: &str = "org.freedesktop.NetworkManager.SecretAgent";
 /// Fixed by NetworkManager: it calls every agent at this path.
 pub const AGENT_PATH: &str = "/org/freedesktop/NetworkManager/SecretAgent";
 pub const AGENT_ID: &str = "os.athanor.Bar";
+/// NetworkManager's answer to a registration when an agent with the same ID is already
+/// registered for the same user (`nm-agent-manager.c`): another bar of this user holds it.
+const PERMISSION_DENIED: &str = "org.freedesktop.NetworkManager.AgentManager.PermissionDenied";
+/// The first wait before registering again with a NetworkManager that did not answer, doubled
+/// at each attempt up to the cap.
+const REGISTER_RETRY: Duration = Duration::from_secs(1);
+const REGISTER_RETRY_CAP: Duration = Duration::from_secs(30);
 pub const SECURITY_SETTING: &str = "802-11-wireless-security";
 pub const MAX_NETWORKS: usize = 24;
 /// How long a password request waits for the person. The bar's agent had no limit of its own
@@ -862,8 +869,8 @@ fn start(
 /// One step of the queue.
 enum Job {
     Command(NetworkCommand),
-    /// `RegisterWithCapabilities`, to this unique name.
-    Register(String),
+    /// `RegisterWithCapabilities`, to this unique name, for this generation of the mirror.
+    Register(String, u64),
 }
 
 impl Job {
@@ -875,6 +882,47 @@ impl Job {
 
 /// A job being carried out.
 type Running = Pin<Box<dyn Future<Output = zbus::Result<()>> + Send>>;
+
+/// What a failed registration of the secret agent means for the next attempt.
+#[derive(Debug, PartialEq, Eq)]
+enum Refusal {
+    /// Another process of this user holds the agent ID: final.
+    Held,
+    /// NetworkManager is starting, stopping or did not answer: try again.
+    Transient,
+    /// Anything else: final.
+    Other,
+}
+
+fn refusal(err: &zbus::Error) -> Refusal {
+    match err {
+        zbus::Error::MethodError(name, ..) => refusal_named(name.as_str()),
+        zbus::Error::FDO(err) => refusal_named(err.name().as_str()),
+        // A call of ours that timed out, or a connection that broke.
+        zbus::Error::InputOutput(_) => Refusal::Transient,
+        _ => Refusal::Other,
+    }
+}
+
+fn refusal_named(name: &str) -> Refusal {
+    match name {
+        PERMISSION_DENIED => Refusal::Held,
+        "org.freedesktop.DBus.Error.NoReply"
+        | "org.freedesktop.DBus.Error.ServiceUnknown"
+        | "org.freedesktop.DBus.Error.NameHasNoOwner"
+        | "org.freedesktop.DBus.Error.Timeout"
+        | "org.freedesktop.DBus.Error.TimedOut"
+        | "org.freedesktop.DBus.Error.Disconnected" => Refusal::Transient,
+        _ => Refusal::Other,
+    }
+}
+
+/// The wait before the next registration after `attempts` unanswered ones.
+fn register_backoff(attempts: u32) -> Duration {
+    REGISTER_RETRY
+        .saturating_mul(1 << attempts.min(5))
+        .min(REGISTER_RETRY_CAP)
+}
 
 /// What the profile of a path says, read once per owner of NetworkManager.
 type Info = (u64, String, Option<ConnectionInfo>);
@@ -918,12 +966,17 @@ async fn run(
     let mut connections: BTreeMap<String, ConnectionInfo> = BTreeMap::new();
     let mut asked: BTreeSet<String> = BTreeSet::new();
     let mut waiting: VecDeque<Job> = VecDeque::new();
-    let mut running: Option<(bool, Running)> = None;
+    // Whether a failure counts as refused, the generation a registration was for, the call.
+    let mut running: Option<(bool, Option<u64>, Running)> = None;
     let mut refused = 0;
     let mut seen = 0;
     // Whether `RegisterAgent` came, and the generation of the owner the agent was queued for.
     let mut registering = false;
     let mut registered_for: Option<u64> = None;
+    // When to register again with a NetworkManager that did not answer, and how many times it
+    // did not: both start over with a new owner of NetworkManager.
+    let mut retry: Option<Instant> = None;
+    let mut attempts: u32 = 0;
     loop {
         // The mirror ends only after it has emptied itself, so its last state is published too.
         let mut alive = true;
@@ -941,18 +994,56 @@ async fn run(
                     }
                 }
             }
+            () = async {
+                match retry {
+                    Some(at) => sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            }, if retry.is_some() => {
+                // Queued again below.
+                retry = None;
+                registered_for = None;
+            }
             result = async {
                 match running.as_mut() {
-                    Some((_, call)) => call.await,
+                    Some((_, _, call)) => call.await,
                     None => std::future::pending().await,
                 }
             }, if running.is_some() => {
-                let counts = running.take().is_some_and(|(counts, _)| counts);
-                if let Err(err) = result {
-                    tracing::warn!(error = %err, "NetworkManager refused or did not answer");
-                    if counts {
-                        refused += 1;
+                let (counts, register) = running
+                    .take()
+                    .map_or((false, None), |(counts, register, _)| (counts, register));
+                match (register, result) {
+                    // A registration with an owner that has gone: the new one has its own.
+                    (Some(generation), _) if generation != seen => {}
+                    (Some(_), Ok(())) => attempts = 0,
+                    (Some(_), Err(err)) => match refusal(&err) {
+                        Refusal::Held => tracing::warn!(
+                            error = %err,
+                            "another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets"
+                        ),
+                        Refusal::Transient => {
+                            let wait = register_backoff(attempts);
+                            if attempts == 0 {
+                                tracing::warn!(error = %err, ?wait, "NetworkManager did not take the secret agent; trying again");
+                            } else {
+                                tracing::debug!(error = %err, ?wait, "NetworkManager did not take the secret agent; trying again");
+                            }
+                            attempts = attempts.saturating_add(1);
+                            retry = Some(Instant::now() + wait);
+                        }
+                        Refusal::Other => tracing::warn!(
+                            error = %err,
+                            "NetworkManager refused the secret agent; this bar will not prompt for Wi-Fi secrets"
+                        ),
+                    },
+                    (None, Err(err)) => {
+                        tracing::warn!(error = %err, "NetworkManager refused or did not answer");
+                        if counts {
+                            refused += 1;
+                        }
                     }
+                    (None, Ok(())) => {}
                 }
             }
         }
@@ -977,13 +1068,15 @@ async fn run(
             shared.withdraw();
             connections.clear();
             asked.clear();
-            waiting.retain(|job| !matches!(job, Job::Register(_)));
+            waiting.retain(|job| !matches!(job, Job::Register(..)));
             registered_for = None;
+            retry = None;
+            attempts = 0;
         }
         if registering && registered_for != Some(seen) {
             if let Some(owner) = &owner {
                 registered_for = Some(seen);
-                waiting.push_back(Job::Register(owner.clone()));
+                waiting.push_back(Job::Register(owner.clone(), seen));
             }
         }
         connections.retain(|path, _| profiles.contains(path));
@@ -1022,7 +1115,11 @@ async fn run(
                         .and_then(|state| state.wifi.as_ref())
                         .map(|wifi| wifi.device.clone()),
                 };
-                running = Some((job.counts(), Box::pin(execute(context, job))));
+                let register = match &job {
+                    Job::Register(_, generation) => Some(*generation),
+                    Job::Command(_) => None,
+                };
+                running = Some((job.counts(), register, Box::pin(execute(context, job))));
             }
         }
         let next = current.map(|state| NetworkState { refused, ..state });
@@ -1120,7 +1217,7 @@ impl Context {
 async fn execute(context: Context, job: Job) -> zbus::Result<()> {
     match job {
         Job::Command(command) => command_of(&context, command).await,
-        Job::Register(owner) => register(&context.connection, &owner).await,
+        Job::Register(owner, _) => register(&context.connection, &owner).await,
     }
 }
 
@@ -1207,7 +1304,13 @@ async fn register(connection: &Connection, owner: &str) -> zbus::Result<()> {
         "RegisterWithCapabilities",
         &(AGENT_ID, 0u32),
     );
-    no_answer(timeout(TIMEOUT, call).await).map(|_| ())
+    match timeout(TIMEOUT, call).await {
+        Ok(reply) => reply.map(|_| ()),
+        // Unanswered, as a NoReply is: worth another attempt.
+        Err(_) => Err(zbus::Error::InputOutput(Arc::new(
+            std::io::ErrorKind::TimedOut.into(),
+        ))),
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -1672,6 +1775,8 @@ mod tests {
         calls: Vec<String>,
         /// The unique name, id and capabilities of each agent registration.
         registered: Vec<(String, String, u32)>,
+        /// The answers to the next registrations, in order; each one after them is accepted.
+        refuse_register: VecDeque<RegisterError>,
         unregistered: u32,
         get_settings: HashMap<String, u32>,
         /// Ssid, key-mgmt and psk of each `AddAndActivateConnection`.
@@ -1900,6 +2005,18 @@ mod tests {
         log: Shared,
     }
 
+    #[derive(Debug, zbus::DBusError)]
+    #[zbus(prefix = "org.freedesktop")]
+    enum RegisterError {
+        #[zbus(error)]
+        ZBus(zbus::Error),
+        /// NetworkManager's answer when another process of the user holds the ID.
+        #[zbus(name = "NetworkManager.AgentManager.PermissionDenied")]
+        Held(String),
+        #[zbus(name = "DBus.Error.NoReply")]
+        NoReply(String),
+    }
+
     #[zbus::interface(name = "org.freedesktop.NetworkManager.AgentManager")]
     impl FakeAgentManager {
         fn register_with_capabilities(
@@ -1907,13 +2024,11 @@ mod tests {
             identifier: String,
             capabilities: u32,
             #[zbus(header)] header: Header<'_>,
-        ) {
+        ) -> Result<(), RegisterError> {
             let sender = header.sender().map(ToString::to_string).unwrap_or_default();
-            self.log
-                .lock()
-                .unwrap()
-                .registered
-                .push((sender, identifier, capabilities));
+            let mut log = self.log.lock().unwrap();
+            log.registered.push((sender, identifier, capabilities));
+            log.refuse_register.pop_front().map_or(Ok(()), Err)
         }
         fn unregister(&self) {
             self.log.lock().unwrap().unregistered += 1;
@@ -2176,6 +2291,79 @@ mod tests {
         until(&log, |log| !log.registered.is_empty()).await;
         assert_eq!(log.lock().unwrap().registered.len(), 1);
         drop(nm);
+    }
+
+    /// The registrations a new owner of NetworkManager sees, each answered by `answers` first.
+    async fn registrations_with_new_owner(answers: Vec<RegisterError>, seen: usize) -> usize {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        rig.nm.graceful_shutdown().await;
+        wait_for(&mut rig.states, |_| true).await;
+        let log = Shared::default();
+        log.lock().unwrap().refuse_register = answers.into();
+        let nm = serve(&rig.bus, &log).await;
+        until(&log, |log| log.registered.len() >= seen).await;
+        // Longer than the first wait before another attempt.
+        tokio::time::sleep(REGISTER_RETRY * 2).await;
+        let count = log.lock().unwrap().registered.len();
+        drop(nm);
+        count
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_agent_id_held_by_another_process_is_not_asked_for_again() {
+        let held = RegisterError::Held(
+            "An agent with this ID is already registered for this user.".into(),
+        );
+        assert_eq!(registrations_with_new_owner(vec![held], 1).await, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unanswered_registration_is_tried_again_until_it_is_taken() {
+        let no_reply = RegisterError::NoReply("no reply".into());
+        assert_eq!(registrations_with_new_owner(vec![no_reply], 2).await, 2);
+    }
+
+    #[test]
+    fn a_held_agent_id_is_final_and_an_unanswered_registration_is_transient() {
+        assert_eq!(refusal_named(PERMISSION_DENIED), Refusal::Held);
+        for name in [
+            "org.freedesktop.DBus.Error.NoReply",
+            "org.freedesktop.DBus.Error.ServiceUnknown",
+            "org.freedesktop.DBus.Error.NameHasNoOwner",
+            "org.freedesktop.DBus.Error.Timeout",
+            "org.freedesktop.DBus.Error.TimedOut",
+            "org.freedesktop.DBus.Error.Disconnected",
+        ] {
+            assert_eq!(refusal_named(name), Refusal::Transient, "{name}");
+        }
+        assert_eq!(
+            refusal_named("org.freedesktop.NetworkManager.AgentManager.InvalidIdentifier"),
+            Refusal::Other
+        );
+        let fdo = |err| zbus::Error::FDO(Box::new(err));
+        assert_eq!(
+            refusal(&fdo(zbus::fdo::Error::ServiceUnknown(String::new()))),
+            Refusal::Transient
+        );
+        assert_eq!(
+            refusal(&fdo(zbus::fdo::Error::AccessDenied(String::new()))),
+            Refusal::Other
+        );
+        let timed_out = zbus::Error::InputOutput(Arc::new(std::io::ErrorKind::TimedOut.into()));
+        assert_eq!(refusal(&timed_out), Refusal::Transient);
+        assert_eq!(
+            refusal(&zbus::Error::Failure(String::new())),
+            Refusal::Other
+        );
+    }
+
+    #[test]
+    fn the_wait_before_another_registration_doubles_up_to_its_cap() {
+        assert_eq!(register_backoff(0), REGISTER_RETRY);
+        assert_eq!(register_backoff(1), REGISTER_RETRY * 2);
+        assert_eq!(register_backoff(4), REGISTER_RETRY * 16);
+        assert_eq!(register_backoff(5), REGISTER_RETRY_CAP);
+        assert_eq!(register_backoff(u32::MAX), REGISTER_RETRY_CAP);
     }
 
     #[tokio::test(flavor = "current_thread")]
