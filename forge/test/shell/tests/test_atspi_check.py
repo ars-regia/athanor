@@ -3,6 +3,7 @@
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -65,6 +66,56 @@ class ExtentsTest(unittest.TestCase):
     def test_a_hidden_control_has_no_extents_to_check(self):
         self.assertEqual(check.problems([("push button", "Sign in", False, (0, 0, 0, 0))], 0, window=WINDOW), [])
 
+    def test_each_control_is_checked_against_its_own_top_level_window(self):
+        # A bar 56 px high and its popup, a window of its own: a button low in the popup is
+        # inside it, and one below the bar's edge is outside the bar, however tall the popup.
+        bar = Fake("frame", (0, 0, 1280, 56), [Fake("button", (0, 50, 34, 32), name="Low")])
+        popup = Fake("window", (0, 0, 300, 350), [Fake("button", (10, 300, 34, 32), name="Next month")])
+        found = check.problems(check.with_extents(Fake("application", (0, 0, 0, 0), [bar, popup]), FakeAtspi), 2)
+        self.assertEqual(found, ["the showing 'button' 'Low' at (0, 50, 34, 32) is outside its window (0, 0, 1280, 56)"])
+
+
+class Fake:
+    """An accessible of the AT-SPI calls with_extents() makes."""
+
+    def __init__(self, role, extents, children=(), name=""):
+        self.role, self.extents, self.children, self.name = role, extents, list(children), name
+
+    def get_state_set(self):
+        return self
+
+    def contains(self, _state):
+        return True
+
+    def get_role_name(self):
+        return self.role
+
+    def get_name(self):
+        return self.name
+
+    def get_component_iface(self):
+        return self
+
+    def get_child_count(self):
+        return len(self.children)
+
+    def get_child_at_index(self, index):
+        return self.children[index]
+
+
+class FakeAtspi:
+    class StateType:
+        SHOWING = "showing"
+
+    class CoordType:
+        WINDOW = "window"
+
+    class Component:
+        @staticmethod
+        def get_extents(accessible, _coord):
+            x, y, width, height = accessible.extents
+            return type("Rect", (), {"x": x, "y": y, "width": width, "height": height})
+
 
 class PasswordTest(unittest.TestCase):
     DOTS = "\u25cf\u25cf\u25cf\u25cf"
@@ -113,25 +164,53 @@ class ChildrenTest(unittest.TestCase):
     def test_a_child_gone_between_the_count_and_the_lookup_is_skipped(self):
         self.assertEqual(list(check.children(self.Fake(["a", None, "c"]))), ["a", "c"])
 
-    def test_window_of_skips_a_gone_window(self):
-        class Window(self.Fake):
-            def get_component_iface(self):
-                return self
+    def test_with_extents_skips_a_gone_window(self):
+        app = Fake("application", (0, 0, 0, 0), [Fake("frame", (0, 0, 30, 20)), None])
+        self.assertEqual(
+            [node[:4] for node in check.with_extents(app, FakeAtspi)],
+            [("application", "", True, (0, 0, 0, 0)), ("frame", "", True, (0, 0, 30, 20))],
+        )
 
-        class Rect:
-            x = y = 0
-            width, height = 30, 20
 
-        class Atspi:
-            class CoordType:
-                WINDOW = 0
 
-            class Component:
-                @staticmethod
-                def get_extents(_, __):
-                    return Rect
+class Vanished(Exception):
+    """A GLib.Error as PyGObject raises it for a node the application destroyed."""
+    domain, message = "atspi_error", "Unknown object '/org/a11y/atspi/accessible/2/1'"
 
-        self.assertEqual(check.window_of(Window([Window([]), None]), Atspi), (0, 0, 30, 20))
+
+class Rebuilt(Fake):
+    """A node whose role reads as vanished the first `times` walks: a popover built again."""
+
+    def __init__(self, times, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.times = times
+
+    def get_role_name(self):
+        if self.times:
+            self.times -= 1
+            raise Vanished()
+        return self.role
+
+
+@unittest.mock.patch.object(check.time, "sleep")
+class WalkTest(unittest.TestCase):
+    def test_a_node_destroyed_mid_walk_walks_again_from_the_root(self, _sleep):
+        app = Fake("application", (0, 0, 0, 0), [Rebuilt(2, "button", (0, 0, 1, 1), name="Close")])
+        self.assertEqual(check.walk(app, FakeAtspi), [("application", "", True, 0), ("button", "Close", True, 1)])
+
+    def test_a_tree_that_keeps_changing_raises_the_last_error(self, _sleep):
+        app = Fake("application", (0, 0, 0, 0), [Rebuilt(check.WALK_TRIES, "button", (0, 0, 1, 1))])
+        with self.assertRaises(Vanished):
+            check.walk(app, FakeAtspi)
+
+    def test_another_error_is_raised_at_once(self, sleep):
+        class Broken(Fake):
+            def get_name(self):
+                raise RuntimeError("bus gone")
+
+        with self.assertRaises(RuntimeError):
+            check.walk(Broken("application", (0, 0, 0, 0)), FakeAtspi)
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

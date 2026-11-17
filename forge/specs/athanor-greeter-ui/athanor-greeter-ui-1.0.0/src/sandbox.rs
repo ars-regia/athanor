@@ -1,26 +1,8 @@
-use landlock::{
-    AccessFs, BitFlags, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, ABI,
-};
+use athanor_unit::dirs;
+pub use athanor_unit::sandbox::ensure_single_threaded;
 use std::env;
+use std::io;
 use std::path::{Path, PathBuf};
-
-/// Fails unless the calling process has exactly one thread.
-///
-/// Landlock confines the thread that calls `restrict_self` and the threads it creates
-/// afterwards, not threads that already exist. The sandbox is therefore only complete
-/// when it is applied while the process is still single-threaded, and this is checked
-/// against the kernel's own thread list rather than assumed.
-pub fn ensure_single_threaded() -> Result<(), Box<dyn std::error::Error>> {
-    let threads = std::fs::read_dir("/proc/self/task")?.count();
-    if threads != 1 {
-        return Err(format!(
-            "{threads} threads exist; Landlock would leave all but one unconfined"
-        )
-        .into());
-    }
-    Ok(())
-}
 
 /// Stops the kernel from writing this process's memory to disk if it dies.
 ///
@@ -50,36 +32,53 @@ pub fn forbid_core_dumps() -> Result<(), Box<dyn std::error::Error>> {
 /// line: /tmp, the runtime directory, and the GPU nodes. It writes no configuration and
 /// no state. Reads are left alone: fonts, icons and catalogs come from /usr.
 ///
+/// Each grant is a descriptor `athanor_unit::dirs` opened inside the sandbox without following
+/// a link and checked there (#1059): /tmp and the runtime directory, the tmpfs mounts bwrap
+/// made, owned by this user (`dirs::owned_dir`); the GPU nodes, which the user namespace shows
+/// as owned by the overflow id, by `dirs::owned_node`, whose owner is not checked. No
+/// descriptor crosses bwrap: one opened outside would reach the host's tree through `..`.
+///
 /// The ruleset is a hard requirement: a kernel without Landlock, or one that cannot
-/// enforce every requested right, is an error rather than a best-effort no-op, so the
-/// caller can refuse to run unconfined. Call it before any other thread exists (see
-/// [`ensure_single_threaded`]).
+/// enforce every requested right, is an error rather than a best-effort no-op, and so is a
+/// grant that fails its check, so the caller can refuse to run unconfined. Call it before any
+/// other thread exists (see [`ensure_single_threaded`]).
 pub fn apply_landlock_sandbox() -> Result<(), Box<dyn std::error::Error>> {
-    restrict_writes_to(&grants())
+    let write = opened(&writable_paths(), dirs::owned_dir)?;
+    let write_file = opened(&device_paths(), dirs::owned_node)?;
+    athanor_unit::sandbox::restrict_writes(&write, &write_file)
 }
 
 /// The DRM device directory. GPU rendering opens its card and render nodes read-write,
 /// and under a ruleset that handles write accesses opening a file for writing needs
-/// `WriteFile`. Reads, directory listing and ioctls are not handled by the ABI V1 write
-/// set, so they need no grant; creating or removing anything here is not granted.
+/// `WriteFile`. Reads, directory listing and ioctls are not handled by the write set, so they
+/// need no grant; creating, removing or truncating anything here is not granted.
 const DRM_DEVICE_DIR: &str = "/dev/dri";
 
-/// Every grant of the sandbox: /tmp and the runtime directory with the whole write set,
-/// and the GPU nodes with `WriteFile` alone. The greeter has no systemd unit -- it is
-/// confined by athanor-greeter-client and by this ruleset, and by nothing else.
-fn grants() -> Vec<(PathBuf, BitFlags<AccessFs>)> {
-    let write_access = AccessFs::from_write(ABI::V1);
-    let mut grants: Vec<_> = writable_paths()
-        .into_iter()
-        .map(|path| (path, write_access))
-        .collect();
-    grants.push((PathBuf::from(DRM_DEVICE_DIR), AccessFs::WriteFile.into()));
-    grants.extend(
-        nvidia_device_nodes(Path::new("/dev"))
-            .into_iter()
-            .map(|node| (node, AccessFs::WriteFile.into())),
-    );
-    grants
+/// The nodes granted `WriteFile` alone (`sandbox::restrict_writes`'s `write_file`): the DRM
+/// directory and the NVIDIA nodes. The greeter has no systemd unit -- it is confined by
+/// athanor-greeter-client and by this ruleset, and by nothing else.
+fn device_paths() -> Vec<PathBuf> {
+    let mut nodes = vec![PathBuf::from(DRM_DEVICE_DIR)];
+    nodes.extend(nvidia_device_nodes(Path::new("/dev")));
+    nodes
+}
+
+/// Each of `paths` opened and checked by `open` (`dirs::owned_dir`, `dirs::owned_node`). A
+/// missing one is skipped, as Landlock has nothing to hold on to; one that fails its check is
+/// an error naming the path, unlike `dirs::existing`, which leaves it out with a warning: the
+/// greeter confines itself before logging exists, so a warning would be lost.
+fn opened<T>(paths: &[PathBuf], open: fn(&Path) -> io::Result<T>) -> io::Result<Vec<T>> {
+    paths
+        .iter()
+        .filter_map(|path| match open(path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => Some(Err(io::Error::new(
+                error.kind(),
+                format!("{} is not granted: {error}", path.display()),
+            ))),
+            Ok(fd) => Some(Ok(fd)),
+        })
+        .collect()
 }
 
 /// The NVIDIA driver's nodes in `dev`, the same set athanor-greeter-client binds: the
@@ -110,29 +109,6 @@ fn nvidia_device_nodes(dev: &Path) -> Vec<PathBuf> {
     nodes
 }
 
-/// Restricts the calling thread, and the threads it creates, to the write accesses
-/// granted beneath each path; a path that does not exist is skipped.
-fn restrict_writes_to(
-    grants: &[(PathBuf, BitFlags<AccessFs>)],
-) -> Result<(), Box<dyn std::error::Error>> {
-    let write_access = AccessFs::from_write(ABI::V1);
-
-    let mut ruleset = Ruleset::default()
-        .set_compatibility(CompatLevel::HardRequirement)
-        .handle_access(write_access)?
-        .create()?;
-
-    for (path, access) in grants {
-        if path.exists() {
-            let path_fd = PathFd::new(path)?;
-            ruleset = ruleset.add_rule(PathBeneath::new(path_fd, *access))?;
-        }
-    }
-
-    ruleset.restrict_self()?;
-    Ok(())
-}
-
 /// The directories the greeter writes to.
 fn writable_paths() -> Vec<PathBuf> {
     let mut paths = vec![PathBuf::from("/tmp")];
@@ -146,6 +122,7 @@ fn writable_paths() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use athanor_unit::sandbox::restrict_writes;
 
     #[test]
     fn writable_set_is_tmp_and_the_runtime_directory() {
@@ -180,8 +157,8 @@ mod tests {
         // Landlock confines the calling thread and its future children only, so the
         // restriction stays inside this thread and the rest of the test binary is free.
         std::thread::spawn(move || {
-            restrict_writes_to(&[(allowed.clone(), AccessFs::from_write(ABI::V1))])
-                .expect("Landlock must be enforced, not skipped");
+            let write = opened(std::slice::from_ref(&allowed), dirs::owned_dir).expect("checked");
+            restrict_writes(&write, &[]).expect("Landlock must be enforced, not skipped");
             assert_denied(&denied.join("probe"));
             std::fs::write(allowed.join("probe"), b"x")
                 .expect("write in the allowed set must succeed");
@@ -195,8 +172,8 @@ mod tests {
     fn threads_created_after_the_sandbox_inherit_it() {
         let (base, allowed, denied) = probe_dirs("inherit");
         std::thread::spawn(move || {
-            restrict_writes_to(&[(allowed, AccessFs::from_write(ABI::V1))])
-                .expect("Landlock must be enforced, not skipped");
+            let write = opened(&[allowed], dirs::owned_dir).expect("checked");
+            restrict_writes(&write, &[]).expect("Landlock must be enforced, not skipped");
             std::thread::spawn(move || assert_denied(&denied.join("probe")))
                 .join()
                 .expect("child thread");
@@ -207,15 +184,39 @@ mod tests {
     }
 
     #[test]
-    fn device_nodes_are_granted_write_file_and_nothing_else() {
-        let devices: Vec<_> = grants()
-            .into_iter()
-            .filter(|(path, _)| path.starts_with("/dev"))
-            .collect();
-        assert_eq!(devices[0].0, PathBuf::from("/dev/dri"));
-        assert!(devices
-            .iter()
-            .all(|(_, access)| *access == BitFlags::from(AccessFs::WriteFile)));
+    fn the_device_grants_are_the_drm_directory_and_the_nvidia_nodes() {
+        let devices = device_paths();
+        assert_eq!(devices[0], PathBuf::from("/dev/dri"));
+        assert_eq!(&devices[1..], nvidia_device_nodes(Path::new("/dev")));
+    }
+
+    #[test]
+    fn a_link_at_a_granted_directory_stops_the_greeter() {
+        let (base, allowed, _) = probe_dirs("link");
+        let link = base.join("runtime");
+        std::os::unix::fs::symlink(&allowed, &link).expect("symlink");
+        let error = opened(&[link], dirs::owned_dir).expect_err("a link to a directory");
+        // O_DIRECTORY with O_NOFOLLOW makes the kernel answer ENOTDIR for a link: an error,
+        // not the NotFound that is skipped.
+        assert_eq!(error.kind(), std::io::ErrorKind::NotADirectory, "{error}");
+        assert!(
+            error.to_string().contains("runtime is not granted"),
+            "{error}"
+        );
+        let node_link = base.join("dri");
+        std::os::unix::fs::symlink(&allowed, &node_link).expect("symlink");
+        let error = opened(&[node_link], dirs::owned_node).expect_err("a link to a node");
+        assert!(error.to_string().contains("dri is not granted"), "{error}");
+        std::fs::remove_dir_all(base).expect("cleanup");
+    }
+
+    #[test]
+    fn a_missing_node_is_skipped() {
+        let (base, nodes, _) = probe_dirs("missing");
+        let found = opened(&[base.join("nvidia7"), nodes], dirs::owned_node)
+            .expect("a missing node is skipped, not refused");
+        assert_eq!(found.len(), 1);
+        std::fs::remove_dir_all(base).expect("cleanup");
     }
 
     #[test]
@@ -251,8 +252,9 @@ mod tests {
         let node = nodes.join("renderD128");
         std::fs::write(&node, b"").expect("create the stand-in node");
         std::thread::spawn(move || {
-            restrict_writes_to(&[(nodes.clone(), AccessFs::WriteFile.into())])
-                .expect("Landlock must be enforced, not skipped");
+            let write_file =
+                opened(std::slice::from_ref(&nodes), dirs::owned_node).expect("checked");
+            restrict_writes(&[], &write_file).expect("Landlock must be enforced, not skipped");
             std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)

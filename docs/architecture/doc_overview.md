@@ -116,7 +116,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV4. The surfaces.**
 
 - **One overview surface per output.**
-  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs:5-12`). The rule is the overview's: the switcher opens and closes its Sal surface on demand, and OV27 item 1 checks that both compositors keep its connection (proposed, revision 3).
+  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (lines 5-12 of the GTK bar's `ui/popups.rs`, removed by the port to the toolkit: `git show f2041a63:forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs`). The rule is the overview's: the switcher opens and closes its Sal surface on demand, and OV27 item 1 checks that both compositors keep its connection (proposed, revision 3).
   - When the output leaves, the window is let go, as the bar's popups are.
   - The surface has three configurations, switched in place:
 
