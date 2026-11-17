@@ -10,13 +10,14 @@ description = "The Athanor greeter: one surface, one binary, the process that re
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-style = { path = "../../../../system/athanor-style" }
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
+# Landlock by checked descriptors (`dirs`, `sandbox`); without the bus-caller feature it adds no zbus.
+athanor-unit = { path = "../../../../system/athanor-unit" }
 gtk4 = { workspace = true }
 gtk4-layer-shell = { workspace = true }
 glib = { workspace = true }
 zbus = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 greetd_ipc = { workspace = true }
-landlock = { workspace = true }
 # prctl(PR_SET_DUMPABLE) and setrlimit(RLIMIT_CORE): safe wrappers, no unsafe block here.
 nix = { workspace = true, features = ["process", "resource"] }
 serde_json = { workspace = true }

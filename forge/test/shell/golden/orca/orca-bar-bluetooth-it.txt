@@ -1,0 +1,13 @@
+Lettore schermo attivo.
+Bluetooth casella di spunta spuntata.
+tabulazione
+Headphones, connesso button.
+tabulazione
+Keyboard button.
+tabulazione
+Phone button.
+tabulazione
+Speaker button.
+tabulazione
+Bluetooth casella di spunta spuntata.
+Lettore schermo disattivato.

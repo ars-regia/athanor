@@ -44,14 +44,23 @@ def alerts(app, Atspi):
 
 
 def never(seen, seconds):
-    """True when `seen` stays false for `seconds`. An error from it, such as a node destroyed
-    mid-read, raises: a tree rebuilt during the interval is the event this exists to catch."""
+    """True when `seen` stays false for `seconds`. An error from it raises. A node destroyed
+    mid-read is read again from the root by atspi_check.walk, so `seen` answers on the tree
+    as it is after the rebuild, and raises only when the tree keeps changing."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if seen():
             return False
         time.sleep(0.2)
     return not seen()
+
+
+def dnd_switches(app, Atspi):
+    """The do not disturb switch: GTK's reaches AT-SPI as a check box, AccessKit's
+    Role::Switch as a toggle button."""
+    return labelled(app, Atspi, "check box", "Do not disturb") or labelled(
+        app, Atspi, "toggle button", "Do not disturb"
+    )
 
 
 def toggle_list(app, Atspi, open_):
@@ -259,7 +268,7 @@ def main():
         repr(problems(nodes, 7)),
     )
 
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     check("the do not disturb switch shows", bool(switches))
     if switches:
         switches[0].do_action(0)
@@ -270,7 +279,7 @@ def main():
     notify("Loud", hints={"urgency": GLib.Variant("y", 2)})
     check("a critical popup shows under do not disturb", wait_for(shows("Loud"), 3))
     check("the list opens for the switch", toggle_list(app, Atspi, True))
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     if switches:
         switches[0].do_action(0)
     check("do not disturb turns off", wait_for(logged("SetDoNotDisturb False"), 3))

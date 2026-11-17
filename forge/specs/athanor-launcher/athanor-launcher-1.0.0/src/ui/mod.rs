@@ -618,7 +618,7 @@ impl Launcher {
                 .iter()
                 .filter(|line| line.hit().is_some())
                 .count();
-            ui.announce(&tr_with("Results: {count}", "count", &count.to_string()));
+            ui.announce(&tr_with("Results: {count}", "count", &count.to_string()), athanor_sal::Priority::Polite);
         }
         // The rows were replaced: the selected one is drawn again, or the pane emptied.
         self.schedule_preview();

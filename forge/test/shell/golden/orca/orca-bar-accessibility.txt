@@ -1,0 +1,17 @@
+Screen reader on.
+High contrast check box not checked.
+tab
+Screen reader check box not checked.
+Magnifier check box not checked.
+tab
+Invert colours check box not checked.
+tab
+No colour filter selected radio button.
+tab
+Greyscale selected radio button.
+Red-green (protanopia) selected radio button.
+Green-red (deuteranopia) selected radio button.
+Blue-yellow (tritanopia) selected radio button.
+High contrast check box not checked.
+tab
+Screen reader off.

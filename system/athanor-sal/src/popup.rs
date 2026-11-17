@@ -40,7 +40,8 @@ pub(crate) enum Dismiss<S> {
 impl<S: Copy + PartialEq> OpenPopup<S> {
     /// Records `popup`, opened from `anchor` of `parent`, and marks it a popup, which raises no
     /// [`Event::PressedOutside`]: a menu expands its button and puts the focus on its first item,
-    /// as GTK's popover does when it shows.
+    /// as GTK's popover does when it shows, unless the application gave it to another, as GTK's
+    /// default widget.
     pub fn opened(
         parent_surface: S,
         anchor: WidgetId,
@@ -52,7 +53,9 @@ impl<S: Copy + PartialEq> OpenPopup<S> {
         popup.popup = true;
         if menu {
             parent.set_expanded(anchor, true);
-            popup.set_focus(focus::step(popup, false));
+            if popup.focus().is_none() {
+                popup.set_focus(focus::step(popup, false));
+            }
         }
         Self {
             surface,
@@ -110,12 +113,15 @@ pub(crate) struct GrabSerial {
     key: Option<u32>,
     /// The serial of the key pressed last, which its repeats are handled with.
     pressed_key: Option<u32>,
+    /// The serial of the last press of a button or a key, kept once it ends.
+    last: Option<u32>,
 }
 
 impl GrabSerial {
     /// A button was pressed with `serial`.
     pub fn pressed(&mut self, serial: u32) {
         self.press = Some(serial);
+        self.last = Some(serial);
     }
 
     /// A button was released, or the pointer left: no press is held.
@@ -127,6 +133,7 @@ impl GrabSerial {
     pub fn key(&mut self, serial: Option<u32>) {
         self.key = serial;
         self.pressed_key = serial.or(self.pressed_key);
+        self.last = serial.or(self.last);
     }
 
     /// The key pressed last repeats: it is handled again with its press's serial, until
@@ -138,6 +145,13 @@ impl GrabSerial {
     /// The serial to grab with, while an input is under way.
     pub fn serial(&self) -> Option<u32> {
         self.key.or(self.press)
+    }
+
+    /// The serial of the last press of a button or a key, after it ended too: what an
+    /// xdg-activation token names for an action the input started, as GTK names its seat's last
+    /// serial. A key's repeats are no new press.
+    pub fn last(&self) -> Option<u32> {
+        self.last
     }
 }
 
@@ -343,6 +357,16 @@ mod tests {
             (Some(app), false)
         );
 
+        // A focus the application gave stays: a confirmation's Cancel, not the item after it.
+        let mut asked = Ui::new("Files", Theme::default(), false);
+        let row = asked.add(Ui::ROOT, Kind::Row);
+        let cancel = asked.add(row, Kind::Button("Cancel".into()));
+        asked.add(row, Kind::Button("Quit".into()));
+        asked.set_focus(Some(cancel));
+        let open = OpenPopup::opened(1, app, 2, &mut parent, &mut asked, true);
+        assert_eq!(asked.focus(), Some(cancel));
+        open.closed(&mut parent);
+
         // A tooltip changes neither the focus nor the button's state.
         parent.set_focus(Some(other));
         let tip = OpenPopup::opened(1, app, 3, &mut parent, &mut menu, false);
@@ -433,6 +457,24 @@ mod tests {
         // The pointer left with the button down: the release goes elsewhere.
         grab.released();
         assert_eq!(grab.serial(), None);
+    }
+
+    #[test]
+    fn an_activation_token_names_the_last_press_after_it_ended() {
+        let mut grab = GrabSerial::default();
+        assert_eq!(grab.last(), None, "no input yet");
+        // A click: the action runs at the release, once the press grabs no more.
+        grab.pressed(7);
+        grab.released();
+        assert_eq!(grab.last(), Some(7));
+        // A key handled, then its repeats: the press is the last input.
+        grab.key(Some(9));
+        grab.key(None);
+        grab.repeat();
+        grab.key(None);
+        assert_eq!(grab.last(), Some(9));
+        grab.pressed(11);
+        assert_eq!(grab.last(), Some(11), "the newer press");
     }
 
     #[test]

@@ -31,3 +31,20 @@ dialog.open	Open a dialog	Apri una finestra di dialogo
 dialog.title	A dialog	Una finestra di dialogo
 dialog.text	A dialog holds its window until it is closed.	Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
 dialog.close	Close	Chiudi
+page.calendar	Calendar	Calendario
+months	January February March April May June July August September October November December	gennaio febbraio marzo aprile maggio giugno luglio agosto settembre ottobre novembre dicembre
+weekdays	Sun Mon Tue Wed Thu Fri Sat	dom lun mar mer gio ven sab
+calendar.previous-month	Previous month	Mese precedente
+calendar.next-month	Next month	Mese successivo
+calendar.previous-year	Previous year	Anno precedente
+calendar.next-year	Next year	Anno successivo
+weekday.first	0	1
+page.menus	Menus	Menu
+menu.open	Open a menu	Apri un menu
+menu.item	New window	Nuova finestra
+menu.check	Show hidden files	Mostra i file nascosti
+menu.radio1	Sort by name	Ordina per nome
+menu.radio2	Sort by date	Ordina per data
+menu.off	Not available	Non disponibile
+menu.more	More	Altro
+menu.about	About	Informazioni

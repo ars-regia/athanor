@@ -329,6 +329,12 @@ impl Page {
         }
     }
 
+    /// Whether the model changed since the page last showed it: the surface calls
+    /// [`Page::turn`] then.
+    pub fn changed(&self) -> bool {
+        (self.service.states.get(), self.service.failures.get()) != self.seen
+    }
+
     /// Whether the surface should open the page: NetworkManager asked for a password while the
     /// page was hidden. True once for each request; the page built next shows the prompt.
     pub fn wants_open(&mut self) -> bool {
@@ -440,8 +446,9 @@ impl Page {
     }
 
     /// Shows what changed since the last call: a new state or request, and a failure as the
-    /// note under the page. A network or a VPN that came, went or changed asks for the page to
-    /// be built again.
+    /// note under the page. A network that came, went or changed, or a VPN that came or went,
+    /// asks for the page to be built again; a VPN that connects or disconnects only sets its
+    /// switch, which keeps the keyboard focus on the switch the person just pressed.
     pub fn turn(&mut self, ui: &mut Ui) -> Turn {
         let now = (self.service.states.get(), self.service.failures.get());
         if now == self.seen {
@@ -464,7 +471,11 @@ impl Page {
             let vpns = state.as_ref().map_or(&[][..], |s| s.vpns.as_slice());
             ids.device != device
                 || !ids.rows.iter().map(|(_, n)| n).zip(&ids.icons).eq(wanted.iter().map(|(i, n)| (n, i)))
-                || !ids.vpn_rows.iter().map(|(_, v)| v).eq(vpns.iter())
+                || !ids
+                    .vpn_rows
+                    .iter()
+                    .map(|(_, v)| (&v.connection, &v.label))
+                    .eq(vpns.iter().map(|v| (&v.connection, &v.label)))
         });
         if rebuild {
             return Turn::Rebuild;
@@ -485,6 +496,17 @@ impl Page {
             ids.failure.hide(ui);
         }
         self.abandon(ui);
+    }
+
+    /// The surface dropped the [`Ui`] that held the page, as a popover that closed: the page
+    /// leaves the screen as [`Page::closed`] says, with no widgets left to set.
+    pub fn dropped(&mut self) {
+        self.shown = false;
+        self.ids = None;
+        self.typed = Zeroizing::default();
+        if matches!(self.asking.take(), Some(Asked { ask: Ask::Secrets, .. })) {
+            self.service.answer(None);
+        }
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -659,7 +681,7 @@ impl Page {
 
     fn show(&mut self, ui: &mut Ui) {
         self.seen = (self.service.states.get(), self.service.failures.get());
-        if let Some(ids) = &self.ids {
+        if let Some(ids) = &mut self.ids {
             if let Some(state) = self.service.state.borrow().as_ref() {
                 match state.wired {
                     Some(true) => ui.set_text(ids.wired, &tr("Wired: connected")),
@@ -674,6 +696,12 @@ impl Page {
                 }
                 ui.set_visible(ids.scroll, !ids.rows.is_empty());
                 ui.set_visible(ids.vpns, !ids.vpn_rows.is_empty());
+                // The rows are those of the state's VPNs, in its order: `turn` asks for a
+                // rebuild otherwise. A switch press reads the active connection kept here.
+                for ((row, shown), vpn) in ids.vpn_rows.iter_mut().zip(&state.vpns) {
+                    ui.set_active(*row, vpn.link != Link::Idle);
+                    *shown = vpn.clone();
+                }
             }
         }
         self.show_prompt(ui);
@@ -1117,6 +1145,16 @@ mod tests {
     }
 
     #[test]
+    fn a_page_dropped_with_its_popover_cancels_the_request_and_forgets_what_was_typed() {
+        let (mut page, mut ui, mut answer) = secrets_page();
+        type_password(&mut page, &mut ui, "correct horse");
+        assert!(!page.changed());
+        page.dropped();
+        assert!(matches!(answer.try_recv(), Ok(None)));
+        assert!(page.typed.is_empty() && page.ids.is_none());
+    }
+
+    #[test]
     fn the_switches_and_the_vpn_check_boxes_send_their_commands() {
         let (mut page, mut received, mut ui) = page(state(
             vec![],
@@ -1172,5 +1210,55 @@ mod tests {
         let mut fresh = Ui::new("t", Theme::default(), false);
         page.build(&mut fresh, Ui::ROOT, &mut Look::plain());
         assert_eq!(page.turn(&mut fresh), Turn::Unchanged);
+    }
+
+    #[test]
+    fn a_vpn_that_connects_keeps_its_row_and_a_new_vpn_rebuilds_them() {
+        let (mut page, mut received, mut ui) = page(state(vec![], vec![vpn("Office VPN", None)]));
+        let row = ids(&page).vpn_rows[0].0;
+        click(&mut page, &mut ui, row);
+        assert!(matches!(received.try_recv(), Ok(NetworkCommand::Activate { .. })));
+        page.service
+            .state
+            .replace(Some(state(vec![], vec![vpn("Office VPN", Some("/active/office"))])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated, "only the VPN's link changed");
+        assert!(ui.is_active(row));
+        // The switch turns off the active connection the update brought.
+        click(&mut page, &mut ui, row);
+        assert!(matches!(
+            received.try_recv(),
+            Ok(NetworkCommand::Deactivate(active)) if active == "/active/office"
+        ));
+        page.service.state.replace(Some(state(vec![], vec![vpn("Office VPN", None)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated);
+        assert!(!ui.is_active(row));
+        page.service.state.replace(Some(state(
+            vec![],
+            vec![vpn("Home VPN", None), vpn("Office VPN", None)],
+        )));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+    }
+
+    #[test]
+    fn vpns_in_another_order_or_with_another_name_rebuild_the_rows() {
+        let office = vpn("Office VPN", None);
+        let home = vpn("Home VPN", None);
+        let (mut page, _received, mut ui) =
+            page(state(vec![], vec![home.clone(), office.clone()]));
+        page.service
+            .state
+            .replace(Some(state(vec![], vec![office.clone(), home.clone()])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild, "the same VPNs in another order");
+        let renamed = Vpn {
+            label: "Office".to_owned(),
+            ..office
+        };
+        page.service.state.replace(Some(state(vec![], vec![home, renamed])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild, "a VPN renamed in place");
     }
 }
