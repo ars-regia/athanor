@@ -1,106 +1,123 @@
 Screen reader on.
-Control center grouping
-Wi-Fi toggle button pressed.
-On.
-Open the Wi-Fi page button.
+Control center
+Control center panel
+Wi-Fi toggle button pressed
+On
+Open the Wi-Fi page button
 tab
-Bluetooth toggle button pressed.
-On.
+Bluetooth toggle button pressed
+On
 tab
-Open the Bluetooth page button.
+Open the Bluetooth page button
 tab
-Dark mode toggle button not pressed.
-Off.
+Dark mode toggle button not pressed
+Off
 tab
-Power mode toggle button not pressed.
-Balanced.
+Power mode toggle button not pressed
+Balanced
 tab
-Open the Power mode page button.
+Open the Power mode page button
 tab
-Mute output toggle button not pressed.
+Mute output toggle button not pressed
 tab
-Output volume horizontal slider 40 39 percent.
+Output volume horizontal slider 39.9993896484375 39 percent.
 tab
-Open the Sound page button.
+Open the Sound page button
 tab
-Mute microphone toggle button not pressed.
+Mute microphone toggle button not pressed
 tab
-Input volume horizontal slider 55 54 percent.
+Input volume horizontal slider 54.998779296875 54 percent.
 tab
-Open the Sound page button.
+Open the Sound page button
 tab
 Brightness horizontal slider 60 60 percent.
 tab
-Media grouping
-Previous track button.
+Media panel
+Previous track button
 tab
-Pause button.
+Pause button
 tab
-Next track button.
+Next track button
 tab
-Settings button.
+Settings button
 tab
-Wi-Fi toggle button pressed.
-On.
-tab
-Screen reader off.
-Screen reader on.
-Back button.
-tab
-Wi-Fi check box checked.
-tab
-Athanor Lab, connected button.
-tab
-Corner Café button.
-tab
-Home Network, secured button.
-tab
-Office VPN check box not checked.
-tab
-Back button.
+Wi-Fi toggle button pressed
+On
 tab
 Screen reader off.
 Screen reader on.
-Back button.
+Control center
+Control center panel
+Back button
+Wi-Fi toggle button pressed
 tab
-Bluetooth check box checked.
+Athanor Lab, connected button
 tab
-Headphones, connected button.
+Corner Café button
 tab
-Keyboard button.
+Home Network, secured button
 tab
-Screen reader off.
-Screen reader on.
-Back button.
+Office VPN toggle button not pressed
 tab
-Output volume horizontal slider 40 39 percent.
+Back button
 tab
-Mute output check box not checked.
-tab
-Speakers, in use button.
-tab
-Headphones button.
-tab
-Input volume horizontal slider 55 54 percent.
-tab
-Mute microphone check box not checked.
-tab
-Previous track button.
-tab
-Pause button.
-tab
-Next track button.
+Wi-Fi toggle button pressed
 tab
 Screen reader off.
 Screen reader on.
-Back button.
+Control center
+Control center panel
+Back button
+Bluetooth toggle button pressed
 tab
-Balanced selected radio button.
+Headphones, connected button
 tab
-Screen brightness horizontal slider 60 60 percent.
+Keyboard button
 tab
-Back button.
+Back button
 tab
-Balanced selected radio button.
+Screen reader off.
+Screen reader on.
+Control center
+Control center panel
+Back button
+Output volume horizontal slider 39.9993896484375 39 percent.
+tab
+Mute output toggle button not pressed
+tab
+Speakers, in use button
+tab
+Headphones button
+tab
+Input volume horizontal slider 54.998779296875 54 percent.
+tab
+Mute microphone toggle button not pressed
+tab
+Previous track button
+tab
+Pause button
+tab
+Next track button
+tab
+Back button
+tab
+Screen reader off.
+Screen reader on.
+Control center
+Control center 3 h 25 min left panel
+Back button
+Power mode panel
+Power mode
+Power saver not selected radio button
+tab
+Power mode
+Balanced selected radio button
+tab
+Power mode
+Performance not selected radio button
+tab
+Screen brightness horizontal slider 60 59 percent.
+tab
+Back button
 tab
 Screen reader off.

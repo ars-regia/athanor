@@ -61,7 +61,9 @@ Dialogs toggle button not pressed
 Enable the button off switch
 Screen reader off.
 Screen reader on.
-Gallery 1 unfocused dialog
+A dialog A dialog holds its window until it is closed.
+Close button
+Gallery
 Dialogs toggle button pressed
 Open a dialog button
 Screen reader off.

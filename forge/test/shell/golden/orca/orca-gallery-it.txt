@@ -61,7 +61,9 @@ Dialoghi pulsante di commutazione non premuto
 Abilita il pulsante non attivo selettore
 Lettore schermo disattivato.
 Lettore schermo attivo.
-Galleria 1 dialogo senza focus
+Una finestra di dialogo Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
+Chiudi pulsante
+Galleria
 Dialoghi pulsante di commutazione premuto
 Apri una finestra di dialogo pulsante
 Lettore schermo disattivato.
