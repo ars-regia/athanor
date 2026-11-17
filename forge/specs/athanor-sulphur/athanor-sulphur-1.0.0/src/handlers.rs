@@ -7,8 +7,8 @@ use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
-    PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupGrab,
+    PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
@@ -1348,12 +1348,14 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
     }
 
-    /// A popup that holds the keyboard hands it back as it is destroyed, at once, to its parent:
-    /// the next open popup of its chain, or the popups' root (decision 30, amended on
-    /// 2026-11-17). Smithay's grab moves the keyboard only at the next key, which leaves it on
-    /// the popup's bare surface until then, so that a toolkit waiting for its parent's `enter`
-    /// to give the focus back to the popup's button would have none (#1217). The grab lets the
-    /// change through, the parent being its current popup or its root.
+    /// A popup that holds the keyboard hands it back as it is destroyed, at once (decision 30,
+    /// amended on 2026-11-17): to the popup grab's current popup, the next of its chain that
+    /// holds a grab, or to the grab's root once none is left. Without a popup grab, or with a
+    /// dead root, it goes to the popup's root if that lives, else where a destroyed window's
+    /// keyboard goes. Smithay's grab moves the keyboard only at the next key, which leaves it on
+    /// the popup's bare surface until then, so that a toolkit waiting for an `enter` to give the
+    /// focus back to the control that opened the popup would have none (#1217). The grab lets
+    /// the change through: its current popup, or anything once it has ended.
     fn popup_destroyed(&mut self, surface: PopupSurface) {
         let Some(keyboard) = self.seat.get_keyboard() else {
             return;
@@ -1361,11 +1363,18 @@ impl XdgShellHandler for State {
         if keyboard.current_focus().as_ref() != Some(surface.wl_surface()) {
             return;
         }
-        if let Some(parent) = surface
-            .get_parent_surface()
-            .filter(|parent| parent.is_alive())
-        {
-            self.set_keyboard_focus(Some(parent));
+        let grabbed =
+            keyboard.with_grab(|_, current| current.is::<PopupKeyboardGrab<State>>()) == Some(true);
+        let target = self
+            .popup_grab
+            .as_ref()
+            .filter(|grab| grabbed && !grab.has_ended())
+            .and_then(PopupGrab::current_grab)
+            .or_else(|| find_popup_root_surface(&PopupKind::Xdg(surface.clone())).ok())
+            .filter(|target| target.is_alive());
+        match target {
+            Some(target) => self.set_keyboard_focus(Some(target)),
+            None => self.refocus(surface.wl_surface()),
         }
     }
 
@@ -1442,6 +1451,7 @@ impl XdgShellHandler for State {
             }
             keyboard.set_focus(self, grab.current_grab(), serial);
             keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+            self.popup_grab = Some(grab.clone());
         }
         if let Some(pointer) = pointer {
             let previous = grab.previous_serial().unwrap_or_else(|| grab.serial());

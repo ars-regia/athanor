@@ -383,6 +383,8 @@ struct Client {
     released: Vec<u32>,
     /// The evdev codes of the keys held, as the last `enter` told them.
     entered_keys: Vec<u32>,
+    /// The protocol id of the surface of each `wl_keyboard.enter`, in order.
+    keyboard_entered: Vec<u32>,
     /// The keymaps the client was sent.
     keymaps: usize,
     /// The size of the last keymap the client was sent, which tells two keymaps apart.
@@ -807,7 +809,8 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
             } => client.released.push(key),
-            wl_keyboard::Event::Enter { keys, .. } => {
+            wl_keyboard::Event::Enter { surface, keys, .. } => {
+                client.keyboard_entered.push(surface.id().protocol_id());
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
             }
@@ -11510,6 +11513,23 @@ fn top_surface_on(
     keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
     output: Option<usize>,
 ) -> (Local, WlSurface, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
+    let (local, server, layer, _) = top_surface_parts(run, namespace, anchor, keyboard, output);
+    (local, server, layer)
+}
+
+/// `top_surface_on`, with the client's `wl_surface` as well.
+fn top_surface_parts(
+    run: &mut Running,
+    namespace: &str,
+    anchor: zwlr_layer_surface_v1::Anchor,
+    keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    output: Option<usize>,
+) -> (
+    Local,
+    WlSurface,
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
+) {
     let mut local = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -11557,7 +11577,7 @@ fn top_surface_on(
             Some(layer.wl_surface().clone())
         })
         .expect("the layer surface");
-    (local, server, layer)
+    (local, server, layer, surface)
 }
 
 /// Ctrl+Alt+Tab gives the keyboard to the bar, then the dock, then the window (AX7): the
@@ -11773,35 +11793,67 @@ impl Errors {
 }
 
 /// A window with the keyboard, then a dock that takes it on demand, given it by Ctrl+Alt+Tab
-/// (AX7), with a popup it opens, as a dock's menu opens, on a key the dock was sent: the
-/// window's surface, the dock's client and surface, and the popup's xdg_popup, xdg_surface and
-/// surface on the client's side.
-fn dock_popup(
+/// (AX7), with a `wl_keyboard`: the window's client and surface, the dock's client, its surface
+/// on the compositor's side, and its layer surface and surface on the client's side.
+fn keyboard_dock(
     run: &mut Running,
 ) -> (
-    WlSurface,
+    (Local, WlSurface),
     Local,
     WlSurface,
-    (
-        xdg_popup::XdgPopup,
-        xdg_surface::XdgSurface,
-        wl_surface::WlSurface,
-    ),
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
 ) {
     use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
-    let (_window, window) = focused_window(run);
+    let (window_client, window) = focused_window(run);
     let bottom = Anchor::Bottom | Anchor::Left | Anchor::Right;
-    let (mut dock, dock_surface, dock_layer) = top_surface_on(run, "dock", bottom, OnDemand, None);
+    let (dock, dock_surface, dock_layer, dock_wl) =
+        top_surface_parts(run, "dock", bottom, OnDemand, None);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    seat.get_keyboard(&dock.queue.handle(), ());
     chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
     assert_eq!(
         keyboard_focus(run).as_ref(),
         Some(&dock_surface),
         "the dock"
     );
+    (
+        (window_client, surface_of(&window)),
+        dock,
+        dock_surface,
+        dock_layer,
+        dock_wl,
+    )
+}
 
+/// A key the dock was sent, whose serial a popup grab names.
+fn dock_key(run: &mut Running, dock_surface: &WlSurface) -> smithay::utils::Serial {
     let serial = SERIAL_COUNTER.next_serial();
     let dock_client = dock_surface.client().expect("the dock's client").id();
     run.state.grab_serials.key_press = Some((serial, dock_client));
+    serial
+}
+
+/// What a popup `open_popup` opens is parented to.
+enum PopupParent<'a> {
+    Layer(&'a zwlr_layer_surface_v1::ZwlrLayerSurfaceV1),
+    Popup(&'a xdg_surface::XdgSurface),
+}
+
+/// A 40 by 40 popup of `parent`, opened and drawn by `dock`'s client, grabbed on `grab` when
+/// given: its xdg_popup, xdg_surface and surface on the client's side. As GTK and the toolkit
+/// open a layer surface's popup, it is created without a parent, which the layer surface then
+/// gives it, and the grab is asked before the first commit.
+fn open_popup(
+    run: &mut Running,
+    dock: &mut Local,
+    parent: PopupParent,
+    grab: Option<smithay::utils::Serial>,
+) -> (
+    xdg_popup::XdgPopup,
+    xdg_surface::XdgSurface,
+    wl_surface::WlSurface,
+) {
     let compositor: wl_compositor::WlCompositor = dock.bind(4);
     let shm: wl_shm::WlShm = dock.bind(1);
     let wm_base: xdg_wm_base::XdgWmBase = dock.bind(1);
@@ -11810,13 +11862,19 @@ fn dock_popup(
     let positioner = wm_base.create_positioner(&qh, ());
     positioner.set_size(40, 40);
     positioner.set_anchor_rect(0, 0, 1, 1);
-    // As GTK and the toolkit open a layer surface's popup: without a parent, which the layer
-    // surface then gives it, and with the grab asked before the first commit.
     let surface = compositor.create_surface(&qh, ());
     let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
-    let popup = xdg.get_popup(None, &positioner, &qh, ());
-    dock_layer.get_popup(&popup);
-    popup.grab(&seat, serial.into());
+    let popup = match parent {
+        PopupParent::Layer(layer) => {
+            let popup = xdg.get_popup(None, &positioner, &qh, ());
+            layer.get_popup(&popup);
+            popup
+        }
+        PopupParent::Popup(parent) => xdg.get_popup(Some(parent), &positioner, &qh, ()),
+    };
+    if let Some(serial) = grab {
+        popup.grab(&seat, serial.into());
+    }
     dock.client.configure = None;
     surface.commit();
     dock.pump(run, "the popup is configured", |client, _| {
@@ -11827,12 +11885,33 @@ fn dock_popup(
     surface.attach(Some(&buffer), 0, 0);
     surface.commit();
     dock.roundtrip(run);
+    (popup, xdg, surface)
+}
+
+/// `keyboard_dock` with a popup it opens, as a dock's menu opens, on a key the dock was sent:
+/// the window's client and surface, the dock's client and surface, and the popup's xdg_popup,
+/// xdg_surface and surface on the client's side.
+fn dock_popup(
+    run: &mut Running,
+) -> (
+    (Local, WlSurface),
+    Local,
+    WlSurface,
     (
-        surface_of(&window),
-        dock,
-        dock_surface,
-        (popup, xdg, surface),
-    )
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    let (window, mut dock, dock_surface, dock_layer, _) = keyboard_dock(run);
+    let serial = dock_key(run, &dock_surface);
+    let popup = open_popup(
+        run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    (window, dock, dock_surface, popup)
 }
 
 /// A layer surface's popup, which xdg-shell creates without a parent and the layer surface
@@ -11883,7 +11962,8 @@ fn a_layer_surfaces_popup_is_known_and_grabs_the_seat() {
 #[test]
 fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
     let mut run = Running::start(None);
-    let (window, mut dock, dock_surface, (popup, xdg, surface)) = dock_popup(&mut run);
+    let ((_window_client, window), mut dock, dock_surface, (popup, xdg, surface)) =
+        dock_popup(&mut run);
     let held = keyboard_focus(&run);
     assert!(
         held.is_some() && held.as_ref() != Some(&dock_surface),
@@ -11901,7 +11981,101 @@ fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
         Some(&dock_surface),
         "the dock has it back at once"
     );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
     assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A chain of a layer surface, a popup without a grab and a grabbed popup of that one: the
+/// grabbed popup, closed, hands the keyboard at once to the grab's root, the layer surface, since
+/// the popup between them holds no grab (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_over_one_without_a_grab_hands_the_keyboard_to_the_root() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let (_menu, menu_xdg, _menu_surface) =
+        open_popup(&mut run, &mut dock, PopupParent::Layer(&dock_layer), None);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "a popup without a grab leaves the keyboard on the dock"
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the grabbed popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the root has it at once, not the popup without a grab"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A grabbed popup whose root, the layer surface, its client destroyed first, hands the
+/// keyboard as it closes to where a destroyed window's goes, the window, and not to a dead
+/// surface (#1217).
+#[test]
+fn a_closed_popup_of_a_dead_root_hands_the_keyboard_to_the_window() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, dock_wl) =
+        keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+    dock_layer.destroy();
+    dock_wl.destroy();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps it while it lives"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.destroy();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(window),
+        "the window has it at once"
+    );
     run.stop();
 }
 
