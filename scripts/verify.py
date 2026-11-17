@@ -5982,8 +5982,6 @@ LINE_CITATIONS_KEPT = {
     "doc_notification_center.md:19": "binds ZcosmicToplevelInfoV1",
     # The token is a trait method; the cited line calls it as `.output(`.
     "doc_osd.md:301": "calls Application::output as .output(",
-    # greenboot-rs left upstream_core; the sentence needs rewording, not a new number (#1089).
-    "doc_recovery.md:32": "greenboot-rs is in custom_packages and custom_tier2",
 }
 
 
