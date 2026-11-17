@@ -414,6 +414,9 @@ struct Client {
     axes: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
+    /// Each key and button event the client was sent, in order: its code, and whether it was a
+    /// press.
+    input: Vec<(u32, bool)>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
     toplevel_states: Vec<(ObjectId, StateEvent)>,
     /// The token of the last xdg_activation_v1 token done.
@@ -803,12 +806,16 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             } => {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
+                client.input.push((key, true));
             }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
-            } => client.released.push(key),
+            } => {
+                client.released.push(key);
+                client.input.push((key, false));
+            }
             wl_keyboard::Event::Enter { keys, .. } => {
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
@@ -849,9 +856,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
             wl_pointer::Event::Axis { .. } => client.axes += 1,
             wl_pointer::Event::Button {
                 serial,
+                button,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
                 ..
-            } => client.button = Some(serial),
+            } => {
+                client.button = Some(serial);
+                client.input.push((button, true));
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: WEnum::Value(wl_pointer::ButtonState::Released),
+                ..
+            } => client.input.push((button, false)),
             _ => {}
         }
     }

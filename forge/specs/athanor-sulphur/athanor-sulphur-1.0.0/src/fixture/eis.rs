@@ -42,6 +42,7 @@ const KEY_LEFTSHIFT: u32 = 42;
 const BTN_LEFT: u32 = 0x110;
 
 /// xkb's modifier masks, as `wl_keyboard.modifiers` names them.
+const SHIFT: u32 = 1;
 const CONTROL: u32 = 1 << 2;
 const SUPER: u32 = 1 << 6;
 
@@ -421,6 +422,187 @@ fn eis_undelivered_key_keeps_the_super_tap() {
         run.state.fired.len(),
         fired + 1,
         "and Super's release is still Super alone"
+    );
+    run.stop();
+}
+
+/// The physical input wins (decision 33): a physical press of a key a context holds reaches the
+/// client after the release of the context's; the context's modifiers no longer count the key,
+/// its next release reaches no client, and a press of it after the physical release reaches the
+/// client with its own release. A physical Super pressed over the context's still opens the
+/// launcher on its release.
+#[test]
+fn eis_yields_a_key_to_a_physical_press() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+
+    ei.key(&mut run, KEY_LEFTSHIFT, true);
+    window.roundtrip(&mut run);
+    let from = window.client.input.len();
+    key(&mut run.state, KEY_LEFTSHIFT, true);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(KEY_LEFTSHIFT, false), (KEY_LEFTSHIFT, true)],
+        "the context's Shift is released before the physical press"
+    );
+    key(&mut run.state, KEY_LEFTSHIFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.last(),
+        Some(&(KEY_LEFTSHIFT, false)),
+        "the physical release reaches the client"
+    );
+    let from = window.client.input.len();
+    ei.key(&mut run, KEY_LEFTSHIFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.len(),
+        from,
+        "the context's next release reaches no client"
+    );
+
+    let told = window.client.modifiers.len();
+    ei.keys(&mut run, &[KEY_A]);
+    window.roundtrip(&mut run);
+    assert!(
+        window.client.modifiers[told..]
+            .iter()
+            .all(|mods| mods & SHIFT == 0),
+        "the context's modifiers no longer count Shift"
+    );
+
+    let from = window.client.input.len();
+    ei.keys(&mut run, &[KEY_LEFTSHIFT]);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(KEY_LEFTSHIFT, true), (KEY_LEFTSHIFT, false)],
+        "a press of the context after the physical release reaches the client with its release"
+    );
+
+    // A context's press, a physical press and release, and the context's press again with no
+    // release between: the last press is the context's own, delivered with its release.
+    ei.key(&mut run, KEY_C, true);
+    key(&mut run.state, KEY_C, true);
+    key(&mut run.state, KEY_C, false);
+    window.roundtrip(&mut run);
+    let from = window.client.input.len();
+    ei.key(&mut run, KEY_C, true);
+    ei.key(&mut run, KEY_C, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(KEY_C, true), (KEY_C, false)],
+        "a press of the context after the physical one is judged anew"
+    );
+
+    let fired = run.state.fired.len();
+    ei.key(&mut run, KEY_LEFTMETA, true);
+    key(&mut run.state, KEY_LEFTMETA, true);
+    key(&mut run.state, KEY_LEFTMETA, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        run.state.fired.len(),
+        fired + 1,
+        "a physical Super over the context's opens the launcher on its release"
+    );
+    ei.key(&mut run, KEY_LEFTMETA, false);
+    run.stop();
+}
+
+/// The physical input wins for a button as for a key (decision 33), and a button one context
+/// holds is neither pressed again nor released by another.
+#[test]
+fn eis_yields_a_button_to_a_physical_press() {
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut window = window_at(&mut run, (300, 200), BAR);
+    let mut ei = Ei::sender(&mut run, "/session/1", 2, 2);
+    let mut other = Ei::sender(&mut run, "/session/2", 2, 2);
+    ei.absolute(&mut run, 320.0, 220.0);
+
+    ei.button(&mut run, BTN_LEFT, true);
+    window.roundtrip(&mut run);
+    let from = window.client.input.len();
+    other.button(&mut run, BTN_LEFT, true);
+    other.button(&mut run, BTN_LEFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.len(),
+        from,
+        "a button another context holds is neither pressed again nor released"
+    );
+
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Pressed, InputTime::now());
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(BTN_LEFT, false), (BTN_LEFT, true)],
+        "the context's button is released before the physical press"
+    );
+    run.state
+        .button_input(BTN_LEFT, ButtonState::Released, InputTime::now());
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.last(),
+        Some(&(BTN_LEFT, false)),
+        "the physical release reaches the client"
+    );
+    let from = window.client.input.len();
+    ei.button(&mut run, BTN_LEFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.len(),
+        from,
+        "the context's next release reaches no client"
+    );
+    ei.button(&mut run, BTN_LEFT, true);
+    ei.button(&mut run, BTN_LEFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(BTN_LEFT, true), (BTN_LEFT, false)],
+        "a press of the context after the physical release reaches the client with its release"
+    );
+    run.stop();
+}
+
+/// A touch point is its device's slot: an injected touch and a physical one never share one,
+/// whatever slot numbers their devices give, so neither has to yield to the other. Each is a
+/// touch point of its own, and a lift ends only its own.
+#[test]
+fn eis_touch_points_stay_apart_from_the_seats() {
+    use smithay::backend::input::TouchSlot;
+    let mut run = Running::start(None);
+    park_the_fixture(&mut run);
+    let mut window = window_at(&mut run, (300, 200), BAR);
+    let mut ei = Ei::sender(&mut run, "/session/1", 7, 4);
+
+    ei.touch_down(&mut run, 0, 330.0, 230.0);
+    window.roundtrip(&mut run);
+    let slot = TouchSlot::from(Some(0));
+    run.state
+        .touch_down("touchscreen", slot, (340.0, 240.0).into(), InputTime::now());
+    run.state.touch_frame();
+    window.roundtrip(&mut run);
+    let downs = &window.client.touch.downs;
+    assert_eq!(
+        downs.len(),
+        2,
+        "the physical touch is a touch point of its own"
+    );
+    assert_ne!(downs[0].1, downs[1].1, "with its own id");
+    let physical = downs[1].1;
+    run.state.touch_up("touchscreen", slot, InputTime::now());
+    run.state.touch_frame();
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.touch.ups,
+        [physical],
+        "its lift ends it alone"
     );
     run.stop();
 }

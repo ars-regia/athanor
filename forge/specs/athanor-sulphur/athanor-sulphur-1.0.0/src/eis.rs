@@ -1144,6 +1144,45 @@ impl State {
                 .is_some_and(|(surface, _)| backend_surface(&surface))
     }
 
+    /// A physical press of `code` wins over a context that holds the key (decision 33): the
+    /// focus is first sent its release, under the context's modifiers once the key is up, as a
+    /// release of the seat's would reach it, and the context counts the key as let go, so its own
+    /// next release finds nothing held and is dropped, and a press of it is judged anew. The
+    /// release starts and cancels no tap of Super (`eis_send_key`).
+    pub(crate) fn eis_yield_key(&mut self, code: Keycode, time: InputTime) {
+        let raw = code.raw();
+        let releases: Vec<[u32; 4]> = self
+            .eis
+            .contexts
+            .values_mut()
+            .filter_map(|context| context.keys.as_mut())
+            .filter_map(|keys| {
+                keys.held.remove(&raw).then(|| {
+                    keys.state.update_key(code, xkb::KeyDirection::Up);
+                    keys.mask()
+                })
+            })
+            .collect();
+        for mask in releases {
+            self.eis_send_key(code, KeyState::Released, mask, time);
+        }
+    }
+
+    /// A press of `button` from the seat wins over a context that holds it (decision 33): the
+    /// pointer's focus is first sent its release, and the context counts it as let go, so its own
+    /// next release is dropped (`eis_button`).
+    pub(crate) fn eis_yield_button(&mut self, button: u32, time: InputTime) {
+        let mut held = 0;
+        for context in self.eis.contexts.values_mut() {
+            let before = context.buttons.len();
+            context.buttons.retain(|(_, of)| *of != button);
+            held += before - context.buttons.len();
+        }
+        for _ in 0..held {
+            self.eis_pointing(|state| state.button_input(button, ButtonState::Released, time));
+        }
+    }
+
     fn eis_touch_up(&mut self, id: u64, key: (String, TouchSlot), time: InputTime) {
         let held = self
             .eis

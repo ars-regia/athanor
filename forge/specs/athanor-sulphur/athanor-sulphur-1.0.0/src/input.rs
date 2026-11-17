@@ -87,6 +87,10 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
+        // A physical press wins over an EIS context's hold of the key (decision 33).
+        if key_state == KeyState::Pressed && source == KeyboardSource::Physical {
+            self.eis_yield_key(code, time);
+        }
         self.end_finished_popup_grab();
         if !past_grab {
             self.resume_input_method_grab();
@@ -290,6 +294,10 @@ impl State {
         self.super_tap = None;
         if button_state == ButtonState::Pressed {
             self.aids_pointer_pressed();
+        }
+        // A press of the seat's wins over an EIS context's hold of the button (decision 33).
+        if button_state == ButtonState::Pressed && !self.eis.injecting() {
+            self.eis_yield_button(button, time);
         }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
