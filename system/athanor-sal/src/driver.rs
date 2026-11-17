@@ -16,7 +16,7 @@ use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{
-    focused_window, keyboard_after_close, Dismiss, GrabSerial, OpenPopup, Tooltip,
+    focused_window, keyboard_after_close, keyboard_after_leave, Dismiss, GrabSerial, OpenPopup, Tooltip,
     TOOLTIP_PADDING,
 };
 use crate::render::{layout, render, Error};
@@ -408,6 +408,7 @@ fn run_on(
         first_frames: Vec::new(),
         outputs: Vec::new(),
         closing: Vec::new(),
+        closed_popups: Vec::new(),
         reduced_motion: false,
         settled: Vec::new(),
         dialogs: dialog::Dialogs::bind(&globals, &qh),
@@ -583,6 +584,8 @@ pub struct Shell {
     outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
     /// The surfaces [`Shell::close`] closed since the driver last ended what they held.
     closing: Vec<SurfaceId>,
+    /// The popups [`Shell::remove`] closed since the driver last handed their keyboard back.
+    closed_popups: Vec<OpenPopup<SurfaceId>>,
     /// Whether motions only fade ([`Shell::set_reduced_motion`]).
     reduced_motion: bool,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
@@ -1250,6 +1253,7 @@ impl Shell {
             {
                 self.popup = None;
                 self.surfaces.retain(|s| s.id != popup.surface);
+                self.closed_popups.push(popup);
                 if let Some(from) = self.get_mut(popup.parent) {
                     popup.closed(&mut from.ui);
                     from.dirty = true;
@@ -2249,19 +2253,23 @@ impl App {
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
-    /// selection its fields offered ends with it. A popup that had the keyboard hands it back
-    /// to the surface it was opened from, while that one is open, without waiting for the
-    /// compositor's `enter` on it.
+    /// selection its fields offered ends with it, and the popups closed with it hand their
+    /// keyboard back ([`App::popups_closed`]).
     fn close(&mut self, id: SurfaceId) {
-        let keyboard = self
-            .shell
-            .popup
-            .filter(|open| open.surface == id)
-            .map(|open| keyboard_after_close(open, self.keyboard_focus));
         self.shell.remove(id);
+        self.popups_closed();
         self.forget(id);
-        if let Some(keyboard) = keyboard.filter(|&k| k != self.keyboard_focus) {
-            self.keyboard_focus = keyboard.filter(|&parent| self.shell.ui(parent).is_some());
+    }
+
+    /// Hands the keyboard of each popup [`Shell::remove`] closed, by the driver or by the
+    /// application, back to the surface it was opened from, while that one is open, without
+    /// waiting for the compositor's `enter` on it, and ends what the popup held.
+    fn popups_closed(&mut self) {
+        for popup in std::mem::take(&mut self.shell.closed_popups) {
+            let shell = &self.shell;
+            self.keyboard_focus =
+                keyboard_after_close(popup, self.keyboard_focus, |id| shell.ui(id).is_some());
+            self.forget(popup.surface);
         }
     }
 
@@ -2279,8 +2287,9 @@ impl App {
     }
 
     /// Ends what the surfaces [`Shell::close`] closed held: their place on their output, their
-    /// text input and their primary selection.
+    /// text input and their primary selection; the popups closed hand their keyboard back first.
     fn closed_by_application(&mut self) {
+        self.popups_closed();
         for id in std::mem::take(&mut self.shell.closing) {
             self.outputs.closed(id);
             self.forget(id);
@@ -2983,7 +2992,10 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
     ) {
-        self.keyboard_focus = None;
+        // A closed popup's leave, which may come after its keyboard was handed back, leaves the
+        // focus where it is.
+        let left = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = keyboard_after_leave(self.keyboard_focus, left);
         self.keyboard_moved(wl, false);
     }
 

@@ -104,16 +104,32 @@ pub(crate) fn focused_window<S: Copy>(
 }
 
 /// The surface with the keyboard once the popup `open` closes, given the one that had it: the
-/// popup's parent, when the popup had it. The compositor gives the keys back to the parent when
-/// the popup's grab ends, which a Smithay compositor sees only at the next key: until then the
-/// parent stays the focused window, and the menu's button, which takes the focus back, keeps the
-/// screen reader's locus (AX7).
+/// popup's parent, when the popup had it and the parent `is_open`, else none. The compositor
+/// gives the keys back to the parent when the popup's grab ends, which a Smithay compositor sees
+/// only at the next key: until then the parent stays the focused window, and the menu's button,
+/// which takes the focus back, keeps the screen reader's locus (AX7).
 pub(crate) fn keyboard_after_close<S: Copy + PartialEq>(
     open: OpenPopup<S>,
     keyboard: Option<S>,
+    is_open: impl Fn(S) -> bool,
 ) -> Option<S> {
     if keyboard == Some(open.surface) {
-        Some(open.parent)
+        Some(open.parent).filter(|&parent| is_open(parent))
+    } else {
+        keyboard
+    }
+}
+
+/// The surface with the keyboard after the compositor's `leave` of `left`, a surface still open,
+/// or none for one already closed: none when `left` had it, else the one that had it. A popup's
+/// `leave` that comes after its keyboard was handed back ([`keyboard_after_close`]) changes
+/// nothing.
+pub(crate) fn keyboard_after_leave<S: PartialEq>(
+    keyboard: Option<S>,
+    left: Option<S>,
+) -> Option<S> {
+    if left.is_some() && left == keyboard {
+        None
     } else {
         keyboard
     }
@@ -458,23 +474,53 @@ mod tests {
             anchor: WidgetId(5, 0),
             menu: true,
         };
-        assert_eq!(keyboard_after_close(menu, Some(2)), Some(1), "the popup's");
+        let open = |_| true;
         assert_eq!(
-            focused_window(None, keyboard_after_close(menu, Some(2))),
+            keyboard_after_close(menu, Some(2), open),
+            Some(1),
+            "the popup's"
+        );
+        assert_eq!(
+            focused_window(None, keyboard_after_close(menu, Some(2), open)),
             Some(1),
             "the parent is the focused window"
         );
         assert_eq!(
-            keyboard_after_close(menu, Some(1)),
+            keyboard_after_close(menu, Some(2), |id| id != 1),
+            None,
+            "the parent closed with it"
+        );
+        assert_eq!(
+            keyboard_after_close(menu, Some(1), open),
             Some(1),
             "the compositor kept the keyboard on the parent"
         );
         assert_eq!(
-            keyboard_after_close(menu, Some(3)),
+            keyboard_after_close(menu, Some(3), open),
             Some(3),
             "another surface"
         );
-        assert_eq!(keyboard_after_close(menu, None), None, "no keyboard");
+        assert_eq!(keyboard_after_close(menu, None, open), None, "no keyboard");
+    }
+
+    #[test]
+    fn a_leave_takes_the_keyboard_only_from_the_surface_that_had_it() {
+        assert_eq!(
+            keyboard_after_leave(Some(1), Some(1)),
+            None,
+            "the focused one"
+        );
+        assert_eq!(
+            keyboard_after_leave(Some(1), None),
+            Some(1),
+            "a closed popup's, after the hand-back"
+        );
+        assert_eq!(
+            keyboard_after_leave(Some(1), Some(2)),
+            Some(1),
+            "another one"
+        );
+        assert_eq!(keyboard_after_leave::<u32>(None, None), None, "none had it");
     }
 
     #[test]
