@@ -99,6 +99,8 @@ pub struct Page {
     service: Rc<Service>,
     /// The state and the failure the page shows last.
     seen: (u64, u64),
+    /// A failure's note is on screen: a page built again, while the old one is, shows it too.
+    noted: bool,
     ids: Option<Ids>,
 }
 
@@ -107,6 +109,7 @@ impl Page {
         Page {
             service: Service::get(services),
             seen: (0, 0),
+            noted: false,
             ids: None,
         }
     }
@@ -132,17 +135,21 @@ impl Page {
         let note = ui.add(summary, Kind::Label(String::new()));
         look.note(ui, note);
 
-        // Columns, not groups: the GTK page's boxes give assistive technologies no group.
-        let profiles_section = column(ui, page);
-        ui.set_spacing(profiles_section, look.radio_gap);
-        let heading = ui.add(profiles_section, Kind::Label(tr("Power mode")));
+        // The profiles' radio buttons in a group named as the heading above them, so a screen
+        // reader says "Power mode" with each; Tab still goes from one to the next (#1237). The
+        // column inside spaces them, which a group does not take.
+        let power_mode = tr("Power mode");
+        let profiles_section = ui.add(page, Kind::Group(power_mode.clone()));
+        let profiles_column = column(ui, profiles_section);
+        ui.set_spacing(profiles_column, look.radio_gap);
+        let heading = ui.add(profiles_column, Kind::Label(power_mode));
         ui.set_text_style(heading, title());
         let profiles = battery::PROFILE_NAMES
             .iter()
             .map(|&name| {
                 (
                     name,
-                    ui.radio(profiles_section, &profile_label(name), false),
+                    ui.radio(profiles_column, &profile_label(name), false),
                 )
             })
             .collect();
@@ -160,6 +167,9 @@ impl Page {
                 50.0,
             );
         let failure = Failure::new(ui, page, look);
+        if self.noted {
+            failure.restore(ui);
+        }
         self.ids = Some(Ids {
             charge,
             note,
@@ -183,7 +193,7 @@ impl Page {
         let failed = now.1 != self.seen.1;
         self.show(ui);
         if let (true, Some(ids)) = (failed, &self.ids) {
-            ids.failure.show(ui);
+            self.noted |= ids.failure.show(ui);
         }
         Turn::Updated
     }
@@ -198,9 +208,15 @@ impl Page {
 
     /// The page left the screen: a note says nothing of the actions to come.
     pub fn closed(&mut self, ui: &mut Ui) {
+        self.discarded();
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
+    }
+
+    /// The surface that showed the page closed: a page built again shows no note.
+    pub fn discarded(&mut self) {
+        self.noted = false;
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -281,6 +297,7 @@ mod tests {
         let page = Page {
             service,
             seen: (0, 0),
+            noted: false,
             ids: None,
         };
         (page, received)
@@ -343,6 +360,18 @@ mod tests {
             ]
         );
         assert_eq!(ids.brightness.and_then(|s| ui.value(s)), Some(60.0));
+        assert!(matches!(
+            &ui.widget(ids.profiles_section).kind,
+            Kind::Group(name) if name == "Power mode"
+        ));
+        assert!(ids.profiles.iter().all(|&(_, id)| {
+            let column = ui.widget(id).parent;
+            column.and_then(|c| ui.widget(c).parent) == Some(ids.profiles_section)
+        }));
+        // The visible heading, the column's first widget, says the group's name.
+        let column = ui.widget(ids.profiles_section).children[0];
+        let heading = ui.widget(column).children[0];
+        assert!(matches!(&ui.widget(heading).kind, Kind::Label(t) if t == "Power mode"));
 
         // A desktop: no profiles daemon, no backlight.
         publish(
@@ -396,5 +425,28 @@ mod tests {
         assert!(ui.is_active(page.ids.as_ref().map_or(saver, |ids| ids.profiles[1].1)));
         page.closed(&mut ui);
         assert!(!ui.is_visible(note));
+    }
+
+    #[test]
+    fn a_note_shown_stays_in_the_page_built_again_until_its_surface_closes() {
+        let note = |page: &Page| page.ids.as_ref().map(|ids| ids.failure.note);
+        let (mut page, _) = page();
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &Look::plain());
+        publish(&page, laptop());
+        page.turn(&mut ui);
+        publish(&page, BatteryState { refused: 1, ..laptop() });
+        page.turn(&mut ui);
+
+        // The note grew the popover, which the bar builds again at its new size.
+        let mut again = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut again, Ui::ROOT, &Look::plain());
+        assert_eq!(note(&page).map(|id| again.is_visible(id)), Some(true));
+
+        // The popover closed: the next one starts without the note.
+        page.discarded();
+        let mut next = Ui::new("Battery", Theme::default(), false);
+        page.build(&mut next, Ui::ROOT, &Look::plain());
+        assert_eq!(note(&page).map(|id| next.is_visible(id)), Some(false));
     }
 }

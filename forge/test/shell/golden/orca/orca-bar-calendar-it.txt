@@ -1,0 +1,12 @@
+Lettore schermo attivo.
+button.
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+Lettore schermo disattivato.

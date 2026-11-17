@@ -30,7 +30,7 @@ async fn send(session: &Connection, notice: &Notice) -> zbus::Result<(u32, Strin
         Notice::Security { until: None, .. } | Notice::SecurityApplies { .. } => (t.security_title, t.security_body.to_owned()),
         Notice::Security { until: Some(until), .. } => (t.security_title, t.postponed_until.replace("{time}", &t.time(*until))),
         Notice::Running { version, build_time, .. } => {
-            let date = chrono::DateTime::from_timestamp(*build_time, 0).map(|time| time.format("%Y-%m-%d").to_string()).unwrap_or_default();
+            let date = jiff::Timestamp::from_second(*build_time).map(|time| time.strftime("%Y-%m-%d").to_string()).unwrap_or_default();
             // The version comes from a world-readable file: plain text, stripped, truncated.
             let body = t.running_body.replace("{version}", &athanor_trust_state::display(version)).replace("{date}", &date);
             (t.running_summary, body)

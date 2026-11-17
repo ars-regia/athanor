@@ -38,8 +38,12 @@ def problems(files):
 
 
 class LandlockFdTest(unittest.TestCase):
-    def test_the_pending_rulesets_pass(self):
-        self.assertEqual(problems({name: GRANT for name in verify.LANDLOCK_PATH_PENDING}), [])
+    def test_the_rulesets_of_the_greeter_and_the_chooser_are_no_longer_exempt(self):
+        # Both confine through athanor_unit::sandbox since #1059: a path grant there is refused.
+        for crate in ("athanor-greeter-ui", "athanor-layout-chooser"):
+            base = f"forge/specs/{crate}/{crate}-1.0.0"
+            found = problems({f"{base}/src/sandbox.rs": GRANT, f"{base}/Cargo.toml": LANDLOCK})
+            self.assertEqual(len(found), 2, found)
 
     def test_the_shared_sandbox_reads_through_path_fd_and_never_writes(self):
         self.assertEqual(problems({verify.LANDLOCK_SANDBOX: READ_GRANT}), [])
@@ -93,9 +97,8 @@ class LandlockFdTest(unittest.TestCase):
         code = "use landlock::{PathFd as Fd, AccessFs};\n"
         self.assertEqual(len(problems({verify.LANDLOCK_SANDBOX: code})), 1)
 
-    def test_only_athanor_unit_and_the_pending_crates_depend_on_landlock(self):
-        allowed = {name: LANDLOCK for name in (verify.LANDLOCK_CRATE, *verify.LANDLOCK_CRATES_PENDING)}
-        self.assertEqual(problems(allowed), [])
+    def test_only_athanor_unit_depends_on_landlock(self):
+        self.assertEqual(problems({verify.LANDLOCK_CRATE: LANDLOCK}), [])
         found = problems({"forge/specs/athanor-dock/athanor-dock-1.0.0/Cargo.toml": LANDLOCK,
                           "system/athanor-idle/Cargo.toml":
                               '[target.\'cfg(unix)\'.dev-dependencies]\nll = { package = "landlock" }\n'})

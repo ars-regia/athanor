@@ -208,6 +208,29 @@
  {
   "depth": 5,
   "role": "toggle button",
+  "name": "Calendar",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Calendar",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
   "name": "Dialogs",
   "states": [
    "focusable",
@@ -221,6 +244,29 @@
   "depth": 6,
   "role": "label",
   "name": "Dialogs",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "toggle button",
+  "name": "Menus",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "label",
+  "name": "Menus",
   "states": [
    "sensitive",
    "showing",

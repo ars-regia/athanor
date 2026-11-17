@@ -31,6 +31,9 @@ impl Ui {
         if dx == 0 && dy == 0 {
             return None;
         }
+        if let Some(done) = self.calendar_wheel(x, y, dy) {
+            return done;
+        }
         let Some(widget) = self.hit(x, y) else {
             self.wheel = None;
             return None;
