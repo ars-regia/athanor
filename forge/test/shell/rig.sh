@@ -170,7 +170,7 @@ image_id() {
 # no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
 # content hash, as Spec Build Check takes it, never latest: the published one when a trusted run
 # of call-build-builder.yml signed it, else the one forge/scripts/builder_image.sh builds from this
-# checkout (doc_build_system.md, section 3). That one is unsigned (the exception to PL12 of
+# checkout (doc_build_system.md, section 5). That one is unsigned (the exception to PL12 of
 # doc_pipeline.md, for this recipe), loaded into the local podman only, never tagged, pushed,
 # signed or cached under its hash, and used for the RPM installed in the test rig. The RPM is a
 # pull-request test artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
