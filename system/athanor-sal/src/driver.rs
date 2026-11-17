@@ -16,7 +16,7 @@ use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
 use crate::popup::{
-    focused_window, keyboard_after_close, keyboard_after_leave, Dismiss, GrabSerial, OpenPopup, Tooltip,
+    focused_window, keyboard_after_closed, keyboard_after_leave, Dismiss, GrabSerial, OpenPopup, Tooltip,
     TOOLTIP_PADDING,
 };
 use crate::render::{layout, render, Error};
@@ -2261,14 +2261,20 @@ impl App {
         self.forget(id);
     }
 
-    /// Hands the keyboard of each popup [`Shell::remove`] closed, by the driver or by the
-    /// application, back to the surface it was opened from, while that one is open, without
-    /// waiting for the compositor's `enter` on it, and ends what the popup held.
+    /// Hands the keyboard of the popups [`Shell::remove`] closed, by the driver or by the
+    /// application, back to the nearest open surface they were opened from, a dialog's window
+    /// when the dialog closed with them, without waiting for the compositor's `enter` on it, and
+    /// ends what the popups held.
     fn popups_closed(&mut self) {
-        for popup in std::mem::take(&mut self.shell.closed_popups) {
-            let shell = &self.shell;
-            self.keyboard_focus =
-                keyboard_after_close(popup, self.keyboard_focus, |id| shell.ui(id).is_some());
+        let popups = std::mem::take(&mut self.shell.closed_popups);
+        let shell = &self.shell;
+        self.keyboard_focus = keyboard_after_closed(
+            &popups,
+            self.keyboard_focus,
+            |id| shell.ui(id).is_some(),
+            |id| shell.dialogs.parent_of(id),
+        );
+        for popup in popups {
             self.forget(popup.surface);
         }
     }

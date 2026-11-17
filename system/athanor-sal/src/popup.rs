@@ -103,26 +103,32 @@ pub(crate) fn focused_window<S: Copy>(
     }
 }
 
-/// The surface with the keyboard once the popup `open` closes, given the one that had it: the
-/// popup's parent, when the popup had it and the parent `is_open`, else none. The compositor
-/// gives the keys back to the parent when the popup's grab ends, which a Smithay compositor sees
-/// only at the next key: until then the parent stays the focused window, and the menu's button,
-/// which takes the focus back, keeps the screen reader's locus (AX7).
-pub(crate) fn keyboard_after_close<S: Copy + PartialEq>(
-    open: OpenPopup<S>,
+/// The surface with the keyboard once the `popups` close, in their order, given the one that
+/// had it: a popup that had it hands it to the nearest of its parent and the parent's ancestors
+/// (`parent_of`, the surface a dialog was opened on) that `is_open`, else to none, as a dialog
+/// closed with its drop-down hands it to its window. The compositor gives the keys back to the
+/// parent when the popup's grab ends, which a Smithay compositor sees only at the next key: until
+/// then the parent stays the focused window, and the menu's button, which takes the focus back,
+/// keeps the screen reader's locus (AX7).
+pub(crate) fn keyboard_after_closed<S: Copy + PartialEq>(
+    popups: &[OpenPopup<S>],
     keyboard: Option<S>,
     is_open: impl Fn(S) -> bool,
+    parent_of: impl Fn(S) -> Option<S>,
 ) -> Option<S> {
-    if keyboard == Some(open.surface) {
-        Some(open.parent).filter(|&parent| is_open(parent))
-    } else {
-        keyboard
-    }
+    popups.iter().fold(keyboard, |keyboard, popup| {
+        if keyboard == Some(popup.surface) {
+            std::iter::successors(Some(popup.parent), |&surface| parent_of(surface))
+                .find(|&surface| is_open(surface))
+        } else {
+            keyboard
+        }
+    })
 }
 
 /// The surface with the keyboard after the compositor's `leave` of `left`, a surface still open,
 /// or none for one already closed: none when `left` had it, else the one that had it. A popup's
-/// `leave` that comes after its keyboard was handed back ([`keyboard_after_close`]) changes
+/// `leave` that comes after its keyboard was handed back ([`keyboard_after_closed`]) changes
 /// nothing.
 pub(crate) fn keyboard_after_leave<S: PartialEq>(
     keyboard: Option<S>,
@@ -474,33 +480,63 @@ mod tests {
             anchor: WidgetId(5, 0),
             menu: true,
         };
-        let open = |_| true;
+        let after = |keyboard| keyboard_after_closed(&[menu], keyboard, |_| true, |_| None);
+        assert_eq!(after(Some(2)), Some(1), "the popup's");
         assert_eq!(
-            keyboard_after_close(menu, Some(2), open),
-            Some(1),
-            "the popup's"
-        );
-        assert_eq!(
-            focused_window(None, keyboard_after_close(menu, Some(2), open)),
+            focused_window(None, after(Some(2))),
             Some(1),
             "the parent is the focused window"
         );
         assert_eq!(
-            keyboard_after_close(menu, Some(2), |id| id != 1),
+            keyboard_after_closed(&[menu], Some(2), |id| id != 1, |_| None),
             None,
             "the parent closed with it"
         );
         assert_eq!(
-            keyboard_after_close(menu, Some(1), open),
+            after(Some(1)),
             Some(1),
             "the compositor kept the keyboard on the parent"
         );
+        assert_eq!(after(Some(3)), Some(3), "another surface");
+        assert_eq!(after(None), None, "no keyboard");
+    }
+
+    #[test]
+    fn popups_closed_together_hand_the_keyboard_to_the_nearest_open_ancestor() {
+        let popup = |surface, parent| OpenPopup {
+            surface,
+            parent,
+            anchor: WidgetId(5, 0),
+            menu: true,
+        };
+        // Window 1, its dialog 2, the dialog's drop-down 3; menus 4 and 5 of the window.
+        let parent_of = |id| (id == 2).then_some(1);
+        let open = |id| id != 3 && id != 4 && id != 5;
         assert_eq!(
-            keyboard_after_close(menu, Some(3), open),
-            Some(3),
-            "another surface"
+            keyboard_after_closed(&[popup(3, 2)], Some(3), |id| id == 1, parent_of),
+            Some(1),
+            "a drop-down closed with its dialog hands it to the dialog's window"
         );
-        assert_eq!(keyboard_after_close(menu, None, open), None, "no keyboard");
+        assert_eq!(
+            keyboard_after_closed(&[popup(3, 2)], Some(3), open, parent_of),
+            Some(2),
+            "a drop-down closed alone hands it to its open dialog"
+        );
+        assert_eq!(
+            keyboard_after_closed(&[popup(4, 1), popup(5, 1)], Some(4), open, parent_of),
+            Some(1),
+            "menu 4, replaced by menu 5, hands it to the window"
+        );
+        assert_eq!(
+            keyboard_after_closed(&[popup(4, 1), popup(5, 1)], Some(5), open, parent_of),
+            Some(1),
+            "menu 5, closed after menu 4, hands it to the window"
+        );
+        assert_eq!(
+            keyboard_after_closed(&[popup(3, 2)], Some(3), |_| false, parent_of),
+            None,
+            "no ancestor open"
+        );
     }
 
     #[test]
