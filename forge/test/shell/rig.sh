@@ -1646,7 +1646,8 @@ orca)
         exit 1
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
-    transcript=orca-$2${3:+-$3}.txt own=()
+    reference=orca-$2${3:+-$3}.txt own=()
+    transcript=$reference
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1697,6 +1698,9 @@ orca)
         # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
         # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
         # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
+        # The toolkit dock's transcript sits beside the GTK dock's under its own name, in the
+        # same artifact, and holds the GTK dock's reference.
+        transcript=orca-${dock_tag}dock${3:+-$3}.txt
         seed_bar "$out/seed-orca-dock" float top visible light
         walk=(Tab*9 shift+F10 Down*4 Escape)
         if [ -n "$unit" ]; then
@@ -1828,7 +1832,7 @@ orca)
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
-        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
+        "/repo/forge/test/shell/golden/orca/$reference" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
     # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-sal's, with vello_cpu and with
