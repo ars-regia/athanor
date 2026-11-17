@@ -290,6 +290,33 @@ class SecondLineTest(unittest.TestCase):
                 self.assertEqual(compare.compare(reference, spoken)[1], [f"{line!r}: missing"])
 
 
+class LauncherResultsTest(unittest.TestCase):
+    """doc_launcher.md LA5, need 6: the launcher announces the number of its results and the row
+    the arrows select while the keyboard stays in the field (#751). Its reference holds the count
+    and both rows that athanor-sal's launcher speaks, so a walk that hears no result fails."""
+
+    def test_the_launcher_walk_hears_the_count_and_each_row(self):
+        for lang, golden, results in (
+            (
+                "en",
+                "orca-launcher.txt",
+                ["Results List with 3 items", "cc window, Web search.", "CC Window, Application."],
+            ),
+            (
+                "it",
+                "orca-launcher-it.txt",
+                ["Risultati Elenco con 3 voci", "cc window, Ricerca sul web.", "CC Window, Applicazione."],
+            ),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                silent = [utterance for utterance in reference if utterance not in results]
+                self.assertEqual(
+                    compare.compare(reference, silent)[1],
+                    [f"{line!r}: missing" for line in results],
+                )
+
+
 class HiddenTest(unittest.TestCase):
     """doc_own_stack.md, decision 28 item 3: under the own compositor the buttons it hides are
     exempt, each with the decision and its control's issue, from golden_report.exemptions."""
