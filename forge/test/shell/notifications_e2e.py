@@ -44,8 +44,9 @@ def alerts(app, Atspi):
 
 
 def never(seen, seconds):
-    """True when `seen` stays false for `seconds`. An error from it, such as a node destroyed
-    mid-read, raises: a tree rebuilt during the interval is the event this exists to catch."""
+    """True when `seen` stays false for `seconds`. An error from it raises. A node destroyed
+    mid-read is read again from the root by atspi_check.walk, so `seen` answers on the tree
+    as it is after the rebuild, and raises only when the tree keeps changing."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if seen():

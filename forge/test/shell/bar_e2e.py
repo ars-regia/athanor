@@ -33,7 +33,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import children, find_application, walk  # noqa: E402
+from atspi_check import afresh, children, find_application, walk  # noqa: E402
 
 READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
@@ -95,29 +95,6 @@ def alive(pid):
 
 def showing(accessible, Atspi):
     return accessible.get_state_set().contains(Atspi.StateType.SHOWING)
-
-
-# How many times a walk of the tree starts again from the root after a node vanished in it.
-WALK_TRIES = 5
-
-
-def vanished(err):
-    """Whether `err` is AT-SPI's answer for a node the application destroyed, as a Sal
-    surface does when it builds a popover again: the tree changed under the walk."""
-    return err.domain == "atspi_error" and err.message.startswith("Unknown object")
-
-
-def afresh(read):
-    """Returns `read()`, a walk of the tree from the application's root. A node destroyed
-    mid-walk starts it again from the root, up to WALK_TRIES times, 0.2 s apart; past that,
-    or on any other error, the last error is raised."""
-    for attempt in range(1, WALK_TRIES + 1):
-        try:
-            return read()
-        except GLib.Error as err:
-            if not vanished(err) or attempt == WALK_TRIES:
-                raise
-        time.sleep(0.2)
 
 
 def buttons_matching(app, Atspi, regex):
@@ -215,7 +192,7 @@ def labelled(app, Atspi, role, label):
 
 
 def print_tree(app, Atspi):
-    for role, label, _, depth in afresh(lambda: walk(app, Atspi)):
+    for role, label, _, depth in walk(app, Atspi):
         print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
 
 

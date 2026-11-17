@@ -15,6 +15,7 @@ gi_stub.install()
 from gi.repository import GLib  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import atspi_check  # noqa: E402
 import bar_e2e  # noqa: E402
 
 
@@ -70,8 +71,8 @@ class AfreshTest(unittest.TestCase):
 
         with self.assertRaises(GLib.Error) as raised:
             bar_e2e.afresh(read)
-        self.assertEqual(len(calls), bar_e2e.WALK_TRIES)
-        self.assertEqual(raised.exception.message, f"Unknown object '/{bar_e2e.WALK_TRIES}'")
+        self.assertEqual(len(calls), atspi_check.WALK_TRIES)
+        self.assertEqual(raised.exception.message, f"Unknown object '/{atspi_check.WALK_TRIES}'")
 
     def test_any_other_error_is_raised_at_once(self, _sleep):
         calls = []

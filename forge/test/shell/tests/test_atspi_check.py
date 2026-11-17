@@ -3,6 +3,7 @@
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -169,6 +170,47 @@ class ChildrenTest(unittest.TestCase):
             [node[:4] for node in check.with_extents(app, FakeAtspi)],
             [("application", "", True, (0, 0, 0, 0)), ("frame", "", True, (0, 0, 30, 20))],
         )
+
+
+
+class Vanished(Exception):
+    """A GLib.Error as PyGObject raises it for a node the application destroyed."""
+    domain, message = "atspi_error", "Unknown object '/org/a11y/atspi/accessible/2/1'"
+
+
+class Rebuilt(Fake):
+    """A node whose role reads as vanished the first `times` walks: a popover built again."""
+
+    def __init__(self, times, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.times = times
+
+    def get_role_name(self):
+        if self.times:
+            self.times -= 1
+            raise Vanished()
+        return self.role
+
+
+@unittest.mock.patch.object(check.time, "sleep")
+class WalkTest(unittest.TestCase):
+    def test_a_node_destroyed_mid_walk_walks_again_from_the_root(self, _sleep):
+        app = Fake("application", (0, 0, 0, 0), [Rebuilt(2, "button", (0, 0, 1, 1), name="Close")])
+        self.assertEqual(check.walk(app, FakeAtspi), [("application", "", True, 0), ("button", "Close", True, 1)])
+
+    def test_a_tree_that_keeps_changing_raises_the_last_error(self, _sleep):
+        app = Fake("application", (0, 0, 0, 0), [Rebuilt(check.WALK_TRIES, "button", (0, 0, 1, 1))])
+        with self.assertRaises(Vanished):
+            check.walk(app, FakeAtspi)
+
+    def test_another_error_is_raised_at_once(self, sleep):
+        class Broken(Fake):
+            def get_name(self):
+                raise RuntimeError("bus gone")
+
+        with self.assertRaises(RuntimeError):
+            check.walk(Broken("application", (0, 0, 0, 0)), FakeAtspi)
+        sleep.assert_not_called()
 
 
 if __name__ == "__main__":

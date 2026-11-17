@@ -77,12 +77,41 @@ def children(accessible):
             yield child
 
 
-def walk(accessible, Atspi, depth=0, out=None):
+# How many times a walk of the tree starts again from the root after a node vanished in it.
+WALK_TRIES = 5
+
+
+def vanished(err):
+    """Whether `err` is AT-SPI's answer for a node the application destroyed, as a Sal
+    surface does when it builds a popover again: the tree changed under the walk."""
+    return getattr(err, "domain", None) == "atspi_error" and str(getattr(err, "message", "")).startswith("Unknown object")
+
+
+def afresh(read):
+    """Returns `read()`, a walk of the tree from the application's root. A node destroyed
+    mid-walk starts it again from the root, up to WALK_TRIES times, 0.2 s apart; past that,
+    or on any other error, the last error is raised."""
+    for attempt in range(1, WALK_TRIES + 1):
+        try:
+            return read()
+        except Exception as err:
+            if not vanished(err) or attempt == WALK_TRIES:
+                raise
+        time.sleep(0.2)
+
+
+def walk(accessible, Atspi):
+    """Every node under `accessible` as (role, name, showing, depth), read afresh: a node
+    destroyed mid-walk starts the walk again from `accessible`."""
+    return afresh(lambda: walk_once(accessible, Atspi))
+
+
+def walk_once(accessible, Atspi, depth=0, out=None):
     out = [] if out is None else out
     states = accessible.get_state_set()
     out.append((accessible.get_role_name(), accessible.get_name() or "", states.contains(Atspi.StateType.SHOWING), depth))
     for child in children(accessible):
-        walk(child, Atspi, depth + 1, out)
+        walk_once(child, Atspi, depth + 1, out)
     return out
 
 
