@@ -19,13 +19,13 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 **Applications.**
 
 - `flatpak` is installed by the image build (`system/Containerfile:208`, `forge/config/packages.json:93`), on the base `quay.io/fedora-ostree-desktops/base-atomic:43` (`system/Containerfile:80`).
-- `cosmic-store` ships (`forge/config/packages.json:156`) and is today the only graphical way to install an application.
+- `cosmic-store` ships (`forge/config/packages.json:132`) and is today the only graphical way to install an application.
 - **No Flathub remote is configured.** The only remote on the desktop is `fedora` (system, OCI), which Fedora's `flatpak-add-fedora-repos.service` adds (enabled by Fedora's `90-default.preset:374`, desktop). The one script that adds Flathub and installs the `flatpaks` list of `forge/config/packages.json` (and the script `system/scripts/provision_flatpak.sh` that read it) were removed on 2026-10-08 (ADR-0089): no unit, kickstart or script ran them, so the list installed nothing, as the `upstream_*` lists once did.
 - The system helper's polkit defaults (Flatpak 1.16.6, desktop): install and uninstall are `auth_admin_keep` for an active session, update and AppStream refresh are `yes` for an active session and `auth_admin` otherwise. Fedora's `org.freedesktop.Flatpak.rules` lets an active local member of `wheel` install and uninstall without a password.
 
 **The legacy store crates.**
 
-- `forge/specs/athanor-store-rs` is out of the workspace (`Cargo.toml:55`, `exclude`) and out of the image (absent from `forge/config/packages.json:2-48`). `experimental/EXEMPT:18-22` records why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
+- `forge/specs/athanor-store-rs` is out of the workspace (`Cargo.toml:55`, `exclude`) and out of the image (absent from `forge/config/packages.json:2-48`). its former entry in `experimental/EXEMPT` recorded why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
   - The unit is a system unit with `Type=dbus`, `BusName=os.athanor.Store` and `DynamicUser=yes` (`athanor-store-rs.spec:50-60`), the bus policy lets only root own the name (`os.athanor.Store.conf:5-7`), and the code connects to the **session** bus (`src/backend/dbus.rs:105`). It could never have started.
   - `os.athanor.store.install` is declared (`os.athanor.store.policy:9`) and checked nowhere.
   - `verify_pqc_package` verifies a Dilithium signature against a public key the caller passes in (`src/backend/dbus.rs:31-51`), which proves nothing: a facade in a security path.
@@ -58,7 +58,7 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Polkit.** `athanor_bus_api::polkit::check_polkit_auth_zbus` builds the subject from the bus sender (`system/athanor-bus-api/src/polkit.rs:97-104`) and passes an empty details map to `CheckAuthorization` (`polkit.rs:119`), so a polkit rule cannot see which object a request is about. systemd's own actions are `auth_admin_keep` for an active session (`org.freedesktop.systemd1.manage-units`, `manage-unit-files`; desktop). `org.freedesktop.login1.set-self-linger` is `yes` for everyone (desktop). The system journal is readable by `wheel` and `adm` through the ACLs of systemd's `tmpfiles.d/systemd.conf:30-32` (desktop).
 
-**The Gatekeeper** is out of the image until a redesign (`experimental/EXEMPT:36-41`); nothing intercepts execution of code the user obtains.
+**The Gatekeeper** is out of the image until a redesign; nothing intercepts execution of code the user obtains.
 
 ### 1.3 What the maintainer asked for
 
@@ -305,7 +305,7 @@ Each runs before the plan it gates and produces an answer, not code we keep.
    | --------------------- | -------------------- | -------------------------------- | -------------------------------------------- | ---- |
    | Files                 | Nautilus             | RPM                              | `cosmic-files`, `Thunar`, `thunar-volman`    | Nautilus, which `athanor-desktop-ui` already requires, is the file manager of 1.0, with the declared risk of `doc_files.md` section 7 (section 9.2); Athanor's file manager (`doc_files.md`) waits until after 1.0. Nautilus is not on Flathub (checked 2026-10-05), so Software cannot offer it afterwards. Search goes through `localsearch`, which `athanor-launcher` also requires; its upstream defaults already index only the user's folders, skip hidden files and ignore removable media. |
    | Archives              | Nautilus             | RPM                              | `thunar-archive-plugin`                      | Through 1.0, extraction runs in Nautilus's process, through gnome-autoar and libarchive, unconfined (section 5, section 9.2). The sandboxed helper of `doc_files.md`, which may write only the destination folder, comes with Athanor's file manager after 1.0. File Roller is not a default: its Flathub build may write the whole home, so it would confine nothing. |
-   | Terminal              | Ptyxis               | RPM                              | `cosmic-term`, `foot`                        | Opens shells in toolbox and podman containers, where development on an immutable image happens. It is the terminal `xdg-terminal-exec` chooses, which the launcher already runs (`system/athanor-sulphur-client/src/launch.rs:22`) and the compositor's Terminal action runs too. |
+   | Terminal              | Ptyxis               | RPM                              | `cosmic-term`, `foot`                        | Opens shells in toolbox and podman containers, where development on an immutable image happens. It is the terminal `xdg-terminal-exec` chooses, which the launcher already runs (`system/athanor-sulphur-client/src/launch.rs:23`) and the compositor's Terminal action runs too. |
    | Text editor           | GNOME Text Editor    | RPM                              | `cosmic-edit`                                |      |
    | Images                | Loupe                | RPM                              | `imv`                                        | Decodes through glycin, which runs each image loader under bubblewrap with a seccomp filter. That needs the `bwrap` binary and unprivileged user namespaces, which the image has (section 1.2); without them glycin runs the loader unconfined and only logs a warning, which acceptance item 16 checks for. |
    | Documents (PDF, EPUB) | Papers               | Flatpak; `papers-thumbnailer` RPM | nothing; no document viewer ships today     | Parses untrusted documents in process. Its Flathub build reads the home read-only and has no network, so a compromised parser can neither change files nor send them away. That build carries no thumbnailer, so the RPM gives the file manager its PDF previews. |
@@ -336,7 +336,7 @@ Each change lands with the package named beside it, not with this document.
 
 - `doc_shell.md`, SH3 (`doc_shell.md:73`): `cosmic-store` leaves the image at the switch of package SWa (decision 5). With SWa.
 - `doc_shell.md`, section 3, "Later stages": a pointer to this document as an application track after stage 2. With the first plan (package S).
-- `experimental/EXEMPT:18-22`: the comment on `athanor-store-rs` is removed with the crate. With SWa. Moot: ADR-0073 deleted the crate and emptied `experimental/EXEMPT`.
+- `experimental/EXEMPT`: the comment on `athanor-store-rs` is removed with the crate. With SWa. Moot: ADR-0073 deleted the crate and emptied `experimental/EXEMPT`.
 - `CLAUDE.md`, "Limiti inviolabili": the compartment-or-MicroVM rule is replaced by the service rule of `doc_threat_model.md`, TM8, in text the maintainer reviews; decision 3 (a) needs no exception (amended 2026-10-06, maintainer decision A2-9 (#151)). Before SWc.
 - `forge/config/packages.json`: the `flatpaks` list is gone (2026-10-08, ADR-0089); `system/scripts/provision_flatpak.sh` is deleted too (ADR-0089).
 - `forge/specs/athanor-desktop-ui/athanor-desktop-ui.spec`: requires the RPM defaults of decision 7 and no longer `foot`; ships `athanor-mimeapps.list`, `athanor-xdg-terminals.list` and the preinstall file for Papers. With SWe.
