@@ -197,6 +197,19 @@ class ModuleTreeTest(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn("system/shared/src/w.rs calls tr", found[0])
 
+    def test_conditional_paths_that_cannot_be_judged_are_each_accepted(self):
+        lib = (
+            '#[cfg_attr(target_os = "linux", path = "l.rs")] '
+            '#[cfg_attr(target_os = "freebsd", path = "f.rs")]\nmod b;\n'
+        )
+        for name in ("l.rs", "f.rs", "b.rs"):
+            found = self.found(lib, {name: TRANSLATED})
+            self.assertEqual(len(found), 1, (name, found))
+            self.assertIn(f"system/shared/src/{name} calls tr", found[0])
+        found = self.found(lib, {})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("declares a module whose file system/shared/src/l.rs", found[0])
+
     def test_a_conditional_path_is_split_at_its_own_commas_and_quotes(self):
         # A comma and a parenthesis inside the quoted path do not end the attribute.
         found = self.found(

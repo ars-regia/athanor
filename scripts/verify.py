@@ -1663,7 +1663,7 @@ def cfg_holds(predicate, features):
 
 def cfg_attr_paths(attrs, features):
     """The `path = "..."` of each `#[cfg_attr(predicate, path = "...")]` in `attrs`, with the
-    predicate's `cfg_value`: [(True, False or None, path)]. Each attribute is read on its
+    predicate's `cfg_value`: [(True|False|None, path)]. Each attribute is read on its
     own, its parentheses balanced."""
     found = []
     for start in re.finditer(r"#\[cfg_attr\(", attrs):
@@ -1721,17 +1721,17 @@ def module_files(root_file, features):
             attrs = code[decl.start(1) : decl.end(1)]
             explicit = re.search(r'#\[path\s*=\s*"([^"]*)"\]', attrs)
             # `#[cfg_attr(predicate, path = "...")]`: the path applies when the predicate
-            # holds; when it cannot be judged, either file will do.
+            # holds; when it cannot be judged, that file or any other the module may take
+            # will do.
             conditional = cfg_attr_paths(attrs, features)
             name = decl.group(2)
+            at = here if outer else path.parent
             normal = [(here / f"{name}.rs", False), (here / name / "mod.rs", True)]
-            candidates = normal
-            for value, target in conditional:
-                if value is not False:
-                    candidates = [((here if outer else path.parent) / target, True)]
-                    candidates += normal if value is None else []
+            holding = [(at / target, True) for value, target in conditional if value]
+            undecided = [(at / t, True) for value, t in conditional if value is None]
+            candidates = holding[-1:] or undecided + normal
             if explicit:
-                candidates = [((here if outer else path.parent) / explicit.group(1), True)]
+                candidates = [(at / explicit.group(1), True)]
             found = [c for c in candidates if c[0].is_file()][:1]
             if not found:
                 missing.append((path, candidates[0][0]))

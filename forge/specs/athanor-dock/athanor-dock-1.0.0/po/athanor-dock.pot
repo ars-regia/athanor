@@ -63,29 +63,29 @@ msgid "Running applications"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:160
-#: ../../../../system/athanor-apps/src/sal.rs:138
+#: ../../../../system/athanor-apps/src/sal.rs:163
 msgid "Running"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:388
-#: ../../../../system/athanor-apps/src/sal.rs:270
+#: ../../../../system/athanor-apps/src/sal.rs:303
 #, rust-format
 msgid "Minimise {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:392
-#: ../../../../system/athanor-apps/src/sal.rs:281
+#: ../../../../system/athanor-apps/src/sal.rs:314
 #, rust-format
 msgid "Close {title}"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:419
-#: ../../../../system/athanor-apps/src/sal.rs:298
+#: ../../../../system/athanor-apps/src/sal.rs:331
 msgid "Open"
 msgstr ""
 
 #: ../../../../system/athanor-apps/src/row.rs:421
-#: ../../../../system/athanor-apps/src/sal.rs:300
+#: ../../../../system/athanor-apps/src/sal.rs:333
 msgid "New Window"
 msgstr ""
 
