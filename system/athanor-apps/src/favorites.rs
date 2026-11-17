@@ -39,7 +39,7 @@ impl Store {
     /// ships is replaced by its successor and saved (`favorites::with_successors`).
     fn load_with(
         file: Option<PathBuf>,
-        cosmic: impl FnOnce() -> Option<Vec<String>>,
+        cosmic: impl FnOnce() -> std::io::Result<Option<Vec<String>>>,
         vendor: &Path,
         installed: impl Fn(&str) -> bool,
     ) -> Store {
@@ -147,7 +147,7 @@ mod tests {
     fn store(file: &Path) -> Store {
         Store::load_with(
             Some(file.to_path_buf()),
-            || None,
+            || Ok(None),
             Path::new("/nonexistent/athanor-apps-vendor.toml"),
             |_| true,
         )
@@ -161,7 +161,7 @@ mod tests {
         favorites::save(&file, &ids(&[FILES, A])).expect("save");
         let store = Store::load_with(
             Some(file.clone()),
-            || None,
+            || Ok(None),
             Path::new("/nonexistent/athanor-apps-vendor.toml"),
             |id| id != FILES,
         );
@@ -223,7 +223,7 @@ mod tests {
     fn without_a_file_the_favourites_are_unavailable() {
         let store = Store::load_with(
             None,
-            || Some(vec![A.to_owned()]),
+            || Ok(Some(vec![A.to_owned()])),
             Path::new("/nonexistent/athanor-apps-vendor.toml"),
             |_| true,
         );

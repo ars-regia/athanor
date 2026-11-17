@@ -67,18 +67,22 @@ pub(crate) enum Names {
 
 /// Where the store and the names are read.
 pub(crate) struct Store {
-    /// cosmic-config's directories, the one whose keys change while a session runs first.
+    /// cosmic-config's directories, the user's first where there is one.
     dirs: Vec<PathBuf>,
+    /// The user's store, the only one that changes while a session runs; none without
+    /// `XDG_CONFIG_HOME` or `HOME`.
+    changing: Option<PathBuf>,
     evdev: PathBuf,
 }
 
 impl Store {
     pub(crate) fn session() -> Self {
+        let user = cosmic_config::user_dir();
         Self {
-            dirs: cosmic_config::user_dir()
-                .into_iter()
-                .chain(cosmic_config::system_dirs())
-                .collect(),
+            changing: user
+                .as_deref()
+                .map(|dir| cosmic_config::component(dir, COMPONENT).join(KEY)),
+            dirs: user.into_iter().chain(cosmic_config::system_dirs()).collect(),
             evdev: PathBuf::from(EVDEV),
         }
     }
@@ -118,22 +122,18 @@ impl Store {
         )
     }
 
-    /// The store of the first directory, the one that changes.
-    fn changing(&self) -> PathBuf {
-        self.dirs.first().map_or_else(PathBuf::new, |dir| {
-            cosmic_config::component(dir, COMPONENT).join(KEY)
-        })
-    }
-
-    /// Calls `changed`, which reads the store, once the first directory's store is written,
-    /// replaced or removed. The events of one change, such as the created and changes-done
-    /// pair GLib gives a swap file renamed over the store, make one call, on the thread's
-    /// main context.
+    /// Calls `changed`, which reads the store, once the user's store is written, replaced or
+    /// removed; without a user store nothing is watched. The events of one change, such as
+    /// the created and changes-done pair GLib gives a swap file renamed over the store, make
+    /// one call, on the thread's main context.
     pub(crate) fn follow(
         self,
         changed: impl Fn(&Self) + 'static,
-    ) -> Result<gio::FileMonitor, glib::Error> {
-        let monitor = gio::File::for_path(self.changing())
+    ) -> Result<Option<gio::FileMonitor>, glib::Error> {
+        let Some(path) = &self.changing else {
+            return Ok(None);
+        };
+        let monitor = gio::File::for_path(path)
             .monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)?;
         let context = glib::MainContext::ref_thread_default();
         let (store, changed) = (Rc::new(self), Rc::new(changed));
@@ -148,7 +148,13 @@ impl Store {
                 });
             }
         });
-        Ok(monitor)
+        Ok(Some(monitor))
+    }
+
+    /// A test's user store.
+    #[cfg(test)]
+    pub(crate) fn changing(&self) -> PathBuf {
+        self.changing.clone().expect("a user store")
     }
 }
 
@@ -312,6 +318,7 @@ pub(crate) fn test_store(name: &str, record: Option<&str>) -> Store {
     let evdev = dir.join("evdev.xml");
     fs::write(&evdev, TEST_EVDEV).expect("evdev.xml");
     let store = Store {
+        changing: Some(cosmic_config::component(&dir.join("user"), COMPONENT).join(KEY)),
         dirs: vec![dir.join("user"), dir.join("system")],
         evdev,
     };
@@ -323,7 +330,7 @@ pub(crate) fn test_store(name: &str, record: Option<&str>) -> Store {
 
 /// Replaces a test's store as cosmic-config and the rig do: a swap file renamed over it.
 #[cfg(test)]
-fn replace(path: &std::path::Path, record: &str) {
+pub(crate) fn replace(path: &std::path::Path, record: &str) {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).expect("store directory");
     }
@@ -455,7 +462,8 @@ mod tests {
                 store.follow(move |store| seen.borrow_mut().push(store.names()))
             })
             .expect("thread default")
-            .expect("monitor");
+            .expect("monitor")
+            .expect("a user store");
         change(&path);
         let mut deadline = Instant::now() + Duration::from_secs(wait);
         let mut first = true;
@@ -525,6 +533,18 @@ mod tests {
         assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
         let empty = test_store("empty", Some("(layout: \"\", variant: \"\")"));
         assert_eq!(empty.names(), Names::Keymap, "a store without a layout is none");
+    }
+
+    /// Without a configuration directory there is no store to read nor to watch.
+    #[test]
+    fn without_a_directory_nothing_is_read_or_watched() {
+        let store = Store {
+            dirs: Vec::new(),
+            changing: None,
+            evdev: PathBuf::from("/nonexistent/evdev.xml"),
+        };
+        assert_eq!(store.names(), Names::Keymap);
+        assert!(store.follow(|_| {}).expect("no watch").is_none());
     }
 
     #[test]

@@ -136,7 +136,7 @@ pub(crate) struct Inner {
     failure: RefCell<Option<Error>>,
     /// Set for good when the display closes or reading from the compositor fails: every
     /// later call returns [`Error::Closed`].
-    closed: Cell<bool>,
+    pub(crate) closed: Cell<bool>,
     source: glib::Source,
     /// The watch of LN9's store, under cosmic-comp from the first `watch_keyboard_group`,
     /// held for its callback: dropping it ends it.
@@ -276,12 +276,12 @@ impl Client {
 
     /// Reads LN9's store once and follows it, whose layouts reach the handler as they change;
     /// without a store the keymap's names stay. Only a client that watches the keyboard group
-    /// reads it, as a client binds only the globals it uses.
-    pub(crate) fn follow_store(&self) {
+    /// reads it, as a client binds only the globals it uses. Without a user store there is
+    /// nothing to watch, and each call reads the system's again.
+    pub(crate) fn follow_store(&self, store: crate::keyboard::Store) {
         if self.inner.store.borrow().is_some() {
             return;
         }
-        let store = crate::keyboard::Store::session();
         let names = store.names();
         self.inner.state.borrow_mut().store_layouts(names);
         let inner = Rc::downgrade(&self.inner);
@@ -293,7 +293,8 @@ impl Client {
             }
         };
         match store.follow(changed) {
-            Ok(monitor) => *self.inner.store.borrow_mut() = Some(monitor),
+            Ok(Some(monitor)) => *self.inner.store.borrow_mut() = Some(monitor),
+            Ok(None) => tracing::info!("no user configuration: the keyboard layouts are not followed"),
             Err(err) => tracing::warn!("the keyboard layouts are not followed: {err}"),
         }
         self.inner.deliver();

@@ -31,7 +31,7 @@ impl Client {
     pub fn watch_keyboard_group(&self) -> Result<(), Error> {
         self.live()?;
         if self.inner.state.borrow().globals.keyboard_layouts.is_some() {
-            self.follow_store();
+            self.follow_store(crate::keyboard::Store::session());
             return Ok(());
         }
         {
@@ -171,10 +171,30 @@ mod tests {
         assert!(client.inner.state.borrow().globals.keyboard_layouts.is_some());
         assert!(client.inner.store.borrow().is_none());
         assert!(!client.inner.state.borrow().layouts_from_store);
-        client.watch_keyboard_group().expect("watch");
+        let store = crate::keyboard::test_store("watch", Some("(layout: \"us,it\", variant: \",\")"));
+        let path = store.changing();
+        client.follow_store(store);
+        assert_eq!(client.keyboard_layouts(), ["English (US)", "Italian"]);
         let first = client.inner.store.borrow().clone().expect("a watch of the store");
-        client.watch_keyboard_group().expect("watch again");
+        // Once it follows a store, a watch reads no other, the session's included.
+        client.watch_keyboard_group().expect("watch");
         assert_eq!(client.inner.store.borrow().as_ref(), Some(&first));
+        assert_eq!(client.keyboard_layouts(), ["English (US)", "Italian"]);
+        // A change reaches an open client; a closed one reads none.
+        let follow = |record, layouts: &[&str]| {
+            crate::keyboard::replace(&path, record);
+            let context = glib::MainContext::default();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline && client.keyboard_layouts() != layouts {
+                context.iteration(false);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        follow("(layout: \"it\", variant: \"\")", &["Italian"]);
+        assert_eq!(client.keyboard_layouts(), ["Italian"]);
+        client.inner.closed.set(true);
+        follow("(layout: \"us\", variant: \"\")", &["English (US)"]);
+        assert_eq!(client.keyboard_layouts(), ["Italian"], "a closed client takes no change");
     }
 
     /// Under cosmic-comp, a virtual keyboard's keymap after the store's two layouts leaves two.

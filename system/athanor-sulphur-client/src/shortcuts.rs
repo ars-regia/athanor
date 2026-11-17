@@ -60,7 +60,8 @@ pub enum Binding {
 /// for it (see `Binding`).
 pub fn set_system_action(action: &str, command: &str) -> Result<Binding, ShortcutError> {
     let dir = dir().ok_or(ShortcutError::NoConfig)?;
-    set_in(&dir.join(KEY), action, command, system_value(action).as_deref())
+    let default = system_value(&cosmic_config::system_dirs(), action)?;
+    set_in(&dir.join(KEY), action, command, default.as_deref())
 }
 
 /// Binds as `set_system_action` does, once per user: when `marker` exists nothing is read or
@@ -249,21 +250,18 @@ fn bindings(bare: &str) -> Result<Vec<Entry>, String> {
 }
 
 /// The action's value in the system file, which cosmic-comp lays beneath the user's copy.
-/// A system file that is absent, unreadable or does not parse gives none: every user value
-/// then counts as the user's choice.
-fn system_value(action: &str) -> Option<String> {
-    let text = match cosmic_config::key(&cosmic_config::system_dirs(), COMPONENT, KEY) {
-        Ok(text) => text?,
-        Err(err) => {
-            tracing::warn!("the system's {KEY} of {COMPONENT} cannot be read: {err}");
-            return None;
-        }
+/// A system file that is absent or does not parse gives none: every user value then
+/// counts as the user's choice. One that cannot be read fails the binding, so that `once`
+/// leaves no marker and the next start tries again.
+fn system_value(dirs: &[PathBuf], action: &str) -> Result<Option<String>, ShortcutError> {
+    let Some(text) = cosmic_config::key(dirs, COMPONENT, KEY)? else {
+        return Ok(None);
     };
     match parse(&text) {
-        Ok(entries) => entries.into_iter().find(|(name, _)| name == action).map(|(_, value)| value),
+        Ok(entries) => Ok(entries.into_iter().find(|(name, _)| name == action).map(|(_, value)| value)),
         Err(reason) => {
             tracing::warn!("the system's {KEY} of {COMPONENT} is not a map of actions to commands: {reason}");
-            None
+            Ok(None)
         }
     }
 }
@@ -612,6 +610,26 @@ mod tests {
         std::fs::write(&path, "not a map").unwrap();
         assert!(once(&failed, bind).is_err());
         assert!(!failed.exists(), "the next start tries again");
+    }
+
+    /// An absent system file gives no default; one that cannot be read fails the binding with
+    /// its path, and `once` leaves no marker.
+    #[test]
+    fn an_unreadable_system_file_fails_the_binding() {
+        let path = scratch("system");
+        let system = path.with_file_name("share");
+        assert_eq!(system_value(std::slice::from_ref(&system), "Launcher").unwrap(), None);
+        let copy = cosmic_config::component(&system, COMPONENT).join(KEY);
+        std::fs::create_dir_all(&copy).unwrap();
+        let marker = path.with_file_name("marker");
+        let bind = || {
+            let default = system_value(std::slice::from_ref(&system), "Launcher")?;
+            set_in(&path, "Launcher", "ours", default.as_deref())
+        };
+        let err = once(&marker, bind).unwrap_err();
+        assert!(matches!(err, ShortcutError::Io(_)), "{err}");
+        assert!(err.to_string().contains(&*copy.to_string_lossy()), "{err}");
+        assert!(!marker.exists(), "the next start tries again");
     }
 
     #[test]

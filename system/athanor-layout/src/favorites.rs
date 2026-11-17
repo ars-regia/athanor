@@ -182,25 +182,32 @@ pub fn save(path: &Path, ids: &[String]) -> Result<(), FavoritesError> {
 /// The favourites at start. An existing file wins. When it is absent: COSMIC's list, else
 /// the vendor list, else nothing, saved once so the import never runs again. A save that
 /// fails is logged and the list is still returned; the import then runs again at the next
-/// start. A file that exists but is rejected is returned as the error and never replaced.
+/// start, as it does when COSMIC's list is there and cannot be read, whose run gets the
+/// vendor list unsaved. A file that exists but is rejected is returned as the error and
+/// never replaced.
 pub fn load_or_import(
     path: &Path,
-    cosmic: impl FnOnce() -> Option<Vec<String>>,
+    cosmic: impl FnOnce() -> std::io::Result<Option<Vec<String>>>,
     vendor: &Path,
 ) -> Result<Vec<String>, FavoritesError> {
     if let Some(ids) = read(path)? {
         return Ok(ids);
     }
+    let vendor_ids = || match read(vendor) {
+        Ok(Some(ids)) => ids,
+        Ok(None) => Vec::new(),
+        Err(err) => {
+            tracing::error!(error = %err, file = %vendor.display(), "the vendor favourites are unusable");
+            Vec::new()
+        }
+    };
     let ids = match cosmic() {
-        Some(ids) => sanitized(ids),
-        None => match read(vendor) {
-            Ok(Some(ids)) => ids,
-            Ok(None) => Vec::new(),
-            Err(err) => {
-                tracing::error!(error = %err, file = %vendor.display(), "the vendor favourites are unusable");
-                Vec::new()
-            }
-        },
+        Ok(Some(ids)) => sanitized(ids),
+        Ok(None) => vendor_ids(),
+        Err(err) => {
+            tracing::warn!(error = %err, "COSMIC's favourites cannot be read; the vendor list is used unsaved and the import runs again at the next start");
+            return Ok(vendor_ids());
+        }
     };
     // Under the same lock `update` takes: a concurrent first start (the dock of 2c) may have
     // imported and saved while this one was reading COSMIC's or the vendor's list, so the
@@ -517,7 +524,7 @@ mod tests {
             &path,
             || {
                 asked.set(true);
-                Some(ids(&["cosmic.desktop"]))
+                Ok(Some(ids(&["cosmic.desktop"])))
             },
             Path::new("/nonexistent"),
         );
@@ -531,12 +538,12 @@ mod tests {
         let found = load_or_import(
             &path,
             || {
-                Some(ids(&[
+                Ok(Some(ids(&[
                     "a.desktop",
                     "a.desktop",
                     "../x.desktop",
                     "b.desktop",
-                ]))
+                ])))
             },
             Path::new("/nonexistent"),
         );
@@ -553,7 +560,7 @@ mod tests {
                 // Another writer's own first-start import lands on disk while this one is
                 // still asking COSMIC for its list; the lock, taken after, must see it.
                 save(&path, &ids(&["other.desktop"])).expect("the other writer saves first");
-                Some(ids(&["mine.desktop"]))
+                Ok(Some(ids(&["mine.desktop"])))
             },
             Path::new("/nonexistent"),
         );
@@ -567,22 +574,39 @@ mod tests {
         let vendor = dir.join("vendor.toml");
         save(&vendor, &ids(&["vendor.desktop"])).expect("save");
         assert_eq!(
-            load_or_import(&dir.join("one/favorites.toml"), || None, &vendor),
+            load_or_import(&dir.join("one/favorites.toml"), || Ok(None), &vendor),
             Ok(ids(&["vendor.desktop"]))
         );
         std::fs::write(&vendor, "schema = 9\n").expect("write");
         assert_eq!(
-            load_or_import(&dir.join("two/favorites.toml"), || None, &vendor),
+            load_or_import(&dir.join("two/favorites.toml"), || Ok(None), &vendor),
             Ok(Vec::new())
         );
         assert_eq!(
             load_or_import(
                 &dir.join("three/favorites.toml"),
-                || None,
+                || Ok(None),
                 &dir.join("absent.toml")
             ),
             Ok(Vec::new())
         );
+    }
+
+    /// A COSMIC list that cannot be read gives this start the vendor list unsaved, and the
+    /// next start imports.
+    #[test]
+    fn an_unreadable_cosmic_list_is_imported_at_a_later_start() {
+        let dir = scratch("unreadable-cosmic");
+        let (path, vendor) = (dir.join("favorites.toml"), dir.join("vendor.toml"));
+        save(&vendor, &ids(&["vendor.desktop"])).expect("save");
+        let unreadable = || Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(load_or_import(&path, unreadable, &vendor), Ok(ids(&["vendor.desktop"])));
+        assert_eq!(read(&path), Ok(None), "nothing was saved");
+        assert_eq!(
+            load_or_import(&path, || Ok(Some(ids(&["cosmic.desktop"]))), &vendor),
+            Ok(ids(&["cosmic.desktop"]))
+        );
+        assert_eq!(read(&path), Ok(Some(ids(&["cosmic.desktop"]))));
     }
 
     #[test]
@@ -593,7 +617,7 @@ mod tests {
         assert_eq!(
             load_or_import(
                 &path,
-                || Some(ids(&["cosmic.desktop"])),
+                || Ok(Some(ids(&["cosmic.desktop"]))),
                 Path::new("/nonexistent")
             ),
             Err(FavoritesError::NewerSchema(2))
