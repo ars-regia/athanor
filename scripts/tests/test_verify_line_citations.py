@@ -38,7 +38,9 @@ class Forms(unittest.TestCase):
         self.assertEqual(len(messages("`src/x.rs:1`, and `grant` at `:2`.")), 1)
 
     def test_a_file_name_between_ends_the_shorthand(self):
-        self.assertEqual(messages("`src/x.rs:1`, `other.target` (`:3`), and `grant` at `:3`."), [])
+        self.assertEqual(
+            messages("`src/x.rs:1`, `other.target` (`:3`), and `grant` at `:3`."), []
+        )
 
     def test_a_comma_list_holds_the_token_in_any_of_its_ranges(self):
         self.assertEqual(messages("The `grant` is at `src/x.rs:3, 1`."), [])
@@ -52,7 +54,9 @@ class Forms(unittest.TestCase):
 
     def test_a_hyphenated_token_is_a_whole_word(self):
         self.assertEqual(messages("The `cosmic-osd` is at `data/clients:3`."), [])
-        self.assertEqual(len(messages("The `cosmic-osd.service` is at `data/clients:1`.")), 1)
+        self.assertEqual(
+            len(messages("The `cosmic-osd.service` is at `data/clients:1`.")), 1
+        )
         self.assertTrue(verify.holds_token("cosmic-osd.service", "cosmic-osd"))
         self.assertFalse(verify.holds_token("cosmic-osd-extra", "cosmic-osd"))
         self.assertTrue(verify.holds_token("fn _focused()", "focused"))
@@ -78,7 +82,12 @@ class Forms(unittest.TestCase):
         self.assertEqual(messages("The `x` is in `src/x.rs:2`."), [])
 
     def test_a_parenthesis_or_a_table_cell_ends_the_sentence(self):
-        self.assertEqual(messages("`grant` is built (`src/x.rs:1`), on the base `a/b` (`src/x.rs:2`)."), [])
+        self.assertEqual(
+            messages(
+                "`grant` is built (`src/x.rs:1`), on the base `a/b` (`src/x.rs:2`)."
+            ),
+            [],
+        )
         self.assertEqual(messages("| `grant` | the tag `other` (`src/x.rs:2`) |"), [])
 
 

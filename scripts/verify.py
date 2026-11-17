@@ -6045,7 +6045,7 @@ def citation_findings(doc, text, read_file):
             own = {part.split(".")[0] for part in path.split("/")}
             tokens = [t for t in CITED_TOKEN.findall(line[start + 1:span.start()])
                       if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
-            held = "\n".join("\n".join(rows[f - 1:l]) for f, l in ranges)
+            held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             if tokens and not holds_token(held, tokens[-1]):
                 out.append((number, path, tokens[-1], f"{doc}:{number}: `{label}` does not hold "
                             f"`{tokens[-1]}`, which its sentence names: the lines moved"))
