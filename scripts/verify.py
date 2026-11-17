@@ -5966,7 +5966,7 @@ LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?
 CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
 FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
 CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
-# The longest range one citation may span: a longer one holds almost any word, so it proves nothing.
+# The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
 LINE_RANGE_LIMIT = 200
 # A markdown line that holds no words: blank, or a table's rule (`| --- | --- |`).
 EMPTY_LINE = re.compile(r"[\s|:-]*")
@@ -6015,8 +6015,8 @@ def citation_findings(doc, text, tracked, read_file):
     before it, then by the one tracked file whose path ends with it; a name that several files
     end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
     repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
-    file is a finding. A range is no line range when it starts at 0, ends before it starts,
-    reaches past the end of the file, or spans more than LINE_RANGE_LIMIT lines. A cited markdown
+    file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
+    reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
     document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
     sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
     and the section ids of the sentence (`BR2`) that the document has as a `**BR2.` line fix the
@@ -6058,7 +6058,9 @@ def citation_findings(doc, text, tracked, read_file):
                 continue
             named, spec = m.groups()
             path = last if named is None else resolve(named, crate)
-            if path is None and named and named.startswith(prefixes):
+            if path is None and named and (named.startswith(prefixes) or (
+                    named.endswith(".md") and "/" not in named
+                    and not any(t.endswith("/" + named) for t in known))):
                 out.append((number, named, spec, None,
                             f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
             last = path
@@ -6074,10 +6076,10 @@ def citation_findings(doc, text, tracked, read_file):
             rows = body.split("\n")
             if rows[-1] == "":
                 rows.pop()
-            if any(f < 1 or e < f or e > len(rows) or e - f >= LINE_RANGE_LIMIT for f, e in ranges):
+            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
-                            f"(at most {LINE_RANGE_LIMIT} lines)"))
+                            f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
             if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
                 out.append((number, path, spec, None,

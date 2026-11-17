@@ -154,6 +154,12 @@ class Resolution(unittest.TestCase):
         self.assertIn("names a file that does not exist", out[0])
         self.assertEqual(messages("The `grant` is at `unknown/none.rs:1`."), [])
 
+    def test_a_bare_document_name_that_does_not_exist_is_a_finding(self):
+        out = messages("The `grant` is at `doc_none.md:3`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("names a file that does not exist", out[0])
+        self.assertEqual(messages("The `alpha` is at `other.md:3`."), [])
+
     def test_a_name_that_is_no_file_leaves_the_last_path_as_it_was(self):
         self.assertEqual(
             len(messages("`src/x.rs:1`, the `grant` and `ident` at `:2`.")), 1
@@ -224,9 +230,11 @@ class Documents(unittest.TestCase):
 class Limits(unittest.TestCase):
     def test_a_long_range_is_a_finding(self):
         self.assertEqual(messages("The `needle` is at `big.rs:299-301`."), [])
+        self.assertEqual(messages("The `line` is at `big.rs:1-199`."), [])
+        self.assertEqual(len(messages("The `line` is at `big.rs:1-200`.")), 1)
         out = messages("The `needle` is at `big.rs:1-301`.")
         self.assertEqual(len(out), 1)
-        self.assertIn("at most 200 lines", out[0])
+        self.assertIn("fewer than 200 lines", out[0])
 
 
 class Kept(unittest.TestCase):
