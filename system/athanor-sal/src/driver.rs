@@ -428,6 +428,7 @@ fn run_on(
         shm,
         keyboard: None,
         keyboard_focus: None,
+        keyboard_handed_back: None,
         window_focus: None,
         pointer: None,
         // Optional: without it, the pointer keeps the compositor's cursor.
@@ -2015,6 +2016,9 @@ struct App {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     /// The surface that has the keyboard.
     keyboard_focus: Option<SurfaceId>,
+    /// The surface a closed popup handed the keyboard back to, until the compositor's next
+    /// `enter` or `leave`.
+    keyboard_handed_back: Option<SurfaceId>,
     /// The surface whose accessibility adapter is the focused window.
     window_focus: Option<SurfaceId>,
     pointer: Option<wl_pointer::WlPointer>,
@@ -2268,12 +2272,16 @@ impl App {
     fn popups_closed(&mut self) {
         let popups = std::mem::take(&mut self.shell.closed_popups);
         let shell = &self.shell;
-        self.keyboard_focus = keyboard_after_closed(
+        let keyboard = keyboard_after_closed(
             &popups,
             self.keyboard_focus,
             |id| shell.ui(id).is_some(),
             |id| shell.dialogs.parent_of(id),
         );
+        if keyboard != self.keyboard_focus {
+            self.keyboard_handed_back = keyboard;
+            self.keyboard_focus = keyboard;
+        }
         for popup in popups {
             self.forget(popup.surface);
         }
@@ -2984,6 +2992,7 @@ impl KeyboardHandler for App {
     ) {
         let entered = self.shell.find(wl).map(|surface| surface.id);
         self.keyboard_focus = entered;
+        self.keyboard_handed_back = None;
         if let Some(ui) = entered.and_then(|id| self.shell.ui_mut(id)) {
             enter_focus(ui, !held.is_empty());
         }
@@ -2998,10 +3007,9 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
     ) {
-        // A closed popup's leave, which may come after its keyboard was handed back, leaves the
-        // focus where it is.
         let left = self.shell.find(wl).map(|surface| surface.id);
-        self.keyboard_focus = keyboard_after_leave(self.keyboard_focus, left);
+        self.keyboard_focus =
+            keyboard_after_leave(self.keyboard_focus, left, self.keyboard_handed_back.take());
         self.keyboard_moved(wl, false);
     }
 

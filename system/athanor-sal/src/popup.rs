@@ -127,14 +127,18 @@ pub(crate) fn keyboard_after_closed<S: Copy + PartialEq>(
 }
 
 /// The surface with the keyboard after the compositor's `leave` of `left`, a surface still open,
-/// or none for one already closed: none when `left` had it, else the one that had it. A popup's
-/// `leave` that comes after its keyboard was handed back ([`keyboard_after_closed`]) changes
-/// nothing.
+/// or none for one already closed, given the one that had it and the one `handed_back` it by
+/// [`keyboard_after_closed`], until the compositor's next `enter` or `leave`: none when `left`
+/// had it, or when a closed surface's `leave` ends a hand-back, as the compositor, which kept the
+/// keys on the closed popup, now gives them to a surface it will `enter`, of this client or not;
+/// else the one that had it. A closed surface's `leave` after an `enter` changes nothing.
 pub(crate) fn keyboard_after_leave<S: PartialEq>(
     keyboard: Option<S>,
     left: Option<S>,
+    handed_back: Option<S>,
 ) -> Option<S> {
-    if left.is_some() && left == keyboard {
+    let ends_hand_back = left.is_none() && handed_back.is_some() && handed_back == keyboard;
+    if ends_hand_back || (left.is_some() && left == keyboard) {
         None
     } else {
         keyboard
@@ -542,21 +546,35 @@ mod tests {
     #[test]
     fn a_leave_takes_the_keyboard_only_from_the_surface_that_had_it() {
         assert_eq!(
-            keyboard_after_leave(Some(1), Some(1)),
+            keyboard_after_leave(Some(1), Some(1), None),
             None,
             "the focused one"
         );
         assert_eq!(
-            keyboard_after_leave(Some(1), None),
-            Some(1),
-            "a closed popup's, after the hand-back"
+            keyboard_after_leave(Some(1), None, Some(1)),
+            None,
+            "a closed popup's, which ends the hand-back: the keys go to another client"
         );
         assert_eq!(
-            keyboard_after_leave(Some(1), Some(2)),
+            keyboard_after_leave(Some(1), None, None),
+            Some(1),
+            "a closed surface's, after the compositor's enter"
+        );
+        assert_eq!(
+            keyboard_after_leave(Some(1), None, Some(3)),
+            Some(1),
+            "a closed surface's, after a hand-back the focus no longer holds"
+        );
+        assert_eq!(
+            keyboard_after_leave(Some(1), Some(2), Some(1)),
             Some(1),
             "another one"
         );
-        assert_eq!(keyboard_after_leave::<u32>(None, None), None, "none had it");
+        assert_eq!(
+            keyboard_after_leave::<u32>(None, None, None),
+            None,
+            "none had it"
+        );
     }
 
     #[test]
