@@ -268,6 +268,13 @@ impl Sessions {
         opened
     }
 
+    /// The stage of the session that holds `handle` now, and its ticket.
+    pub fn current(&self, handle: &str) -> Option<(Stage, Ticket)> {
+        self.sessions
+            .get(handle)
+            .map(|session| (session.stage, Ticket(session.generation)))
+    }
+
     /// Whether a session holds `handle` now.
     pub fn exists(&self, handle: &str) -> bool {
         self.sessions.contains_key(handle)

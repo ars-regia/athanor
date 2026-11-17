@@ -6,8 +6,9 @@
 //! [`Host::consent`], after the owner of `os.athanor.Eis` is checked to be the compositor, and
 //! the impl's `ConnectToEIS` then obtains one file descriptor, with the granted types only. Every
 //! `Notify*` method is refused. When the session ends, from `Close`, from the bar's Stop or from
-//! the backend, the compositor is asked to close its context. A frontend that vanishes without
-//! `Close` leaves the session open and listed until Stop or the backend's own end.
+//! the backend, the compositor is asked to close its context; a Stop whose `CloseSession` fails
+//! is answered with the error and leaves the session open and listed. A frontend that vanishes
+//! without `Close` leaves the session open and listed until Stop or the backend's own end.
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -21,7 +22,7 @@ use zbus::{ObjectPath, OwnedFd};
 use zbus::{OwnedVariant as OwnedValue, Variant as Value};
 
 use crate::eis::{Eis, Identity};
-use crate::remote_desktop::{self, display_name, holds_context, Answer, Sessions};
+use crate::remote_desktop::{self, display_name, holds_context, Answer, Sessions, Ticket};
 
 /// The private interface's name and object (PT10).
 pub const PORTAL1_NAME: &str = "os.athanor.Portal";
@@ -90,17 +91,34 @@ impl<H: Host> Shared<H> {
         })
     }
 
-    /// Ends the session `handle`, whatever ends it: dismisses its dialog, removes its object,
-    /// tells the frontend when the frontend did not ask (`announce`), asks the compositor to
-    /// close its context, and updates `InputSessions`. `false` for no such session.
-    async fn end(&self, server: &ObjectServer, handle: &ObjectPath<'_>, announce: bool) -> bool {
-        let Some(stage) = self.sessions().close(handle) else {
+    /// Ends the session `handle`, whatever ends it: dismisses its dialog, removes its object
+    /// and updates `InputSessions`. The bar's Stop (`stopped`) has closed the compositor's
+    /// context already, and ends only the session of its ticket, whose frontend is told. Any
+    /// other end asks the compositor to close the context; when that fails, the owner check
+    /// included, one journal line says so and the compositor's revocation at the backend's
+    /// change of owner covers it (PT15). `false` for no such session.
+    async fn end(
+        &self,
+        server: &ObjectServer,
+        handle: &ObjectPath<'_>,
+        stopped: Option<Ticket>,
+    ) -> bool {
+        let closed = {
+            let mut sessions = self.sessions();
+            match stopped {
+                Some(ticket) if sessions.current(handle).map(|(_, now)| now) != Some(ticket) => {
+                    None
+                }
+                _ => sessions.close(handle),
+            }
+        };
+        let Some(stage) = closed else {
             return false;
         };
         if let Some(dismiss) = lock(&self.dismiss).remove(handle.as_str()) {
             dismiss.send_replace(true);
         }
-        if announce {
+        if stopped.is_some() {
             match server.interface::<_, Session<H>>(handle).await {
                 Ok(session) => {
                     if let Err(error) = Session::<H>::closed(session.signal_emitter()).await {
@@ -114,8 +132,10 @@ impl<H: Host> Shared<H> {
             tracing::error!(%error, %handle, "the session's object was not removed");
         }
         if holds_context(stage) {
-            if let Err(why) = self.eis.close(handle).await {
-                tracing::error!(%why, %handle, "the compositor was not asked to close the session's EIS context");
+            if stopped.is_none() {
+                if let Err(why) = self.eis.close(handle).await {
+                    tracing::error!(%why, %handle, "the compositor was not asked to close the session's EIS context");
+                }
             }
             input_sessions_changed::<H>(server).await;
         }
@@ -505,7 +525,7 @@ impl<H: Host> Session<H> {
         let handle = header
             .path()
             .ok_or_else(|| fdo::Error::InvalidArgs("a call with no object path".into()))?;
-        self.shared.end(server, handle, false).await;
+        self.shared.end(server, handle, None).await;
         Ok(())
     }
 
@@ -523,7 +543,9 @@ pub struct Portal1<H: Host>(Arc<Shared<H>>);
 
 #[zbus::interface(name = "os.athanor.Portal1")]
 impl<H: Host> Portal1<H> {
-    /// Closes the session `id`, and so revokes its file descriptor.
+    /// Closes the session `id`, and so revokes its file descriptor. When the compositor's
+    /// `CloseSession` fails, the error is the answer and the session stays open and listed, so
+    /// the indicator and its Stop remain (PT15).
     async fn stop_capture(
         &self,
         #[zbus(header)] header: Header<'_>,
@@ -533,11 +555,19 @@ impl<H: Host> Portal1<H> {
         self.0.bar(&header).await?;
         let handle = ObjectPath::try_from(id)
             .map_err(|_| fdo::Error::InvalidArgs(format!("no session {id}")))?;
-        if self.0.end(server, &handle, true).await {
-            Ok(())
-        } else {
-            Err(fdo::Error::InvalidArgs(format!("no session {id}")))
+        let (stage, ticket) = self
+            .0
+            .sessions()
+            .current(&handle)
+            .ok_or_else(|| fdo::Error::InvalidArgs(format!("no session {id}")))?;
+        if holds_context(stage) {
+            if let Err(why) = self.0.eis.close(&handle).await {
+                tracing::error!(%why, %handle, "StopCapture: the compositor did not close the session's EIS context, which stays listed");
+                return Err(fdo::Error::Failed(format!("{handle} stays open: {why}")));
+            }
         }
+        self.0.end(server, &handle, Some(ticket)).await;
+        Ok(())
     }
 
     /// Session id, application id and name of each session whose EIS context is open. The
@@ -1208,6 +1238,51 @@ mod tests {
             );
         }
         assert!(rd.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn input_stop_capture_keeps_the_session_listed_until_close_session_succeeds() {
+        let rd = rd("stopfails", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        for n in [1, 2] {
+            rd.create(n).await;
+            rd.start(n).await;
+        }
+        let one = rd.connect(1).await.expect("fd 1");
+        let _two = rd.connect(2).await.expect("fd 2");
+        assert!(rd
+            .compositor
+            .release_name(crate::eis::NAME)
+            .await
+            .expect("release"));
+
+        let stopped = rd.stop(&rd.bar, 1).await;
+        assert!(
+            matches!(fdo_error(&stopped), Some(fdo::Error::Failed(_))),
+            "{stopped:?}"
+        );
+        assert_eq!(rd.listed().await.len(), 2, "stopped, but still listed");
+
+        rd.close(2)
+            .await
+            .expect("Close ends the session all the same");
+        assert_eq!(rd.listed().await.len(), 1);
+
+        rd.compositor
+            .request_name(crate::eis::NAME)
+            .await
+            .expect("the compositor again");
+        rd.stop(&rd.bar, 1).await.expect("StopCapture");
+        assert!(rd.listed().await.is_empty());
+        assert_eq!(
+            rd.calls(),
+            [
+                Call::Connect(session(1).to_string(), KEYBOARD),
+                Call::Connect(session(2).to_string(), KEYBOARD),
+                Call::Close(session(1).to_string())
+            ],
+            "nothing is sent while the owner is not the compositor"
+        );
+        assert!(ended(one));
     }
 
     #[tokio::test]
