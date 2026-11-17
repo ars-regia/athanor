@@ -9,7 +9,8 @@
 use super::keyboard_monitor::Bus;
 use super::*;
 use crate::eis::{
-    check, serve, Types, Update, BACKEND, BACKEND_EXECUTABLE, BACKEND_UNIT, NAME, PATH,
+    admit, check, serve, within_ask, Types, Update, ASK, BACKEND, BACKEND_EXECUTABLE, BACKEND_UNIT,
+    NAME, PATH,
 };
 use crate::identity::pidfd_open;
 use crate::keyboard_monitor::answer;
@@ -936,6 +937,29 @@ fn eis_admits_the_backend_alone() {
     assert!(
         check(&other_executable, client, client).is_err(),
         "a unit that runs another executable"
+    );
+}
+
+/// The owner of the backend's name is asked within `ASK`: on a bus that answers nothing, the
+/// call is refused once the bound has passed, and the `eis` thread goes on to the next.
+#[test]
+fn eis_admission_refuses_a_silent_bus_within_its_bound() {
+    let bus = Bus::start();
+    let asking =
+        zbus::block_on(within_ask(bus.builder()).build()).expect("a connection to the bus");
+    let proxy = zbus::block_on(DBusProxy::new(&asking)).expect("the bus's proxy");
+    bus.stop();
+    let (refused, read) = channel();
+    std::thread::spawn(move || {
+        // The test may have ended, and its receiver with it.
+        refused
+            .send(admit(&proxy, &BACKEND_SYSTEMD, ":1.7").is_err())
+            .ok();
+    });
+    assert_eq!(
+        read.recv_timeout(ASK + WAIT),
+        Ok(true),
+        "a silent bus refuses the call within the bound"
     );
 }
 

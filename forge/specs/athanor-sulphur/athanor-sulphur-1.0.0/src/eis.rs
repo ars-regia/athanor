@@ -9,9 +9,9 @@
 //! it from the caller's pidfd (`athanor_unit::bus_caller::admit`: `GetUnitByPIDFD`, the unit's
 //! `MainPID`, its one `ExecStart` `/usr/libexec/xdg-desktop-portal-athanor` and its files in the
 //! image), never by reading `/proc/<pid>/exe`, which a confined unit cannot read (#1047). Each
-//! question waits [`ASK`] at most, and one unanswered refuses. Every call is admitted anew; a
-//! refused call changes nothing, is answered `AccessDenied`, and the journal names it at most
-//! once a minute.
+//! question, the one for the name's owner included, waits [`ASK`] at most, and one unanswered
+//! refuses. Every call is admitted anew; a refused call changes nothing, is answered
+//! `AccessDenied`, and the journal names it at most once a minute.
 //! A `device_types` of 0, or with a bit other than 1, 2 and 4, is `InvalidArgs` and creates
 //! nothing; a second `ConnectToEIS` for a handle that holds a file descriptor is `Failed`, and the
 //! handle stays held until `CloseSession` or the revocation, so a portal session has one file
@@ -83,7 +83,13 @@ pub(crate) const BACKEND_SERVICE: Service<'static> = Service {
 };
 /// How long one question of the admission waits, as athanor-idle's admission of the backend
 /// (issue #1035): unanswered, the call is refused.
-const ASK: Duration = Duration::from_secs(2);
+pub(crate) const ASK: Duration = Duration::from_secs(2);
+
+/// `builder`, whose every method call fails unanswered after [`ASK`]: the `eis` thread asks the
+/// bus on such connections alone, the owner of the backend's name included.
+pub(crate) fn within_ask(builder: Builder<'_>) -> Builder<'_> {
+    builder.method_timeout(ASK)
+}
 
 /// Whether `client`, while `owner` owns the backend's name, is the main process of the
 /// backend's unit, or why not.
@@ -95,7 +101,11 @@ pub(crate) fn check(questions: &impl Questions, client: &str, owner: &str) -> Re
 }
 
 /// Asks the bus who owns the backend's name, and `check`s `client`.
-fn admit(bus: &DBusProxy<'_>, questions: &impl Questions, client: &str) -> Result<(), Error> {
+pub(crate) fn admit(
+    bus: &DBusProxy<'_>,
+    questions: &impl Questions,
+    client: &str,
+) -> Result<(), Error> {
     let owner = zbus::block_on(bus.get_name_owner(BACKEND.try_into()?))?;
     check(questions, client, owner.as_str())
 }
@@ -250,11 +260,12 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) {
                     .map_err(|_| Error::from("the event loop has ended"))
             };
             // The admission asks on connections that serve nothing and subscribe to nothing
-            // (`bus_caller::OnBus`), each question within `ASK`.
+            // (`bus_caller::OnBus`), and the owner of the backend's name on `asking`: each
+            // question within `ASK`.
             let connected = zbus::block_on(async {
-                let asking = Connection::session().await?;
-                let query = Builder::session().method_timeout(ASK).build().await?;
-                let system = bus_caller::system_bus().method_timeout(ASK).build().await?;
+                let asking = within_ask(Builder::session()).build().await?;
+                let query = within_ask(Builder::session()).build().await?;
+                let system = within_ask(bus_caller::system_bus()).build().await?;
                 let bus = DBusProxy::new(&query).await?;
                 Ok::<_, zbus::Error>((asking, query, system, bus))
             });

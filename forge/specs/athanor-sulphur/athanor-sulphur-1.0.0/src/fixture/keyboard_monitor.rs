@@ -706,6 +706,16 @@ impl Bus {
     pub(super) fn connect(&self) -> Connection {
         zbus::block_on(self.builder().build()).expect("a connection to the bus")
     }
+
+    /// Stops the daemon, which then answers nothing until the bus is dropped.
+    pub(super) fn stop(&self) {
+        let stopped = Command::new("kill")
+            .arg("-STOP")
+            .arg(self.daemon.id().to_string())
+            .status()
+            .expect("kill runs");
+        assert!(stopped.success(), "the bus daemon stops");
+    }
 }
 
 impl Drop for Bus {
