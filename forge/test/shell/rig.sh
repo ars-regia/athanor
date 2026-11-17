@@ -215,8 +215,11 @@ build_spec_rig() {
         # Outside $out/cosmic-comp-spec, which is the build context of the derived image.
         mkdir -p "$out/builder-local"
         archive=$out/builder-local/athanor-builder.tar.gz
-        # The archive goes on every way out of this step, a signal included; the errors of the
-        # build and the load stay on stderr, and so does their exit status.
+        # A run killed outright leaves the archive read-only, as the nix store copies it.
+        rm -f "$archive"
+        # The archive goes on every way out of this step, a signal included (bash runs the trap
+        # once the foreground nix build or podman load returns); the errors of the build and the
+        # load stay on stderr, and so does their exit status.
         trap 'rm -f "$archive"; exit 130' INT
         trap 'rm -f "$archive"; exit 143' TERM
         status=0
