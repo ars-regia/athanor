@@ -498,13 +498,14 @@ def main():
     )
     # The loop switches on, then off: it starts from the key's default.
     check("the screen reader key starts off", screen_reader_key() == "false")
+    # High contrast switched off just before rebuilds the open popover, so a press can land
+    # on a switch the rebuild removes: switch_until presses again, as it does above.
     for value in ("true", "false"):
-        switches = labelled(app, Atspi, "toggle button", "Screen reader")
-        if switches:
-            switches[0].do_action(0)
         check(
             f"the screen reader switch writes {value} to its GNOME key within 2 s",
-            wait_for(lambda value=value: screen_reader_key() == value, 2),
+            switch_until(
+                app, Atspi, "Screen reader", lambda value=value: screen_reader_key() == value
+            ),
         )
 
     # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
