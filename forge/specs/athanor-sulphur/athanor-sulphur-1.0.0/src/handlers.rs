@@ -2,6 +2,7 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
+use crate::layer::mapped;
 use crate::state::{is_full_screen, unconfined, ClientState, State};
 use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
@@ -1146,6 +1147,19 @@ impl State {
             Some((map.layer_geometry(layer)?.loc + area.loc, area))
         })
     }
+
+    /// Whether `root`, a popup's root, can keep the keyboard a closing popup hands back: its
+    /// interactivity takes it, it shows a buffer, it is in the space, not minimised, parked or
+    /// refused, and no other surface holds the keyboard exclusively. A window drawing nothing
+    /// shows no buffer.
+    fn keeps_keyboard(&self, root: &WlSurface) -> bool {
+        self.takes_keyboard(root)
+            && mapped(root)
+            && self.popup_root_place(root).is_some()
+            && self
+                .exclusive_layer()
+                .is_none_or(|surface| &surface == root)
+    }
 }
 
 impl BufferHandler for State {
@@ -1349,11 +1363,14 @@ impl XdgShellHandler for State {
     }
 
     /// A popup that holds the keyboard hands it back as it is destroyed, at once (decision 30,
-    /// amended on 2026-11-17): to the popup grab's current popup, the next of its chain that
-    /// holds a grab, or to the grab's root once none is left. Without a popup grab, or with a
-    /// dead root, it goes to the popup's root if that lives, else where a destroyed window's
-    /// keyboard goes. Smithay's grab moves the keyboard only at the next key, which leaves it on
-    /// the popup's bare surface until then, so that a toolkit waiting for an `enter` to give the
+    /// amended on 2026-11-17): to its parent when the parent is a popup that still holds a grab,
+    /// the popup grab's current popup, and otherwise to the popups' root surface. A parent
+    /// destroyed first resets its popup data, which cuts the chain `find_popup_root_surface`
+    /// walks, so the root is then the grab's. A root that is gone or can no longer keep the
+    /// keyboard (`keeps_keyboard`) is not given it: the popup's grab, which would hold the
+    /// keyboard on the popup, ends, and the focus is chosen again as when the focused window
+    /// closes. Smithay's grab moves the keyboard only at the next key, which leaves it on the
+    /// popup's bare surface until then, so that a toolkit waiting for an `enter` to give the
     /// focus back to the control that opened the popup would have none (#1217). The grab lets
     /// the change through: its current popup, or anything once it has ended.
     fn popup_destroyed(&mut self, surface: PopupSurface) {
@@ -1365,16 +1382,25 @@ impl XdgShellHandler for State {
         }
         let grabbed =
             keyboard.with_grab(|_, current| current.is::<PopupKeyboardGrab<State>>()) == Some(true);
-        let target = self
-            .popup_grab
-            .as_ref()
-            .filter(|grab| grabbed && !grab.has_ended())
-            .and_then(PopupGrab::current_grab)
-            .or_else(|| find_popup_root_surface(&PopupKind::Xdg(surface.clone())).ok())
-            .filter(|target| target.is_alive());
-        match target {
+        let grab = self.popup_grab.as_ref().filter(|_| grabbed);
+        let root = find_popup_root_surface(&PopupKind::Xdg(surface.clone()))
+            .ok()
+            .or_else(|| grab.and_then(|grab| grab.keyboard_grab_start_data().focus.clone()));
+        let current = grab
+            .filter(|grab| !grab.has_ended())
+            .and_then(PopupGrab::current_grab);
+        let parent = surface
+            .get_parent_surface()
+            .filter(|parent| Some(parent) != root.as_ref() && Some(parent) == current.as_ref());
+        let target = parent.or_else(|| root.filter(|root| self.keeps_keyboard(root)));
+        match target.filter(|target| target.is_alive()) {
             Some(target) => self.set_keyboard_focus(Some(target)),
-            None => self.refocus(surface.wl_surface()),
+            None => {
+                if grabbed {
+                    keyboard.unset_grab(self);
+                }
+                self.refocus(surface.wl_surface());
+            }
         }
     }
 
