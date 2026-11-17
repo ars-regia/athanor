@@ -1081,15 +1081,16 @@ compositor and that the own compositor did not yet offer:
     grab, and otherwise to the popups' root surface, and not at the next key or click. When the
     root is gone or can no longer take the keyboard (unmapped, not shown, a layer surface without
     keyboard interactivity, or while another surface holds the keyboard exclusively), Sulphur
-    does not give it the keyboard and chooses the focus again, as when the focused window
-    closes. The client sees `wl_keyboard.enter` on the surface that takes the keyboard as the
-    popup closes, so that a toolkit can give the focus back to the control that opened the
-    popup with nothing pressed. A fixture test of Sulphur covers each case: a parent popup that
-    holds a grab, a parent popup already destroyed, a parent popup that holds no grab, a parent
-    that is the root, a root that is gone, a root that takes no keyboard, and a root while
-    another surface holds the keyboard exclusively. AX7 of
-    `doc_accessibility.md` says that Escape closes the innermost popover; where the keyboard
-    goes after any destroy of a popup, Escape included, is this decision.
+    does not give it the keyboard and chooses the focus again by the rule it applies when the
+    focused window closes. The client sees `wl_keyboard.enter` on the surface that takes the
+    keyboard as the popup closes, so that a toolkit can give the focus back to the control that
+    opened the popup with nothing pressed. A fixture test of Sulphur covers each case: a parent
+    popup that holds a grab, a parent popup already destroyed, a parent popup that holds no
+    grab, a parent that is the root, and a root that is gone, unmapped, not shown, without
+    keyboard interactivity, or under a surface that holds the keyboard exclusively; the test
+    compares the focus with the one that rule chooses. AX7 of `doc_accessibility.md` says that
+    Escape closes the innermost popover; where the keyboard goes after any destroy of a popup,
+    Escape included, is this decision.
 
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
     MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
