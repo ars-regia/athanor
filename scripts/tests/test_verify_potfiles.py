@@ -181,7 +181,11 @@ class ModuleTreeTest(unittest.TestCase):
         # Cannot be judged: either file is accepted, neither is a problem.
         unlisted(found('target_os = "linux"', {"u.rs": TRANSLATED}), "u.rs")
         unlisted(found('target_os = "linux"', {"b.rs": TRANSLATED}), "b.rs")
-        unlisted(found('target_os = "linux"', both), "u.rs")
+        # With both present, each is compiled for some target, so each is scanned.
+        found_both = found('target_os = "linux"', both)
+        self.assertEqual(len(found_both), 2, found_both)
+        for name in ("u.rs", "b.rs"):
+            self.assertTrue(any(f"system/shared/src/{name} calls tr" in f for f in found_both))
         missing(found('target_os = "linux"', {}), "u.rs")
         # An unparsable predicate cannot be judged either.
         unlisted(found("not()", {"b.rs": TRANSLATED}), "b.rs")
@@ -209,6 +213,11 @@ class ModuleTreeTest(unittest.TestCase):
         found = self.found(lib, {})
         self.assertEqual(len(found), 1, found)
         self.assertIn("declares a module whose file system/shared/src/l.rs", found[0])
+        # Each file a build for some target compiles is scanned, not only the first one.
+        found = self.found(lib, {"l.rs": TRANSLATED, "f.rs": TRANSLATED})
+        self.assertEqual(len(found), 2, found)
+        for name in ("l.rs", "f.rs"):
+            self.assertTrue(any(f"system/shared/src/{name} calls tr" in f for f in found), found)
 
     def test_a_conditional_path_is_split_at_its_own_commas_and_quotes(self):
         # A comma and a parenthesis inside the quoted path do not end the attribute.

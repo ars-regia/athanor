@@ -1722,7 +1722,8 @@ def module_files(root_file, features):
             explicit = re.search(r'#\[path\s*=\s*"([^"]*)"\]', attrs)
             # `#[cfg_attr(predicate, path = "...")]`: the path applies when the predicate
             # holds; when it cannot be judged, that file or any other the module may take
-            # will do.
+            # will do, and every one of them that exists is scanned, as a build for another
+            # target compiles it.
             conditional = cfg_attr_paths(attrs, features)
             name = decl.group(2)
             at = here if outer else path.parent
@@ -1732,7 +1733,7 @@ def module_files(root_file, features):
             candidates = holding[-1:] or undecided + normal
             if explicit:
                 candidates = [(at / explicit.group(1), True)]
-            found = [c for c in candidates if c[0].is_file()][:1]
+            found = [c for c in candidates if c[0].is_file()]
             if not found:
                 missing.append((path, candidates[0][0]))
             todo += found
