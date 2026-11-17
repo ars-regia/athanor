@@ -25,19 +25,30 @@
 //! connection, which also carries the changes of names `eis-names` reads. The loop never waits
 //! on the bus.
 
+use crate::bindings;
 use crate::identity::{self, Process};
+use crate::input::{BUTTONS, KEYS};
 use crate::keyboard_monitor::{answer, Answer, Caller, Hush, Names};
 use crate::state::State;
 use crate::xkb_config::Settings;
 use crate::Error;
 use futures_util::StreamExt;
-use smithay::backend::libei::{EiInput, EiInputConnection, EiInputEvent, EiInputSeat, EiRegion};
-use smithay::input::keyboard::XkbConfig;
+use smithay::backend::input::{
+    AbsolutePositionEvent, ButtonState, Device, Event, InputEvent, InputTime, KeyState,
+    PointerButtonEvent, TouchEvent, TouchSlot,
+};
+use smithay::backend::libei::{
+    EiInput, EiInputConnection, EiInputEvent, EiInputSeat, EiRegion, ScrollEvent,
+};
+use smithay::input::keyboard::{xkb, Keycode, Keysym, ModifiersState, XkbConfig};
 use smithay::reexports::calloop::{
     channel, EventSource, LoopHandle, Poll, PostAction, Readiness, RegistrationToken, Token,
     TokenFactory,
 };
-use smithay::reexports::reis::eis;
+use smithay::reexports::reis::{self, eis};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use std::collections::{HashMap, HashSet};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -471,6 +482,103 @@ struct Context {
     socket: UnixStream,
     /// The seat, once the client has finished its handshake.
     seat: Option<EiInputSeat>,
+    /// The keyboard's own state, when the keyboard was granted.
+    keys: Option<Keys>,
+    /// The buttons held, by device: Smithay's device id is unique within one connection only,
+    /// so a device is named `eis:<context>:<id>` (`device_key`).
+    buttons: HashSet<(String, u32)>,
+    /// The touches held, by device and the device's slot.
+    touches: HashSet<(String, TouchSlot)>,
+    /// The absolute devices that moved the pointer, whose last position the seat keeps.
+    absolute: HashSet<String>,
+}
+
+/// A context's keyboard: its own keymap, the seat's `xkb_config` compiled again, and its own
+/// xkb state, apart from the seat's physical state (`State::eis_key`).
+struct Keys {
+    keymap: xkb::Keymap,
+    state: xkb::State,
+    /// The xkb codes pressed and sent to a client.
+    held: HashSet<u32>,
+    /// The xkb codes whose press was dropped, and whose release is dropped too.
+    dropped: HashSet<u32>,
+}
+
+impl Keys {
+    fn new(settings: Option<&Settings>) -> Option<Self> {
+        let config = xkb_config(settings);
+        let keymap = xkb::Keymap::new_from_names(
+            &xkb::Context::new(xkb::CONTEXT_NO_FLAGS),
+            config.rules,
+            config.model,
+            config.layout,
+            config.variant,
+            config.options,
+            xkb::KEYMAP_COMPILE_NO_FLAGS,
+        )?;
+        Some(Self {
+            state: xkb::State::new(&keymap),
+            keymap,
+            held: HashSet::new(),
+            dropped: HashSet::new(),
+        })
+    }
+
+    fn modifiers(&self) -> ModifiersState {
+        let mut modifiers = ModifiersState::default();
+        modifiers.update_with(&self.state);
+        modifiers
+    }
+
+    /// `[depressed, latched, locked, group]`, as `set_modifier_mask` takes them.
+    fn mask(&self) -> [u32; 4] {
+        [
+            self.state.serialize_mods(xkb::STATE_MODS_DEPRESSED),
+            self.state.serialize_mods(xkb::STATE_MODS_LATCHED),
+            self.state.serialize_mods(xkb::STATE_MODS_LOCKED),
+            self.state.serialize_layout(xkb::STATE_LAYOUT_EFFECTIVE),
+        ]
+    }
+
+    /// The first-level keysyms of `code` in the active layout, then in the others, as the
+    /// keyboard aids read a hardware key (`aids.rs`).
+    fn raw_syms(&self, code: Keycode) -> Vec<Keysym> {
+        let active = self.state.serialize_layout(xkb::STATE_LAYOUT_EFFECTIVE);
+        let others = (0..self.keymap.num_layouts()).filter(|layout| *layout != active);
+        std::iter::once(active)
+            .chain(others)
+            .flat_map(|layout| self.keymap.key_get_syms_by_level(code, layout, 0).to_vec())
+            .collect()
+    }
+}
+
+/// Whether injected input is delivered: neither from the lock request to the unlock nor while
+/// the session is paused on another virtual terminal, as `drops_virtual_input` has it for the
+/// virtual keyboard. An event sent then is dropped, not queued.
+fn delivers(locked: bool, paused: bool) -> bool {
+    !locked && !paused
+}
+
+/// Whether `surface` is the portal backend's, named by its unit or its executable as the
+/// admission names it: no injected input reaches the consent dialog.
+pub(crate) fn backend_surface(surface: &WlSurface) -> bool {
+    surface
+        .client()
+        .and_then(|client| crate::state::identity_of(&client))
+        .is_some_and(|identity| {
+            identity.unit.as_deref() == Some(BACKEND_UNIT)
+                || identity.executable == Path::new(BACKEND_EXECUTABLE)
+        })
+}
+
+/// A device of context `id`, apart from every other context's.
+fn device_key(id: u64, device: &impl Device) -> String {
+    format!("eis:{id}:{}", device.id())
+}
+
+/// A point of an absolute event, if finite.
+fn finite(x: f64, y: f64) -> Option<Point<f64, Logical>> {
+    (x.is_finite() && y.is_finite()).then(|| Point::from((x, y)))
 }
 
 /// The event loop's side: the contexts, by an id of the loop's own, and the keymap their
@@ -483,6 +591,15 @@ pub(crate) struct Eis {
     ended: Option<channel::Sender<u64>>,
     /// The seat's `xkb_config`, once a file was applied; the default before.
     settings: Option<Settings>,
+    /// Set while an injected motion, button or scroll is applied: `pointer_target` then gives
+    /// no surface of the portal backend the pointer.
+    injecting: bool,
+}
+
+impl Eis {
+    pub(crate) fn injecting(&self) -> bool {
+        self.injecting
+    }
 }
 
 /// The keymap of `settings`, or the default `State::new` gives the seat.
@@ -565,6 +682,10 @@ impl State {
             }
         };
         tracing::info!(%handle, ?types, "an EIS context is open");
+        let keys = types
+            .keyboard()
+            .then(|| Keys::new(self.eis.settings.as_ref()))
+            .flatten();
         self.eis.contexts.insert(
             id,
             Context {
@@ -573,6 +694,10 @@ impl State {
                 token,
                 socket,
                 seat: None,
+                keys,
+                buttons: HashSet::new(),
+                touches: HashSet::new(),
+                absolute: HashSet::new(),
             },
         );
     }
@@ -606,7 +731,11 @@ impl State {
     /// Drops what the loop holds for context `id` and shuts its socket down: the source's token,
     /// if the context was known.
     fn eis_forget(&mut self, id: u64) -> Option<RegistrationToken> {
+        self.eis_release(id);
         let context = self.eis.contexts.remove(&id)?;
+        for device in &context.absolute {
+            self.absolute_device_gone(device);
+        }
         if let Err(error) = context.socket.shutdown(Shutdown::Both) {
             tracing::debug!(%error, handle = %context.handle, "an EIS socket was shut down already");
         }
@@ -619,8 +748,7 @@ impl State {
             EiInputEvent::Connected => self.eis_connected(id, connection),
             // The source removes itself and says so (`Served`).
             EiInputEvent::Disconnected => {}
-            // Delivered by the routing below; nothing reaches a client before it.
-            EiInputEvent::Event(_) => {}
+            EiInputEvent::Event(event) => self.eis_input(id, event),
         }
     }
 
@@ -669,8 +797,15 @@ impl State {
     /// The seat's keymap changed: each context's keyboard is given the new one.
     pub(crate) fn eis_keymap_changed(&mut self, settings: &Settings) {
         self.eis.settings = Some(settings.clone());
+        let ids: Vec<u64> = self.eis.contexts.keys().copied().collect();
+        for id in ids {
+            self.eis_release_keys(id);
+        }
         let config = xkb_config(self.eis.settings.as_ref());
-        for context in self.eis.contexts.values() {
+        for context in self.eis.contexts.values_mut() {
+            if context.keys.is_some() {
+                context.keys = Keys::new(self.eis.settings.as_ref());
+            }
             let Some(seat) = context.seat.as_ref().filter(|_| context.types.keyboard()) else {
                 continue;
             };
@@ -678,6 +813,404 @@ impl State {
             if let Err(error) = seat.add_keyboard(KEYBOARD, config.clone()) {
                 tracing::warn!(?error, handle = %context.handle, "an EIS keyboard was not given the new keymap");
             }
+        }
+    }
+
+    /// Context `id`'s input. It reaches Wayland clients only: no binding of the compositor,
+    /// neither the keyboard monitor nor the keyboard aids, and no surface of the portal backend.
+    fn eis_input(&mut self, id: u64, event: InputEvent<EiInput>) {
+        if let InputEvent::DeviceRemoved { device } = &event {
+            return self.eis_device_gone(id, device);
+        }
+        if !delivers(self.lock.is_some(), self.session_paused()) {
+            return;
+        }
+        match event {
+            InputEvent::Keyboard { event } => {
+                let pressed = event.state == eis::keyboard::KeyState::Press;
+                self.eis_key(id, event.key, pressed, Event::time(&event));
+            }
+            InputEvent::PointerMotion { event } => {
+                let Some(delta) = finite(event.dx.into(), event.dy.into()) else {
+                    return;
+                };
+                self.eis_pointing(|state| {
+                    state.pointer_moved_by(delta, delta, Event::time(&event))
+                });
+            }
+            InputEvent::PointerMotionAbsolute { event } => {
+                let Some(to) = finite(event.x(), event.y()).filter(|to| self.on_outputs(*to))
+                else {
+                    return;
+                };
+                let device = device_key(id, &Event::device(&event));
+                let Some(context) = self.eis.contexts.get_mut(&id) else {
+                    return;
+                };
+                context.absolute.insert(device.clone());
+                self.eis_pointing(|state| state.pointer_moved_to(device, to, Event::time(&event)));
+            }
+            InputEvent::PointerButton { event } => {
+                let device = device_key(id, &Event::device(&event));
+                let time = Event::time(&event);
+                self.eis_button(id, device, event.button_code(), event.state(), time);
+            }
+            InputEvent::PointerAxis { event } => {
+                if let ScrollEvent::Delta(delta) = &event {
+                    if finite(delta.dx.into(), delta.dy.into()).is_none() {
+                        return;
+                    }
+                }
+                let Some(pointer) = self.seat.get_pointer() else {
+                    return;
+                };
+                if self.eis_aims_at_backend() {
+                    return;
+                }
+                self.activity();
+                self.eis_pointing(|state| crate::input::scroll(state, &pointer, &event));
+            }
+            InputEvent::TouchDown { event } => {
+                let device = device_key(id, &Event::device(&event));
+                let Some(at) = finite(event.x(), event.y()).filter(|at| self.on_outputs(*at))
+                else {
+                    return;
+                };
+                if self
+                    .surface_under(at)
+                    .is_some_and(|(surface, _)| backend_surface(&surface))
+                {
+                    return;
+                }
+                let Some(context) = self.eis.contexts.get_mut(&id) else {
+                    return;
+                };
+                let slot = event.slot();
+                if !context.touches.insert((device.clone(), slot)) {
+                    return;
+                }
+                self.activity();
+                self.touch_down(&device, slot, at, Event::time(&event));
+            }
+            InputEvent::TouchMotion { event } => {
+                let key = (device_key(id, &Event::device(&event)), event.slot());
+                let Some(at) = finite(event.x(), event.y()) else {
+                    return;
+                };
+                if self
+                    .eis
+                    .contexts
+                    .get(&id)
+                    .is_some_and(|context| context.touches.contains(&key))
+                {
+                    self.touch_motion(&key.0, key.1, at, Event::time(&event));
+                }
+            }
+            InputEvent::TouchUp { event } => {
+                let key = (device_key(id, &Event::device(&event)), event.slot());
+                self.eis_touch_up(id, key, Event::time(&event));
+            }
+            // One touch's cancel, which ends that touch alone: `wl_touch.cancel` would end the
+            // user's own touches too.
+            InputEvent::TouchCancel { event } => {
+                let key = (device_key(id, &Event::device(&event)), event.slot());
+                self.eis_touch_up(id, key, Event::time(&event));
+            }
+            InputEvent::TouchFrame { .. } => self.touch_frame(),
+            // Text (keysyms and UTF-8) is never offered, and its events are dropped.
+            _ => {}
+        }
+    }
+
+    /// An injected key, under context `id`'s own keymap and modifiers. A press is dropped, its
+    /// release with it, when it is a protected key of decision 30 under the context's own
+    /// modifiers, when the seat or another context holds that key, or when the keyboard focus
+    /// is the portal backend's.
+    fn eis_key(&mut self, id: u64, key: u32, pressed: bool, time: InputTime) {
+        // Smithay adds 8 to a code the client chose.
+        let Some(raw) = key.checked_add(8).filter(|raw| KEYS.contains(raw)) else {
+            return;
+        };
+        let code = Keycode::new(raw);
+        let keyboard = self.seat.get_keyboard();
+        let seat_holds = keyboard
+            .as_ref()
+            .is_some_and(|keyboard| keyboard.pressed_keys().contains(&code));
+        let to_backend = keyboard
+            .as_ref()
+            .and_then(|keyboard| keyboard.current_focus())
+            .is_some_and(|surface| backend_surface(&surface));
+        let another_holds = self.eis.contexts.iter().any(|(other, context)| {
+            *other != id
+                && context
+                    .keys
+                    .as_ref()
+                    .is_some_and(|keys| keys.held.contains(&raw))
+        });
+        let Some(keys) = self
+            .eis
+            .contexts
+            .get_mut(&id)
+            .and_then(|context| context.keys.as_mut())
+        else {
+            return;
+        };
+        let key_state = if pressed {
+            if keys.held.contains(&raw) || keys.dropped.contains(&raw) {
+                return;
+            }
+            let protected =
+                bindings::protected(bindings::mask(&keys.modifiers()), &keys.raw_syms(code));
+            if protected || seat_holds || another_holds || to_backend {
+                keys.dropped.insert(raw);
+                return;
+            }
+            keys.state.update_key(code, xkb::KeyDirection::Down);
+            keys.held.insert(raw);
+            KeyState::Pressed
+        } else {
+            if keys.dropped.remove(&raw) || !keys.held.remove(&raw) {
+                return;
+            }
+            keys.state.update_key(code, xkb::KeyDirection::Up);
+            if to_backend {
+                return;
+            }
+            KeyState::Released
+        };
+        let mask = keys.mask();
+        self.activity();
+        self.eis_send_key(code, key_state, mask, time);
+    }
+
+    /// Sends the focused client a key with the modifiers `mask`, past the input method's grab,
+    /// and then the seat's own modifiers again, as a virtual keyboard's key is sent
+    /// (`with_keymap_of`): the seat's xkb state, which reads the hardware's keys, never has the
+    /// key, and no binding, monitor or aid sees it.
+    fn eis_send_key(
+        &mut self,
+        code: Keycode,
+        key_state: KeyState,
+        mask: [u32; 4],
+        time: InputTime,
+    ) {
+        // The context's keymap is the seat's own.
+        self.restore_seat_keymap();
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let seat = keyboard.modifier_state().serialized;
+        let [depressed, latched, locked, group] = mask;
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(depressed, latched, locked, group)
+        });
+        let serial = SERIAL_COUNTER.next_serial();
+        if key_state == KeyState::Pressed {
+            self.grab_serials.press = Some(serial);
+        }
+        keyboard.input_forward_bypassing_grab(self, code, key_state, serial, time, true);
+        keyboard.with_xkb_state(self, |mut context| {
+            context.set_modifier_mask(
+                seat.depressed,
+                seat.latched,
+                seat.locked,
+                seat.layout_effective,
+            )
+        });
+    }
+
+    /// An injected button: a press aimed at the portal backend is dropped, and a release counts
+    /// only for a button its device holds.
+    fn eis_button(
+        &mut self,
+        id: u64,
+        device: String,
+        button: u32,
+        button_state: ButtonState,
+        time: InputTime,
+    ) {
+        if !BUTTONS.contains(&button) {
+            return;
+        }
+        let aims_at_backend = self.eis_aims_at_backend();
+        let Some(context) = self.eis.contexts.get_mut(&id) else {
+            return;
+        };
+        let key = (device, button);
+        let counts = match button_state {
+            ButtonState::Pressed => {
+                !aims_at_backend && !context.buttons.contains(&key) && context.buttons.insert(key)
+            }
+            ButtonState::Released => context.buttons.remove(&key),
+        };
+        if counts {
+            self.activity();
+            self.eis_pointing(|state| state.button_input(button, button_state, time));
+        }
+    }
+
+    /// Whether a button or a scroll would reach a surface of the portal backend: the one under
+    /// the pointer, or the pointer's focus.
+    fn eis_aims_at_backend(&self) -> bool {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return false;
+        };
+        let focused = pointer
+            .current_focus()
+            .is_some_and(|surface| backend_surface(&surface));
+        focused
+            || self
+                .surface_under(pointer.current_location())
+                .is_some_and(|(surface, _)| backend_surface(&surface))
+    }
+
+    fn eis_touch_up(&mut self, id: u64, key: (String, TouchSlot), time: InputTime) {
+        let held = self
+            .eis
+            .contexts
+            .get_mut(&id)
+            .is_some_and(|context| context.touches.remove(&key));
+        if held {
+            self.touch_up(&key.0, key.1, time);
+        }
+    }
+
+    /// Runs `input` with the portal backend kept from the pointer's focus.
+    fn eis_pointing(&mut self, input: impl FnOnce(&mut Self)) {
+        self.eis.injecting = true;
+        input(self);
+        self.eis.injecting = false;
+    }
+
+    fn on_outputs(&self, at: Point<f64, Logical>) -> bool {
+        self.output_areas()
+            .iter()
+            .any(|area| area.to_f64().contains(at))
+    }
+
+    /// A device of context `id` went: what it held is let go.
+    fn eis_device_gone(
+        &mut self,
+        id: u64,
+        device: &<EiInput as smithay::backend::input::InputBackend>::Device,
+    ) {
+        let key = device_key(id, device);
+        if device.has_capability(reis::event::DeviceCapability::Keyboard) {
+            self.eis_release_keys(id);
+            let settings = self.eis.settings.clone();
+            if let Some(context) = self.eis.contexts.get_mut(&id) {
+                if context.keys.is_some() {
+                    context.keys = Keys::new(settings.as_ref());
+                }
+            }
+        }
+        let Some(context) = self.eis.contexts.get_mut(&id) else {
+            return;
+        };
+        let buttons: Vec<u32> = context
+            .buttons
+            .iter()
+            .filter(|(of, _)| *of == key)
+            .map(|(_, button)| *button)
+            .collect();
+        context.buttons.retain(|(of, _)| *of != key);
+        let touches: Vec<TouchSlot> = context
+            .touches
+            .iter()
+            .filter(|(of, _)| *of == key)
+            .map(|(_, slot)| *slot)
+            .collect();
+        context.touches.retain(|(of, _)| *of != key);
+        if context.absolute.remove(&key) {
+            self.absolute_device_gone(&key);
+        }
+        self.eis_let_go(&buttons, &[], &key, &touches);
+    }
+
+    /// Lets go of what context `id` holds: its keys and buttons with a release, its touches
+    /// with `wl_touch.up` of their slots, never `wl_touch.cancel`, which would end the user's
+    /// own touches too. No other context's input, and none of the seat's, is touched.
+    fn eis_release(&mut self, id: u64) {
+        self.eis_release_keys(id);
+        let Some(context) = self.eis.contexts.get_mut(&id) else {
+            return;
+        };
+        let buttons: Vec<u32> = context.buttons.drain().map(|(_, button)| button).collect();
+        let touches: Vec<(String, TouchSlot)> = context.touches.drain().collect();
+        self.eis_let_go(&buttons, &touches, "", &[]);
+    }
+
+    /// Releases `buttons`, and lifts `touches` and the slots `slots` of `device`, framed.
+    fn eis_let_go(
+        &mut self,
+        buttons: &[u32],
+        touches: &[(String, TouchSlot)],
+        device: &str,
+        slots: &[TouchSlot],
+    ) {
+        let time = InputTime::now();
+        for button in buttons {
+            self.eis_pointing(|state| state.button_input(*button, ButtonState::Released, time));
+        }
+        let lifted = touches
+            .iter()
+            .map(|(device, slot)| (device.as_str(), *slot))
+            .chain(slots.iter().map(|slot| (device, *slot)));
+        let mut any = false;
+        for (device, slot) in lifted {
+            self.touch_up(device, slot, time);
+            any = true;
+        }
+        if any {
+            self.touch_frame();
+        }
+    }
+
+    /// Releases the keys context `id` holds and forgets the presses it dropped.
+    fn eis_release_keys(&mut self, id: u64) {
+        let Some(keys) = self
+            .eis
+            .contexts
+            .get_mut(&id)
+            .and_then(|context| context.keys.as_mut())
+        else {
+            return;
+        };
+        keys.dropped.clear();
+        let held: Vec<u32> = keys.held.drain().collect();
+        // Each release is sent with the modifiers that remain once its key is up.
+        let releases: Vec<(Keycode, [u32; 4])> = held
+            .into_iter()
+            .map(|raw| {
+                let code = Keycode::new(raw);
+                keys.state.update_key(code, xkb::KeyDirection::Up);
+                (code, keys.mask())
+            })
+            .collect();
+        let time = InputTime::now();
+        for (code, mask) in releases {
+            self.eis_send_key(code, KeyState::Released, mask, time);
+        }
+    }
+
+    /// The lock was requested, or the session paused: every context lets go of its keys and
+    /// buttons with a release, and its touches are cancelled with `wl_touch.cancel`, as the
+    /// hardware's are.
+    pub(crate) fn eis_suspend(&mut self) {
+        let ids: Vec<u64> = self.eis.contexts.keys().copied().collect();
+        let mut touched = false;
+        for id in ids {
+            self.eis_release_keys(id);
+            let Some(context) = self.eis.contexts.get_mut(&id) else {
+                continue;
+            };
+            let buttons: Vec<u32> = context.buttons.drain().map(|(_, button)| button).collect();
+            touched |= !context.touches.is_empty();
+            context.touches.clear();
+            self.eis_let_go(&buttons, &[], "", &[]);
+        }
+        if touched {
+            self.cancel_touches();
         }
     }
 }

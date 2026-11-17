@@ -16,7 +16,7 @@ use smithay::backend::input::{
 use smithay::input::keyboard::{
     FilterResult, KeyboardHandle, KeyboardSource, Keycode, KeymapFile, Xkb, XkbConfig,
 };
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, Size, Transform, SERIAL_COUNTER};
@@ -357,28 +357,10 @@ impl State {
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
-                let source = event.source();
                 if self.scroll_zooms(&event) {
                     return;
                 }
-                let mut frame = AxisFrame::new(event.time()).source(source);
-                for axis in [Axis::Horizontal, Axis::Vertical] {
-                    let discrete = event.amount_v120(axis);
-                    let amount = event
-                        .amount(axis)
-                        .unwrap_or_else(|| discrete.unwrap_or(0.0) * 15.0 / 120.0);
-                    if amount != 0.0 {
-                        frame = frame.value(axis, amount);
-                        if let Some(discrete) = discrete {
-                            frame = frame.v120(axis, discrete as i32);
-                        }
-                    }
-                    if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
-                        frame = frame.stop(axis);
-                    }
-                }
-                pointer.axis(self, frame);
-                pointer.frame(self);
+                scroll(self, &pointer, &event);
             }
             // A gesture goes to the focused surface; one still disarms Super alone (D4).
             event @ (InputEvent::GestureSwipeBegin { .. }
@@ -795,10 +777,38 @@ impl VirtualPointerHandler for State {
 }
 
 /// The evdev codes of buttons, BTN_MISC to KEY_MAX.
-const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
+pub(crate) const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
 
 /// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
-const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
+pub(crate) const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
+
+/// A scroll, to the pointer's focus, framed: what reads the scroll for a binding comes before
+/// (`State::scroll_zooms`), and an injected scroll has none (`eis.rs`).
+pub(crate) fn scroll<I: InputBackend>(
+    state: &mut State,
+    pointer: &PointerHandle<State>,
+    event: &impl PointerAxisEvent<I>,
+) {
+    let source = event.source();
+    let mut frame = AxisFrame::new(event.time()).source(source);
+    for axis in [Axis::Horizontal, Axis::Vertical] {
+        let discrete = event.amount_v120(axis);
+        let amount = event
+            .amount(axis)
+            .unwrap_or_else(|| discrete.unwrap_or(0.0) * 15.0 / 120.0);
+        if amount != 0.0 {
+            frame = frame.value(axis, amount);
+            if let Some(discrete) = discrete {
+                frame = frame.v120(axis, discrete as i32);
+            }
+        }
+        if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
+            frame = frame.stop(axis);
+        }
+    }
+    pointer.axis(state, frame);
+    pointer.frame(state);
+}
 
 /// Where a relative motion from `from` to `to` leaves the pointer: at `to` when an output of
 /// `outputs` shows it, else at the edge of the output it is on (the first one when on none),

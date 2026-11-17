@@ -720,6 +720,7 @@ impl State {
         self.kept_keys.clear();
         self.super_tap = None;
         self.aids_paused();
+        self.eis_suspend();
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning
