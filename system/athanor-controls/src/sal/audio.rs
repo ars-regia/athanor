@@ -298,6 +298,9 @@ pub struct Page {
     seen: (u64, u64),
     /// A failure's note is on screen: a page built again, while the old one is, shows it too.
     noted: bool,
+    /// A failure came with a rebuild: the surface drops the old page's [`Ui`] unannounced, so
+    /// the page built again announces it.
+    unheard: bool,
     ids: Option<Ids>,
 }
 
@@ -307,6 +310,7 @@ impl Page {
             service: Service::get(services),
             seen: (0, 0),
             noted: false,
+            unheard: false,
             ids: None,
         }
     }
@@ -391,7 +395,9 @@ impl Page {
         }
         let [previous, play, next] = buttons;
         let failure = Failure::new(ui, page, look);
-        if self.noted {
+        if std::mem::take(&mut self.unheard) {
+            self.noted |= failure.show(ui);
+        } else if self.noted {
             failure.restore(ui);
         }
         self.ids = Some(Ids {
@@ -420,12 +426,12 @@ impl Page {
             return Turn::Unchanged;
         }
         let failed = now.1 != self.seen.1;
-        let rebuild = self.show(ui);
+        if self.show(ui) {
+            self.unheard |= failed;
+            return Turn::Rebuild;
+        }
         if let (true, Some(ids)) = (failed, &self.ids) {
             self.noted |= ids.failure.show(ui);
-        }
-        if rebuild {
-            return Turn::Rebuild;
         }
         Turn::Updated
     }
@@ -441,6 +447,7 @@ impl Page {
     /// The surface that showed the page closed: a page built again shows no note.
     pub fn discarded(&mut self) {
         self.noted = false;
+        self.unheard = false;
     }
 
     /// Takes `event` if it is one of the page's widgets': whether it was.
@@ -517,6 +524,7 @@ mod tests {
             service,
             seen: (0, 0),
             noted: false,
+            unheard: false,
             ids: None,
         };
         (page, received)
@@ -648,5 +656,79 @@ mod tests {
         assert!(ui.is_visible(note));
         page.closed(&mut ui);
         assert!(!ui.is_visible(note));
+    }
+
+    #[test]
+    fn a_note_shown_stays_in_the_page_built_again_until_its_surface_closes() {
+        let note = |page: &Page, ui: &Ui| {
+            page.ids
+                .as_ref()
+                .is_some_and(|ids| ui.is_visible(ids.failure.note))
+        };
+        let both = |refused| AudioState {
+            refused,
+            ..speakers_and_headset()
+        };
+        let headset = |refused| {
+            let mut state = both(refused);
+            state.outputs.remove(0);
+            state
+        };
+        let build = |page: &mut Page| {
+            let mut ui = Ui::new("Sound", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, None, &Look::plain());
+            ui
+        };
+        let (mut page, _received) = page();
+        publish(&page, both(0));
+        let mut ui = build(&mut page);
+
+        // A refusal that comes with a device that left: the page built again shows it.
+        publish(&page, headset(1));
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+        let mut again = build(&mut page);
+        assert!(
+            note(&page, &again),
+            "the refusal that came with the rebuild"
+        );
+        assert_eq!(
+            again.announcement().map(|(text, _)| text.to_owned()),
+            Some(tr("The action did not complete.")),
+            "announced on the Ui the surface keeps"
+        );
+
+        // A device comes while the note is on screen: the page built again keeps it.
+        publish(&page, both(1));
+        assert_eq!(page.turn(&mut again), Turn::Rebuild);
+        let third = build(&mut page);
+        assert!(note(&page, &third));
+        assert_eq!(
+            third.announcement(),
+            None,
+            "a note already announced is not again"
+        );
+
+        // The popover closed: the next one starts without the note.
+        page.discarded();
+        let mut next = build(&mut page);
+        assert!(!note(&page, &next));
+
+        // A refusal in place, then a rebuild: the page built again keeps the note, silent.
+        publish(&page, both(2));
+        assert_eq!(page.turn(&mut next), Turn::Updated);
+        assert!(note(&page, &next));
+        publish(&page, headset(2));
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        let mut fourth = build(&mut page);
+        assert!(note(&page, &fourth));
+        assert_eq!(fourth.announcement(), None);
+
+        // A refusal with a rebuild the popover closed before: nothing shown, nothing said.
+        publish(&page, both(3));
+        assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
+        page.discarded();
+        let last = build(&mut page);
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
     }
 }
