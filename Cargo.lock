@@ -604,7 +604,7 @@ dependencies = [
  "athanor-layout",
  "athanor-sal",
  "athanor-style",
- "landlock",
+ "athanor-unit",
  "tracing",
  "tracing-subscriber",
  "zbus 5.19.0",
