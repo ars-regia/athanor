@@ -43,7 +43,7 @@ class ToolkitBoundary(unittest.TestCase):
 
     def test_a_pub_use_of_a_crate_module_fails(self):
         for use in ("crate::text", "self::text", "crate::{render, a11y}"):
-            self.lib(f"pub mod driver;\npub use {use};\n")
+            self.lib(f"pub mod driver;\nmod text;\nmod render;\nmod a11y;\npub use {use};\n")
             self.assertTrue(self.problems(), use)
 
     def test_a_pub_use_of_items_passes(self):
@@ -64,6 +64,20 @@ class ToolkitBoundary(unittest.TestCase):
         out = self.problems()
         self.assertEqual(len(out), 1)
         self.assertIn("`pub mod gpu`", out[0])
+
+    def test_a_pub_use_of_a_module_in_any_spelling_fails(self):
+        for use in ("text", "text as t", "crate::{text as t}", "crate::{widget::Ui, text}", "text::*"):
+            self.lib(f"pub mod driver;\nmod text;\nmod widget;\npub use {use};\n")
+            self.assertTrue(self.problems(), use)
+
+    def test_a_pub_use_of_nested_items_passes(self):
+        self.lib("pub mod driver;\nmod text;\nmod widget;\nmod render;\npub use crate::Align;\n"
+                 "pub use crate::{widget::{Ui, Kind}, render::Error};\npub use crate::*;\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_multi_line_commented_pub_mod_passes(self):
+        self.lib("pub mod driver;\n/*\npub mod x;\n*/\n")
+        self.assertEqual(self.problems(), [])
 
     def test_a_widget_id_alias_fails(self):
         (self.dir / "src" / "widget.rs").write_text("pub type WidgetId = usize;\n")
