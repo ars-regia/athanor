@@ -135,13 +135,22 @@ struct Session {
     app_id: String,
     name: String,
     stage: Stage,
+    /// Which session of this handle it is: a handle closed and created again is another
+    /// session, which an answer to the first one's `ConnectToEIS` must not reach.
+    generation: u64,
 }
 
 /// The sessions of the backend, by the session's object path.
 #[derive(Debug, Default)]
 pub struct Sessions {
     sessions: BTreeMap<String, Session>,
+    created: u64,
 }
+
+/// One `ConnectToEIS` in flight: the compositor's answer is accepted only for the session that
+/// asked, still connecting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Ticket(u64);
 
 /// Why a call on a session is refused.
 pub type Refusal = String;
@@ -156,12 +165,14 @@ impl Sessions {
         if self.sessions.contains_key(handle) {
             return Err(format!("{handle} exists already"));
         }
+        self.created += 1;
         self.sessions.insert(
             handle.to_owned(),
             Session {
                 app_id: app_id.to_owned(),
                 name: name.to_owned(),
                 stage: Stage::Created(AVAILABLE),
+                generation: self.created,
             },
         );
         Ok(())
@@ -215,14 +226,14 @@ impl Sessions {
         matches!(session.stage, Stage::Granted(_))
     }
 
-    /// `ConnectToEIS`: the granted types, to ask the compositor for. Refused before the grant
-    /// and for every call after the first.
-    pub fn connect(&mut self, handle: &str, app_id: &str) -> Result<u32, Refusal> {
+    /// `ConnectToEIS`: the granted types, to ask the compositor for, and the ticket its answer
+    /// is given back with. Refused before the grant and for every call after the first.
+    pub fn connect(&mut self, handle: &str, app_id: &str) -> Result<(u32, Ticket), Refusal> {
         let session = self.of(handle, app_id)?;
         match session.stage {
             Stage::Granted(types) => {
                 session.stage = Stage::Connecting(types);
-                Ok(types)
+                Ok((types, Ticket(session.generation)))
             }
             Stage::Connecting(_) | Stage::Connected(_) | Stage::Spent => Err(format!(
                 "{handle} has asked for its file descriptor already"
@@ -231,21 +242,30 @@ impl Sessions {
         }
     }
 
-    /// The compositor's answer to `ConnectToEIS`: `true` for a file descriptor, `false` for a
-    /// refusal. Returns whether the session is still open; when it closed meanwhile the caller
-    /// closes the context it was just given.
-    pub fn connected(&mut self, handle: &str, opened: bool) -> bool {
+    /// The compositor's answer to the `ConnectToEIS` of `ticket`: `opened` for a file
+    /// descriptor, else a refusal, which spends the session. `true` only when the session that
+    /// asked is still connecting and now holds the descriptor; otherwise the caller drops it.
+    pub fn connected(&mut self, handle: &str, ticket: Ticket, opened: bool) -> bool {
         let Some(session) = self.sessions.get_mut(handle) else {
             return false;
         };
-        if let Stage::Connecting(types) = session.stage {
-            session.stage = if opened {
-                Stage::Connected(types)
-            } else {
-                Stage::Spent
-            };
+        let Stage::Connecting(types) = session.stage else {
+            return false;
+        };
+        if Ticket(session.generation) != ticket {
+            return false;
         }
-        true
+        session.stage = if opened {
+            Stage::Connected(types)
+        } else {
+            Stage::Spent
+        };
+        opened
+    }
+
+    /// Whether a session holds `handle` now.
+    pub fn exists(&self, handle: &str) -> bool {
+        self.sessions.contains_key(handle)
     }
 
     /// The session ends, for any reason: its stage, if it existed. A session that was
@@ -373,12 +393,14 @@ mod tests {
     fn the_granted_types_are_connected_once() {
         let mut sessions = Sessions::new();
         assert!(started(&mut sessions, Answer::Granted(POINTER)));
-        assert_eq!(sessions.connect(H, APP), Ok(POINTER));
+        let (types, ticket) = sessions.connect(H, APP).expect("connect");
+        assert_eq!(types, POINTER);
         assert!(
             sessions.connect(H, APP).is_err(),
             "a second call while the first asks"
         );
-        assert!(sessions.connected(H, true));
+        assert!(sessions.connected(H, ticket, true));
+        assert!(!sessions.connected(H, ticket, true), "a second completion");
         assert!(
             sessions.connect(H, APP).is_err(),
             "a second call once connected"
@@ -390,8 +412,13 @@ mod tests {
     fn a_compositor_refusal_spends_the_session() {
         let mut sessions = Sessions::new();
         assert!(started(&mut sessions, Answer::Granted(KEYBOARD)));
-        sessions.connect(H, APP).expect("connect");
-        assert!(sessions.connected(H, false));
+        let (_, ticket) = sessions.connect(H, APP).expect("connect");
+        assert!(!sessions.connected(H, ticket, false));
+        assert_eq!(sessions.stage(H), Some(Stage::Spent));
+        assert!(
+            !sessions.connected(H, ticket, true),
+            "a late descriptor once refused"
+        );
         assert_eq!(sessions.stage(H), Some(Stage::Spent));
         assert!(sessions.connect(H, APP).is_err());
         assert!(sessions.input_sessions().is_empty());
@@ -401,12 +428,12 @@ mod tests {
     fn input_sessions_list_a_session_from_its_context_to_its_close() {
         let mut sessions = Sessions::new();
         assert!(started(&mut sessions, Answer::Granted(KEYBOARD)));
-        sessions.connect(H, APP).expect("connect");
+        let (_, ticket) = sessions.connect(H, APP).expect("connect");
         assert!(
             sessions.input_sessions().is_empty(),
             "the compositor has not answered"
         );
-        sessions.connected(H, true);
+        assert!(sessions.connected(H, ticket, true));
         assert_eq!(
             sessions.input_sessions(),
             [(H.to_owned(), APP.to_owned(), "Remote".to_owned())]
@@ -420,12 +447,33 @@ mod tests {
     fn a_session_closed_while_connecting_is_reported_gone() {
         let mut sessions = Sessions::new();
         assert!(started(&mut sessions, Answer::Granted(KEYBOARD)));
-        sessions.connect(H, APP).expect("connect");
+        let (_, ticket) = sessions.connect(H, APP).expect("connect");
         assert!(holds_context(sessions.close(H).expect("closed")));
         assert!(
-            !sessions.connected(H, true),
+            !sessions.connected(H, ticket, true),
             "the caller must close the new context"
         );
+        assert!(!sessions.exists(H));
+    }
+
+    #[test]
+    fn a_late_answer_never_reaches_a_session_created_again_on_the_handle() {
+        let mut sessions = Sessions::new();
+        assert!(started(&mut sessions, Answer::Granted(KEYBOARD)));
+        let (_, old) = sessions.connect(H, APP).expect("connect");
+        sessions.close(H);
+        assert!(started(&mut sessions, Answer::Granted(KEYBOARD)));
+        assert!(!sessions.connected(H, old, true), "granted, not connecting");
+        assert_eq!(sessions.stage(H), Some(Stage::Granted(KEYBOARD)));
+        let (_, new) = sessions.connect(H, APP).expect("the new session connects");
+        assert_ne!(old, new);
+        assert!(
+            !sessions.connected(H, old, true),
+            "connecting, but another session"
+        );
+        assert_eq!(sessions.stage(H), Some(Stage::Connecting(KEYBOARD)));
+        assert!(sessions.connected(H, new, true));
+        assert!(sessions.exists(H));
     }
 
     #[test]

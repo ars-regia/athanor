@@ -317,25 +317,32 @@ impl<H: Host> RemoteDesktop<H> {
         _options: HashMap<String, OwnedValue>,
     ) -> fdo::Result<OwnedFd> {
         self.0.frontend(&header).await?;
-        let types = self
+        let (types, ticket) = self
             .0
             .sessions()
             .connect(&session_handle, &app_id)
             .map_err(fdo::Error::Failed)?;
-        match self.0.eis.connect(&session_handle, types).await {
+        let given = self.0.eis.connect(&session_handle, types).await;
+        let opened = given.is_ok();
+        let held = self.0.sessions().connected(&session_handle, ticket, opened);
+        match given {
+            Ok(fd) if held => {
+                input_sessions_changed::<H>(server).await;
+                Ok(fd.into())
+            }
             Ok(fd) => {
-                if self.0.sessions().connected(&session_handle, true) {
-                    input_sessions_changed::<H>(server).await;
-                    return Ok(fd.into());
-                }
+                // The session closed while the compositor answered: the descriptor is dropped.
+                // Its close already asked the compositor to close the context; asking again is
+                // safe only while no new session holds the handle, which a close would revoke.
                 drop(fd);
-                if let Err(why) = self.0.eis.close(&session_handle).await {
-                    tracing::error!(%why, %session_handle, "the compositor was not asked to close the context of a closed session");
+                if !self.0.sessions().exists(&session_handle) {
+                    if let Err(why) = self.0.eis.close(&session_handle).await {
+                        tracing::error!(%why, %session_handle, "the compositor was not asked to close the context of a closed session");
+                    }
                 }
                 Err(fdo::Error::Failed(format!("{session_handle} closed")))
             }
             Err(why) => {
-                self.0.sessions().connected(&session_handle, false);
                 tracing::warn!(%why, %session_handle, "no EIS file descriptor");
                 Err(fdo::Error::Failed(why.to_string()))
             }
