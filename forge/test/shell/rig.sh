@@ -1676,9 +1676,9 @@ orca)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-sulphur
         # decision 28 hides Workspaces and Applications, exempt through `own`). Under cosmic-comp
-        # Tab skips Input source (#751), so the seventh Tab comes back round to the first; the
-        # eighth once Tab reaches it. Under athanor-sulphur Ctrl+Alt+Tab reaches the Clock and
-        # the seven Tabs go round the six buttons left, Input source among them.
+        # the seven Tabs go from the first to the eighth. Under athanor-sulphur Ctrl+Alt+Tab
+        # reaches the Clock and the seven Tabs go round the six buttons left, Input source among
+        # them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)

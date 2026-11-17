@@ -138,6 +138,24 @@ pub(crate) struct Inner {
     /// later call returns [`Error::Closed`].
     closed: Cell<bool>,
     source: glib::Source,
+    /// The watch of LN9's store, under cosmic-comp, held for its callback: dropping it ends it.
+    _store: Option<gio::FileMonitor>,
+}
+
+/// Follows LN9's store, whose layouts reach the handler as they change.
+fn follow_store(inner: std::rc::Weak<Inner>) -> Option<gio::FileMonitor> {
+    let changed = move |names| {
+        if let Some(inner) = inner.upgrade() {
+            if !inner.closed.get() {
+                inner.state.borrow_mut().store_layouts(names);
+                inner.deliver();
+            }
+        }
+    };
+    crate::keyboard::Store::session()
+        .follow(changed)
+        .inspect_err(|err| tracing::warn!("the keyboard layouts are not followed: {err}"))
+        .ok()
 }
 
 impl Drop for Inner {
@@ -193,6 +211,14 @@ impl Client {
             .map_err(|err| Error::Connection(err.to_string()))?;
         let qh = queue.handle();
         let mut state = State::bind(&globals, &qh);
+        // Before the keymap arrives, which names no layout when a virtual keyboard sent it.
+        let cosmic_comp = state.globals.keyboard_layouts.is_some();
+        if let Some(names) = cosmic_comp
+            .then(|| crate::keyboard::Store::session().names())
+            .flatten()
+        {
+            state.store_layouts(names);
+        }
         announce(&mut queue, &mut state)?;
         state.events.clear();
 
@@ -218,6 +244,7 @@ impl Client {
             failure: RefCell::new(None),
             closed: Cell::new(false),
             source: queue_source::attach(weak.clone(), fd, &context),
+            _store: cosmic_comp.then(|| follow_store(weak.clone())).flatten(),
         });
         Ok(Client { inner })
     }
@@ -264,7 +291,8 @@ impl Client {
             .collect()
     }
 
-    /// The configured layouts in group order; empty when the compositor sends no XKB keymap.
+    /// The configured layouts in group order: under cosmic-comp those of LN9's store once there
+    /// is one, under athanor-sulphur those of its `layouts` event, else those of the XKB keymap.
     pub fn keyboard_layouts(&self) -> Vec<String> {
         self.inner.state.borrow().keyboard_layouts.clone()
     }
@@ -815,6 +843,8 @@ pub(crate) struct State {
     pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
     pub(crate) keyboard_layouts: Vec<String>,
+    /// LN9's store names the layouts, under cosmic-comp (`keyboard.rs`).
+    pub(crate) layouts_from_store: bool,
     pub(crate) keyboard_group: u32,
     pub(crate) accessibility: Accessibility,
     pub(crate) events: Vec<Event>,

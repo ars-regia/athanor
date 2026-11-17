@@ -115,9 +115,10 @@ impl State {
         }
     }
 
-    /// The names of a keymap, which are the seat's where no `layouts` event names them.
+    /// The names of a keymap, which are the seat's where neither a `layouts` event nor LN9's
+    /// store names them.
     pub(crate) fn keymap_layouts(&mut self, names: Vec<String>) {
-        if !self.globals.keyboard_group.names_layouts {
+        if !self.globals.keyboard_group.names_layouts && !self.layouts_from_store {
             self.set_layouts(names);
         }
     }
@@ -135,10 +136,10 @@ mod tests {
         assert_eq!(names_of("English (US)\n\nItalian\n"), ["English (US)", "", "Italian"]);
     }
 
-    /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp and
-    /// version 1 a keymap is all there is.
+    /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp the
+    /// store's, and under version 1 a keymap is all there is.
     #[test]
-    fn a_keymap_names_the_layouts_only_where_no_event_does() {
+    fn a_keymap_names_the_layouts_only_where_no_event_nor_store_does() {
         let seat = vec!["English (US)".to_owned(), "Italian".to_owned()];
         let mut state = State::default();
         state.keymap_layouts(seat.clone());
@@ -146,7 +147,33 @@ mod tests {
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, seat);
         state.globals.keyboard_group.names_layouts = false;
+        state.layouts_from_store = true;
+        state.keymap_layouts(Vec::new());
+        assert_eq!(state.keyboard_layouts, seat);
+        state.layouts_from_store = false;
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, Vec::<String>::new());
+    }
+
+    /// Under cosmic-comp, a virtual keyboard's keymap after the store's two layouts leaves two.
+    #[test]
+    fn a_virtual_keyboards_keymap_leaves_the_stores_layouts() {
+        let store = crate::keyboard::test_store("virtual", Some("(layout: \"us,it\", variant: \",\")"));
+        let mut state = State::default();
+        state.store_layouts(store.names().unwrap_or_default());
+        state.keymap_layouts(vec!["English (US)".to_owned(), "Italian".to_owned()]);
+        state.keymap_layouts(Vec::new());
+        assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
+    }
+
+    /// A client that connects while the keymap is a virtual keyboard's one-layout one still
+    /// reads the store's two.
+    #[test]
+    fn a_client_started_after_a_one_layout_keymap_reads_the_store() {
+        let store = crate::keyboard::test_store("late", Some("(layout: \"us,it\", variant: \",\")"));
+        let mut state = State::default();
+        state.store_layouts(store.names().unwrap_or_default());
+        state.keymap_layouts(vec!["English (US)".to_owned()]);
+        assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
     }
 }
