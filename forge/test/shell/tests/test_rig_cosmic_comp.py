@@ -28,7 +28,18 @@ COPIED = (
 )
 PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
-RUNNER_ENV = ("GITHUB_BASE_REF", "GH_TOKEN", "GITHUB_TOKEN")
+# What decides which signatures a run trusts, as TRUST_ENV of forge/scripts/tests/signed_registry.py,
+# and the tokens that would let a test reach the network.
+RUNNER_ENV = (
+    "GITHUB_REF",
+    "GITHUB_BASE_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+    "TIER_TRUSTED_REFS",
+    "GITHUB_ACTIONS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+)
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
 
