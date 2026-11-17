@@ -233,10 +233,12 @@ def require_owner_approval(view, paths):
     if not owned:
         return
     # The latest approving or rejecting review of each reviewer decides; a comment changes nothing.
+    deciding = [r for r in view["reviews"] if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")]
+    if any(not r.get("submittedAt") for r in deciding):
+        raise Refused("a review carries no submission time, so its order is unknown")
     latest = {}
-    for r in sorted(view["reviews"], key=lambda r: r["submittedAt"]):
-        if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
-            latest[r["author"]["login"].lower()] = r
+    for r in sorted(deciding, key=lambda r: r["submittedAt"]):
+        latest[r["author"]["login"].lower()] = r
     approvers = {
         "@" + login
         for login, r in latest.items()

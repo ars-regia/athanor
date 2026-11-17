@@ -298,6 +298,12 @@ class BotMergeTest(unittest.TestCase):
         approved = [self.review(), self.review("CHANGES_REQUESTED", at="2026-11-17T09:00:00Z")]
         self.assertEqual(len(self.system(reviewDecision="", reviews=approved)), 1)
 
+    def test_a_pending_review_without_a_time_is_ignored_and_a_deciding_one_stays(self):
+        pending = [self.review(), self.review("PENDING", at=None)]
+        self.assertEqual(len(self.system(reviewDecision="", reviews=pending)), 1)
+        untimed = [self.review(at=None)]
+        self.assertEqual(self.system(reviewDecision="", reviews=untimed), [])
+
     def test_the_owner_login_is_compared_case_insensitively(self):
         self.assertEqual(len(self.system(reviewDecision="", reviews=[self.review(login="HR-Mes")])), 1)
 
