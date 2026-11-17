@@ -1451,10 +1451,9 @@ compositor and that the own compositor did not yet offer:
           the pointer, the absolute pointer, the button and the scroll; touch screen (4) to
           touch. A text device is never offered, and a device of a capability not granted is
           refused. A `device_types` of 0, or with a bit other than 1, 2 and 4, makes
-          `ConnectToEIS` fail with `InvalidArgs`, and nothing is created for it. If the
-          compositor cannot claim `os.athanor.Eis` (another process owns it, or the bus
-          refuses it), it logs the failure once and serves no EIS, and RemoteDesktop `Start`
-          is refused, as `doc_portal.md` PT15 states for a name with no owner;
+          `ConnectToEIS` fail with `InvalidArgs`, and nothing is created for it. The
+          compositor claims `os.athanor.Eis` at its start; who owns the name is checked by the
+          backend, not by the compositor (`doc_portal.md` PT15);
         - the admission, at every call, as the keyboard monitor's (OS4,
           `keyboard_monitor.rs`): the caller is the current owner of
           `org.freedesktop.impl.portal.desktop.athanor`; its process, read through the pidfd
@@ -1468,7 +1467,9 @@ compositor and that the own compositor did not yet offer:
           (`doc_threat_model.md` TM1, TM2);
         - consent stays in the portal backend: its dialog asks the user for each portal
           session, and the backend calls `ConnectToEIS` only for a session the user has
-          granted (`doc_portal.md` PT15). The compositor shows no dialog of its own;
+          granted (`doc_portal.md` PT15), and its grant button stays insensitive until a device
+          type is ticked, so that granting nothing is the refusal and `ConnectToEIS` never
+          receives 0 from it. The compositor shows no dialog of its own;
         - the revocation. The compositor ends a session's EIS context when the backend calls
           `CloseSession` for it, when `org.freedesktop.impl.portal.desktop.athanor` changes
           owner, and when the backend's connection or process ends. It removes the context's
@@ -1504,10 +1505,15 @@ compositor and that the own compositor did not yet offer:
           own modifier and xkb state, separate from the seat's physical state. An injected
           modifier never changes what a physical key means, and a physical modifier never
           makes an injected key a binding or a protected chord: an injected Escape is judged
-          against the modifiers injected by the same context alone;
+          against the modifiers injected by the same context alone. Before each injected key
+          the compositor sends the client the context's modifier state with
+          `wl_keyboard.modifiers`, and after it restores the physical state, as the virtual
+          keyboard path's `with_keymap_of` does, so that an injected Ctrl+C reaches the client
+          as Ctrl+C;
         - the backend's own dialogs. Injected input never reaches a surface of
-          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by the
-          client identity of OS4. An injected key is dropped, its release included, while the
+          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by its unit
+          and its executable as the `os.athanor.Eis1` admission is, the privileged-clients list
+          having no line for it. An injected key is dropped, its release included, while the
           keyboard focus is such a surface; an injected button, scroll or touch aimed at such a
           surface is dropped; and an injected motion never gives it the pointer focus. So a
           session cannot Tab through the consent dialog of a second session and widen its own
@@ -1530,8 +1536,6 @@ compositor and that the own compositor did not yet offer:
             refused as the keyboard monitor's is, a second `ConnectToEIS` for one session is
             refused, and a context that announces itself as a receiver is disconnected and
             serves nothing;
-          - the name: a compositor that cannot claim `os.athanor.Eis` logs it, serves no EIS
-            and starts, and the backend's `Start` is refused;
           - the revocation: a session's context ends on `CloseSession`, when the backend's
             bus name changes owner, and when the backend exits, and its file descriptor then
             reads end of stream and delivers nothing; the touches the context holds end with
@@ -1559,7 +1563,8 @@ compositor and that the own compositor did not yet offer:
             the keyboard monitor nor the keyboard aids see an injected key;
           - mixed sources: an injected Super with a physical Escape, and a physical Super
             with an injected Escape, each reach the focused client as the plain Escape and
-            trigger no binding and no protected chord, and a physical key keeps its meaning
+            trigger no binding and no protected chord, an injected Ctrl+C reaches it as Ctrl+C
+            with the physical modifiers restored afterwards, and a physical key keeps its meaning
             while an injected modifier is held;
           - the backend's dialogs: an injected key, button, scroll and touch each reach no
             surface of `xdg-desktop-portal-athanor`, the consent dialog included, and an
