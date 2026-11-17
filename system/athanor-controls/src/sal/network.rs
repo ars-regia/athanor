@@ -293,6 +293,8 @@ pub struct Page {
     airplane_switch: bool,
     /// The state and the failure the page shows last.
     seen: (u64, u64),
+    /// A failure's note is on screen: a page built again, while the old one is, shows it too.
+    noted: bool,
     ids: Option<Ids>,
     /// Whether the page is on screen: built, and not closed since.
     shown: bool,
@@ -321,6 +323,7 @@ impl Page {
             service,
             airplane_switch,
             seen: (0, 0),
+            noted: false,
             ids: None,
             shown: false,
             asking: None,
@@ -420,6 +423,9 @@ impl Page {
         ui.set_visible(password, false);
 
         let failure = Failure::new(ui, page, look);
+        if self.noted {
+            failure.restore(ui);
+        }
         self.ids = Some(Ids {
             list,
             wired,
@@ -477,13 +483,15 @@ impl Page {
                     .map(|(_, v)| (&v.connection, &v.label))
                     .eq(vpns.iter().map(|v| (&v.connection, &v.label)))
         });
+        let failed = now.1 != self.seen.1;
+        if !rebuild {
+            self.show(ui);
+        }
+        if let (true, Some(ids)) = (failed, &self.ids) {
+            self.noted |= ids.failure.show(ui);
+        }
         if rebuild {
             return Turn::Rebuild;
-        }
-        let failed = now.1 != self.seen.1;
-        self.show(ui);
-        if let (true, Some(ids)) = (failed, &self.ids) {
-            ids.failure.show(ui);
         }
         Turn::Updated
     }
@@ -492,6 +500,7 @@ impl Page {
     /// note says nothing of the actions to come.
     pub fn closed(&mut self, ui: &mut Ui) {
         self.shown = false;
+        self.noted = false;
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
@@ -502,6 +511,7 @@ impl Page {
     /// leaves the screen as [`Page::closed`] says, with no widgets left to set.
     pub fn dropped(&mut self) {
         self.shown = false;
+        self.noted = false;
         self.ids = None;
         self.typed = Zeroizing::default();
         if matches!(self.asking.take(), Some(Asked { ask: Ask::Secrets, .. })) {
@@ -1041,6 +1051,39 @@ mod tests {
             Err(oneshot::error::TryRecvError::Closed)
         ));
         assert_eq!(ui.password_text(ids(&page).field), Some("correct"), "the join's prompt stays");
+    }
+
+    #[test]
+    fn a_note_shown_stays_in_the_page_built_again_until_its_surface_closes() {
+        let note = |page: &Page, ui: &Ui| ui.is_visible(ids(page).failure.note);
+        let home = || network("Home Network", Security::Open);
+        let (mut page, _received, mut ui) = page(state(vec![home()], vec![]));
+
+        // A refusal that comes with a network that came: the page built again shows it.
+        page.service.failed();
+        page.service.state.replace(Some(state(
+            vec![home(), network("Lab", Security::Open)],
+            vec![],
+        )));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+        let mut again = Ui::new("t", Theme::default(), false);
+        page.build(&mut again, Ui::ROOT, &mut Look::plain());
+        assert!(note(&page, &again), "the refusal that came with the rebuild");
+
+        // A network goes while the note is on screen: the page built again keeps it.
+        page.service.state.replace(Some(state(vec![home()], vec![])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut again), Turn::Rebuild);
+        let mut third = Ui::new("t", Theme::default(), false);
+        page.build(&mut third, Ui::ROOT, &mut Look::plain());
+        assert!(note(&page, &third));
+
+        // The popover closed: the next one starts without the note.
+        page.dropped();
+        let mut next = Ui::new("t", Theme::default(), false);
+        page.build(&mut next, Ui::ROOT, &mut Look::plain());
+        assert!(!note(&page, &next));
     }
 
     #[test]
