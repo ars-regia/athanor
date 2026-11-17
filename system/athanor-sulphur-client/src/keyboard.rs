@@ -127,7 +127,7 @@ impl Store {
     /// the created and changes-done pair GLib gives a swap file renamed over the store, make
     /// one call, on the thread's main context.
     pub(crate) fn follow(
-        self,
+        self: Rc<Self>,
         changed: impl Fn(&Self) + 'static,
     ) -> Result<Option<gio::FileMonitor>, glib::Error> {
         let Some(path) = &self.changing else {
@@ -136,7 +136,7 @@ impl Store {
         let monitor = gio::File::for_path(path)
             .monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)?;
         let context = glib::MainContext::ref_thread_default();
-        let (store, changed) = (Rc::new(self), Rc::new(changed));
+        let (store, changed) = (self, Rc::new(changed));
         let pending = Rc::new(Cell::new(false));
         monitor.connect_changed(move |_, _, _, event| {
             use gio::FileMonitorEvent::{ChangesDoneHint, Deleted, MovedIn};
@@ -459,7 +459,7 @@ mod tests {
         let _monitor = context
             .with_thread_default(|| {
                 let seen = seen.clone();
-                store.follow(move |store| seen.borrow_mut().push(store.names()))
+                Rc::new(store).follow(move |store| seen.borrow_mut().push(store.names()))
             })
             .expect("thread default")
             .expect("monitor")
@@ -544,7 +544,7 @@ mod tests {
             evdev: PathBuf::from("/nonexistent/evdev.xml"),
         };
         assert_eq!(store.names(), Names::Keymap);
-        assert!(store.follow(|_| {}).expect("no watch").is_none());
+        assert!(Rc::new(store).follow(|_| {}).expect("no watch").is_none());
     }
 
     #[test]

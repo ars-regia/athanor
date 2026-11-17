@@ -139,6 +139,7 @@ mod tests {
             favorites::update(&path, |ids| favorites::pinned(ids, "new.desktop")),
             Ok(vec!["vendor.desktop".to_owned(), "new.desktop".to_owned()])
         );
+        std::fs::remove_dir_all(&dir).expect("cleanup");
     }
 
     #[test]

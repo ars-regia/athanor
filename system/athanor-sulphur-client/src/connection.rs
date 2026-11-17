@@ -282,8 +282,7 @@ impl Client {
         if self.inner.store.borrow().is_some() {
             return;
         }
-        let names = store.names();
-        self.inner.state.borrow_mut().store_layouts(names);
+        let store = Rc::new(store);
         let inner = Rc::downgrade(&self.inner);
         let changed = move |store: &crate::keyboard::Store| {
             if let Some(inner) = inner.upgrade().filter(|inner| !inner.closed.get()) {
@@ -292,11 +291,14 @@ impl Client {
                 inner.deliver();
             }
         };
-        match store.follow(changed) {
+        // The watch first, so that a change written while the store is read is not missed.
+        match store.clone().follow(changed) {
             Ok(Some(monitor)) => *self.inner.store.borrow_mut() = Some(monitor),
             Ok(None) => tracing::info!("no user configuration: the keyboard layouts are not followed"),
             Err(err) => tracing::warn!("the keyboard layouts are not followed: {err}"),
         }
+        let names = store.names();
+        self.inner.state.borrow_mut().store_layouts(names);
         self.inner.deliver();
     }
 
