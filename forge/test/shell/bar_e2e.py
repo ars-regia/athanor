@@ -97,9 +97,37 @@ def showing(accessible, Atspi):
     return accessible.get_state_set().contains(Atspi.StateType.SHOWING)
 
 
+# How many times a walk of the tree starts again from the root after a node vanished in it.
+WALK_TRIES = 5
+
+
+def vanished(err):
+    """Whether `err` is AT-SPI's answer for a node the application destroyed, as a Sal
+    surface does when it builds a popover again: the tree changed under the walk."""
+    return err.domain == "atspi_error" and err.message.startswith("Unknown object")
+
+
+def afresh(read):
+    """Returns `read()`, a walk of the tree from the application's root. A node destroyed
+    mid-walk starts it again from the root, up to WALK_TRIES times, 0.2 s apart; past that,
+    or on any other error, the last error is raised."""
+    for attempt in range(1, WALK_TRIES + 1):
+        try:
+            return read()
+        except GLib.Error as err:
+            if not vanished(err) or attempt == WALK_TRIES:
+                raise
+        time.sleep(0.2)
+
+
 def buttons_matching(app, Atspi, regex):
     """Every showing push button whose name matches `regex`, found afresh: a rebuild
     replaces them."""
+    return afresh(lambda: matching_buttons(app, Atspi, regex))
+
+
+def matching_buttons(app, Atspi, regex):
+    """buttons_matching in one walk, which a node destroyed mid-walk ends with its error."""
     found = []
 
     def visit(accessible):
@@ -178,30 +206,50 @@ def labelled(app, Atspi, role, label):
         for child in children(accessible):
             visit(child)
 
-    visit(app)
-    return found
+    def walk_once():
+        found.clear()
+        visit(app)
+        return found
+
+    return afresh(walk_once)
+
+
+def print_tree(app, Atspi):
+    for role, label, _, depth in afresh(lambda: walk(app, Atspi)):
+        print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
 
 
 def press(app, Atspi, name):
-    found = buttons(app, Atspi, name)
-    if not found:
-        print(f"no showing button named {name!r}; tree:", file=sys.stderr)
-        for role, label, _, depth in walk(app, Atspi):
-            print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
-        return False
-    found[0].do_action(0)
-    return True
+    """Presses the first showing button called `name`; one destroyed before the press is
+    looked up again."""
+    exact = re.compile(f"^{re.escape(name)}$")
+
+    def find_and_press():
+        found = matching_buttons(app, Atspi, exact)
+        if found:
+            found[0].do_action(0)
+        return bool(found)
+
+    if afresh(find_and_press):
+        return True
+    print(f"no showing button named {name!r}; tree:", file=sys.stderr)
+    print_tree(app, Atspi)
+    return False
 
 
 def confirm_button(app, Atspi, name):
     """The confirmation's button: the sibling of Cancel called `name`. The row of the
     same name sits on the hidden page of the stack."""
-    for cancel in buttons(app, Atspi, "Cancel"):
-        parent = cancel.get_parent()
-        for child in children(parent):
-            if child.get_role_name() == "button" and child.get_name() == name:
-                return cancel, child
-    return None, None
+
+    def find():
+        for cancel in matching_buttons(app, Atspi, re.compile("^Cancel$")):
+            parent = cancel.get_parent()
+            for child in children(parent):
+                if child.get_role_name() == "button" and child.get_name() == name:
+                    return cancel, child
+        return None, None
+
+    return afresh(find)
 
 
 def pss_kb(pid):
@@ -290,8 +338,7 @@ def menu_row_after(app, Atspi, opener, row):
         if press(app, Atspi, opener) and wait_for(lambda: buttons(app, Atspi, row), 2):
             return buttons(app, Atspi, row)[0]
     print(f"no showing button named {row!r} after {opener!r}; tree:", file=sys.stderr)
-    for role, label, _, depth in walk(app, Atspi):
-        print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
+    print_tree(app, Atspi)
     return None
 
 

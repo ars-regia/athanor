@@ -27,6 +27,7 @@ from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
     READY_FILE,
+    afresh,
     alive,
     buttons,
     check,
@@ -145,8 +146,12 @@ def showing_role(app, Atspi, role):
         for child in children(accessible):
             visit(child)
 
-    visit(app)
-    return found
+    def walk_once():
+        found.clear()
+        visit(app)
+        return found
+
+    return afresh(walk_once)
 
 
 def type_password(app, Atspi, password):
