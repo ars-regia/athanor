@@ -20,11 +20,11 @@ src/ui/modules/power.rs
 src/ui/modules/shield.rs
 src/ui/modules/tiling.rs
 src/ui/modules/tray.rs
-../../../../system/athanor-controls/src/audio.rs
-../../../../system/athanor-controls/src/battery.rs
 ../../../../system/athanor-controls/src/bluetooth.rs
 ../../../../system/athanor-controls/src/labels.rs
 ../../../../system/athanor-controls/src/network.rs
+../../../../system/athanor-controls/src/sal/audio.rs
+../../../../system/athanor-controls/src/sal/battery.rs
 ../../../../system/athanor-controls/src/sal/bluetooth.rs
 ../../../../system/athanor-controls/src/sal/network.rs
 ../../../../system/athanor-controls/src/sal/widgets.rs
