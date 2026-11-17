@@ -45,7 +45,8 @@ pub(crate) fn versioned(dir: &std::path::Path, component: &str, version: u32) ->
 
 /// The first copy of a key, highest directory first; `None` where no directory has one. A
 /// copy that cannot be read, is not a regular file, is larger than `LIMIT` or is not UTF-8
-/// is an error, not an absence.
+/// is an error, not an absence, and so is a directory on the way that cannot be searched: the
+/// search stops there rather than read a lower copy that the higher one may override.
 pub(crate) fn key(
     dirs: &[PathBuf],
     component_name: &str,

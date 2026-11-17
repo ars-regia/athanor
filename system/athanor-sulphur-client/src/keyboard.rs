@@ -125,7 +125,9 @@ impl Store {
     /// Calls `changed`, which reads the store, once the user's store is written, replaced or
     /// removed; without a user store nothing is watched. The events of one change, such as
     /// the created and changes-done pair GLib gives a swap file renamed over the store, make
-    /// one call, on the thread's main context.
+    /// one call, on the thread's main context. The store is watched by its name: a store that
+    /// is a link to a file edited in place is read again only when the link itself is replaced,
+    /// as cosmic-settings does, or when the client starts.
     pub(crate) fn follow(
         self: Rc<Self>,
         changed: impl Fn(&Self) + 'static,
