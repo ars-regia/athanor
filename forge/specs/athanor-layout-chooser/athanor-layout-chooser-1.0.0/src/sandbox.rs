@@ -175,7 +175,7 @@ mod tests {
             .parent()
             .expect("dir")
             .to_path_buf();
-        let write = opened(&[document_dir.clone()], dirs::owned_dir).expect("checked");
+        let write = opened(std::slice::from_ref(&document_dir), dirs::owned_dir).expect("checked");
         // After the check, the dotfiles directory moves and a link to another one of the
         // user's takes its path: the link the document names now leads there.
         std::fs::rename(&document_dir, base.join("moved")).expect("rename");
@@ -198,7 +198,7 @@ mod tests {
     fn writes_outside_the_grants_are_refused() {
         let base = probe("enforced");
         let (allowed, denied) = (base.join("dotfiles"), base.join("elsewhere"));
-        let write = opened(&[allowed.clone()], dirs::owned_dir).expect("checked");
+        let write = opened(std::slice::from_ref(&allowed), dirs::owned_dir).expect("checked");
         std::thread::spawn(move || {
             restrict_writes(&write, &[]).expect("Landlock must be enforced");
             let err = std::fs::write(denied.join("probe"), b"x").expect_err("outside the grants");
