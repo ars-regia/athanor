@@ -72,7 +72,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md`
   AX4 and AX11.
 - Amended on 2026-11-17: decision 33's EIS admission by unit through `athanor_unit::bus_caller`,
-  in both directions, and the injected key that cancels a pending tap of Super, with
+  in both directions, and the injected key that reaches a client and cancels a pending tap
+  of Super, with
   `doc_portal.md` PT15 and `doc_portal.md` section 6, decision 13.
 - Amended on 2026-11-17: decision 30, the keyboard's return when a popup that holds it is
   destroyed (#1217, #1231).
@@ -1531,10 +1532,10 @@ compositor and that the own compositor did not yet offer:
           its press and its release: it reaches neither the compositor nor any client. An
           injected key that reaches a client cancels a pending tap of Super, as a hardware key
           and an injected button or touch do, so a physical Super released after it opens no
-          launcher; the injected key still reaches only the client. A dropped key, a key held
-          by the seat or another context, and any key while the session is locked or its
-          input paused reach no client and cancel nothing, as for an injected button
-          (maintainer decisions, 2026-11-17);
+          launcher; the injected key still reaches only the client. A key this decision drops,
+          a protected key or one aimed at the backend's own dialogs, and any key while the
+          session is locked or paused reach no client and cancel nothing (maintainer
+          decisions, 2026-11-17);
         - its own state. Injected keys take their own path to the focused client, not the
           virtual keyboard's path through `aided` and `typed`, and each EIS context keeps its
           own modifier and xkb state, separate from the seat's physical state. An injected
