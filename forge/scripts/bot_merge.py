@@ -193,7 +193,9 @@ def codeowners_regex(pattern):
         lambda m: translate.get(m.group(0)) or re.escape(m.group(0)),
         pattern.lstrip("/"),
     )
-    return re.compile(("" if anchored else "(?:.*/)?") + body + ("/.*" if directory else "(?:/.*)?"))
+    # Only a pattern that names a directory covers what is below it: a glob never crosses `/`.
+    below = "/.*" if directory else ("" if re.search(r"[*?]", pattern) else "(?:/.*)?")
+    return re.compile(("" if anchored else "(?:.*/)?") + body + below)
 
 
 def codeowners_rules():
@@ -232,7 +234,7 @@ def require_owner_approval(view, paths):
         return
     # The latest approving or rejecting review of each reviewer decides; a comment changes nothing.
     latest = {}
-    for r in view["reviews"]:
+    for r in sorted(view["reviews"], key=lambda r: r["submittedAt"]):
         if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             latest[r["author"]["login"].lower()] = r
     approvers = {

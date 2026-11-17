@@ -261,8 +261,13 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(self.spec(author={"login": "hr-mes"}), [])
         self.assertEqual(self.system(author={"login": "app/athanor-agent"}), [])
 
-    def review(self, state="APPROVED", login="hr-mes", oid=SHA):
-        return {"author": {"login": login}, "state": state, "commit": {"oid": oid}}
+    def review(self, state="APPROVED", login="hr-mes", oid=SHA, at="2026-11-17T10:00:00Z"):
+        return {
+            "author": {"login": login},
+            "state": state,
+            "commit": {"oid": oid},
+            "submittedAt": at,
+        }
 
     def test_an_unapproved_owned_pull_request_with_no_decision_stays(self):
         # GitHub reads "" for it while the approving count is 0 (#1246).
@@ -279,10 +284,22 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(self.system(reviewDecision="", reviews=[self.review(login="other")]), [])
 
     def test_a_later_rejection_by_the_owner_voids_the_approval(self):
-        reviews = [self.review(), self.review("CHANGES_REQUESTED")]
-        self.assertEqual(self.system(reviewDecision="", reviews=reviews), [])
-        reviews = [self.review(), self.review("COMMENTED")]
+        late = "2026-11-17T11:00:00Z"
+        for state in ("CHANGES_REQUESTED", "DISMISSED"):
+            reviews = [self.review(), self.review(state, at=late)]
+            self.assertEqual(self.system(reviewDecision="", reviews=reviews), [])
+        reviews = [self.review(), self.review("COMMENTED", at=late)]
         self.assertEqual(len(self.system(reviewDecision="", reviews=reviews)), 1)
+
+    def test_the_latest_review_is_by_submitted_at_not_by_list_order(self):
+        late = "2026-11-17T11:00:00Z"
+        rejected = [self.review("CHANGES_REQUESTED", at=late), self.review()]
+        self.assertEqual(self.system(reviewDecision="", reviews=rejected), [])
+        approved = [self.review(), self.review("CHANGES_REQUESTED", at="2026-11-17T09:00:00Z")]
+        self.assertEqual(len(self.system(reviewDecision="", reviews=approved)), 1)
+
+    def test_the_owner_login_is_compared_case_insensitively(self):
+        self.assertEqual(len(self.system(reviewDecision="", reviews=[self.review(login="HR-Mes")])), 1)
 
     def test_any_other_decision_stays(self):
         for decision in ("CHANGES_REQUESTED", "REVIEW_REQUIRED", "SOMETHING_NEW"):
@@ -299,6 +316,20 @@ class BotMergeTest(unittest.TestCase):
         self.assertEqual(bot.owners_of("forge/y/z.spec", rules), ["@b"])
         self.assertEqual(bot.owners_of("forge/x/z.spec", rules), [])
         self.assertEqual(bot.owners_of("docs/a/b.md", rules), ["@c"])
+
+    def test_codeowners_globs_do_not_cross_directories(self):
+        def owner(pattern, path):
+            return bool(bot.owners_of(path, [(bot.codeowners_regex(pattern), ["@a"])]))
+
+        self.assertTrue(owner("docs/*", "docs/f"))
+        self.assertFalse(owner("docs/*", "docs/sub/f"))
+        self.assertTrue(owner("/docs/", "docs/sub/f"))
+        self.assertTrue(owner("/docs", "docs/sub/f"))
+        self.assertTrue(owner("docs/**", "docs/sub/f"))
+        self.assertTrue(owner("/a/**/f", "a/x/y/f"))
+        self.assertTrue(owner("/a/?", "a/b"))
+        self.assertFalse(owner("/a/?", "a/bc"))
+        self.assertFalse(owner("/a/?", "a/b/c"))
 
     def test_missing_pull_request_number_fails(self):
         for pr in ("", "null"):
