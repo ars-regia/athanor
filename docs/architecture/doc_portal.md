@@ -185,7 +185,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with changes:** r
 
 - From the backend: the `athanor-shell-rs` chooser, every call to `org.athanor.Hypervisor1` with the fabricated tunnel of `setup_virtiofs_tunnel`, and the test that asserts it. The Camera, Location and Microphone objects, ScreenCast with its fixed node and `OpenPipeWireRemote`, and the fixed save paths already left in releases 5 and 6 (PR #107).
 - From the package: `Requires: athanor-shell-rs` (`xdg-desktop-portal-athanor.spec:13`) and `UseIn=athanor`.
-- From the image, in the same change, as `doc_software.md:348` asks: `athanor-shell-rs`, once neither this package nor `athanor-desktop-ui` requires it, and `foot` with it; the changelog of `athanor-desktop-ui.spec:63` records that both were dropped.
+- From the image, in the same change, as `doc_software.md:350` asks: `athanor-shell-rs`, once neither this package nor `athanor-desktop-ui` requires it, and `foot` with it; the changelog of `athanor-desktop-ui.spec:63` records that both were dropped.
 - **The MicroVM bridge.** Sharing a file or a screen with an application inside a MicroVM returns only when the hypervisor daemon's guest path is specified and real; until then such an application gets what any Flatpak gets.
 
 **PT15. Exclusions,** each with its reason.

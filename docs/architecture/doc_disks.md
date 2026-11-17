@@ -255,9 +255,9 @@ Applied with the approval of this document.
   - CC13, Fixtures (`doc_control_center.md:159`): UDisks2 leaves the list of `python3-dbusmock` templates, because none exists upstream (`martinpitt/python-dbusmock`, `dbusmock/templates`, checked 2026-10-05); its fixture is the in-process `zbus` server that CC3 already describes (`doc_control_center.md:52`) and DK18 uses.
   - Open doubt 8 (`doc_control_center.md:197`): UDisks2 is no longer among the templates assumed present.
 - `doc_software.md` revision 3 (merged, PR #117):
-  - Decision 7, the Disks row (`doc_software.md:314`): it names `athanor-disks`, application id `os.athanor.Disks`.
-  - Wired by the image (`doc_software.md:328`): `athanor-mimeapps.list` maps `application/x-cd-image` and `application/x-raw-disk-image` to `athanor-disks` at step 5 of DK19.
-  - Section 7, the `doc_disks.md` line (`doc_software.md:347`): removing `gnome-disk-utility` also removes `gnome-disk-image-mounter` and the image writer (`gnome-disks --restore-disk-image`); `athanor-disks` takes over both handlers (DK14).
+  - Decision 7, the Disks row (`doc_software.md:316`): it names `athanor-disks`, application id `os.athanor.Disks`.
+  - Wired by the image (`doc_software.md:330`): `athanor-mimeapps.list` maps `application/x-cd-image` and `application/x-raw-disk-image` to `athanor-disks` at step 5 of DK19.
+  - Section 7, the `doc_disks.md` line (`doc_software.md:349`): removing `gnome-disk-utility` also removes `gnome-disk-image-mounter` and the image writer (`gnome-disks --restore-disk-image`); `athanor-disks` takes over both handlers (DK14).
 - `doc_files.md`:
   - FM14, first bullet (`doc_files.md:146`): the sidebar's drives, mount, unmount, unlock, lock and eject come from the `udisks` module of `athanor-services` (DK3, DK12), not from GIO's volume monitor; the passphrase entry follows DK11 (typed, never remembered).
   - FM14, second bullet (`doc_files.md:147`), and section 1 (`doc_files.md:20`): "the active session mounts, unlocks and ejects without a password" holds for every user once DK20 A ships; until then Athanor's rule asks a user outside `wheel` for an administrator to mount or eject.
