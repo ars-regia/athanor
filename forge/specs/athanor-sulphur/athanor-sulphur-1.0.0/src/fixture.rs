@@ -11739,6 +11739,173 @@ fn ctrl_alt_tab_from_a_popup_continues_after_its_parent() {
     run.stop();
 }
 
+/// The error lines Smithay and the compositor log on the thread that runs the compositor, the
+/// test's, while the guard `capture` returns lives.
+#[derive(Clone, Default)]
+struct Errors(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Errors {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("the log").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Errors {
+    fn capture(&self) -> tracing::subscriber::DefaultGuard {
+        let writer = self.clone();
+        tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .with_max_level(tracing::Level::ERROR)
+                .with_ansi(false)
+                .finish(),
+        )
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("the log")).into_owned()
+    }
+}
+
+/// A window with the keyboard, then a dock that takes it on demand, given it by Ctrl+Alt+Tab
+/// (AX7), with a popup it opens, as a dock's menu opens, on a key the dock was sent: the
+/// window's surface, the dock's client and surface, and the popup's xdg_popup, xdg_surface and
+/// surface on the client's side.
+fn dock_popup(
+    run: &mut Running,
+) -> (
+    WlSurface,
+    Local,
+    WlSurface,
+    (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
+    let (_window, window) = focused_window(run);
+    let bottom = Anchor::Bottom | Anchor::Left | Anchor::Right;
+    let (mut dock, dock_surface, dock_layer) = top_surface_on(run, "dock", bottom, OnDemand, None);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(run).as_ref(),
+        Some(&dock_surface),
+        "the dock"
+    );
+
+    let serial = SERIAL_COUNTER.next_serial();
+    let dock_client = dock_surface.client().expect("the dock's client").id();
+    run.state.grab_serials.key_press = Some((serial, dock_client));
+    let compositor: wl_compositor::WlCompositor = dock.bind(4);
+    let shm: wl_shm::WlShm = dock.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = dock.bind(1);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    let qh = dock.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    // As GTK and the toolkit open a layer surface's popup: without a parent, which the layer
+    // surface then gives it, and with the grab asked before the first commit.
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(None, &positioner, &qh, ());
+    dock_layer.get_popup(&popup);
+    popup.grab(&seat, serial.into());
+    dock.client.configure = None;
+    surface.commit();
+    dock.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(dock.client.configure.expect("a configure"));
+    let (buffer, _) = dock.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    dock.roundtrip(run);
+    (
+        surface_of(&window),
+        dock,
+        dock_surface,
+        (popup, xdg, surface),
+    )
+}
+
+/// A layer surface's popup, which xdg-shell creates without a parent and the layer surface
+/// parents, is known to the popup manager with the layer surface as its root, and its grab, on
+/// a key the layer surface was sent, takes the keyboard and the pointer; Smithay logs no
+/// "surface missing from known popups" (#1217, T9-7 of the C1 spike).
+#[test]
+fn a_layer_surfaces_popup_is_known_and_grabs_the_seat() {
+    let errors = Errors::default();
+    let _capture = errors.capture();
+    let mut run = Running::start(None);
+    let (_window, _dock, dock_surface, _popup) = dock_popup(&mut run);
+
+    let held = keyboard_focus(&run).expect("a focus");
+    let popup = run.state.popups.find_popup(&held).expect("a known popup");
+    assert_eq!(
+        smithay::desktop::find_popup_root_surface(&popup).ok(),
+        Some(dock_surface),
+        "the dock is its root"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the grab takes the keyboard"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_pointer()
+            .is_some_and(|pointer| pointer.is_grabbed()),
+        "and the pointer"
+    );
+    let logged = errors.text();
+    assert!(
+        !logged.contains("missing from known popups"),
+        "Smithay logged: {logged}"
+    );
+    run.stop();
+}
+
+/// A popup of a layer surface that takes the keyboard on demand, grabbed on a key and closed by
+/// its client, as GTK hides a popover, hands the keyboard back to the layer surface, not to the
+/// window that had it before (AX7: Escape closes the popover with the focus back on its
+/// button). Smithay's grab gives the keyboard back to the popups' root at the next key, so the
+/// focus stays on the popup's bare surface until then (#1217, #614).
+#[test]
+fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
+    let mut run = Running::start(None);
+    let (window, mut dock, dock_surface, (popup, xdg, surface)) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    chord(&mut run.state, &[KEY_DOWN]);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the dock has it back after a key"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
 /// Super pressed and released alone shows the launcher, after the client was sent both (D4).
 #[test]
 fn super_alone_shows_the_launcher() {
