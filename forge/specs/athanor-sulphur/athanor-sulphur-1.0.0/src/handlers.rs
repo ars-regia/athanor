@@ -1348,6 +1348,27 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
     }
 
+    /// A popup that holds the keyboard hands it back as it is destroyed, at once, to its parent:
+    /// the next open popup of its chain, or the popups' root (decision 30, amended on
+    /// 2026-11-17). Smithay's grab moves the keyboard only at the next key, which leaves it on
+    /// the popup's bare surface until then, so that a toolkit waiting for its parent's `enter`
+    /// to give the focus back to the popup's button would have none (#1217). The grab lets the
+    /// change through, the parent being its current popup or its root.
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard.current_focus().as_ref() != Some(surface.wl_surface()) {
+            return;
+        }
+        if let Some(parent) = surface
+            .get_parent_surface()
+            .filter(|parent| parent.is_alive())
+        {
+            self.set_keyboard_focus(Some(parent));
+        }
+    }
+
     /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
     /// does. Only a client the user is with gets one, and only for an input event the user
     /// made: it names the serial of the last button press sent to it, while it holds the

@@ -11878,8 +11878,8 @@ fn a_layer_surfaces_popup_is_known_and_grabs_the_seat() {
 /// A popup of a layer surface that takes the keyboard on demand, grabbed on a key and closed by
 /// its client, as GTK hides a popover, hands the keyboard back to the layer surface, not to the
 /// window that had it before (AX7: Escape closes the popover with the focus back on its
-/// button). Smithay's grab gives the keyboard back to the popups' root at the next key, so the
-/// focus stays on the popup's bare surface until then (#1217, #614).
+/// button). It is back at once, with no key pressed, as the popup's role is destroyed (decision
+/// 30, amended on 2026-11-17; #1217, #614).
 #[test]
 fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
     let mut run = Running::start(None);
@@ -11896,11 +11896,10 @@ fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
     surface.commit();
     dock.roundtrip(&mut run);
 
-    chord(&mut run.state, &[KEY_DOWN]);
     assert_eq!(
         keyboard_focus(&run).as_ref(),
         Some(&dock_surface),
-        "the dock has it back after a key"
+        "the dock has it back at once"
     );
     assert_ne!(keyboard_focus(&run), Some(window), "not the window");
     run.stop();
