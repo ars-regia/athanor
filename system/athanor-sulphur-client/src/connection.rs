@@ -136,7 +136,7 @@ pub(crate) struct Inner {
     failure: RefCell<Option<Error>>,
     /// Set for good when the display closes or reading from the compositor fails: every
     /// later call returns [`Error::Closed`].
-    pub(crate) closed: Cell<bool>,
+    closed: Cell<bool>,
     source: glib::Source,
     /// The watch of LN9's store, under cosmic-comp from the first `watch_keyboard_group`,
     /// held for its callback: dropping it ends it.
@@ -502,6 +502,12 @@ fn tolerate_would_block(result: Result<(), WaylandError>) -> Result<(), WaylandE
 }
 
 impl Inner {
+    /// Closes the client as a failure of the display would, for a test.
+    #[cfg(test)]
+    pub(crate) fn set_closed(&self) {
+        self.closed.set(true);
+    }
+
     fn live(&self) -> Result<(), Error> {
         if self.closed.get() {
             Err(Error::Closed)

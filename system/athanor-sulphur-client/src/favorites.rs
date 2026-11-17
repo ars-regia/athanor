@@ -1,34 +1,34 @@
 //! The one-time import of COSMIC's favourites (doc_bar.md, BR7). This crate is the only
 //! one that knows COSMIC's paths; the favourites file itself belongs to `athanor-layout`.
 
-use std::io;
 use std::path::Path;
 
 use crate::cosmic_config;
 
 const APP_LIST: &str = "com.system76.CosmicAppList";
 
-/// The desktop ids of the user's own COSMIC favourites, in COSMIC's order; `None` when
-/// the user has no list, or one that does not parse; an error when the list is there and
-/// cannot be read, so that the import runs again later. COSMIC's system default under `/usr/share/cosmic` is a
+/// The desktop ids of the user's own COSMIC favourites, in COSMIC's order; `None`, logged
+/// with its path, when the user has no readable list, so that the vendor list is imported
+/// and saved. COSMIC's system default under `/usr/share/cosmic` is a
 /// vendor choice like our own list, not the user's: importing it would shadow the vendor
 /// favourites of the bar (doc_bar.md, BR7).
-pub fn cosmic_favorites() -> io::Result<Option<Vec<String>>> {
-    match cosmic_config::user_dir() {
-        Some(dir) => cosmic_favorites_in(&dir),
-        None => Ok(None),
-    }
+pub fn cosmic_favorites() -> Option<Vec<String>> {
+    cosmic_favorites_in(&cosmic_config::user_dir()?)
 }
 
-fn cosmic_favorites_in(user_cosmic_dir: &Path) -> io::Result<Option<Vec<String>>> {
-    let Some(text) = cosmic_config::key(&[user_cosmic_dir.to_path_buf()], APP_LIST, "favorites")? else {
-        return Ok(None);
+fn cosmic_favorites_in(user_cosmic_dir: &Path) -> Option<Vec<String>> {
+    let text = match cosmic_config::key(&[user_cosmic_dir.to_path_buf()], APP_LIST, "favorites") {
+        Ok(text) => text?,
+        Err(err) => {
+            tracing::warn!("COSMIC's favourites list cannot be read; the vendor list is imported: {err}");
+            return None;
+        }
     };
     let favorites = parse(&text);
     if favorites.is_none() {
         tracing::warn!("COSMIC's favourites list does not parse; it is not imported");
     }
-    Ok(favorites)
+    favorites
 }
 
 /// A RON list of strings: `[ "firefox", "com.system76.CosmicFiles", ]`. Anything else in
@@ -109,15 +109,35 @@ mod tests {
     fn only_the_users_own_list_is_read() {
         let dir = std::env::temp_dir().join(format!("athanor-favs-{}", std::process::id()));
         let _fresh = std::fs::remove_dir_all(&dir);
-        assert_eq!(cosmic_favorites_in(&dir).expect("no list"), None);
+        assert_eq!(cosmic_favorites_in(&dir), None);
         let list = crate::cosmic_config::component(&dir, APP_LIST);
-        std::fs::create_dir_all(list.join("favorites")).expect("a directory where the list is");
-        assert!(cosmic_favorites_in(&dir).is_err(), "an unreadable list is an error");
-        std::fs::remove_dir(list.join("favorites")).expect("remove");
+        std::fs::create_dir_all(&list).expect("mkdir");
         std::fs::write(list.join("favorites"), "[\"firefox\"]").expect("write");
         assert_eq!(
-            cosmic_favorites_in(&dir).expect("list"),
+            cosmic_favorites_in(&dir),
             Some(vec!["firefox.desktop".to_owned()])
+        );
+    }
+
+    /// A list that cannot be read is none: the vendor list is imported and saved, so a later
+    /// pin keeps the vendor entries.
+    #[test]
+    fn an_unreadable_list_imports_the_vendor_list() {
+        use athanor_layout::favorites;
+        let dir = std::env::temp_dir().join(format!("athanor-favs-unreadable-{}", std::process::id()));
+        let _fresh = std::fs::remove_dir_all(&dir);
+        let list = crate::cosmic_config::component(&dir, APP_LIST).join("favorites");
+        std::fs::create_dir_all(&list).expect("a directory where the list is");
+        assert_eq!(cosmic_favorites_in(&dir), None);
+        let (path, vendor) = (dir.join("favorites.toml"), dir.join("vendor.toml"));
+        let vendor_ids = vec!["vendor.desktop".to_owned()];
+        favorites::save(&vendor, &vendor_ids).expect("vendor list");
+        let found = favorites::load_or_import(&path, || cosmic_favorites_in(&dir), &vendor);
+        assert_eq!(found, Ok(vendor_ids.clone()));
+        assert_eq!(favorites::read(&path), Ok(Some(vendor_ids)));
+        assert_eq!(
+            favorites::update(&path, |ids| favorites::pinned(ids, "new.desktop")),
+            Ok(vec!["vendor.desktop".to_owned(), "new.desktop".to_owned()])
         );
     }
 

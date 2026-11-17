@@ -192,7 +192,7 @@ mod tests {
         };
         follow("(layout: \"it\", variant: \"\")", &["Italian"]);
         assert_eq!(client.keyboard_layouts(), ["Italian"]);
-        client.inner.closed.set(true);
+        client.inner.set_closed();
         follow("(layout: \"us\", variant: \"\")", &["English (US)"]);
         assert_eq!(client.keyboard_layouts(), ["Italian"], "a closed client takes no change");
     }
