@@ -1076,11 +1076,11 @@ compositor and that the own compositor did not yet offer:
       own, as under GNOME.
 
     *Amended on 2026-11-17 (maintainer decision, 2026-11-17; #1217, #1231):* when a popup that
-    holds the keyboard is destroyed, the keyboard returns at once to the next open popup of its
-    chain, or to the popups' root surface when none is left, and not at the next key or click.
-    The client sees `wl_keyboard.enter` on that surface as the popup closes, so that a toolkit
-    can give the focus back to the popup's button with nothing pressed (`doc_accessibility.md`
-    AX7). While the session is locked, the keyboard stays with the lock surface.
+    holds the keyboard is destroyed, the keyboard returns at once to the next popup of its chain
+    that holds a grab, or to the popups' root surface, and not at the next key or click. The
+    client sees `wl_keyboard.enter` on that surface as the popup closes, so that a toolkit can
+    give the focus back to the control that opened it with nothing pressed
+    (`doc_accessibility.md` AX7: Escape closes the innermost popover).
 
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
     MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
