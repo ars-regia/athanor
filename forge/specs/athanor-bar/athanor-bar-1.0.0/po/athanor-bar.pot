@@ -16,71 +16,73 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ../../../../system/athanor-apps/src/openers.rs:19
-msgid "Launcher"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/openers.rs:20
-msgid "Applications"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/openers.rs:21
-msgid "Workspaces"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/row.rs:88
-msgid "Running applications"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/row.rs:202
-#: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:729
+#: ../../../../system/athanor-apps/src/entries.rs:89
+#: ../../../../system/athanor-apps/src/entries.rs:243
+#: ../../../../system/athanor-apps/src/entries.rs:245
+#: src/ui/notifications.rs:727
 msgid "Unknown application"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:218
+#: ../../../../system/athanor-apps/src/entries.rs:105
 #, rust-format
 msgid "{app}: {title}"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:224
+#: ../../../../system/athanor-apps/src/entries.rs:111
 #, rust-format
 msgid "{app} ({count} windows)"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:251
-msgid "Running"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/row.rs:479
+#: ../../../../system/athanor-apps/src/entries.rs:121
+#: ../../../../system/athanor-apps/src/entries.rs:301
 msgid "Untitled window"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:487
-#, rust-format
-msgid "Minimise {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:138
+msgid "Launcher"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:855
-#, rust-format
-msgid "Close {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:139
+msgid "Applications"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:518
-msgid "Open"
+#: ../../../../system/athanor-apps/src/entries.rs:140
+msgid "Workspaces"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:520
-msgid "New Window"
-msgstr ""
-
-#: ../../../../system/athanor-apps/src/row.rs:587
+#: ../../../../system/athanor-apps/src/entries.rs:190
 #, rust-format
 msgid "{name} could not start"
 msgstr ""
 
-#: ../../../../system/athanor-apps/src/row.rs:588
+#: ../../../../system/athanor-apps/src/entries.rs:191
 msgid "The reason is in the system journal."
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:58
+msgid "Running applications"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:160
+msgid "Running"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:388
+#, rust-format
+msgid "Minimise {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:392 src/ui/notifications.rs:853
+#, rust-format
+msgid "Close {title}"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:419
+msgid "Open"
+msgstr ""
+
+#: ../../../../system/athanor-apps/src/row.rs:421
+msgid "New Window"
 msgstr ""
 
 #: ../../../../system/athanor-controls/src/audio.rs:225
@@ -129,46 +131,11 @@ msgstr ""
 msgid "Play"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/battery.rs:126
-#, rust-format
-msgid "{percent} %"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:144
-#, rust-format
-msgid "{hours} h {minutes} min left"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:147
-#, rust-format
-msgid "{hours} h {minutes} min until full"
-msgstr ""
-
 #: ../../../../system/athanor-controls/src/battery.rs:149
-msgid "Charging"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:150
-msgid "Fully charged"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:157
-msgid "Power saver"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:158
-msgid "Performance"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:159
-msgid "Balanced"
-msgstr ""
-
-#: ../../../../system/athanor-controls/src/battery.rs:188
 msgid "Power mode"
 msgstr ""
 
-#: ../../../../system/athanor-controls/src/battery.rs:206
+#: ../../../../system/athanor-controls/src/battery.rs:167
 msgid "Screen brightness"
 msgstr ""
 
@@ -214,6 +181,41 @@ msgstr ""
 #: ../../../../system/athanor-controls/src/bluetooth.rs:495
 #, rust-format
 msgid "Type this code on {device}, then press Enter there."
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:11
+#, rust-format
+msgid "{percent} %"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:29
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:32
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:34
+msgid "Charging"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:35
+msgid "Fully charged"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:42
+msgid "Power saver"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:43
+msgid "Performance"
+msgstr ""
+
+#: ../../../../system/athanor-controls/src/labels.rs:44
+msgid "Balanced"
 msgstr ""
 
 #: ../../../../system/athanor-controls/src/network.rs:307 src/ui/network.rs:42
@@ -273,48 +275,52 @@ msgstr ""
 msgid "The action did not complete."
 msgstr ""
 
-#: src/ui/accessibility.rs:36
+#: src/ui/accessibility.rs:37
 msgid "Greyscale"
 msgstr ""
 
-#: src/ui/accessibility.rs:37
+#: src/ui/accessibility.rs:38
 msgid "Red-green (protanopia)"
 msgstr ""
 
-#: src/ui/accessibility.rs:38
+#: src/ui/accessibility.rs:39
 msgid "Green-red (deuteranopia)"
 msgstr ""
 
-#: src/ui/accessibility.rs:39
+#: src/ui/accessibility.rs:40
 msgid "Blue-yellow (tritanopia)"
 msgstr ""
 
-#: src/ui/accessibility.rs:40
+#: src/ui/accessibility.rs:41
 msgid "No colour filter"
 msgstr ""
 
-#: src/ui/accessibility.rs:160
+#: src/ui/accessibility.rs:177
 msgid "Accessibility"
 msgstr ""
 
-#: src/ui/accessibility.rs:161
+#: src/ui/accessibility.rs:178
 msgid "High contrast"
 msgstr ""
 
-#: src/ui/accessibility.rs:162
+#: src/ui/accessibility.rs:179
 msgid "Screen reader"
 msgstr ""
 
-#: src/ui/accessibility.rs:163
+#: src/ui/accessibility.rs:180
 msgid "Magnifier"
 msgstr ""
 
-#: src/ui/accessibility.rs:164
+#: src/ui/accessibility.rs:181
 msgid "Invert colours"
 msgstr ""
 
-#: src/ui/accessibility.rs:168
+#: src/ui/accessibility.rs:185
 msgid "Colour filter"
+msgstr ""
+
+#: src/ui/accessibility.rs:204
+msgid "Turn on"
 msgstr ""
 
 #: src/ui/audio.rs:44
@@ -326,26 +332,26 @@ msgid "Battery"
 msgstr ""
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-#: src/ui/clock.rs:83
+#: src/ui/clock.rs:101
 msgid "%a %-d %b %H:%M"
 msgstr ""
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-#: src/ui/clock.rs:85
+#: src/ui/clock.rs:103
 msgid "%A %-d %B %Y, %H:%M"
 msgstr ""
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
-#: src/ui/clock.rs:90
+#: src/ui/clock.rs:108
 msgid "%a %-d %b %-I:%M %p"
 msgstr ""
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
-#: src/ui/clock.rs:92
+#: src/ui/clock.rs:110
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr ""
 
-#: src/ui/clock.rs:127
+#: src/ui/clock.rs:145
 msgid "Clock"
 msgstr ""
 
@@ -367,89 +373,89 @@ msgstr ""
 msgid "Input source"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:31
 msgid "sticky keys"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:32
 msgid "slow keys"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:33
 msgid "bounce keys"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:39
 msgid "Shift"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:40
 msgid "Control"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:41
 msgid "Alt"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:42
 msgid "Super"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:43
 msgid "AltGr"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:54
+#, rust-format
 msgid "{modifier} locked"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:56
+#, rust-format
 msgid "{modifier} latched"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:66
+#, rust-format
 msgid "Key rejected: {aid}"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:70
+#, rust-format
 msgid "Turn on {aid}?"
 msgstr ""
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:122
 msgid "No modifier held"
 msgstr ""
 
-#: src/ui/accessibility.rs
-msgid "Turn on"
-msgstr ""
-
-#: src/ui/mod.rs:678
+#: src/ui/mod.rs:712
 msgid "Unpin from Bar"
 msgstr ""
 
-#: src/ui/mod.rs:680
+#: src/ui/mod.rs:714
 msgid "Pin to Bar"
 msgstr ""
 
-#: src/ui/notifications.rs:971
+#: src/ui/notifications.rs:969
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr ""
 
-#: src/ui/notifications.rs:976 src/ui/notifications.rs:1009
-#: src/ui/notifications.rs:1012
+#: src/ui/notifications.rs:974 src/ui/notifications.rs:1007
+#: src/ui/notifications.rs:1010
 msgid "Notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:1016
+#: src/ui/notifications.rs:1014
 msgid "Clear all"
 msgstr ""
 
-#: src/ui/notifications.rs:1021
+#: src/ui/notifications.rs:1019
 msgid "No notifications"
 msgstr ""
 
-#: src/ui/notifications.rs:1031
+#: src/ui/notifications.rs:1029
 msgid "Do not disturb"
 msgstr ""
 
@@ -787,11 +793,11 @@ msgstr ""
 msgid "Go back"
 msgstr ""
 
-#: src/ui/tiling.rs:64
+#: src/ui/tiling.rs:67
 msgid "Tiling"
 msgstr ""
 
-#: src/ui/tiling.rs:65
+#: src/ui/tiling.rs:68
 msgid "Tile windows"
 msgstr ""
 

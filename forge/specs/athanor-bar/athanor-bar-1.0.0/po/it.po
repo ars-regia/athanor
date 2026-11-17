@@ -8,72 +8,74 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: ../../../../system/athanor-apps/src/openers.rs:19
-msgid "Launcher"
-msgstr "Avvio applicazioni"
-
-#: ../../../../system/athanor-apps/src/openers.rs:20
-msgid "Applications"
-msgstr "Applicazioni"
-
-#: ../../../../system/athanor-apps/src/openers.rs:21
-msgid "Workspaces"
-msgstr "Spazi di lavoro"
-
-#: ../../../../system/athanor-apps/src/row.rs:88
-msgid "Running applications"
-msgstr "Applicazioni in esecuzione"
-
-#: ../../../../system/athanor-apps/src/row.rs:202
-#: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:729
+#: ../../../../system/athanor-apps/src/entries.rs:89
+#: ../../../../system/athanor-apps/src/entries.rs:243
+#: ../../../../system/athanor-apps/src/entries.rs:245
+#: src/ui/notifications.rs:727
 msgid "Unknown application"
 msgstr "Applicazione sconosciuta"
 
-#: ../../../../system/athanor-apps/src/row.rs:218
+#: ../../../../system/athanor-apps/src/entries.rs:105
 #, rust-format
 msgid "{app}: {title}"
 msgstr "{app}: {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:224
+#: ../../../../system/athanor-apps/src/entries.rs:111
 #, rust-format
 msgid "{app} ({count} windows)"
 msgstr "{app} ({count} finestre)"
 
-#: ../../../../system/athanor-apps/src/row.rs:251
-msgid "Running"
-msgstr "In esecuzione"
-
-#: ../../../../system/athanor-apps/src/row.rs:479
+#: ../../../../system/athanor-apps/src/entries.rs:121
+#: ../../../../system/athanor-apps/src/entries.rs:301
 msgid "Untitled window"
 msgstr "Finestra senza titolo"
 
-#: ../../../../system/athanor-apps/src/row.rs:487
-#, rust-format
-msgid "Minimise {title}"
-msgstr "Riduci a icona {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:138
+msgid "Launcher"
+msgstr "Avvio applicazioni"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:855
-#, rust-format
-msgid "Close {title}"
-msgstr "Chiudi {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:139
+msgid "Applications"
+msgstr "Applicazioni"
 
-#: ../../../../system/athanor-apps/src/row.rs:518
-msgid "Open"
-msgstr "Apri"
+#: ../../../../system/athanor-apps/src/entries.rs:140
+msgid "Workspaces"
+msgstr "Spazi di lavoro"
 
-#: ../../../../system/athanor-apps/src/row.rs:520
-msgid "New Window"
-msgstr "Nuova finestra"
-
-#: ../../../../system/athanor-apps/src/row.rs:587
+#: ../../../../system/athanor-apps/src/entries.rs:190
 #, rust-format
 msgid "{name} could not start"
 msgstr "Impossibile avviare {name}"
 
-#: ../../../../system/athanor-apps/src/row.rs:588
+#: ../../../../system/athanor-apps/src/entries.rs:191
 msgid "The reason is in the system journal."
 msgstr "Il motivo è nel registro di sistema."
+
+#: ../../../../system/athanor-apps/src/row.rs:58
+msgid "Running applications"
+msgstr "Applicazioni in esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:160
+msgid "Running"
+msgstr "In esecuzione"
+
+#: ../../../../system/athanor-apps/src/row.rs:388
+#, rust-format
+msgid "Minimise {title}"
+msgstr "Riduci a icona {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:392 src/ui/notifications.rs:853
+#, rust-format
+msgid "Close {title}"
+msgstr "Chiudi {title}"
+
+#: ../../../../system/athanor-apps/src/row.rs:419
+msgid "Open"
+msgstr "Apri"
+
+#: ../../../../system/athanor-apps/src/row.rs:421
+msgid "New Window"
+msgstr "Nuova finestra"
 
 #: ../../../../system/athanor-controls/src/audio.rs:225
 #, rust-format
@@ -121,46 +123,11 @@ msgstr "Brano successivo"
 msgid "Play"
 msgstr "Riproduci"
 
-#: ../../../../system/athanor-controls/src/battery.rs:126
-#, rust-format
-msgid "{percent} %"
-msgstr "{percent}%"
-
-#: ../../../../system/athanor-controls/src/battery.rs:144
-#, rust-format
-msgid "{hours} h {minutes} min left"
-msgstr "{hours} h {minutes} min rimanenti"
-
-#: ../../../../system/athanor-controls/src/battery.rs:147
-#, rust-format
-msgid "{hours} h {minutes} min until full"
-msgstr "{hours} h {minutes} min alla carica completa"
-
 #: ../../../../system/athanor-controls/src/battery.rs:149
-msgid "Charging"
-msgstr "In carica"
-
-#: ../../../../system/athanor-controls/src/battery.rs:150
-msgid "Fully charged"
-msgstr "Carica completa"
-
-#: ../../../../system/athanor-controls/src/battery.rs:157
-msgid "Power saver"
-msgstr "Risparmio energetico"
-
-#: ../../../../system/athanor-controls/src/battery.rs:158
-msgid "Performance"
-msgstr "Prestazioni"
-
-#: ../../../../system/athanor-controls/src/battery.rs:159
-msgid "Balanced"
-msgstr "Bilanciato"
-
-#: ../../../../system/athanor-controls/src/battery.rs:188
 msgid "Power mode"
 msgstr "Modalità di alimentazione"
 
-#: ../../../../system/athanor-controls/src/battery.rs:206
+#: ../../../../system/athanor-controls/src/battery.rs:167
 msgid "Screen brightness"
 msgstr "Luminosità dello schermo"
 
@@ -207,6 +174,41 @@ msgstr "Associazione con {device}"
 #, rust-format
 msgid "Type this code on {device}, then press Enter there."
 msgstr "Digita questo codice su {device}, poi premi Invio."
+
+#: ../../../../system/athanor-controls/src/labels.rs:11
+#, rust-format
+msgid "{percent} %"
+msgstr "{percent}%"
+
+#: ../../../../system/athanor-controls/src/labels.rs:29
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr "{hours} h {minutes} min rimanenti"
+
+#: ../../../../system/athanor-controls/src/labels.rs:32
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min alla carica completa"
+
+#: ../../../../system/athanor-controls/src/labels.rs:34
+msgid "Charging"
+msgstr "In carica"
+
+#: ../../../../system/athanor-controls/src/labels.rs:35
+msgid "Fully charged"
+msgstr "Carica completa"
+
+#: ../../../../system/athanor-controls/src/labels.rs:42
+msgid "Power saver"
+msgstr "Risparmio energetico"
+
+#: ../../../../system/athanor-controls/src/labels.rs:43
+msgid "Performance"
+msgstr "Prestazioni"
+
+#: ../../../../system/athanor-controls/src/labels.rs:44
+msgid "Balanced"
+msgstr "Bilanciato"
 
 #: ../../../../system/athanor-controls/src/network.rs:307 src/ui/network.rs:42
 msgid "Network"
@@ -265,49 +267,53 @@ msgstr "Password per {network}"
 msgid "The action did not complete."
 msgstr "L'azione non è stata completata."
 
-#: src/ui/accessibility.rs:36
+#: src/ui/accessibility.rs:37
 msgid "Greyscale"
 msgstr "Scala di grigi"
 
-#: src/ui/accessibility.rs:37
+#: src/ui/accessibility.rs:38
 msgid "Red-green (protanopia)"
 msgstr "Rosso-verde (protanopia)"
 
-#: src/ui/accessibility.rs:38
+#: src/ui/accessibility.rs:39
 msgid "Green-red (deuteranopia)"
 msgstr "Verde-rosso (deuteranopia)"
 
-#: src/ui/accessibility.rs:39
+#: src/ui/accessibility.rs:40
 msgid "Blue-yellow (tritanopia)"
 msgstr "Blu-giallo (tritanopia)"
 
-#: src/ui/accessibility.rs:40
+#: src/ui/accessibility.rs:41
 msgid "No colour filter"
 msgstr "Nessun filtro colore"
 
-#: src/ui/accessibility.rs:160
+#: src/ui/accessibility.rs:177
 msgid "Accessibility"
 msgstr "Accessibilità"
 
-#: src/ui/accessibility.rs:161
+#: src/ui/accessibility.rs:178
 msgid "High contrast"
 msgstr "Contrasto elevato"
 
-#: src/ui/accessibility.rs:162
+#: src/ui/accessibility.rs:179
 msgid "Screen reader"
 msgstr "Lettore dello schermo"
 
-#: src/ui/accessibility.rs:163
+#: src/ui/accessibility.rs:180
 msgid "Magnifier"
 msgstr "Lente d'ingrandimento"
 
-#: src/ui/accessibility.rs:164
+#: src/ui/accessibility.rs:181
 msgid "Invert colours"
 msgstr "Inverti i colori"
 
-#: src/ui/accessibility.rs:168
+#: src/ui/accessibility.rs:185
 msgid "Colour filter"
 msgstr "Filtro colore"
+
+#: src/ui/accessibility.rs:204
+msgid "Turn on"
+msgstr "Attiva"
 
 #: src/ui/audio.rs:44
 msgid "Sound"
@@ -318,26 +324,26 @@ msgid "Battery"
 msgstr "Batteria"
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-#: src/ui/clock.rs:83
+#: src/ui/clock.rs:101
 msgid "%a %-d %b %H:%M"
 msgstr "%a %-d %b %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-#: src/ui/clock.rs:85
+#: src/ui/clock.rs:103
 msgid "%A %-d %B %Y, %H:%M"
 msgstr "%A %-d %B %Y, %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
-#: src/ui/clock.rs:90
+#: src/ui/clock.rs:108
 msgid "%a %-d %b %-I:%M %p"
 msgstr "%a %-d %b %-I:%M %p"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
-#: src/ui/clock.rs:92
+#: src/ui/clock.rs:110
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr "%A %-d %B %Y, %-I:%M %p"
 
-#: src/ui/clock.rs:127
+#: src/ui/clock.rs:145
 msgid "Clock"
 msgstr "Orologio"
 
@@ -359,89 +365,89 @@ msgstr "Sorgente di input: {name}"
 msgid "Input source"
 msgstr "Sorgente di input"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:31
 msgid "sticky keys"
 msgstr "tasti permanenti"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:32
 msgid "slow keys"
 msgstr "tasti lenti"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:33
 msgid "bounce keys"
 msgstr "tasti rimbalzati"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:39
 msgid "Shift"
 msgstr "Maiusc"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:40
 msgid "Control"
 msgstr "Ctrl"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:41
 msgid "Alt"
 msgstr "Alt"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:42
 msgid "Super"
 msgstr "Super"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:43
 msgid "AltGr"
 msgstr "AltGr"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:54
+#, rust-format
 msgid "{modifier} locked"
 msgstr "{modifier} bloccato"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:56
+#, rust-format
 msgid "{modifier} latched"
 msgstr "{modifier} agganciato"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:66
+#, rust-format
 msgid "Key rejected: {aid}"
 msgstr "Tasto rifiutato: {aid}"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:70
+#, rust-format
 msgid "Turn on {aid}?"
 msgstr "Attivare {aid}?"
 
-#: src/ui/keyboard_aids.rs
+#: src/ui/keyboard_aids.rs:122
 msgid "No modifier held"
 msgstr "Nessun modificatore attivo"
 
-#: src/ui/accessibility.rs
-msgid "Turn on"
-msgstr "Attiva"
-
-#: src/ui/mod.rs:678
+#: src/ui/mod.rs:712
 msgid "Unpin from Bar"
 msgstr "Rimuovi dalla barra"
 
-#: src/ui/mod.rs:680
+#: src/ui/mod.rs:714
 msgid "Pin to Bar"
 msgstr "Aggiungi alla barra"
 
-#: src/ui/notifications.rs:971
+#: src/ui/notifications.rs:969
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr "Notifiche, {count} in attesa"
 
-#: src/ui/notifications.rs:976 src/ui/notifications.rs:1009
-#: src/ui/notifications.rs:1012
+#: src/ui/notifications.rs:974 src/ui/notifications.rs:1007
+#: src/ui/notifications.rs:1010
 msgid "Notifications"
 msgstr "Notifiche"
 
-#: src/ui/notifications.rs:1016
+#: src/ui/notifications.rs:1014
 msgid "Clear all"
 msgstr "Cancella tutto"
 
-#: src/ui/notifications.rs:1021
+#: src/ui/notifications.rs:1019
 msgid "No notifications"
 msgstr "Nessuna notifica"
 
-#: src/ui/notifications.rs:1031
+#: src/ui/notifications.rs:1029
 msgid "Do not disturb"
 msgstr "Non disturbare"
 
@@ -779,11 +785,11 @@ msgstr "Tornare alla versione precedente e riavviare? Serve la password di un am
 msgid "Go back"
 msgstr "Torna indietro"
 
-#: src/ui/tiling.rs:64
+#: src/ui/tiling.rs:67
 msgid "Tiling"
 msgstr "Affiancamento"
 
-#: src/ui/tiling.rs:65
+#: src/ui/tiling.rs:68
 msgid "Tile windows"
 msgstr "Affianca le finestre"
 
