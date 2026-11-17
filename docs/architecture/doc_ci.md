@@ -51,7 +51,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 
 ### 1.3 Images and their registry paths
 
-`REGISTRY` is `${{ vars.REGISTRY_HOST || 'ghcr.io' }}`; `<owner>` is `github.repository_owner`. The kernel images use `KERNEL_REGISTRY`, default `ghcr.io/<owner>` (`system/kernel-artifacts.sh:56`). Section 4 lists the files that still write `ghcr.io` literally.
+`REGISTRY` is `${{ vars.REGISTRY_HOST || 'ghcr.io' }}`; `<owner>` is `github.repository_owner`. The kernel images use `KERNEL_REGISTRY`, default `ghcr.io/<owner>` (`system/kernel-artifacts.sh:98`). Section 4 lists the files that still write `ghcr.io` literally.
 
 | Image | Producer | Tags |
 |---|---|---|
@@ -62,7 +62,7 @@ CI1 runs CI2 once, as its first job, and calls CI3, CI4 and CI5 only after it pa
 | `ghcr.io/<owner>/athanor-iso` | CI5 (`<run_id>`), CI11 (`stable`), `main`'s own CI1 (`latest`) | `<run_id>`; `stable` moved by the last step of the `promote` job of CI11, after `promote.sh`, to the ISO the promoted run's acceptance tested, the digest the promotion record names (`system/promote-iso.sh`, `system/tag-images.sh --iso`, ADR-0114), the ISO users are given; `latest` only on a hand release of the frozen `main`, through `main`'s own copy of CI1, after the default image it installs verified (`system/tag-images.sh --iso`; PL35 of [doc_pipeline.md](doc_pipeline.md)) |
 | the three system images, tag `stable` | CI11 | moved by `system/promote.sh` |
 | `KERNEL_REGISTRY/azoth`, `azoth-devel`, `azoth-debuginfo` | CI8 `publish` | `<nvr>`, `<nvr>-microvm` (guest kernel), `<nvr>-k<12 hex of the kernel digest>` and `<nvr>-k<12 hex>-microvm`, written before `<nvr>` moves and pruned by `retention.sh` fourteen days after `<nvr>` left them (#1208); a release whose signing is approved more than fourteen days after a republish of its NVR re-runs the Orchestrator, since the digest it pinned is pruned and cosign fails loudly on it; `latest` only on the default branch (`forge/specs/azoth/publish.sh`); the target has no kernel `latest`, since every consumer reads it by digest (doc_pipeline.md PL35). Keyless signature and attestation, the build record |
-| `KERNEL_REGISTRY/azoth-nvidia` | CI6 `publish` | the tag `system/kernel-artifacts.sh` computes per driver branch (`forge/specs/azoth/nvidia-publish.sh:42`) |
+| `KERNEL_REGISTRY/azoth-nvidia` | CI6 `publish` | the tag `system/kernel-artifacts.sh` computes per driver branch (`forge/specs/azoth/nvidia-publish.sh:43`) |
 | `KERNEL_REGISTRY/azoth-boot` | CI6 `publish` | `<nvr>-k<12 hex of the kernel digest>`: the vmlinuz signed for Secure Boot, keyless-signed and attested; `system/Containerfile` copies it in by digest |
 | `KERNEL_REGISTRY/azoth-signer` | CI25 | `<12 hex of a sha256 over the Containerfile, the lock, lock.sh and sign-kernel.sh>`: the sign toolchain (sbsigntools, sign-file) and `sign-kernel.sh`, run by the digest committed in `forge/specs/azoth/signer/image.digest` |
 | `KERNEL_REGISTRY/athanor-nvidia-rpms` | CI9 `system` | the locked NVIDIA RPMs (`system/nvidia/mirror.sh`) |
@@ -375,7 +375,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 | CB1 | CI22 | **Closed.** CI22 now runs the audit in the builder image under podman, not as a job container, so the runner's `node24` no longer loads inside the image (CI22), and `flake.nix` carries `/lib/x86_64-linux-gnu` in `LD_LIBRARY_PATH`. Section 3.5 of [doc_pipeline.md](doc_pipeline.md) deletes `rust-security-audit.yml`: `cargo deny` runs in `just check` (ADR-0075) and the daily rescan moves to `maintenance.yml`. The cause as found: every job runs in the Nix `athanor-builder` container, where the runner's `node24` cannot load `libstdc++.so.6`, so `actions/checkout` and every JavaScript action fail. The nixpkgs `ld.so` of the image searched neither `/lib/x86_64-linux-gnu` nor `/usr/lib64`, where `builder-fhs-compat` links `libstdc++.so.6`, and `LD_LIBRARY_PATH` did not name them. Fixed in `flake.nix` by adding `/lib/x86_64-linux-gnu` to `LD_LIBRARY_PATH`; it takes effect when the builder image is rebuilt. | Run 37436972597 (2026-10-06): `/__e/node24/bin/node: error while loading shared libraries: libstdc++.so.6`. Runs 33735152030, 33735141194, 33735127883, 33735106788 (2026-09-03) failed. Last success 31723735366 (2026-08-13). |
 | CB2 | CI21 | Same container cause. The rewritten `forge/scripts/clean_ghcr.sh` has never pruned in CI. The job has a 10-minute limit (`forge-ghcr-cleanup.yml:23`) against a backlog nobody has measured since. | Run 37173567085 (2026-10-04): same `libstdc++.so.6` error. Every run since 31918663684 (2026-08-16) failed; last success 31590170415 (2026-08-12). |
 | CB3 | CI23 | Retired. The workflow ran in the same container as CB1 and its targets, `tests/fuzz`, were deleted in `0c4e012f` (2026-08-14); every run after 2026-08-16 failed (the last 30) and it was removed. | Last success 31924793226 (2026-08-16). |
-| CB4 | CI24 | Deleted by section 3.5 of [doc_pipeline.md](doc_pipeline.md) (its triggers name a branch without a release role, and `just check` covers the flake). As found: green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (the workflow's line 19); `nixos-unstable` floats (line 21). It builds `pkgs.just` (`flake.nix:80`), nothing of Athanor, and runs only for `main` (lines 5 and 7). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |
+| CB4 | CI24 | Deleted by section 3.5 of [doc_pipeline.md](doc_pipeline.md) (its triggers name a branch without a release role, and `just check` covers the flake). As found: green, but not reproducible: `cachix/install-nix-action@v25` is a tag, not a commit (the workflow's line 19); `nixos-unstable` floats (line 21). It builds `pkgs.just` (`flake.nix:89`), nothing of Athanor, and runs only for `main` (lines 5 and 7). | Runs 37436972430, 33735156990, 33735143255, 33735130648, 33735112511 success. |
 
 - **CP1** _(Decided 2026-10-08, [ADR-0098](../decisions/0098-update-delivery-ci-operations-batch-4.md))_: a workflow that section 3.5 of [doc_pipeline.md](doc_pipeline.md) keeps is either green or disabled with an open issue that names the cause, disabled with `gh workflow disable` until it is fixed. The rule does not apply to a workflow that section 3.5 deletes: CB1 is closed and CB4 goes with its deletion. CB2, `forge-ghcr-cleanup.yml`, is merged into `maintenance.yml` as the weekly janitor, so its repair belongs to that block (PB9) and the rule applies to `maintenance.yml`.
 
@@ -385,11 +385,11 @@ One runner is registered (`athanor-vm-<timestamp>`, labels `self-hosted`, `Linux
 
 | Job | Why self-hosted |
 |---|---|
-| CI8 `build` (`kernel-build.yml:125`) | the kernel RPM build takes about an hour |
+| CI8 `build` (`kernel-build.yml:201`) | the kernel RPM build takes about an hour |
 | CI9 `prep` (`kernel-bump.yml:116`) | `build.sh --stage prep` of the new pins, in the same builder |
 | CI10 `repro`, `variant` (`kernel-weekly.yml:54,128`) | full kernel rebuilds |
 
-CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:124`), so outside code never reaches the runner through it.
+CI8 runs on every PR; its `build` job is skipped for PRs from forks (`kernel-build.yml:205`), so outside code never reaches the runner through it.
 
 ## 5. Secrets, variables and environments
 
