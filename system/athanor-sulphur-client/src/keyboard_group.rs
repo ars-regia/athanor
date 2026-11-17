@@ -25,17 +25,19 @@ pub(crate) struct Globals {
 }
 
 impl Client {
-    /// Follows the keyboard's group (`Event::KeyboardGroup`) through athanor-sulphur's
-    /// manager. Nothing to do under cosmic-comp, whose manager is bound at connect, nor where the
-    /// manager is already bound.
+    /// Follows the keyboard's group (`Event::KeyboardGroup`) and layouts: through
+    /// athanor-sulphur's manager, bound here once, or under cosmic-comp, whose manager is bound
+    /// at connect, through LN9's store (`keyboard.rs`).
     pub fn watch_keyboard_group(&self) -> Result<(), Error> {
         self.live()?;
+        if self.inner.state.borrow().globals.keyboard_layouts.is_some() {
+            self.follow_store();
+            return Ok(());
+        }
         {
             let mut state = self.inner.state.borrow_mut();
             let state = &mut *state;
-            if state.globals.keyboard_layouts.is_some()
-                || state.globals.keyboard_group.manager.is_some()
-            {
+            if state.globals.keyboard_group.manager.is_some() {
                 return Ok(());
             }
             let manager: Option<AthanorKeyboardGroupManagerV1> =
@@ -153,6 +155,25 @@ mod tests {
         state.layouts_from_store = false;
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, Vec::<String>::new());
+    }
+
+    /// Least privilege, as for the window globals (#1058): under cosmic-comp a client that never
+    /// watches the keyboard group reads neither the store nor `evdev.xml` and holds no watch;
+    /// one that watches holds one, once across its watches.
+    #[test]
+    fn only_a_client_that_watches_the_group_follows_the_store() {
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_connection, client, _bound) =
+            crate::windows::tests::connect(&["zcosmic_keyboard_layout_manager_v1"]);
+        assert!(client.inner.state.borrow().globals.keyboard_layouts.is_some());
+        assert!(client.inner.store.borrow().is_none());
+        assert!(!client.inner.state.borrow().layouts_from_store);
+        client.watch_keyboard_group().expect("watch");
+        let first = client.inner.store.borrow().clone().expect("a watch of the store");
+        client.watch_keyboard_group().expect("watch again");
+        assert_eq!(client.inner.store.borrow().as_ref(), Some(&first));
     }
 
     /// Under cosmic-comp, a virtual keyboard's keymap after the store's two layouts leaves two.
