@@ -1076,7 +1076,10 @@ mod tests {
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
         let mut again = Ui::new("t", Theme::default(), false);
         page.build(&mut again, Ui::ROOT, &mut Look::plain());
-        assert!(note(&page, &again), "the refusal that came with the rebuild");
+        assert!(
+            note(&page, &again),
+            "the refusal that came with the rebuild"
+        );
         assert_eq!(
             again.announcement().map(|(text, _)| text.to_owned()),
             Some(tr("The action did not complete.")),
@@ -1084,13 +1087,19 @@ mod tests {
         );
 
         // A network goes while the note is on screen: the page built again keeps it.
-        page.service.state.replace(Some(state(vec![home()], vec![])));
+        page.service
+            .state
+            .replace(Some(state(vec![home()], vec![])));
         page.service.changed();
         assert_eq!(page.turn(&mut again), Turn::Rebuild);
         let mut third = Ui::new("t", Theme::default(), false);
         page.build(&mut third, Ui::ROOT, &mut Look::plain());
         assert!(note(&page, &third));
-        assert_eq!(third.announcement(), None, "a note already announced is not again");
+        assert_eq!(
+            third.announcement(),
+            None,
+            "a note already announced is not again"
+        );
 
         // The popover closed: the next one starts without the note.
         page.dropped();
@@ -1115,7 +1124,9 @@ mod tests {
 
         // A refusal with a rebuild the popover closed before: nothing shown, nothing said.
         page.service.failed();
-        page.service.state.replace(Some(state(vec![home()], vec![])));
+        page.service
+            .state
+            .replace(Some(state(vec![home()], vec![])));
         page.service.changed();
         assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
         page.dropped();
