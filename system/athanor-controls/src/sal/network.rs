@@ -295,6 +295,9 @@ pub struct Page {
     seen: (u64, u64),
     /// A failure's note is on screen: a page built again, while the old one is, shows it too.
     noted: bool,
+    /// A failure came with a rebuild: the surface drops the old page's [`Ui`] unannounced, so
+    /// the page built again announces it.
+    unheard: bool,
     ids: Option<Ids>,
     /// Whether the page is on screen: built, and not closed since.
     shown: bool,
@@ -324,6 +327,7 @@ impl Page {
             airplane_switch,
             seen: (0, 0),
             noted: false,
+            unheard: false,
             ids: None,
             shown: false,
             asking: None,
@@ -423,7 +427,9 @@ impl Page {
         ui.set_visible(password, false);
 
         let failure = Failure::new(ui, page, look);
-        if self.noted {
+        if std::mem::take(&mut self.unheard) {
+            self.noted |= failure.show(ui);
+        } else if self.noted {
             failure.restore(ui);
         }
         self.ids = Some(Ids {
@@ -484,14 +490,13 @@ impl Page {
                     .eq(vpns.iter().map(|v| (&v.connection, &v.label)))
         });
         let failed = now.1 != self.seen.1;
-        if !rebuild {
-            self.show(ui);
+        if rebuild {
+            self.unheard |= failed && self.ids.is_some();
+            return Turn::Rebuild;
         }
+        self.show(ui);
         if let (true, Some(ids)) = (failed, &self.ids) {
             self.noted |= ids.failure.show(ui);
-        }
-        if rebuild {
-            return Turn::Rebuild;
         }
         Turn::Updated
     }
@@ -501,6 +506,7 @@ impl Page {
     pub fn closed(&mut self, ui: &mut Ui) {
         self.shown = false;
         self.noted = false;
+        self.unheard = false;
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
@@ -512,6 +518,7 @@ impl Page {
     pub fn dropped(&mut self) {
         self.shown = false;
         self.noted = false;
+        self.unheard = false;
         self.ids = None;
         self.typed = Zeroizing::default();
         if matches!(self.asking.take(), Some(Asked { ask: Ask::Secrets, .. })) {
@@ -1070,6 +1077,11 @@ mod tests {
         let mut again = Ui::new("t", Theme::default(), false);
         page.build(&mut again, Ui::ROOT, &mut Look::plain());
         assert!(note(&page, &again), "the refusal that came with the rebuild");
+        assert_eq!(
+            again.announcement().map(|(text, _)| text.to_owned()),
+            Some(tr("The action did not complete.")),
+            "announced on the Ui the surface keeps"
+        );
 
         // A network goes while the note is on screen: the page built again keeps it.
         page.service.state.replace(Some(state(vec![home()], vec![])));
@@ -1078,12 +1090,39 @@ mod tests {
         let mut third = Ui::new("t", Theme::default(), false);
         page.build(&mut third, Ui::ROOT, &mut Look::plain());
         assert!(note(&page, &third));
+        assert_eq!(third.announcement(), None, "a note already announced is not again");
 
         // The popover closed: the next one starts without the note.
         page.dropped();
         let mut next = Ui::new("t", Theme::default(), false);
         page.build(&mut next, Ui::ROOT, &mut Look::plain());
         assert!(!note(&page, &next));
+
+        // A refusal in place, then a rebuild: the page built again keeps the note, silent.
+        page.service.failed();
+        assert_eq!(page.turn(&mut next), Turn::Updated);
+        assert!(note(&page, &next));
+        page.service.state.replace(Some(state(
+            vec![home(), network("Lab", Security::Open)],
+            vec![],
+        )));
+        page.service.changed();
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        let mut fourth = Ui::new("t", Theme::default(), false);
+        page.build(&mut fourth, Ui::ROOT, &mut Look::plain());
+        assert!(note(&page, &fourth));
+        assert_eq!(fourth.announcement(), None);
+
+        // A refusal with a rebuild the popover closed before: nothing shown, nothing said.
+        page.service.failed();
+        page.service.state.replace(Some(state(vec![home()], vec![])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
+        page.dropped();
+        let mut last = Ui::new("t", Theme::default(), false);
+        page.build(&mut last, Ui::ROOT, &mut Look::plain());
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
     }
 
     #[test]

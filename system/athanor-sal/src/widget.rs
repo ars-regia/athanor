@@ -1201,6 +1201,14 @@ impl Ui {
         self.announcement = Some((text.to_owned(), priority));
     }
 
+    /// The text and priority [`Ui::announce`] asked for that the driver has not published
+    /// yet.
+    pub fn announcement(&self) -> Option<(&str, Priority)> {
+        self.announcement
+            .as_ref()
+            .map(|(text, priority)| (text.as_str(), *priority))
+    }
+
     /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
     ///
     /// # Panics
