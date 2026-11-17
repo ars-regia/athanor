@@ -1453,7 +1453,9 @@ compositor and that the own compositor did not yet offer:
           refused. A `device_types` of 0, or with a bit other than 1, 2 and 4, makes
           `ConnectToEIS` fail with `InvalidArgs`, and nothing is created for it. The
           compositor claims `os.athanor.Eis` at its start; who owns the name is checked by the
-          backend, not by the compositor: the owner's process must lie in the cgroup of
+          backend, not by the compositor. A failure to claim the name is logged once and the
+          compositor starts without EIS, never with a fatal start error, and the backend then
+          refuses `Start` through its owner check. The owner's process must lie in the cgroup of
           `athanor-sulphur.service` and run `/usr/bin/athanor-sulphur` (`doc_portal.md` PT15);
         - the admission, at every call, as the keyboard monitor's (OS4,
           `keyboard_monitor.rs`): the caller is the current owner of
@@ -1571,7 +1573,14 @@ compositor and that the own compositor did not yet offer:
             surface of `xdg-desktop-portal-athanor`, the consent dialog included, and an
             injected motion gives it no pointer focus, while the hardware's input reaches it
             and the same input reaches another client;
-          - the indicator: with the backend on the rig, an open session is listed in
+          - the name: with the name owned by another process at the compositor's start, the
+            compositor runs, serves no EIS and logs the failure once;
+          - where the tests run: CI runs the admission with a fixture and the backend's owner
+            check through an identity seam; the end-to-end positive path, which needs the
+            installed unit and path, and the indicator test below run on athanor-ref. On the
+            shell rig, in a dev build and with a compositor started outside
+            `athanor-sulphur.service` the backend's owner check refuses `Start` by design;
+          - the indicator: on athanor-ref with the backend, an open session is listed in
             `InputSessions` and the bar shows the indicator; its Stop ends the session's
             context, and the indicator hides once no session is open; a session whose
             frontend died without `Close` stays listed until Stop;
