@@ -1267,6 +1267,32 @@ def gallery_problems(root):
     return out
 
 
+# The one module the toolkit's root exposes: the rest of its surface is re-exported by `pub use`
+# (decision 3 of #649), so an application never names a module whose signatures carry accesskit,
+# vello_cpu or parley types. Widening the list is a decision of the API, not of the author.
+TOOLKIT_PUBLIC_MODULES = {"driver"}
+
+
+def api_problems(root):
+    """The toolkit's root declares no `pub mod` outside TOOLKIT_PUBLIC_MODULES, and WidgetId is no
+    alias of an integer: any id of that type would address another Ui's widgets (#649).
+
+    Limit: it does not see a foreign crate's type in a public signature; the rustdoc run with
+    `--all-features` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
+    lib = f"{TOOLKIT}/src/lib.rs"
+    try:
+        text = read(root / lib)
+    except OSError as err:
+        return [f"{lib}: cannot read ({err})"]
+    out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
+           "make it pub(crate) and re-export what an application needs"
+           for name in re.findall(r"^\s*pub\s+mod\s+(\w+)", text, re.M) if name not in TOOLKIT_PUBLIC_MODULES]
+    for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
+        if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
+            out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")
+    return out
+
+
 def toolkit_boundary_problems(root=None):
     """The toolkit names no Athanor crate, no path and no workspace dependency in [dependencies]
     or [build-dependencies], and its `license` is the set of licence files beside the manifest
@@ -1301,10 +1327,10 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out + gallery_problems(root)
+    return out + gallery_problems(root) + api_problems(root)
 
 
-@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, and its licence files match its license")
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():

@@ -22,9 +22,34 @@ class ToolkitBoundary(unittest.TestCase):
         self.dir.mkdir(parents=True)
         for name in ("LICENSE-MIT", "LICENSE-APACHE"):
             (self.dir / name).write_text("text\n")
+        self.lib("pub mod driver;\nmod widget;\npub use widget::WidgetId;\n")
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def lib(self, text):
+        (self.dir / "src").mkdir(exist_ok=True)
+        (self.dir / "src" / "lib.rs").write_text(text)
+
+    def test_a_public_module_outside_the_list_fails(self):
+        self.lib("pub mod driver;\npub mod render;\n")
+        out = self.problems()
+        self.assertEqual(len(out), 1)
+        self.assertIn("`pub mod render`", out[0])
+
+    def test_a_pub_crate_module_passes(self):
+        self.lib("pub mod driver;\npub(crate) mod render;\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_widget_id_alias_fails(self):
+        (self.dir / "src" / "widget.rs").write_text("pub type WidgetId = usize;\n")
+        out = self.problems()
+        self.assertEqual(len(out), 1)
+        self.assertIn("opaque newtype", out[0])
+
+    def test_a_missing_root_fails(self):
+        (self.dir / "src" / "lib.rs").unlink()
+        self.assertIn("cannot read", self.problems()[0])
 
     def problems(self, body=""):
         (self.dir / "Cargo.toml").write_text(MANIFEST.format(body=body))
