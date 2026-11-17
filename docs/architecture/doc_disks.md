@@ -251,19 +251,19 @@ Applied with the approval of this document.
 
 - `doc_control_center.md` (worktree `cc-spec`):
   - CC2, the row of `system/athanor-services` (`doc_control_center.md:29`): its models include `udisks` (drives, blocks, mount, unlock, lock, safe removal), written by step 1 of DK19 and owned by this document.
-  - CC8, the row "Removable drives" (`doc_control_center.md:114`): the Devices page reaches UDisks2 through that module and its safe-removal sequence (DK12); its polkit actions are udisks's defaults once DK20 A ships.
-  - CC13, Fixtures (`doc_control_center.md:159`): UDisks2 leaves the list of `python3-dbusmock` templates, because none exists upstream (`martinpitt/python-dbusmock`, `dbusmock/templates`, checked 2026-10-05); its fixture is the in-process `zbus` server that CC3 already describes (`doc_control_center.md:52`) and DK18 uses.
-  - Open doubt 8 (`doc_control_center.md:197`): UDisks2 is no longer among the templates assumed present.
+  - CC8, the row "Removable drives" (`doc_control_center.md:118`): the Devices page reaches UDisks2 through that module and its safe-removal sequence (DK12); its polkit actions are udisks's defaults once DK20 A ships.
+  - CC13, Fixtures (`doc_control_center.md:163`): UDisks2 leaves the list of `python3-dbusmock` templates, because none exists upstream (`martinpitt/python-dbusmock`, `dbusmock/templates`, checked 2026-10-05); its fixture is the in-process `zbus` server that CC3 already describes (`doc_control_center.md:52`) and DK18 uses.
+  - Open doubt 8 (`doc_control_center.md:201`): UDisks2 is no longer among the templates assumed present.
 - `doc_software.md` revision 3 (merged, PR #117):
   - Decision 7, the Disks row (`doc_software.md:316`): it names `athanor-disks`, application id `os.athanor.Disks`.
   - Wired by the image (`doc_software.md:330`): `athanor-mimeapps.list` maps `application/x-cd-image` and `application/x-raw-disk-image` to `athanor-disks` at step 5 of DK19.
   - Section 7, the `doc_disks.md` line (`doc_software.md:349`): removing `gnome-disk-utility` also removes `gnome-disk-image-mounter` and the image writer (`gnome-disks --restore-disk-image`); `athanor-disks` takes over both handlers (DK14).
 - `doc_files.md`:
-  - FM14, first bullet (`doc_files.md:146`): the sidebar's drives, mount, unmount, unlock, lock and eject come from the `udisks` module of `athanor-services` (DK3, DK12), not from GIO's volume monitor; the passphrase entry follows DK11 (typed, never remembered).
-  - FM14, second bullet (`doc_files.md:147`), and section 1 (`doc_files.md:20`): "the active session mounts, unlocks and ejects without a password" holds for every user once DK20 A ships; until then Athanor's rule asks a user outside `wheel` for an administrator to mount or eject.
-  - FM14, third bullet (`doc_files.md:148`), and section 3 (`doc_files.md:219`): every mount the file manager makes carries the `noexec` default of DK20 B. This document does not decide whether the session mounts drives on insertion; that stays with FM14, where the mounts are made.
-  - The comparison table, row "Removable drives" (`doc_files.md:182`): "the `udisks` model of `athanor-services`, FM14".
-- `doc_control_center.md` (worktree `cc-spec`), amendment owed beside the ones above: CC8, the row "Removable drives" (`doc_control_center.md:114`) lists a USB storage device blocked by USBGuard as "Blocked" with an "Allow" button, through the `usbguard` module of `athanor-services` and the same polkit path as the disk utility (DK21).
+  - FM14, first bullet (`doc_files.md:155`): the sidebar's drives, mount, unmount, unlock, lock and eject come from the `udisks` module of `athanor-services` (DK3, DK12), not from GIO's volume monitor; the passphrase entry follows DK11 (typed, never remembered).
+  - FM14, second bullet (`doc_files.md:160`), and section 1 (`doc_files.md:20`): "the active session mounts, unlocks and ejects without a password" holds for every user once DK20 A ships; until then Athanor's rule asks a user outside `wheel` for an administrator to mount or eject.
+  - FM14, third bullet (`doc_files.md:156`), and section 3 (`doc_files.md:219`): every mount the file manager makes carries the `noexec` default of DK20 B. This document does not decide whether the session mounts drives on insertion; that stays with FM14, where the mounts are made.
+  - The comparison table, row "Removable drives" (`doc_files.md:194`): "the `udisks` model of `athanor-services`, FM14".
+- `doc_control_center.md` (worktree `cc-spec`), amendment owed beside the ones above: CC8, the row "Removable drives" (`doc_control_center.md:118`) lists a USB storage device blocked by USBGuard as "Blocked" with an "Allow" button, through the `usbguard` module of `athanor-services` and the same polkit path as the disk utility (DK21).
 - `doc_session_daemons.md` SD12 and SD13, amendment received: `athanor-sessiond` owns the notice "Allow once / Allow always" for a blocked storage device, shown in the unlocked session only, built on the `usbguard` module (DK21); it must not show it while the session is locked and must raise it at unlock for a device inserted while locked.
 - `doc_files.md` FM14: a blocked stick does not appear in the sidebar; the window shows nothing for it and points to the session notice and to this utility (written there, same date).
 - `doc_lock_and_prompts.md` LP4, LP18 step 10 and acceptance 15 to 16: the root service that sets USBGuard's inserted-device policy from the session's lock state (written there, same date).

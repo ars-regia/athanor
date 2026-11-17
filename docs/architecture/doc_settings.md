@@ -18,7 +18,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
   - It also ships `/usr/share/polkit-1/rules.d/cosmic-settings.rules`, which returns `YES` without a password to any active local member of `wheel` for `org.freedesktop.locale1.set-locale`, `set-keyboard`, `org.freedesktop.hostname1.set-hostname`, `set-static-hostname` and `org.freedesktop.ModemManager1.Device.Control`.
   - `forge/specs/athanor-settings-rs` (5039 lines, GTK4) was excluded from the workspace (the root `Cargo.toml`, under `exclude`, line 60 then) and left the image on 2026-09-17 (`athanor-desktop-ui.spec`, 1.0.0-10); #121 has since removed it from the tree. Its pages wrote COSMIC's keys directly and held facade switches the changelog records as removed.
   - `forge/specs/athanor-layout-chooser` (`os.athanor.Layout`) ships, writes the layout document through `athanor-layout`, and confines its writes with Landlock before any thread exists (`src/sandbox.rs`). It is the pattern this document follows.
-  - In the register (`shell-features.md:344-383`), 16 of the 36 Settings entries are `have` only through cosmic-settings, so in the end state they are `missing` until this document replaces them, as `doc_languages.md` already notes for F-settings-15.
+  - In the register (`shell-features.md:345-384`), 16 of the 36 Settings entries are `have` only through cosmic-settings, so in the end state they are `missing` until this document replaces them, as `doc_languages.md` already notes for F-settings-15.
 
 ## 2. Decisions
 
@@ -140,7 +140,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 **SE11. Power, battery and idle.**
 
 - The page embeds the `athanor-controls` Battery page (health, charge limit through UPower, CC5) and the power profile.
-- **Blank and suspend** (section `power/idle`, F-settings-21, LP5, `doc_lock_and_prompts.md:80`): "Blank screen after" (1, 2, 3, 5, 10, 15, 30 minutes, never), "Suspend after, on battery" and "Suspend after, plugged in" (15, 20, 30, 45, 60, 90 minutes, never). The battery row shows only on a machine with a battery. The factory values are D6's: 5 minutes, 15 minutes on battery, never plugged in; they are not written by Settings but shipped as the defaults of `org.athanor.desktop.idle` from step 1 of SD22 (LP5). Before that step the page shows cosmic-idle's store, which on a fresh account holds cosmic-idle's compiled values.
+- **Blank and suspend** (section `power/idle`, F-settings-21, LP5, `doc_lock_and_prompts.md:91`): "Blank screen after" (1, 2, 3, 5, 10, 15, 30 minutes, never), "Suspend after, on battery" and "Suspend after, plugged in" (15, 20, 30, 45, 60, 90 minutes, never). The battery row shows only on a machine with a battery. The factory values are D6's: 5 minutes, 15 minutes on battery, never plugged in; they are not written by Settings but shipped as the defaults of `org.athanor.desktop.idle` from step 1 of SD22 (LP5). Before that step the page shows cosmic-idle's store, which on a fresh account holds cosmic-idle's compiled values.
 - **The lock follows the blank.** The page says "The screen locks when it blanks" and offers no separate lock timer, because LP5 keeps one idle policy and the idle daemon locks 500 ms after blanking (cosmic-idle until step 1 of `doc_session_daemons.md` SD22, then `athanor-idle`, SD4).
 - **Until step 1 of the session-daemons construction (`doc_session_daemons.md` SD22)** the store is cosmic-idle's `com.system76.CosmicIdle` version 1: `screen_off_time`, `suspend_on_battery_time`, `suspend_on_ac_time`, in milliseconds, `None` for never (key names found in `/usr/bin/cosmic-idle`, cosmic-idle 1.8.0, `strings`, 2026-10-05). Settings writes them only through `athanor_sulphur_client::idle` (section 3). From that step the store is `org.athanor.desktop.idle` (`blank-after`, `suspend-after-battery` and `suspend-after-ac`, in seconds, 0 for never, SD3), which Settings writes through GIO, and `athanor_sulphur_client::idle` is deleted in the same change; the page changes its writer and nothing else.
 - Lid and power-button actions stay logind's system configuration; Settings does not edit `/etc/systemd/logind.conf` (SE24).
@@ -197,7 +197,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 - **Keyboard aids** (sticky, slow, bounce) are shown only once the cosmic-comp patch of AX11 ships; until then their rows are absent rather than inert.
 - The readers file of AX5 has no page: it is not a user setting.
 
-**SE19. Language, region, date and time.** Meets LN15 and LN4, LN6, LN1 (`doc_languages.md:431-434`).
+**SE19. Language, region, date and time.** Meets LN15 and LN4, LN6, LN1 (`doc_languages.md:444-447`).
 
 - **Language:** the list is `athanor_i18n::offered_languages()`, complete languages first, each marked "Complete" or "Partial translation" (LN4). The user's languages go to AccountsService `SetLanguages`; the system language (the greeter's and new users') to localed `SetLocale`, as an administrator.
 - **Formats:** `org.gnome.system.locale region`.
@@ -247,14 +247,14 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
   - The scripts that use cosmic-settings as a test window move to Settings: `scripts/devvm/shield-acceptance.sh:140-144` and the preview scenes of `forge/test/shell/rig.sh:334-336`.
   - The text of `athanor-system-config.spec:208` that names cosmic-settings as the settings application is updated.
   - `athanor-layout-chooser` and `os.athanor.Layout` leave in the same change (decision 6).
-- This step answers `doc_shell.md:252`: no COSMIC Settings page is hidden or patched, because the whole application leaves.
+- This step answers `doc_shell.md:267`: no COSMIC Settings page is hidden or patched, because the whole application leaves.
 
 **SE24. Exclusions of the first release,** each with its reason. The register entries become `excluded` (section 3); the maintainer confirmed the list (decision 8).
 
 | Excluded                                            | Reason                                                                                                                                                                                                                                                                                       |
 | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | F-settings-24 Online accounts                       | gnome-online-accounts is not in the image (`rpm -q`, 2026-10-05); accounts are configured in each application.                                                                                                                                                                               |
-| F-settings-25 Sharing and remote desktop            | a remote-desktop backend belongs to `doc_portal.md`; remote login (SSH) is a feature of Software, off by default (`doc_software.md:268-275`); its switch also opens `ssh` in the active firewall zone (ADR-0089 decision 3), which Software owns; no file-sharing service ships.                                                                                                                                              |
+| F-settings-25 Sharing and remote desktop            | a remote-desktop backend belongs to `doc_portal.md`; remote login (SSH) is a feature of Software, off by default (`doc_software.md:269`); its switch also opens `ssh` in the active firewall zone (ADR-0089 decision 3), which Software owns; no file-sharing service ships.                                                                                                                                              |
 | F-settings-26 Printers and scanners                 | administering CUPS from a user process needs cups-pk-helper, a root D-Bus helper not in the image, and a polkit decision; driverless printers already work through cups-browsed 2.1.1 (installed), and the queue is in the control center (CC14 step 3). Scanning belongs to an application. |
 | F-settings-27 Screen time                           | malcontent is not in the image; parental controls need a design of their own.                                                                                                                                                                                                                |
 | F-settings-28 Software and system updates           | they live in the shield and in Software (SW16, BR6).                                                                                                                                                                                                                                         |
@@ -293,9 +293,9 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 **Requirements of those six specifications, met here.**
 
 - `doc_accessibility.md` AX2, AX9 and section 3: one Accessibility page writing the keys of AX2 and `accessibility_zoom`, with AX9's note on cursor size; no page for AX5's readers file. Met by SE18, enforced by SE7's key table. AX11's rows appear with the patch.
-- `doc_languages.md` LN15, LN4, LN6, LN1 and section 3 (`:314-341`, `:431-434`): met by SE15 and SE19. F-settings-15 returns from `missing` to `have` at SE23's retirement step.
-- `doc_lock_and_prompts.md` LP5 (`:80`) and D6: the idle-values control, met by SE11.
-- `doc_lock_and_prompts.md` LP9 (`:127`) and D8: fingerprint enrolment, met by SE20; LP18 step 7 can proceed once SE26 step 4 ships it.
+- `doc_languages.md` LN15, LN4, LN6, LN1 and section 3 (`:314-341`, `:444-447`): met by SE15 and SE19. F-settings-15 returns from `missing` to `have` at SE23's retirement step.
+- `doc_lock_and_prompts.md` LP5 (`:91`) and D6: the idle-values control, met by SE11.
+- `doc_lock_and_prompts.md` LP9 (`:145`) and D8: fingerprint enrolment, met by SE20; LP18 step 7 can proceed once SE26 step 4 ships it.
 - `doc_disks.md` DK6 (`:99`) and DK16 (`:185`): the system disk passphrase belongs to Settings and to D42's reseal. Met by SE21 for the change of passphrase (decision 3); keyslots wait for D42 (P4b).
 - `doc_osd.md` OD19 and M6: `IdentifyOutputs` and `DismissOutputIdentifiers` serve the Displays page, met by SE12. OD14: `DisplayToggle` is bound by the display settings, met by SE12 (still no default key). F-osd-07 (display mode) is served by SE12 through CC5's Display page.
 - `doc_files.md:237`: the application id `os.athanor.Settings` follows rule 18, met by SE1. FM7: no trash-emptying setting, met by SE21.
@@ -326,9 +326,9 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 - `doc_notification_center.md` NC8 (`:121`): "Settings' unit name is fixed by Settings' specification" becomes "`athanor-settings.service` (`doc_settings.md` SE4)".
 - `doc_software.md` SW2 (`:82`): unchanged in meaning; the target `privacy/developer-mode` is added for Software's link.
 - `doc_osd.md` OD19 (controller ruling of 2026-10-05): the headset dialog's "Sound settings" button returns and calls `os.athanor.Settings1.Show("sound")`, in the step where Settings ships (SE26 step 6); the maintainer's condition "no Sound settings button until our Settings app" is then met.
-- `doc_shell.md:252` (open doubt 5): answered by SE23; no COSMIC page is hidden or patched.
+- `doc_shell.md:267` (open doubt 5): answered by SE23; no COSMIC page is hidden or patched.
 - `docs/decisions/0010-wave2-settings.md` decision 7 still names `os.athanor.Lvfs`, which decision 7 here replaced with fwupd; a record that supersedes that point is due with step 4.
-- `shell-features.md` (`:344-383`): F-settings-24, 25, 26, 27, 28, 29, 30, 33, 34 marked `excluded` with SE24's reasons (decision 8); F-settings-01 to 21 and 31, 32 point to this document, and those `have` through cosmic-settings say "replaced by `doc_settings.md` at stage 6".
+- `shell-features.md` (`:345-384`): F-settings-24, 25, 26, 27, 28, 29, 30, 33, 34 marked `excluded` with SE24's reasons (decision 8); F-settings-01 to 21 and 31, 32 point to this document, and those `have` through cosmic-settings say "replaced by `doc_settings.md` at stage 6".
 - Code changes at the retirement step, listed in SE23: `forge/config/packages.json:128-129`, `forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`, `scripts/devvm/shield-acceptance.sh:140-144`, `forge/test/shell/rig.sh:334-336`, `forge/specs/athanor-system-config/athanor-system-config.spec:208`; and at step 1 the workspace `exclude` entry of the root `Cargo.toml` (line 60 then; removed with the crate by #121).
 - Amendments received, from the maintainer's rulings of 2026-10-05: SE11 and SE13 name the schemas of `doc_session_daemons.md` SD3; the USB devices text is the section of SD13; the startup-applications exclusion of SE24 ends (SD10); SE14 gains the hot-corner switch and the workspace settings the overview reads (`doc_overview.md` OV14, OV3).
 
@@ -374,7 +374,7 @@ On a fresh install in the dev VM and on the reference laptop athanor-ref. **CI**
 
 Taken by the maintainer on 2026-10-05. Each followed the recommendation of revision 0.
 
-1. **Is Settings resident?** (SE5) Choice: started on the first `Show`, resident until logout. Reason: it meets ST5's 100 ms for every opening after the first and the recovery threshold, pays memory only for users who opened Settings once, and needs no exception to the standard (a cold GTK4 start misses 100 ms, `doc_control_center.md:38`).
+1. **Is Settings resident?** (SE5) Choice: started on the first `Show`, resident until logout. Reason: it meets ST5's 100 ms for every opening after the first and the recovery threshold, pays memory only for users who opened Settings once, and needs no exception to the standard (a cold GTK4 start misses 100 ms, `doc_control_center.md:39`).
 2. **Which Wayland socket?** (SE6, SE12, SE18) Choice: the main socket for the whole application in release 1. Reason: cosmic-comp offers output configuration and the accessibility manager only there; Landlock, no network and no setuid already limit a compromise, and every privileged client of ours uses the same socket until SH2's per-surface confinement narrows them all.
 3. **The system disk passphrase** (SE21; DK6; `doc_kernel_profile.md` D42). Choice: change of passphrase now through udisks `ChangePassphrase` (`auth_admin_keep`); keyslots (TPM, PIN, recovery key) wait for P4b. Reason: every user may need it, and udisks does it under an administrator's authorisation without new code touching key material; the TPM policy waits for D42's design.
 4. **How a user changes their own password** (SE20). Choice: `athanor-passwd@`, a confined root service with PAM's `chauthtok`; until it ships the page points to `passwd`. Its implementation plan needs the maintainer's approval before any code. Reason: the only option that asks for the current password and works for a user outside `wheel`, on the model approved for the lock (D1).
