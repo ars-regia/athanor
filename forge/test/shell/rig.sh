@@ -10,7 +10,7 @@
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp (a build of the spec needs cosign on PATH, which verifies the builder)
-#                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
+#                           (when the published rig holds another, the spec is built as the forge builds it, in the signed builder or else in one built here from the checkout, never pushed, and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -168,8 +168,12 @@ image_id() {
 # run_spec_build.sh is the DAG's and Spec Build Check's path: the sources checked against
 # SOURCES/sources.sha256, rpmbuild without network, sccache in a volume removed at the end, so
 # no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
-# content hash, as Spec Build Check takes it, never latest. The RPM is a pull-request test
-# artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
+# content hash, as Spec Build Check takes it, never latest: the published one when a trusted run
+# of call-build-builder.yml signed it, else the one forge/scripts/builder_image.sh builds from this
+# checkout (doc_build_system.md, section 3). That one is unsigned (the exception to PL12 of
+# doc_pipeline.md, for this recipe), loaded into the local podman only, never tagged, pushed,
+# signed or cached under its hash, and used for the RPM installed in the test rig. The RPM is a
+# pull-request test artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
 build_spec_rig() {
     local base=$1 want=$2 idemp builder rpm ctx id
     # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
@@ -178,12 +182,22 @@ build_spec_rig() {
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
     # The digest check_idempotency.sh verified, never the tag again: the tag can move after it.
     builder=$(sed -n 's/^IMAGE=//p' <<< "$idemp")
-    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp" || [ -z "$builder" ]; then
-        echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
-            "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
-        exit 1
+    if grep -qx 'CACHE_HIT=true' <<< "$idemp" && [ -n "$builder" ]; then
+        bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
+    else
+        # No signed builder for this checkout's inputs: build it here, for this test only.
+        if ! command -v nix > /dev/null; then
+            echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml," \
+                "and nix, which builds it here, is not on PATH: install nix, or land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
+            exit 1
+        fi
+        echo "rig.sh: no signed builder for this checkout: building it with builder_image.sh, unsigned, for this test only" >&2
+        # Outside $out/cosmic-comp-spec, which is the build context of the derived image.
+        mkdir -p "$out/builder-local"
+        bash "$root/forge/scripts/builder_image.sh" build "$out/builder-local/athanor-builder.tar.gz"
+        builder=$(bash "$root/forge/scripts/builder_image.sh" resolve "$out/builder-local/athanor-builder.tar.gz")
+        rm -f "$out/builder-local/athanor-builder.tar.gz"
     fi
-    bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
     rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
     rm -f "$rpm"
     bash "$root/forge/scripts/run_spec_build.sh" "$builder" specs/cosmic-comp

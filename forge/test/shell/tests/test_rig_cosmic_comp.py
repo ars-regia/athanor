@@ -23,6 +23,7 @@ COPIED = (
     "forge/scripts/check_idempotency.sh",
     "forge/scripts/registry_probe.sh",
     "forge/scripts/verify_image.sh",
+    "forge/scripts/builder_image.sh",
     "system/tier-digests.sh",
     "system/Containerfile",
 )
@@ -47,6 +48,8 @@ PODMAN = textwrap.dedent(
         log.write(json.dumps(args) + "\\n")
     if args[0] == "volume" and args[1] == "create":
         print("home")
+    elif args[0] == "load":
+        print("Loaded image: localhost/athanor-builder:local")
     elif args[:2] == ["image", "exists"]:
         sys.exit(1 if args[2] in conf["absent"] else 0)
     elif args[:2] == ["image", "inspect"]:
@@ -103,6 +106,25 @@ COSIGN = textwrap.dedent(
 )
 
 
+# The nix of the tests: `nix build ... --print-out-paths <root>#builderImage` answers the path of
+# an image archive. Every call is logged as a JSON list.
+NIX = textwrap.dedent(
+    """\
+    #!/usr/bin/env python3
+    import json, pathlib, sys
+    tmp = pathlib.Path(__file__).resolve().parents[1]
+    with open(tmp / "nix.log", "a") as log:
+        log.write(json.dumps(sys.argv[1:]) + "\\n")
+    if (tmp / "nix-fails").exists():
+        print("error: builderImage does not build", file=sys.stderr)
+        sys.exit(1)
+    archive = tmp / "builder-image.tar.gz"
+    archive.write_text("archive")
+    print(archive)
+    """
+)
+
+
 def spec(release):
     return textwrap.dedent(
         f"""\
@@ -125,6 +147,7 @@ class Rig:
         derived_nevr=SPEC,
         builder=True,
         signed=True,
+        nix=True,
     ):
         self.tmp = tmp
         self.tree = tmp / "tree"
@@ -141,9 +164,13 @@ class Rig:
         )
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
-        for name, body in (("podman", PODMAN), ("skopeo", SKOPEO), ("cosign", COSIGN)):
+        tools = [("podman", PODMAN), ("skopeo", SKOPEO), ("cosign", COSIGN)]
+        if nix:
+            tools.append(("nix", NIX))
+        for name, body in tools:
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
+        self.nix = nix
         if not builder:
             (tmp / "builder-absent").write_text("")
         if not signed:
@@ -186,8 +213,19 @@ class Rig:
 
     def run(self, *args):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ATHANOR_")}
+        path = env["PATH"]
+        if not self.nix:
+            # The host's PATH without any nix: a symlink to every other tool it offers.
+            host = self.tmp / "host-bin"
+            if not host.exists():
+                host.mkdir()
+                for directory in path.split(":"):
+                    for tool in Path(directory).glob("*") if Path(directory).is_dir() else ():
+                        if tool.name != "nix" and not os.path.lexists(host / tool.name):
+                            (host / tool.name).symlink_to(tool)
+            path = str(host)
         env.update(
-            PATH=f"{self.tmp / 'bin'}:{env['PATH']}",
+            PATH=f"{self.tmp / 'bin'}:{path}",
             ATHANOR_RIG_OUT=str(self.out),
             HOME=str(self.tmp),
             RETRY_ATTEMPTS="1",
@@ -202,6 +240,12 @@ class Rig:
 
     def calls(self):
         log = self.tmp / "podman.log"
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text().splitlines()]
+
+    def nix_calls(self):
+        log = self.tmp / "nix.log"
         if not log.exists():
             return []
         return [json.loads(line) for line in log.read_text().splitlines()]
@@ -350,26 +394,55 @@ class CosmicCompVersion(unittest.TestCase):
             result.stderr,
         )
 
-    def test_an_unpublished_builder_fails_before_any_build(self):
+    def assert_built_in_local_builder(self, rig, result):
+        """The miss path: the checkout's builder is built and loaded here, and nothing leaves."""
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsigned, for this test only", result.stderr)
+        calls = rig.calls()
+        self.assertEqual(len(rig.nix_calls()), 1)
+        self.assertIn("builderImage", rig.nix_calls()[0][-1])
+        self.assertIn(["load", "-i", str(rig.out / "builder-local/athanor-builder.tar.gz")], calls)
+        stages = [call for call in calls if "scripts/build_spec.sh" in call]
+        self.assertEqual([call[-2] for call in stages], ["fetch", "build"])
+        # The spec builds in the image podman loaded; nothing is pulled, tagged or pushed, and the
+        # builder is never signed or copied.
+        self.assertEqual(stages[0][-5], "localhost/athanor-builder:local")
+        self.assertFalse([c for c in calls if c[0] in ("push", "tag", "login")])
+        self.assertFalse([c for c in calls if c[0] == "pull" and "athanor-builder" in c[-1]])
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_an_unpublished_builder_is_built_here_and_used_unpushed(self):
         rig = Rig(self.tmp, builder=False)
-        result = rig.run("cosmic-comp-version")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("is not published", result.stderr)
-        self.assertFalse(rig.built())
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
 
-    def test_an_unsigned_builder_fails_before_any_build(self):
+    def test_an_unsigned_builder_is_built_here_and_used_unpushed(self):
         rig = Rig(self.tmp, signed=False)
-        result = rig.run("cosmic-comp-version")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
-        self.assertFalse(rig.built())
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
 
-    def test_a_builder_labelled_with_another_hash_fails_before_any_build(self):
+    def test_a_builder_labelled_with_another_hash_is_built_here(self):
         rig = Rig(self.tmp)
         (self.tmp / "builder-hash").write_text("0" * 64)
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
+
+    def test_a_signed_builder_is_pulled_by_digest_and_nix_never_runs(self):
+        rig = Rig(self.tmp)
+        self.assertEqual(rig.run("cosmic-comp-version").returncode, 0)
+        self.assertEqual(rig.nix_calls(), [])
+        self.assertFalse([c for c in rig.calls() if c[0] == "load"])
+
+    def test_a_builder_that_does_not_build_fails_before_any_spec_build(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "nix-fails").write_text("")
+        result = rig.run("cosmic-comp-version")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("builderImage does not build", result.stderr)
+        self.assertFalse(rig.built())
+
+    def test_a_miss_without_nix_refuses_with_a_message(self):
+        rig = Rig(self.tmp, signed=False, nix=False)
         result = rig.run("cosmic-comp-version")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
+        self.assertIn("nix, which builds it here, is not on PATH", result.stderr)
         self.assertFalse(rig.built())
 
     def test_an_unreadable_spec_fails_before_the_rig_runs(self):

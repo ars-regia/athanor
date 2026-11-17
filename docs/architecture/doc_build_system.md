@@ -178,7 +178,12 @@ named by its content hash (`check_idempotency.sh --package builder`): the publis
 `call-build-builder.yml`, pulled by the digest that lookup verified, never by the tag again
 (the shell rig's spec build, `rig.sh`, does the same), else a builder image built from the pull
 request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
-artifact and never pushed. Never `athanor-builder:latest`, the default branch's builder: a
+artifact and never pushed. The shell rig's spec build (`rig.sh cosmic-comp-version`) on such a
+miss builds the checkout's builder with `builder_image.sh` itself and loads it into the local
+podman: unsigned, never tagged, pushed, signed or cached under its hash, and used only to build
+the RPM that the job installs in the test rig, which nothing publishes; a host without `nix`
+refuses with a message. This is the one place PL12 (`doc_pipeline.md`) accepts an unsigned
+builder. Never `athanor-builder:latest`, the default branch's builder: a
 pull request into another branch would build against the default branch's libraries.
 
 ## 6. Tier repositories and the system image
