@@ -16,8 +16,16 @@ FILES = {
     "src/x.rs": "fn grant() {}\nfn other() {}\nfn _focused() {}\nlet x = set_input(); // x.rs\n",
     "crate/src/lib.rs": "one\ntwo\nfn deep() {}\n",
     "crate/data/y": "alpha\nbeta deep\n",
-    "pkg/src/y.rs": "fn zeta() {}\nfn eta() {}\n",
+    "pkg/lib/y.rs": "fn zeta() {}\nfn eta() {}\n",
     "system/a/src/lib.rs": "one\n",
+    "experimental/q.rs": "one\n",
+    "forge/f": "one\n",
+    "scripts/s": "one\n",
+    "docs/d": "one\n",
+    ".github/g": "one\n",
+    "other.md": "# Title\n\n**AB1. First.** alpha text\nmore of it\n\n**AB2. Second.** beta text\n"
+    "| Name | Role |\n| --- | --- |\n| Archives | keeps files |\n| Devices | plugs |\n",
+    "big.rs": "".join(f"line {n}\n" for n in range(300)) + "needle\n",
 }
 CRATE = "`crate/src/lib.rs:1` "
 
@@ -64,7 +72,9 @@ class Forms(unittest.TestCase):
         )
         self.assertTrue(verify.holds_token("cosmic-osd.service", "cosmic-osd"))
         self.assertFalse(verify.holds_token("cosmic-osd-extra", "cosmic-osd"))
-        self.assertTrue(verify.holds_token("fn _focused()", "focused"))
+        self.assertFalse(verify.holds_token("fn _focused()", "focused"))
+        self.assertFalse(verify.holds_token("fn open_layer()", "open"))
+        self.assertTrue(verify.holds_token("fn open()", "open"))
 
     def test_a_path_token_is_read_by_its_last_segment(self):
         self.assertEqual(messages("The `Shell::grant` is at `src/x.rs:1`."), [])
@@ -78,7 +88,7 @@ class Forms(unittest.TestCase):
     def test_nothing_else_is_read(self):
         self.assertEqual(messages("See `src/x.rs:2`."), [])
         self.assertEqual(messages("The `missing_token` is at `src/x.rs:2`."), [])
-        self.assertEqual(messages("The `grant` is at `src/none.rs:2`."), [])
+        self.assertEqual(messages("The `grant` is at `nowhere/none.rs:2`."), [])
         self.assertEqual(messages("The `x` is at `:2`."), [])
         self.assertEqual(messages("The `x` of the file `x`, `src/x`."), [])
 
@@ -138,6 +148,17 @@ class Resolution(unittest.TestCase):
             self.assertEqual(len(out), 1, path)
             self.assertIn("names a file that does not exist", out[0])
 
+    def test_a_prefix_is_any_top_level_directory_of_the_repository(self):
+        out = messages("The `grant` is at `experimental/none.rs:1`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("names a file that does not exist", out[0])
+        self.assertEqual(messages("The `grant` is at `unknown/none.rs:1`."), [])
+
+    def test_a_name_that_is_no_file_leaves_the_last_path_as_it_was(self):
+        self.assertEqual(
+            len(messages("`src/x.rs:1`, the `grant` and `ident` at `:2`.")), 1
+        )
+
     def test_an_unprefixed_path_that_does_not_exist_is_not(self):
         self.assertEqual(messages("The `grant` is at `none/a.rs:2`."), [])
 
@@ -151,10 +172,10 @@ class Resolution(unittest.TestCase):
         )
 
     def test_a_short_path_resolves_by_its_unique_suffix(self):
-        self.assertEqual(len(messages("The `zeta` is at `src/y.rs:2`.")), 1)
-        self.assertEqual(messages("The `zeta` is at `src/y.rs:1`."), [])
+        self.assertEqual(len(messages("The `zeta` is at `lib/y.rs:2`.")), 1)
+        self.assertEqual(messages("The `zeta` is at `lib/y.rs:1`."), [])
         self.assertEqual(
-            messages("The `zeta` is at `src/y.rs:2`.", {"pkg2/src/y.rs": "a\n"}), []
+            messages("The `zeta` is at `lib/y.rs:2`.", {"pkg2/lib/y.rs": "a\n"}), []
         )
 
     def test_a_shorthand_after_a_path_without_a_line_keeps_that_path(self):
@@ -175,13 +196,46 @@ class Resolution(unittest.TestCase):
         self.assertIn("is not a line range of its file", out[0])
 
 
+class Documents(unittest.TestCase):
+    """A citation of a markdown document."""
+
+    def test_the_first_cited_line_must_hold_words(self):
+        out = messages("The `x` is at `other.md:5`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("no words", out[0])
+        self.assertEqual(len(messages("The `x` is at `other.md:8`.")), 1)
+        self.assertEqual(messages("The `x` is at `other.md:3`."), [])
+
+    def test_a_row_named_by_the_sentence_is_held_by_the_cited_lines(self):
+        self.assertEqual(messages("The Archives row (`other.md:9`)."), [])
+        self.assertEqual(len(messages("The Archives row (`other.md:10`).")), 1)
+
+    def test_the_section_a_sentence_names_holds_the_cited_lines(self):
+        self.assertEqual(messages("AB1 is at `other.md:3-4`."), [])
+        out = messages("AB1 is at `other.md:6`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("is not in the section of AB1", out[0])
+        self.assertEqual(messages("AB1 and AB2 are at `other.md:3-6`."), [])
+
+    def test_a_list_of_documents_may_name_the_id_in_the_cited_lines(self):
+        self.assertEqual(messages("AB2 is at `other.md:6`."), [])
+
+
+class Limits(unittest.TestCase):
+    def test_a_long_range_is_a_finding(self):
+        self.assertEqual(messages("The `needle` is at `big.rs:299-301`."), [])
+        out = messages("The `needle` is at `big.rs:1-301`.")
+        self.assertEqual(len(out), 1)
+        self.assertIn("at most 200 lines", out[0])
+
+
 class Kept(unittest.TestCase):
     def test_the_kept_list_only_shrinks(self):
         self.assertLessEqual(len(verify.LINE_CITATIONS_KEPT), 1)
 
     def test_a_kept_entry_covers_one_citation_only(self):
         ((key, why),) = verify.LINE_CITATIONS_KEPT.items()
-        moved = {(*key[:2], "1", key[3]): why}
+        moved = {(*key[:2], "1", *key[3:]): why}
         with mock.patch.object(verify, "LINE_CITATIONS_KEPT", moved):
             result = verify.check_line_citations()
         self.assertTrue(any("matches no finding" in p for p in result.problems))
@@ -189,12 +243,19 @@ class Kept(unittest.TestCase):
 
     def test_a_kept_entry_that_matches_no_finding_fails(self):
         stale = dict(verify.LINE_CITATIONS_KEPT)
-        stale[("doc_none.md", "src/x.rs", "1", "grant")] = "a reason"
+        stale[("doc_none.md", "src/x.rs", "1", "grant", 1)] = "a reason"
         with mock.patch.object(verify, "LINE_CITATIONS_KEPT", stale):
             result = verify.check_line_citations()
         stale_problems = [p for p in result.problems if "matches no finding" in p]
         self.assertEqual(len(stale_problems), 1)
         self.assertIn("doc_none.md", stale_problems[0])
+
+    def test_a_kept_entry_names_the_nth_citation_of_its_key(self):
+        ((key, why),) = verify.LINE_CITATIONS_KEPT.items()
+        second = {(*key[:4], 2): why}
+        with mock.patch.object(verify, "LINE_CITATIONS_KEPT", second):
+            result = verify.check_line_citations()
+        self.assertTrue(any("matches no finding" in p for p in result.problems))
 
     def test_the_shipped_documents_pass(self):
         self.assertEqual(verify.check_line_citations().problems, [])
