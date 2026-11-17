@@ -301,6 +301,7 @@ impl State {
         // token made from the click that focused a window is in range.
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
+        self.eis.seat_button(button, button_state);
         pointer.button(
             self,
             &ButtonEvent {

@@ -197,6 +197,7 @@ impl State {
             self.aids_focus_changed(None);
             self.loop_handle.insert_idle(|state| state.refresh_constraint());
         }
+        self.eis_focusing(surface.as_ref());
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
     }
 

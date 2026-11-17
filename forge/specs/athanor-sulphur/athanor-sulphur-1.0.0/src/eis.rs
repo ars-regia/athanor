@@ -505,6 +505,16 @@ struct Keys {
 }
 
 impl Keys {
+    /// The keyboard of context `handle`, logged when the keymap does not compile: every key the
+    /// context sends is then dropped, as with no keyboard.
+    fn of(handle: &str, settings: Option<&Settings>) -> Option<Self> {
+        let keys = Self::new(settings);
+        if keys.is_none() {
+            tracing::warn!(%handle, "an EIS keyboard's keymap did not compile; its keys are dropped");
+        }
+        keys
+    }
+
     fn new(settings: Option<&Settings>) -> Option<Self> {
         let config = xkb_config(settings);
         let keymap = xkb::Keymap::new_from_names(
@@ -594,11 +604,25 @@ pub(crate) struct Eis {
     /// Set while an injected motion, button or scroll is applied: `pointer_target` then gives
     /// no surface of the portal backend the pointer.
     injecting: bool,
+    /// How many presses of each button the seat holds, the hardware's and the contexts'.
+    buttons: HashMap<u32, usize>,
 }
 
 impl Eis {
     pub(crate) fn injecting(&self) -> bool {
         self.injecting
+    }
+
+    /// A button reached the seat (`State::button_input`).
+    pub(crate) fn seat_button(&mut self, button: u32, state: ButtonState) {
+        let held = self.buttons.entry(button).or_default();
+        match state {
+            ButtonState::Pressed => *held += 1,
+            ButtonState::Released => *held = held.saturating_sub(1),
+        }
+        if *held == 0 {
+            self.buttons.remove(&button);
+        }
     }
 }
 
@@ -684,7 +708,7 @@ impl State {
         tracing::info!(%handle, ?types, "an EIS context is open");
         let keys = types
             .keyboard()
-            .then(|| Keys::new(self.eis.settings.as_ref()))
+            .then(|| Keys::of(&handle, self.eis.settings.as_ref()))
             .flatten();
         self.eis.contexts.insert(
             id,
@@ -803,8 +827,8 @@ impl State {
         }
         let config = xkb_config(self.eis.settings.as_ref());
         for context in self.eis.contexts.values_mut() {
-            if context.keys.is_some() {
-                context.keys = Keys::new(self.eis.settings.as_ref());
+            if context.types.keyboard() {
+                context.keys = Keys::of(&context.handle, self.eis.settings.as_ref());
             }
             let Some(seat) = context.seat.as_ref().filter(|_| context.types.keyboard()) else {
                 continue;
@@ -819,12 +843,17 @@ impl State {
     /// Context `id`'s input. It reaches Wayland clients only: no binding of the compositor,
     /// neither the keyboard monitor nor the keyboard aids, and no surface of the portal backend.
     fn eis_input(&mut self, id: u64, event: InputEvent<EiInput>) {
-        if let InputEvent::DeviceRemoved { device } = &event {
-            return self.eis_device_gone(id, device);
+        match &event {
+            InputEvent::DeviceAdded { .. } => return,
+            InputEvent::DeviceRemoved { device } => return self.eis_device_gone(id, device),
+            _ => {}
         }
         if !delivers(self.lock.is_some(), self.session_paused()) {
             return;
         }
+        // As for the hardware's input (`process_input_event`).
+        self.activity();
+        self.request_redraw();
         match event {
             InputEvent::Keyboard { event } => {
                 let pressed = event.state == eis::keyboard::KeyState::Press;
@@ -867,7 +896,6 @@ impl State {
                 if self.eis_aims_at_backend() {
                     return;
                 }
-                self.activity();
                 self.eis_pointing(|state| crate::input::scroll(state, &pointer, &event));
             }
             InputEvent::TouchDown { event } => {
@@ -889,7 +917,6 @@ impl State {
                 if !context.touches.insert((device.clone(), slot)) {
                     return;
                 }
-                self.activity();
                 self.touch_down(&device, slot, at, Event::time(&event));
             }
             InputEvent::TouchMotion { event } => {
@@ -972,14 +999,12 @@ impl State {
             if keys.dropped.remove(&raw) || !keys.held.remove(&raw) {
                 return;
             }
+            // The keys held when the backend took the focus were released before
+            // (`eis_focusing`), so a held key is the focus's own and its release always goes.
             keys.state.update_key(code, xkb::KeyDirection::Up);
-            if to_backend {
-                return;
-            }
             KeyState::Released
         };
         let mask = keys.mask();
-        self.activity();
         self.eis_send_key(code, key_state, mask, time);
     }
 
@@ -1033,18 +1058,17 @@ impl State {
             return;
         }
         let aims_at_backend = self.eis_aims_at_backend();
+        // Held by the hardware or another context: its release would end that hold too.
+        let seat_holds = self.eis.buttons.get(&button).is_some_and(|held| *held > 0);
         let Some(context) = self.eis.contexts.get_mut(&id) else {
             return;
         };
         let key = (device, button);
         let counts = match button_state {
-            ButtonState::Pressed => {
-                !aims_at_backend && !context.buttons.contains(&key) && context.buttons.insert(key)
-            }
+            ButtonState::Pressed => !aims_at_backend && !seat_holds && context.buttons.insert(key),
             ButtonState::Released => context.buttons.remove(&key),
         };
         if counts {
-            self.activity();
             self.eis_pointing(|state| state.button_input(button, button_state, time));
         }
     }
@@ -1075,6 +1099,19 @@ impl State {
         }
     }
 
+    /// The keyboard focus is about to move to `surface`: if it is the portal backend's, every
+    /// context's held keys are released to the focus they were pressed on first, so the
+    /// backend's `wl_keyboard.enter` lists none of them and no release reaches it.
+    pub(crate) fn eis_focusing(&mut self, surface: Option<&WlSurface>) {
+        if !surface.is_some_and(backend_surface) {
+            return;
+        }
+        let ids: Vec<u64> = self.eis.contexts.keys().copied().collect();
+        for id in ids {
+            self.eis_release_keys(id);
+        }
+    }
+
     /// Runs `input` with the portal backend kept from the pointer's focus.
     fn eis_pointing(&mut self, input: impl FnOnce(&mut Self)) {
         self.eis.injecting = true;
@@ -1099,8 +1136,8 @@ impl State {
             self.eis_release_keys(id);
             let settings = self.eis.settings.clone();
             if let Some(context) = self.eis.contexts.get_mut(&id) {
-                if context.keys.is_some() {
-                    context.keys = Keys::new(settings.as_ref());
+                if context.types.keyboard() {
+                    context.keys = Keys::of(&context.handle, settings.as_ref());
                 }
             }
         }
