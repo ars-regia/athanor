@@ -137,9 +137,10 @@ impl State {
                 }
                 match key_state {
                     KeyState::Pressed => {
-                        // Any other press disarms Super alone (D4). Only a hardware key counts:
-                        // the input method sends the keys it forwards a second time, as a
-                        // virtual keyboard's.
+                        // Any other press disarms Super alone (D4). Of the seat's keys only a
+                        // hardware key counts: the input method sends the keys it forwards a
+                        // second time, as a virtual keyboard's. An EIS context's key, which
+                        // never passes here, disarms it in `eis::eis_key`.
                         // A second Super while one is held is not Super alone either, and
                         // nothing arms while the session is locked or the focused surface
                         // inhibits the bindings.

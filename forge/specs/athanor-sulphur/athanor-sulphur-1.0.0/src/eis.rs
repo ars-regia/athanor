@@ -1030,6 +1030,8 @@ impl State {
             }
             keys.state.update_key(code, xkb::KeyDirection::Down);
             keys.held.insert(raw);
+            // A key the client gets cancels a hardware Super alone, as an injected button does.
+            self.super_tap = None;
             KeyState::Pressed
         } else {
             if keys.dropped.remove(&raw) || !keys.held.remove(&raw) {

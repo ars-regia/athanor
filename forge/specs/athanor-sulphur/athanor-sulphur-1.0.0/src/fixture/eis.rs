@@ -341,9 +341,14 @@ fn eis_keys_reach_the_window_and_never_a_binding() {
         fired,
         "an injected key binds nothing"
     );
-    // Only a hardware key disarms Super alone (input.rs), so its release still fires that.
+    // The injected key cancels Super alone, as a hardware key would: its release fires nothing.
     key(&mut run.state, KEY_LEFTMETA, false);
     window.roundtrip(&mut run);
+    assert_eq!(
+        run.state.fired.len(),
+        fired,
+        "Super's release after an injected key is not Super alone"
+    );
     assert!(
         window.client.modifiers[told..]
             .iter()
