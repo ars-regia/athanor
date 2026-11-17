@@ -14,7 +14,10 @@ use crate::a11y::{leave, rejoining, tree_update, tree_updates};
 use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
-use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
+use crate::popup::{
+    focused_window, keyboard_after_close, Dismiss, GrabSerial, OpenPopup, Tooltip,
+    TOOLTIP_PADDING,
+};
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
@@ -2185,10 +2188,20 @@ impl App {
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
-    /// selection its fields offered ends with it.
+    /// selection its fields offered ends with it. A popup that had the keyboard hands it back
+    /// to the surface it was opened from, while that one is open, without waiting for the
+    /// compositor's `enter` on it.
     fn close(&mut self, id: SurfaceId) {
+        let keyboard = self
+            .shell
+            .popup
+            .filter(|open| open.surface == id)
+            .map(|open| keyboard_after_close(open, self.keyboard_focus));
         self.shell.remove(id);
         self.forget(id);
+        if let Some(keyboard) = keyboard.filter(|&k| k != self.keyboard_focus) {
+            self.keyboard_focus = keyboard.filter(|&parent| self.shell.ui(parent).is_some());
+        }
     }
 
     /// Ends the text input and the primary selection of the closed surface `id`; a dialog that

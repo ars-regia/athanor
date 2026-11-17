@@ -100,6 +100,22 @@ pub(crate) fn focused_window<S: Copy>(
     }
 }
 
+/// The surface with the keyboard once the popup `open` closes, given the one that had it: the
+/// popup's parent, when the popup had it. The compositor gives the keys back to the parent when
+/// the popup's grab ends, which a Smithay compositor sees only at the next key: until then the
+/// parent stays the focused window, and the menu's button, which takes the focus back, keeps the
+/// screen reader's locus (AX7).
+pub(crate) fn keyboard_after_close<S: Copy + PartialEq>(
+    open: OpenPopup<S>,
+    keyboard: Option<S>,
+) -> Option<S> {
+    if keyboard == Some(open.surface) {
+        Some(open.parent)
+    } else {
+        keyboard
+    }
+}
+
 /// The serial a menu's xdg_popup.grab names: the press of the button held, until its release or
 /// the pointer's leave, or the key being handled, as GTK grabs with its implicit grab's serial.
 /// A menu opened with no input under way, as by an assistive technology's action, grabs nothing:
@@ -408,6 +424,33 @@ mod tests {
         );
         // Once the menu closes, the window focus returns to the surface with the keyboard.
         assert_eq!(focused_window::<u32>(None, Some(1)), Some(1));
+    }
+
+    #[test]
+    fn a_closed_popup_hands_the_keyboard_it_had_back_to_its_parent() {
+        let menu = OpenPopup {
+            surface: 2,
+            parent: 1,
+            anchor: WidgetId(5, 0),
+            menu: true,
+        };
+        assert_eq!(keyboard_after_close(menu, Some(2)), Some(1), "the popup's");
+        assert_eq!(
+            focused_window(None, keyboard_after_close(menu, Some(2))),
+            Some(1),
+            "the parent is the focused window"
+        );
+        assert_eq!(
+            keyboard_after_close(menu, Some(1)),
+            Some(1),
+            "the compositor kept the keyboard on the parent"
+        );
+        assert_eq!(
+            keyboard_after_close(menu, Some(3)),
+            Some(3),
+            "another surface"
+        );
+        assert_eq!(keyboard_after_close(menu, None), None, "no keyboard");
     }
 
     #[test]
