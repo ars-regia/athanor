@@ -1,0 +1,13 @@
+Lettore schermo attivo.
+Blocca button.
+tabulazione
+Termina sessione button.
+Sospendi button.
+tabulazione
+Riavvia button.
+tabulazione
+Spegni button.
+tabulazione
+Blocca button.
+tabulazione
+Lettore schermo disattivato.

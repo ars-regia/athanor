@@ -276,6 +276,27 @@ class CompareTest(unittest.TestCase):
         )
         self.assertEqual(failures, ["check box 'Speakers': role 'toggle button'"])
 
+    def test_a_popover_frame_named_as_its_switch_leaves_the_switch_its_toggle_button(self):
+        # The bar's Bluetooth popover is a frame named Bluetooth that holds the Bluetooth switch.
+        reference = [node("check box", "Bluetooth", ["checkable", "checked"])]
+        transcript = [
+            node("frame", "Bluetooth", ["active"]),
+            dict(node("toggle button", "Bluetooth", ["pressed"]), depth=1),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("transcript 'toggle button'", lines[0])
+
+    def test_the_airplane_switch_of_the_bar_network_page_is_a_toggle_button(self):
+        for name in ("Airplane mode", "Modalità aereo"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable"]), depth=1),
+            ]
+            lines, failures = compare.compare(reference, [node("toggle button", name)])
+            self.assertEqual((len(lines), failures), (1, []))
+
     def test_a_list_box_is_a_list(self):
         reference = [node("list", "A list", ["focusable", "showing"])]
         lines, failures = compare.compare(reference, [node("list box", "A list", ["focusable", "showing"])])
@@ -284,6 +305,19 @@ class CompareTest(unittest.TestCase):
         # A list is not another role.
         _, failures = compare.compare(reference, [node("menu", "A list", ["focusable", "showing"])])
         self.assertEqual(failures, ["list 'A list': role 'menu'"])
+
+    def test_a_checkable_menu_item_is_a_check_or_radio_menu_item(self):
+        for role in ("check menu item", "radio menu item"):
+            reference = [node("menu item", "Sort by name", ["checkable", "checked", "showing"])]
+            transcript = [node(role, "Sort by name", ["checkable", "checked", "showing"])]
+            lines, failures = compare.compare(reference, transcript)
+            self.assertEqual(failures, [])
+            self.assertIn(f"note: role '{role}'", lines[0])
+
+    def test_a_menu_item_that_is_not_checkable_is_not_a_check_menu_item(self):
+        reference = [node("menu item", "New window", ["showing"])]
+        _, failures = compare.compare(reference, [node("check menu item", "New window", ["showing"])])
+        self.assertEqual(failures, ["menu item 'New window': role 'check menu item'"])
 
     def test_the_states_of_a_row_with_no_name_are_compared(self):
         def at(depth, role, name, states):
@@ -342,6 +376,41 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(failures, ["scroll bar '': value '5.0', expected '0.0'"])
         self.assertEqual(compare.INDICATOR_PAGES, {"lists"})
 
+    def test_the_calendars_unnamed_arrows_match_the_named_buttons_at_their_place(self):
+        reference = [node("button", "Today", ["showing"])] + [
+            node("button", "", ["focusable", "sensitive", "showing"]) for _ in range(4)
+        ] + [node("label", "2026", ["showing"])]
+        names = ["Previous month", "Next month", "Previous year", "Next year"]
+        transcript = [node("button", "Today", ["showing"]), node("label", "2026", ["showing"])] + [
+            node("button", name, ["focusable", "sensitive", "showing"]) for name in names
+        ]
+        lines, failures = compare.compare(reference, transcript, arrows=True)
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            [line.split("; ")[-1] for line in lines if "named" in line],
+            [f"note: named {name!r}: {compare.ARROWS}" for name in names],
+        )
+        # A named button too few: the last arrow is missing.
+        _, failures = compare.compare(reference, transcript[:-1], arrows=True)
+        self.assertEqual(failures, ["button '': missing"])
+        # Its states are compared as any element's.
+        bare = transcript[:2] + [node("button", name, ["sensitive", "showing"]) for name in names]
+        _, failures = compare.compare(reference, bare, arrows=True)
+        self.assertEqual(failures, ["button '': state 'focusable' missing"] * 4)
+
+    def test_the_arrow_rule_holds_only_for_the_calendars_references(self):
+        reference = [node("button", "", ["showing"])]
+        transcript = [node("button", "Next month", ["showing"])]
+        self.assertEqual(compare.ARROWS_REFERENCES, {"atspi-bar-calendar", "atspi-bar-calendar-it"})
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {}
+            for name, tree in [("atspi-bar", reference), ("atspi-bar-calendar", reference), ("t", transcript)]:
+                paths[name] = Path(tmp) / f"{name}.json"
+                paths[name].write_text(json.dumps(tree), encoding="utf-8")
+            with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                self.assertEqual(compare.main([str(paths["atspi-bar"]), str(paths["t"])]), 1)
+                self.assertEqual(compare.main([str(paths["atspi-bar-calendar"]), str(paths["t"])]), 0)
+
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
         self.assertEqual(compare.compare([], REFERENCE)[1], empty)
@@ -387,6 +456,20 @@ class GalleryTest(unittest.TestCase):
             )
             _, failures = compare.gallery_problems(references, transcripts, "en")
             self.assertEqual(failures, ["lists: no difference left; remove its expected difference (#1)"])
+
+    def test_the_arrow_rule_holds_for_the_gallerys_calendar_page_only(self):
+        self.assertEqual(compare.ARROWS_PAGES, {"calendar"})
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                (Path(references) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "")])
+                )
+                (Path(transcripts) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "Next month")])
+                )
+            _, failures = compare.gallery_problems(references, transcripts, "en")
+            pages = [page for page in compare.GALLERY_PAGES if page != "calendar"]
+            self.assertEqual(failures, [f"{page}: button '': missing" for page in pages])
 
     def test_an_expected_difference_of_no_page_fails(self):
         stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}

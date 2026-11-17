@@ -1,0 +1,15 @@
+Lettore schermo attivo.
+Wi-Fi casella di spunta spuntata.
+tabulazione
+Athanor Lab, connessa button.
+tabulazione
+Corner Café button.
+tabulazione
+Home Network, protetta button.
+tabulazione
+Office VPN casella di spunta non spuntata.
+tabulazione
+Modalità aereo casella di spunta non spuntata.
+tabulazione
+Wi-Fi casella di spunta spuntata.
+Lettore schermo disattivato.
