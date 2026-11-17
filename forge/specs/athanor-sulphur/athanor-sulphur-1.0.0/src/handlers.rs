@@ -1149,9 +1149,9 @@ impl State {
     }
 
     /// Whether `root`, a popup's root, can keep the keyboard a closing popup hands back: its
-    /// interactivity takes it, it shows a buffer, it is in the space, not minimised, parked or
-    /// refused, and no other surface holds the keyboard exclusively. A window drawing nothing
-    /// shows no buffer.
+    /// interactivity takes it, it shows a buffer, it has a place in the space, and no other
+    /// surface holds the keyboard exclusively. A window drawing nothing shows no buffer; a
+    /// minimised or parked window, which leaves the space, has no place.
     fn keeps_keyboard(&self, root: &WlSurface) -> bool {
         self.takes_keyboard(root)
             && mapped(root)

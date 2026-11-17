@@ -12105,6 +12105,19 @@ fn assert_refocused(run: &mut Running) {
     assert_eq!(keyboard_focus(run), focus, "where refocus puts it");
 }
 
+/// Puts the keyboard straight on `popup`, with no grab, as after something that took it from
+/// the popup and ended its grab, so that the popup's destruction reaches `popup_destroyed` with
+/// the keyboard on it.
+fn give_back_to_popup(run: &mut Running, popup: Option<WlSurface>) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    keyboard.set_focus(&mut run.state, popup.clone(), SERIAL_COUNTER.next_serial());
+    assert_eq!(
+        keyboard_focus(run),
+        popup,
+        "the popup has the keyboard again"
+    );
+}
+
 /// Two nested popups of a layer surface, each grabbed: the inner one, closed, hands the keyboard
 /// at once to the outer one, the popup grab's current popup, and not to the layer surface
 /// (decision 30, amended on 2026-11-17; #1217).
@@ -12379,15 +12392,17 @@ fn window_popup(
     (local, window, window_surface, menu, popup)
 }
 
-/// A window minimised while its popup holds the keyboard, which dismisses the popup, and the
-/// popup then destroyed by its client: the keyboard is where `refocus` puts a destroyed window's,
-/// not on the window the user cannot see (decision 30, amended on 2026-11-17; #1217).
+/// A window minimised while its popup holds the keyboard, which dismisses the popup and ends its
+/// grab, the keyboard put back on the popup, and the popup then destroyed by its client: the
+/// keyboard is where `refocus` puts a destroyed window's, not on the window the user cannot see,
+/// which minimising took out of the space (decision 30, amended on 2026-11-17; #1217).
 #[test]
 fn a_closed_popup_of_a_window_not_shown_leaves_it_the_keyboard() {
     let mut run = Running::start(None);
     let (mut local, window, window_surface, _menu, popup) = window_popup(&mut run);
     let held = keyboard_focus(&run);
     assert!(run.state.minimise(&window), "the window is minimised");
+    give_back_to_popup(&mut run, held.clone());
 
     close_popup(&mut run, &mut local, popup);
 
@@ -12460,14 +12475,15 @@ fn a_closed_popup_of_a_window_out_of_the_space_hands_the_keyboard_on() {
 }
 
 /// A surface that holds the keyboard exclusively, mapped while a dock's popup holds it, takes
-/// the keyboard and ends the popup's grab; the popup, closed by its client after, leaves the
-/// keyboard on that surface and does not hand it to the dock (decision 30, amended on
-/// 2026-11-17; #1217).
+/// the keyboard and ends the popup's grab; with the keyboard put back on the popup, the popup,
+/// closed by its client, leaves the keyboard on that surface and does not hand it to the dock
+/// (decision 30, amended on 2026-11-17; #1217).
 #[test]
 fn a_closed_popup_leaves_the_keyboard_on_a_surface_that_holds_it_exclusively() {
     use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::Exclusive};
     let mut run = Running::start(None);
     let (_window, mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
     let (_launcher, launcher_surface, _) = top_surface_on(
         &mut run,
         "launcher",
@@ -12480,6 +12496,7 @@ fn a_closed_popup_leaves_the_keyboard_on_a_surface_that_holds_it_exclusively() {
         Some(&launcher_surface),
         "the exclusive surface takes the keyboard"
     );
+    give_back_to_popup(&mut run, held);
 
     close_popup(&mut run, &mut dock, popup);
 
