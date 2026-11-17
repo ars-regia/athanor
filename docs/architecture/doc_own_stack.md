@@ -1529,9 +1529,12 @@ compositor and that the own compositor did not yet offer:
           the keyboard aids (AX11) never see it. An injected protected key of decision 30,
           Super+Escape, the reveal key Super+Alt+T and Ctrl+Alt+Tab among them, is dropped,
           its press and its release: it reaches neither the compositor nor any client. An
-          injected key cancels a pending tap of Super, as a hardware key and an injected button
-          or touch do, so a physical Super released after it opens no launcher; the injected
-          key still reaches only the client (maintainer decision, 2026-11-17);
+          injected key that reaches a client cancels a pending tap of Super, as a hardware key
+          and an injected button or touch do, so a physical Super released after it opens no
+          launcher; the injected key still reaches only the client. A dropped key, a key held
+          by the seat or another context, and any key while the session is locked or its
+          input paused reach no client and cancel nothing, as for an injected button
+          (maintainer decisions, 2026-11-17);
         - its own state. Injected keys take their own path to the focused client, not the
           virtual keyboard's path through `aided` and `typed`, and each EIS context keeps its
           own modifier and xkb state, separate from the seat's physical state. An injected
