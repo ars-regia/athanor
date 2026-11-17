@@ -1453,7 +1453,8 @@ compositor and that the own compositor did not yet offer:
           refused. A `device_types` of 0, or with a bit other than 1, 2 and 4, makes
           `ConnectToEIS` fail with `InvalidArgs`, and nothing is created for it. The
           compositor claims `os.athanor.Eis` at its start; who owns the name is checked by the
-          backend, not by the compositor (`doc_portal.md` PT15);
+          backend, not by the compositor: the owner's process must lie in the cgroup of
+          `athanor-sulphur.service` and run `/usr/bin/athanor-sulphur` (`doc_portal.md` PT15);
         - the admission, at every call, as the keyboard monitor's (OS4,
           `keyboard_monitor.rs`): the caller is the current owner of
           `org.freedesktop.impl.portal.desktop.athanor`; its process, read through the pidfd
