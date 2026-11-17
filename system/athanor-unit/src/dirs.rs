@@ -92,8 +92,21 @@ pub fn private_dir(runtime: &Path, name: &str) -> io::Result<Checked> {
 /// opened without following a link: a link in an intermediate component is still followed,
 /// and the walk that refuses one is #1061.
 pub fn owned_dir(path: &Path) -> io::Result<Checked> {
+    checked_dir(path, true)
+}
+
+/// `owned_dir` for a directory only the process's own user may own, root included: what a
+/// grant needs when the path may be reached through a link the user's files hold (a dotfiles
+/// tree), so that a root-owned directory is never granted. The owner is read from the same
+/// descriptor the grant names.
+pub fn own_dir(path: &Path) -> io::Result<Checked> {
+    checked_dir(path, false)
+}
+
+fn checked_dir(path: &Path, root_ok: bool) -> io::Result<Checked> {
     let (opened, found) = not_a_link(path, OFlag::O_DIRECTORY)?;
-    if found.uid() != 0 && found.uid() != nix::unistd::geteuid().as_raw() {
+    let owner = found.uid();
+    if owner != nix::unistd::geteuid().as_raw() && !(root_ok && owner == 0) {
         return Err(refused(path, "is owned by another user"));
     }
     Ok(Checked(opened.into()))
@@ -282,6 +295,22 @@ mod tests {
         .join()
         .expect("the confined thread");
         assert!(!runtime.join("elsewhere/file").exists());
+        fs::remove_dir_all(&runtime).expect("cleanup");
+    }
+
+    #[test]
+    fn an_own_dir_refuses_a_directory_of_root() {
+        // "/" must be root's and not ours: not so when the suite runs as root, nor in a user
+        // namespace that does not map root, where "/" reads as the overflow id.
+        if nix::unistd::geteuid().is_root() || fs::metadata("/").map(|m| m.uid()).ok() != Some(0) {
+            return;
+        }
+        owned_dir(Path::new("/")).expect("root's directory passes owned_dir");
+        let error = own_dir(Path::new("/")).expect_err("root's directory");
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(error.to_string().starts_with("/ is owned by another user"));
+        let runtime = runtime("own");
+        own_dir(&runtime).expect("a directory of the user's");
         fs::remove_dir_all(&runtime).expect("cleanup");
     }
 

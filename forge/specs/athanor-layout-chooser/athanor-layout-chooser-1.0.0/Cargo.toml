@@ -11,7 +11,8 @@ athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
 athanor-sal = { path = "../../../../system/athanor-sal" }
 athanor-style = { path = "../../../../system/athanor-style", default-features = false }
-landlock = { workspace = true }
+# Landlock by checked descriptors (`dirs`, `sandbox`); without the bus-caller feature it adds no zbus.
+athanor-unit = { path = "../../../../system/athanor-unit" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # The zbus the toolkit's AT-SPI bridge, accesskit_unix, already runs on its own executor, with

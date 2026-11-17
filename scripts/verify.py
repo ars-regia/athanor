@@ -4038,10 +4038,10 @@ def check_gpu_grants():
 # landlock::PathFd opens a path following links, and a ruleset can name any descriptor: a
 # write grant built from either widens to wherever a link put at the path points (#1052).
 # athanor_unit::sandbox takes its write grants as dirs::Checked, which only athanor_unit::dirs
-# builds. This check holds the rest: no crate but athanor-unit and the pending ones depends on
-# the landlock crate, so every other one confines through athanor_unit::sandbox; no Rust file
-# outside those crates' rulesets names PathFd, under any name a `use ... as` gives it; and in
-# athanor_unit's sandbox.rs, PathFd appears only in its import and as the parent of a read grant.
+# builds. This check holds the rest: no crate but athanor-unit depends on the landlock crate,
+# so every other one confines through athanor_unit::sandbox; no other Rust file names PathFd,
+# under any name a `use ... as` gives it; and in athanor_unit's sandbox.rs, PathFd appears only
+# in its import and as the parent of a read grant.
 LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
 LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
@@ -4055,15 +4055,6 @@ PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
 SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
 SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
 SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
-# Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
-# user namespace where the system's nodes are owned by nobody, and the chooser grants the
-# target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
-# moving them is their own change (#1059). The list only shrinks.
-LANDLOCK_PATH_PENDING = (
-    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
-    "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
-)
-LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
 
 
 def landlock_dependencies(manifest):
@@ -4120,9 +4111,9 @@ def sandbox_grant_problems(relative, code, read_grants):
 
 
 def landlock_fd_problems(root):
-    """No crate but athanor-unit and the pending ones depends on landlock; no Rust file but
-    their rulesets names PathFd; athanor_unit's sandbox.rs names it only in its import and as
-    the parent of a read grant. So a Landlock write grant is never built from a path."""
+    """No crate but athanor-unit depends on landlock; no Rust file names PathFd but
+    athanor_unit's sandbox.rs, and that only in its import and as the parent of a read grant.
+    So a Landlock write grant is never built from a path."""
     root = Path(root)
     problems = []
     # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
@@ -4135,7 +4126,7 @@ def landlock_fd_problems(root):
     files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
     for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
         path = root / relative
-        if relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+        if relative == LANDLOCK_CRATE:
             continue
         try:
             manifest = tomllib.loads(read(path))
@@ -4147,8 +4138,6 @@ def landlock_fd_problems(root):
                             f"athanor_unit::sandbox, whose grants are dirs::Checked")
     for relative in (name for name in files if name.endswith(".rs")):
         path = root / relative
-        if relative in LANDLOCK_PATH_PENDING:
-            continue
         text = read(path)
         allowed = []
         if relative == LANDLOCK_SANDBOX:

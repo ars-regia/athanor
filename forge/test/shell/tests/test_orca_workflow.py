@@ -13,15 +13,24 @@ WORKFLOW = ROOT / ".github/workflows/shell-surfaces.yml"
 STEP = re.compile(r"bash forge/test/shell/rig\.sh orca ([a-z-]+)( it)?")
 
 
+MATRIX = re.compile(r'"\$\{\{ matrix\.([a-z]+) \}\}"')
+
+
 def compared(workflow):
     """The transcripts the workflow's steps compare, by file name: `rig.sh orca <surface> [it]`
-    compares golden/orca/orca-<surface>[-it].txt."""
+    compares golden/orca/orca-<surface>[-it].txt; a surface `"${{ matrix.<key> }}"` stands for
+    each value of the job's matrix key."""
     names = set()
     for job in workflow["jobs"].values():
+        matrix = job.get("strategy", {}).get("matrix", {})
         for step in job.get("steps", []):
-            match = STEP.fullmatch(step.get("run", "").strip())
-            if match:
-                names.add(f"orca-{match[1]}{'-it' if match[2] else ''}.txt")
+            run = step.get("run", "").strip()
+            key = MATRIX.search(run)
+            runs = [MATRIX.sub(value, run) for value in matrix[key[1]]] if key else [run]
+            for run in runs:
+                match = STEP.fullmatch(run)
+                if match:
+                    names.add(f"orca-{match[1]}{'-it' if match[2] else ''}.txt")
     return names
 
 
