@@ -86,7 +86,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - #2778 and #1968 were found by search on 2026-10-05; their pages were not read.
 - **Locale data on the image** (checked on 2026-10-05, glibc 2.42-16.fc43).
   - `glibc-all-langpacks` is installed with an installed size of 237,950,035 bytes. `localedef --list-archive` lists 887 locales.
-  - `system/Containerfile:255` keeps glibc-all-langpacks deliberately.
+  - `system/Containerfile:408` keeps glibc-all-langpacks deliberately.
   - `forge/config/packages.json:104-105` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
   - `/usr/share/locale` holds 699 language directories (335 MB), because Fedora keeps translations inside the main packages (`%_install_langs` is `all`).
   - composefs is enabled (`/usr/lib/ostree/prepare-root.conf`), so the two identical locale archives (`locale-archive` and `locale-archive.real`, 233,242,544 bytes each, same sha256) are stored once.
@@ -111,7 +111,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     | my                      | Padauk                          |
     | el / ru / vi            | Noto Sans                       |
 
-  - The shell test rig installs Inter and two Noto families but not `adwaita-sans-fonts` (`forge/test/shell/Containerfile:17`).
+  - The shell test rig installs Inter and two Noto families but not `adwaita-sans-fonts` (`forge/test/shell/Containerfile:54`).
 - **Accounts and region** (checked on 2026-10-05).
   - AccountsService 23.13.9 stores a user's language as `Language` (one locale) and `Languages` (an ordered list), set through `SetLanguage` and `SetLanguages`. It has no property for formats.
   - GNOME stores the region in the GSettings key `org.gnome.system.locale region`. At login gnome-session sets `LC_NUMERIC`, `LC_TIME`, `LC_MONETARY`, `LC_PAPER`, `LC_ADDRESS`, `LC_TELEPHONE` and `LC_MEASUREMENT` to it, and leaves them unset when the region equals `LANG` (gnome-session `leader-main.c:129-158`, main at d3c610c1, 2026-09-20).
@@ -163,7 +163,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 **LN4. Languages and locale data in the image.**
 
 - **Our catalogs** ship for Italian and English (SH13, SW14). The test rig adds German and the right-to-left pseudo-locale, which never ship.
-- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:255`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
+- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:408`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
   - No locale is generated at first boot, and `/etc` holds no locale archive, so every locale a user picks works on the immutable image without a rebuild.
 - **Translations of third-party packages** stay as Fedora ships them: all languages, inside each package.
 - **Spell-checking dictionaries** ship for each shipped language: `hunspell-en` is already installed, and `hunspell-it` (1,441,631 bytes) is added. Other dictionaries come from Software as described in LN15.
