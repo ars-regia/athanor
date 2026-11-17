@@ -576,35 +576,111 @@ fn eis_closing_a_context_releases_its_input_alone() {
     run.stop();
 }
 
+/// The backend's name changing owner ends every context: each releases its keys, and each
+/// application reads end of stream.
+#[test]
+fn eis_closing_every_context() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+    let mut other = Ei::sender(&mut run, "/session/2", 1, 1);
+    ei.key(&mut run, KEY_A, true);
+    other.key(&mut run, KEY_C, true);
+    run.state.eis_apply(Update::CloseAll);
+    window.roundtrip(&mut run);
+    let mut released = window.client.released.clone();
+    released.sort_unstable();
+    assert_eq!(released, [KEY_A, KEY_C], "every context's key is released");
+    assert_eq!(run.state.eis.open(), 0);
+    ei.pump(&mut run, "the application reads end of stream", |ei| {
+        ei.ended
+    });
+    other.pump(&mut run, "the other too", |ei| ei.ended);
+    run.stop();
+}
+
+/// A change of the seat's keymap releases what each context holds and gives its keyboard the
+/// new keymap again: the session goes on, and its keys still reach the window.
+#[test]
+fn eis_keymap_change_keeps_the_session() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+    ei.key(&mut run, KEY_A, true);
+    let settings = crate::xkb_config::Settings {
+        rules: String::new(),
+        model: String::new(),
+        layout: "it".into(),
+        variant: String::new(),
+        options: None,
+        repeat_delay: 600,
+        repeat_rate: 25,
+    };
+    run.state.eis_keymap_changed(&settings);
+    window.roundtrip(&mut run);
+    assert_eq!(window.client.released, [KEY_A], "the held key is released");
+    ei.pump(&mut run, "the keyboard is offered again", |ei| {
+        ei.resumed == 2
+    });
+    ei.sync(&mut run);
+    assert_eq!(ei.devices.len(), 1, "one keyboard, the old one removed");
+    assert_eq!(run.state.eis.open(), 1, "the session goes on");
+    ei.key(&mut run, KEY_A, false);
+    ei.keys(&mut run, &[KEY_C]);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.keys,
+        [KEY_A, KEY_C],
+        "and its keys still reach the window"
+    );
+    assert_eq!(
+        window.client.released,
+        [KEY_A, KEY_C],
+        "a stale release is dropped"
+    );
+    run.stop();
+}
+
 /// A context is offered the granted devices alone and never a text device; a receiver context
 /// is refused and leaves nothing behind.
 #[test]
 fn eis_offers_the_granted_devices_alone() {
+    use DeviceCapability::{Keyboard, Pointer, PointerAbsolute, Text, Touch};
     let mut run = Running::start(None);
-    let ei = Ei::sender(&mut run, "/session/1", 1, 1);
-    let keyboard = &ei.devices;
-    assert!(keyboard
-        .iter()
-        .all(|device| device.has_capability(DeviceCapability::Keyboard)));
-    let ei = Ei::sender(&mut run, "/session/2", 2, 2);
-    for capability in [
-        DeviceCapability::Keyboard,
-        DeviceCapability::Touch,
-        DeviceCapability::Text,
-    ] {
-        assert!(
-            !ei.devices
-                .iter()
-                .any(|device| device.has_capability(capability)),
-            "a pointer context has no {capability:?} device"
-        );
-    }
-    let ei = Ei::sender(&mut run, "/session/3", 4, 1);
-    assert!(ei
-        .devices
-        .iter()
-        .all(|device| device.has_capability(DeviceCapability::Touch)));
-    assert_eq!(run.state.eis.open(), 3);
+    // Each device's kinds, once every device the compositor offers has arrived.
+    let offered = |run: &mut Running, handle: &str, types: u32, devices: usize| {
+        let mut ei = Ei::sender(run, handle, types, devices);
+        ei.sync(run);
+        let mut kinds: Vec<Vec<DeviceCapability>> = ei
+            .devices
+            .iter()
+            .map(|device| {
+                [Keyboard, Pointer, PointerAbsolute, Touch, Text]
+                    .into_iter()
+                    .filter(|kind| device.has_capability(*kind))
+                    .collect()
+            })
+            .collect();
+        kinds.sort_by_key(|kind| format!("{kind:?}"));
+        kinds
+    };
+    assert_eq!(offered(&mut run, "/session/1", 1, 1), [vec![Keyboard]]);
+    assert_eq!(
+        offered(&mut run, "/session/2", 2, 2),
+        [vec![PointerAbsolute], vec![Pointer]]
+    );
+    assert_eq!(offered(&mut run, "/session/3", 4, 1), [vec![Touch]]);
+    assert_eq!(
+        offered(&mut run, "/session/5", 7, 4),
+        [
+            vec![Keyboard],
+            vec![PointerAbsolute],
+            vec![Pointer],
+            vec![Touch]
+        ]
+    );
+    // Each application above has gone, and so has its context; this one stays.
+    let _kept = Ei::sender(&mut run, "/session/6", 1, 1);
 
     let mut receiver = Ei::open(
         &mut run,
@@ -613,9 +689,10 @@ fn eis_offers_the_granted_devices_alone() {
         ei::handshake::ContextType::Receiver,
     );
     receiver.pump(&mut run, "a receiver is disconnected", |ei| ei.ended);
-    run.until("the receiver's context is gone", |state| {
-        state.eis.open() == 3
-    });
+    run.until(
+        "the receiver's context and the gone ones are ended",
+        |state| state.eis.open() == 1,
+    );
     run.stop();
 }
 
@@ -958,6 +1035,15 @@ fn eis_on_the_bus_serves_the_backend_alone() {
     assert!(
         connect_to_eis(&backend, "/session/1", 1).is_ok(),
         "the handle is free again"
+    );
+    assert!(matches!(
+        updates.recv_timeout(WAIT),
+        Ok(Update::Open { .. })
+    ));
+    zbus::block_on(backend.release_name(BACKEND)).expect("the backend lets its name go");
+    assert!(
+        matches!(updates.recv_timeout(WAIT), Ok(Update::CloseAll)),
+        "the backend's name changing owner ends its contexts"
     );
 
     let second = serve(bus.builder(), &bus.connect(), &BACKEND_PROCESS, &|_| Ok(()));
