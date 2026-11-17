@@ -565,7 +565,7 @@ impl Keys {
 /// Whether injected input is delivered: neither from the lock request to the unlock nor while
 /// the session is paused on another virtual terminal, as `drops_virtual_input` has it for the
 /// virtual keyboard. An event sent then is dropped, not queued.
-fn delivers(locked: bool, paused: bool) -> bool {
+pub(crate) fn delivers(locked: bool, paused: bool) -> bool {
     !locked && !paused
 }
 
@@ -611,6 +611,12 @@ pub(crate) struct Eis {
 impl Eis {
     pub(crate) fn injecting(&self) -> bool {
         self.injecting
+    }
+
+    /// How many contexts are open.
+    #[cfg(test)]
+    pub(crate) fn open(&self) -> usize {
+        self.contexts.len()
     }
 
     /// A button reached the seat (`State::button_input`).
