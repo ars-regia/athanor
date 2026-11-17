@@ -5967,6 +5967,73 @@ def check_agent_docs():
 
 
 # --------------------------------------------------------------------------- #
+# line-citations: a `path:N` in an architecture document still names what the sentence names
+# --------------------------------------------------------------------------- #
+
+# `dir/file.ext:N` or `:N-M`; a bare file name is relative to a crate the sentence names, so it is
+# not read.
+LINE_CITATION = re.compile(r"`([\w.+-]+(?:/[\w.+-]+)+):(\d+)(?:-(\d+))?`")
+# What a sentence names in code: a backticked identifier, or a bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_]\w*(?:::\w+)*(?=`)|(?<![\w`/.])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`])")
+
+# Findings the heuristic cannot settle, each by "doc.md:line" with the reason; the list only shrinks.
+LINE_CITATIONS_KEPT = {
+    # The token is the protocol name; the cited line binds it through its Rust type.
+    "doc_notification_center.md:19": "binds ZcosmicToplevelInfoV1",
+    # The token is a trait method; the cited line calls it as `.output(`.
+    "doc_osd.md:301": "calls Application::output as .output(",
+    # greenboot-rs left upstream_core; the sentence needs rewording, not a new number (#1089).
+    "doc_recovery.md:32": "greenboot-rs is in custom_packages and custom_tier2",
+}
+
+
+def citation_problems(doc, text, read_file):
+    """A citation `path:N[-M]` of the document's `text` whose sentence names a code token that the
+    cited file holds, but not in the cited lines. `read_file(path)` is the file's text, None when it
+    is no tracked file (a citation of such a path is not read). The token is the nearest one
+    before the citation, in the same sentence (after the last `. `, `; `, `: `, `), ` or ` | `).
+
+    Limit: a sentence with no such token, or whose token the file does not hold, is not checked, and
+    neither is a citation that names a wrong place holding the token (#1089)."""
+    out = []
+    for number, line in enumerate(text.split("\n"), 1):
+        for m in LINE_CITATION.finditer(line):
+            body = read_file(m.group(1))
+            if body is None:
+                continue
+            start = max(line.rfind(sep, 0, m.start()) for sep in (". ", "; ", ": ", "), ", " | "))
+            tokens = [t for t in CITED_TOKEN.findall(line[start + 1:m.start()]) if t in body]
+            first, last = int(m.group(2)), int(m.group(3) or m.group(2))
+            lines = f"{first}-{last}" if last != first else str(first)
+            if tokens and tokens[-1] not in "\n".join(body.split("\n")[first - 1:last]):
+                out.append(f"{doc}:{number}: `{m.group(1)}:{lines}` does not hold `{tokens[-1]}`, "
+                           "which its sentence names: the lines moved")
+    return out
+
+
+@check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
+def check_line_citations():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = {f for f in listed.stdout.split("\0") if f}
+
+    def read_file(path):
+        try:
+            return read(ROOT / path) if path in tracked else None
+        except OSError:
+            return None
+
+    for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
+        for problem in citation_problems(rel(doc), read(doc), read_file):
+            if problem.split(": ")[0].removeprefix("docs/architecture/") not in LINE_CITATIONS_KEPT:
+                r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
