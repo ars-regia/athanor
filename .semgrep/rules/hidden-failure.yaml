@@ -44,11 +44,3 @@ rules:
       # normal case, and the function returns with nothing to export (the greeter's start path,
       # which AGENTS.md reserves to the maintainer).
       - pattern-not-regex: '\[ -r "\$file" \] \|\| return 0'
-      # Not fixed here: lines of the signing, key and MOK scripts, which AGENTS.md reserves to
-      # the maintainer ("Stop and ask before editing"): the test MOK of azoth/boot.sh and
-      # azoth/signer/run.sh, cert_field() of azoth/sign-kernel.sh, the test vector keys of
-      # athanor-update, and verify_gpg() of azoth/build.sh. Each waits for that decision.
-      - pattern-not-regex: "-subj '/CN=Athanor OS K3 test MOK/' -keyout \\S+ -out \\S+ 2> /dev/null"
-      - pattern-not-regex: 'openssl x509 -in "\$1" -noout "-\$2" -nameopt RFC2253 2> /dev/null'
-      - pattern-not-regex: 'openssl ec -in \S+ -pubout -out \S+ 2> /dev/null'
-      - pattern-not-regex: 'gpg --homedir "\$home" --batch --status-fd 1 --verify "\$2" "\$3" 2>/dev/null'

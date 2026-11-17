@@ -145,7 +145,7 @@ echo "initramfs: $(du -sh "$R" | cut -f1) uncompressed, $(du -h "$WORK/initramfs
 step "UKI signed with an ephemeral MOK, enrolled in the OVMF varstore"
 # The Secure Boot profile of the project key: the MOK the matrix enrols has its shape.
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -config "$HERE/keys/profiles/secureboot.cnf" \
-  -subj '/CN=Athanor OS K3 test MOK/' -keyout "$WORK/mok.key" -out "$OUT/mok.pem" 2> /dev/null
+  -subj '/CN=Athanor OS K3 test MOK/' -keyout "$WORK/mok.key" -out "$OUT/mok.pem"
 ukify build --linux "$VMLINUZ" --initrd "$WORK/initramfs.img" --uname "$KVER" \
   --cmdline "$UEFI_CMDLINE" --stub /usr/lib/systemd/boot/efi/linuxx64.efi.stub \
   --signtool sbsign --secureboot-private-key "$WORK/mok.key" --secureboot-certificate "$OUT/mok.pem" \
