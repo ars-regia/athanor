@@ -42,8 +42,9 @@ class EveryTranscriptHasAStep(unittest.TestCase):
 
 class SulphurWalksRunUnderSulphur(unittest.TestCase):
     # The dock's and the launcher's references are athanor-sulphur's transcripts, the default
-    # session of 1.0 (ADR-0135): under cosmic-comp the launcher is never activated (#751) and
-    # 1.11 does not speak the dock's Shift+F10 menu.
+    # session of 1.0 (ADR-0135): cosmic-comp never activated the GTK launcher the reference was
+    # recorded from (#751; athanor-sal's is activated), and 1.11 does not speak the dock's
+    # Shift+F10 menu.
     def test_dock_and_launcher_steps_set_the_compositor_and_always_run(self):
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         found = []
