@@ -1241,4 +1241,24 @@ mod tests {
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
     }
+
+    #[test]
+    fn vpns_in_another_order_or_with_another_name_rebuild_the_rows() {
+        let office = vpn("Office VPN", None);
+        let home = vpn("Home VPN", None);
+        let (mut page, _received, mut ui) =
+            page(state(vec![], vec![home.clone(), office.clone()]));
+        page.service
+            .state
+            .replace(Some(state(vec![], vec![office.clone(), home.clone()])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild, "the same VPNs in another order");
+        let renamed = Vpn {
+            label: "Office".to_owned(),
+            ..office
+        };
+        page.service.state.replace(Some(state(vec![], vec![home, renamed])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild, "a VPN renamed in place");
+    }
 }

@@ -220,21 +220,16 @@ def print_tree(app, Atspi):
 
 
 def press(app, Atspi, name):
-    """Presses the first showing button called `name`; one destroyed before the press is
-    looked up again."""
-    exact = re.compile(f"^{re.escape(name)}$")
-
-    def find_and_press():
-        found = matching_buttons(app, Atspi, exact)
-        if found:
-            found[0].do_action(0)
-        return bool(found)
-
-    if afresh(find_and_press):
-        return True
-    print(f"no showing button named {name!r}; tree:", file=sys.stderr)
-    print_tree(app, Atspi)
-    return False
+    """Presses the first showing button called `name`. Only the lookup walks again: an error
+    of the press itself is raised, since the application may have acted on it already, and a
+    second press would undo a toggle."""
+    found = buttons(app, Atspi, name)
+    if not found:
+        print(f"no showing button named {name!r}; tree:", file=sys.stderr)
+        print_tree(app, Atspi)
+        return False
+    found[0].do_action(0)
+    return True
 
 
 def confirm_button(app, Atspi, name):

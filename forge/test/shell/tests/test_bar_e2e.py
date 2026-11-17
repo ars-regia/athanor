@@ -4,6 +4,7 @@
 import contextlib
 import io
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -82,6 +83,31 @@ class AfreshTest(unittest.TestCase):
         with self.assertRaises(GLib.Error):
             bar_e2e.afresh(read)
         self.assertEqual(len(calls), 1)
+
+    def test_a_press_that_fails_is_raised_not_pressed_again(self, _sleep):
+        presses = []
+
+        class Button:
+            def get_role_name(self):
+                return "button"
+
+            def get_name(self):
+                return "Network"
+
+            def get_state_set(self):
+                return types.SimpleNamespace(contains=lambda state: True)
+
+            def get_child_count(self):
+                return 0
+
+            def do_action(self, index):
+                presses.append(index)
+                raise gerror("atspi_error", "Unknown object '/org/a11y/atspi/accessible/9/2'")
+
+        atspi = types.SimpleNamespace(StateType=types.SimpleNamespace(SHOWING=1))
+        with self.assertRaises(GLib.Error):
+            bar_e2e.press(Button(), atspi, "Network")
+        self.assertEqual(presses, [0])
 
 
 if __name__ == "__main__":
