@@ -1517,7 +1517,10 @@ compositor and that the own compositor did not yet offer:
           injected press of a key the seat or another context holds is dropped, its release
           included, since the client keeps one set of held keys: it never sees a second press
           without a release between, and one source's release never lets the key go for the
-          other (maintainer decision, 2026-11-17);
+          other. The physical input wins the other way: a physical press of a key or button a
+          context holds first sends the client the release of the held one, which that context
+          then counts as let go and whose later release is dropped, and then the press
+          (maintainer decisions, 2026-11-17);
         - the lock and the paused session. From the lock request on (decision 36) until the
           unlock, and while the session is paused on another virtual terminal until its
           resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
@@ -1597,7 +1600,9 @@ compositor and that the own compositor did not yet offer:
             request, and at a pause, are released, the touch with `wl_touch.cancel`; two
             contexts that hold input with the same device id are tracked apart; an injected
             press of a key the seat or another context holds reaches no client, nor does its
-            release, and the other source's release still reaches it;
+            release, and the other source's release still reaches it; a physical press of a key
+            or button a context holds reaches the client after the release of the held one, and
+            that context's later release reaches no client;
           - the device types: a context granted the keyboard alone is offered no pointer or
             touch device and is refused one it asks for, and likewise for each other granted
             set; each portal type yields the capabilities of the mapping above and no text
