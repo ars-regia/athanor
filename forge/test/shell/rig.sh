@@ -9,7 +9,7 @@
 #   rig.sh publish-image    push the rig stage and print its digest (needs a registry login)
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
-#   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp
+#   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp (a build of the spec needs cosign on PATH, which verifies the builder)
 #                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
@@ -176,9 +176,10 @@ build_spec_rig() {
     # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
     idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
-    builder=$registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp")
-    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp"; then
-        echo "rig.sh: $builder, the builder of this checkout, is not published, so forge/specs/cosmic-comp" \
+    # The digest check_idempotency.sh verified, never the tag again: the tag can move after it.
+    builder=$(sed -n 's/^IMAGE=//p' <<< "$idemp")
+    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp" || [ -z "$builder" ]; then
+        echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
             "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
         exit 1
     fi
@@ -195,9 +196,11 @@ build_spec_rig() {
     cp "$rpm" "$ctx/cosmic-comp.rpm"
     # rpm -U, not dnf: no repository is read, and a requirement the rig lacks fails the install.
     # --oldpackage: a spec may also name an older build than the rig's. A bind mount, so the RPM
-    # itself stays out of the image's layers.
+    # itself stays out of the image's layers. --nosignature: the RPM was built a few lines above,
+    # in this run, and the forge signs only what it publishes; from Fedora 45, rpm 6 refuses an
+    # unsigned package by default (%_pkgverify_level all). Its digests are still checked.
     printf '%s\n' "FROM $base" \
-        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage /tmp/cosmic-comp.rpm' \
+        'RUN --mount=type=bind,source=cosmic-comp.rpm,target=/tmp/cosmic-comp.rpm rpm -U --oldpackage --nosignature /tmp/cosmic-comp.rpm' \
         > "$ctx/Containerfile"
     podman build --network=none --pull=never --iidfile "$ctx/iid" -t "$local_image:cosmic-comp-spec" \
         -f "$ctx/Containerfile" "$ctx"
@@ -966,6 +969,8 @@ compositor-globals)
     standard+=(ext_background_effect_manager_v1)
     # Decision 36.
     standard+=(wp_content_type_manager_v1 xdg_toplevel_tag_manager_v1)
+    # Decision 33, wave 2b.
+    standard+=(wp_tearing_control_manager_v1)
     standard+=(xdg_wm_dialog_v1 wp_pointer_warp_v1 xdg_system_bell_v1)
     if grep -q 'explicit sync: none, Pixman draws without a render node' "$out/compositor-globals-compositor.log"; then
         dmabuf="no linux-dmabuf nor wl_drm, as Pixman draws without a render node"

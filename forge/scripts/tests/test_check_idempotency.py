@@ -9,7 +9,8 @@ import subprocess
 import tempfile
 import unittest
 
-from signed_registry import TRUSTED, WORKFLOWS, signed_registry_env, stub_cosign, stub_skopeo
+from signed_registry import (BUILDER_TRUSTED, DIGEST, TRUSTED, WORKFLOWS, signed_registry_env, stub_cosign,
+                             stub_skopeo)
 
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "check_idempotency.sh"
 
@@ -197,6 +198,70 @@ class PackageCacheHitTest(unittest.TestCase):
     def test_a_verification_that_cannot_be_answered_fails_the_check(self):
         (self.root / "cosign_error").write_text("")
         result = self.check(TRUSTED)
+        self.assertNotEqual(0, result.returncode)
+        self.assertNotIn("CACHE_HIT=", result.stdout)
+
+
+class BuilderCacheHitTest(BuilderHashTest):
+    """The builder's tag is a hit only when a trusted run of call-build-builder.yml signed the
+    digest it names, and the hit names that digest (issue #1205); otherwise it is rebuilt."""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "bin").mkdir()
+        stub_skopeo(self.root / "bin")
+        stub_cosign(self.root / "bin")
+
+    def check(self, signer):
+        if signer:
+            (self.root / "signer").write_text(signer)
+        return subprocess.run(
+            ["bash", SCRIPT, "--package", "builder", "--registry", "ghcr.io", "--owner", "owner",
+             "--image-name", "athanor-builder"],
+            cwd=self.forge, capture_output=True, text=True,
+            env=signed_registry_env(self.root / "bin", self.root),
+        )
+
+    def test_a_signed_builder_is_a_hit_by_its_digest(self):
+        result = self.check(BUILDER_TRUSTED)
+        self.assertEqual(0, result.returncode, result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertIn("CACHE_HIT=true", lines)
+        self.assertIn(f"IMAGE=ghcr.io/owner/athanor-builder@{DIGEST}", lines)
+        self.assertIn("call-build-builder\\.yml", (self.root / "cosign.log").read_text())
+
+    def test_an_unsigned_or_foreign_builder_is_a_miss_and_an_error(self):
+        for signer in (None, TRUSTED, WORKFLOWS + "call-build-builder.yml@refs/heads/feature"):
+            with self.subTest(signer=signer):
+                (self.root / "signer").unlink(missing_ok=True)
+                result = self.check(signer)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+                self.assertNotIn("IMAGE=", result.stdout)
+                self.assertIn("no trusted run of call-build-builder.yml signed", result.stderr)
+
+    def test_a_signed_builder_labelled_with_another_hash_is_a_miss(self):
+        # A signature binds a digest, not a tag: a trusted builder of other inputs copied with
+        # its signature under this hash is not this checkout's builder.
+        for label in ("none", "f" * 64):
+            with self.subTest(label=label):
+                (self.root / "label").write_text(label)
+                result = self.check(BUILDER_TRUSTED)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+                self.assertNotIn("IMAGE=", result.stdout)
+                self.assertIn("not the tag's hash", result.stderr)
+
+    def test_an_absent_builder_is_a_miss(self):
+        (self.root / "status").write_text("1")
+        (self.root / "answer").write_text("manifest unknown")
+        result = self.check(BUILDER_TRUSTED)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("CACHE_HIT=false", result.stdout.splitlines())
+
+    def test_a_verification_that_cannot_be_answered_fails_the_check(self):
+        (self.root / "cosign_error").write_text("")
+        result = self.check(BUILDER_TRUSTED)
         self.assertNotEqual(0, result.returncode)
         self.assertNotIn("CACHE_HIT=", result.stdout)
 

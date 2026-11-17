@@ -63,7 +63,7 @@ pub fn admit_user_unit(
     let pidfd = peer_pidfd(socket).map_err(Refused::NoPidfd)?;
     check(
         &cgroup,
-        exe,
+        Some(exe),
         || pidfd_pid(pidfd.as_fd()),
         |pid| std::fs::read_to_string(format!("/proc/{pid}/cgroup")),
         |pid| std::fs::read_link(format!("/proc/{pid}/exe")),
@@ -71,11 +71,40 @@ pub fn admit_user_unit(
     )
 }
 
-/// The rule over its readers: the pid of the pidfd, the cgroup and the executable of that pid,
-/// then the pid again, unchanged, and the process still running.
+/// Admits the peer of `socket` only when its process is in the unit `unit` of the slice `slice`
+/// of this process's own user manager, whatever it runs: `admit_user_unit` without the
+/// executable.
+///
+/// Use it only for a unit that runs in its own namespaces (`PrivateNetwork=`, `ProtectSystem=`
+/// and the like put a user unit in a user namespace of its own). Reading `/proc/<pid>/exe` is a
+/// ptrace-read check, which the kernel refuses between sibling user namespaces, so such a unit
+/// cannot read its peer's executable and `admit_user_unit` would refuse every peer. The cgroup
+/// still keeps out a confined application, which runs in a scope of its own; what it cannot
+/// keep out is code that runs as the user and replaces the unit's program, and for that the
+/// executable check gives nothing either (`doc_session_daemons.md` SD17). Every other caller
+/// uses `admit_user_unit`.
+pub fn admit_user_unit_cgroup(
+    socket: BorrowedFd<'_>,
+    slice: &str,
+    unit: &str,
+) -> Result<(), Refused> {
+    let cgroup = user_unit_cgroup(nix::unistd::getuid().as_raw(), slice, unit);
+    let pidfd = peer_pidfd(socket).map_err(Refused::NoPidfd)?;
+    check(
+        &cgroup,
+        None,
+        || pidfd_pid(pidfd.as_fd()),
+        |pid| std::fs::read_to_string(format!("/proc/{pid}/cgroup")),
+        |_| Ok(PathBuf::new()),
+        || running(pidfd.as_fd()),
+    )
+}
+
+/// The rule over its readers: the pid of the pidfd, the cgroup and, when `exe` is given, the
+/// executable of that pid, then the pid again, unchanged, and the process still running.
 fn check(
     cgroup: &str,
-    exe: &Path,
+    exe: Option<&Path>,
     mut pid: impl FnMut() -> io::Result<Option<i32>>,
     read_cgroup: impl FnOnce(i32) -> io::Result<String>,
     read_exe: impl FnOnce(i32) -> io::Result<PathBuf>,
@@ -85,7 +114,12 @@ fn check(
         return Err(Refused::Gone);
     };
     let read = read_cgroup(first).map_err(Refused::Unreadable)?;
-    let program = read_exe(first).map_err(Refused::Unreadable)?;
+    // The executable is read only when one is named, and kept with it, so no pair of
+    // "named" and "read" can disagree: a read that was asked for and failed is refused.
+    let program = exe
+        .map(|want| read_exe(first).map(|got| (want, got)))
+        .transpose()
+        .map_err(Refused::Unreadable)?;
     if pid().map_err(Refused::Unreadable)? != Some(first)
         || !running().map_err(Refused::Unreadable)?
     {
@@ -94,10 +128,10 @@ fn check(
     if read.strip_suffix('\n').unwrap_or(&read) != cgroup {
         return Err(Refused::Cgroup(read));
     }
-    if program != exe {
-        return Err(Refused::Exe(program));
+    match program {
+        Some((want, got)) if got != want => Err(Refused::Exe(got)),
+        Some(_) | None => Ok(()),
     }
-    Ok(())
 }
 
 /// The pidfd of the peer of `socket`.
@@ -159,7 +193,7 @@ mod tests {
         let reads = Cell::new(0);
         check(
             WANT,
-            Path::new("/usr/bin/a"),
+            Some(Path::new("/usr/bin/a")),
             || {
                 let pid = pids[reads.get()];
                 reads.set(reads.get() + 1);
@@ -208,6 +242,37 @@ mod tests {
     }
 
     #[test]
+    fn with_no_executable_named_only_the_unit_counts() {
+        let no_exe = |cgroup: &str, pids: &[Option<i32>], alive: bool| {
+            let reads = Cell::new(0);
+            check(
+                WANT,
+                None,
+                || {
+                    let pid = pids[reads.get()];
+                    reads.set(reads.get() + 1);
+                    Ok(pid)
+                },
+                |_| Ok(cgroup.to_owned()),
+                |_| Err(io::ErrorKind::PermissionDenied.into()),
+                || Ok(alive),
+            )
+        };
+        let ok = no_exe(&format!("{WANT}\n"), &[Some(7), Some(7)], true);
+        assert!(ok.is_ok(), "{ok:?}");
+        let other = no_exe("0::/user.slice/other.service\n", &[Some(7), Some(7)], true);
+        assert!(matches!(other, Err(Refused::Cgroup(_))), "{other:?}");
+        for (pids, alive) in [
+            (&[None][..], true),
+            (&[Some(7), Some(8)], true),
+            (&[Some(7), Some(7)], false),
+        ] {
+            let gone = no_exe(WANT, pids, alive);
+            assert!(matches!(gone, Err(Refused::Gone)), "{pids:?}: {gone:?}");
+        }
+    }
+
+    #[test]
     fn a_peer_that_left_while_read_is_refused() {
         for (pids, alive) in [
             (&[None][..], true),
@@ -227,10 +292,26 @@ mod tests {
     fn an_unreadable_process_is_refused() {
         let refused = check(
             WANT,
-            Path::new("/usr/bin/a"),
+            Some(Path::new("/usr/bin/a")),
             || Ok(Some(7)),
             |_| Err(io::ErrorKind::PermissionDenied.into()),
             |_| Ok(PathBuf::from("/usr/bin/a")),
+            || Ok(true),
+        );
+        assert!(
+            matches!(refused, Err(Refused::Unreadable(_))),
+            "{refused:?}"
+        );
+    }
+
+    #[test]
+    fn a_named_executable_that_cannot_be_read_is_refused() {
+        let refused = check(
+            WANT,
+            Some(Path::new("/usr/bin/a")),
+            || Ok(Some(7)),
+            |_| Ok(WANT.to_owned()),
+            |_| Err(io::ErrorKind::PermissionDenied.into()),
             || Ok(true),
         );
         assert!(
@@ -254,7 +335,7 @@ mod tests {
         let exe = std::env::current_exe().expect("own executable");
         let checked = check(
             own.trim_end(),
-            &exe,
+            Some(&exe),
             || pidfd_pid(pidfd.as_fd()),
             |pid| std::fs::read_to_string(format!("/proc/{pid}/cgroup")),
             |pid| std::fs::read_link(format!("/proc/{pid}/exe")),
@@ -262,6 +343,8 @@ mod tests {
         );
         assert!(checked.is_ok(), "{checked:?}");
         let other = admit_user_unit(a.as_fd(), "session.slice", "nothing.service", &exe);
+        assert!(matches!(other, Err(Refused::Cgroup(_))), "{other:?}");
+        let other = admit_user_unit_cgroup(a.as_fd(), "session.slice", "nothing.service");
         assert!(matches!(other, Err(Refused::Cgroup(_))), "{other:?}");
     }
 

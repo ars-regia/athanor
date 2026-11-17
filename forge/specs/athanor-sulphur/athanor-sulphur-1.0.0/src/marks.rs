@@ -1050,6 +1050,36 @@ fn window_elements<R>(
     }
 }
 
+/// Whether every line of OS4's border around `surface` is among `elements`, whole inside the
+/// output showing `area`: the border of a frame that may tear (`tearing.rs`). A line left out
+/// of the frame, or pushed off the output by the magnifier, is not drawn.
+pub fn bordered<E: Element>(
+    surface: &WlSurface,
+    elements: &[E],
+    area: Rectangle<i32, Logical>,
+    output: &Output,
+) -> bool {
+    let scale = output.current_scale().fractional_scale();
+    let shown = Rectangle::from_size(area.size).to_physical_precise_round(scale);
+    let lines: Vec<Id> = with_states(surface, |states| {
+        let Some(rings) = states.data_map.get::<Rings>() else {
+            return Vec::new();
+        };
+        let rings = rings.0.borrow();
+        rings[..BORDER.len()]
+            .iter()
+            .flatten()
+            .flat_map(|ring| ring.lines.clone())
+            .collect()
+    });
+    lines.len() == BORDER.len() * 4
+        && lines.iter().all(|id| {
+            elements.iter().any(|element| {
+                element.id() == id && shown.contains_rect(element.geometry(scale.into()))
+            })
+        })
+}
+
 /// Whether `window` has the output showing `area` whole and its client has answered a request
 /// for it, this one or an earlier one. A null buffer takes the answer back.
 pub fn whole_on(window: &Window, area: Rectangle<i32, Logical>) -> bool {
