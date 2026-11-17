@@ -1700,9 +1700,11 @@ orca)
         # the walk is the arrows): "cc window" lists two results under a header, CC Window and
         # the web search; Down goes down them, Up back to the first. The reference is the GTK
         # launcher's transcript under athanor-sulphur, which spoke no result, as cosmic-comp in the
-        # rig never activated that launcher (#751). athanor-sal's launcher (#1154) is activated
-        # under both compositors, and Orca says each row the arrows select through the entry's
-        # active descendant, the focus staying on the entry (doc_launcher.md LA7).
+        # rig never activated that launcher (#751), with the count of the results and the two rows
+        # that athanor-sal's launcher (#1154) speaks (doc_launcher.md LA5, need 6), so a walk that
+        # hears no result fails. That launcher is activated under both compositors, and Orca says
+        # each row the arrows select through the entry's active descendant, the focus staying on
+        # the entry (doc_launcher.md LA7).
         seed_bar "$out/seed-orca-launcher" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" \
