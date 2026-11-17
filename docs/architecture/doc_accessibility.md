@@ -298,7 +298,7 @@ Applied with the approval of this document. Line numbers into code are those of 
 - `doc_notification_center.md` (branch `notification-center-spec`):
   - `:143` (NC11): a critical notification is announced at assertive priority (AX6); the announcement on opening (`:174`) is unchanged.
 - `doc_osd.md`:
-  - `:75` (OD4): `os.athanor.Osd1` has the method `ShowKeyboardAid(s notice)`, admitted only from the cgroup of `athanor-a11y.service` (done in revision 2 of `doc_osd.md`, ADR-0007); `:177` (F-osd-18) names it.
+  - `:98-99` (OD4): `os.athanor.Osd1` has the method `ShowKeyboardAid(s notice)`, admitted only from the cgroup of `athanor-a11y.service` (done in revision 2 of `doc_osd.md`, ADR-0007); `:225` (F-osd-18) names it.
   - `:70`: the `ScreenReader` system action is rebound by the `system_actions` entry of AX3.
 - `doc_lock_and_prompts.md`:
   - `:84` (LP6) and `:210` (its register row): the interfaces it asks for are the keys of AX2, read and written with GSettings, and the embedded `athanor-keyboard` widget (AX12, AX13).

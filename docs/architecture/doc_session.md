@@ -37,7 +37,7 @@ Status: **revision 4 (2026-10-28), approved by the maintainer on 2026-10-28.** R
 - **The SH8 counter.** `system/athanor-unit/src/crash_loop.rs:1-9,16-17` counts failures in the unit's runtime directory; the bar, after five, keeps running on the vendor layout without favourites (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/start.rs:74-93`).
 - **Core dumps are off** image-wide: `Storage=none`, `ProcessSizeMax=0` (`forge/specs/athanor-base-config/SOURCES/etc/systemd/coredump.conf.d/99-disable.conf`). With `panic = "abort"` a crashing program leaves a journal line and nothing else.
 - **What follows from the facts.**
-  - Two `PartOf=` rules are written: `graphical-session.target` in every shipped unit and in SD17 and PT3, `athanor-session.target` in LP2 (`doc_lock_and_prompts.md:55`).
+  - Two `PartOf=` rules are written: `graphical-session.target` in every shipped unit and in SD17 and PT3, `athanor-session.target` in LP2 until SN3 replaced it with `graphical-session.target` (`doc_lock_and_prompts.md:68`).
   - The readiness gate has no `PartOf=`, so after a logout it stays active (exited) for as long as the user manager lives. A new login inside that time, or with lingering enabled, finds the gate already active: it does not run again, and the units ordered after it no longer wait for the new compositor.
   - Application units are bound to nothing: at logout they are not stopped by the session, and nothing orders them against the portal frontend, the polkit agent or the lock.
   - Nothing removes the imported variables from the user manager at logout, so a unit started between two sessions inherits the old `WAYLAND_DISPLAY`.
