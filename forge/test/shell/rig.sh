@@ -924,7 +924,7 @@ build-toolkit)
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sal --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sal --all-targets --features gpu -- -D warnings \
-                 && cargo rustdoc --locked -p athanor-sal -- -D warnings \
+                 && cargo rustdoc --locked -p athanor-sal --all-features -- --document-private-items -D warnings \
                  && cargo test --locked -p athanor-sal \
                  && cargo test --locked -p athanor-sal --features gpu \
                  && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer --example a11y \
@@ -1713,9 +1713,9 @@ orca)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-sulphur
         # decision 28 hides Workspaces and Applications, exempt through `own`). Under cosmic-comp
-        # Tab skips Input source (#751), so the seventh Tab comes back round to the first; the
-        # eighth once Tab reaches it. Under athanor-sulphur Ctrl+Alt+Tab reaches the Clock and
-        # the seven Tabs go round the six buttons left, Input source among them.
+        # the seven Tabs go from the first to the eighth. Under athanor-sulphur Ctrl+Alt+Tab
+        # reaches the Clock and the seven Tabs go round the six buttons left, Input source among
+        # them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
@@ -1781,9 +1781,13 @@ orca)
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
         # the walk is the arrows): "cc window" lists two results under a header, CC Window and
-        # the web search; Down goes down them, Up back to the first. Orca presents no result yet,
-        # and cosmic-comp in the rig never activates the launcher, so its reference is
-        # athanor-sulphur's transcript (#751).
+        # the web search; Down goes down them, Up back to the first. The reference is the GTK
+        # launcher's transcript under athanor-sulphur, which spoke no result, as cosmic-comp in the
+        # rig never activated that launcher (#751), with the count of the results and the two rows
+        # that athanor-sal's launcher (#1154) speaks (doc_launcher.md LA5, need 6), so a walk that
+        # hears no result fails. That launcher is activated under both compositors, and Orca says
+        # each row the arrows select through the entry's active descendant, the focus staying on
+        # the entry (doc_launcher.md LA7).
         seed_bar "$out/seed-orca-launcher" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" \

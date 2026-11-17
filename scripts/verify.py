@@ -1267,6 +1267,75 @@ def gallery_problems(root):
     return out
 
 
+# The one module the toolkit's root exposes: the rest of its surface is re-exported by `pub use`
+# (decision 3 of #649), so an application never names a module whose signatures carry accesskit,
+# vello_cpu or parley types. Widening the list is a decision of the API, not of the author.
+TOOLKIT_PUBLIC_MODULES = {"driver"}
+
+
+def use_paths(tree, prefix=()):
+    """The full paths of a `use` tree, without `as` aliases and a leading `crate::` or `self::`."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(tree + ","):
+        depth += (ch == "{") - (ch == "}")
+        if ch == "," and depth == 0:
+            item, start = tree[start:i].strip(), i + 1
+            item = re.sub(r"\s+as\s+\w+$", "", item)
+            if not item:  # a trailing comma
+                continue
+            head, brace, rest = item.partition("{")
+            segs = prefix + tuple(x.strip() for x in head.split("::") if x.strip())
+            if brace:
+                out += use_paths(rest[: rest.rindex("}")], segs)
+            elif segs:
+                out.append([x for x in segs if x])
+    return [p[1:] if p[0] in ("crate", "self") and len(p) > 1 else p for p in out]
+
+
+def api_problems(root):
+    """The toolkit's root declares no `pub mod` outside TOOLKIT_PUBLIC_MODULES, and WidgetId is no
+    alias of an integer: any id of that type would address another Ui's widgets (#649).
+
+    `pub use` of a private module of the root (`text`, `crate::{text as t}`, `text::*`) fails; a
+    glob of the root (`crate::*`) does not.
+
+    Limit: it does not see a foreign crate's type in a public signature; the rustdoc run with
+    `--all-features -- --document-private-items` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
+    lib = f"{TOOLKIT}/src/lib.rs"
+    try:
+        text = read(root / lib)
+    except OSError as err:
+        return [f"{lib}: cannot read ({err})"]
+    # Only the root's own items count: comments are dropped and a `mod t { .. }` body is skipped.
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+    depth, top, stack = 0, [], []
+    for i, ch in enumerate(text):
+        if ch == "{":
+            stack.append(text[:i].rstrip().endswith("::"))  # a `use a::{b, c}` group is no block
+            depth += not stack[-1]
+        elif ch == "}" and stack:
+            depth -= not stack.pop()
+        top.append(ch if depth == 0 else " ")
+    top = "".join(top)
+    out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
+           "make it pub(crate) and re-export what an application needs"
+           for name in re.findall(r"\bpub\s+mod\s+(\w+)", top) if name not in TOOLKIT_PUBLIC_MODULES]
+    private = set(re.findall(r"\bmod\s+(\w+)", top)) - TOOLKIT_PUBLIC_MODULES
+    for use in re.findall(r"\bpub\s+use\s+([^;]*);", top):
+        for path in use_paths(use):
+            # A path of one segment, or `m::*`, that names a private module re-exports it whole;
+            # `crate::*` and an item of a module (`crate::widget::Kind`) are left alone.
+            if path[-1:] == ["*"]:
+                path = path[:-1]
+            if len(path) == 1 and path[0] in private:
+                out.append(f"{lib}: `pub use` of the module `{path[0]}` is outside the public modules "
+                           f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items")
+    for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
+        if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
+            out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")
+    return out
+
+
 def toolkit_boundary_problems(root=None):
     """The toolkit names no Athanor crate, no path and no workspace dependency in [dependencies]
     or [build-dependencies], and its `license` is the set of licence files beside the manifest
@@ -1301,10 +1370,10 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out + gallery_problems(root)
+    return out + gallery_problems(root) + api_problems(root)
 
 
-@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, and its licence files match its license")
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():
