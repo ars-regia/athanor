@@ -341,60 +341,108 @@ impl Monitor {
     }
 }
 
+/// Who may call a service of the compositor on the session bus: the owner of `name`, whose
+/// process lies in `unit`'s cgroup and runs an executable `executable` accepts, the very file at
+/// that path. Orca's keyboard monitor (AX4) and the EIS socket (doc_own_stack.md decision 33,
+/// wave 2c) admit their callers through one.
+pub(crate) struct Caller {
+    pub(crate) name: &'static str,
+    pub(crate) unit: &'static str,
+    pub(crate) executable: fn(&Path) -> bool,
+}
+
+/// Whether `executable` lies under `/usr`: Orca is a Python script, run by the interpreter.
+fn under_usr(executable: &Path) -> bool {
+    executable.starts_with("/usr")
+        && executable != Path::new("/usr")
+        && !executable.components().any(|c| c == Component::ParentDir)
+}
+
+/// Orca, for the keyboard monitor.
+pub(crate) const ORCA_CALLER: Caller = Caller {
+    name: ORCA,
+    unit: ORCA_UNIT,
+    executable: under_usr,
+};
+
 /// Whether the client `client`, with `credentials` from the bus, is Orca while `owner` owns
-/// Orca's name: the pid it was read through, or why not.
+/// Orca's name: the pid it was read through, or why not. The fixture's admission tests call it.
+#[cfg(test)]
 pub(crate) fn check(
     client: &str,
     owner: &str,
     credentials: &ConnectionCredentials,
     process: &dyn Process,
 ) -> Result<i32, Error> {
-    if client != owner {
-        return Err(format!("{client} does not own {ORCA}").into());
-    }
-    let opened;
-    let pidfd = match credentials.process_fd() {
-        Some(fd) => fd.as_fd(),
-        None => {
-            let pid = credentials
-                .process_id()
-                .ok_or("the bus names neither a pidfd nor a pid")?;
-            opened = identity::pidfd_open(pid)?;
-            opened.as_fd()
-        }
-    };
-    let pid = identity::pidfd_pid(pidfd)?;
-    let cgroup = process.cgroup(pid)?;
-    if identity::unit(&cgroup) != Some(ORCA_UNIT) {
-        return Err(format!("{client} is not in {ORCA_UNIT}").into());
-    }
-    let executable = process.executable(pid)?;
-    let under_usr = executable.starts_with("/usr")
-        && executable != Path::new("/usr")
-        && !executable.components().any(|c| c == Component::ParentDir);
-    if !under_usr || process.file(&executable)? != process.executable_file(pid)? {
-        return Err(format!("{client} runs {} from outside /usr", executable.display()).into());
-    }
-    if identity::pidfd_pid(pidfd)? != pid {
-        return Err(format!("{client} exited while it was read").into());
-    }
-    Ok(pid)
+    ORCA_CALLER.check(client, owner, credentials, process)
 }
 
-/// Asks the bus who owns Orca's name and who `client` is, and `check`s them.
-fn admit(bus: &DBusProxy<'_>, client: &str, process: &dyn Process) -> Result<(), Error> {
-    let owner = zbus::block_on(bus.get_name_owner(ORCA.try_into()?))?;
-    let credentials = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
-    let pid = check(client, owner.as_str(), &credentials, process)?;
-    if credentials.process_fd().is_none() {
-        // The pidfd was opened after the bus named the pid: the connection, still open with that
-        // pid, shows the pid was not reused in between.
-        let again = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
-        if again.process_id().map(i64::from) != Some(i64::from(pid)) {
-            return Err(format!("{client}'s pid changed while it was read").into());
+impl Caller {
+    /// Whether the client `client`, with `credentials` from the bus, is this caller while
+    /// `owner` owns its name: the pid it was read through, or why not.
+    pub(crate) fn check(
+        &self,
+        client: &str,
+        owner: &str,
+        credentials: &ConnectionCredentials,
+        process: &dyn Process,
+    ) -> Result<i32, Error> {
+        if client != owner {
+            return Err(format!("{client} does not own {}", self.name).into());
         }
+        let opened;
+        let pidfd = match credentials.process_fd() {
+            Some(fd) => fd.as_fd(),
+            None => {
+                let pid = credentials
+                    .process_id()
+                    .ok_or("the bus names neither a pidfd nor a pid")?;
+                opened = identity::pidfd_open(pid)?;
+                opened.as_fd()
+            }
+        };
+        let pid = identity::pidfd_pid(pidfd)?;
+        let cgroup = process.cgroup(pid)?;
+        if identity::unit(&cgroup) != Some(self.unit) {
+            return Err(format!("{client} is not in {}", self.unit).into());
+        }
+        let executable = process.executable(pid)?;
+        if !(self.executable)(&executable)
+            || process.file(&executable)? != process.executable_file(pid)?
+        {
+            return Err(format!(
+                "{client} runs {}, which {} may not run",
+                executable.display(),
+                self.unit
+            )
+            .into());
+        }
+        if identity::pidfd_pid(pidfd)? != pid {
+            return Err(format!("{client} exited while it was read").into());
+        }
+        Ok(pid)
     }
-    Ok(())
+
+    /// Asks the bus who owns this caller's name and who `client` is, and `check`s them.
+    pub(crate) fn admit(
+        &self,
+        bus: &DBusProxy<'_>,
+        client: &str,
+        process: &dyn Process,
+    ) -> Result<(), Error> {
+        let owner = zbus::block_on(bus.get_name_owner(self.name.try_into()?))?;
+        let credentials = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
+        let pid = self.check(client, owner.as_str(), &credentials, process)?;
+        if credentials.process_fd().is_none() {
+            // The pidfd was opened after the bus named the pid: the connection, still open with
+            // that pid, shows the pid was not reused in between.
+            let again = zbus::block_on(bus.get_connection_credentials(client.try_into()?))?;
+            if again.process_id().map(i64::from) != Some(i64::from(pid)) {
+                return Err(format!("{client}'s pid changed while it was read").into());
+            }
+        }
+        Ok(())
+    }
 }
 
 /// The admission's answer to one call, shared by its two ends.
@@ -708,7 +756,7 @@ pub(crate) fn serve(
             // The clients are not told: the interface has no signal for it.
             let failed: Vec<String> = admitted
                 .iter()
-                .filter(|client| match admit(&bus, client, process) {
+                .filter(|client| match ORCA_CALLER.admit(&bus, client, process) {
                     Ok(()) => false,
                     Err(error) => {
                         tracing::warn!(%client, %error, "a keyboard monitor client is forgotten");
@@ -728,7 +776,7 @@ pub(crate) fn serve(
         let Job::Call(client, change, answer) = job else {
             continue;
         };
-        match admit(&bus, &client, process) {
+        match ORCA_CALLER.admit(&bus, &client, process) {
             Ok(()) => {
                 admitted.insert(client.clone());
                 // The loop has the change before the client has its answer.
