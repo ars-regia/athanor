@@ -20,7 +20,12 @@ const DRM_DEVICE_DIR: &str = "/dev/dri";
 /// descriptor its check opened. A grant that fails its check (a link, another user's directory)
 /// stops the chooser, and so does a kernel without Landlock: never a best-effort no-op.
 pub fn apply(user_file: &Path) -> Result<(), Box<dyn Error>> {
-    let write = opened(&writable_dirs(&document_dir(user_file)?), dirs::owned_dir)?;
+    let granted = writable_dirs(&document_dir(user_file)?);
+    // The document's directory is reached through the user's own links, so it must be the
+    // user's, root included; /tmp, the cache and the runtime directory keep `owned_dir`.
+    let (document, rest) = granted.split_at(1);
+    let mut write = opened(document, dirs::own_dir)?;
+    write.extend(opened(rest, dirs::owned_dir)?);
     let mut nodes = vec![PathBuf::from(DRM_DEVICE_DIR)];
     nodes.extend(nvidia_device_nodes(Path::new("/dev")));
     let write_file = opened(&nodes, dirs::owned_node)?;
@@ -141,6 +146,19 @@ mod tests {
         );
         assert_eq!(opened(&[dir], dirs::owned_dir).expect("checked").len(), 1);
         std::fs::remove_dir_all(base).expect("cleanup");
+    }
+
+    #[test]
+    fn a_document_directory_not_the_users_stops_the_chooser() {
+        // "/" is root's: granted only when the suite itself runs as root, which proves nothing.
+        let Err(error) = opened(&[PathBuf::from("/")], dirs::own_dir) else {
+            return;
+        };
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            error.to_string().starts_with("/ is not granted: "),
+            "{error}"
+        );
     }
 
     #[test]
