@@ -30,7 +30,7 @@ Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, a
   - `doc_bar.md`: the bar's Workspaces module and the dock's workspaces button open cosmic-workspaces "until stage 7" (`doc_bar.md:74`). Popups go on the output of the active workspace (BR4). Launches follow BR2.
   - `doc_visual_language.md`: VL7 sets radii and the grid. VL9 sets motion: 300 ms for large changes including the switch between workspaces, one curve, and zero duration when `enable-animations` is off; surfaces are opaque. `doc_accessibility.md` AX9: with reduced motion nothing slides.
   - `doc_compositor.md` (revision 2, approved by the maintainer on 2026-10-08): no compositor of our own (CO1). Window-management features enter through the register (CO2). Patches stay few, are proposed upstream first, and each has an exit (CO3).
-  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (`doc_overview.md`) owns workspace feedback" (`doc_osd.md:171`). `doc_settings.md:169` leaves hot corners to this document.
+  - `doc_osd.md` excludes F-osd-12, the workspace-change indicator: "the overview specification (`doc_overview.md`) owns workspace feedback" (`doc_osd.md:219`). `doc_settings.md:169` leaves hot corners to this document.
 - **What runs today** (cosmic-workspaces 1.8.0-1.fc43, source tag `epoch-1.8.0`, crate 1.0.12, GPL-3.0-only, iced and libcosmic; read 2026-10-05). The cosmic-comp spec in the tree is 1.9.0 (`forge/specs/cosmic-comp/cosmic-comp.spec:13`); every source line of cosmic-workspaces, cosmic-comp and cosmic-settings cited in this document is at `epoch-1.8.0`, to recheck at `epoch-1.9.0`:
   - **Surfaces.** One layer surface per output on the `top` layer, namespace `cosmic-workspace-overview`, exclusive keyboard (`src/main.rs:263-265`). The surfaces are destroyed on hide (`:321-364`).
   - **Contents.** Live window thumbnails only for the active workspaces, and a live thumbnail of every workspace (`:372-385`). Both are captured through cctk with dmabuf buffers allocated through GBM and a Vulkan instance (`src/backend/wayland/vulkan.rs:24`).
@@ -43,7 +43,7 @@ Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, a
     - Typing a character starts cosmic-launcher or cosmic-app-library with no text, according to cosmic-comp's `action_on_typing`, so the character is lost (`:328-345`).
   - **Gaps.** New workspace and close workspace are commented-out code (`:803`, `:918`). There is no arrow-key navigation, and no accessibility at all: iced has no AT-SPI support, and libcosmic's text inputs emit no accessibility node (pop-os/libcosmic#1429, `doc_shell.md:32`).
   - **D-Bus.** It exports `com.system76.CosmicWorkspaces` with `Show` and `Hide` (`src/dbus.rs:18-29`).
-  - **How it is opened.** cosmic-comp binds Super+W and `XF86LaunchA` to `System(WorkspaceOverview)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:106,127`, owned by cosmic-comp-1.8.0-1.fc43.athanor1). The action runs `cosmic-workspaces` (`system_actions:57`, owned by cosmic-settings-daemon-1.8.0-1.fc43). The bar and the dock open it through `Opener::Workspaces` (`system/athanor-sulphur-client/src/launch.rs:466-509`), with `Activate` on a cold start and `Show` on a warm one.
+  - **How it is opened.** cosmic-comp binds Super+W and `XF86LaunchA` to `System(WorkspaceOverview)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:106,127`, owned by cosmic-comp-1.8.0-1.fc43.athanor1). The action runs `cosmic-workspaces` (`system_actions:57`, owned by cosmic-settings-daemon-1.8.0-1.fc43). The bar and the dock open it through `Opener::Workspaces` (`system/athanor-sulphur-client/src/launch.rs:509-577`), with `Activate` on a cold start and `Show` on a warm one.
 - **Its defects.**
   - **A crash on NVIDIA.** On the maintainer's desktop it dies with SIGSEGV about 30 ms after a cold start that is shown at once, which is the bar's path. Its backend thread calls `vkCreateInstance` while wgpu enumerates instance extensions in the same Vulkan loader, and NVIDIA's ICD calls a null entry. Shown one second later, it does not crash (observed by the maintainer on 2026-10-01; the check is item 9 of section 5).
   - **A crash in the dev VM.** It crashes there because cosmic-comp rejects its capture buffers on the virgl render node (observed during shell package 2a, PR #68, 01d100c1; the virgl VM is described in `scripts/devvm/README.md`).
@@ -61,7 +61,7 @@ Renaming workspaces, Stage Manager, snap layouts and tiling zones, Activities, a
   - It can activate, minimise, unminimise and close a window, and set a workspace's tiling.
   - It captures a window into `wl_shm` through `ext-image-copy-capture-v1` (`src/capture.rs`, 500 ms timeout), built for the launcher's preview (LA6).
   - It does not report which workspace a window is on (LA6), and it cannot activate, move, reorder or pin a workspace.
-- **The register** (`shell-features.md`, Workspace overview, `:385-409`): 10 entries have, 7 are missing and 4 are proposed for exclusion. Three statuses are wrong:
+- **The register** (`shell-features.md`, Workspace overview, `:386-410`): 10 entries have, 7 are missing and 4 are proposed for exclusion. Three statuses are wrong:
   - F-overview-11, the hot corner, is marked have through "cosmic-settings hot corner option", which does not exist (above).
   - F-overview-12, gestures, is "not verified": four-finger workspace switching exists.
   - F-overview-09, search, depends on cosmic-launcher, which leaves at LA12.
@@ -116,7 +116,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 **OV4. The surfaces.**
 
 - **One overview surface per output.**
-  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (`forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs:5-12`). The rule is the overview's: the switcher opens and closes its Sal surface on demand, and OV27 item 1 checks that both compositors keep its connection (proposed, revision 3).
+  - It is created the first time the output is seen and kept for the life of the output, pinned and never unmapped, as LA8 requires: cosmic-comp drops the connection of a gtk4-layer-shell client that destroys a mapped layer surface (lines 5-12 of the GTK bar's `ui/popups.rs`, removed by the port to the toolkit: `git show f2041a63:forge/specs/athanor-bar/athanor-bar-1.0.0/src/ui/popups.rs`). The rule is the overview's: the switcher opens and closes its Sal surface on demand, and OV27 item 1 checks that both compositors keep its connection (proposed, revision 3).
   - When the output leaves, the window is let go, as the bar's popups are.
   - The surface has three configurations, switched in place:
 
@@ -198,7 +198,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **OV9. Typing hands off to the launcher** (F-overview-09). A printable key typed in the overview hides it and passes the text on, following cosmic-comp's `action_on_typing` as read through the compositor client (OV3):
 
-- `OpenLauncher` calls `os.athanor.Launcher1.Search(s query)`, and `OpenApplications` calls `os.athanor.Library1.Search(s query)`. Each opens the program with the text in its query field. Both methods are defined in `doc_launcher.md` (LA8, `:112`).
+- `OpenLauncher` calls `os.athanor.Launcher1.Search(s query)`, and `OpenApplications` calls `os.athanor.Library1.Search(s query)`. Each opens the program with the text in its query field. Both methods are defined in `doc_launcher.md` (LA8, `:142`).
 - `None` ignores the key.
 - Until those methods are built, the overview calls `Show()` and the first character is lost, as it is with cosmic-workspaces today (`src/main.rs:328-345`).
 
@@ -226,7 +226,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 - Clicking a card works as in OV7.
 - The dock's application menu gains "Show all windows", which calls `ShowApplication`. Section 3 asks `doc_bar.md` for this; that change is the dock's.
 
-**OV12. Feedback when the workspace changes** (F-osd-12, which `doc_osd.md:171` gives to this document). The overview draws its own indicator card (decision 3).
+**OV12. Feedback when the workspace changes** (F-osd-12, which `doc_osd.md:219` gives to this document). The overview draws its own indicator card (decision 3).
 
 - **When it appears.** When an output's active workspace changes while the overview is hidden, that output's surface switches to the indicator state (OV4). The change may come from a key, a gesture, the bar, a window activation or any other cause.
 - **The card.** It is centred on the output with `radius.panel`, the `float` shadow and the opaque surface. It shows one dot per workspace with the active one filled, and the label "Workspace n". The dots run horizontally or vertically as `workspace_layout` does.
@@ -277,8 +277,8 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
-- remove `cosmic-workspaces` from `forge/config/packages.json:111`;
-- point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:466-509`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
+- remove `cosmic-workspaces` from `forge/config/packages.json:123`;
+- point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:511-515, 573-574`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;
 - enable `athanor-overview.service` by preset.
@@ -355,7 +355,7 @@ Applied with the approval of this document.
 
 - **`athanor-sulphur-client`** (owner: `doc_shell.md`, SH2): the additions of OV3.
 - **`athanor_sulphur_client::window_management`** (owner: `doc_settings.md`, section 3): read and watch of `workspace_layout` and `action_on_typing`.
-- **`os.athanor.Launcher1` and `os.athanor.Library1`** (owner: `doc_launcher.md`, LA8, `:112`): the method `Search(s query)` on each, already defined there, which shows the program with `query` in its field and selects the first result as typing would. Only `athanor-overview.service` needs it; the same toggle rules as `Show` apply to an already shown launcher, except that `Search` never hides.
+- **`os.athanor.Launcher1` and `os.athanor.Library1`** (owner: `doc_launcher.md`, LA8, `:142`): the method `Search(s query)` on each, already defined there, which shows the program with `query` in its field and selects the first result as typing would. Only `athanor-overview.service` needs it; the same toggle rules as `Show` apply to an already shown launcher, except that `Search` never hides.
 - **The `system_actions` file** (owner: `doc_languages.md` LN9, at `/usr/share/athanor/cosmic-defaults/cosmic/com.system76.CosmicSettings.Shortcuts/v1/system_actions`, by the ruling of 2026-10-05; no file is owned by two RPMs): a `WorkspaceOverview` entry calling `os.athanor.Overview1.Toggle`, added at OV19 step 5.
 - **The dock** (owner: `doc_bar.md`): a "Show all windows" entry in an application's menu, calling `ShowApplication` (OV11).
 - **The Settings app** (owner: `doc_settings.md`, SE14): a "Hot corner" switch on the Desktop page writing `org.gnome.desktop.interface enable-hot-corners` (decisions 6 and 8).
@@ -389,7 +389,7 @@ Applied with the approval of this document.
   - `docs/operations/release-1.0.md`: amended by ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) itself (row 12, section 3); nothing more is owed here.
   - `doc_own_stack.md`: the 1.1 placement of the window switcher at the lines ADR-0138 lists (about 423, 666, 778, 917 to 920, 940 and 1205), and OS13's list of default bindings, which gains Alt+Tab and Alt+Shift+Tab.
   - `doc_session.md` SN16, gap 8 (`:227`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
-  - `doc_launcher.md` LA12 (`:141`) and "Left for plan 3c" (`:187`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
+  - `doc_launcher.md` LA12 (`:173`) and "Left for plan 3c" (`:253`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
   - `doc_shell.md` SH3, the row of cosmic-launcher (`:70`): its condition is met by OV28 step 7.
   - `shell-features.md` F-overview-10 (`:399`): owned by this document, not by "the launcher's plan 3c"; its source becomes `athanor-switcher` at OV28 step 7.
   - `docs/architecture/components.toml`: an entry for `forge/specs/athanor-switcher`, status "specified", spec `doc_overview.md`, item OV20.
@@ -490,10 +490,10 @@ The program `athanor-switcher`: its bus interface, the bindings of both sessions
 
 ### Rationale: context and verified facts
 
-Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the maintainer's desktop.
+Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the maintainer's desktop. Line numbers corrected against `iso-v0` at b1f3e0bb on 2026-11-17 (#1089).
 
 - **What binds it.** ADR-0138 decisions 2 and 6; section 7 (A2-24) and `doc_launcher.md` LA12, which remove cosmic-launcher only with this switcher bound to Alt+Tab; SH1's rule for replacing a surface (`doc_shell.md`); `doc_own_stack.md` OS8 (Orca's transcript), OS13 (every default binding has a fixture test) and decision 30 (the compositor draws no title bars, with their text, theme and accessibility work).
-- **cosmic-comp's session today.** COSMIC's `defaults` bind Alt+Tab and Super+Tab to `System(WindowSwitcher)`, and Alt+Shift+Tab and Super+Shift+Tab to `System(WindowSwitcherPrevious)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:109-112`, cosmic-comp-1.11.0-2.fc43.athanor1). `system_actions:53,55` run `cosmic-launcher alt-tab` and `cosmic-launcher shift-alt-tab` (cosmic-settings-daemon-1.11.0-2.fc43). The compositor client writes a user's system action once with `shortcuts::set_system_action_once` (`system/athanor-sulphur-client/src/shortcuts.rs:69`), as the launcher does for `Launcher` (`forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/main.rs:95`).
+- **cosmic-comp's session today.** COSMIC's `defaults` bind Alt+Tab and Super+Tab to `System(WindowSwitcher)`, and Alt+Shift+Tab and Super+Shift+Tab to `System(WindowSwitcherPrevious)` (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:109-112`, cosmic-comp-1.11.0-2.fc43.athanor1). `system_actions:53,55` run `cosmic-launcher alt-tab` and `cosmic-launcher shift-alt-tab` (cosmic-settings-daemon-1.11.0-2.fc43). The compositor client writes a user's system action once with `shortcuts::set_system_action_once` (`system/athanor-sulphur-client/src/shortcuts.rs:69`), as the launcher does for `Launcher` (`forge/specs/athanor-launcher/athanor-launcher-1.0.0/src/main.rs:87`).
 - **athanor-sulphur today** (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0`, below `S`).
   - Alt+Tab is unbound: the fixture test `the_unnamed_cosmic_keys_reach_the_client` lists it among COSMIC's keys that reach the client (`S/src/fixture.rs:9716`, row at `:9722`).
   - Bindings are rows of `DEFAULTS` (`S/src/bindings.rs:127`). `Action::Call` makes a call of `S/src/session_calls.rs`: a session-bus method without arguments, with `while_locked` and `coalesce` flags (`Call`, `:15-28`); the launcher's is coalesced.
@@ -541,9 +541,9 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 - **The held modifier.** It is read from the first `wl_keyboard.modifiers` event after `enter`, which the protocol sends right after it, never from `enter` alone: until that event the switcher decides nothing. The held modifier is Alt, or Super when only Super is held (Super+Tab under cosmic-comp, OV21). A modifier counts as held when it is in the depressed or the locked mask; a latched modifier was used by the Tab that called the switcher.
 - **A quick press.** When that event shows neither Alt nor Super held, the selected window is activated at once and the surface closes. A held Alt+Tab therefore never becomes a quick press: the event that reports Alt held keeps the card open.
 - **While shown,** each `Next()` or `Previous()` moves the selection by one and wraps. Tab, Shift+Tab, Up and Down do the same when they reach the surface; with Alt held they arrive as calls in both sessions (rationale). With Tab pressed n times while the modifier is held, the first press included, the selection is n places back in the order of use, counting the window in use as 0 and wrapping after the last.
-- **Choosing.** Releasing the held modifier activates the selected window through the compositor client, which also activates its workspace or unminimises it, and closes the surface. Enter does the same, for a modifier that is locked (sticky keys' second tap) and for Orca's users; a latched Alt, sticky keys' first tap, gives a quick press: `Kind::List` raises `Event::Selected` on Enter (`system/athanor-sal/src/widget.rs:156-171`). Space does not choose, so that it never activates a window by accident. A click on a row does the same as Enter.
+- **Choosing.** Releasing the held modifier activates the selected window through the compositor client, which also activates its workspace or unminimises it, and closes the surface. Enter does the same, for a modifier that is locked (sticky keys' second tap) and for Orca's users; a latched Alt, sticky keys' first tap, gives a quick press: `Kind::List` raises `Event::Selected` on Enter (`system/athanor-sal/src/widget.rs:377-384`). Space does not choose, so that it never activates a window by accident. A click on a row does the same as Enter.
 - **Cancelling.** Escape closes the surface and activates nothing; the window that had the keyboard keeps it.
-- **Losing the keyboard.** A keyboard `leave` while the card is open cancels, as Escape does. The application learns it through `Application::keyboard(shell, id, focused)` with `focused` false (`system/athanor-sal/src/driver.rs:221`, called from `keyboard_moved`, `:1654-1662`). This covers Super+Escape, which takes the keyboard from an exclusive surface (`escape_exclusive`, `S/src/layer.rs:196-220`), a session lock, and another exclusive surface mapped above the card.
+- **Losing the keyboard.** A keyboard `leave` while the card is open cancels, as Escape does. The application learns it through `Application::keyboard(shell, id, focused)` with `focused` false (`system/athanor-sal/src/driver.rs:237-238`, called from `keyboard_moved`, `:2509-2514`). This covers Super+Escape, which takes the keyboard from an exclusive surface (`escape_exclusive`, `S/src/layer.rs:196-220`), a session lock, and another exclusive surface mapped above the card.
 - **After Super+Escape.** athanor-sulphur keeps the escape for the identity the grant went to, executable and unit, until the user clicks one of its layer surfaces that takes the keyboard (`S/src/layer.rs:196-203`, `S/src/input.rs:35-47`), so a later opening of the switcher would get no keyboard. Later openings must still work: when the user presses Alt+Tab or Alt+Shift+Tab, athanor-sulphur lifts the escape of the identity its allow-list line names for `athanor-switcher` before it makes the call, as a click on its surface does. It does so only for a physical key, as Super alone arms only on one (`source == KeyboardSource::Physical`, `S/src/input.rs:142`), so a virtual keyboard cannot lift it; only while the switcher has no mapped surface, so a card that hangs open cannot take the keyboard back; and never while the session is locked. That key is the user's own choice of the switcher, as deliberate as the click. The change lands with OV28 step 4. cosmic-comp has no such escape.
 - **While locked,** a call is refused and logged at info, as OV10 refuses `Show()`.
 
@@ -564,10 +564,10 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 
 **OV27. Sal prerequisites** (proposed, revision 3), in one Sal pull request agreed with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display, which need items 1 to 3 too:
 
-1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:717`, and `close`, `:837`). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
-2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:2009-2082`).
+1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:1107`, and `close`, `:2250`; `Shell::open_layer`, `:847`, and a public `close`, `:868`, have since landed). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
+2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:2947-2974, 3002-3024`).
 3. **Focus at map.** The focused widget is reported to AT-SPI when the surface first takes the keyboard, proven by an AT-SPI golden.
-4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:156-171`). Enter raises `Event::Selected` on the selected row, as it does today.
+4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:377-384`). Enter raises `Event::Selected` on the selected row, as it does today.
 
 **OV28. Construction** (proposed, revision 3). Each step merges on its own, in this order, and each is judged on the reference laptop:
 

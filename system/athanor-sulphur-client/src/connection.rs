@@ -138,6 +138,9 @@ pub(crate) struct Inner {
     /// later call returns [`Error::Closed`].
     closed: Cell<bool>,
     source: glib::Source,
+    /// The watch of LN9's store, under cosmic-comp from the first `watch_keyboard_group`,
+    /// held for its callback: dropping it ends it.
+    pub(crate) store: RefCell<Option<gio::FileMonitor>>,
 }
 
 impl Drop for Inner {
@@ -218,6 +221,7 @@ impl Client {
             failure: RefCell::new(None),
             closed: Cell::new(false),
             source: queue_source::attach(weak.clone(), fd, &context),
+            store: RefCell::new(None),
         });
         Ok(Client { inner })
     }
@@ -264,9 +268,38 @@ impl Client {
             .collect()
     }
 
-    /// The configured layouts in group order; empty when the compositor sends no XKB keymap.
+    /// The configured layouts in group order: under cosmic-comp those of LN9's store once there
+    /// is one and `watch_keyboard_group` was called, under athanor-sulphur those of its `layouts` event, else those of the XKB keymap.
     pub fn keyboard_layouts(&self) -> Vec<String> {
         self.inner.state.borrow().keyboard_layouts.clone()
+    }
+
+    /// Reads LN9's store once and follows it, whose layouts reach the handler as they change;
+    /// without a store the keymap's names stay. Only a client that watches the keyboard group
+    /// reads it, as a client binds only the globals it uses. Without a user store there is
+    /// nothing to watch, and each call reads the system's again.
+    pub(crate) fn follow_store(&self, store: crate::keyboard::Store) {
+        if self.inner.store.borrow().is_some() {
+            return;
+        }
+        let store = Rc::new(store);
+        let inner = Rc::downgrade(&self.inner);
+        let changed = move |store: &crate::keyboard::Store| {
+            if let Some(inner) = inner.upgrade().filter(|inner| !inner.closed.get()) {
+                let names = store.names();
+                inner.state.borrow_mut().store_layouts(names);
+                inner.deliver();
+            }
+        };
+        // The watch first, so that a change written while the store is read is not missed.
+        match store.clone().follow(changed) {
+            Ok(Some(monitor)) => *self.inner.store.borrow_mut() = Some(monitor),
+            Ok(None) => tracing::info!("no user configuration: the keyboard layouts are not followed"),
+            Err(err) => tracing::warn!("the keyboard layouts are not followed: {err}"),
+        }
+        let names = store.names();
+        self.inner.state.borrow_mut().store_layouts(names);
+        self.inner.deliver();
     }
 
     pub fn keyboard_group(&self) -> u32 {
@@ -471,6 +504,12 @@ fn tolerate_would_block(result: Result<(), WaylandError>) -> Result<(), WaylandE
 }
 
 impl Inner {
+    /// Closes the client as a failure of the display would, for a test.
+    #[cfg(test)]
+    pub(crate) fn set_closed(&self) {
+        self.closed.set(true);
+    }
+
     fn live(&self) -> Result<(), Error> {
         if self.closed.get() {
             Err(Error::Closed)
@@ -815,6 +854,10 @@ pub(crate) struct State {
     pub(crate) keyboard: Option<wl_keyboard::WlKeyboard>,
     keyboard_layout: Option<ZcosmicKeyboardLayoutV1>,
     pub(crate) keyboard_layouts: Vec<String>,
+    /// LN9's store names the layouts, under cosmic-comp (`keyboard.rs`).
+    pub(crate) layouts_from_store: bool,
+    /// The last keymap's names, the layouts' once no store or event names them.
+    pub(crate) keymap_names: Vec<String>,
     pub(crate) keyboard_group: u32,
     pub(crate) accessibility: Accessibility,
     pub(crate) events: Vec<Event>,

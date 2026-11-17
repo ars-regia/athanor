@@ -13,15 +13,24 @@ WORKFLOW = ROOT / ".github/workflows/shell-surfaces.yml"
 STEP = re.compile(r"bash forge/test/shell/rig\.sh orca ([a-z-]+)( it)?")
 
 
+MATRIX = re.compile(r'"\$\{\{ matrix\.([a-z]+) \}\}"')
+
+
 def compared(workflow):
     """The transcripts the workflow's steps compare, by file name: `rig.sh orca <surface> [it]`
-    compares golden/orca/orca-<surface>[-it].txt."""
+    compares golden/orca/orca-<surface>[-it].txt; a surface `"${{ matrix.<key> }}"` stands for
+    each value of the job's matrix key."""
     names = set()
     for job in workflow["jobs"].values():
+        matrix = job.get("strategy", {}).get("matrix", {})
         for step in job.get("steps", []):
-            match = STEP.fullmatch(step.get("run", "").strip())
-            if match:
-                names.add(f"orca-{match[1]}{'-it' if match[2] else ''}.txt")
+            run = step.get("run", "").strip()
+            key = MATRIX.search(run)
+            runs = [MATRIX.sub(value, run) for value in matrix[key[1]]] if key else [run]
+            for run in runs:
+                match = STEP.fullmatch(run)
+                if match:
+                    names.add(f"orca-{match[1]}{'-it' if match[2] else ''}.txt")
     return names
 
 
@@ -42,8 +51,9 @@ class EveryTranscriptHasAStep(unittest.TestCase):
 
 class SulphurWalksRunUnderSulphur(unittest.TestCase):
     # The dock's and the launcher's references are athanor-sulphur's transcripts, the default
-    # session of 1.0 (ADR-0135): under cosmic-comp the launcher is never activated (#751) and
-    # 1.11 does not speak the dock's Shift+F10 menu.
+    # session of 1.0 (ADR-0135): cosmic-comp never activated the GTK launcher the reference was
+    # recorded from (#751; athanor-sal's is activated), and 1.11 does not speak the dock's
+    # Shift+F10 menu.
     def test_dock_and_launcher_steps_set_the_compositor_and_always_run(self):
         workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
         found = []
