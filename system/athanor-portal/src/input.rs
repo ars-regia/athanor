@@ -22,7 +22,7 @@ use zbus::{ObjectPath, OwnedFd};
 use zbus::{OwnedVariant as OwnedValue, Variant as Value};
 
 use crate::eis::{Eis, Identity};
-use crate::remote_desktop::{self, display_name, holds_context, Answer, Sessions, Ticket};
+use crate::remote_desktop::{self, display_name, holds_context, Answer, Sessions, Stage, Ticket};
 
 /// The private interface's name and object (PT10).
 pub const PORTAL1_NAME: &str = "os.athanor.Portal";
@@ -92,23 +92,21 @@ impl<H: Host> Shared<H> {
     }
 
     /// Ends the session `handle`, whatever ends it: dismisses its dialog, removes its object
-    /// and updates `InputSessions`. The bar's Stop (`stopped`) has closed the compositor's
-    /// context already, and ends only the session of its ticket, whose frontend is told. Any
-    /// other end asks the compositor to close the context; when that fails, the owner check
-    /// included, one journal line says so and the compositor's revocation at the backend's
-    /// change of owner covers it (PT15). `false` for no such session.
-    async fn end(
-        &self,
-        server: &ObjectServer,
-        handle: &ObjectPath<'_>,
-        stopped: Option<Ticket>,
-    ) -> bool {
+    /// and updates `InputSessions`. The bar's Stop tells the frontend. A Stop that has closed
+    /// the compositor's context already ([`End::StoppedClosed`]) ends only the connected
+    /// session of its ticket, the one whose context it closed. Any other end decides from the
+    /// stage it removes, under the lock, and asks the compositor to close a context that
+    /// stage holds; when that fails, the owner check included, one journal line says so and
+    /// the compositor's revocation at the backend's change of owner covers it (PT15). `false`
+    /// for no such session.
+    async fn end(&self, server: &ObjectServer, handle: &ObjectPath<'_>, how: End) -> bool {
         let closed = {
             let mut sessions = self.sessions();
-            match stopped {
-                Some(ticket) if sessions.current(handle).map(|(_, now)| now) != Some(ticket) => {
-                    None
+            match (how, sessions.current(handle)) {
+                (End::StoppedClosed(ticket), Some((Stage::Connected(_), now))) if now == ticket => {
+                    sessions.close(handle)
                 }
+                (End::StoppedClosed(_), _) => None,
                 _ => sessions.close(handle),
             }
         };
@@ -118,7 +116,7 @@ impl<H: Host> Shared<H> {
         if let Some(dismiss) = lock(&self.dismiss).remove(handle.as_str()) {
             dismiss.send_replace(true);
         }
-        if stopped.is_some() {
+        if how != End::Closed {
             match server.interface::<_, Session<H>>(handle).await {
                 Ok(session) => {
                     if let Err(error) = Session::<H>::closed(session.signal_emitter()).await {
@@ -132,7 +130,7 @@ impl<H: Host> Shared<H> {
             tracing::error!(%error, %handle, "the session's object was not removed");
         }
         if holds_context(stage) {
-            if stopped.is_none() {
+            if !matches!(how, End::StoppedClosed(_)) {
                 if let Err(why) = self.eis.close(handle).await {
                     tracing::error!(%why, %handle, "the compositor was not asked to close the session's EIS context");
                 }
@@ -141,6 +139,18 @@ impl<H: Host> Shared<H> {
         }
         true
     }
+}
+
+/// What ends a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum End {
+    /// The frontend's `Close`, or the backend's own end.
+    Closed,
+    /// The bar's Stop of a session with no open context.
+    Stopped,
+    /// The bar's Stop, once `CloseSession` closed the open context of the session of this
+    /// ticket.
+    StoppedClosed(Ticket),
 }
 
 async fn input_sessions_changed<H: Host>(server: &ObjectServer) {
@@ -525,7 +535,7 @@ impl<H: Host> Session<H> {
         let handle = header
             .path()
             .ok_or_else(|| fdo::Error::InvalidArgs("a call with no object path".into()))?;
-        self.shared.end(server, handle, None).await;
+        self.shared.end(server, handle, End::Closed).await;
         Ok(())
     }
 
@@ -560,13 +570,22 @@ impl<H: Host> Portal1<H> {
             .sessions()
             .current(&handle)
             .ok_or_else(|| fdo::Error::InvalidArgs(format!("no session {id}")))?;
-        if holds_context(stage) {
-            if let Err(why) = self.0.eis.close(&handle).await {
-                tracing::error!(%why, %handle, "StopCapture: the compositor did not close the session's EIS context, which stays listed");
-                return Err(fdo::Error::Failed(format!("{handle} stays open: {why}")));
-            }
+        let Stage::Connected(_) = stage else {
+            // No open context to keep listed: the session ends at once, and `end` closes a
+            // context from the stage it removes under the lock, so a `ConnectToEIS` answered
+            // meanwhile finds no session and closes its late context itself.
+            self.0.end(server, &handle, End::Stopped).await;
+            return Ok(());
+        };
+        // A connected session leaves that stage only by its end, so this `CloseSession` closes
+        // the context that exists now.
+        if let Err(why) = self.0.eis.close(&handle).await {
+            tracing::error!(%why, %handle, "StopCapture: the compositor did not close the session's EIS context, which stays listed");
+            return Err(fdo::Error::Failed(format!("{handle} stays open: {why}")));
         }
-        self.0.end(server, &handle, Some(ticket)).await;
+        self.0
+            .end(server, &handle, End::StoppedClosed(ticket))
+            .await;
         Ok(())
     }
 
@@ -649,6 +668,7 @@ mod tests {
         calls: Arc<Mutex<Vec<Call>>>,
         refuse: Arc<AtomicBool>,
         hold: Arc<AtomicBool>,
+        close_releases: Arc<AtomicBool>,
         release: Arc<tokio::sync::Notify>,
         held: Arc<Mutex<Vec<(String, UnixStream)>>>,
         frontend: Connection,
@@ -666,6 +686,7 @@ mod tests {
         let calls = mock.calls.clone();
         let refuse = mock.refuse.clone();
         let hold = mock.hold.clone();
+        let close_releases = mock.close_releases.clone();
         let release = mock.release.clone();
         let held = mock.held.clone();
         let compositor = bus
@@ -708,6 +729,7 @@ mod tests {
             calls,
             refuse,
             hold,
+            close_releases,
             release,
             held,
             frontend,
@@ -1304,6 +1326,34 @@ mod tests {
             "nothing is sent while the owner is not the compositor"
         );
         assert!(ended(one));
+    }
+
+    /// The compositor answers `ConnectToEIS` while the bar's Stop waits for `CloseSession`,
+    /// as a compositor that handles the two calls at once may: the application is left no live
+    /// descriptor and the compositor no context.
+    #[tokio::test]
+    async fn input_stop_capture_during_connect_to_eis_leaves_no_live_context() {
+        let rd = rd("stopconnecting", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        rd.hold.store(true, Ordering::SeqCst);
+        rd.close_releases.store(true, Ordering::SeqCst);
+        rd.create(1).await;
+        rd.start(1).await;
+        let (late, stopped) = tokio::join!(rd.connect(1), async {
+            rd.connecting(1).await;
+            rd.stop(&rd.bar, 1).await
+        });
+        stopped.expect("StopCapture");
+        assert!(
+            !matches!(late.map(ended), Ok(false)),
+            "the application holds a live descriptor"
+        );
+        assert!(
+            lock(&rd.held)
+                .iter()
+                .all(|(handle, _)| *handle != session(1).as_str()),
+            "the compositor holds a context for the stopped session"
+        );
+        assert!(rd.listed().await.is_empty());
     }
 
     #[tokio::test]

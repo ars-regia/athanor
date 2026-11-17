@@ -239,6 +239,8 @@ pub(crate) mod tests {
         pub(crate) refuse: Arc<AtomicBool>,
         /// Each `ConnectToEIS` waits for one `release` before it answers.
         pub(crate) hold: Arc<AtomicBool>,
+        /// Each `CloseSession` gives one `release`, and answers 200 ms later.
+        pub(crate) close_releases: Arc<AtomicBool>,
         pub(crate) release: Arc<tokio::sync::Notify>,
     }
 
@@ -282,6 +284,10 @@ pub(crate) mod tests {
                 .lock()
                 .expect("held")
                 .retain(|(h, _)| h != session_handle.as_str());
+            if self.close_releases.load(Ordering::SeqCst) {
+                self.release.notify_one();
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
         }
     }
 
