@@ -2,14 +2,18 @@
 //! decision 33, wave 2c amendment; doc_portal.md PT15; `eis.rs`). Each context is driven by a
 //! reis sender on the test's thread, read without blocking while the compositor's loop runs;
 //! an `ei_connection.sync` after each request marks the point where the compositor has handled
-//! it. The admission is checked through `check` with this process's own pidfd, read as whatever
-//! unit and executable the test sets, and the last tests serve the interface on a private bus.
+//! it. The admission is checked through `check` against a systemd that answers with this
+//! process's own pidfd and whatever unit the test sets, and the last tests serve the interface
+//! on a private bus.
 
 use super::keyboard_monitor::Bus;
 use super::*;
-use crate::eis::{serve, Types, Update, BACKEND, BACKEND_CALLER, BACKEND_EXECUTABLE, NAME, PATH};
+use crate::eis::{
+    check, serve, Types, Update, BACKEND, BACKEND_EXECUTABLE, BACKEND_UNIT, NAME, PATH,
+};
 use crate::identity::pidfd_open;
 use crate::keyboard_monitor::answer;
+use athanor_unit::bus_caller::{Credentials, Manager, Questions, Unit, IMAGE_USER_UNITS};
 use smithay::reexports::reis::ei;
 use smithay::reexports::reis::enumflags2::BitFlags;
 use smithay::reexports::reis::event::{DeviceCapability, EiEvent, EiEventConverter};
@@ -17,11 +21,14 @@ use smithay::reexports::reis::handshake::EiHandshaker;
 use smithay::reexports::reis::PendingRequestResult;
 use std::cell::Cell;
 use std::os::fd::AsRawFd;
+use std::os::fd::BorrowedFd;
+use std::os::unix::fs::MetadataExt;
 use std::rc::Rc;
 use std::sync::mpsc::channel;
 use wayland_client::protocol::wl_touch;
-use zbus::fdo::{ConnectionCredentials, DBusProxy};
+use zbus::fdo::DBusProxy;
 use zbus::ObjectPath;
+use zbus::OwnedObjectPath;
 
 const KEY_ESC: u32 = 1;
 const KEY_T: u32 = 20;
@@ -40,8 +47,6 @@ const SUPER: u32 = 1 << 6;
 /// The backend's process, as the compositor reads it.
 const BACKEND_CGROUP: &str = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/xdg-desktop-portal-athanor.service\n";
 const BACKEND_IDENTITY: (&str, &str) = (BACKEND_EXECUTABLE, BACKEND_CGROUP);
-const OTHER_CGROUP: &str =
-    "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-terminal-1.scope\n";
 
 /// How long a bus call waits.
 const WAIT: Duration = Duration::from_secs(10);
@@ -838,72 +843,94 @@ fn eis_types_are_the_portals() {
     }
 }
 
-/// The caller's process as the compositor reads it.
-struct Peer {
-    executable: &'static str,
-    cgroup: &'static str,
-    file: FileId,
+/// The user's systemd, as the admission asks it: every peer is this process, of our user and
+/// with a pidfd, run by a verified manager in the unit `unit`, whose one `ExecStart` is `exec`.
+struct Systemd {
+    unit: &'static str,
+    exec: &'static str,
 }
 
-impl Process for Peer {
-    fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.executable.into())
-    }
-    fn cgroup(&self, _pid: i32) -> std::io::Result<String> {
-        Ok(self.cgroup.into())
-    }
-    fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
-        Ok(self.file)
-    }
-    fn file(&self, _path: &Path) -> std::io::Result<FileId> {
-        Ok(BACKEND_FILE)
-    }
-}
-
-const BACKEND_FILE: FileId = FileId { dev: 1, ino: 7 };
-const BACKEND_PROCESS: Peer = Peer {
-    executable: BACKEND_EXECUTABLE,
-    cgroup: BACKEND_CGROUP,
-    file: BACKEND_FILE,
+const BACKEND_SYSTEMD: Systemd = Systemd {
+    unit: BACKEND_UNIT,
+    exec: BACKEND_EXECUTABLE,
 };
 
-fn credentials() -> ConnectionCredentials {
-    let pidfd = pidfd_open(std::process::id()).expect("a pidfd of this process");
-    ConnectionCredentials::default().set_process_fd(pidfd.into())
+fn ours() -> u32 {
+    std::fs::metadata("/proc/self").expect("this process").uid()
 }
 
-/// Only the backend, in its unit, running its own executable, while it owns its name, is
-/// admitted.
+fn path(path: &str) -> OwnedObjectPath {
+    OwnedObjectPath::try_from(path).expect("an object path")
+}
+
+impl Questions for Systemd {
+    async fn user_manager(&self) -> Result<String, String> {
+        Ok(":1.2".into())
+    }
+
+    async fn credentials(&self, _peer: &str) -> Result<Credentials, String> {
+        let pidfd = pidfd_open(std::process::id()).map_err(|error| error.to_string())?;
+        Ok(Credentials {
+            uid: Some(ours()),
+            pid: Some(std::process::id()),
+            pidfd: Some(pidfd),
+        })
+    }
+
+    async fn unit_by_pidfd(
+        &self,
+        manager: Manager<'_>,
+        _pidfd: BorrowedFd<'_>,
+    ) -> Result<(OwnedObjectPath, String), String> {
+        Ok(match manager {
+            Manager::System => (path("/user"), format!("user@{}.service", ours())),
+            Manager::User(_) => (path("/unit"), self.unit.into()),
+        })
+    }
+
+    async fn main_pid(
+        &self,
+        _manager: Manager<'_>,
+        _path: &OwnedObjectPath,
+    ) -> Result<u32, String> {
+        Ok(std::process::id())
+    }
+
+    async fn unit(&self, _manager: Manager<'_>, _path: &OwnedObjectPath) -> Result<Unit, String> {
+        Ok(Unit {
+            main_pid: std::process::id(),
+            exec_start: vec![self.exec.into()],
+            fragment_path: format!("{IMAGE_USER_UNITS}/{}", self.unit),
+            drop_in_paths: Vec::new(),
+        })
+    }
+}
+
+/// Only the backend, the main process of its unit as systemd tells it, while it owns its name,
+/// is admitted.
 #[test]
 fn eis_admits_the_backend_alone() {
     let (client, other) = (":1.7", ":1.8");
-    let check =
-        |owner: &str, peer: &Peer| BACKEND_CALLER.check(client, owner, &credentials(), peer);
-    assert!(check(client, &BACKEND_PROCESS).is_ok(), "the backend");
     assert!(
-        check(other, &BACKEND_PROCESS).is_err(),
+        check(&BACKEND_SYSTEMD, client, client).is_ok(),
+        "the backend"
+    );
+    assert!(
+        check(&BACKEND_SYSTEMD, client, other).is_err(),
         "a client that does not own the name"
     );
-    let other_unit = Peer {
-        cgroup: OTHER_CGROUP,
-        ..BACKEND_PROCESS
+    let other_unit = Systemd {
+        unit: "app-gnome-terminal-1.scope",
+        ..BACKEND_SYSTEMD
     };
-    assert!(check(client, &other_unit).is_err(), "another unit");
-    let other_executable = Peer {
-        executable: "/usr/bin/python3",
-        ..BACKEND_PROCESS
-    };
-    assert!(
-        check(client, &other_executable).is_err(),
-        "another executable"
-    );
-    let replaced = Peer {
-        file: FileId { dev: 1, ino: 8 },
-        ..BACKEND_PROCESS
+    assert!(check(&other_unit, client, client).is_err(), "another unit");
+    let other_executable = Systemd {
+        exec: "/usr/bin/python3",
+        ..BACKEND_SYSTEMD
     };
     assert!(
-        check(client, &replaced).is_err(),
-        "an executable replaced on disk"
+        check(&other_executable, client, client).is_err(),
+        "a unit that runs another executable"
     );
 }
 
@@ -957,7 +984,7 @@ fn eis_on_the_bus_serves_the_backend_alone() {
             sent.send(update)
                 .map_err(|_| crate::Error::from("the test has ended"))
         };
-        serve(served, &asking, &BACKEND_PROCESS, &send).map_err(|error| error.to_string())
+        serve(served, &asking, &BACKEND_SYSTEMD, &send).map_err(|error| error.to_string())
     });
     let (backend, other) = (bus.connect(), bus.connect());
     let names = zbus::block_on(DBusProxy::new(&backend)).expect("the bus's proxy");
@@ -1046,7 +1073,7 @@ fn eis_on_the_bus_serves_the_backend_alone() {
         "the backend's name changing owner ends its contexts"
     );
 
-    let second = serve(bus.builder(), &bus.connect(), &BACKEND_PROCESS, &|_| Ok(()));
+    let second = serve(bus.builder(), &bus.connect(), &BACKEND_SYSTEMD, &|_| Ok(()));
     assert!(second.is_err(), "a second server, the name taken, stops");
     drop(bus);
     let ended = server.join().expect("the interface's thread");

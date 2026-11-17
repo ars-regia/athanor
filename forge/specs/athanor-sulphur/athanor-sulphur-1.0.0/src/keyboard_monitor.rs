@@ -343,8 +343,8 @@ impl Monitor {
 
 /// Who may call a service of the compositor on the session bus: the owner of `name`, whose
 /// process lies in `unit`'s cgroup and runs an executable `executable` accepts, the very file at
-/// that path. Orca's keyboard monitor (AX4) and the EIS socket (doc_own_stack.md decision 33,
-/// wave 2c) admit their callers through one.
+/// that path. Orca's keyboard monitor (AX4) admits its caller through one; the EIS socket asks
+/// systemd instead (`eis::check`).
 pub(crate) struct Caller {
     pub(crate) name: &'static str,
     pub(crate) unit: &'static str,

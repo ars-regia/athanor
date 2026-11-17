@@ -5,10 +5,13 @@
 //! context and is answered once the loop has shut its end down.
 //!
 //! Admission: a call counts only from the owner of `org.freedesktop.impl.portal.desktop.athanor`
-//! whose process lies in `xdg-desktop-portal-athanor.service`'s cgroup and runs
-//! `/usr/libexec/xdg-desktop-portal-athanor`, the very file at that path, read as the keyboard
-//! monitor reads Orca (`keyboard_monitor::Caller`). Every call is admitted anew; a refused call
-//! changes nothing, is answered `AccessDenied`, and the journal names it at most once a minute.
+//! that is the main process of `xdg-desktop-portal-athanor.service`, as the user's systemd tells
+//! it from the caller's pidfd (`athanor_unit::bus_caller::admit`: `GetUnitByPIDFD`, the unit's
+//! `MainPID`, its one `ExecStart` `/usr/libexec/xdg-desktop-portal-athanor` and its files in the
+//! image), never by reading `/proc/<pid>/exe`, which a confined unit cannot read (#1047). Each
+//! question waits [`ASK`] at most, and one unanswered refuses. Every call is admitted anew; a
+//! refused call changes nothing, is answered `AccessDenied`, and the journal names it at most
+//! once a minute.
 //! A `device_types` of 0, or with a bit other than 1, 2 and 4, is `InvalidArgs` and creates
 //! nothing; a second `ConnectToEIS` for a handle that holds a file descriptor is `Failed`, and the
 //! handle stays held until `CloseSession` or the revocation, so a portal session has one file
@@ -26,12 +29,12 @@
 //! on the bus.
 
 use crate::bindings;
-use crate::identity::{self, Process};
 use crate::input::{BUTTONS, KEYS};
-use crate::keyboard_monitor::{answer, Answer, Caller, Hush, Names};
+use crate::keyboard_monitor::{answer, Answer, Hush, Names};
 use crate::state::State;
 use crate::xkb_config::Settings;
 use crate::Error;
+use athanor_unit::bus_caller::{self, OnBus, Questions, Service};
 use futures_util::StreamExt;
 use smithay::backend::input::{
     AbsolutePositionEvent, ButtonState, Device, Event, InputEvent, InputTime, KeyState,
@@ -56,6 +59,7 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
+use std::time::Duration;
 use zbus::connection::Builder;
 use zbus::fdo::DBusProxy;
 use zbus::message::Header;
@@ -72,17 +76,29 @@ pub(crate) const BACKEND_EXECUTABLE: &str = "/usr/libexec/xdg-desktop-portal-ath
 /// the one wake-up after a change of the backend's name that `Names::wake` lets wait.
 const JOBS: usize = 4;
 
-/// Whether `executable` is the backend's.
-fn backend_executable(executable: &Path) -> bool {
-    executable == Path::new(BACKEND_EXECUTABLE)
+/// The portal backend's service, whose main process alone is admitted.
+pub(crate) const BACKEND_SERVICE: Service<'static> = Service {
+    unit: BACKEND_UNIT,
+    exec: BACKEND_EXECUTABLE,
+};
+/// How long one question of the admission waits, as athanor-idle's admission of the backend
+/// (issue #1035): unanswered, the call is refused.
+const ASK: Duration = Duration::from_secs(2);
+
+/// Whether `client`, while `owner` owns the backend's name, is the main process of the
+/// backend's unit, or why not.
+pub(crate) fn check(questions: &impl Questions, client: &str, owner: &str) -> Result<(), Error> {
+    if client != owner {
+        return Err(format!("{client} does not own {BACKEND}").into());
+    }
+    zbus::block_on(bus_caller::admit(questions, client, BACKEND_SERVICE)).map_err(Error::from)
 }
 
-/// The portal backend, for the EIS socket.
-pub(crate) const BACKEND_CALLER: Caller = Caller {
-    name: BACKEND,
-    unit: BACKEND_UNIT,
-    executable: backend_executable,
-};
+/// Asks the bus who owns the backend's name, and `check`s `client`.
+fn admit(bus: &DBusProxy<'_>, questions: &impl Questions, client: &str) -> Result<(), Error> {
+    let owner = zbus::block_on(bus.get_name_owner(BACKEND.try_into()?))?;
+    check(questions, client, owner.as_str())
+}
 
 /// The device types the user granted, with the portal's values: 1 keyboard, 2 pointer, 4 touch
 /// screen.
@@ -233,10 +249,24 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) {
                     .send(update)
                     .map_err(|_| Error::from("the event loop has ended"))
             };
-            let served = zbus::block_on(Connection::session())
-                .map(|asking| (Builder::session(), asking));
-            let ended = match served {
-                Ok((served, asking)) => serve(served, &asking, &identity::Proc, &send),
+            // The admission asks on connections that serve nothing and subscribe to nothing
+            // (`bus_caller::OnBus`), each question within `ASK`.
+            let connected = zbus::block_on(async {
+                let asking = Connection::session().await?;
+                let query = Builder::session().method_timeout(ASK).build().await?;
+                let system = bus_caller::system_bus().method_timeout(ASK).build().await?;
+                let bus = DBusProxy::new(&query).await?;
+                Ok::<_, zbus::Error>((asking, query, system, bus))
+            });
+            let ended = match connected {
+                Ok((asking, query, system, bus)) => {
+                    let questions = OnBus {
+                        bus: &bus,
+                        session: &query,
+                        system: &system,
+                    };
+                    serve(Builder::session(), &asking, &questions, &send)
+                }
                 Err(error) => Err(error.into()),
             };
             if let Err(error) = ended {
@@ -254,7 +284,7 @@ pub(crate) fn start(handle: &LoopHandle<'static, State>) {
 pub(crate) fn serve(
     served: Builder<'_>,
     asking: &Connection,
-    process: &dyn Process,
+    questions: &impl Questions,
     updates: &dyn Fn(Update) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let bus = zbus::block_on(DBusProxy::new(asking))?;
@@ -327,7 +357,7 @@ pub(crate) fn serve(
                 handle,
                 device_types,
                 answer,
-            } => match BACKEND_CALLER.admit(&bus, &client, process) {
+            } => match admit(&bus, questions, &client) {
                 Ok(()) => {
                     answer.give(connect(&mut open, handle, device_types, updates)?);
                     continue;
@@ -341,7 +371,7 @@ pub(crate) fn serve(
                 client,
                 handle,
                 answer,
-            } => match BACKEND_CALLER.admit(&bus, &client, process) {
+            } => match admit(&bus, questions, &client) {
                 Ok(()) => {
                     // The loop answers once the context is gone; an unknown handle is closed.
                     open.remove(&handle);
