@@ -249,10 +249,16 @@ fn bindings(bare: &str) -> Result<Vec<Entry>, String> {
 }
 
 /// The action's value in the system file, which cosmic-comp lays beneath the user's copy.
-/// A system file that is absent or does not parse gives none: every user value then
-/// counts as the user's choice.
+/// A system file that is absent, unreadable or does not parse gives none: every user value
+/// then counts as the user's choice.
 fn system_value(action: &str) -> Option<String> {
-    let text = cosmic_config::key(&cosmic_config::system_dirs(), COMPONENT, KEY)?;
+    let text = match cosmic_config::key(&cosmic_config::system_dirs(), COMPONENT, KEY) {
+        Ok(text) => text?,
+        Err(err) => {
+            tracing::warn!("the system's {KEY} of {COMPONENT} cannot be read: {err}");
+            return None;
+        }
+    };
     match parse(&text) {
         Ok(entries) => entries.into_iter().find(|(name, _)| name == action).map(|(_, value)| value),
         Err(reason) => {

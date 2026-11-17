@@ -121,8 +121,9 @@ impl State {
     /// store names them.
     pub(crate) fn keymap_layouts(&mut self, names: Vec<String>) {
         if !self.globals.keyboard_group.names_layouts && !self.layouts_from_store {
-            self.set_layouts(names);
+            self.set_layouts(names.clone());
         }
+        self.keymap_names = names;
     }
 }
 
@@ -181,7 +182,7 @@ mod tests {
     fn a_virtual_keyboards_keymap_leaves_the_stores_layouts() {
         let store = crate::keyboard::test_store("virtual", Some("(layout: \"us,it\", variant: \",\")"));
         let mut state = State::default();
-        state.store_layouts(store.names().unwrap_or_default());
+        state.store_layouts(store.names());
         state.keymap_layouts(vec!["English (US)".to_owned(), "Italian".to_owned()]);
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
@@ -193,7 +194,7 @@ mod tests {
     fn a_client_started_after_a_one_layout_keymap_reads_the_store() {
         let store = crate::keyboard::test_store("late", Some("(layout: \"us,it\", variant: \",\")"));
         let mut state = State::default();
-        state.store_layouts(store.names().unwrap_or_default());
+        state.store_layouts(store.names());
         state.keymap_layouts(vec!["English (US)".to_owned()]);
         assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
     }

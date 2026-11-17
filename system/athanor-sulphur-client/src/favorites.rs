@@ -16,7 +16,13 @@ pub fn cosmic_favorites() -> Option<Vec<String>> {
 }
 
 fn cosmic_favorites_in(user_cosmic_dir: &Path) -> Option<Vec<String>> {
-    let text = cosmic_config::key(&[user_cosmic_dir.to_path_buf()], APP_LIST, "favorites")?;
+    let text = match cosmic_config::key(&[user_cosmic_dir.to_path_buf()], APP_LIST, "favorites") {
+        Ok(text) => text?,
+        Err(err) => {
+            tracing::warn!("COSMIC's favourites list cannot be read; it is not imported: {err}");
+            return None;
+        }
+    };
     let favorites = parse(&text);
     if favorites.is_none() {
         tracing::warn!("COSMIC's favourites list does not parse; it is not imported");

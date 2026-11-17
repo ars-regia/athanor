@@ -6,8 +6,10 @@
 //! LN9's `write()` and `available()`, and the model, options and repeat of `read()`, are not
 //! here yet: nothing calls them.
 
+use std::cell::Cell;
 use std::fs;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 use gio::prelude::*;
 
@@ -17,6 +19,8 @@ use crate::cosmic_config;
 const COMPONENT: &str = "com.system76.CosmicComp";
 const KEY: &str = "xkb_config";
 const EVDEV: &str = "/usr/share/X11/xkb/rules/evdev.xml";
+/// LN9's layouts at most, as athanor-sulphur's `xkb_config.rs` holds them.
+const MAX_LAYOUTS: usize = 4;
 
 /// The store's ordered layouts.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -31,14 +35,34 @@ pub struct Layout {
     pub variant: String,
 }
 
-/// A store that is not cosmic-config's record of `XkbConfig`.
+/// A store that is not cosmic-config's record of `XkbConfig` with at most `MAX_LAYOUTS`.
 #[derive(Debug, thiserror::Error)]
-#[error("xkb_config is not a record of XkbConfig")]
+#[error("xkb_config is not a record of XkbConfig with at most {MAX_LAYOUTS} layouts")]
 pub struct Malformed;
 
+/// A store that is there and cannot be used.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("xkb_config cannot be read: {0}")]
+    Unreadable(#[from] std::io::Error),
+    #[error(transparent)]
+    Malformed(#[from] Malformed),
+}
+
 /// The user's layouts: the user's store, else the system's default; none without either.
-pub fn read() -> Result<XkbLayouts, Malformed> {
+pub fn read() -> Result<XkbLayouts, ReadError> {
     Store::session().read().map(Option::unwrap_or_default)
+}
+
+/// What the store says of the layouts' names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Names {
+    /// The store's, in group order.
+    Store(Vec<String>),
+    /// No store, or one without a layout: the keymap's (doc_own_stack.md decision 27).
+    Keymap,
+    /// A store that cannot be used: the names the client holds stay.
+    Kept,
 }
 
 /// Where the store and the names are read.
@@ -61,34 +85,31 @@ impl Store {
 
     /// `None` without a store: cosmic-comp's keymap is then the one `XKB_DEFAULT_*` gives
     /// (doc_own_stack.md decision 27).
-    fn read(&self) -> Result<Option<XkbLayouts>, Malformed> {
-        cosmic_config::key(&self.dirs, COMPONENT, KEY)
-            .map(|text| parse(&text))
-            .transpose()
+    fn read(&self) -> Result<Option<XkbLayouts>, ReadError> {
+        match cosmic_config::key(&self.dirs, COMPONENT, KEY)? {
+            Some(text) => Ok(Some(parse(&text)?)),
+            None => Ok(None),
+        }
     }
 
-    /// The layouts' names in group order; `None`, logged, without a store or for a malformed
-    /// one, where the names the client holds stay.
-    pub(crate) fn names(&self) -> Option<Vec<String>> {
+    /// The layouts' names, logged where the store does not give them.
+    pub(crate) fn names(&self) -> Names {
         let layouts = match self.read() {
-            Ok(Some(layouts)) => layouts,
-            Ok(None) => {
-                tracing::info!("no xkb_config: the keymap names the keyboard layouts");
-                return None;
+            Ok(Some(layouts)) if !layouts.layouts.is_empty() => layouts,
+            Ok(_) => {
+                tracing::info!("no xkb_config with a layout: the keymap names the keyboard layouts");
+                return Names::Keymap;
             }
             Err(err) => {
                 tracing::warn!("the keyboard layouts are kept: {err}");
-                return None;
+                return Names::Kept;
             }
         };
-        if layouts.layouts.is_empty() {
-            return Some(Vec::new());
-        }
         let evdev = fs::read_to_string(&self.evdev).unwrap_or_else(|err| {
             tracing::warn!(path = %self.evdev.display(), "the layouts are named by their codes: {err}");
             String::new()
         });
-        Some(
+        Names::Store(
             layouts
                 .layouts
                 .iter()
@@ -104,22 +125,27 @@ impl Store {
         })
     }
 
-    /// Calls `changed` with the names after each change of the first directory's store.
+    /// Calls `changed`, which reads the store, once the first directory's store is written,
+    /// replaced or removed. The events of one change, such as the created and changes-done
+    /// pair GLib gives a swap file renamed over the store, make one call, on the thread's
+    /// main context.
     pub(crate) fn follow(
         self,
-        changed: impl Fn(Vec<String>) + 'static,
+        changed: impl Fn(&Self) + 'static,
     ) -> Result<gio::FileMonitor, glib::Error> {
         let monitor = gio::File::for_path(self.changing())
             .monitor_file(gio::FileMonitorFlags::NONE, gio::Cancellable::NONE)?;
+        let context = glib::MainContext::ref_thread_default();
+        let (store, changed) = (Rc::new(self), Rc::new(changed));
+        let pending = Rc::new(Cell::new(false));
         monitor.connect_changed(move |_, _, _, event| {
-            use gio::FileMonitorEvent::{ChangesDoneHint, Created, Deleted, MovedIn, Renamed};
-            if matches!(
-                event,
-                ChangesDoneHint | Created | Deleted | MovedIn | Renamed
-            ) {
-                if let Some(names) = self.names() {
-                    changed(names);
-                }
+            use gio::FileMonitorEvent::{ChangesDoneHint, Deleted, MovedIn};
+            if matches!(event, ChangesDoneHint | Deleted | MovedIn) && !pending.replace(true) {
+                let (store, changed, pending) = (store.clone(), changed.clone(), pending.clone());
+                context.spawn_local(async move {
+                    pending.set(false);
+                    changed(&store);
+                });
             }
         });
         Ok(monitor)
@@ -139,10 +165,20 @@ impl Layout {
 }
 
 impl State {
-    /// Under cosmic-comp the store names the layouts from now on, and a keymap no longer does.
-    pub(crate) fn store_layouts(&mut self, names: Vec<String>) {
-        self.layouts_from_store = true;
-        self.set_layouts(names);
+    /// Under cosmic-comp a store names the layouts from now on, and a keymap no longer does;
+    /// once there is none, the last keymap names them again.
+    pub(crate) fn store_layouts(&mut self, names: Names) {
+        match names {
+            Names::Store(names) => {
+                self.layouts_from_store = true;
+                self.set_layouts(names);
+            }
+            Names::Keymap if self.layouts_from_store => {
+                self.layouts_from_store = false;
+                self.set_layouts(self.keymap_names.clone());
+            }
+            Names::Keymap | Names::Kept => {}
+        }
     }
 }
 
@@ -180,7 +216,7 @@ fn parse(text: &str) -> Result<XkbLayouts, Malformed> {
     }
     let (layout, variant) = (layout.ok_or(Malformed)?, variant.unwrap_or_default());
     let mut variants = variant.split(',');
-    let layouts = layout
+    let layouts: Vec<_> = layout
         .split(',')
         .filter(|_| !layout.is_empty())
         .map(|layout| Layout {
@@ -188,6 +224,9 @@ fn parse(text: &str) -> Result<XkbLayouts, Malformed> {
             variant: variants.next().unwrap_or("").trim().to_owned(),
         })
         .collect();
+    if layouts.len() > MAX_LAYOUTS {
+        return Err(Malformed);
+    }
     Ok(XkbLayouts { layouts })
 }
 
@@ -374,6 +413,7 @@ mod tests {
             "(layout: \"us\" variant: \"\")",
             "(layout: \"us)",
             "(layout: \"us\") trailing",
+            "(layout: \"us,it,de,fr,es\", variant: \"\")",
         ] {
             assert!(parse(text).is_err(), "{text:?}");
         }
@@ -402,35 +442,43 @@ mod tests {
         );
     }
 
-    /// The names the watch of `store` reports after `change` and up to `wait`.
-    fn followed(store: Store, change: impl FnOnce(&std::path::Path), wait: u64) -> Vec<Vec<String>> {
+    /// The names each read of the watch of `store` gives after `change`: up to `wait` for the
+    /// first, and half a second more for any other.
+    fn followed(store: Store, change: impl FnOnce(&std::path::Path), wait: u64) -> Vec<Names> {
+        use std::time::{Duration, Instant};
         let path = store.changing();
         let context = glib::MainContext::new();
-        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let seen = Rc::new(std::cell::RefCell::new(Vec::new()));
         let _monitor = context
             .with_thread_default(|| {
                 let seen = seen.clone();
-                store.follow(move |names| seen.borrow_mut().push(names))
+                store.follow(move |store| seen.borrow_mut().push(store.names()))
             })
             .expect("thread default")
             .expect("monitor");
         change(&path);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
-        while seen.borrow().is_empty() && std::time::Instant::now() < deadline {
+        let mut deadline = Instant::now() + Duration::from_secs(wait);
+        let mut first = true;
+        while Instant::now() < deadline {
             context.iteration(false);
-            std::thread::sleep(std::time::Duration::from_millis(10));
+            if first && !seen.borrow().is_empty() {
+                first = false;
+                deadline = Instant::now() + Duration::from_millis(500);
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
         seen.take()
     }
 
-    /// A store replaced as cosmic-config replaces it reaches the watch, as does the first one,
-    /// written where no store was (athanor-shelld's seed, LN9), its directory included.
+    /// A store replaced as cosmic-config replaces it reaches the watch, in one read, as does
+    /// the first one, written where no store was (athanor-shelld's seed, LN9), its directory
+    /// included.
     #[test]
     fn a_store_change_is_followed_live() {
-        let two = vec!["English (US)".to_owned(), "Italian".to_owned()];
+        let two = Names::Store(vec!["English (US)".to_owned(), "Italian".to_owned()]);
         let record = "(layout: \"us,it\", variant: \",\")";
         let replaced = test_store("live", Some("(layout: \"us\", variant: \"\")"));
-        assert_eq!(followed(replaced, |path| replace(path, record), 5).last(), Some(&two));
+        assert_eq!(followed(replaced, |path| replace(path, record), 5), std::slice::from_ref(&two));
         let first = test_store("first", None);
         fs::create_dir_all(first.changing().parent().expect("parent")).expect("directory");
         assert_eq!(followed(first, |path| replace(path, record), 5).last(), Some(&two));
@@ -439,18 +487,44 @@ mod tests {
         assert_eq!(followed(seeded, |path| replace(path, record), 15).last(), Some(&two));
     }
 
+    /// A store removed while a session runs gives the layouts back to the last keymap, as an
+    /// event, without a restart; a system store, where there is one, names them instead.
+    #[test]
+    fn a_removed_store_gives_the_layouts_back_to_the_keymap() {
+        let store = test_store("removed", Some("(layout: \"us,it\", variant: \",\")"));
+        let mut state = State::default();
+        state.store_layouts(store.names());
+        state.keymap_layouts(vec!["English (US)".to_owned()]);
+        assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
+        let names = followed(store, |path| fs::remove_file(path).expect("remove"), 5);
+        assert_eq!(names, [Names::Keymap]);
+        state.events.clear();
+        names.into_iter().for_each(|names| state.store_layouts(names));
+        assert_eq!(state.keyboard_layouts, ["English (US)"]);
+        assert_eq!(
+            state.events,
+            [crate::model::Event::KeyboardLayouts(vec!["English (US)".to_owned()])]
+        );
+        state.keymap_layouts(vec!["Italian".to_owned()]);
+        assert_eq!(state.keyboard_layouts, ["Italian"], "the keymap names them again");
+        let system = test_store("removed", None);
+        replace(
+            &cosmic_config::component(&system.dirs[1], COMPONENT).join(KEY),
+            "(layout: \"it\", variant: \"\")",
+        );
+        assert_eq!(system.names(), Names::Store(vec!["Italian".to_owned()]));
+    }
+
     #[test]
     fn without_a_store_the_keymap_names_the_layouts() {
         let store = test_store("none", None);
-        assert_eq!(store.names(), None);
+        assert_eq!(store.names(), Names::Keymap);
         let mut state = State::default();
-        if let Some(names) = store.names() {
-            state.store_layouts(names);
-        }
+        state.store_layouts(store.names());
         state.keymap_layouts(vec!["English (US)".to_owned(), "Italian".to_owned()]);
         assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
         let empty = test_store("empty", Some("(layout: \"\", variant: \"\")"));
-        assert_eq!(empty.names(), Some(Vec::new()));
+        assert_eq!(empty.names(), Names::Keymap, "a store without a layout is none");
     }
 
     #[test]
@@ -458,12 +532,17 @@ mod tests {
         let store = test_store("named", Some("(layout: \"us,it\", variant: \"intl,\")"));
         assert_eq!(
             store.names(),
-            Some(vec![
+            Names::Store(vec![
                 "English (US, intl., with dead keys)".to_owned(),
                 "Italian".to_owned()
             ])
         );
         replace(&store.changing(), "(layout: \"us\"");
-        assert_eq!(store.names(), None, "a malformed store keeps the layouts");
+        assert_eq!(store.names(), Names::Kept, "a malformed store keeps the layouts");
+        replace(&store.changing(), "(layout: \"us,it,de,fr,es\", variant: \"\")");
+        assert_eq!(store.names(), Names::Kept, "more layouts than LN9 holds");
+        fs::remove_file(store.changing()).expect("remove");
+        fs::create_dir(store.changing()).expect("a directory where the store is");
+        assert_eq!(store.names(), Names::Kept, "an unreadable store keeps the layouts");
     }
 }

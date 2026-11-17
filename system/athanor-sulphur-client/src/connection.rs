@@ -282,12 +282,12 @@ impl Client {
             return;
         }
         let store = crate::keyboard::Store::session();
-        if let Some(names) = store.names() {
-            self.inner.state.borrow_mut().store_layouts(names);
-        }
+        let names = store.names();
+        self.inner.state.borrow_mut().store_layouts(names);
         let inner = Rc::downgrade(&self.inner);
-        let changed = move |names| {
+        let changed = move |store: &crate::keyboard::Store| {
             if let Some(inner) = inner.upgrade().filter(|inner| !inner.closed.get()) {
+                let names = store.names();
                 inner.state.borrow_mut().store_layouts(names);
                 inner.deliver();
             }
@@ -847,6 +847,8 @@ pub(crate) struct State {
     pub(crate) keyboard_layouts: Vec<String>,
     /// LN9's store names the layouts, under cosmic-comp (`keyboard.rs`).
     pub(crate) layouts_from_store: bool,
+    /// The last keymap's names, the layouts' once no store or event names them.
+    pub(crate) keymap_names: Vec<String>,
     pub(crate) keyboard_group: u32,
     pub(crate) accessibility: Accessibility,
     pub(crate) events: Vec<Event>,
