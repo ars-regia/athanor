@@ -4,7 +4,7 @@
 %global sources forge/specs/%{name}/SOURCES
 Name:           athanor-update
 Version:        1.0.0
-Release:        17%{?athanor_content}%{?dist}
+Release:        16%{?athanor_content}%{?dist}
 Summary:        Athanor system image updates and trust state
 
 License:        GPL-3.0-or-later
@@ -76,11 +76,6 @@ install -D -m 0644 forge/specs/%{name}/RECOVERY.md %{buildroot}/usr/share/doc/at
 %doc /usr/share/doc/athanor-update/RECOVERY.md
 
 %changelog
-* Tue Nov 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-17
-- athanor-update and athanor-update-notify read and format dates with jiff in place of
-  chrono, which RUSTSEC-2026-0543 marks unmaintained. The notifier's local time still comes
-  from /etc/localtime and /usr/share/zoneinfo.
-
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-16
 - athanor-update-notify confines itself with athanor_unit's Landlock ruleset (#1052) and
   grants its state directory by a descriptor of dirs::owned_dir: a state directory that is a

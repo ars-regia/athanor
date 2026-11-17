@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/%{name}/%{name}-%{version}
 Name:           athanor-backup
 Version:        1.0.0
-Release:        8%{?athanor_content}%{?dist}
+Release:        7%{?athanor_content}%{?dist}
 Summary:        Hourly btrfs snapshots of /var/home with retention and restore
 
 License:        GPL-3.0-or-later
@@ -38,9 +38,6 @@ install -D -m 0644 %{crate_dir}/systemd/athanor-backup-hourly.service %{buildroo
 /usr/lib/systemd/system/athanor-backup-hourly.service
 
 %changelog
-* Tue Nov 17 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
-- Snapshot names and the hourly, daily and ISO-week retention use jiff in place of chrono,
-  which RUSTSEC-2026-0543 marks unmaintained. The names keep their format.
 * Sun Oct 18 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - The hourly unit marks the snapshot subvolume optional in ReadWritePaths=: systemd sets
   up the mount namespace before `athanor-backup init` can create the subvolume, so on a
