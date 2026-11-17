@@ -41,6 +41,30 @@ class ToolkitBoundary(unittest.TestCase):
         self.lib("pub mod driver;\npub(crate) mod render;\n")
         self.assertEqual(self.problems(), [])
 
+    def test_a_pub_use_of_a_crate_module_fails(self):
+        for use in ("crate::text", "self::text", "crate::{render, a11y}"):
+            self.lib(f"pub mod driver;\npub use {use};\n")
+            self.assertTrue(self.problems(), use)
+
+    def test_a_pub_use_of_items_passes(self):
+        self.lib("pub mod driver;\npub use driver::run;\npub use crate::driver::{Role, Side};\n"
+                 "pub use crate::widget::{Ui, Kind};\npub use crate::render::Error;\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_commented_pub_mod_passes(self):
+        self.lib("pub mod driver;\n// pub mod render;\n/* pub mod text; */\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_nested_pub_mod_passes(self):
+        self.lib("pub mod driver;\n#[cfg(test)]\nmod t {\n    pub mod fixtures;\n}\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_a_one_line_cfg_pub_mod_outside_the_list_fails(self):
+        self.lib('pub mod driver;\n#[cfg(feature = "gpu")] pub mod gpu;\n')
+        out = self.problems()
+        self.assertEqual(len(out), 1)
+        self.assertIn("`pub mod gpu`", out[0])
+
     def test_a_widget_id_alias_fails(self):
         (self.dir / "src" / "widget.rs").write_text("pub type WidgetId = usize;\n")
         out = self.problems()

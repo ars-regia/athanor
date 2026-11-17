@@ -1278,15 +1278,34 @@ def api_problems(root):
     alias of an integer: any id of that type would address another Ui's widgets (#649).
 
     Limit: it does not see a foreign crate's type in a public signature; the rustdoc run with
-    `--all-features` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
+    `--all-features -- --document-private-items` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
     lib = f"{TOOLKIT}/src/lib.rs"
     try:
         text = read(root / lib)
     except OSError as err:
         return [f"{lib}: cannot read ({err})"]
+    # Only the root's own items count: comments are dropped and a `mod t { .. }` body is skipped.
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+    depth, top, stack = 0, [], []
+    for i, ch in enumerate(text):
+        if ch == "{":
+            stack.append(text[:i].rstrip().endswith("::"))  # a `use a::{b, c}` group is no block
+            depth += not stack[-1]
+        elif ch == "}" and stack:
+            depth -= not stack.pop()
+        top.append(ch if depth == 0 else " ")
+    top = "".join(top)
     out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
            "make it pub(crate) and re-export what an application needs"
-           for name in re.findall(r"^\s*pub\s+mod\s+(\w+)", text, re.M) if name not in TOOLKIT_PUBLIC_MODULES]
+           for name in re.findall(r"\bpub\s+mod\s+(\w+)", top) if name not in TOOLKIT_PUBLIC_MODULES]
+    for use in re.findall(r"\bpub\s+use\s+([^;]*);", top):
+        # `pub use crate::text;` or `pub use crate::{render, a11y};` re-exports a module whole; an
+        # item of a module (`crate::widget::Ui`) or `driver::run` is the intended re-export.
+        mods = re.findall(r"\b(?:crate|self)::(\w+)\s*(?![\w:])", use)
+        for grp in re.findall(r"\b(?:crate|self)::\{([^}]*)\}", use):
+            mods += [m.strip() for m in grp.split(",") if re.fullmatch(r"\s*\w+\s*", m)]
+        out += [f"{lib}: `pub use` of the module `{m}` is outside the public modules "
+                f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items" for m in mods if m not in TOOLKIT_PUBLIC_MODULES]
     for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
         if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
             out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")

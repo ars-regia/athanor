@@ -39,7 +39,7 @@ pub(crate) enum Dismiss<S> {
 
 impl<S: Copy + PartialEq> OpenPopup<S> {
     /// Records `popup`, opened from `anchor` of `parent`, and marks it a popup, which raises no
-    /// [`Event::PressedOutside`]: a menu expands its button and puts the focus on its first item,
+    /// [`Event::PressedOutside`](crate::Event::PressedOutside): a menu expands its button and puts the focus on its first item,
     /// as GTK's popover does when it shows.
     pub fn opened(
         parent_surface: S,
