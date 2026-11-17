@@ -4,11 +4,14 @@ another. rig.sh and the forge's scripts run in a copy of the tree, against a pod
 that record their arguments and answer as the test says
 (python3 -B -m unittest discover -s forge/test/shell/tests -v)."""
 
+import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import textwrap
 import unittest
 from pathlib import Path
@@ -31,8 +34,10 @@ PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
-LOCAL_BUILDER_ID = "c" * 64
-LOCAL_BUILDER = "localhost/athanor-builder:latest"
+# The config file of the builder archive the nix of the tests builds; podman takes its digest for
+# the image ID of a docker archive.
+BUILDER_CONFIG = b'{"architecture":"amd64"}'
+LOCAL_BUILDER_ID = hashlib.sha256(BUILDER_CONFIG).hexdigest()
 
 # The podman of the tests: `run ... rpm -q` answers the Version-Release of the image it names,
 # `run ... build_spec.sh build` leaves the RPM the test names in the checkout's forge/RPMS, and
@@ -51,6 +56,9 @@ PODMAN = textwrap.dedent(
     if args[0] == "volume" and args[1] == "create":
         print("home")
     elif args[0] == "load":
+        if (tmp / "load-hangs").exists():
+            import time
+            time.sleep(60)
         if (tmp / "load-fails").exists():
             print("Error: payload does not match", file=sys.stderr)
             sys.exit(125)
@@ -118,18 +126,25 @@ COSIGN = textwrap.dedent(
 NIX = textwrap.dedent(
     """\
     #!/usr/bin/env python3
-    import json, pathlib, sys
+    import io, json, pathlib, sys, tarfile
     tmp = pathlib.Path(__file__).resolve().parents[1]
     with open(tmp / "nix.log", "a") as log:
         log.write(json.dumps(sys.argv[1:]) + "\\n")
     if (tmp / "nix-fails").exists():
         print("error: builderImage does not build", file=sys.stderr)
         sys.exit(1)
+    # A docker archive: manifest.json names the config file, whose digest is the image ID.
+    config = __CONFIG__
     archive = tmp / "builder-image.tar.gz"
-    archive.write_text("archive")
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, body in (("manifest.json", json.dumps([{"Config": "config.json"}]).encode()),
+                           ("config.json", config)):
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
     print(archive)
     """
-)
+).replace("__CONFIG__", repr(BUILDER_CONFIG))
 
 
 def spec(release):
@@ -195,7 +210,7 @@ class Rig:
             json.dumps(
                 {
                     "derived_id": DERIVED_ID,
-                    "ids": {self.base: BASE_ID, LOCAL_BUILDER: LOCAL_BUILDER_ID},
+                    "ids": {self.base: BASE_ID, LOCAL_BUILDER_ID: LOCAL_BUILDER_ID},
                     "absent": [],
                     "rpm": rpm,
                     "nevr": {
@@ -218,7 +233,7 @@ class Rig:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(spec(release))
 
-    def run(self, *args):
+    def environment(self):
         env = {k: v for k, v in os.environ.items() if not k.startswith("ATHANOR_")}
         path = env["PATH"]
         if not self.nix:
@@ -237,11 +252,14 @@ class Rig:
             HOME=str(self.tmp),
             RETRY_ATTEMPTS="1",
         )
+        return env
+
+    def run(self, *args):
         return subprocess.run(
             ["bash", str(self.tree / "forge/test/shell/rig.sh"), *args],
             capture_output=True,
             text=True,
-            env=env,
+            env=self.environment(),
             check=False,
         )
 
@@ -416,7 +434,7 @@ class CosmicCompVersion(unittest.TestCase):
         # The spec builds in the image by its ID, not by the name load applied.
         self.assertEqual(stages[0][-5], LOCAL_BUILDER_ID)
         self.assertIn(
-            ["image", "inspect", "--format", "{{.Id}}", LOCAL_BUILDER], calls
+            ["image", "inspect", "--format", "{{.Id}}", LOCAL_BUILDER_ID], calls
         )
         # No podman call of any form pushes, tags, logs in or touches a manifest.
         self.assertFalse(
@@ -454,7 +472,7 @@ class CosmicCompVersion(unittest.TestCase):
         rig = Rig(self.tmp, signed=False)
         (self.tmp / "nix-fails").write_text("")
         result = rig.run("cosmic-comp-version")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 1)
         self.assertIn("builderImage does not build", result.stderr)
         self.assertFalse(rig.built())
         self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
@@ -464,11 +482,44 @@ class CosmicCompVersion(unittest.TestCase):
         (self.tmp / "nix-fails").unlink(missing_ok=True)
         (self.tmp / "load-fails").write_text("")
         result = rig.run("cosmic-comp-version")
-        self.assertNotEqual(result.returncode, 0)
+        # podman's own exit status, not a flattened 1.
+        self.assertEqual(result.returncode, 125)
         self.assertIn("payload does not match", result.stderr)
         self.assertIn("could not be built or loaded", result.stderr)
         self.assertFalse(rig.built())
         self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_load_that_leaves_no_image_of_the_archives_id_fails(self):
+        rig = Rig(self.tmp, signed=False)
+        # The load answers, but the image of the archive's config digest is not there.
+        rig.configure(ids={rig.base: BASE_ID})
+        result = rig.run("cosmic-comp-version")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not be built or loaded", result.stderr)
+        self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_signal_during_the_load_removes_the_archive(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "load-hangs").write_text("")
+        proc = subprocess.Popen(
+            ["bash", str(rig.tree / "forge/test/shell/rig.sh"), "cosmic-comp-version"],
+            env=rig.environment(),
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        archive = rig.out / "builder-local/athanor-builder.tar.gz"
+        for _ in range(100):
+            if any(call[0] == "load" for call in rig.calls()):
+                break
+            time.sleep(0.1)
+        self.assertTrue(archive.exists())
+        os.killpg(proc.pid, signal.SIGTERM)
+        _, stderr = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 143, stderr)
+        self.assertFalse(archive.exists())
 
     def test_a_miss_without_nix_refuses_with_a_message(self):
         rig = Rig(self.tmp, signed=False, nix=False)

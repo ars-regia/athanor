@@ -181,11 +181,13 @@ request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-da
 artifact and never pushed. The shell rig's spec build (`rig.sh cosmic-comp-version`) on such a
 miss builds the checkout's builder with `builder_image.sh` itself and loads it into the local
 podman under the archive's own local tag: unsigned, never pushed, signed or cached under its
-hash, run by its image ID, and used only to build the RPM that the job installs in the test rig, which nothing publishes; a host without `nix`
-refuses with a message. Like the one-day artifact, this builder never leaves the job; it differs
-in being loaded into the local podman, and its RPM goes only into the test rig. PL12
-(`doc_pipeline.md`) names both. Never `athanor-builder:latest`, the default branch's builder: a
-pull request into another branch would build against the default branch's libraries.
+hash, run by the image ID read from the archive, and used only to build the RPM that the job
+installs in the test rig, which nothing publishes; a host without `nix` refuses with a message.
+Like the one-day artifact, this builder never leaves the job; it differs in being loaded into the
+local podman, and its RPM goes only into the test rig. PL12 (`doc_pipeline.md`) names both. Never
+the registry's `athanor-builder:latest`, the default branch's builder: a pull request into
+another branch would build against the default branch's libraries. The local tag that
+`podman load` applies is not that image and is never pulled or pushed.
 
 ## 6. Tier repositories and the system image
 
