@@ -73,7 +73,7 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   AX4 and AX11.
 - Amended on 2026-11-17: decision 33's EIS admission by unit through `athanor_unit::bus_caller`,
   in both directions, and the injected key that cancels a pending tap of Super, with
-  `doc_portal.md` PT15 and section 6, decision 13.
+  `doc_portal.md` PT15 and `doc_portal.md` section 6, decision 13.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1524,9 +1524,12 @@ compositor and that the own compositor did not yet offer:
           keyboard path's `with_keymap_of` does, so that an injected Ctrl+C reaches the client
           as Ctrl+C;
         - the backend's own dialogs. Injected input never reaches a surface of
-          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by its unit
-          and its executable as the `os.athanor.Eis1` admission is, the privileged-clients list
-          having no line for it. An injected key is dropped, its release included, while the
+          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by the
+          identity OS4 reads for every Wayland client when it connects (`identify` in
+          `identity.rs`: the peer's pidfd from `SO_PEERPIDFD`, then, through its pid, the
+          executable `/usr/libexec/xdg-desktop-portal-athanor` and the unit of its cgroup,
+          `xdg-desktop-portal-athanor.service`; amended on 2026-11-17), the privileged-clients
+          list having no line for it. An injected key is dropped, its release included, while the
           keyboard focus is such a surface; an injected button, scroll or touch aimed at such a
           surface is dropped; and an injected motion never gives it the pointer focus. So a
           session cannot Tab through the consent dialog of a second session and widen its own
