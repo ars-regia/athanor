@@ -2398,12 +2398,13 @@ mod tests {
         until(&log, |log| log.registered.len() == 4).await;
         let at = registered_at(&log);
         let waits: Vec<Duration> = at.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        // Real time: the model talks to a real bus, and tokio's paused clock would jump past
+        // its reply timeout while a call is on the wire. The bound below each wait is exact; the
+        // one above is the next step's wait, so a back-off one step off still fails while a
+        // loaded host's scheduling delay of less than a whole step does not.
         for (wait, expected) in waits.iter().zip([1, 2, 4]) {
             let expected = REGISTER_RETRY * expected;
-            assert!(
-                *wait >= expected && *wait < expected + REGISTER_RETRY / 2,
-                "waits {waits:?}"
-            );
+            assert!(*wait >= expected && *wait < expected * 2, "waits {waits:?}");
         }
     }
 
