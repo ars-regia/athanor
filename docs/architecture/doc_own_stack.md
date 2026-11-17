@@ -1537,8 +1537,9 @@ compositor and that the own compositor did not yet offer:
           injected key that reaches a client cancels a pending tap of Super, as a hardware key
           and an injected button or touch do, so a physical Super released after it opens no
           launcher; the injected key still reaches only the client. A key this decision drops,
-          a protected key or one aimed at the backend's own dialogs, and any key while the
-          session is locked or paused reach no client and cancel nothing (maintainer
+          a protected key, one the seat or another context holds or one aimed at the backend's
+          own dialogs, and any key while the session is locked or paused reach no client and
+          cancel nothing (maintainer
           decisions, 2026-11-17);
         - its own state. Injected keys take their own path to the focused client, not the
           virtual keyboard's path through `aided` and `typed`, and each EIS context keeps its
@@ -1594,7 +1595,9 @@ compositor and that the own compositor did not yet offer:
             and the rig's does not;
           - held input: a key, a pointer button and a touch held through EIS at the lock
             request, and at a pause, are released, the touch with `wl_touch.cancel`; two
-            contexts that hold input with the same device id are tracked apart;
+            contexts that hold input with the same device id are tracked apart; an injected
+            press of a key the seat or another context holds reaches no client, nor does its
+            release, and the other source's release still reaches it;
           - the device types: a context granted the keyboard alone is offered no pointer or
             touch device and is refused one it asks for, and likewise for each other granted
             set; each portal type yields the capabilities of the mapping above and no text
