@@ -12,6 +12,9 @@ Uso:
     python3 scripts/verify.py --list
     python3 scripts/verify.py --known-red scripts/ci/known-red.txt [--known-red-base REF]
                                            # a listed red check does not fail the run (PQ12)
+    python3 scripts/verify.py specs --known-red-base REF
+                                           # REF is also the base `specs` measures Release raises
+                                           # against (#1202)
 
 Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
@@ -22,6 +25,7 @@ import collections
 import datetime
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -52,6 +56,9 @@ VENDORED_CRATES = {
 # --------------------------------------------------------------------------- #
 
 CHECKS = {}
+# The revision the change is measured against, from --known-red-base: the base of the pull
+# request or of the merge group in pr.yml (`just check-static`), None when none is given.
+BASE_REF = None
 BOLD, DIM, RED, GRN, YEL, OFF = "\033[1m", "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m"
 if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
     BOLD = DIM = RED = GRN = YEL = OFF = ""
@@ -3617,6 +3624,88 @@ RELEASE_BY_HAND = {
     "forge/specs/greenboot-rs/greenboot-rs.spec",
     "forge/specs/polkit/polkit.spec",
 }
+# The RELEASE_BY_HAND spec whose Version-Release is the kernel's NVR: build.sh defines kversion
+# and krelease from nvr.sh, which reads the kernel pins, so the spec cannot raise it, and the
+# kernel pipeline already rebuilds and tests a change to microvm/ (build-inputs.py hashes its
+# spec and kernel-local, kernel_unchanged.py checks the whole directory).
+RELEASE_FROM_KERNEL = {"forge/specs/azoth/microvm/azoth-microvm.spec"}
+# Directories under a RELEASE_BY_HAND spec's directory that no Source line and no section of the
+# spec reads, so a change to them leaves the package as it is and raises no Release (#1202). The
+# spec file itself is never listed: a comment-only edit of a spec raises Release too.
+RELEASE_UNPACKAGED = {
+    "forge/specs/greenboot-rs/tests/": "unittest suites of the patches, run by just check, not packaged",
+    "forge/specs/polkit/tests/": "unittest suites of the agent helper, run by just check, not packaged",
+}
+
+
+def load_module(path):
+    """The Python module at PATH, relative to the repository, loaded by its file path: the
+    directories of scripts/ci and forge/scripts are not packages verify.py can import."""
+    spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def unraised_releases(root, base):
+    """The RELEASE_BY_HAND specs of ROOT (but RELEASE_FROM_KERNEL) whose directory differs from
+    revision BASE outside RELEASE_UNPACKAGED while their Version-Release did not rise (#1202).
+
+    The working tree is compared with BASE, a two-tree diff as scripts/ci/changes.py makes: in
+    pr.yml BASE is the first parent of the checked-out merge, so the diff is the pull request's.
+    A spec absent at BASE is new, one absent from the tree is removed, and one whose base Release
+    still carried %{?athanor_content} had no hand Release to raise: none of them is compared.
+    Raises ValueError when BASE is not a commit or git cannot diff it.
+    """
+    rpms = load_module("forge/scripts/check_image_rpms.py")
+    classes = load_module("scripts/ci/release_class.py")
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+    if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
+        raise ValueError(f"{base} is not a commit of {root}")
+    diff = git("diff", "--name-only", "--no-renames", "-z", base, "--")
+    if diff.returncode != 0:
+        raise ValueError(f"git diff {base} failed: {diff.stderr.strip()}")
+    changed = [p for p in diff.stdout.split("\0") if p]
+
+    problems = []
+    for spec in sorted(RELEASE_BY_HAND - RELEASE_FROM_KERNEL):
+        directory = spec.rsplit("/", 1)[0] + "/"
+        content = [p for p in changed if p.startswith(directory)
+                   and not any(p.startswith(d) for d in RELEASE_UNPACKAGED)]
+        if not content or not (Path(root) / spec).is_file():
+            continue
+        listed = git("ls-tree", "-z", "--name-only", base, "--", spec)
+        if listed.returncode != 0:
+            problems.append(f"{spec}: cannot list it at {base}: {listed.stderr.strip()}")
+            continue
+        if not listed.stdout:
+            continue
+        before = git("show", f"{base}:{spec}")
+        if before.returncode != 0:
+            problems.append(f"{spec}: cannot read it at {base}: {before.stderr.strip()}")
+            continue
+        if re.search(r"^Release:.*%\{\?athanor_content\}", before.stdout, re.M):
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            old_spec = Path(tmp) / Path(spec).name
+            old_spec.write_text(before.stdout, encoding="utf-8")
+            try:
+                old = rpms.read_spec(old_spec)[1]()
+                new = rpms.read_spec(Path(root) / spec)[1]()
+                raised = classes.evrcmp(new, old) > 0
+            except (KeyError, ValueError, classes.ClassError) as e:
+                problems.append(f"{spec}: cannot read its Version-Release: {e}")
+                continue
+        if not raised:
+            problems.append(
+                f"{spec}: {', '.join(c[len(directory):] for c in content)} changed but "
+                f"Version-Release {new} is not higher than {old} at {base}: raise Release and add "
+                f"a %changelog entry, or add a path no build reads to RELEASE_UNPACKAGED in "
+                f"scripts/verify.py, only with its reason")
+    return problems
 
 
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
@@ -3624,6 +3713,25 @@ def check_specs():
     r = Result()
     for problem in manifest_spec_problems():
         r.fail(problem)
+    if BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the Release raises of RELEASE_BY_HAND "
+               "were not checked")
+    else:
+        try:
+            for problem in unraised_releases(ROOT, BASE_REF):
+                r.fail(problem)
+        except ValueError as e:
+            r.fail(f"Release raises against {BASE_REF}: {e}")
+        else:
+            commits = {
+                subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+                                f"{ref}^{{commit}}"], capture_output=True, text=True).stdout
+                for ref in (BASE_REF, "HEAD")
+            }
+            if len(commits) == 1:
+                r.note(f"the base {BASE_REF} is the checked-out commit, so only uncommitted edits were compared for "
+                       "Release raises: pass the pull request's base, e.g. "
+                       "`just check-static origin/iso-v0`")
     import shlex
 
     def sections(text):
@@ -4975,6 +5083,46 @@ def shipped_user_units(root):
     return units, problems
 
 
+# A tmpfiles.d line that creates a directory under the user's state directory.
+TMPFILES_DIRECTORY = re.compile(r"^[dD]!?\s+%S/([^/\s]+)")
+
+
+def shipped_user_state_directories(root):
+    """The top-level names under the user's state directory that a user tmpfiles.d file creates
+    (`d %S/<name>`), counting only the files a spec lists in its %files."""
+    names = set()
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        text = read(spec)
+        files = text.split("%files", 1)[1].split("%changelog", 1)[0] if "%files" in text else ""
+        for conf in sorted((spec.parent / "SOURCES/usr/share/user-tmpfiles.d").glob("*.conf")):
+            if f"/usr/share/user-tmpfiles.d/{conf.name}" not in files:
+                continue
+            for line in read(conf).splitlines():
+                match = TMPFILES_DIRECTORY.match(line.strip())
+                if match:
+                    names.add(match.group(1))
+    return names
+
+
+def state_link_problems(units, created):
+    """A finding for every top-level name a user unit takes as StateDirectory= that `created`
+    does not hold. When that directory is missing and ~/.config/<name> exists, whoever made it,
+    systemd 254 and later links the first to the second, and the state lives in the configuration
+    (#1238); a tmpfiles.d entry creates it before any unit starts.
+    ponytail: top-level names only; a nested StateDirectory= whose own ~/.config path exists
+    would still be linked, check the full path if one ever appears."""
+    state = {}
+    for unit, text in units.items():
+        for path in unit_names(unit_section(text, "Service"), "StateDirectory"):
+            state.setdefault(path.split(":")[0].split("/")[0], set()).add(unit)
+    return [
+        f"'{name}' is StateDirectory= of {', '.join(sorted(state[name]))} and no shipped user tmpfiles.d "
+        f"line 'd %S/{name}' creates it: systemd links a missing ~/.local/state/{name} to an existing "
+        f"~/.config/{name} (#1238)"
+        for name in sorted(state.keys() - created)
+    ]
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -4983,6 +5131,8 @@ def check_session_units():
         r.fail(problem)
     enabled = {unit for verb, unit, _ in preset_lines(ROOT) if verb == "enable"}
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
+        r.fail(problem)
+    for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
         r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")
@@ -5972,9 +6122,8 @@ def main(argv):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    if known_red_ref and not known_red_path:
-        print("--known-red-base needs --known-red", file=sys.stderr)
-        return 2
+    global BASE_REF
+    BASE_REF = known_red_ref
 
     if "--list" in argv:
         for n, f in CHECKS.items():

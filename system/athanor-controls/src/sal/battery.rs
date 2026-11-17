@@ -132,17 +132,21 @@ impl Page {
         let note = ui.add(summary, Kind::Label(String::new()));
         look.note(ui, note);
 
-        // Columns, not groups: the GTK page's boxes give assistive technologies no group.
-        let profiles_section = column(ui, page);
-        ui.set_spacing(profiles_section, look.radio_gap);
-        let heading = ui.add(profiles_section, Kind::Label(tr("Power mode")));
+        // The profiles' radio buttons in a group named as the heading above them, so a screen
+        // reader says "Power mode" with each; Tab still goes from one to the next (#1237). The
+        // column inside spaces them, which a group does not take.
+        let power_mode = tr("Power mode");
+        let profiles_section = ui.add(page, Kind::Group(power_mode.clone()));
+        let profiles_column = column(ui, profiles_section);
+        ui.set_spacing(profiles_column, look.radio_gap);
+        let heading = ui.add(profiles_column, Kind::Label(power_mode));
         ui.set_text_style(heading, title());
         let profiles = battery::PROFILE_NAMES
             .iter()
             .map(|&name| {
                 (
                     name,
-                    ui.radio(profiles_section, &profile_label(name), false),
+                    ui.radio(profiles_column, &profile_label(name), false),
                 )
             })
             .collect();
@@ -343,6 +347,18 @@ mod tests {
             ]
         );
         assert_eq!(ids.brightness.and_then(|s| ui.value(s)), Some(60.0));
+        assert!(matches!(
+            &ui.widget(ids.profiles_section).kind,
+            Kind::Group(name) if name == "Power mode"
+        ));
+        assert!(ids.profiles.iter().all(|&(_, id)| {
+            let column = ui.widget(id).parent;
+            column.and_then(|c| ui.widget(c).parent) == Some(ids.profiles_section)
+        }));
+        // The visible heading, the column's first widget, says the group's name.
+        let column = ui.widget(ids.profiles_section).children[0];
+        let heading = ui.widget(column).children[0];
+        assert!(matches!(&ui.widget(heading).kind, Kind::Label(t) if t == "Power mode"));
 
         // A desktop: no profiles daemon, no backlight.
         publish(

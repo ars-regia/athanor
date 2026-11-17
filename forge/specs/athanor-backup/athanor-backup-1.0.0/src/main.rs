@@ -11,7 +11,7 @@
 mod retention;
 
 use anyhow::{anyhow, bail, Context, Result};
-use chrono::{NaiveDateTime, Utc};
+use jiff::{civil::DateTime, tz::TimeZone, Timestamp};
 use nix::fcntl::{openat2, OFlag, OpenHow, ResolveFlag};
 use nix::sys::stat::fstatat;
 use std::ffi::{OsStr, OsString};
@@ -96,7 +96,7 @@ fn init() -> Result<()> {
 fn create() -> Result<()> {
     ensure_subvolume(Path::new(HOME_ROOT))?;
     ensure_subvolume(Path::new(SNAPSHOT_DIR))?;
-    let id = Utc::now().format(ID_FORMAT).to_string();
+    let id = Timestamp::now().strftime(ID_FORMAT).to_string();
     let target = Path::new(SNAPSHOT_DIR).join(&id);
     btrfs(&[
         OsStr::new("subvolume"),
@@ -113,7 +113,8 @@ fn create() -> Result<()> {
 fn prune() -> Result<()> {
     let snapshots = snapshots()?;
     let mut failed = Vec::new();
-    for id in prunable(&snapshots, Utc::now().naive_utc()) {
+    let now = Timestamp::now().to_zoned(TimeZone::UTC).datetime();
+    for id in prunable(&snapshots, now) {
         let path = Path::new(SNAPSHOT_DIR).join(id);
         match btrfs(&[
             OsStr::new("subvolume"),
@@ -139,7 +140,7 @@ fn prune() -> Result<()> {
 /// deleted nor counted: counted, it would hold the newest hour, day and week of the
 /// retention for good and push the real snapshots out. Once the clock passes its date
 /// it is an ordinary snapshot again.
-fn prunable(snapshots: &[(NaiveDateTime, String)], now: NaiveDateTime) -> Vec<&str> {
+fn prunable(snapshots: &[(DateTime, String)], now: DateTime) -> Vec<&str> {
     let past: Vec<_> = snapshots.iter().filter(|(time, _)| *time <= now).collect();
     let times: Vec<_> = past.iter().map(|(time, _)| *time).collect();
     past.iter()
@@ -279,14 +280,14 @@ fn relative_to_home_root(path: &Path) -> Result<PathBuf> {
 }
 
 /// The creation time a snapshot name stands for, if `name` is one.
-fn parse_id(name: &str) -> Option<NaiveDateTime> {
-    NaiveDateTime::parse_from_str(name, ID_FORMAT)
+fn parse_id(name: &str) -> Option<DateTime> {
+    DateTime::strptime(ID_FORMAT, name)
         .ok()
-        .filter(|time| time.format(ID_FORMAT).to_string() == name)
+        .filter(|time| time.strftime(ID_FORMAT).to_string() == name)
 }
 
 /// The snapshots, newest first. Entries not named like a snapshot are left alone.
-fn snapshots() -> Result<Vec<(NaiveDateTime, String)>> {
+fn snapshots() -> Result<Vec<(DateTime, String)>> {
     let entries = match fs::read_dir(SNAPSHOT_DIR) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),

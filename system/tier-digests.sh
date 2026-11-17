@@ -14,8 +14,10 @@
 #               print signed or unsigned for one image reference, retrying a failure of
 #               cosign itself; forge/scripts/publish_tiers.sh asks it before it reuses a tier.
 #               WORKFLOW is the file of the signing workflow: call-system-image.yml (the
-#               default, the tiers) or call-dag-compile.yml (the package images, which
+#               default, the tiers), call-dag-compile.yml (the package images, which
 #               forge/scripts/verify_image.sh asks before a build is skipped or its RPMs used)
+#               or call-build-builder.yml (the builder image, which verify_image.sh asks
+#               before a build is skipped or a job runs in it, issue #1205)
 #   probe REF [WORKFLOW]
 #               one attempt of signed
 #
@@ -64,7 +66,7 @@ die() {
 }
 case ${1:-}:$# in
 resolve:1 | verify:1 | signed:2 | probe:2) ;;
-signed:3 | probe:3) [[ $3 == call-system-image.yml || $3 == call-dag-compile.yml ]] || usage ;;
+signed:3 | probe:3) [[ $3 == call-system-image.yml || $3 == call-dag-compile.yml || $3 == call-build-builder.yml ]] || usage ;;
 *) usage ;;
 esac
 # The workflow whose runs sign what is verified.

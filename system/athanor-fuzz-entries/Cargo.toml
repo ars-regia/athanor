@@ -19,7 +19,7 @@ doctest = false
 
 [features]
 default = ["update", "shelld", "layout", "gtk", "sulphur"]
-update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:chrono", "dep:tracing"]
+update = ["dep:athanor-trust-state", "dep:base64", "dep:p256", "dep:serde", "dep:serde_json", "dep:sha2", "dep:hex", "dep:jiff", "dep:tracing"]
 shelld = ["dep:athanor-shelld", "dep:zbus"]
 layout = ["dep:athanor-layout", "dep:athanor-trust-state"]
 gtk = ["dep:athanor-bar", "dep:athanor-sulphur-client", "dep:glib"]
@@ -36,7 +36,7 @@ athanor-trust-state = { path = "../athanor-trust-state", optional = true }
 # The same versions as athanor-update, whose modules `src/update.rs` includes.
 base64 = { version = "0.23", optional = true }
 p256 = { version = "0.14", features = ["ecdsa", "pem"], optional = true }
-chrono = { version = "0.4", default-features = false, features = ["std"], optional = true }
+jiff = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
@@ -47,4 +47,4 @@ zbus = { workspace = true, optional = true }
 
 [package.metadata.cargo-machete]
 # Used by the athanor-update modules that lib.rs includes with #[path]; the scan reads only this crate's own sources.
-ignored = ["chrono", "serde", "tracing"]
+ignored = ["jiff", "serde", "tracing"]

@@ -182,12 +182,21 @@ class TierDigests(unittest.TestCase):
     def test_signed_asks_for_the_workflow_it_is_given(self):
         # forge/scripts/verify_image.sh asks for a package image built by call-dag-compile.yml
         # (issue #1176): the same branches and issuer, another workflow, and no third one.
+        # The builder image is signed by call-build-builder.yml (issue #1205), under the same rules.
         dag = WORKFLOW.replace("call-system-image.yml", "call-dag-compile.yml")
+        builder = WORKFLOW.replace("call-system-image.yml", "call-build-builder.yml")
         for signer, workflow, verdict in (
             (f"{dag}@refs/heads/iso-v0", "call-dag-compile.yml", "signed"),
             (f"{WORKFLOW}@refs/heads/iso-v0", "call-dag-compile.yml", "unsigned"),
             (f"{dag}@refs/heads/feature", "call-dag-compile.yml", "unsigned"),
             (f"{dag}@refs/heads/iso-v0", "call-system-image.yml", "unsigned"),
+            (f"{builder}@refs/heads/iso-v0", "call-build-builder.yml", "signed"),
+            (f"{builder}@refs/heads/main", "call-build-builder.yml", "signed"),
+            (f"{dag}@refs/heads/iso-v0", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/feature", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/pull/7/merge", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/rebase/fedora-45", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/iso-v0", "call-dag-compile.yml", "unsigned"),
         ):
             with self.subTest(signer=signer, workflow=workflow):
                 self.publish("ghcr.io/ars-regia", signers={"tier0": signer}, **DIGESTS)
