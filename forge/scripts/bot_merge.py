@@ -28,9 +28,12 @@ Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
        GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a token of
        the bots GitHub App, so that the merge triggers the push workflows)
 
-A pull request whose files have a code owner (ADR-0107) merges once the owner has approved it
-at HEAD_SHA: the run before that reports it as waiting, and the next run of this script
-(another pr.yml run on the pull request) or the maintainer merges it.
+A pull request whose files have a code owner (ADR-0107) merges only once GitHub reports it
+APPROVED, or reports no decision (the approving count is 0) and a code owner of every owned
+file has approved it at HEAD_SHA; a pull request on unowned paths needs no approval. Any
+other decision stays for a person. bot-merge.yml runs only on workflow_run of pr.yml and a push
+dismisses the approval, so after approving, the maintainer reruns the Bot Merge run of that
+head or merges by hand: nothing else wakes the script.
 
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
@@ -57,6 +60,8 @@ BOT_AUTHOR = "app/athanor-bots"
 # merging App is a bypass actor of the pull request rule, so this wait is what keeps a red check from merging. Switching
 # the required check (docs/operations/github-settings.md section 8) is a change of that file.
 BRANCH_PROTECTION = ".github/settings/branch-protection.json"
+# Who owns what, read from the checkout (the base branch) like the files above.
+CODEOWNERS = ".github/CODEOWNERS"
 # The workflow whose newest pull_request run reports each check a branch may require, as the
 # name of its gate job.
 CHECK_WORKFLOWS = {
@@ -177,6 +182,71 @@ def check_system(f, contents):
             )
 
 
+def codeowners_regex(pattern):
+    """GitHub's CODEOWNERS pattern as a regex over a repository path (gitignore semantics)."""
+    directory = pattern.endswith("/")
+    pattern = pattern.rstrip("/")
+    anchored = "/" in pattern
+    translate = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}
+    body = re.sub(
+        r"\*\*/|\*\*|\*|\?|[^*?]+",
+        lambda m: translate.get(m.group(0)) or re.escape(m.group(0)),
+        pattern.lstrip("/"),
+    )
+    return re.compile(("" if anchored else "(?:.*/)?") + body + ("/.*" if directory else "(?:/.*)?"))
+
+
+def codeowners_rules():
+    """(regex, owners) of every rule of CODEOWNERS, in order: the last match wins."""
+    rules = []
+    with open(CODEOWNERS) as f:
+        for line in f:
+            parts = line.split("#")[0].split()
+            if parts:
+                rules.append((codeowners_regex(parts[0]), parts[1:]))
+    return rules
+
+
+def owners_of(path, rules):
+    owners = []
+    for regex, names in rules:
+        if regex.fullmatch(path):
+            owners = names
+    return owners
+
+
+def require_owner_approval(view, paths):
+    """Fail closed: refuse unless GitHub reports APPROVED, or reports no decision and every
+    owned path has a code owner's approval at the head. GitHub leaves the decision empty for an
+    unapproved pull request while the approving count is 0 (ADR-0107, #569), so the empty
+    decision alone proves nothing."""
+    decision = view["reviewDecision"]
+    if decision == "APPROVED":
+        return
+    if decision != "":
+        raise Refused(f"review decision {decision!r}: it needs a person")
+    rules = codeowners_rules()
+    owned = {p: owners_of(p, rules) for p in paths}
+    owned = {p: o for p, o in owned.items() if o}
+    if not owned:
+        return
+    # The latest approving or rejecting review of each reviewer decides; a comment changes nothing.
+    latest = {}
+    for r in view["reviews"]:
+        if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
+            latest[r["author"]["login"].lower()] = r
+    approvers = {
+        "@" + login
+        for login, r in latest.items()
+        if r["state"] == "APPROVED" and (r.get("commit") or {}).get("oid") == view["headRefOid"]
+    }
+    missing = sorted(p for p, o in owned.items() if not approvers & {x.lower() for x in o})
+    if missing:
+        raise Refused(
+            f"waits for a code owner's approval at {view['headRefOid']} of {', '.join(missing)}"
+        )
+
+
 def check(kind, pr, sha, gh):
     view = json.loads(
         gh(
@@ -184,7 +254,7 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles,reviewDecision",
+            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles,reviewDecision,reviews",
         )
     )
     if view["state"] != "OPEN":
@@ -237,12 +307,7 @@ def check(kind, pr, sha, gh):
             check_spec(f)
         else:
             check_system(f, contents)
-    if view["reviewDecision"] == "REVIEW_REQUIRED":
-        # ADR-0107: the files of the pull request have a code owner, whose approval at this head
-        # the merge needs. Trying it would end the job red on "the base branch policy prohibits
-        # the merge" (#569). A pull request the owner approved reads APPROVED or empty (ADR-0107
-        # keeps the approving count at 0), and an unowned path reads empty.
-        raise Refused("waits for the code owner's approval at this head")
+    require_owner_approval(view, [f["filename"] for f in files])
     return view["baseRefName"]
 
 
