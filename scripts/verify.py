@@ -5970,42 +5970,85 @@ def check_agent_docs():
 # line-citations: a `path:N` in an architecture document still names what the sentence names
 # --------------------------------------------------------------------------- #
 
-# `dir/file.ext:N` or `:N-M`; a bare file name is relative to a crate the sentence names, so it is
-# not read.
-LINE_CITATION = re.compile(r"`([\w.+-]+(?:/[\w.+-]+)+):(\d+)(?:-(\d+))?`")
-# What a sentence names in code: a backticked identifier, or a bare snake_case or `::` path.
-CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_]\w*(?:::\w+)*(?=`)|(?<![\w`/.])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`])")
+# What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path cited last.
+LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
+# What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
+# `cosmic-osd.service`), or a bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
+CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
 
-# Findings the heuristic cannot settle, each by "doc.md:line" with the reason; the list only shrinks.
+# Findings the heuristic cannot settle, each (document, cited path, token) with the reason; an entry
+# that matches no finding fails, so the list only shrinks.
 LINE_CITATIONS_KEPT = {
-    # The token is the protocol name; the cited line binds it through its Rust type.
-    "doc_notification_center.md:19": "binds ZcosmicToplevelInfoV1",
-    # The token is a trait method; the cited line calls it as `.output(`.
-    "doc_osd.md:301": "calls Application::output as .output(",
+    ("doc_notification_center.md", "system/athanor-sulphur-client/src/windows.rs", "zcosmic_toplevel_info_v1"):
+        "the line binds the protocol through its Rust type, ZcosmicToplevelInfoV1",
+    ("doc_tetragon.md", "system/Containerfile", "tmpfiles.d"):
+        "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
 }
 
 
-def citation_problems(doc, text, read_file):
-    """A citation `path:N[-M]` of the document's `text` whose sentence names a code token that the
-    cited file holds, but not in the cited lines. `read_file(path)` is the file's text, None when it
-    is no tracked file (a citation of such a path is not read). The token is the nearest one
-    before the citation, in the same sentence (after the last `. `, `; `, `: `, `), ` or ` | `).
+def holds_token(text, token):
+    """Whether `text` has `token` as a whole word (the last segment of a `A::b` path)."""
+    word = re.escape(token.rsplit("::", 1)[-1])
+    return re.search(rf"(?<![A-Za-z0-9-]){word}(?![\w-])", text) is not None
 
-    Limit: a sentence with no such token, or whose token the file does not hold, is not checked, and
-    neither is a citation that names a wrong place holding the token (#1089)."""
+
+def citation_findings(doc, text, read_file):
+    """The citations of the document's `text` that no longer name what they cite, as
+    (line, path, token, message); `token` is None for a range that is no line range.
+    `read_file(path)` is a tracked file's text, None for any other path.
+
+    A citation is `path:N`, `path:N-M` or a list `path:N, M-K`; `:N` alone cites the path cited
+    last in the same line, until a file name without a line or another path comes between; a
+    `src/`, `data/` or `tests/` path is read from the crate whose full path the line names before
+    it; a bare file name (`Cargo.toml:9`) is relative to a crate the sentence names loosely and is
+    not read. The token is the nearest code token before the citation in its sentence (after the
+    last `. `, `; `, `: `, `), ` or ` | `) that the cited file holds as a whole word; the cited
+    lines must hold it.
+
+    Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
+    place holding the token (#1089)."""
     out = []
     for number, line in enumerate(text.split("\n"), 1):
-        for m in LINE_CITATION.finditer(line):
-            body = read_file(m.group(1))
+        last = crate = None
+        for span in re.finditer(r"`([^`]+)`", line):
+            m = LINE_CITATION.fullmatch(span.group(1))
+            if not m:
+                if FILE_LIKE.search(span.group(1)):
+                    last = None
+                continue
+            named, spec = m.groups()
+            path = last if named is None else None
+            if named:
+                for candidate in (named, f"{crate}/{named}" if crate else None):
+                    if candidate and read_file(candidate) is not None and "/" in named:
+                        path = candidate
+                        break
+            body = read_file(path) if path else None
+            last = path
             if body is None:
                 continue
-            start = max(line.rfind(sep, 0, m.start()) for sep in (". ", "; ", ": ", "), ", " | "))
-            tokens = [t for t in CITED_TOKEN.findall(line[start + 1:m.start()]) if t in body]
-            first, last = int(m.group(2)), int(m.group(3) or m.group(2))
-            lines = f"{first}-{last}" if last != first else str(first)
-            if tokens and tokens[-1] not in "\n".join(body.split("\n")[first - 1:last]):
-                out.append(f"{doc}:{number}: `{m.group(1)}:{lines}` does not hold `{tokens[-1]}`, "
-                           "which its sentence names: the lines moved")
+            if (c := CRATE_ROOT.match(path)):
+                crate = c.group(1)
+            ranges = []
+            for part in re.split(r",\s*", spec):
+                first, _, end = part.partition("-")
+                ranges.append((int(first), int(end or first)))
+            rows = body.split("\n")
+            label = f"{path}:{spec}"
+            bad = next((r for r in ranges if r[0] < 1 or r[1] < r[0] or r[0] > len(rows)), None)
+            if bad:
+                out.append((number, path, None, f"{doc}:{number}: `{label}` is not a line range of its file"))
+                continue
+            start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
+            own = {part.split(".")[0] for part in path.split("/")}
+            tokens = [t for t in CITED_TOKEN.findall(line[start + 1:span.start()])
+                      if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
+            held = "\n".join("\n".join(rows[f - 1:l]) for f, l in ranges)
+            if tokens and not holds_token(held, tokens[-1]):
+                out.append((number, path, tokens[-1], f"{doc}:{number}: `{label}` does not hold "
+                            f"`{tokens[-1]}`, which its sentence names: the lines moved"))
     return out
 
 
@@ -6024,10 +6067,14 @@ def check_line_citations():
         except OSError:
             return None
 
+    seen = set()
     for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
-        for problem in citation_problems(rel(doc), read(doc), read_file):
-            if problem.split(": ")[0].removeprefix("docs/architecture/") not in LINE_CITATIONS_KEPT:
+        for _, path, token, problem in citation_findings(doc.name, read(doc), read_file):
+            seen.add((doc.name, path, token))
+            if (doc.name, path, token) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
+    for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
+        r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
     return r
 
 
