@@ -2,7 +2,6 @@
 // ponytail: a two-language table. When plan 1a's `system/athanor-i18n` lands, replace the
 // body of `texts` with catalog lookups; the callers do not change.
 use crate::notices::{Notice, ACTION_APPLY, ACTION_GO_BACK, ACTION_LATER, ACTION_POSTPONE};
-use chrono::Datelike as _;
 
 pub struct Texts {
     pub ready_summary: &'static str,
@@ -56,8 +55,9 @@ impl Texts {
     /// into `/usr/share/zoneinfo`, which the Landlock ruleset grants.
     #[must_use]
     pub fn time(&self, seconds: i64) -> String {
-        let Some(time) = chrono::DateTime::from_timestamp(seconds, 0).map(|time| time.with_timezone(&chrono::Local)) else { return String::new() };
-        format!("{} {}, {}", time.day(), self.months[time.month0() as usize], time.format("%H:%M"))
+        let Ok(time) = jiff::Timestamp::from_second(seconds).map(|time| time.to_zoned(jiff::tz::TimeZone::system())) else { return String::new() };
+        // A month is 1 to 12.
+        format!("{} {}, {}", time.day(), self.months[usize::from(time.month().unsigned_abs() - 1)], time.strftime("%H:%M"))
     }
 }
 
@@ -103,8 +103,8 @@ mod tests {
         assert_eq!(it.postpone, "Rimanda");
         assert!(it.postponed_until.contains("{time}") && en.postponed_until.contains("{time}"));
         // Local time: the day and hour depend on the zone, the month and the shape do not.
-        let local = chrono::DateTime::from_timestamp(1_790_604_800, 0).expect("in range").with_timezone(&chrono::Local);
-        let (day, hour) = (local.day(), local.format("%H:%M"));
+        let local = jiff::Timestamp::from_second(1_790_604_800).expect("in range").to_zoned(jiff::tz::TimeZone::system());
+        let (day, hour) = (local.day(), local.strftime("%H:%M"));
         assert_eq!((en.time(1_790_604_800), it.time(1_790_604_800)), (format!("{day} September, {hour}"), format!("{day} settembre, {hour}")));
     }
 }
