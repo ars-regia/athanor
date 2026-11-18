@@ -379,6 +379,15 @@ impl Client {
         self.flush()
     }
 
+    /// The user's reduced-motion setting (doc_accessibility.md AX9), which only athanor-sulphur
+    /// version 2 takes: [`Error::Unavailable`] under cosmic-comp and under version 1.
+    pub fn set_reduced_motion(&self, reduced: bool) -> Result<(), Error> {
+        let state = self.inner.live_state()?;
+        state.a11y()?.set_reduced_motion(reduced)?;
+        drop(state);
+        self.flush()
+    }
+
     /// The keyboard aids (doc_accessibility.md AX11), which only athanor-sulphur has.
     pub fn set_keyboard_aids(&self, aids: KeyboardAids) -> Result<(), Error> {
         let state = self.inner.live_state()?;

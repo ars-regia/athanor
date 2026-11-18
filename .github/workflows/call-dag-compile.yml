@@ -8,17 +8,17 @@ on:
         type: string
         required: false
         default: '[]'
-      builder_hash:
-        description: 'Content hash of builder container'
+      builder_image:
+        description: 'The builder image by digest, as call-build-builder.yml verified it signed'
         type: string
-        required: false
-        default: 'latest'
+        required: true
 
 env:
   # The registry host is the REGISTRY_HOST repository variable (default ghcr.io), the owner
   # the repository's: the same knob forge-ghcr-cleanup.yml and promote-stable.yml read.
   REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
-  BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ inputs.builder_hash }}
+  # Pulled and run by this digest only, never by a tag (#1205).
+  BUILDER_IMAGE: ${{ inputs.builder_image }}
 
 permissions:
   contents: read

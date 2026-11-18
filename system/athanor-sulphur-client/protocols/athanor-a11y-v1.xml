@@ -54,7 +54,7 @@
     version it knows.
   </description>
 
-  <interface name="athanor_a11y_manager_v1" version="1">
+  <interface name="athanor_a11y_manager_v1" version="2">
     <description summary="the accessibility features of the compositor">
       Switches the magnifier and the colour filters, configures the keyboard aids, and sends
       their state. When the manager is bound, the magnifier, screen_filter and modifiers events
@@ -202,6 +202,19 @@
         sticky_keys gesture, and Shift held for eight seconds as the slow_keys gesture. The
         compositor changes no setting for a gesture: the client offers the aid to the user.
         Disabled until the client enables them.
+      </description>
+      <arg name="active" type="uint" enum="active_state"/>
+    </request>
+
+    <request name="set_reduced_motion" since="2">
+      <description summary="the user's reduced-motion setting">
+        Tells the compositor whether the user asked for reduced motion, which is GNOME's
+        enable-animations turned off (doc_accessibility.md AX9). With it enabled, the
+        compositor shows what would blink or slide without moving: the focus outline's bell
+        is drawn at twice its width instead of blinking (doc_own_stack.md decision 33). The
+        compositor does not read the setting itself and keeps it in memory only: the state is
+        disabled until a client sends it, and a client that bound version 1 cannot send it.
+        The last client's value stands.
       </description>
       <arg name="active" type="uint" enum="active_state"/>
     </request>

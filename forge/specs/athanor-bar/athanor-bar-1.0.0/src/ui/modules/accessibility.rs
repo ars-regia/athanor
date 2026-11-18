@@ -6,7 +6,7 @@
 use std::rc::Rc;
 
 use athanor_bar::i18n::tr;
-use athanor_bar::{magnifier, screen_reader};
+use athanor_bar::{magnifier, reduced_motion, screen_reader};
 use athanor_sal::{Event, Kind, Ui, WidgetId};
 use athanor_style::appearance::{self, Appearance};
 use athanor_sulphur_client::{theme, Accessibility, Client, Event as Compositor, ScreenFilter};
@@ -58,6 +58,16 @@ pub fn new(start: &Start) -> Option<Box<dyn Module>> {
         // is sent; the keyboard aids' start asks for it.
         aids.start(client);
         magnifier_key = follow_magnifier(client);
+        // AX9: `enable-animations` reaches the compositor now and at each change (decision 37).
+        let weak = Rc::downgrade(client);
+        reduced_motion::follow(move |reduced| {
+            let Some(client) = weak.upgrade() else {
+                return;
+            };
+            if let Err(err) = client.set_reduced_motion(reduced) {
+                tracing::info!(error = %err, "the reduced-motion setting cannot reach the compositor");
+            }
+        });
     }
     let reader_key = screen_reader::settings(gio::SettingsSchemaSource::default().as_ref(), None);
     if reader_key.is_none() {
