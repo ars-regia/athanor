@@ -299,12 +299,12 @@ class LauncherResultsTest(unittest.TestCase):
             (
                 "en",
                 "orca-launcher.txt",
-                ["Results List with 3 items", "cc window, Web search.", "CC Window, Application."],
+                ["Results List with 3 items", "cc window, Web search", "CC Window, Application"],
             ),
             (
                 "it",
                 "orca-launcher-it.txt",
-                ["Risultati Elenco con 3 voci", "cc window, Ricerca sul web.", "CC Window, Applicazione."],
+                ["Risultati Elenco con 3 voci", "cc window, Ricerca sul web", "CC Window, Applicazione"],
             ),
         ):
             with self.subTest(lang=lang):

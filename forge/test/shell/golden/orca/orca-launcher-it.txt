@@ -1,7 +1,9 @@
 Lettore schermo attivo.
-Cerca testo.
-cc window.
+Cerca campo inserimento cc window
+apre un popup
 Risultati Elenco con 3 voci
-cc window, Ricerca sul web.
-CC Window, Applicazione.
+cc window, Ricerca sul web
+cc window
+CC Window, Applicazione
+CC Window
 Lettore schermo disattivato.
