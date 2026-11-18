@@ -6,9 +6,14 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 license = "GPL-3.0-or-later"
 description = "Athanor's Wayland compositor on Smithay (doc_own_stack.md, milestone C1)"
 
+[features]
+# `fuzz::run`, the entry of the protocol fuzz target, for athanor-fuzz-entries (issue #1172).
+fuzz = []
+
 [dependencies]
-# Readiness for the `Type=notify` unit of the preview session (`ready.rs`).
-athanor-unit = { path = "../../../../system/athanor-unit" }
+# Readiness for the `Type=notify` unit of the preview session (`ready.rs`), and the admission
+# of the portal backend on the EIS socket by its unit (`eis.rs`, `bus_caller`).
+athanor-unit = { path = "../../../../system/athanor-unit", features = ["bus-caller"] }
 # A monitor's make, model and serial from the EDID blob of its connector (`udev.rs`); the same
 # parser names the monitor to athanor-osd (doc_osd.md OD4).
 athanor-edid = { path = "../../../../system/athanor-edid" }
@@ -17,10 +22,10 @@ athanor-edid = { path = "../../../../system/athanor-edid" }
 bitflags = { workspace = true }
 wayland-scanner = { workspace = true }
 # The revision and its date are in README.md; deny.toml admits this URL and no other git source.
-smithay = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false, features = ["backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
+smithay = { git = "https://github.com/Smithay/smithay", rev = "62ec78dbe742cc59e7a1cb4ce2b52b4292b531d9", default-features = false, features = ["backend_gbm", "backend_libei", "backend_libinput", "backend_session_libseat", "backend_udev", "backend_winit", "desktop", "renderer_multi", "renderer_pixman", "wayland_frontend"] }
 # The DRM backend's connector scan, from the same repository and revision; without
 # libdisplay-info, so an output is named by its connector only.
-smithay-drm-extras = { git = "https://github.com/Smithay/smithay", rev = "023b78b1c5a05ca512767cacc07efca55fae8be4", default-features = false }
+smithay-drm-extras = { git = "https://github.com/Smithay/smithay", rev = "62ec78dbe742cc59e7a1cb4ce2b52b4292b531d9", default-features = false }
 libc = { workspace = true }
 # The signalfd source that ends the event loop on SIGTERM and SIGINT (`shutdown.rs`); it is
 # Smithay's calloop, and nix is already a dependency.
@@ -28,8 +33,11 @@ calloop = { workspace = true, features = ["signals"] }
 # The watch of `xkb_config` (`xkb_config.rs`).
 nix = { workspace = true, features = ["inotify"] }
 # The lock request to logind (`lock.rs`), a blocking call on its own thread, and
-# WAYLAND_DISPLAY to the user manager (`ready.rs`).
-zbus = { workspace = true }
+# WAYLAND_DISPLAY to the user manager (`ready.rs`), each in a `zbus::block_on` call: the
+# multi-threaded runtime keeps serving the keyboard monitor's connection between those calls.
+zbus = { workspace = true, features = ["tokio-multithread"] }
+# The keyboard monitor's reader of name changes (`keyboard_monitor.rs`).
+futures-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # The pointer's themed cursor (`cursor.rs`); already in the build through wayland-cursor.
@@ -42,3 +50,8 @@ wayland-client = { workspace = true }
 # The fixture binds the unstable protocols: tablet, pointer gestures, decoration, foreign.
 wayland-protocols = { workspace = true, features = ["unstable"] }
 wayland-protocols-wlr = { workspace = true }
+
+[package.metadata.cargo-machete]
+# bitflags: the code wayland_scanner::generate_client_code! expands names `bitflags::bitflags!` for the bitfield enums.
+# calloop: only turns on the `signals` feature of Smithay's calloop, which shutdown.rs reaches through smithay::reexports.
+ignored = ["bitflags", "calloop"]

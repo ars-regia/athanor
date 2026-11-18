@@ -87,8 +87,8 @@ async fn run(
     // service's signals, and `Mirror::signal` keeps the owner's.
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
-        .sender(&*name)?
-        .build();
+        .sender(&*name)
+        .build()?;
     let mut signals = MessageStream::for_match_rule(rule, &connection, None).await?;
     let mut mirror = Mirror {
         connection,
@@ -341,7 +341,6 @@ mod tests {
     use std::time::Instant;
 
     use tokio::runtime::Handle;
-    use zbus::zvariant;
 
     use super::*;
     use crate::props;
@@ -380,7 +379,7 @@ mod tests {
             &server,
             "/root/b",
             "Level",
-            zvariant::Value::from("not a u32"),
+            zbus::Variant::from("not a u32"),
         )
         .await;
         let mut rx = spawn(&Handle::current(), client, NAME, Source::Managed("/root"));

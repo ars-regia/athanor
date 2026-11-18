@@ -3,10 +3,10 @@
 
 use crate::text::Brush;
 use crate::driver::Side;
-use crate::theme::Rgba;
+use crate::theme::{Rgba, Theme, TitleBarStyle};
 use crate::widget::{
-    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Ui, WidgetId,
-    WindowButton,
+    knob_rect, label_x, mark_rect, mark_size, slider_knob, slider_knob_x, Kind, Mark, Rect as WRect,
+    Ui, WidgetId, WindowButton,
 };
 use parley::{Layout, PositionedLayoutItem};
 use vello_cpu::kurbo::{Affine, BezPath, Circle, Line, Rect, RoundedRect, Shape, Stroke};
@@ -181,8 +181,78 @@ fn mix(base: Rgba, ink: Rgba, part: f32) -> Rgba {
 const HOVER: f32 = 0.05;
 /// How much of its opacity an insensitive widget keeps: half, as Adwaita's.
 const INSENSITIVE: f32 = 0.5;
+
+/// How much of the text a day of the month before or after keeps, as GTK's dimmed label.
+const OTHER_MONTH: f32 = 0.35;
 /// The width of an icon button's indicator, as the GTK dock's inset shadow.
 const INDICATOR: f64 = 2.0;
+
+/// The box of a check, or the track of a switch, in `mark` with corners of `radius`: the accent
+/// when on, the surface with a border when off, each a little toward its ink under the pointer.
+fn draw_box<C: Canvas>(
+    ctx: &mut C,
+    t: &Theme,
+    mark: WRect,
+    radius: f32,
+    active: bool,
+    hovered: bool,
+) {
+    let (fill, ink) = if active {
+        (t.accent, t.on_accent)
+    } else {
+        (t.surface, t.text)
+    };
+    let fill = if hovered { mix(fill, ink, HOVER) } else { fill };
+    ctx.set_paint(color(fill));
+    ctx.fill_path(&rounded(mark, 0.0, radius));
+    if !active {
+        ctx.set_paint(color(t.border));
+        ctx.set_stroke(Stroke::new(1.0));
+        ctx.stroke_path(&rounded(mark, -0.5, radius));
+    }
+}
+
+/// A check's tick in its box `mark`, drawn as two lines, as the window buttons' marks.
+fn draw_tick<C: Canvas>(ctx: &mut C, t: &Theme, mark: WRect) {
+    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
+    ctx.set_paint(color(t.on_accent));
+    ctx.set_stroke(Stroke::new(1.8));
+    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
+        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
+        ctx.stroke_path(&line.to_path(0.1));
+    }
+}
+
+/// A radio's ring in `mark`, as GTK's radio check button: the chosen one's ring and the dot in it
+/// in the accent.
+fn draw_radio<C: Canvas>(ctx: &mut C, t: &Theme, mark: WRect, active: bool, hovered: bool) {
+    let centre = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
+    let fill = if hovered { mix(t.surface, t.text, HOVER) } else { t.surface };
+    ctx.set_paint(color(fill));
+    ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 2.0)).to_path(0.1));
+    ctx.set_paint(color(if active { t.accent } else { t.border }));
+    ctx.set_stroke(Stroke::new(if active { 2.0 } else { 1.0 }));
+    let ring = f64::from(mark.w / 2.0) - if active { 1.0 } else { 0.5 };
+    ctx.stroke_path(&Circle::new(centre, ring).to_path(0.1));
+    if active {
+        ctx.set_paint(color(t.accent));
+        ctx.fill_path(&Circle::new(centre, f64::from(mark.w / 5.0)).to_path(0.1));
+    }
+}
+
+/// An arrow in the middle of `mark`, a chevron pointing left or right, as GTK's `pan-start` and
+/// `pan-end` icons.
+fn draw_arrow<C: Canvas>(ctx: &mut C, mark: WRect, left: bool, ink: Rgba) {
+    let (cx, cy) = (f64::from(mark.center_x()), f64::from(mark.y + mark.h / 2.0));
+    let arm = f64::from(mark.h) / 5.0;
+    let tip = if left { cx - arm / 2.0 } else { cx + arm / 2.0 };
+    let back = if left { cx + arm / 2.0 } else { cx - arm / 2.0 };
+    ctx.set_paint(color(ink));
+    ctx.set_stroke(Stroke::new(1.5));
+    for end in [cy - arm, cy + arm] {
+        ctx.stroke_path(&Line::new((back, end), (tip, cy)).to_path(0.1));
+    }
+}
 
 fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
     let o = f64::from(outset);
@@ -194,6 +264,112 @@ fn rounded(r: crate::widget::Rect, outset: f32, radius: f32) -> BezPath {
         (f64::from(radius) + o).max(0.0),
     )
     .to_path(0.1)
+}
+
+/// The arrow of the island `id` marked by [`crate::Ui::set_arrow`], once its popup is placed: the
+/// two ends of its base on the edge of `fill` that faces the popup's widget, and its tip, the
+/// base kept clear of the fill's corners.
+fn arrow(ui: &Ui, id: WidgetId, fill: crate::widget::Rect) -> Option<[(f64, f64); 3]> {
+    let arrow = ui.arrow.filter(|arrow| arrow.island == id)?;
+    let (side, at) = (arrow.side?, arrow.at?);
+    let size = ui.theme.island_arrow;
+    if size <= 0.0 {
+        return None;
+    }
+    // Along the edge, between the corners' arcs.
+    let clear = ui.theme.island_radius + size;
+    let along = |start: f32, length: f32| {
+        f64::from(at.clamp(start + clear, (start + length - clear).max(start + clear)))
+    };
+    let (s, f) = (f64::from(size), fill);
+    let (left, top, right, bottom) = (
+        f64::from(f.x),
+        f64::from(f.y),
+        f64::from(f.x + f.w),
+        f64::from(f.bottom()),
+    );
+    Some(match side {
+        // Below its widget: the arrow stands on the top edge, pointing up.
+        Side::Bottom => {
+            let x = along(f.x, f.w);
+            [(x - s, top), (x, top - s), (x + s, top)]
+        }
+        Side::Top => {
+            let x = along(f.x, f.w);
+            [(x - s, bottom), (x, bottom + s), (x + s, bottom)]
+        }
+        Side::Right => {
+            let y = along(f.y, f.h);
+            [(left, y - s), (left - s, y), (left, y + s)]
+        }
+        Side::Left => {
+            let y = along(f.y, f.h);
+            [(right, y - s), (right + s, y), (right, y + s)]
+        }
+    })
+}
+
+/// An island's fill in `t.island`, with `t.island_border` of `outline` inside its edge, and
+/// the `arrow` out of that edge drawn as part of the fill: the outline goes round the arrow,
+/// not under it.
+fn draw_island<C: Canvas>(
+    ctx: &mut C,
+    t: &Theme,
+    outline: Rgba,
+    fill: crate::widget::Rect,
+    arrow: Option<[(f64, f64); 3]>,
+) {
+    let border = t.island_border;
+    ctx.set_paint(color(t.island));
+    ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
+    if border > 0.0 {
+        ctx.set_stroke(Stroke::new(f64::from(border)));
+        ctx.set_paint(color(outline));
+        ctx.stroke_path(&rounded(fill, -border / 2.0, t.island_radius));
+    }
+    let Some([a, tip, b]) = arrow else {
+        return;
+    };
+    // The base sinks into the fill by the border's width, so that the arrow's fill covers the
+    // outline where the two meet.
+    let (mx, my) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+    let (dx, dy) = (mx - tip.0, my - tip.1);
+    let length = dx.hypot(dy).max(f64::EPSILON);
+    let sink = f64::from(border) / length;
+    let inner = |p: (f64, f64)| (p.0 + dx * sink, p.1 + dy * sink);
+    let mut path = BezPath::new();
+    path.move_to(inner(a));
+    path.line_to(tip);
+    path.line_to(inner(b));
+    path.close_path();
+    ctx.set_paint(color(t.island));
+    ctx.fill_path(&path);
+    if border > 0.0 {
+        let mut sides = BezPath::new();
+        sides.move_to(a);
+        sides.line_to(tip);
+        sides.line_to(b);
+        ctx.set_paint(color(outline));
+        ctx.stroke_path(&sides);
+    }
+}
+
+/// Draws `image` in the middle of `r`, fitted to a square of `side` logical pixels with its
+/// aspect ratio kept.
+fn draw_icon<C: Canvas>(
+    ctx: &mut C,
+    resources: &mut C::Resources,
+    image: &crate::icon::Image,
+    r: crate::widget::Rect,
+    side: f32,
+) {
+    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+    let side = f64::from(side);
+    let fit = (side / w).min(side / h);
+    let (w, h) = (w * fit, h * fit);
+    let x = f64::from(r.center_x()) - w / 2.0;
+    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
 }
 
 fn draw_text<C: Canvas>(
@@ -273,7 +449,8 @@ pub fn render(ui: &mut Ui, scale: f32) -> Result<Pixmap, Error> {
     Ok(pixmap)
 }
 
-/// Lays the window out; returns its size in physical pixels at `scale`.
+/// Lays the window out; returns its size in physical pixels at `scale`, one logical pixel at
+/// least along each axis: wl_shm refuses an empty buffer, and the refusal ends the connection.
 pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     if !(scale.is_finite() && scale > 0.0) {
         return Err(format!("scale {scale} is not a positive number").into());
@@ -281,7 +458,7 @@ pub fn layout(ui: &mut Ui, scale: f32) -> Result<(u16, u16), Error> {
     // Whole logical pixels: an integer buffer scale then divides the buffer, as wl_surface
     // requires, and the background covers every pixel.
     let (w, h) = ui.layout();
-    Ok((physical(w, scale)?, physical(h, scale)?))
+    Ok((physical(w.max(1.0), scale)?, physical(h.max(1.0), scale)?))
 }
 
 /// `logical` pixels, rounded up to whole ones, in physical pixels at `scale`, as
@@ -341,25 +518,87 @@ pub fn paint<C: Canvas>(
             ctx.push_clip_path(&rounded(c, 0.0, t.radius));
         }
         let (flat, island) = (ui.is_flat(id), ui.island_fill(id));
+        // A calendar's line goes under its heading, its first child.
+        let heading = match ui.widgets[id].kind {
+            Kind::Calendar(_) => ui.widgets[id].children.first().map(|&h| ui.widgets[h].rect),
+            _ => None,
+        };
+        // A menu entry's label starts past the marks of its menu, as GTK's indicator size group.
+        let indent = match ui.widgets[id].kind {
+            Kind::MenuItem(_) | Kind::MenuEntry { .. } => {
+                ui.widgets[id].parent.map_or(0.0, |menu| ui.menu_indent(menu))
+            }
+            _ => 0.0,
+        };
         let widget = &mut ui.widgets[id];
         let r = widget.rect;
         match &mut widget.kind {
-            Kind::Column | Kind::Row | Kind::Group(_) | Kind::Menu | Kind::Scroll { .. } => {}
-            Kind::Island { .. } => {
-                if let Some(fill) = island {
-                    ctx.set_paint(color(t.island));
-                    ctx.fill_path(&rounded(fill, 0.0, t.island_radius));
+            Kind::Column
+            | Kind::Row
+            | Kind::Inline { .. }
+            | Kind::CenterBox
+            | Kind::Group(_)
+            | Kind::Alert(_)
+            | Kind::Menu
+            | Kind::Scroll { .. } => {}
+            // A line under its heading, as GTK's header border.
+            Kind::Calendar(_) => {
+                if let Some(h) = heading {
+                    let y = f64::from((h.bottom() + t.gap / 2.0).floor());
+                    ctx.set_paint(color(t.border));
+                    ctx.fill_rect(&Rect::new(
+                        f64::from(r.x),
+                        y,
+                        f64::from(r.x + r.w),
+                        y + 1.0,
+                    ));
                 }
             }
-            // Flat, filled only under the pointer, with its image in the middle and the line of
-            // a focused application along its indicator's side.
+            Kind::CalendarCell(cell) => {
+                let mark = cell.day.unwrap_or_default();
+                let ink = if mark.selected {
+                    ctx.set_paint(color(t.accent));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                    t.on_accent
+                } else if mark.other {
+                    mix(t.background, t.text, OTHER_MONTH)
+                } else {
+                    t.text
+                };
+                if mark.today && !mark.selected {
+                    ctx.set_paint(color(t.accent));
+                    let y = f64::from(r.bottom()) - 2.0;
+                    ctx.fill_rect(&Rect::new(
+                        f64::from(r.x),
+                        y,
+                        f64::from(r.x + r.w),
+                        y + 2.0,
+                    ));
+                }
+                if let Some(layout) = &widget.text {
+                    let at = (
+                        r.x + (r.w - layout.width()) / 2.0,
+                        r.y + (r.h - layout.height()) / 2.0,
+                    );
+                    draw_text(ctx, resources, layout, at, ink)?;
+                }
+            }
+            Kind::Island { .. } => {
+                if let Some(fill) = island {
+                    let outline = ui.widgets[id].ink.unwrap_or(t.border);
+                    draw_island(ctx, &t, outline, fill, arrow(ui, id, fill));
+                }
+            }
+            // Flat, filled only under the pointer or while its popup is open, as GTK's checked
+            // menu button, with its image in the middle and the line of a focused application
+            // along its indicator's side.
             Kind::IconButton {
                 image,
                 size,
                 indicator,
                 ..
             } => {
-                if hover == Some(id) {
+                if hover == Some(id) || widget.expanded == Some(true) {
                     ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
@@ -387,22 +626,50 @@ pub fn paint<C: Canvas>(
                     ctx.fill_rect(&line);
                 }
             }
-            // A white sheet under its rows, as GTK's list.
+            // Flat as an icon button, its image then its text centred together, mirrored in
+            // right to left.
+            Kind::LabelledButton { image, size, .. } => {
+                if hover == Some(id) || widget.expanded == Some(true) {
+                    ctx.set_paint(color(mix(t.island, t.text, 2.0 * HOVER)));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
+                let side = image.as_ref().map_or(0.0, |_| *size);
+                let (image_x, text_x) = crate::widget::labelled::places(
+                    (r.x, r.w),
+                    image.as_ref().map(|_| side),
+                    widget.text.as_ref().map(|l| l.width()),
+                    t.gap,
+                    ui.rtl,
+                );
+                if let Some(image) = image {
+                    let (w, h) = (f64::from(image.width()), f64::from(image.height()));
+                    let fit = (f64::from(side) / w).min(f64::from(side) / h);
+                    let (w, h) = (w * fit, h * fit);
+                    let x = f64::from(image_x + side / 2.0) - w / 2.0;
+                    let y = f64::from(r.y + r.h / 2.0) - h / 2.0;
+                    ctx.fill_image(resources, &Rect::new(x, y, x + w, y + h), image.pixmap());
+                }
+                if let Some(layout) = &widget.text {
+                    let at = (text_x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+            }
+            // The view's sheet under its rows, as GTK's list.
             Kind::List { .. } => {
-                ctx.set_paint(color(t.on_accent));
+                ctx.set_paint(color(t.view));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
             }
             // A row with its text at the start edge: tinted with the accent when selected, and
-            // toward the text under the pointer.
-            Kind::ListRow(_) => {
+            // toward the text under the pointer. A heading is neither.
+            Kind::ListRow(_) | Kind::ListHeading(_) => {
                 let selected = widget.parent.and_then(|l| ui.selected(l)) == Some(id);
                 let fill = if selected {
-                    Some(mix(t.on_accent, t.accent, SELECTED))
+                    Some(mix(t.view, t.accent, SELECTED))
                 } else {
                     None
                 };
                 let fill = match (fill, hover == Some(id)) {
-                    (fill, true) => Some(mix(fill.unwrap_or(t.on_accent), t.text, HOVER)),
+                    (fill, true) => Some(mix(fill.unwrap_or(t.view), t.text, HOVER)),
                     (fill, false) => fill,
                 };
                 if let Some(fill) = fill {
@@ -430,17 +697,45 @@ pub fn paint<C: Canvas>(
                     y + 1.0,
                 ));
             }
-            // A flat row with its label at the start edge, filled only under the pointer.
-            Kind::MenuItem(_) => {
+            // A flat row with its label at the start edge, after the room its menu leaves for
+            // the marks, filled only under the pointer; a check, a radio or the way back from a
+            // submenu at the start edge, a submenu's arrow at the end edge.
+            Kind::MenuItem(_) | Kind::MenuEntry { .. } => {
                 if hover == Some(id) {
                     ctx.set_paint(color(mix(t.background, t.text, 2.0 * HOVER)));
                     ctx.fill_path(&rounded(r, 0.0, t.radius));
                 }
+                let inner = WRect {
+                    x: r.x + t.padding,
+                    w: r.w - 2.0 * t.padding,
+                    ..r
+                };
+                let size = mark_size(false, t.font_size);
+                let start = mark_rect(inner, ui.rtl, size, false);
+                let end = mark_rect(inner, ui.rtl, size, true);
+                let hovered = hover == Some(id);
+                let mark = match widget.kind {
+                    Kind::MenuEntry { mark, .. } => Some(mark),
+                    _ => None,
+                };
+                match mark {
+                    Some(Mark::Check(active)) => {
+                        draw_box(ctx, &t, start, start.h / 4.0, active, hovered);
+                        if active {
+                            draw_tick(ctx, &t, start);
+                        }
+                    }
+                    Some(Mark::Radio(active)) => draw_radio(ctx, &t, start, active, hovered),
+                    Some(Mark::Submenu(_)) => draw_arrow(ctx, end, ui.rtl, t.text),
+                    Some(Mark::Back(_)) => draw_arrow(ctx, start, !ui.rtl, t.text),
+                    None => {}
+                }
                 if let Some(layout) = &widget.text {
-                    let x = if ui.rtl {
-                        r.x + r.w - t.padding - layout.width()
-                    } else {
-                        r.x + t.padding
+                    let x = match (mark, ui.rtl) {
+                        // A submenu's title is centred, as GTK's.
+                        (Some(Mark::Back(_)), _) => r.x + (r.w - layout.width()) / 2.0,
+                        (_, true) => inner.x + inner.w - indent - layout.width(),
+                        (_, false) => inner.x + indent,
                     };
                     let at = (x, r.y + (r.h - layout.height()) / 2.0);
                     draw_text(ctx, resources, layout, at, t.text)?;
@@ -462,16 +757,21 @@ pub fn paint<C: Canvas>(
                     f64::from(r.bottom()),
                 ));
             }
-            // A round button with its mark drawn as lines, as GTK's symbolic icons.
+            // A round button with its mark drawn as lines, as GTK's symbolic icons; a bare one
+            // is filled only under the pointer, as GTK's header bar buttons.
             Kind::WindowButton(button) => {
                 let (cx, cy) = (f64::from(r.center_x()), f64::from(r.y + r.h / 2.0));
-                let fill = if hover == Some(id) {
-                    mix(t.surface, t.text, HOVER)
-                } else {
-                    t.surface
+                let bare = t.title_bar_style == TitleBarStyle::Bare;
+                let fill = match (hover == Some(id), bare) {
+                    (true, true) => Some(mix(t.title_bar, t.text, HOVER)),
+                    (true, false) => Some(mix(t.surface, t.text, HOVER)),
+                    (false, true) => None,
+                    (false, false) => Some(t.surface),
                 };
-                ctx.set_paint(color(fill));
-                ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                if let Some(fill) = fill {
+                    ctx.set_paint(color(fill));
+                    ctx.fill_path(&Circle::new((cx, cy), f64::from(r.w / 2.0)).to_path(0.1));
+                }
                 let arm = f64::from(r.w) * 0.16;
                 let lines = match button {
                     WindowButton::Minimize => {
@@ -520,7 +820,8 @@ pub fn paint<C: Canvas>(
             }
             Kind::Label(_) | Kind::Tooltip(_) => {
                 if let Some(layout) = &widget.text {
-                    draw_text(ctx, resources, layout, (r.x, r.y), t.text)?;
+                    let ink = widget.ink.unwrap_or(t.text);
+                    draw_text(ctx, resources, layout, (r.x, r.y), ink)?;
                 }
             }
             // A button a menu holds reads as one of its rows.
@@ -539,6 +840,50 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, at, t.text)?;
                 }
             }
+            // A radio: one choice of several, drawn as GTK's radio check button rather than as
+            // an on/off toggle, a ring at the start edge and the label after it; the chosen one's
+            // ring and the dot in it take the accent.
+            Kind::Toggle {
+                active,
+                radio: true,
+                ..
+            } => {
+                let size = mark_size(false, t.font_size);
+                let mark = mark_rect(r, ui.rtl, size, false);
+                draw_radio(ctx, &t, mark, *active, hover == Some(id));
+                if let Some(layout) = &widget.text {
+                    let x = label_x(r, mark, ui.rtl, false, t.gap, layout.width());
+                    let y = r.y + (r.h - layout.height()) / 2.0;
+                    draw_text(ctx, resources, layout, (x, y), t.text)?;
+                }
+            }
+            // A drop-down: a raised button, its chosen item at the start edge and a downward
+            // chevron at the end edge, as GTK's DropDown.
+            Kind::DropDown(_) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                let arrow = t.font_size * crate::drop_down::ARROW;
+                let text_w = widget.text.as_ref().map_or(0.0, |layout| layout.width());
+                let (x, ax) = crate::drop_down::spots(r, text_w, arrow, t.padding, ui.rtl);
+                if let Some(layout) = &widget.text {
+                    let at = (x, r.y + (r.h - layout.height()) / 2.0);
+                    draw_text(ctx, resources, layout, at, t.text)?;
+                }
+                let (ax, ay) = (f64::from(ax), f64::from(r.y + r.h / 2.0));
+                let a = f64::from(arrow);
+                let mut chevron = BezPath::new();
+                chevron.move_to((ax + a * 0.2, ay - a * 0.15));
+                chevron.line_to((ax + a * 0.5, ay + a * 0.15));
+                chevron.line_to((ax + a * 0.8, ay - a * 0.15));
+                ctx.set_paint(color(t.text));
+                ctx.set_stroke(Stroke::new(1.5));
+                ctx.stroke_path(&chevron);
+            }
             Kind::Button(_) | Kind::Toggle { .. } => {
                 let active = matches!(widget.kind, Kind::Toggle { active: true, .. });
                 let (fill, ink) = if active {
@@ -551,8 +896,14 @@ pub fn paint<C: Canvas>(
                 } else {
                     fill
                 };
+                // The outline, as GTK's border: the fill inside it, the radius its outer edge's.
+                let border = t.control_border;
+                if border > 0.0 {
+                    ctx.set_paint(color(if active { t.accent } else { t.border }));
+                    ctx.fill_path(&rounded(r, 0.0, t.radius));
+                }
                 ctx.set_paint(color(fill));
-                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                ctx.fill_path(&rounded(r, -border, t.radius));
                 if let Some(layout) = &widget.text {
                     let at = (
                         r.x + (r.w - layout.width()) / 2.0,
@@ -561,43 +912,68 @@ pub fn paint<C: Canvas>(
                     draw_text(ctx, resources, layout, at, ink)?;
                 }
             }
+            // A tile: the controls' fill, its icon's disc in the accent only while it is on
+            // (VL10), and the title over the second line after the disc.
+            Kind::Tile(tile) => {
+                let fill = if hover == Some(id) {
+                    mix(t.surface, t.text, HOVER)
+                } else {
+                    t.surface
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, crate::tile::RADIUS));
+                let disc = crate::tile::disc(r, t.padding, ui.rtl);
+                // The glyph is in the ink of the disc: Tile::glyph.
+                let disc_fill = if tile.active {
+                    t.accent
+                } else {
+                    mix(t.surface, t.text, 2.0 * HOVER)
+                };
+                let centre = (f64::from(disc.center_x()), f64::from(disc.y + disc.h / 2.0));
+                ctx.set_paint(color(disc_fill));
+                ctx.fill_path(&Circle::new(centre, f64::from(disc.w / 2.0)).to_path(0.1));
+                if let Some(glyph) = tile.glyph() {
+                    draw_icon(ctx, resources, glyph, disc, crate::tile::GLYPH);
+                }
+                if let (Some(first), Some(second)) = (&widget.text, &tile.second) {
+                    let top = r.y + (r.h - first.height() - second.height()) / 2.0;
+                    let x = crate::tile::line_origin(r, t.padding, t.gap, ui.rtl, first);
+                    draw_text(ctx, resources, first, (x, top), t.text)?;
+                    let x = crate::tile::line_origin(r, t.padding, t.gap, ui.rtl, second);
+                    draw_text(ctx, resources, second, (x, top + first.height()), t.text)?;
+                }
+            }
+            // An icon toggle: raised, as a button, and darker or lighter toward its text while
+            // it is on, without the accent (VL10).
+            Kind::IconToggle(toggle) => {
+                let base = if toggle.active {
+                    mix(t.surface, t.text, crate::icon_toggle::ON)
+                } else {
+                    t.surface
+                };
+                let fill = if hover == Some(id) {
+                    mix(base, t.text, HOVER)
+                } else {
+                    base
+                };
+                ctx.set_paint(color(fill));
+                ctx.fill_path(&rounded(r, 0.0, t.radius));
+                draw_icon(ctx, resources, &toggle.image, r, toggle.size);
+            }
             Kind::Check { active, .. } | Kind::Switch { active, .. } => {
                 let active = *active;
                 let is_switch = matches!(widget.kind, Kind::Switch { .. });
                 let size = mark_size(is_switch, t.font_size);
                 let mark = mark_rect(r, ui.rtl, size, is_switch);
-                let (fill, ink) = if active {
-                    (t.accent, t.on_accent)
-                } else {
-                    (t.surface, t.text)
-                };
-                let fill = if hover == Some(id) {
-                    mix(fill, ink, HOVER)
-                } else {
-                    fill
-                };
                 let radius = if is_switch { mark.h / 2.0 } else { mark.h / 4.0 };
-                ctx.set_paint(color(fill));
-                ctx.fill_path(&rounded(mark, 0.0, radius));
-                if !active {
-                    ctx.set_paint(color(t.border));
-                    ctx.set_stroke(Stroke::new(1.0));
-                    ctx.stroke_path(&rounded(mark, -0.5, radius));
-                }
+                draw_box(ctx, &t, mark, radius, active, hover == Some(id));
                 if is_switch {
                     let knob = knob_rect(mark, ui.rtl, active);
                     let centre = (f64::from(knob.center_x()), f64::from(knob.y + knob.h / 2.0));
                     ctx.set_paint(color(if active { t.on_accent } else { t.border }));
                     ctx.fill_path(&Circle::new(centre, f64::from(knob.w / 2.0)).to_path(0.1));
                 } else if active {
-                    // A tick drawn as two lines, as the window buttons' marks.
-                    let (x, y, s) = (f64::from(mark.x), f64::from(mark.y), f64::from(mark.w));
-                    ctx.set_paint(color(t.on_accent));
-                    ctx.set_stroke(Stroke::new(1.8));
-                    for (from, to) in [((0.24, 0.52), (0.42, 0.70)), ((0.42, 0.70), (0.76, 0.30))] {
-                        let line = Line::new((x + from.0 * s, y + from.1 * s), (x + to.0 * s, y + to.1 * s));
-                        ctx.stroke_path(&line.to_path(0.1));
-                    }
+                    draw_tick(ctx, &t, mark);
                 }
                 if let Some(layout) = &widget.text {
                     let x = label_x(r, mark, ui.rtl, is_switch, t.gap, layout.width());
@@ -668,7 +1044,7 @@ pub fn paint<C: Canvas>(
                 ctx.fill_path(&bar(0.0, level.value.min(level.full)));
             }
             Kind::Field(field) | Kind::TextArea(field) => {
-                ctx.set_paint(color(t.on_accent));
+                ctx.set_paint(color(t.view));
                 ctx.fill_path(&rounded(r, 0.0, t.radius));
                 ctx.set_paint(color(t.border));
                 ctx.set_stroke(Stroke::new(1.0));
@@ -679,7 +1055,7 @@ pub fn paint<C: Canvas>(
                 let layout = field.layout(&mut ui.text).clone();
                 // Text longer than the field stays inside it; the selection is filled under it.
                 ctx.push_clip_path(&rounded(r, 0.0, t.radius));
-                ctx.set_paint(color(mix(t.on_accent, t.accent, SELECTED_TEXT)));
+                ctx.set_paint(color(mix(t.view, t.accent, SELECTED_TEXT)));
                 for b in field.selection_boxes() {
                     let (x, y) = (f64::from(x), f64::from(y));
                     ctx.fill_rect(&Rect::new(b.x0 + x, b.y0 + y, b.x1 + x, b.y1 + y));
@@ -695,11 +1071,16 @@ pub fn paint<C: Canvas>(
                 ctx.pop_clip();
             }
         }
-        if focus == Some(id) {
-            // A row's ring stays inside it, where its list's edge and the viewport do not cut it.
-            let row = matches!(ui.widgets[id].kind, Kind::ListRow(_));
-            let (outset, radius) = if row {
+        if focus == Some(id) && ui.quiet_focus != Some(id) {
+            // A list row's and a menu item's ring stays inside it, where the list's or menu's
+            // edge and a scroll's viewport do not cut it. A tile's follows its larger corners.
+            let parent = ui.widgets[id].parent.map(|p| &ui.widgets[p].kind);
+            let inside = matches!(ui.widgets[id].kind, Kind::ListRow(_))
+                || matches!(parent, Some(Kind::Menu));
+            let (outset, radius) = if inside {
                 (-t.focus_width / 2.0 - 1.0, t.radius - 1.0)
+            } else if matches!(ui.widgets[id].kind, Kind::Tile(_)) {
+                (t.focus_width, crate::tile::RADIUS)
             } else {
                 (t.focus_width, t.radius)
             };
@@ -723,25 +1104,22 @@ pub fn paint<C: Canvas>(
     Ok(())
 }
 
-/// The visible widgets in the order they are drawn, each with the topmost insensitive widget
-/// above it or itself: the order of the tree, but with the subtree of each such widget in one
-/// run, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
+/// The visible widgets in the order they are drawn, the order of the tree, each with the
+/// topmost insensitive widget above it or itself: the subtree of each such widget is one run
+/// of it, which [`paint`] draws in one layer at [`INSENSITIVE`] opacity, as GTK draws an
 /// insensitive widget and everything under it as one group.
 fn paint_order(ui: &Ui) -> Vec<(WidgetId, Option<WidgetId>)> {
-    // A parent comes before its children in the arena.
-    let mut faint: Vec<Option<WidgetId>> = Vec::with_capacity(ui.len());
+    let mut faint: Vec<Option<WidgetId>> = vec![None; ui.len()];
+    let mut order = Vec::with_capacity(ui.len());
+    // A parent comes before its children in the order of the tree.
     for id in ui.ids() {
         let widget = &ui.widgets[id];
         let above = widget.parent.and_then(|p| faint[p.index()]);
-        faint.push(above.or((!widget.sensitive).then_some(id)));
+        faint[id.index()] = above.or((!widget.sensitive).then_some(id));
+        if ui.is_visible(id) {
+            order.push((id, faint[id.index()]));
+        }
     }
-    let mut order: Vec<_> = ui
-        .ids()
-        .filter(|&id| ui.is_visible(id))
-        .map(|id| (id, faint[id.index()]))
-        .collect();
-    // Stable: each subtree keeps the order of the tree, and starts where its root stood.
-    order.sort_by_key(|&(id, root)| root.unwrap_or(id));
     order
 }
 
@@ -794,6 +1172,19 @@ mod tests {
         let mut h = DefaultHasher::new();
         pixmap.data_as_u8_slice().hash(&mut h);
         h.finish()
+    }
+
+    #[test]
+    fn a_window_without_widgets_draws_one_pixel_at_least() -> Result<(), Error> {
+        // Without a margin, as a surface whose widgets place themselves by their own margins.
+        let theme = crate::Theme { margin: 0.0, ..crate::Theme::default() };
+        let mut ui = crate::Ui::new("Hidden", theme, false);
+        assert_eq!(ui.layout(), (0.0, 0.0));
+        assert_eq!(layout(&mut ui, 1.0)?, (1, 1));
+        assert_eq!(layout(&mut ui, 2.0)?, (2, 2));
+        let pixmap = render(&mut ui, 1.0)?;
+        assert_eq!((pixmap.width(), pixmap.height()), (1, 1));
+        Ok(())
     }
 
     /// A field holding "abc", composed or committed, drawn without focus so no caret shows.
@@ -897,7 +1288,7 @@ mod tests {
         let mut ui = crate::Ui::new("Field", crate::Theme::default(), false);
         let field = ui.field(crate::Ui::ROOT, "Name", "abc");
         let t = &ui.theme;
-        let fill = mix(t.on_accent, t.accent, SELECTED_TEXT).0;
+        let fill = mix(t.view, t.accent, SELECTED_TEXT).0;
         let filled = |p: &Pixmap| {
             let pixels = p.data_as_u8_slice().as_chunks::<4>().0;
             pixels.iter().filter(|&&px| px == fill).count()
@@ -979,6 +1370,84 @@ mod tests {
     }
 
     #[test]
+    fn a_radio_is_a_ring_with_the_accent_dot_only_when_chosen() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Radio", crate::Theme::default(), false);
+        let group = ui.add(crate::Ui::ROOT, crate::Kind::Column);
+        let chosen = ui.radio(group, "Headphones", true);
+        let other = ui.radio(group, "Headset with microphone", false);
+        let pixmap = render(&mut ui, 1.0)?;
+        let t = ui.theme.clone();
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let mark = |id| {
+            let size = mark_size(false, t.font_size);
+            mark_rect(ui.widget(id).rect, false, size, false)
+        };
+        let (on, off) = (mark(chosen), mark(other));
+        let centre = |m: crate::widget::Rect| (m.center_x(), m.y + m.h / 2.0);
+        let (x, y) = centre(on);
+        assert_eq!(at(x, y), t.accent.0.to_vec(), "the chosen radio's dot");
+        let (x, y) = centre(off);
+        assert_eq!(at(x, y), t.surface.0.to_vec(), "no dot in the other");
+        // The ring's left edge, a pixel in: the accent around the chosen one only.
+        assert_eq!(at(on.x + 1.0, on.y + on.h / 2.0), t.accent.0.to_vec());
+        assert_ne!(at(off.x + 1.0, off.y + off.h / 2.0), t.accent.0.to_vec());
+        // Its label follows the ring, as a check button's does, not centred as a toggle's.
+        let label = ui.widget(chosen).text.as_ref().map(|l| l.width());
+        assert!(label.is_some_and(|w| ui.widget(chosen).rect.w >= on.w + t.gap + w));
+        Ok(())
+    }
+
+    #[test]
+    fn a_menu_items_focus_ring_is_drawn_inside_it_where_a_scroll_cannot_clip_it(
+    ) -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Menu", crate::Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(crate::Ui::ROOT, "Media player", &names, 0);
+        let Some((mut menu, items)) = ui.drop_down_menu(players, Some(200.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let (first, _) = items[0];
+        menu.set_focus(Some(first));
+        let pixmap = render(&mut menu, 1.0)?;
+        let t = menu.theme.clone();
+        let r = menu.widget(first).rect;
+        let at = |x: f32, y: f32| {
+            let i = 4 * (usize::from(pixmap.width()) * y as usize + x as usize);
+            pixmap.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        // Across the item's start band, at its middle: the ring's colour inside its rect.
+        let y = r.y + r.h / 2.0;
+        let band = (0..(t.focus_width as usize + 3)).map(|dx| r.x + dx as f32);
+        let inside = band.filter(|&x| at(x, y) == t.focus.0.to_vec()).count();
+        assert!(inside > 0, "the ring is drawn inside the item at {r:?}");
+        Ok(())
+    }
+
+    /// The focus the keyboard's entering gives draws no ring until a key is pressed (AX8).
+    #[test]
+    fn a_quiet_focus_draws_its_ring_once_a_key_is_pressed() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Bar", crate::Theme::default(), false);
+        let button = ui.add(crate::Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.layout();
+        let ring = ui.theme.focus.0.to_vec();
+        let has_ring = |ui: &mut crate::Ui| -> Result<bool, Error> {
+            let pixmap = render(ui, 1.0)?;
+            Ok(pixmap.data_as_u8_slice().chunks(4).any(|px| px == ring.as_slice()))
+        };
+        ui.focus_quietly(button);
+        assert_eq!(ui.focus(), Some(button));
+        assert!(!has_ring(&mut ui)?, "no ring before a key");
+        ui.key(crate::widget::Key::Tab);
+        assert_eq!(ui.focus(), Some(button), "Tab comes back round to the one control");
+        assert!(has_ring(&mut ui)?, "the ring once a key is pressed");
+        Ok(())
+    }
+
+    #[test]
     fn an_insensitive_container_is_drawn_as_one_layer_with_its_scroll_indicator(
     ) -> Result<(), Error> {
         let mut ui = crate::Ui::new("Sensitive", crate::Theme::default(), false);
@@ -1011,6 +1480,55 @@ mod tests {
         let ink = at(bar.x + bar.w / 2.0, bar.y + bar.h / 2.0);
         let half = mix(t.background, t.border, INSENSITIVE);
         assert!(near(&ink, half), "the indicator {ink:?} is not {half:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn a_popups_island_draws_its_outline_and_an_arrow_at_its_widget() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Popover", crate::Theme::default(), false);
+        ui.theme.background = Rgba::rgb(0x00, 0xff, 0x00);
+        ui.theme.island = Rgba::rgb(0x20, 0x20, 0x20);
+        ui.theme.border = Rgba::rgb(0xff, 0x00, 0x00);
+        ui.theme.island_radius = 6.0;
+        ui.theme.island_padding = 12.0;
+        ui.theme.island_border = 2.0;
+        ui.theme.island_arrow = 8.0;
+        let island = ui.island(crate::Ui::ROOT, true, [10.0, 0.0, 0.0, 0.0]);
+        ui.add(island, crate::Kind::Label("A popover of some width".into()));
+        ui.set_arrow(island);
+        let unplaced = render(&mut ui, 1.0)?;
+        let fill = ui.island_fill(island).expect("the island has a child");
+        let pixel = |p: &Pixmap, x: f64, y: f64| {
+            let i = 4 * (usize::from(p.width()) * y as usize + x as usize);
+            p.data_as_u8_slice()[i..i + 4].to_vec()
+        };
+        let (x, top) = (f64::from(fill.x) + 40.0, f64::from(fill.y));
+        let (background, island_fill, border) = (
+            ui.theme.background.0.to_vec(),
+            ui.theme.island.0.to_vec(),
+            ui.theme.border.0.to_vec(),
+        );
+        // Before the compositor places the popup, no arrow.
+        assert_eq!(pixel(&unplaced, x, top - 3.0), background);
+        let arrow = ui.arrow.as_mut().expect("marked");
+        (arrow.side, arrow.at) = (Some(Side::Bottom), Some(fill.x + 40.0));
+        let placed = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&placed, x, top - 3.0), island_fill, "the arrow, above the fill");
+        assert_eq!(pixel(&placed, x, top + 0.5), island_fill, "no outline under the arrow");
+        assert_eq!(pixel(&placed, x + 20.0, top + 0.5), border, "the outline beside it");
+        assert_eq!(pixel(&placed, x + 12.0, top - 3.0), background, "beside the arrow");
+        // A widget past the island's end: the arrow stays clear of the corner.
+        let arrow = ui.arrow.as_mut().expect("marked");
+        arrow.at = Some(fill.x + fill.w + 50.0);
+        let slid = render(&mut ui, 1.0)?;
+        let clear = f64::from(fill.x + fill.w) - 6.0 - 8.0;
+        assert_eq!(pixel(&slid, clear, top - 3.0), island_fill);
+        // An island's ink outlines it in place of the theme's border, as a critical card's.
+        let warning = Rgba::rgb(0xff, 0xa0, 0x00);
+        assert!(ui.set_ink(island, Some(warning)));
+        let inked = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&inked, x + 20.0, top + 0.5), warning.0.to_vec());
+        assert_eq!(pixel(&inked, clear, top - 3.0), island_fill, "the arrow keeps its fill");
         Ok(())
     }
 
@@ -1218,7 +1736,12 @@ mod tests {
     #[test]
     fn a_scroll_shows_only_its_viewport_and_an_indicator_at_the_end_edge() -> Result<(), Error> {
         for rtl in [false, true] {
-            let mut ui = crate::Ui::new("Scroll", crate::Theme::default(), rtl);
+            // A dark sheet, apart from the white of text on the accent.
+            let theme = crate::Theme {
+                view: crate::Rgba::rgb(0x21, 0x15, 0x26),
+                ..crate::Theme::default()
+            };
+            let mut ui = crate::Ui::new("Scroll", theme, rtl);
             let scroll = ui.scroll(crate::Ui::ROOT, 100.0);
             let list = ui.list(scroll, "Rows");
             let rows: Vec<_> = (1..=50).map(|n| ui.list_row(list, &format!("Row {n}"))).collect();
@@ -1232,7 +1755,7 @@ mod tests {
             // Inside the viewport the list's sheet shows; in the gap under it, the background,
             // though the list runs on far below.
             let middle = view.x + view.w / 2.0;
-            assert_eq!(at(middle, view.y + 4.0), t.on_accent.0.to_vec(), "rtl {rtl}");
+            assert_eq!(at(middle, view.y + 4.0), t.view.0.to_vec(), "rtl {rtl}");
             assert!(ui.widget(rows[49]).rect.y > view.bottom() + t.margin);
             assert_eq!(at(middle, view.bottom() + 2.0), t.background.0.to_vec(), "rtl {rtl}");
             // The indicator sits at the top of the end edge: the right in LTR, the left in RTL.
@@ -1242,6 +1765,95 @@ mod tests {
             assert_ne!(at(far, view.y + 8.0), t.border.0.to_vec(), "rtl {rtl}");
             assert_ne!(at(edge, view.bottom() - 8.0), t.border.0.to_vec(), "rtl {rtl}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn the_fourth_child_of_a_centre_box_is_neither_read_nor_drawn() {
+        let mut ui = crate::Ui::new("Strip", crate::Theme::default(), false);
+        let center = ui.add(crate::Ui::ROOT, Kind::CenterBox);
+        for text in ["Start", "Middle", "End", "Fourth"] {
+            ui.add(center, Kind::Button(text.into()));
+        }
+        ui.layout();
+        let children = ui.widget(center).children.clone();
+        let (three, fourth) = (&children[..3], children[3]);
+        let tree = crate::a11y::tree_update(&ui, 1.0);
+        let node = |id| tree.nodes.iter().find(|(n, _)| *n == crate::a11y::node_id(id));
+        let read = node(center).map(|(_, n)| n.children().to_vec());
+        let three_read: Vec<_> = three.iter().map(|&c| crate::a11y::node_id(c)).collect();
+        assert_eq!(read, Some(three_read), "the centre box reads its first three children");
+        assert!(node(fourth).is_none(), "no node of its own");
+        let drawn: Vec<_> = paint_order(&ui).into_iter().map(|(id, _)| id).collect();
+        assert!(three.iter().all(|c| drawn.contains(c)));
+        assert!(!drawn.contains(&fourth), "not drawn");
+    }
+
+    /// The pixel of `p` at logical `(x, y)`, drawn at scale 1.
+    fn pixel(p: &Pixmap, x: f32, y: f32) -> Vec<u8> {
+        let i = 4 * (usize::from(p.width()) * y as usize + x as usize);
+        p.data_as_u8_slice()[i..i + 4].to_vec()
+    }
+
+    #[test]
+    fn a_label_is_drawn_in_its_own_ink() -> Result<(), Error> {
+        let mut ui = crate::Ui::new("Ink", crate::Theme::default(), false);
+        let label = ui.add(crate::Ui::ROOT, crate::Kind::Label("WWWW".into()));
+        let red = crate::Rgba::rgb(255, 0, 0);
+        ui.set_ink(label, Some(red));
+        let pixmap = render(&mut ui, 1.0)?;
+        let r = ui.widget(label).rect;
+        let inked = (r.x as u32..(r.x + r.w) as u32)
+            .flat_map(|x| (r.y as u32..r.bottom() as u32).map(move |y| (x, y)))
+            .any(|(x, y)| pixel(&pixmap, x as f32, y as f32) == red.0.to_vec());
+        assert!(inked, "no pixel of the label is in its ink");
+        Ok(())
+    }
+
+    #[test]
+    fn a_control_outline_is_the_border_or_the_active_toggles_accent() -> Result<(), Error> {
+        // Two pixels wide, so that one whole pixel lies inside the outline wherever a control
+        // starts between two pixels.
+        let theme = crate::Theme {
+            control_border: 2.0,
+            radius: 0.0,
+            ..crate::Theme::default()
+        };
+        let mut ui = crate::Ui::new("Outline", theme, false);
+        let row = ui.add(crate::Ui::ROOT, crate::Kind::Row);
+        let on = ui.toggle(row, "On", true);
+        let off = ui.toggle(row, "Off", false);
+        let pixmap = render(&mut ui, 1.0)?;
+        let t = &ui.theme;
+        for (id, outline, fill) in [(on, t.accent, t.accent), (off, t.border, t.surface)] {
+            let r = ui.widget(id).rect;
+            let mid = r.y + r.h / 2.0;
+            assert_eq!(pixel(&pixmap, r.x + 1.0, mid), outline.0.to_vec());
+            assert_eq!(pixel(&pixmap, r.x + 3.0, mid), fill.0.to_vec());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_bare_window_button_is_filled_only_under_the_pointer() -> Result<(), Error> {
+        let theme = crate::Theme {
+            title_bar_style: TitleBarStyle::Bare,
+            ..crate::Theme::default()
+        };
+        let mut ui = crate::Ui::new("Bare", theme, false);
+        ui.add_title_bar();
+        // The title bar is the root's first child.
+        let bar = ui.widget(crate::Ui::ROOT).children[0];
+        let close = *ui.widget(bar).children.last().expect("the Close button");
+        let plain = render(&mut ui, 1.0)?;
+        let r = ui.widget(close).rect;
+        // Inside the circle, away from the mark.
+        let (x, y) = (r.center_x(), r.y + 2.0);
+        let t = ui.theme.clone();
+        assert_eq!(pixel(&plain, x, y), t.title_bar.0.to_vec());
+        ui.pointer_motion(x, y);
+        let hovered = render(&mut ui, 1.0)?;
+        assert_eq!(pixel(&hovered, x, y), mix(t.title_bar, t.text, HOVER).0.to_vec());
         Ok(())
     }
 }

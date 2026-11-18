@@ -20,9 +20,7 @@ Restart=on-failure
 # Every restart comes at once, as the bar's (doc_shell_standard.md, ST5, recovery).
 RestartSec=100ms
 Slice=session.slice
-# SH4: the layer surface is drawn with Cairo, on every GPU.
-Environment=GSK_RENDERER=cairo
-# GTK's and fontconfig's caches, inside the Landlock ruleset.
+# fontconfig's cache, inside the Landlock ruleset.
 Environment=XDG_CACHE_HOME=%C/athanor-control-center
 CacheDirectory=athanor-control-center
 # MemoryHigh throttles well above the resident size; MemoryMax is the hard cap for an icon
@@ -53,10 +51,10 @@ ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=yes
 NoNewPrivileges=yes
-# No MemoryDenyWriteExecute: GTK's GL renderers and the Mesa drivers GTK loads map
-# executable memory. The renderer is Cairo, but GDK still probes GL at start.
-# @mount: glycin decodes every image in a bubblewrap sandbox, which mounts its own root.
-SystemCallFilter=@system-service @mount
+# Sal draws with vello_cpu: the binary is built without its gpu feature, so no GL or Vulkan
+# driver maps executable memory, and it decodes its icons in process, with no sandbox to mount.
+MemoryDenyWriteExecute=yes
+SystemCallFilter=@system-service
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
@@ -64,9 +62,8 @@ ProtectControlGroups=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
-# Wayland, D-Bus and journald over Unix sockets; AF_NETLINK because bubblewrap brings up
-# the loopback interface of glycin's sandbox over rtnetlink.
-RestrictAddressFamilies=AF_UNIX AF_NETLINK
+# Wayland, both D-Buses, PulseAudio and journald, all over Unix sockets.
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=athanor-session.target

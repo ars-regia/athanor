@@ -34,7 +34,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # The guest side of one job. The disks vm.sh attaches are found by their virtio serial:
-# the cache persists across jobs, the scratch disk is recreated empty for each one, and
+# vm.sh recreates both empty for each job (doc_pipeline.md PL10), and
 # x-systemd.makefs formats a disk that has no file system. Their SELinux context makes
 # them usable by the rootless containers of the jobs, which bind-mount the workspace and
 # ~/.cache/azoth without :z. The runner user has a fixed UID because system units cannot
@@ -62,7 +62,7 @@ write_files:
       [Service]
       Type=oneshot
       RemainAfterExit=yes
-      ExecStart=/usr/bin/install -d -o runner -g runner /var/lib/runner/cache/containers /var/lib/runner/cache/azoth /var/lib/runner/work
+      ExecStart=/usr/bin/install -d -o runner -g runner /var/lib/runner/cache/containers /var/lib/runner/cache/azoth /var/lib/runner/work /var/lib/runner/work/.podman-tmp
   - path: /usr/local/libexec/actions-runner-start
     permissions: '0755'
     content: |
@@ -101,6 +101,14 @@ write_files:
       [storage]
       driver = "overlay"
       graphroot = "/var/lib/runner/cache/containers"
+  # podman build copies each committed layer through image_copy_tmp_dir, /var/tmp on the
+  # small system disk by default: a builder image rebuilt from scratch filled it. The scratch
+  # disk is large and recreated empty for every job.
+  - path: /home/runner/.config/containers/containers.conf
+    defer: true
+    content: |
+      [engine]
+      image_copy_tmp_dir = "/var/lib/runner/work/.podman-tmp"
 # One script under set -e: cloud-init runs every runcmd entry even after one fails, so the
 # marker build-image.sh waits for is written only when every step succeeded.
 runcmd:

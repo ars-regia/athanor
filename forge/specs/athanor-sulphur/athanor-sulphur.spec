@@ -2,10 +2,12 @@
 # repo-input: system/athanor-sulphur-client/protocols/athanor-keyboard-group-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-workspace-tiling-v1.xml
+# repo-input: system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml
+# repo-input: system/athanor-sulphur-client/protocols/athanor-material-v1.xml
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        23%{?dist}
+Release:        25%{?athanor_content}%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,6 +57,28 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-25
+- Serve ext_background_effect_manager_v1 (doc_own_stack.md decision 35): on an output of
+  tier M2, what lies under a surface's blur region, windows included, is blurred with a dual
+  Kawase blur from half resolution, three passes, saturated in the last one, and drawn under
+  the surface; it is blurred again only when what lies under it changes. On M0 and M1, and
+  in software, the region is drawn as it is. Each blur element keeps its own copy of what
+  lies under it and the blur's levels in the damage tracker's effects cache. An output blurs,
+  front to back, at most eight regions a frame, of at most its own area together, counted
+  before the magnifier scales them, and draws the rest as they are. A copy is freed when its
+  element or its region goes, or when the output drops below M2.
+
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+- Serve xdg_wm_dialog_v1 (doc_own_stack.md decision 33): a click on the parent of a shown
+  modal dialog gives the keyboard to the dialog, which stays above its parent.
+- Serve wp_pointer_warp_v1 (decision 33): a warp moves the pointer only within the surface
+  that has both the pointer focus and the keyboard focus, and never under a pointer lock,
+  while the session is locked or while Ctrl+Alt+Tab has suspended its client.
+- Serve xdg_system_bell_v1 (decision 33): a bell from the client of the focused window, at
+  most one a second and never while the session is locked, blinks that window's focus
+  outline once, or widens it for half a second under reduced motion; a bell where no outline
+  is drawn is dropped.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
 - Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:
   the global is disabled, which sends global_remove, and destroyed only after the grace, so a

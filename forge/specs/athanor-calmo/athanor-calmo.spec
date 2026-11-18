@@ -2,7 +2,7 @@
 %global debug_package %{nil}
 Name:           athanor-calmo
 Version:        1.0.0
-Release:        4%{?dist}
+Release:        4%{?athanor_content}%{?dist}
 Summary:        The Calmo identity: COSMIC defaults, hearth wallpaper and seal icons
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

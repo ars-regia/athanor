@@ -16,7 +16,7 @@ the script does not merge, or one the queue removes, waits for a person.
 spec   — branch chore/update-specs-zero-trust (forge-util-update-specs.yml); only modified
          *.spec and SOURCES/sources.sha256 of the packages forge/upstream-watch.json lists
          (read from the checkout, the base branch); only Version
-         lines (numeric), Release lines (N%{?dist}) and manifest entries; every Version keeps
+         lines (numeric), Release lines (N%{?athanor_content}%{?dist}) and manifest entries; every Version keeps
          its leftmost non-zero component (1.6.0 -> 1.7.1 merges, 1.9 -> 2.0 and 0.3 -> 0.4 do
          not).
 system — branch bump/system-* with label system-bump (kernel-bump.yml, system group); only
@@ -27,6 +27,13 @@ system — branch bump/system-* with label system-bump (kernel-bump.yml, system 
 Usage: bot_merge.py spec|system PR HEAD_SHA BUILD_RESULT
        GH_TOKEN: reads the pull request and the Actions runs; MERGE_TOKEN: merges it (a token of
        the bots GitHub App, so that the merge triggers the push workflows)
+
+A pull request whose files have a code owner (ADR-0107) merges only once GitHub reports it
+APPROVED, or reports no decision (the approving count is 0) and a code owner of every owned
+file has approved it at HEAD_SHA; a pull request on unowned paths needs no approval. Any
+other decision stays for a person. bot-merge.yml runs only on workflow_run of pr.yml and a push
+dismisses the approval, so after approving, the maintainer reruns the Bot Merge run of that
+head or merges by hand: nothing else wakes the script.
 
 A pull request of another shape, or a build that is not `success`, is reported in the log and
 the job summary and the script exits 0. A failing gh call, a failing required check or a
@@ -53,6 +60,8 @@ BOT_AUTHOR = "app/athanor-bots"
 # merging App is a bypass actor of the pull request rule, so this wait is what keeps a red check from merging. Switching
 # the required check (docs/operations/github-settings.md section 8) is a change of that file.
 BRANCH_PROTECTION = ".github/settings/branch-protection.json"
+# Who owns what, read from the checkout (the base branch) like the files above.
+CODEOWNERS = ".github/CODEOWNERS"
 # The workflow whose newest pull_request run reports each check a branch may require, as the
 # name of its gate job.
 CHECK_WORKFLOWS = {
@@ -63,7 +72,7 @@ CHECK_WORKFLOWS = {
 SPECS_JOB = "specs / Spec gate"
 SYSTEM_PATH = re.compile(rf"system/(Containerfile|nvidia/locks/{NAME}\.lock)")
 VERSION = re.compile(r"Version:[ \t]+(\d+(?:\.\d+)*)")
-RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?dist\}")
+RELEASE = re.compile(r"Release:[ \t]+\d+%\{\?athanor_content\}%\{\?dist\}")
 MANIFEST = re.compile(rf"{HEX64}  {NAME}")
 LOCK_ENTRY = re.compile(rf"{HEX64}  (https://\S+)")
 FROM = re.compile(rf"FROM ([^\s@]+)@sha256:{HEX64} AS (\S+)")
@@ -173,6 +182,75 @@ def check_system(f, contents):
             )
 
 
+def codeowners_regex(pattern):
+    """GitHub's CODEOWNERS pattern as a regex over a repository path (gitignore semantics)."""
+    directory = pattern.endswith("/")
+    pattern = pattern.rstrip("/")
+    anchored = "/" in pattern
+    translate = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}
+    body = re.sub(
+        r"\*\*/|\*\*|\*|\?|[^*?]+",
+        lambda m: translate.get(m.group(0)) or re.escape(m.group(0)),
+        pattern.lstrip("/"),
+    )
+    # Only a pattern that names a directory covers what is below it: a glob never crosses `/`.
+    below = "/.*" if directory else ("" if re.search(r"[*?]", pattern) else "(?:/.*)?")
+    return re.compile(("" if anchored else "(?:.*/)?") + body + below)
+
+
+def codeowners_rules():
+    """(regex, owners) of every rule of CODEOWNERS, in order: the last match wins."""
+    rules = []
+    with open(CODEOWNERS) as f:
+        for line in f:
+            parts = line.split("#")[0].split()
+            if parts:
+                rules.append((codeowners_regex(parts[0]), parts[1:]))
+    return rules
+
+
+def owners_of(path, rules):
+    owners = []
+    for regex, names in rules:
+        if regex.fullmatch(path):
+            owners = names
+    return owners
+
+
+def require_owner_approval(view, paths):
+    """Fail closed: refuse unless GitHub reports APPROVED, or reports no decision and every
+    owned path has a code owner's approval at the head. GitHub leaves the decision empty for an
+    unapproved pull request while the approving count is 0 (ADR-0107, #569), so the empty
+    decision alone proves nothing."""
+    decision = view["reviewDecision"]
+    if decision == "APPROVED":
+        return
+    if decision != "":
+        raise Refused(f"review decision {decision!r}: it needs a person")
+    rules = codeowners_rules()
+    owned = {p: owners_of(p, rules) for p in paths}
+    owned = {p: o for p, o in owned.items() if o}
+    if not owned:
+        return
+    # The latest approving or rejecting review of each reviewer decides; a comment changes nothing.
+    deciding = [r for r in view["reviews"] if r["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED")]
+    if any(not r.get("submittedAt") for r in deciding):
+        raise Refused("a review carries no submission time, so its order is unknown")
+    latest = {}
+    for r in sorted(deciding, key=lambda r: r["submittedAt"]):
+        latest[r["author"]["login"].lower()] = r
+    approvers = {
+        "@" + login
+        for login, r in latest.items()
+        if r["state"] == "APPROVED" and (r.get("commit") or {}).get("oid") == view["headRefOid"]
+    }
+    missing = sorted(p for p, o in owned.items() if not approvers & {x.lower() for x in o})
+    if missing:
+        raise Refused(
+            f"waits for a code owner's approval at {view['headRefOid']} of {', '.join(missing)}"
+        )
+
+
 def check(kind, pr, sha, gh):
     view = json.loads(
         gh(
@@ -180,7 +258,7 @@ def check(kind, pr, sha, gh):
             "view",
             pr,
             "--json",
-            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles",
+            "state,author,baseRefName,headRefName,headRefOid,isCrossRepository,labels,changedFiles,reviewDecision,reviews",
         )
     )
     if view["state"] != "OPEN":
@@ -193,7 +271,7 @@ def check(kind, pr, sha, gh):
         raise Refused(f"head moved past the checked commit {sha}")
     if not BRANCH[kind].fullmatch(view["headRefName"]):
         raise Refused(f"branch {view['headRefName']} is not the {kind} bot's")
-    if kind == "system" and "system-bump" not in {l["name"] for l in view["labels"]}:
+    if kind == "system" and "system-bump" not in {ln["name"] for ln in view["labels"]}:
         raise Refused("has no system-bump label")
 
     repo = (
@@ -233,6 +311,7 @@ def check(kind, pr, sha, gh):
             check_spec(f)
         else:
             check_system(f, contents)
+    require_owner_approval(view, [f["filename"] for f in files])
     return view["baseRefName"]
 
 

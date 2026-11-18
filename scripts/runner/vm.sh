@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # One job of the self-hosted runner (scripts/runner/README.md). Asks GitHub for a
 # just-in-time runner configuration, boots the base image with snapshot=on (no write
-# reaches it) and a scratch disk recreated empty, and passes the configuration to the
-# guest as a systemd credential through fw_cfg. The job is over when GitHub removes the
+# reaches it) and a cache and a scratch disk recreated empty, and passes the configuration
+# to the guest as a systemd credential through fw_cfg. The job is over when GitHub removes the
 # just-in-time registration: vm.sh then powers the guest off through QMP, whatever the
 # runner inside does, and athanor-runner.service starts the next one. Runs as the
 # dynamic user of the service: STATE_DIRECTORY holds golden.qcow2 and the disks, the
@@ -211,8 +211,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 143' TERM
 
-[[ -f $STATE/cache.raw ]] || truncate -s "$CACHE_DISK_SIZE" "$STATE/cache.raw"
-rm -f "$STATE/scratch.raw"
+# Both extra disks are recreated empty for every job (doc_pipeline.md PL10, #1191). Every
+# guest takes whatever self-hosted job comes first, a pull request's or a release's, and a
+# pull request's kernel build is the one the push to iso-v0 may publish (ADR-0110), so no
+# writable state outlives its guest. The cache disk stays a disk of its own because the
+# base image mounts it by its serial (build-image.sh).
+rm -f "$STATE/cache.raw" "$STATE/scratch.raw"
+truncate -s "$CACHE_DISK_SIZE" "$STATE/cache.raw"
 truncate -s "$SCRATCH_DISK_SIZE" "$STATE/scratch.raw"
 
 echo "runner $name ($id): booting, serial console in $LOGS/console.log"

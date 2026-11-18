@@ -19,6 +19,7 @@ pub async fn run(conn: &Connection) -> Result<String, String> {
     match conn.call_method(Some(BUS_NAME), OBJECT_PATH, Some(BUS_NAME), "GoBack", &()).await {
         Ok(_) => Ok("The previous version boots next. The machine restarts now.".into()),
         Err(zbus::Error::MethodError(name, detail, _)) => Err(describe(name.as_str(), detail.as_deref())),
+        Err(zbus::Error::FDO(err)) => Err(describe(zbus::DBusError::name(&*err).as_str(), zbus::DBusError::description(&*err))),
         Err(err) => Err(format!("cannot reach {BUS_NAME}: {err}")),
     }
 }
@@ -104,7 +105,7 @@ pub(crate) mod tests {
         }
 
         pub(crate) fn builder(&self) -> Builder<'static> {
-            Builder::address(self.address.as_str()).expect("address")
+            Builder::address(self.address.as_str())
         }
     }
 
@@ -135,7 +136,7 @@ pub(crate) mod tests {
 
     async fn ask(name: &str, service: Fake) -> Result<String, String> {
         let bus = Bus::start(name);
-        let _service = bus.builder().name(BUS_NAME).expect("name").serve_at(OBJECT_PATH, service).expect("serve").build().await.expect("service");
+        let _service = bus.builder().name(BUS_NAME).serve_at(OBJECT_PATH, service).build().await.expect("service");
         let client = bus.builder().build().await.expect("client");
         run(&client).await
     }

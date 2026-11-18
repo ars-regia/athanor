@@ -107,7 +107,7 @@ Each one is a change to a file followed by `apply`, or a deletion by hand follow
 | Point | Decision |
 | --- | --- |
 | Description `ermete-os` | Set the Athanor description in `repository.json` (the file change follows this record) |
-| Dependabot alerts off | Set `vulnerability_alerts` to `true` in `repository.json` |
+| Dependabot alerts off | Set `vulnerability_alerts` to `true` in `repository.json` _(The file changed on 2026-11-11; the alerts are on once the maintainer applies it)_ |
 | Environment `delete` has no rule and no secret, and no workflow names it (`grep -rn "environment:" .github/workflows` finds only `signing-kernel` and `signing-images`) | _(Done, export of 2026-10-09)_ The maintainer deletes it by hand, then exports again |
 | Pages builds `main:/docs` and errors, and nothing publishes to the `gh-pages` branch since the DNF channel was removed (ADR-0076, decision 2) | Turn Pages off in `pages.json`; the maintainer then deletes the `gh-pages` branch and the `github-pages` environment by hand and exports again _(Done: the maintainer deleted the branch, the environment and the Pages site by hand on 2026-10-09; the export of that day records it)_ |
 | `enforce_admins` is off on `iso-v0` and `main`: the admin may push past the required check | Stays off while there is a single maintainer: turned on, it would block every merge, because nobody else can approve. Turn it on when a second maintainer joins. The signing environments bind the admin already (section 7) |

@@ -13,7 +13,8 @@
 #
 # Usage: run_spec_build.sh IMAGE SPEC_DIR [podman run options...]
 #   SPEC_DIR is relative to forge/ (e.g. specs/athanor-tetragon). The options, such as the DAG's
-#   sccache mount and size, go to both containers. The volume is removed on exit.
+#   ATHANOR_CONTENT, go to both containers. The volume, and the sccache cache in it, is removed
+#   on exit.
 set -euo pipefail
 
 usage="usage: run_spec_build.sh IMAGE SPEC_DIR [podman run options...]"

@@ -206,19 +206,19 @@ fn remaining(battery: &Battery, catalog: &Catalog) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zbus::zvariant::{OwnedValue, Value};
+    use zbus::{OwnedVariant, Variant};
 
     fn device(state: u32, warning: u32) -> Props {
         let mut props = Props::new();
-        let mut put = |name: &str, value: Value<'_>| {
+        let mut put = |name: &str, value: Variant<'_>| {
             props.insert(name.into(), value.try_to_owned().expect("owned"));
         };
-        put("Type", Value::U32(2));
-        put("IsPresent", Value::Bool(true));
-        put("Percentage", Value::F64(9.4));
-        put("State", Value::U32(state));
-        put("TimeToEmpty", Value::I64(3900));
-        put("WarningLevel", Value::U32(warning));
+        put("Type", Variant::U32(2));
+        put("IsPresent", Variant::Bool(true));
+        put("Percentage", Variant::F64(9.4));
+        put("State", Variant::U32(state));
+        put("TimeToEmpty", Variant::I64(3900));
+        put("WarningLevel", Variant::U32(warning));
         props
     }
 
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(wanted(&device(CHARGING, 4)), None);
         assert_eq!(wanted(&device(4, 3)), None, "full");
         let mut ups = device(DISCHARGING, 4);
-        ups.insert("Type".into(), OwnedValue::from(3u32));
+        ups.insert("Type".into(), OwnedVariant::from(3u32));
         assert_eq!(wanted(&ups), None, "not the machine's battery");
     }
 

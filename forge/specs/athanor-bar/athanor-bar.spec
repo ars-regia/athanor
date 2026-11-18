@@ -1,12 +1,13 @@
 %global debug_package %{nil}
 Name:           athanor-bar
 Version:        1.0.0
-Release:        23%{?dist}
+Release:        24%{?athanor_content}%{?dist}
 Summary:        The Athanor bar
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
-Requires:       gtk4 gtk4-layer-shell athanor-calmo athanor-shelld
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel pulseaudio-libs-devel gettext binutils python3
+# Inter, the interface font, and the symbolic icons the bar draws.
+Requires:       athanor-calmo adwaita-icon-theme athanor-shelld
 # The shield asks os.athanor.Update1.State(), which athanor-update serves from 1.0.0-2; the
 # local-changes reason it may publish exists from 1.0.0-4, channel-absent from 1.0.0-6,
 # origin-not-enforcing from 1.0.0-8; owner-moved, owner-moved-waiting, owner-moved-held and
@@ -38,6 +39,10 @@ for catalog in forge/specs/athanor-bar/athanor-bar-1.0.0/po/*.po; do
     msgfmt --check --output-file="locale-build/$lang/LC_MESSAGES/athanor-bar.mo" "$catalog"
 done
 
+%check
+# Drawn with Sal: neither GTK nor its layer-shell shim may come back among DT_NEEDED.
+python3 -B forge/scripts/check_shim_link_order.py --without-gtk target/release/athanor-bar
+
 %install
 install -D -m 0755 target/release/athanor-bar %{buildroot}/usr/bin/athanor-bar
 install -D -m 0644 forge/specs/athanor-bar/athanor-bar-1.0.0/data/athanor-bar.service \
@@ -55,10 +60,6 @@ mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
 rm -rf locale-build
 
-%check
-# doc_shell.md, SH4: the layer-shell shim must load before libwayland-client and GTK.
-python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
-
 %files
 /usr/bin/athanor-bar
 /usr/lib/systemd/user/athanor-bar.service
@@ -73,6 +74,11 @@ python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-bar
 %lang(en) /usr/share/locale/en/LC_MESSAGES/athanor-bar.mo
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+- Landlock grants the bar's writes by descriptors athanor_unit::dirs opened and checked
+  (#1052): a directory that is a link or another user's is left out with a warning, and the
+  launch directory and dconf are private_dir's, mode 0700.
+
 * Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
 - Watch the windows at start: athanor-sulphur-client binds the window globals only for a
   client that asks for them, and this one reads the window list and the windows of the

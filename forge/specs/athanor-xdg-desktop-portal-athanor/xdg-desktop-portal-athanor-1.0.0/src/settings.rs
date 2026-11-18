@@ -16,8 +16,8 @@ use glib::{Variant, VariantClass};
 use tokio::sync::mpsc::UnboundedSender;
 use zbus::message::Header;
 use zbus::object_server::SignalEmitter;
-use zbus::zvariant::{Array, Dict, ObjectPath, OwnedValue, Signature, StructureBuilder, Value};
 use zbus::Connection;
+use zbus::{Array, Dict, ObjectPath, OwnedVariant, Signature, Structure};
 
 use crate::{caller, Error};
 
@@ -193,27 +193,29 @@ impl Watcher {
 }
 
 /// A GLib value as a D-Bus one. `None` for what D-Bus cannot carry: maybe types and handles.
-pub fn to_value(variant: &Variant) -> Option<OwnedValue> {
-    OwnedValue::try_from(convert(variant)?).ok()
+pub fn to_value(variant: &Variant) -> Option<OwnedVariant> {
+    OwnedVariant::try_from(convert(variant)?).ok()
 }
 
-fn convert(variant: &Variant) -> Option<Value<'static>> {
+fn convert(variant: &Variant) -> Option<zbus::Variant<'static>> {
     Some(match variant.classify() {
-        VariantClass::Boolean => Value::Bool(variant.get()?),
-        VariantClass::Byte => Value::U8(variant.get()?),
-        VariantClass::Int16 => Value::I16(variant.get()?),
-        VariantClass::Uint16 => Value::U16(variant.get()?),
-        VariantClass::Int32 => Value::I32(variant.get()?),
-        VariantClass::Uint32 => Value::U32(variant.get()?),
-        VariantClass::Int64 => Value::I64(variant.get()?),
-        VariantClass::Uint64 => Value::U64(variant.get()?),
-        VariantClass::Double => Value::F64(variant.get()?),
-        VariantClass::String => Value::from(variant.str()?.to_owned()),
+        VariantClass::Boolean => zbus::Variant::Bool(variant.get()?),
+        VariantClass::Byte => zbus::Variant::U8(variant.get()?),
+        VariantClass::Int16 => zbus::Variant::I16(variant.get()?),
+        VariantClass::Uint16 => zbus::Variant::U16(variant.get()?),
+        VariantClass::Int32 => zbus::Variant::I32(variant.get()?),
+        VariantClass::Uint32 => zbus::Variant::U32(variant.get()?),
+        VariantClass::Int64 => zbus::Variant::I64(variant.get()?),
+        VariantClass::Uint64 => zbus::Variant::U64(variant.get()?),
+        VariantClass::Double => zbus::Variant::F64(variant.get()?),
+        VariantClass::String => zbus::Variant::from(variant.str()?.to_owned()),
         VariantClass::ObjectPath => {
-            Value::ObjectPath(ObjectPath::try_from(variant.str()?.to_owned()).ok()?)
+            zbus::Variant::ObjectPath(ObjectPath::try_from(variant.str()?.to_owned()).ok()?)
         }
-        VariantClass::Signature => Value::Signature(Signature::try_from(variant.str()?).ok()?),
-        VariantClass::Variant => Value::Value(Box::new(convert(&variant.as_variant()?)?)),
+        VariantClass::Signature => {
+            zbus::Variant::Signature(Signature::try_from(variant.str()?).ok()?)
+        }
+        VariantClass::Variant => zbus::Variant::Variant(Box::new(convert(&variant.as_variant()?)?)),
         VariantClass::Array => {
             let element = variant.type_().element();
             let children = (0..variant.n_children()).map(|i| variant.child_value(i));
@@ -229,21 +231,21 @@ fn convert(variant: &Variant) -> Option<Value<'static>> {
                     )
                     .ok()?;
                 }
-                Value::Dict(dict)
+                zbus::Variant::Dict(dict)
             } else {
                 let mut array = Array::new(&Signature::try_from(element.as_str()).ok()?);
                 for child in children {
                     array.append(convert(&child)?).ok()?;
                 }
-                Value::Array(array)
+                zbus::Variant::Array(array)
             }
         }
         VariantClass::Tuple => {
-            let mut fields = StructureBuilder::new();
+            let mut fields = Structure::builder();
             for i in 0..variant.n_children() {
                 fields = fields.append_field(convert(&variant.child_value(i))?);
             }
-            Value::Structure(fields.build().ok()?)
+            zbus::Variant::Structure(fields.build().ok()?)
         }
         _ => return None,
     })
@@ -284,7 +286,7 @@ impl Portal {
         &self,
         namespaces: Vec<String>,
         #[zbus(header)] header: Header<'_>,
-    ) -> Result<HashMap<String, HashMap<String, OwnedValue>>, Error> {
+    ) -> Result<HashMap<String, HashMap<String, OwnedVariant>>, Error> {
         caller::authorise(&header, &self.query).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         Ok(store
@@ -305,7 +307,7 @@ impl Portal {
         namespace: String,
         key: String,
         #[zbus(header)] header: Header<'_>,
-    ) -> Result<OwnedValue, Error> {
+    ) -> Result<OwnedVariant, Error> {
         caller::authorise(&header, &self.query).await?;
         let store = self.store.read().unwrap_or_else(PoisonError::into_inner);
         store
@@ -320,7 +322,7 @@ impl Portal {
         emitter: &SignalEmitter<'_>,
         namespace: &str,
         key: &str,
-        value: &Value<'_>,
+        value: &zbus::Variant<'_>,
     ) -> zbus::Result<()>;
 
     // The specification names it in lower case; zbus would export "Version".

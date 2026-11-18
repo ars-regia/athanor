@@ -6,7 +6,7 @@
 mod a11y;
 mod actions;
 pub mod background;
-#[cfg(feature = "gtk")]
+#[cfg(feature = "capture")]
 mod capture;
 mod connection;
 mod cosmic_config;
@@ -14,6 +14,7 @@ pub mod favorites;
 pub mod idle;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
+pub mod keyboard;
 mod keyboard_group;
 mod keymap;
 mod launch;
@@ -33,6 +34,8 @@ mod workspace_tiling;
 pub(crate) static MAIN_CONTEXT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub use actions::WindowActions;
+#[cfg(feature = "capture")]
+pub use capture::{Picture, PixelFormat};
 pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
 pub use shortcuts::SETTINGS_PAGE_PREFIX;

@@ -14,11 +14,8 @@ use zbus::{Connection, Proxy};
 async fn watcher(conn: &Connection) -> Proxy<'static> {
     Builder::<Proxy>::new(conn)
         .destination(WATCHER_NAME)
-        .expect("destination")
         .path(WATCHER_PATH)
-        .expect("path")
         .interface("org.kde.StatusNotifierWatcher")
-        .expect("interface")
         .cache_properties(CacheProperties::No)
         .build()
         .await

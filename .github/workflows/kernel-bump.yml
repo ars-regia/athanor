@@ -66,6 +66,8 @@ jobs:
       KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: One open kernel bump PR at a time
         id: open
@@ -103,7 +105,7 @@ jobs:
           if-no-files-found: error
 
       - if: ${{ steps.bump.outputs.changed == 'true' }}
-        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+        uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63 # v2.0.3
         with:
           version: 1.3.1
 
@@ -118,8 +120,10 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: bump-pins
 
@@ -142,13 +146,15 @@ jobs:
 
       - name: Manifests for the new pins
         if: ${{ steps.lock.outputs.locked == 'true' }}
+        # The manifests are hashed from what the store holds, so they read an empty store made
+        # for this run, never the runner's persistent one, which other jobs write (#1179).
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.cache/azoth"
+          mkdir "$RUNNER_TEMP/azoth"
           builder() {
             podman run --rm \
               -v "$GITHUB_WORKSPACE:/forge" \
-              -v "$HOME/.cache/azoth:/var/cache/azoth" \
+              -v "$RUNNER_TEMP/azoth:/var/cache/azoth" \
               -w /forge localhost/azoth-builder "$@"
           }
           builder bash forge/specs/azoth/build.sh --stage manifest --out /forge/manifest/kernel
@@ -171,7 +177,7 @@ jobs:
             echo "::error::lock.sh generate failed: the pull request carries the end of its log"
           elif ! podman run --rm \
                  -v "$GITHUB_WORKSPACE:/forge" \
-                 -v "$HOME/.cache/azoth:/var/cache/azoth" \
+                 -v "$RUNNER_TEMP/azoth:/var/cache/azoth" \
                  -w /forge localhost/azoth-builder \
                  bash forge/specs/azoth/build.sh --stage prep --out /forge/out > prep.log 2>&1; then
             outcome=FAIL
@@ -182,7 +188,7 @@ jobs:
             echo; echo "## prep: ${outcome}"; echo
             if [[ $outcome == REFRESH ]]; then
               # shellcheck disable=SC2016
-              echo 'A CachyOS patch no longer applies without fuzz. On this branch run `build.sh --stage refresh --out DIR` in the builder, as in `forge/specs/azoth/KERNEL.md`, review the hunks GNU patch applied with fuzz, commit the copy under `forge/specs/azoth/patches/refreshed/` and merge by hand (doc_kernel_build.md, section 8). This PR does not merge by itself.'
+              echo 'A CachyOS patch no longer applies without fuzz, or CachyOS changes what its locks hold (the lines below). On this branch run `build.sh --stage refresh --out DIR` in the builder, as in `forge/specs/azoth/KERNEL.md`: review the hunks GNU patch applied with fuzz and commit the copy under `forge/specs/azoth/patches/refreshed/`, and review and commit every new line of `derived.config`, `cachyos-protected.sha256` and `cachyos-files.list`. Then merge by hand (doc_kernel_build.md, section 8). This PR does not merge by itself.'
               echo; echo '```'; grep '^build.sh: refresh needed: ' prep.log; echo '```'
             fi
             if [[ $outcome != ok ]]; then
@@ -223,7 +229,7 @@ jobs:
       # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
       # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
       - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
@@ -232,11 +238,12 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: bump-*
           merge-multiple: true
@@ -295,7 +302,7 @@ jobs:
       # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
       # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
       - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
@@ -304,7 +311,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 
@@ -340,7 +348,7 @@ jobs:
           git status --short -- system/Containerfile system/nvidia/locks
 
       - if: ${{ !cancelled() }}
-        uses: oras-project/setup-oras@1d808f7d7f6995cc68b7bf507bfe5c5446e1dc9d # v2.0.1
+        uses: oras-project/setup-oras@5e2f2482b30b0cb3e14e67f89a80c88c659a7c63 # v2.0.3
         with:
           version: 1.3.1
 

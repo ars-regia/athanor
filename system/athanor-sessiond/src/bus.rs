@@ -18,7 +18,7 @@ use tokio::sync::watch;
 use tokio::time::timeout;
 use zbus::message::Type;
 use zbus::names::BusName;
-use zbus::zvariant::Value;
+use zbus::Variant;
 use zbus::{Connection, MatchRule, Message, MessageStream};
 
 use crate::battery::{self, Level, Notice, Notices, Step, SETTINGS_ACTION, SETTINGS_PAGE};
@@ -43,19 +43,19 @@ pub async fn run(
 ) -> Result<(), Failure> {
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
-        .interface(SERVER)?
-        .path(SERVER_PATH)?
-        .build();
+        .interface(SERVER)
+        .path(SERVER_PATH)
+        .build()?;
     let mut server = MessageStream::for_match_rule(rule, signals, None).await?;
     // A failed raise stays owed until the level changes or a server appears, and a server that
     // appears gets the current level's notice again (SD14, maintainer decision, 2026-11-07).
     let owner = MatchRule::builder()
         .msg_type(Type::Signal)
-        .sender("org.freedesktop.DBus")?
-        .interface("org.freedesktop.DBus")?
-        .member("NameOwnerChanged")?
-        .arg(0, SERVER)?
-        .build();
+        .sender("org.freedesktop.DBus")
+        .interface("org.freedesktop.DBus")
+        .member("NameOwnerChanged")
+        .arg(0, SERVER)
+        .build()?;
     let mut owners = MessageStream::for_match_rule(owner, signals, None).await?;
     let mut upower = mirror::spawn(
         handle,
@@ -211,10 +211,10 @@ async fn raise(query: &Connection, notice: &Notice) -> Result<(String, u32), Fai
         .iter()
         .flat_map(|(key, label)| [*key, label.as_str()])
         .collect();
-    let mut hints: HashMap<&str, Value<'_>> =
-        HashMap::from([("urgency", Value::U8(notice.urgency))]);
+    let mut hints: HashMap<&str, Variant<'_>> =
+        HashMap::from([("urgency", Variant::U8(notice.urgency))]);
     if notice.resident {
-        hints.insert("resident", Value::Bool(true));
+        hints.insert("resident", Variant::Bool(true));
     }
     let body = (
         "Athanor",
@@ -240,7 +240,7 @@ async fn call<B>(
     body: &B,
 ) -> Result<Message, Failure>
 where
-    B: serde::Serialize + zbus::zvariant::DynamicType,
+    B: serde::Serialize + zbus::DynamicType,
 {
     let reply = timeout(
         CALL_TIMEOUT,
@@ -261,9 +261,7 @@ mod tests {
             "org.freedesktop.DBus",
             "NameOwnerChanged",
         )
-        .expect("signal")
         .sender(sender)
-        .expect("sender")
         .build(&(name, "", new))
         .expect("message")
     }

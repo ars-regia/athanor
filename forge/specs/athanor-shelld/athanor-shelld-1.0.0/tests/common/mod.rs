@@ -12,8 +12,8 @@ use std::{env, fs, process};
 use athanor_shelld::sender::BAR as BAR_SERVICE;
 use athanor_shelld::server::{self, Config};
 use zbus::connection::Builder;
-use zbus::zvariant::{Fd, OwnedObjectPath};
 use zbus::Connection;
+use zbus::{Fd, OwnedObjectPath};
 
 pub const BAR: &str = BAR_SERVICE.unit;
 pub const APP: &str = "app-athanor-foo@0123.service";
@@ -48,7 +48,7 @@ impl Bus {
     }
 
     pub fn builder(&self) -> Builder<'static> {
-        Builder::address(self.address.as_str()).expect("address")
+        Builder::address(self.address.as_str())
     }
 
     pub async fn client(&self) -> Connection {

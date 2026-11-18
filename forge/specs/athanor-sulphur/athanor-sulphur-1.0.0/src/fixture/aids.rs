@@ -556,8 +556,8 @@ fn ax11_a_trusted_prompt_is_told_nothing() {
     let mut run = Running::start(None);
     // The control center's line, marked: the fixture connects it under its identity.
     let marked = FIXTURE_ALLOW_LIST.replace(
-        "athanor_toplevel_manager_v1\n",
-        "athanor_toplevel_manager_v1 trusted-prompt\n",
+        "athanor_toplevel_manager_v1 athanor_material_manager_v1\n",
+        "athanor_toplevel_manager_v1 athanor_material_manager_v1 trusted-prompt\n",
     );
     run.state.allow_list = AllowList::parse(&marked).expect("allow-list");
     let mut prompt = Local::control_center(&mut run);

@@ -27,8 +27,7 @@ struct Osd {
 }
 
 fn options(namespace: &str, anchor: Anchor, keyboard: KeyboardInteractivity) -> LayerOptions {
-    let mut options = LayerOptions::default();
-    options.layer = Layer::Overlay;
+    let mut options = LayerOptions::new(Layer::Overlay);
     options.namespace = namespace.into();
     options.anchor = anchor;
     options.keyboard = keyboard;
@@ -95,7 +94,7 @@ impl Application for Osd {
             }
             "Announce" => shell
                 .ui_mut(status)
-                .map(|ui| ui.announce(ANNOUNCED))
+                .map(|ui| ui.announce(ANNOUNCED, athanor_sal::Priority::Polite))
                 .ok_or_else(|| "the status surface is closed".into()),
             _ => Ok(()),
         };

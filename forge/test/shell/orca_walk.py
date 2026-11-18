@@ -81,14 +81,20 @@ def presses(keys):
             yield key, press
 
 
-def walk(orca, keys):
-    """Waits for Orca, walks the surface and quits Orca; returns why it failed, or None."""
+def walk(orca, keys, before=None):
+    """Waits for Orca, walks the surface and quits Orca; returns why it failed, or None.
+    `before`, when given, runs once Orca presents the focused window and before the first key,
+    for a surface the walk opens itself; it returns why it failed, or None."""
     deadline = time.monotonic() + STARTUP
     while not owned():
         if time.monotonic() > deadline or orca.poll() is not None:
             return f"Orca did not take {SERVICE}"
         time.sleep(0.5)
     time.sleep(3 * PAUSE)
+    if before is not None:
+        if error := before():
+            return error
+        time.sleep(2 * PAUSE)
     for key, press in presses(keys):
         if error := run([*wtype(), *press]):
             return f"wtype did not press {key}: {error}"
@@ -111,7 +117,7 @@ def walk(orca, keys):
     return None
 
 
-def main(argv):
+def main(argv, before=None):
     if len(argv) < 2:
         print(__doc__, file=sys.stderr)
         return 2
@@ -122,7 +128,7 @@ def main(argv):
         orca = subprocess.Popen(orca_command(log), stdout=stderr, stderr=stderr)
         # Orca never outlives the walk, whichever way the walk ends.
         try:
-            error = walk(orca, keys)
+            error = walk(orca, keys, before)
         finally:
             if orca.poll() is None:
                 orca.kill()

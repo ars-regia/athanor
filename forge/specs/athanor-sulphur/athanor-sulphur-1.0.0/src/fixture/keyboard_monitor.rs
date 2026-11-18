@@ -19,9 +19,10 @@ use std::sync::mpsc::{channel, sync_channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::protocol::wl_seat;
-use zbus::blocking::fdo::DBusProxy;
-use zbus::blocking::connection::Builder;
-use zbus::blocking::{Connection, MessageIterator};
+use futures_util::StreamExt;
+use zbus::connection::Builder;
+use zbus::fdo::DBusProxy;
+use zbus::{Connection, MessageStream};
 use zbus::message::Type;
 use zbus::{MatchRule, Message};
 use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1;
@@ -657,15 +658,19 @@ fn ax4_caps_lock_leaves_the_lock_as_the_window_knows_it() {
 }
 
 /// A private session bus: a `dbus-daemon` of its own, stopped and removed when dropped.
-struct Bus {
+pub(super) struct Bus {
     daemon: Child,
     address: String,
     dir: PathBuf,
 }
 
 impl Bus {
-    fn start() -> Self {
-        let dir = std::env::temp_dir().join(format!("athanor-sulphur-{}", std::process::id()));
+    pub(super) fn start() -> Self {
+        // One directory per bus: the tests of a process run in parallel.
+        static BUSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let bus = BUSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("athanor-sulphur-{}-{bus}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the bus's directory");
         // A configuration of its own: `--session` reads the host's, which on a system running
         // dbus-broker has no <listen> element.
@@ -694,12 +699,22 @@ impl Bus {
         }
     }
 
-    fn builder(&self) -> Builder<'static> {
-        Builder::address(self.address.as_str()).expect("the bus's address")
+    pub(super) fn builder(&self) -> Builder<'static> {
+        Builder::address(self.address.as_str())
     }
 
-    fn connect(&self) -> Connection {
-        self.builder().build().expect("a connection to the bus")
+    pub(super) fn connect(&self) -> Connection {
+        zbus::block_on(self.builder().build()).expect("a connection to the bus")
+    }
+
+    /// Stops the daemon, which then answers nothing until the bus is dropped.
+    pub(super) fn stop(&self) {
+        let stopped = Command::new("kill")
+            .arg("-STOP")
+            .arg(self.daemon.id().to_string())
+            .status()
+            .expect("kill runs");
+        assert!(stopped.success(), "the bus daemon stops");
     }
 }
 
@@ -717,21 +732,28 @@ fn refused(answer: zbus::Result<Message>) -> Option<String> {
     match answer {
         Ok(_) => None,
         Err(zbus::Error::MethodError(name, _, _)) => Some(name.to_string()),
+        Err(zbus::Error::FDO(error)) => Some(zbus::DBusError::name(&*error).to_string()),
         Err(error) => panic!("the call did not reach the monitor: {error}"),
     }
 }
 
 /// `method` of the monitor, with no arguments, called by `client`: the error's name, if it fails.
 fn ask(client: &Connection, method: &str) -> Option<String> {
-    refused(client.call_method(Some(NAME), PATH, Some(INTERFACE), method, &()))
+    refused(zbus::block_on(client.call_method(
+        Some(NAME),
+        PATH,
+        Some(INTERFACE),
+        method,
+        &(),
+    )))
 }
 
 /// The next `KeyEvent` `signals` delivers, within `WAIT`.
-fn next_key(signals: MessageIterator) -> (MessageIterator, Message) {
+fn next_key(signals: MessageStream) -> (MessageStream, Message) {
     let (sent, received) = channel();
     std::thread::spawn(move || {
         let mut signals = signals;
-        let next = signals.next();
+        let next = zbus::block_on(signals.next());
         // The test may have given up waiting.
         sent.send((signals, next)).ok();
     });
@@ -740,14 +762,14 @@ fn next_key(signals: MessageIterator) -> (MessageIterator, Message) {
 }
 
 /// The `KeyEvent` signals addressed to `client`.
-fn key_events(client: &Connection) -> MessageIterator {
+fn key_events(client: &Connection) -> MessageStream {
     let rule = MatchRule::builder()
         .msg_type(Type::Signal)
         .interface(INTERFACE)
-        .and_then(|rule| rule.member("KeyEvent"))
-        .map(|rule| rule.build())
+        .member("KeyEvent")
+        .build()
         .expect("a match rule");
-    MessageIterator::for_match_rule(rule, client, None).expect("the match rule added")
+    zbus::block_on(MessageStream::for_match_rule(rule, client, None)).expect("the match rule added")
 }
 
 /// On a real bus the monitor admits Orca's calls, and Orca's alone, before it answers them;
@@ -768,16 +790,15 @@ fn ax4_on_the_bus_the_monitor_serves_orca_alone() {
         serve(served, &asking, &ORCA_PROCESS, &send, queued).map_err(|error| error.to_string())
     });
     let (orca, other) = (bus.connect(), bus.connect());
-    let names = DBusProxy::new(&orca).expect("the bus's proxy");
+    let names = zbus::block_on(DBusProxy::new(&orca)).expect("the bus's proxy");
     let deadline = Instant::now() + WAIT;
-    while !names
-        .name_has_owner(NAME.try_into().expect("a name"))
+    while !zbus::block_on(names.name_has_owner(NAME.try_into().expect("a name")))
         .expect("the bus answers")
     {
         assert!(Instant::now() < deadline, "the monitor took its name in time");
         std::thread::sleep(Duration::from_millis(10));
     }
-    orca.request_name(ORCA_NAME).expect("Orca's name");
+    zbus::block_on(orca.request_name(ORCA_NAME)).expect("Orca's name");
     let orca_name = orca.unique_name().expect("Orca's unique name").to_string();
     let other_name = other.unique_name().expect("a unique name").to_string();
 
@@ -792,7 +813,8 @@ fn ax4_on_the_bus_the_monitor_serves_orca_alone() {
         assert_eq!(ask(&other, method), denied, "{method}: another client is refused");
     }
     let body = (vec![1_u32], vec![(2_u32, 3_u32)]);
-    let answer = orca.call_method(Some(NAME), PATH, Some(INTERFACE), "SetKeyGrabs", &body);
+    let answer =
+        zbus::block_on(orca.call_method(Some(NAME), PATH, Some(INTERFACE), "SetKeyGrabs", &body));
     assert_eq!(refused(answer), None);
     let grabs = Update {
         client: orca_name.clone(),
@@ -821,14 +843,14 @@ fn ax4_on_the_bus_the_monitor_serves_orca_alone() {
     let body: (bool, u32, u32, u32, u16) = signal.body().deserialize().expect("a KeyEvent");
     assert!(body.0, "another client is sent its own key, not Orca's");
 
-    orca.release_name(ORCA_NAME).expect("Orca lets its name go");
+    zbus::block_on(orca.release_name(ORCA_NAME)).expect("Orca lets its name go");
     let forget = Update {
         client: orca_name.clone(),
         change: Change::Forget,
     };
     assert_eq!(updates.recv_timeout(WAIT).ok(), Some(forget), "Orca is forgotten");
 
-    orca.request_name(ORCA_NAME).expect("Orca's name");
+    zbus::block_on(orca.request_name(ORCA_NAME)).expect("Orca's name");
     assert_eq!(ask(&orca, "WatchKeyboard"), None, "Orca is admitted again");
     updates.try_recv().expect("its change");
     drop(bus);

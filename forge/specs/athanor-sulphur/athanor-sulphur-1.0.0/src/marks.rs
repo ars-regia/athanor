@@ -34,6 +34,7 @@ use smithay::utils::user_data::UserDataMap;
 use smithay::utils::{Buffer, Logical, Physical, Point, Rectangle, Scale, Size, Transform};
 use smithay::wayland::compositor::{with_states, with_surface_tree_downward, TraversalAction};
 use smithay::wayland::shell::wlr_layer::Layer;
+use smithay::wayland::shell::xdg::ToplevelSurface;
 use std::cell::RefCell;
 
 /// The window radius of `doc_visual_language.md`, the corners a mark follows.
@@ -295,6 +296,8 @@ pub struct Marks {
     /// `None` when the setting is off.
     pub outline: Option<Outline>,
     pub edge: Edge,
+    /// The surfaces that set a blur region (`background_effect.rs`).
+    pub blurred: crate::background_effect::Regions,
 }
 
 /// Whether `surface` belongs to a confined client. A surface whose client is gone, or unknown,
@@ -915,6 +918,25 @@ where
     )
 }
 
+/// Whether `toplevel` is full screen, and whether it is maximised, as its client last
+/// committed.
+fn committed(toplevel: &ToplevelSurface) -> (bool, bool) {
+    toplevel.with_committed_state(|state| {
+        state.map_or((false, false), |state| {
+            (
+                state.states.contains(xdg_toplevel::State::Fullscreen),
+                state.states.contains(xdg_toplevel::State::Maximized),
+            )
+        })
+    })
+}
+
+/// Whether `toplevel` may have the focus outline: neither full screen nor maximised.
+pub(crate) fn marked(toplevel: &ToplevelSurface) -> bool {
+    let (full_screen, maximised) = committed(toplevel);
+    !full_screen && !maximised
+}
+
 /// `window` as it stands in the stack, front to back: its popups, each with a border when its
 /// client is confined, the window's own marks, and its surface tree.
 fn window_elements<R>(
@@ -934,14 +956,7 @@ fn window_elements<R>(
     let surface = toplevel.wl_surface();
     let offset = window.geometry().loc;
     let drawn_at = located.loc - offset;
-    let (full_screen, maximised) = toplevel.with_committed_state(|state| {
-        state.map_or((false, false), |state| {
-            (
-                state.states.contains(xdg_toplevel::State::Fullscreen),
-                state.states.contains(xdg_toplevel::State::Maximized),
-            )
-        })
-    });
+    let (full_screen, maximised) = committed(toplevel);
     let cut = if full_screen {
         place.output
     } else {
@@ -1033,6 +1048,36 @@ fn window_elements<R>(
             Kind::Unspecified,
         )));
     }
+}
+
+/// Whether every line of OS4's border around `surface` is among `elements`, whole inside the
+/// output showing `area`: the border of a frame that may tear (`tearing.rs`). A line left out
+/// of the frame, or pushed off the output by the magnifier, is not drawn.
+pub fn bordered<E: Element>(
+    surface: &WlSurface,
+    elements: &[E],
+    area: Rectangle<i32, Logical>,
+    output: &Output,
+) -> bool {
+    let scale = output.current_scale().fractional_scale();
+    let shown = Rectangle::from_size(area.size).to_physical_precise_round(scale);
+    let lines: Vec<Id> = with_states(surface, |states| {
+        let Some(rings) = states.data_map.get::<Rings>() else {
+            return Vec::new();
+        };
+        let rings = rings.0.borrow();
+        rings[..BORDER.len()]
+            .iter()
+            .flatten()
+            .flat_map(|ring| ring.lines.clone())
+            .collect()
+    });
+    lines.len() == BORDER.len() * 4
+        && lines.iter().all(|id| {
+            elements.iter().any(|element| {
+                element.id() == id && shown.contains_rect(element.geometry(scale.into()))
+            })
+        })
 }
 
 /// Whether `window` has the output showing `area` whole and its client has answered a request

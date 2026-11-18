@@ -24,8 +24,8 @@ const ASK: Duration = Duration::from_secs(2);
 /// fixed socket, never at an address from the environment.
 async fn connect(address: Option<&str>) -> zbus::Result<Connection> {
     match address {
-        Some(address) => zbus::connection::Builder::address(address)?.build().await,
-        None => bus_caller::system_bus()?.build().await,
+        Some(address) => zbus::connection::Builder::address(address).build().await,
+        None => bus_caller::system_bus().build().await,
     }
 }
 

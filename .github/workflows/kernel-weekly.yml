@@ -58,6 +58,8 @@ jobs:
       packages: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Build the kernel builder image
         env:
@@ -129,6 +131,8 @@ jobs:
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Build the kernel builder image
         env:
@@ -167,6 +171,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/kvm
 
@@ -184,7 +190,7 @@ jobs:
           mkdir -p out-a && podman cp "${ctr}:/." out-a/ && podman rm "$ctr" > /dev/null
 
       - if: ${{ needs.variant.result == 'success' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-variant
           path: out-v
@@ -236,6 +242,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/alert
         with:

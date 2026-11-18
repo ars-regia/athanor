@@ -48,10 +48,24 @@ with open(out, "w") as f:
 print(status, end="")
 """
 
-# Serves QMP on the first -qmp socket, logs each command and exits on system_powerdown.
+# Logs every disk the guest can write (any -drive without snapshot=on) as "DRIVE id empty"
+# or "DRIVE id written", then writes to it as a job would; serves QMP on the first -qmp
+# socket, logs each command and exits on system_powerdown.
 FAKE_QEMU = """\
 import json, os, socket, sys
 args = sys.argv[1:]
+for i, arg in enumerate(args[:-1]):
+    if arg != "-drive":
+        continue
+    options = dict(option.split("=", 1) for option in args[i + 1].split(","))
+    if options.get("snapshot") == "on":
+        continue
+    with open(options["file"], "r+b") as disk:
+        state = "written" if disk.read().strip(b"\\0") else "empty"
+        disk.seek(0)
+        disk.write(b"written by the job of an earlier guest")
+    with open(os.path.join(os.environ["FAKE_ROOT"], "calls.log"), "a") as log:
+        log.write(f"DRIVE {options['id']} {state}\\n")
 path = args[args.index("-qmp") + 1].removeprefix("unix:").split(",")[0]
 server = socket.socket(socket.AF_UNIX)
 server.bind(path)
@@ -82,8 +96,10 @@ exec "$@"
 
 @unittest.skipUnless(shutil.which("jq"), "vm.sh needs jq")
 class VmSh(unittest.TestCase):
-    def run_vm(self, gets, delete=(204,)):
-        """Runs vm.sh until it exits; returns its output and the calls GitHub and QMP saw."""
+    def run_vm(self, gets, delete=(204,), boots=1):
+        """Runs vm.sh until it exits, `boots` times on the same state directory as the
+        service restarts it; returns the output of the last run and the calls GitHub, QMP
+        and the fake QEMU saw across all of them."""
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         script = (RUNNER / "vm.sh").read_text()
         # Fast polls, and a guest idle from the first poll: the most eager recycling.
@@ -117,9 +133,6 @@ class VmSh(unittest.TestCase):
             path.chmod(0o755)
         (root / "state" / "golden.qcow2").touch()
         (root / "credentials" / "github-token").write_text("token")
-        (root / "scenario.json").write_text(
-            json.dumps({"gets": gets, "delete": list(delete)})
-        )
         env = dict(
             os.environ,
             PATH=f"{fake}:{os.environ['PATH']}",
@@ -129,14 +142,21 @@ class VmSh(unittest.TestCase):
             LOGS_DIRECTORY=str(root / "logs"),
             CREDENTIALS_DIRECTORY=str(root / "credentials"),
         )
-        result = subprocess.run(
-            ["bash", str(runner / "vm.sh")],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        for _ in range(boots):
+            (root / "scenario.json").write_text(
+                json.dumps({"gets": gets, "delete": list(delete)})
+            )
+            # systemd removes the runtime directory, and with it the QMP sockets, between runs.
+            shutil.rmtree(root / "runtime")
+            (root / "runtime").mkdir()
+            result = subprocess.run(
+                ["bash", str(runner / "vm.sh")],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
         calls = (root / "calls.log").read_text().splitlines()
         return result.stdout, calls
 
@@ -174,6 +194,18 @@ class VmSh(unittest.TestCase):
         self.assertEqual(calls.count("QMP system_powerdown"), 1)
         self.assertLess(
             calls.index(f"DELETE {RUNNERS}"), calls.index("QMP system_powerdown")
+        )
+
+    def test_no_guest_boots_with_a_disk_an_earlier_guest_wrote(self):
+        # doc_pipeline.md PL10 (#1191): any guest may take a pull request's job or a
+        # release's, so a disk the guest can write that survived the guest before it would
+        # carry a pull request's writes into a release build. The fake QEMU writes to every
+        # such disk, as a job would, and logs whether it found it empty.
+        _, calls = self.run_vm(gets=[[200, {"busy": True}], [404, {}]], boots=2)
+        drives = [call for call in calls if call.startswith("DRIVE ")]
+        self.assertEqual(
+            sorted(drives),
+            sorted(2 * ["DRIVE cache empty", "DRIVE scratch empty"]),
         )
 
 

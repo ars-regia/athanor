@@ -14,3 +14,7 @@ glycin = { workspace = true }
 # recvmsg with SCM_RIGHTS for the wallpaper's request.
 nix = { workspace = true, features = ["socket", "uio"] }
 poppler-rs = { workspace = true }
+
+[package.metadata.cargo-machete]
+# Renamed crates: the code uses them as `cairo` and `poppler`.
+ignored = ["cairo-rs", "poppler-rs"]

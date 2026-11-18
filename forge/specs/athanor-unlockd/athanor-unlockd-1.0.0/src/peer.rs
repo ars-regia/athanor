@@ -143,45 +143,57 @@ fn pidfd_pid(pidfd: BorrowedFd<'_>) -> Result<Option<i32>, Internal> {
     Ok((pid > 0).then_some(pid))
 }
 
+const LOGIND: &str = "org.freedesktop.login1";
+
 /// The sessions of `uid`, from logind's `ListSessions` and each session's `Type` and `Active`,
-/// over `zbus::blocking` (D29).
+/// asked in one synchronous `zbus::block_on` call (D29).
 fn logind_sessions(uid: u32) -> Result<Vec<Session>, Internal> {
-    const LOGIND: &str = "org.freedesktop.login1";
-    let bus = zbus::blocking::connection::Builder::system()?
-        .method_timeout(LOGIND_TIMEOUT)
-        .build()?;
-    let listed: Vec<(String, u32, String, String, zbus::zvariant::OwnedObjectPath)> = bus
-        .call_method(
-            Some(LOGIND),
-            "/org/freedesktop/login1",
-            Some("org.freedesktop.login1.Manager"),
-            "ListSessions",
-            &(),
-        )?
-        .body()
-        .deserialize()?;
-    let property = |path: &zbus::zvariant::OwnedObjectPath, name: &str| {
-        bus.call_method(
-            Some(LOGIND),
-            path,
-            Some("org.freedesktop.DBus.Properties"),
-            "Get",
-            &("org.freedesktop.login1.Session", name),
-        )?
-        .body()
-        .deserialize::<zbus::zvariant::OwnedValue>()
-    };
-    let mut sessions = Vec::new();
-    for (_, session_uid, _, _, path) in listed.into_iter().filter(|s| s.1 == uid) {
-        let kind = String::try_from(property(&path, "Type")?)?;
-        let active = bool::try_from(property(&path, "Active")?)?;
-        sessions.push(Session {
-            uid: session_uid,
-            kind,
-            active,
-        });
-    }
-    Ok(sessions)
+    zbus::block_on(async {
+        let bus = zbus::connection::Builder::system()
+            .method_timeout(LOGIND_TIMEOUT)
+            .build()
+            .await?;
+        let listed: Vec<(String, u32, String, String, zbus::OwnedObjectPath)> = bus
+            .call_method(
+                Some(LOGIND),
+                "/org/freedesktop/login1",
+                Some("org.freedesktop.login1.Manager"),
+                "ListSessions",
+                &(),
+            )
+            .await?
+            .body()
+            .deserialize()?;
+        let mut sessions = Vec::new();
+        for (_, session_uid, _, _, path) in listed.into_iter().filter(|s| s.1 == uid) {
+            let kind = String::try_from(session_property(&bus, &path, "Type").await?)?;
+            let active = bool::try_from(session_property(&bus, &path, "Active").await?)?;
+            sessions.push(Session {
+                uid: session_uid,
+                kind,
+                active,
+            });
+        }
+        Ok(sessions)
+    })
+}
+
+/// The property `name` of logind's session at `path`.
+async fn session_property(
+    bus: &zbus::Connection,
+    path: &zbus::OwnedObjectPath,
+    name: &str,
+) -> zbus::Result<zbus::OwnedVariant> {
+    bus.call_method(
+        Some(LOGIND),
+        path,
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &("org.freedesktop.login1.Session", name),
+    )
+    .await?
+    .body()
+    .deserialize()
 }
 
 #[cfg(test)]

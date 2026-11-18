@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-desktop-ui
 Version:        1.0.0
-Release:        15%{?dist}
+Release:        15%{?athanor_content}%{?dist}
 Summary:        Athanor OS Desktop UI configurations
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor

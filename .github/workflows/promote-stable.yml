@@ -77,6 +77,10 @@ jobs:
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
           extra_nix_config: "experimental-features = nix-command flakes"
+      - name: 🔑 Put the flake's cosign on PATH
+        # system/verify-images.sh verifies the builder image before it runs in it (issue #1220).
+        # The nix fetch runs here, before the login, so it sees no registry session or token.
+        run: nix build --inputs-from . nixpkgs#cosign --no-link --print-out-paths | sed 's|$|/bin|' >> "${GITHUB_PATH}"
       - name: Log in to the registries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -137,6 +141,10 @@ jobs:
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
           extra_nix_config: "experimental-features = nix-command flakes"
+      - name: 🔑 Put the flake's cosign on PATH
+        # system/verify-images.sh verifies the builder image before it runs in it (issue #1220).
+        # The nix fetch runs here, before the login, so it sees no registry session or token.
+        run: nix build --inputs-from . nixpkgs#cosign --no-link --print-out-paths | sed 's|$|/bin|' >> "${GITHUB_PATH}"
       - name: Log in to the registries
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,7 +159,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash system/fetch-evidence.sh "${RUN_ID}" artifacts
       - name: 📎 The approved plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: promotion-${{ inputs.run_id }}
           path: approved
@@ -191,7 +199,7 @@ jobs:
         with:
           extra_nix_config: "experimental-features = nix-command flakes"
       - name: 📎 The approved plan
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: promotion-${{ inputs.run_id }}
           path: approved

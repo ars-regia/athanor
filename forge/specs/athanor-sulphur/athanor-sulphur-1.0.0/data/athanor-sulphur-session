@@ -18,7 +18,7 @@ if [ -z "${ATHANOR_COMPOSITOR_SESSION_JOURNAL:-}" ]; then
 fi
 unset ATHANOR_COMPOSITOR_SESSION_JOURNAL
 
-# The supervisor of the locker and the idle daemon, and the stop of their scopes.
+# The supervisor of the locker, and the stop of its scope.
 # shellcheck source=SCRIPTDIR/../../../athanor-system-config/SOURCES/usr/libexec/athanor/session-components
 . /usr/libexec/athanor/session-components
 
@@ -162,7 +162,7 @@ hand_off() {
     hand_off_now "$1"
 }
 
-# 4. What athanor-session exports (SN2): the locker and the idle daemon are children of this
+# 4. What athanor-session exports (SN2): the locker is a child of this
 # script through the supervisor, not of the user manager, and need Calmo's defaults.
 export XDG_CURRENT_DESKTOP=Athanor:COSMIC
 export XDG_SESSION_TYPE=wayland
@@ -220,7 +220,7 @@ if [ -n "$IMPORTED" ] && ! systemctl --user import-environment $IMPORTED; then
     hand_off "systemctl --user import-environment$IMPORTED failed"
 fi
 
-# 6. The locker and the idle daemon, once athanor-session.target is active, each in its scope.
+# 6. The locker, once athanor-session.target is active, in its scope.
 # Monitor mode puts the background job in a process group of its own, whose id is its pid,
 # so that the exit handler can end it with its jobs in one kill (step 3); bash gives the job
 # its group without a terminal, where dash does not. Monitor mode no longer closes a

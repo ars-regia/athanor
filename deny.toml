@@ -2,7 +2,7 @@
 #
 # One policy for the root workspace lockfile. `just check-deny` applies its licences,
 # bans and sources in the pull request gate; scripts/ci/security-audit.sh applies its
-# advisories, on pull requests, pushes and a weekly schedule. The
+# advisories, on pull requests, pushes and a daily schedule. The
 # packages built from their own vendored lockfile (athanor-backup's release tarball,
 # greenboot-rs) are not covered yet. The licence
 # allow-list is the set of identifiers the current dependency graph contains, derived

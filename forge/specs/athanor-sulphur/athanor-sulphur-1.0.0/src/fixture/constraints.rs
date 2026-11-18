@@ -1,5 +1,5 @@
 //! Decision 30 (`constraints.rs`): pointer locks, relative motion and keyboard-shortcuts
-//! inhibitors, with Ctrl+Alt+Tab's suspension.
+//! inhibitors, with Ctrl+Alt+Tab's suspension; and decision 33's pointer warps.
 
 use super::*;
 use crate::bindings::Action;
@@ -9,6 +9,7 @@ use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
     zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
     zwp_keyboard_shortcuts_inhibitor_v1::{self, ZwpKeyboardShortcutsInhibitorV1},
 };
+use wayland_protocols::wp::pointer_warp::v1::client::wp_pointer_warp_v1::WpPointerWarpV1;
 use wayland_protocols::wp::pointer_constraints::zv1::client::{
     zwp_confined_pointer_v1::{self, ZwpConfinedPointerV1},
     zwp_locked_pointer_v1::{self, ZwpLockedPointerV1},
@@ -27,6 +28,7 @@ fn events(log: &Log) -> Vec<&'static str> {
 }
 
 delegate_noop!(Client: ZwpPointerConstraintsV1);
+delegate_noop!(Client: WpPointerWarpV1);
 delegate_noop!(Client: ZwpRelativePointerManagerV1);
 delegate_noop!(Client: ZwpKeyboardShortcutsInhibitManagerV1);
 delegate_noop!(Client: wl_region::WlRegion);
@@ -1241,5 +1243,258 @@ fn a_pen_landing_under_a_lock_sends_no_jump() {
     sent.retain(|motion| *motion != [0.0; 4]);
     assert_eq!(sent, [[3.0, 0.0, 3.0, 0.0]], "only the small move");
     assert_eq!(Game::location(&run), before, "the pointer stays");
+    run.stop();
+}
+
+impl Game {
+    /// Asks for the pointer at `to` on the window's surface, with the serial of the last enter
+    /// the client was sent and `stale` taken from it, and waits for the answer.
+    fn warp(&mut self, run: &mut Running, to: (f64, f64), stale: u32) {
+        let warps: WpPointerWarpV1 = self.local.bind(1);
+        let serial = self.local.client.pointer_enter.expect("an enter");
+        warps.warp_pointer(&self.surface, &self.pointer, to.0, to.1, serial.wrapping_sub(stale));
+        self.settle(run);
+    }
+}
+
+/// A warp moves the pointer within the surface that has both the pointer and the keyboard.
+#[test]
+fn a_warp_moves_the_pointer_within_the_focused_surface() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    game.warp(&mut run, (10.0, 20.0), 0);
+    let to = game.origin(&run) + Point::from((10.0, 20.0));
+    assert_eq!(Game::location(&run), to, "the pointer is where the client asked");
+    run.stop();
+}
+
+/// A surface with the pointer but not the keyboard cannot warp.
+#[test]
+fn a_warp_without_the_keyboard_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    run.state.set_keyboard_focus(None);
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// A surface with the keyboard but not the pointer cannot warp, with the serial of the enter
+/// it had.
+#[test]
+fn a_warp_without_the_pointer_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let away = Point::from((5.0, 5.0));
+    run.state.pointer_to(away, InputTime::now());
+    assert_ne!(
+        run.state.surface_under(away).map(|(surface, _)| surface),
+        Some(game.server.clone()),
+        "the pointer has left the window"
+    );
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), away, "the pointer stays");
+    assert_eq!(keyboard_focus(&run), Some(game.server.clone()), "with the keyboard on it");
+    run.stop();
+}
+
+/// A warp names the surface with the pointer's focus: with the pointer on a subsurface, a warp
+/// on the window's own surface is refused.
+#[test]
+fn a_warp_on_a_surface_without_the_pointer_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_subsurface, server) = game.subsurface(&mut run, (0, 0), (40, 40));
+    let on = game.origin(&run) + Point::from((20.0, 20.0));
+    run.state.pointer_to(on, InputTime::now());
+    game.settle(&mut run);
+    let focus = run.state.seat.get_pointer().and_then(|p| p.current_focus());
+    assert_eq!(focus, Some(server), "the pointer is on the subsurface");
+    game.warp(&mut run, (100.0, 50.0), 0);
+    assert_eq!(Game::location(&run), on, "the pointer stays");
+    run.stop();
+}
+
+/// A warp that names another enter than the last one is refused.
+#[test]
+fn a_warp_with_a_stale_serial_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    game.warp(&mut run, (10.0, 20.0), 1);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// A warp to a point off the surface is refused.
+#[test]
+fn a_warp_off_the_surface_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    game.warp(&mut run, (f64::from(WIDTH) + 50.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// Under a confinement a warp goes only into the confined area.
+#[test]
+fn a_warp_stays_in_a_confined_region() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let region = middle(&mut game.local);
+    let (_confined, log) = game.confine(Some(&region), Lifetime::Persistent);
+    game.wait(&mut run, &log, &["confined"], "confined");
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "not out of the region");
+    let inside = (f64::from(WIDTH / 2 + 5), f64::from(HEIGHT / 2 + 5));
+    game.warp(&mut run, inside, 0);
+    let to = game.origin(&run) + Point::from(inside);
+    assert_eq!(Game::location(&run), to, "within it");
+    run.stop();
+}
+
+/// Ctrl+Alt+Tab's suspension refuses a warp, as it deactivates a lock, until a click lifts it.
+#[test]
+fn ctrl_alt_tab_suspends_a_warp_until_a_click() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    chord(&mut run.state, &CYCLE);
+    assert_eq!(keyboard_focus(&run), Some(game.server.clone()), "the window keeps the keyboard");
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    game.click(&mut run);
+    game.warp(&mut run, (10.0, 20.0), 0);
+    let to = game.origin(&run) + Point::from((10.0, 20.0));
+    assert_eq!(Game::location(&run), to, "the click lifted the suspension");
+    run.stop();
+}
+
+/// A warp under a pointer lock is refused: a locked pointer stays still, and a oneshot lock
+/// holds.
+#[test]
+fn a_warp_under_a_pointer_lock_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_lock, log) = game.lock(Lifetime::Oneshot);
+    game.wait(&mut run, &log, &["locked"], "locked");
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    assert_eq!(events(&log), ["locked"], "the lock holds");
+    run.stop();
+}
+
+/// While the session is locked a warp is refused, from a window given the pointer and the
+/// keyboard back past the lock too.
+#[test]
+fn a_warp_while_the_session_is_locked_is_refused() {
+    use smithay::input::pointer::MotionEvent;
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let (_locker, _session) = lock_session(&mut run);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    let focus = Some((game.server.clone(), game.origin(&run)));
+    let motion = MotionEvent {
+        location: game.at,
+        serial: SERIAL_COUNTER.next_serial(),
+        time: InputTime::now(),
+    };
+    pointer.motion(&mut run.state, focus, &motion);
+    pointer.frame(&mut run.state);
+    keyboard.set_focus(
+        &mut run.state,
+        Some(game.server.clone()),
+        SERIAL_COUNTER.next_serial(),
+    );
+    game.settle(&mut run);
+    assert_eq!(
+        pointer.current_focus(),
+        Some(game.server.clone()),
+        "the window has the pointer"
+    );
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(game.server.clone()),
+        "and the keyboard"
+    );
+    game.warp(&mut run, (10.0, 20.0), 0);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// A second client, with neither the pointer nor the keyboard, cannot warp the pointer onto
+/// its own window, with the serial of the first client's enter.
+#[test]
+fn a_warp_from_another_client_is_refused() {
+    let mut run = Running::start(None);
+    let mut game = Game::start(&mut run);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let apart = window_of(&run, other.id.as_ref().expect("an id"));
+    run.state
+        .space
+        .map_element(apart.clone(), (900, 600), false);
+    run.state.set_keyboard_focus(Some(game.server.clone()));
+    game.aim(&mut run);
+    game.settle(&mut run);
+    other.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(game.server.clone()),
+        "the first window has the keyboard"
+    );
+    assert_eq!(
+        other.client.pointer_enter, None,
+        "the second has never had the pointer"
+    );
+    let (surface, _) = other.window.clone().expect("a window");
+    let pointer = other.pointer.clone().expect("a pointer");
+    let serial = game.local.client.pointer_enter.expect("an enter");
+    // A point on the second window, in the first one's coordinates: were the warp taken from
+    // where the pointer is, it would land there.
+    let location = run
+        .state
+        .space
+        .element_location(&apart)
+        .expect("a location");
+    let target = (location - apart.geometry().loc).to_f64() + Point::from((10.0, 20.0));
+    let to = target - game.origin(&run);
+    let warps: WpPointerWarpV1 = other.bind(1);
+    warps.warp_pointer(&surface, &pointer, to.x, to.y, serial);
+    other.roundtrip(&mut run);
+    game.settle(&mut run);
+    assert_eq!(Game::location(&run), game.at, "the pointer stays");
+    run.stop();
+}
+
+/// The locker cannot warp the pointer either, though its lock surface has both the pointer
+/// and the keyboard and passes every other check.
+#[test]
+fn a_warp_from_the_locker_is_refused() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock, surface) = lock_session_with_surface(&mut run);
+    let seat: wl_seat::WlSeat = locker.bind(1);
+    let pointer = seat.get_pointer(&locker.queue.handle(), ());
+    locker.roundtrip(&mut run);
+    // Off the outputs and back, so that the new pointer is sent an enter.
+    run.state
+        .pointer_to(Point::from((-50.0, -50.0)), InputTime::now());
+    let at = Point::from((100.0, 100.0));
+    run.state.pointer_to(at, InputTime::now());
+    locker.roundtrip(&mut run);
+    let serial = locker
+        .client
+        .pointer_enter
+        .expect("an enter on the lock surface");
+    let focus = run.state.seat.get_pointer().and_then(|p| p.current_focus());
+    assert_eq!(
+        focus.as_ref().and_then(|s| s.client()).map(|c| c.id()),
+        locker.id.clone(),
+        "the lock surface has the pointer"
+    );
+    let warps: WpPointerWarpV1 = locker.bind(1);
+    warps.warp_pointer(&surface, &pointer, 10.0, 20.0, serial);
+    locker.roundtrip(&mut run);
+    locker.roundtrip(&mut run);
+    assert_eq!(Game::location(&run), at, "the pointer stays");
     run.stop();
 }

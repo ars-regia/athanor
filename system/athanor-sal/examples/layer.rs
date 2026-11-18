@@ -54,8 +54,7 @@ fn button(name: &str) -> Ui {
 }
 
 fn options(layer: Layer, namespace: &str) -> LayerOptions {
-    let mut options = LayerOptions::default();
-    options.layer = layer;
+    let mut options = LayerOptions::new(layer);
     options.namespace = namespace.into();
     options.anchor = Anchor::BOTTOM;
     options.margin = [0, 0, 8, 0];

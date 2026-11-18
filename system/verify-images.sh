@@ -13,6 +13,13 @@
 # runs in that image under podman, which receives the rendered policy and the public keys,
 # read-only, and nothing else. Without it the host's skopeo verifies.
 #
+# The builder's tag is a content hash that any writer of the registry namespace can move, and a
+# builder of its choosing would report every image verified (issue #1220). So the image runs
+# only by the digest forge/scripts/verify_image.sh finds signed by a trusted run of
+# call-build-builder.yml and labelled with that hash, never by the tag; an absent, unsigned or
+# foreign builder, or one whose verification cannot be answered, fails before any image is
+# pulled. --builder therefore needs cosign on PATH.
+#
 # With --evidence DIR --build-run-id ID it also writes the `signature` evidence of UD4
 # (scripts/ci/evidence.py) for each image it verified, naming ID as the run; a digests file
 # whose tag is not ID on every line is refused before anything is verified.
@@ -70,10 +77,20 @@ bash "$root/forge/specs/athanor-update/SOURCES/usr/libexec/athanor-update/render
     --registry "$registry" --keys-dir "$keys_dir" --out "$work/policy"
 skopeo=(skopeo)
 if [[ -n $builder ]]; then
+    image="${registry,,}/athanor-builder"
+    answer=$(bash "$root/forge/scripts/verify_image.sh" "$image:$builder" call-build-builder.yml) || {
+        echo "${0##*/}: the builder $image:$builder could not be verified: no image is verified in it" >&2
+        exit 1
+    }
+    pinned=${answer#signed }
+    [[ $answer == "signed $image@sha256:"* && ${pinned#"$image@sha256:"} =~ ^[0-9a-f]{64}$ ]] || {
+        echo "${0##*/}: the builder $image:$builder is not one a trusted run of call-build-builder.yml signed ($answer): no image is verified in it" >&2
+        exit 1
+    }
     # The policy names the keys by absolute path, so they are mounted where the policy says.
     skopeo=(podman run --rm --cap-drop=all --security-opt no-new-privileges --security-opt label=disable
         -v "$work/policy:$work/policy:ro" -v "$keys_dir:$keys_dir:ro"
-        "${registry,,}/athanor-builder:$builder" skopeo)
+        "$pinned" skopeo)
 fi
 
 n=0

@@ -1027,11 +1027,13 @@ probe() { # probe NAME PREFIX
   python3 "$ROOT/forge/test/iso/console.py" --print-probe "$1" | guest_ssh bash -s |
     python3 "$ROOT/forge/test/iso/console.py" --classify "$2" >> "$PHASES"
 }
-session_probes() { # session_probes PREFIX
+# SESSION is the strict probe, for the candidate. SESSION_HELD is the probe for the published
+# :stable image, after GoBack(): it skips a session unit that image cannot ship yet.
+session_probes() { # session_probes PREFIX SESSION|SESSION_HELD
   probe MOK "$1"
   probe GREETER "$1"
   type_keys "$GUEST_USER" @enter
-  probe SESSION "$1"
+  probe "$2" "$1"
   probe SETTINGS "$1"
 }
 
@@ -1066,9 +1068,29 @@ ci_stage_seed() { # UD18 2
 }
 
 # What the check saw, for a failure of UD18 3: the guest and its journal are gone after the run.
+# Beyond the client's state, it records whether the check ran in the window (the unit's result
+# and start), the unit's last journal lines of this boot, and two reads of :stable from the
+# guest: the mirror itself, and the repository through the registries configuration the client
+# uses. A 'network' failure then names the route to the mirror, the drop-in, or the run.
 check_seen() { # check_seen JOURNAL
-  printf "update '%s', last_error '%s' from '%s'; the check's journal:\n%s" \
-    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "$1"
+  local unit boot
+  unit=$(guest_ssh systemctl show -p Result,ExecMainStatus,ExecMainStartTimestamp athanor-update-check.service 2>&1) ||
+    unit+=" (systemctl show exited $?)"
+  boot=$(guest_ssh sudo journalctl -q -b -o short-iso -n 40 -u athanor-update-check.service 2>&1) ||
+    boot+=" (journalctl exited $?)"
+  printf "update '%s', last_error '%s' from '%s'; the unit: %s; %s; %s; the check's journal:\n%s\nthe unit's last 40 lines of this boot:\n%s" \
+    "$(state .update)" "$(state .last_error)" "$(state .last_error_host)" "${unit//$'\n'/, }" \
+    "$(seen_pull "$ATHANOR_UPDATE_MIRROR:stable" --tls-verify=false)" "$(seen_pull "$ATHANOR_UPDATE_REPOSITORY:stable")" "$1" "$boot"
+}
+# Whether the guest reads the manifest of REFERENCE, with skopeo's error when it does not.
+seen_pull() { # seen_pull REFERENCE [SKOPEO OPTION...]
+  local out status=0
+  out=$(guest_ssh sudo timeout 90 skopeo inspect --raw "${@:2}" "docker://$1" 2>&1 > /dev/null) || status=$?
+  if ((status == 0)); then
+    printf 'the guest reads %s' "$1"
+  else
+    printf 'the guest cannot read %s: skopeo exited %s: %s' "$1" "$status" "$out"
+  fi
 }
 
 ci_stage_upgrade() { # UD18 3 and 4
@@ -1151,7 +1173,7 @@ ci_stage_check() { # UD18 5
   sum=$(guest_ssh sha256sum "/usr$ETC_PROBE" | cut -d' ' -f1)
   [[ $sum == "$(< "$ACC_STATE/shipped-sum")" ]] || die "FAIL  UD18 5: the candidate changed the shipped probe file: the merge is not tested"
   seeds_kept "UD18 5"
-  session_probes upgraded-
+  session_probes upgraded- SESSION
 }
 
 ci_stage_goback() { # UD18 6
@@ -1172,7 +1194,7 @@ ci_stage_check_back() { # UD18 6
   expect "UD18 6: the client holds the candidate it went back from" .update held
   [[ $(guest_ssh sudo cat /var/lib/athanor-update/held) == "$ATHANOR_UPDATE_TO" ]] || die "FAIL  UD18 6: the held digest is not the candidate"
   seeds_kept "UD18 6"
-  session_probes rolled-back-
+  session_probes rolled-back- SESSION_HELD
 }
 
 if [[ -n $ACC_CI ]]; then

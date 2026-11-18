@@ -37,7 +37,7 @@ class DagPackageTest(unittest.TestCase):
                  "PKG_NAME": pkg, "REGISTRY": "GHCR.io", "GITHUB_REPOSITORY_OWNER": "Owner",
                  "RUNNER_TEMP": str(self.dir), "GITHUB_TOKEN": "t", "GITHUB_ACTOR": "a",
                  "CONTENT_HASH": "h1", "BUILDER_IMAGE": "ghcr.io/o/b:1", "GITHUB_WORKSPACE": str(self.dir),
-                 "SCCACHE_CACHE_SIZE": "1G", "RETRY_ATTEMPTS": "1"},
+                 "RETRY_ATTEMPTS": "1"},
         )
 
     def test_a_package_with_a_spec_publishes_under_the_forge_prefix(self):

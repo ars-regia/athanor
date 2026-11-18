@@ -1,17 +1,12 @@
 //! `athanor-sessiond` (`doc_session_daemons.md` SD1): confines itself, tells systemd it is
-//! ready, then raises the battery notices (SD14) until the bus ends, and resets COSMIC's
-//! appearance values (SD16) beside them.
+//! ready, resets COSMIC's appearance values (SD16) and runs until the session stops it.
 
 use std::env;
 use std::error::Error;
 use std::process::ExitCode;
 
-use athanor_i18n::Catalog;
-use athanor_sessiond::{appearance, bus, confine};
+use athanor_sessiond::{appearance, confine};
 use athanor_unit::{journal, notify, sandbox};
-use zbus::Connection;
-
-const DOMAIN: &str = "athanor-sessiond";
 
 /// Landlock while the process has one thread (SD17), with the grants of `confine`.
 fn confine_self(grants: &confine::Grants) -> Result<(), Box<dyn Error>> {
@@ -35,29 +30,17 @@ async fn reset_appearance() {
     }
 }
 
-async fn serve(catalog: &Catalog) -> Result<(), Box<dyn Error>> {
-    let system = Connection::system().await?;
-    // Signals on one connection, the calls the loop awaits on another (#1035).
-    let signals = Connection::session().await?;
-    let query = Connection::session().await?;
-    // Beside the notices, never before them: a hung dconf delays neither.
-    tokio::spawn(reset_appearance());
-    bus::run(
-        &tokio::runtime::Handle::current(),
-        system,
-        &signals,
-        &query,
-        catalog,
-    )
-    .await
+/// The reset, then nothing until the session stops the unit. The battery notices (SD14,
+/// `athanor_sessiond::bus::run`) start at SD22 step 8 (S3), when cosmic-settings-daemon and
+/// its own notices leave, so that one process notifies at a time (NC13; maintainer decision,
+/// 2026-11-07).
+async fn serve() {
+    reset_appearance().await;
+    std::future::pending::<()>().await;
 }
 
 fn main() -> ExitCode {
     journal::init();
-    let catalog = Catalog::load(DOMAIN).unwrap_or_else(|(path, err)| {
-        tracing::warn!(path = %path.display(), ?err, "the catalog cannot be read; the notices are in English");
-        Catalog::empty()
-    });
     let grants = match confine::daemon(|name| env::var_os(name), None) {
         Ok(grants) => grants,
         Err(err) => {
@@ -82,14 +65,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let served = runtime.block_on(serve(&catalog));
-    // A reset still waiting on dconf must not hold the exit, as dropping the runtime would.
-    runtime.shutdown_background();
-    match served {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            tracing::error!(%err, "the battery notices stopped");
-            ExitCode::FAILURE
-        }
-    }
+    runtime.block_on(serve());
+    ExitCode::SUCCESS
 }

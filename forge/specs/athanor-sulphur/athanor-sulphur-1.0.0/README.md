@@ -13,11 +13,19 @@ cosmic-comp's session stays at the greeter as the second entry until this one pa
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/Smithay/smithay |
-| Revision | `023b78b1c5a05ca512767cacc07efca55fae8be4` |
-| Date | 2026-10-15 |
+| Revision | `62ec78dbe742cc59e7a1cb4ce2b52b4292b531d9` |
+| Date | 2026-11-10 |
+| Held before | `4d80d1c53b2303a3672de41a0a0f9bcbc572fdce` |
 
 The revision is pinned in `Cargo.toml`; `deny.toml` admits this repository and no other git
 source. A new revision changes both lines and this table in one commit.
+
+The pin stops before Smithay `4d80d1c53b23` (input: Use seperate `Mutex` for grab), the head of
+master on 2026-11-12 included: from it, `TabletToolInnerHandle::set_grab` locks the tool's inner
+mutex twice, so a tool's first tip down on the default grab deadlocks, and the tip-down tests of
+`src/fixture/devices.rs` hang. A bump to that commit or later waits until Smithay fixes it: while
+master contains the commit of the "Held before" row, `scripts/bump/smithay.sh` opens no bump.
+The row goes once Smithay's fix lands.
 
 ## Running
 
@@ -100,8 +108,11 @@ that is neither the last nor the active one is removed. A window maps on the fir
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
 back there when it is activated, at once, with no animation. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
-first; an xdg-activation token, which a focused client can make at any time, switches no
-workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+first; an xdg-activation token switches no workspace. A client gets one for a serial of its
+own input since it took the keyboard, or, outside a security context, for a button press
+delivered to its own surface while that press is the latest input, with no later key, button,
+finger or pen press and no keyboard focus change; no client gets one while the session is locked,
+when a token restores, raises and focuses nothing; leaving a workspace or minimising a window dismisses its popups, and a popup of a
 window on an inactive workspace, minimised or drawing nothing grabs nothing. A window
 a move drops with its centre on another output joins that output's active workspace, and a
 window its output no longer shows after the outputs change is centred on that output, on the
@@ -118,6 +129,92 @@ both selections without the focus, are privileged and granted to no client yet (
 `wp-security-context-v1` tags the clients a sandbox connects: they
 see the standard globals, primary selection among them, and no privileged one, data control
 included, nor the security context manager.
+Decision 33's wave 2a adds standard globals, which a confined client sees as any other:
+`wl_fixes`, and `wp_alpha_modifier_v1`, whose alpha Smithay applies to the client's own surfaces
+and never to the border and outline drawn around its window.
+`org_kde_kwin_server_decoration_manager` answers client-side to every request, as xdg-decoration
+does (`src/decoration.rs`), and each toplevel keeps the icon `xdg_toplevel_icon_manager_v1` sets,
+not yet forwarded to the shell; the compositor answers that manager itself, so that a change to an
+icon already set, a buffer at a scale under 1 and a buffer past the sixteenth of an icon are
+refused before they reach Smithay (`src/toplevel_icon.rs`).
+`wp_fifo_manager_v1` and `wp_commit_timing_manager_v1` pace commits (`src/pacing.rs`): a FIFO
+commit waits for a frame of the output that shows its surface, or of any output when none does,
+and the commit that sets a barrier asks for that frame. A commit with a timestamp is held until
+then, for at most a second; the compositor answers that manager itself, and a timestamp that is
+not a time is the timer's `invalid_timestamp` error. Every commit a client has queued, on a fence,
+a timestamp, a barrier or an earlier commit of its surface, counts against one bound of 64, past
+which the client is disconnected; the commits a synchronised subsurface keeps for its parent's next
+commit count against the same bound per subsurface, and against a bound of 1024 for all of a
+client's subsurfaces together, and leave both with the subsurface. A destroyed surface's
+timestamps are released at once, so that a parent's commit carrying them goes on.
+
+Decision 33 of `doc_own_stack.md`, wave 2a, adds standard globals. With `xdg_wm_dialog_v1` a
+window with a parent stays above it whatever its hint, and a click on a parent whose modal
+dialog is shown raises the parent with its dialogs and gives the keyboard to the dialog, the
+last of a chain of modal dialogs (`State::focus_clicked`, `src/fixture/parented.rs`).
+`wp_pointer_warp_v1` moves the pointer only within the surface that has both the pointer's
+focus, since the enter whose serial the warp names, and the keyboard: to a point on that
+surface, and in the confined area under a confinement; never under a pointer lock, which keeps
+the pointer still, nor while the session is locked. Ctrl+Alt+Tab's suspension of decision 30
+refuses it, as it deactivates a pointer lock, until the user clicks or keys back to the client
+(`src/constraints.rs`, `src/fixture/constraints.rs`).
+`xdg_system_bell_v1` shows a bell on the focus outline of decision 31, and sounds nothing: from
+the client of the window with the keyboard, at most one a second and never while the session
+is locked, the outline is hidden for 250 ms and drawn again, with no transition, or, under
+reduced motion (`doc_accessibility.md` AX9), drawn at twice its width for 500 ms. A bell is
+dropped wherever decision 31 draws no outline: from any other client, without a surface, on a
+maximised or full-screen window, with `active_hint` off or at a theme width of 0. Reduced
+motion is open: the compositor has no source for it yet, so the flag (`Bell::reduced_motion`)
+is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
+
+Decision 33, wave 2b, adds `wl_drm`, standard, for the older Mesa clients that look for it
+before linux-dmabuf (`src/wl_drm.rs`, `src/fixture/wave2b.rs`). It is offered on a render node
+only, and its `device` names the node that linux-dmabuf's feedback names. A buffer comes only
+from `create_prime_buffer`, checked as linux-dmabuf checks its parameters and imported by the
+renderer as a dmabuf; a flink name is the `invalid_name` error, and `authenticate` is answered
+without authenticating anything, as a render node needs no DRM authentication. The bindings
+are generated from Mesa's description, `protocols/wayland-drm.xml`, copied unchanged from
+[`mesa/mesa`](https://gitlab.freedesktop.org/mesa/mesa) at commit
+`e74c9473592dafce4fb0005555ce9406b4200012` (2019-09-20, the last to change it, as on `main`
+on 2026-11-15), path `src/egl/wayland/wayland-drm/wayland-drm.xml`, SHA-256
+`15ca83d05ceae54b9b4c0e7fe0ceeeb3345b71cd3cb457811a55580ea182036f`. Its licence is in its
+`<copyright>` element: HPND-sell-variant, 2008-2011 Kristian Høgsberg and 2010-2011 Intel
+Corporation. No compositor's code was read for it (`doc_own_stack.md` OS3).
+
+Decision 33, wave 2b, also adds `wp_tearing_control_manager_v1`, standard (`src/tearing.rs`,
+`src/fixture/wave2b.rs`). A surface's presentation hint is applied with its next commit, and
+destroying its object takes it back to vsync; a second object for a surface is the
+`tearing_control_exists` error. The DRM backend reads decision 33's conditions from each frame
+it draws (`tearing::conditions`): the surface is full-screen and alone on its output, with no
+popup there, the input method's included, no layer surface drawn above it is mapped there (the
+overlay layer, and the top layer unless the window is lifted above it), the session is not
+locked, counting from the moment the lock is requested, and for a confined client every line of OS4's
+border is in the frame and inside the output. A flip in flight when a condition stops holding
+completes, and the next frame is vsync (amendment of 2026-11-16). Smithay's DRM backend has no asynchronous
+page flip at the pinned revision, so every frame is presented with vsync, which the protocol
+allows; the backend logs when the conditions change.
+
+Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
+the content type its client sets, applied with the surface's commit, and no behaviour reads it at
+1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag
+and description, applied with the commit; a tag grants nothing, since no privilege, class,
+allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
+`wp_drm_lease_device_v1`, unconfined, exists on the udev backend only, for the GPU it draws on:
+it offers the connectors the kernel marks `non-desktop`, such as a headset's, which never become
+outputs. No lease is granted from the lock request to the unlock, from a switch of virtual
+terminal the compositor starts or a pause to the resume, nor while a lease waits to end; a switch
+that paused nothing, its session still active and its own terminal still shown, is over after two
+seconds, and a lease granted since that is held into a late pause is logged as an error. A lease
+ends at the lock request, before a switch the compositor makes, at the resume, on a GPU removal, an
+unplug and a connector that stops being `non-desktop`: it is revoked, counted ended only once the
+GPU's list of lessees no longer has it, and its CRTCs disabled. The types of `src/drm_lease.rs`
+ensure only that `locked` needs a `Revoked`, which `Leases::proof` makes once every lease has been
+handed to the closure the caller passes and that closure has reported it ended; the read of the
+list of lessees is in that closure, `finish` in `src/udev.rs`, which every call there passes.
+When a lease cannot be ended before a switch the compositor makes, the compositor keeps its
+terminal and logs the lease's connectors as an error.
+Until then the lock is shown and the leases tried again once a second, at each scan and at the
+resume. While the session is paused the GPU is not touched.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
@@ -144,7 +241,7 @@ security context's listener is granted nothing, whatever its identity.
 
 | Global | Granted to |
 | --- | --- |
-| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1` | the allow-list's clients, each global by its own line |
+| `ext_foreign_toplevel_list_v1`, `ext_foreign_toplevel_image_capture_source_manager_v1`, `ext_output_image_capture_source_manager_v1`, `ext_image_copy_capture_manager_v1`, `ext_session_lock_manager_v1`, `ext_workspace_manager_v1`, `zwlr_output_manager_v1`, `zwlr_output_power_manager_v1`, `zwp_virtual_keyboard_manager_v1`, `zwlr_virtual_pointer_manager_v1`, `zwp_input_method_manager_v2`, `athanor_toplevel_manager_v1`, `athanor_toplevel_actions_v1`, `athanor_keyboard_group_manager_v1`, `athanor_a11y_manager_v1`, `ext_data_control_manager_v1`, `zwlr_data_control_manager_v1`, `athanor_workspace_tiling_manager_v1`, `athanor_dock_overlap_manager_v1`, `athanor_material_manager_v1` | the allow-list's clients, each global by its own line |
 | `zwlr_layer_shell_v1`, top and overlay layers | the allow-list's clients: another client's surface there is closed at the commit that puts it there, at creation or after `set_layer` |
 | `zwlr_layer_shell_v1`, bottom and background layers | every client outside a security context |
 | `wp_security_context_manager_v1`, `zwp_text_input_manager_v3` | every client outside a security context |
@@ -161,7 +258,21 @@ on windows: the control center is granted the first, the bar, the dock and the l
 `athanor_keyboard_group_manager_v1` names the seat's layouts and follows and switches the
 keyboard's layout group: the bar alone is granted it, for its input-source switch.
 `athanor_workspace_tiling_manager_v1` reads and sets whether each workspace is tiled (OS12): the
-bar alone is granted it, for its tiling switch. The layouts, options and repeat come from
+bar alone is granted it, for its tiling switch.
+`athanor_dock_overlap_manager_v1` (`athanor-dock-overlap-v1.xml`, decision 35) tells the dock
+whether a mapped, not minimised window of the current workspace of its layer surface's output
+intersects the rectangle the dock sent, in that output's logical coordinates, whatever the
+surface's own geometry, and when that changes; nothing while the session is locked, and the
+current answer at unlock. It tells nothing else about windows: the dock alone is granted it.
+`athanor_material_manager_v1` (`athanor-material-v1.xml`, decision 35) sends each output's
+material tier, M0, M1 or M2, to the shell surfaces granted it on their lines: the bar, the
+launcher, the dock, the control center and the OSD. At each enable, mode change and GPU change
+of an output a probe draws off screen on the output's GPU, on a thread and in a GL context of
+its own (`material.rs`, `blur.rs`), and VL13's thresholds turn its 95th percentiles into the
+tier; while an output is in M2 its damaged frames are timed to their sync points, and a median
+over half the frame interval moves it to M1 until its next probe. Software rendering is M0
+without a probe; a probe that fails or misses its 3 s deadline is M0, and so is an output until
+its probe has run. The layouts, options and repeat come from
 cosmic-comp's `cosmic/com.system76.CosmicComp/v1/xkb_config` under the configuration root, read
 before the first client and again after each change of it (an inotify watch of its directory
 and of every ancestor of it, along each link on the way), so one file drives the
@@ -362,6 +473,25 @@ libinput.
 ```
 athanor-sulphur --drm
 ```
+
+Touchscreens come through the seat's `wl_touch`, with no global of their own (`doc_own_stack.md`
+decision 33, wave 2a; `src/touch.rs`):
+
+| Rule | How | Test (`src/fixture/touch.rs`) |
+| --- | --- | --- |
+| A touch reaches the surface under the finger | each finger keeps its own surface (`touch::Fingers`), where Smithay's default grab sends every later finger to the first one's | `a_touch_reaches_the_surface_under_each_finger` |
+| Two touchscreens do not mix their fingers | a touch point is held by its device and the device's own slot, and the seat gives it a slot no other held touch has | `two_touchscreens_on_the_same_slot_touch_apart` |
+| A release is framed, and a removed touchscreen lets go | the seat gives a released slot again only after the frame owed to its client, and frames the events before a cancel; a touchscreen removed with fingers on it cancels every touch the seat holds, as `wl_touch.cancel` ends every touch point of a client: a move or resize from a touch ends, every slot is free, and a finger left on another touchscreen reaches no one until it is put down again | `a_release_and_a_touch_in_one_frame_each_get_their_frame`, `a_release_before_a_cancel_keeps_its_frame`, `a_touchscreen_removed_cancels_its_touches`, `a_touchscreen_removed_during_a_touch_move_cancels_it`, `a_touchscreen_removed_cancels_the_touches_of_every_device` |
+| A touch-down focuses by the rule of a click | the first finger goes through `click_focus`; a finger after it, or one while the pointer holds a grab (a button held, a popup), changes no focus | `a_touch_down_focuses_the_window_under_the_finger`, `a_touch_while_the_pointer_is_grabbed_changes_no_focus` |
+| While locked, a touch off the lock surface is refused | the down never reaches the seat, nor do its motion and release | `a_touch_off_the_lock_surface_reaches_nothing` |
+| A touch held at lock is cancelled | `lock` sends `wl_touch.cancel`; the later motion and release reach no one | `a_touch_held_at_lock_is_cancelled_and_its_release_reaches_no_one` |
+| Each touchscreen spans its own output, under its transform | the output libinput names (udev's `WL_OUTPUT`), else the built-in panel (`eDP-`, `LVDS-`, `DSI-`), else the touch is dropped; never the first output | `a_touchscreen_maps_to_its_own_output` |
+| A move or a resize starts from a touch serial | the serial is the first finger's, the one that starts the seat's touch grab, while that finger is down, and a later finger's is refused; the window grabs follow the finger that started them, and its release ends them; a window grab that ends while other fingers are held gives the seat back to the fingers' grab, under a serial no client was sent, so that a new finger is no first touch | `a_touch_moves_and_resizes_a_window`, `a_move_from_the_first_of_two_fingers`, `a_lifted_finger_starts_no_move`, `a_touch_move_ended_with_a_finger_held_keeps_the_fingers`, `a_window_leaving_its_touch_move_keeps_the_fingers` |
+| A drag starts from a touch serial | as from a press: the source is cancelled, drag and drop not being offered yet | `a_drag_starts_from_a_touch` |
+
+libinput reports no touch shape or orientation, so none is sent; the grabs pass them on should a
+backend give them. Injected touch comes only through libei (wave 2c), not yet built. A touch on the
+nested window names no output, so it is dropped.
 
 It offers `linux-dmabuf` with feedback naming the render node and, when the GPU can wait on a
 syncobj, `linux-drm-syncobj-v1`. A monitor plugged in gets an output and its `wl_output`. The make,
@@ -574,16 +704,18 @@ echo "$sock"
 
 If the last message appears, stop here and send the log.
 
-The bar and the dock are unique applications on the user's D-Bus (`os.athanor.Bar`,
-`os.athanor.Dock`): a second copy would only wake the one running in the COSMIC session on VT 1
-and exit, and nothing would be drawn here. Stop those two units first; the graphical session
-loses its bar and dock until step 6 or the end of the run:
+The dock is a unique application on the user's D-Bus (`os.athanor.Dock`): a second copy would
+only wake the one running in the COSMIC session on VT 1 and exit, and nothing would be drawn
+here. The bar, drawn with Sal, has no such name and a second copy would run, but it would share
+the user's services with the first: NetworkManager keeps the secret agent `os.athanor.Bar` of
+the first bar and refuses the second's. Stop those two units first; the graphical session loses
+its bar and dock until step 6 or the end of the run:
 
 ```
 systemctl --user stop athanor-bar.service athanor-dock.service
 ```
 
-`--drm` takes no other option (`src/main.rs`). Then the clients: the bar and the dock as user
+`--drm` takes no other option (`options` in `src/lib.rs`). Then the clients: the bar and the dock as user
 units, so that the allow-list's unit names hold. Each keeps a crash record in the runtime
 directory its unit names (`RUNTIME_DIRECTORY`, an entry named `athanor-bar` or `athanor-dock`;
 `system/athanor-unit/src/dirs.rs`); the record is shared with the real units, and five failed
@@ -594,7 +726,7 @@ here: if it opens a window on VT 1 instead, close every Ptyxis window there firs
 
 ```
 mkdir -p ~/c1/run/athanor-bar ~/c1/run/athanor-dock
-systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
+systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
 systemd-run --user --collect --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-dock" /usr/bin/athanor-dock
 WAYLAND_DISPLAY="$sock" ptyxis --standalone &> terminal.log &
 ```

@@ -6,13 +6,14 @@ Usage: check_image_session.py [IMAGE_ROOT]
 system/check-image-session.sh runs it inside a built image (IMAGE_ROOT defaults to /).
 
 ADR-0115 ships upstream components for 0.9, chosen in docs/spikes/lock-and-polkit-agent-0-9.md:
-cosmic-greeter as the locker and cosmic-idle as the idle trigger, both run inside the
-logind session by the supervisor /usr/libexec/athanor/session-components (SN15), which
-athanor-desktop and athanor-sulphur-session start, and cosmic-osd as the polkit agent on polkit 127's
-socket-activated helper. Each line below is a way the image has lost one of them without a
-build failure: a package dropped from packages.json, a supervisor line removed, the agent's unit
-no longer wanted by the session, masked, taken out of NoNewPrivileges or given another ExecStart
-by a drop-in, the helper socket not enabled or enabled without its unit file, the helper setuid
+cosmic-greeter as the locker, run inside the logind session by the supervisor
+/usr/libexec/athanor/session-components (SN15), which athanor-desktop and athanor-sulphur-session
+start, and cosmic-osd as the polkit agent on polkit 127's socket-activated helper; athanor-idle,
+the idle trigger since SD22's I4, is a user unit the session target wants, and the only activation
+of org.freedesktop.ScreenSaver. Each line below is a way the image has lost one of them without a
+build failure: a package dropped from packages.json, a supervisor line removed, the agent's or the
+idle daemon's unit no longer wanted by the session, masked, taken out of NoNewPrivileges or given
+another ExecStart by a drop-in, a second ScreenSaver activation file, the helper socket not enabled or enabled without its unit file, the helper setuid
 again (polkit 126), the helper's sandbox read-only over pam_faillock's tally directory (#144,
 #445), the settings daemon's sandbox read-only over the runtime directory where it binds the
 socket of its audio service, which leaves the volume keys dead (#144), a portal interface
@@ -35,12 +36,12 @@ import sys
 from check_image_contacts import enabled_units, is_masked
 
 LAUNCHER = "usr/bin/athanor-desktop"
-BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/cosmic-idle", "usr/bin/cosmic-osd")
+BINARIES = ("usr/bin/cosmic-greeter", "usr/bin/athanor-idle", "usr/bin/cosmic-osd")
 SUPERVISOR = "usr/libexec/athanor/session-components"
 COMPOSITOR = "usr/bin/athanor-sulphur"
 COMPOSITOR_SESSION = "usr/bin/athanor-sulphur-session"
 # What each script must hold as a whole active line (doc_session.md SN15): the sessions start
-# the supervisor, which runs the locker and the idle daemon, each in a scope of its own.
+# the supervisor, which runs the locker in a scope of its own.
 LAUNCHER_LINES = (
     ". /usr/libexec/athanor/session-components",
     'session_components "$$" &',
@@ -51,9 +52,7 @@ COMPOSITOR_LINES = (
 )
 SUPERVISED = (
     'session_component "$anchor" cosmic-greeter \\',
-    'session_component "$anchor" cosmic-idle \\',
     "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-greeter-locker.scope cosmic-greeter &",
-    "systemd-run --user --scope --collect --property=TimeoutStopSec=5s --unit=cosmic-idle.scope cosmic-idle &",
 )
 LOCKER_PAM = ("etc/pam.d/cosmic-greeter", "usr/lib/pam.d/cosmic-greeter")
 # Unit directories as an image has them, the lowest priority first (systemd.unit(5), "User Unit
@@ -75,6 +74,8 @@ SYSTEM_UNITS = (
 )
 AGENT = "cosmic-osd.service"
 AGENT_UNIT = f"{USER_UNITS[0]}/{AGENT}"
+IDLE = "athanor-idle.service"
+IDLE_BUS_NAME = "org.freedesktop.ScreenSaver"
 SESSION_TARGET = "usr/lib/systemd/user/athanor-session.target"
 HELPER = "usr/lib/polkit-1/polkit-agent-helper-1"
 HELPER_SOCKET = "polkit-agent-helper.socket"
@@ -106,6 +107,14 @@ DESKTOPS = ("athanor", "cosmic")  # XDG_CURRENT_DESKTOP=Athanor:COSMIC, lowercas
 HOME_DIRS = ("/home", "/root", "/run/user")
 PORTALS_DIR = "usr/share/xdg-desktop-portal/portals"
 DBUS_SERVICES = "usr/share/dbus-1/services"
+# The session bus's activation directories an image can fill: XDG_DATA_DIRS, with the directory
+# 60-athanor-cosmic-defaults.conf prepends, then the standard one (dbus-daemon(1)). The user's
+# XDG_DATA_HOME is not in the image.
+SESSION_SERVICE_DIRS = (
+    "usr/share/athanor/cosmic-defaults/dbus-1/services",
+    "usr/local/share/dbus-1/services",
+    DBUS_SERVICES,
+)
 FILE_CHOOSER = "org.freedesktop.impl.portal.FileChooser"
 GREETER_DAEMON = "cosmic-greeter-daemon.service"
 SCHEMA_DIR = "/usr/share/glib-2.0/schemas"
@@ -365,6 +374,71 @@ def script_problems(root, rel, wanted, required):
     return [f"/{rel} does not run `{c}`" for c in wanted if c not in lines]
 
 
+def user_unit_problems(root, unit, role):
+    """Why the user unit cannot run as shipped: missing, NoNewPrivileges lifted or ExecStart
+    replaced by a drop-in, or masked or replaced in a later unit directory."""
+    path = root / USER_UNITS[0] / unit
+    found = []
+    if not path.is_file():
+        found.append(f"/{USER_UNITS[0]}/{unit} is missing")
+    else:
+        unit_dropins = dropins(root, USER_UNITS, unit)
+        files = [path] + unit_dropins
+        last = [v for f in files for v in settings(f, "NoNewPrivileges")][-1:]
+        if [v.lower() for v in last] not in (["1"], ["yes"], ["true"], ["on"]):  # systemd.syntax(7)
+            found.append(
+                f"/{USER_UNITS[0]}/{unit} with its drop-ins does not set NoNewPrivileges=true"
+            )
+        found += [
+            f"/{f.relative_to(root)} overrides {role}'s ExecStart"
+            for f in unit_dropins
+            if assignments(f, "ExecStart")
+        ]
+    found += [
+        f"/{d}/{unit} masks or replaces {role}'s unit"
+        for d in USER_UNITS[1:]
+        if os.path.lexists(root / d / unit)
+    ]
+    return found
+
+
+def idle_problems(root):
+    """athanor-idle is the session's only idle lock: its unit must run as shipped, be wanted by
+    athanor-session.target, and be the one activation of org.freedesktop.ScreenSaver."""
+    found = user_unit_problems(root, IDLE, "the idle daemon")
+    # systemd loads a wants link by its name, whatever it points to, except a link to /dev/null or
+    # an empty file, which it ignores; the first directory's entry shadows the later ones.
+    wants = [root / d / "athanor-session.target.wants" / IDLE for d in ("etc/systemd/user", USER_UNITS[0])]
+    link = next((p for p in wants if os.path.lexists(p)), None)
+    if link is None or is_masked(link.parent, IDLE):
+        found.append(f"{IDLE} is not wanted by athanor-session.target: nothing locks an idle session")
+    # Matched on the Name= line, spaces around = allowed, as the Containerfile's grep does: an unrelated file the bus
+    # would skip as malformed is not this check's to fail.
+    owners = [
+        service
+        for d in SESSION_SERVICE_DIRS
+        for service in sorted((root / d).glob("*.service"))
+        if service.is_file()  # a dangling link is skipped, as the bus skips it
+        and any(
+            key.strip() == "Name" and sep and value.strip() == IDLE_BUS_NAME
+            for key, sep, value in (
+                line.partition("=") for line in service.read_bytes().decode(errors="replace").splitlines()
+            )
+        )
+    ]
+    expected = root / DBUS_SERVICES / f"{IDLE_BUS_NAME}.service"
+    if owners != [expected]:
+        listed = ", ".join(f"/{p.relative_to(root)}" for p in owners) or "no file"
+        found.append(f"{IDLE_BUS_NAME} is activated by {listed}, not by athanor-idle's file alone")
+    else:
+        problem = activation_problem(root, IDLE_BUS_NAME)
+        if problem:
+            found.append(f"{IDLE_BUS_NAME}: {problem}")
+        elif ini(expected).get("D-BUS Service", {}).get("SystemdService") != IDLE:
+            found.append(f"{IDLE_BUS_NAME}'s activation file does not start {IDLE}")
+    return found
+
+
 def problems(root):
     found = [f"/{b} is missing" for b in BINARIES if not (root / b).is_file()]
     found += script_problems(root, LAUNCHER, LAUNCHER_LINES, required=True)
@@ -378,26 +452,8 @@ def problems(root):
         found.append(
             "the locker's PAM service cosmic-greeter is missing: the lock could never open"
         )
-    agent = root / AGENT_UNIT
-    if not agent.is_file():
-        found.append(f"/{AGENT_UNIT} is missing")
-    else:
-        agent_dropins = dropins(root, USER_UNITS, AGENT)
-        files = [agent] + agent_dropins
-        if [v for f in files for v in settings(f, "NoNewPrivileges")][-1:] != ["true"]:
-            found.append(
-                f"/{AGENT_UNIT} with its drop-ins does not set NoNewPrivileges=true"
-            )
-        found += [
-            f"/{f.relative_to(root)} overrides the agent's ExecStart"
-            for f in agent_dropins
-            if assignments(f, "ExecStart")
-        ]
-    found += [
-        f"/{d}/{AGENT} masks or replaces the agent's unit"
-        for d in USER_UNITS[1:]
-        if os.path.lexists(root / d / AGENT)
-    ]
+    found += user_unit_problems(root, AGENT, "the agent")
+    found += idle_problems(root)
     target = root / SESSION_TARGET
     if not target.is_file() or "cosmic-osd.service" not in settings(
         target, "Wants", "Unit"

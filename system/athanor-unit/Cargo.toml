@@ -8,8 +8,8 @@ authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
 landlock = { workspace = true }
-# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window; open(2)'s flags for private_dir; poll
-# and getuid for the peer check.
+# clock_gettime(CLOCK_BOOTTIME) for the crash-loop window; open(2)'s flags for the checked
+# directories of `dirs` and geteuid(2) for their owner; poll and getuid for the peer check.
 nix = { workspace = true, features = ["fs", "time", "poll", "user"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }

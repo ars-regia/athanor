@@ -224,6 +224,18 @@ mod tests {
         assert_eq!(reset(&settings), Ok(vec![]));
     }
 
+    /// Moved from athanor-system-services' test of `athanor-appearance-reset`, which this
+    /// daemon replaces (SD22 step 3).
+    #[test]
+    fn each_value_of_the_daemon_is_reset_on_its_own() {
+        for (key, cosmic) in COSMIC_VALUES {
+            let settings = settings(&format!("each-{key}"), SCHEMA);
+            set(&settings, key, cosmic);
+            assert_eq!(reset(&settings), Ok(vec![key]), "{key}");
+            assert!(settings.user_value(key).is_none(), "{key}");
+        }
+    }
+
     #[test]
     fn a_value_close_to_the_daemons_is_the_persons() {
         let settings = settings("close", SCHEMA);

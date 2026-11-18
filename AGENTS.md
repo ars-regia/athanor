@@ -15,11 +15,11 @@ as RPMs; the Rust crates of the shell and of the platform services form one Carg
 
 ## Checks
 
-`just check` is the gate every pull request passes (`Justfile`). It requires `actionlint`,
-`shellcheck`, `cargo-deny`, `skopeo`, `cosign` and `registry` from `scripts/ci/install-tools.sh`;
-without `ksvalidator` (pykickstart) `verify.py kickstart` notes it. It runs `just check-syntax`,
-every `verify.py` check, the kernel profile, the Calmo palette, every `test_*.py` directory, the
-Rust workspace and `just check-deny` (`deny.toml`). Before a push, run what you changed:
+`just check` is the gate every pull request passes (`Justfile`). It requires `actionlint`, `zizmor`,
+`shellcheck`, `ruff`, `cargo-deny`, `cargo-machete`, `skopeo`, `cosign`, `registry` and, with
+`ATHANOR_INSTALL_SEMGREP=1`, `semgrep` from `scripts/ci/install-tools.sh`; without `ksvalidator` (pykickstart)
+`verify.py kickstart` notes it. It runs `just check-syntax`, every `verify.py` check, Semgrep on `.semgrep/`, the
+kernel profile, the Calmo palette, every `test_*.py` directory, the Rust workspace and `just check-deny` (`deny.toml`). Before a push, run what you changed:
 
 | Check | Command |
 | --- | --- |
@@ -61,10 +61,10 @@ hours: never use it as a check.
   links in code, commits, pull requests or documents.
 - **One logical change per commit.** Report unrelated problems instead of fixing them in
   passing.
-- **At most ten open pull requests** (ADR-0135, which raised the limit of five). With
-  ten open, finish before starting: a new pull request waits until one is merged or closed,
-  and reviewers' findings on open ones are closed before new work begins. A branch without
-  an open pull request is merged, archived as a tag `archive/<branch>`, or deleted.
+- **At most ten open pull requests** (ADR-0135); one whose diff stays under `docs/` does not
+  count (ADR-0139). With ten open, finish before starting: a new pull request waits until one
+  is merged or closed, and reviewers' findings on open ones are closed before new work begins.
+  A branch without an open pull request is merged, archived as `archive/<branch>`, or deleted.
 - **Every class of defect an audit finds becomes an automatic check** in the pull request that
   fixes it, or an issue that names the check to add. Audit reports stay outside the public
   repository. When audits run and what they re-examine: `docs/operations/audits.md`.

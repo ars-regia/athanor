@@ -9,8 +9,8 @@ use zbus::fdo::{self, DBusProxy};
 use zbus::message::Header;
 use zbus::names::BusName;
 use zbus::object_server::SignalEmitter;
+use zbus::ObjectPath;
 use zbus::{interface, Connection};
-use zbus::zvariant::ObjectPath;
 
 use crate::server::WATCHER_PATH;
 

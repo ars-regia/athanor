@@ -6,15 +6,24 @@
 //! AT-SPI per surface.
 
 mod clipboard;
+mod dialog;
+mod modifiers;
+
+pub use modifiers::KeyModifiers;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
+use crate::focus;
 use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
-use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
+use crate::popup::{
+    focused_window, keyboard_after_closed, keyboard_after_leave, Dismiss, GrabSerial, OpenPopup, Tooltip,
+    TOOLTIP_PADDING,
+};
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
+use dialog::CloseRequest;
 use accesskit::{ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, TreeUpdate};
 use smithay_client_toolkit::reexports::calloop::channel::{self, Sender};
 use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
@@ -43,6 +52,7 @@ pub use smithay_client_toolkit::{
     shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer},
 };
 use smithay_client_toolkit::{
+    activation::{ActivationHandler as TokenHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
     delegate_registry,
     dispatch2::Dispatch2,
@@ -56,8 +66,8 @@ use smithay_client_toolkit::{
     seat::{
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
         pointer::{
-            cursor_shape::CursorShapeManager, PointerEvent, PointerEventKind, PointerHandler,
-            BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
+            cursor_shape::CursorShapeManager, AxisScroll, PointerEvent, PointerEventKind,
+            PointerHandler, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
         },
         Capability, SeatHandler, SeatState,
     },
@@ -150,7 +160,7 @@ pub enum Role {
 /// A `zwlr_layer_surface_v1`'s state. The surface takes the size of its widgets, and along an
 /// axis anchored on both edges at least the size the compositor configures: a surface anchored
 /// on all four whose widgets are a [`crate::Kind::Picture`] takes exactly the configured size.
-/// New fields are added over time: start from [`LayerOptions::default`] and set the fields that
+/// New fields are added over time: start from [`LayerOptions::new`] and set the fields that
 /// differ.
 #[non_exhaustive]
 pub struct LayerOptions {
@@ -170,13 +180,14 @@ pub struct LayerOptions {
     pub input_region: Option<Vec<Rect>>,
 }
 
-impl Default for LayerOptions {
-    /// The protocol's defaults where it has them: no anchor, no margin, an exclusive zone of 0,
-    /// no keyboard and the pointer on the whole surface. The layer is the top one, as
-    /// gtk-layer-shell's default, and the namespace is empty.
-    fn default() -> Self {
+impl LayerOptions {
+    /// A surface on `layer`, with the protocol's defaults where it has them: no anchor, no
+    /// margin, an exclusive zone of 0, no keyboard and the pointer on the whole surface. The
+    /// namespace is empty. The layer has no default: the compositor grants the top and overlay
+    /// layers only to the clients of its allow-list, so each client names the one it asks for.
+    pub fn new(layer: Layer) -> Self {
         Self {
-            layer: Layer::Top,
+            layer,
             namespace: String::new(),
             anchor: Anchor::empty(),
             margin: [0; 4],
@@ -234,14 +245,48 @@ pub trait Application {
     /// The keyboard entered (`focused`) or left `surface`, a popup included.
     fn keyboard(&mut self, _shell: &mut Shell, _surface: SurfaceId, _focused: bool) {}
 
+    /// The primary button was pressed on `surface` at `at`, in logical pixels, after its widgets
+    /// took the press: where a surface closes when the user presses beside its content, as the
+    /// launcher's panel over its whole output does (doc_launcher.md, LA5), comparing `at` with
+    /// [`crate::Ui::island_fill`] or a widget's `rect`. A press that closes a popup comes here
+    /// for no surface, nor does one that moves a window by its title bar.
+    fn pressed(&mut self, _shell: &mut Shell, _surface: SurfaceId, _at: (f32, f32)) {}
+
+    /// A key pressed, or repeated, on `surface`, before its widgets see it, a focused field
+    /// included: `true` takes it, and the widgets never see it. Where an application gives keys
+    /// a meaning of its own while the focus stays in a field: the arrows that move a list of
+    /// results, say, or Ctrl+Enter, which [`Key::Enter`] with `modifiers.ctrl` tells from Enter.
+    /// The keys of an open menu come to the menu's surface. Escape on a popup that Escape
+    /// dismisses closes it first, without this call. The default takes no key.
+    ///
+    /// Only the keys a [`Key`] names come here: Tab and Shift+Tab, the arrows, Home, End,
+    /// Page Up, Page Down, Enter, Backspace, Delete, Escape, Menu and Shift+F10, Ctrl+A, Ctrl+C,
+    /// Ctrl+X and Ctrl+V, and a key that types text, which comes as [`Key::Text`] whatever the
+    /// modifiers held, Alt or Super included. Shift with Left or Right comes as
+    /// [`Key::SelectLeft`] or [`Key::SelectRight`], and Ctrl with an arrow as the arrow, with
+    /// `modifiers.ctrl`: only a calendar reads it apart. The other keys reach neither this call nor
+    /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
+    /// keys that type nothing, such as Insert.
+    fn key(
+        &mut self,
+        _shell: &mut Shell,
+        _surface: SurfaceId,
+        _key: &Key,
+        _modifiers: KeyModifiers,
+    ) -> bool {
+        false
+    }
+
     /// Runs after each turn of the event loop, once its events are handled: where the
     /// application applies what its own source (see [`run_with`]) changed since.
     fn turn(&mut self, _shell: &mut Shell) {}
 
-    /// The first frame of `surface` was committed: called in the turn of the event loop that
-    /// drew it, after [`Application::turn`], so that nothing waits on a frame callback the
-    /// compositor may withhold from a surface it does not show. Where a `Type=notify`
-    /// service tells systemd it is ready. Not called for a surface closed by then.
+    /// The first frame of `surface` was committed, or the first after
+    /// [`Shell::report_next_frame`]: called in the turn of the event loop that drew it, after
+    /// [`Application::turn`], so that nothing waits on a frame callback the compositor may
+    /// withhold from a surface it does not show. Where a `Type=notify` service tells systemd it
+    /// is ready, and a surface kept open and shown again times its showing. Not called for a
+    /// surface closed by then.
     fn drawn(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
 
     /// The motion of `surface` ([`Shell::animate`]) reached its end pose, which the surface keeps:
@@ -275,6 +320,10 @@ pub trait Application {
     /// `unlock_and_destroy` for a lock it had confirmed and `destroy` otherwise, and closed the
     /// lock surfaces; [`Shell::lock`] may ask again.
     fn finished(&mut self, _shell: &mut Shell) {}
+
+    /// The compositor's token for the request [`Shell::request_activation_token`] numbered
+    /// `request`.
+    fn activation_token(&mut self, _shell: &mut Shell, _request: u64, _token: String) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -348,6 +397,9 @@ fn run_on(
         .handle()
         .insert_source(receiver, |event, _, app: &mut App| {
             if let channel::Event::Msg((id, request)) = event {
+                if app.shell.dialogs.blocked(id) {
+                    return;
+                }
                 let event = app
                     .shell
                     .get_mut(id)
@@ -383,6 +435,7 @@ fn run_on(
         first_frames: Vec::new(),
         outputs: Vec::new(),
         closing: Vec::new(),
+        closed_popups: Vec::new(),
         reduced_motion: false,
         settled: Vec::new(),
         // Bound as the others; where the compositor withholds it, as athanor-sulphur does from a
@@ -390,6 +443,12 @@ fn run_on(
         session_lock_state: SessionLockState::new(&globals, &qh),
         session_lock: None,
         lock_asked: Vec::new(),
+        dialogs: dialog::Dialogs::bind(&globals, &qh),
+        blocking: Vec::new(),
+        // Optional: without it, an application this one starts gets no token.
+        activation: ActivationState::bind(&globals, &qh).ok(),
+        next_token: 0,
+        input_surface: None,
     };
     let mut app = App {
         application: Box::new(application),
@@ -415,7 +474,7 @@ fn run_on(
         modifiers: Modifiers::default(),
         // Optional: without them, a field copies and pastes nothing.
         clipboards: clipboard::Clipboards::bind(&globals, &qh),
-        field_menu: None,
+        own_menu: None,
         pressed_at: None,
         tooltip: Tooltip::default(),
         error: None,
@@ -424,13 +483,11 @@ fn run_on(
         app.shell.open(ui, role, None)?;
     }
     while !app.shell.exit {
-        event_loop.dispatch(wait(!app.shell.settled.is_empty()), &mut app)?;
+        dispatch(&mut event_loop, &conn, wait(!app.shell.settled.is_empty()), &mut app)?;
         app.application.turn(&mut app.shell);
         // A lock asked for in this turn has its surfaces before anything is drawn.
         app.open_lock_surfaces();
-        if let Err(error) = app.shell.draw_dirty() {
-            app.fail(error);
-        }
+        app.draw_dirty();
         // A surface closed since its first frame, by the compositor, with its output or by an
         // earlier `drawn`, is not reported drawn.
         let first_frames = std::mem::take(&mut app.shell.first_frames);
@@ -456,7 +513,11 @@ fn run_on(
             },
             |app, surface| app.application.settled(&mut app.shell, surface),
         );
+        // What the application asked of the clipboards outside an input handler is served now,
+        // a copy refused, and never at a later key or click.
+        app.clips_outside_input();
         app.closed_by_application();
+        app.blocked_by_dialogs();
         app.sync_window_focus();
         if let Some(error) = app.error.take().or_else(|| app.shell.failure.take()) {
             return Err(error);
@@ -557,6 +618,8 @@ pub struct Shell {
     outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
     /// The surfaces [`Shell::close`] closed since the driver last ended what they held.
     closing: Vec<SurfaceId>,
+    /// The popups [`Shell::remove`] closed since the driver last handed their keyboard back.
+    closed_popups: Vec<OpenPopup<SurfaceId>>,
     /// Whether motions only fade ([`Shell::set_reduced_motion`]).
     reduced_motion: bool,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
@@ -567,9 +630,61 @@ pub struct Shell {
     session_lock: Option<SessionLock>,
     /// The outputs [`Application::lock_surface`] was asked about since the lock was asked for.
     lock_asked: Vec<wl_output::WlOutput>,
+    /// The modal dialogs open, each on its window.
+    dialogs: dialog::Dialogs,
+    /// The windows a dialog opened on since the driver last ended the pointer's press and hover
+    /// on them.
+    blocking: Vec<SurfaceId>,
+    /// xdg_activation_v1, and the number of the next token asked for.
+    activation: Option<ActivationState>,
+    next_token: u64,
+    /// The surface of the last press of a button or a key, whose serial `grab` keeps.
+    input_surface: Option<SurfaceId>,
 }
 
 impl Shell {
+    /// The surface and the serial of the last press of a button or a key, after it ended too:
+    /// what [`Shell::request_activation_token`] names for an action the input started. `None`
+    /// before any press, or once its surface closed.
+    pub fn last_input(&self) -> Option<(SurfaceId, u32)> {
+        let surface = self
+            .input_surface
+            .filter(|&id| self.surfaces.iter().any(|s| s.id == id))?;
+        Some((surface, self.grab.last()?))
+    }
+
+    /// Asks the compositor for an xdg-activation-v1 token that lets an application this one
+    /// starts or calls raise its window, naming `surface` and the input's `serial` with the seat,
+    /// either left out when `None`. The token comes to [`Application::activation_token`] with
+    /// the number this returns, once the compositor answers; a compositor that does not grant it
+    /// still answers, and the token then activates nothing. `None` without the global: the
+    /// caller goes on without a token.
+    pub fn request_activation_token(
+        &mut self,
+        surface: Option<SurfaceId>,
+        serial: Option<u32>,
+    ) -> Option<u64> {
+        let activation = self.activation.as_ref()?;
+        let request = self.next_token;
+        self.next_token += 1;
+        let surface = surface.and_then(|id| {
+            self.surfaces
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.wl_surface().clone())
+        });
+        activation.request_token(
+            &self.qh,
+            RequestData {
+                app_id: None,
+                seat_and_serial: self.seat.clone().zip(serial),
+                surface,
+                udata: request,
+            },
+        );
+        Some(request)
+    }
+
     /// The surfaces open, in the order they were opened.
     pub fn surfaces(&self) -> impl Iterator<Item = SurfaceId> + '_ {
         self.surfaces.iter().map(|s| s.id)
@@ -584,6 +699,15 @@ impl Shell {
     /// tells, and a dock's Type=notify waits for. `false` once it is closed.
     pub fn drawn(&self, id: SurfaceId) -> bool {
         self.surfaces.iter().any(|s| s.id == id && s.drawn)
+    }
+
+    /// Reports the next frame `id` commits through [`Application::drawn`], as its first frame
+    /// is: for a surface kept open and shown again, whose showing is timed to the frame that
+    /// shows it. A surface closed by then is not reported; nothing for an `id` not open.
+    pub fn report_next_frame(&mut self, id: SurfaceId) {
+        if let Some(surface) = self.get_mut(id) {
+            surface.report = true;
+        }
     }
 
     /// The widgets of `id`, which the driver draws again after the event.
@@ -858,6 +982,63 @@ impl Shell {
         }
     }
 
+    /// Opens `ui` as a modal dialog of the window `parent`, as GTK's modal windows: a window of
+    /// the parent's application id, its child, modal through `xdg_wm_dialog_v1` when the
+    /// compositor offers it. Its root reads as a modal dialog (an alert dialog keeps its role),
+    /// its title bar has only Close, and while it is open the parent takes no input: neither the
+    /// pointer, nor the keyboard, nor the input method, nor an assistive technology's action.
+    /// Escape, its Close button and the compositor's request to close it reach the application
+    /// as [`Event::Window`] with [`WindowButton::Close`], which closes the run for any other
+    /// window: the application answers it, at least with [`Shell::close`]. It closes with its
+    /// parent. It is drawn at its first configure; a parent that is not an open window is
+    /// refused.
+    pub fn open_dialog(&mut self, parent: SurfaceId, mut ui: Ui) -> Result<SurfaceId, Error> {
+        let Some(Surface {
+            shown: Shown::Window(parent_window),
+            app_id,
+            ..
+        }) = self.surfaces.iter().find(|s| s.id == parent)
+        else {
+            return Err(format!("no window {parent:?} to open a dialog on").into());
+        };
+        let (parent_window, app_id) = (parent_window.clone(), app_id.clone());
+        ui.set_dialog();
+        let (wl, fractional) = self.new_surface();
+        let window = self.window(wl, &ui, &app_id)?;
+        window.set_parent(Some(&parent_window));
+        let id = self.adopt(ui, Shown::Window(window), fractional, None, (false, false))?;
+        // Made once the surface is taken, so that no refusal leaves it behind its toplevel:
+        // the surface destroys it before the toplevel when it closes.
+        if let Some(surface) = self.surfaces.iter_mut().find(|s| s.id == id) {
+            surface.app_id = app_id;
+            if let Shown::Window(window) = &surface.shown {
+                surface.modal = self.dialogs.set_modal(window.xdg_toplevel(), &self.qh);
+            }
+        }
+        self.dialogs.opened(id, parent);
+        // The parent's menu or tooltip closes, since the parent takes no input, and the
+        // pointer's press and hover on it end at the end of the turn.
+        if self.popup.is_some_and(|p| p.parent == parent) {
+            self.close_popup();
+        }
+        self.blocking.push(parent);
+        Ok(id)
+    }
+
+    /// An xdg-toplevel for `ui`, which draws its own title bar, as GTK does, so that assistive
+    /// technologies find the title and the window's buttons in its tree; a compositor that
+    /// insists on drawing them says so in the first configure.
+    fn window(&self, wl: wl_surface::WlSurface, ui: &Ui, app_id: &str) -> Result<Window, Error> {
+        let xdg_shell = self
+            .xdg_shell
+            .as_ref()
+            .ok_or("the compositor does not offer xdg_wm_base")?;
+        let window = xdg_shell.create_window(wl, WindowDecorations::RequestClient, &self.qh);
+        window.set_title(ui.title.as_str());
+        window.set_app_id(app_id);
+        Ok(window)
+    }
+
     fn get_mut(&mut self, id: SurfaceId) -> Option<&mut Surface> {
         self.surfaces.iter_mut().find(|s| s.id == id)
     }
@@ -924,7 +1105,10 @@ impl Shell {
         if matches!(from.shown, Shown::Lock(_)) {
             return Err(format!("no popup of the lock surface {parent:?}").into());
         }
-        if anchor.index() >= from.ui.len() {
+        if self.dialogs.blocked(parent) {
+            return Err(format!("no popup of {parent:?}: a dialog blocks it").into());
+        }
+        if !from.ui.contains(anchor) {
             return Err(format!("no widget {anchor:?} on {parent:?}").into());
         }
         let r = at.map_or(from.ui.widget(anchor).rect, |(x, y)| Rect {
@@ -954,7 +1138,14 @@ impl Shell {
             ((right - x) as i32).max(1),
             ((bottom - y) as i32).max(1),
         );
-        let along_x = ConstraintAdjustment::FlipY | ConstraintAdjustment::SlideX;
+        // A menu also slides along its axis, so that one as high as the output stays on it.
+        let along_x = ConstraintAdjustment::FlipY
+            | ConstraintAdjustment::SlideX
+            | if menu {
+                ConstraintAdjustment::SlideY
+            } else {
+                ConstraintAdjustment::empty()
+            };
         let along_y = ConstraintAdjustment::FlipX | ConstraintAdjustment::SlideY;
         let (edge, gravity, adjust) = match side {
             Side::Top => (Edge::Top, Gravity::Top, along_x),
@@ -986,6 +1177,9 @@ impl Shell {
         let from = self
             .get_mut(parent)
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        if let Some(arrow) = ui.arrow.as_mut() {
+            arrow.side = Some(side);
+        }
         let open = OpenPopup::opened(parent, anchor, id, &mut from.ui, &mut ui, menu);
         from.dirty = true;
         // A tooltip takes no pointer: it never stands between the pointer and its widget.
@@ -1036,18 +1230,11 @@ impl Shell {
         let mut input_region = None;
         let mut stretch = (false, false);
         let mut placed = None;
+        let mut window_app_id = String::new();
         let shown = match role {
             Role::Window { app_id } => {
-                let xdg_shell = self
-                    .xdg_shell
-                    .as_ref()
-                    .ok_or("the compositor does not offer xdg_wm_base")?;
-                // The window draws its own title bar, as GTK does, so assistive technologies
-                // find the title and the window's buttons in its tree; a compositor that insists
-                // on drawing them says so in the first configure.
-                let window = xdg_shell.create_window(wl, WindowDecorations::RequestClient, qh);
-                window.set_title(ui.title.as_str());
-                window.set_app_id(app_id);
+                let window = self.window(wl, &ui, &app_id)?;
+                window_app_id = app_id;
                 Shown::Window(window)
             }
             Role::Layer(options) => {
@@ -1074,6 +1261,7 @@ impl Shell {
         if let Some(surface) = self.get_mut(id) {
             surface.layer = placed;
             surface.output = output.cloned();
+            surface.app_id = window_app_id;
         }
         Ok(id)
     }
@@ -1119,7 +1307,17 @@ impl Shell {
             }
             Shown::Popup(_) => logical_size(&ui),
             // A lock surface takes the size of its configure.
-            Shown::Window(_) | Shown::Lock(_) => (0, 0),
+            Shown::Lock(_) => (0, 0),
+            // A window gives its widgets' size as its minimum before the first configure, as
+            // GTK does: a compositor that suggests a smaller first size, as cosmic-comp does on
+            // a small output, would otherwise place the window for a width it never takes.
+            Shown::Window(window) => {
+                layout(&mut ui, 1.0)?;
+                let size = logical_size(&ui);
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&ui, size));
+                size
+            }
         };
         self.next += 1;
         self.surfaces.push(Surface {
@@ -1139,10 +1337,13 @@ impl Shell {
             output: None,
             configured: false,
             drawn: false,
+            report: false,
             frame_pending: false,
             redraw: false,
             dirty: false,
             motion: None,
+            app_id: String::new(),
+            modal: None,
         });
         if input_region.is_some() {
             self.set_input_region(id, input_region.as_deref())?;
@@ -1160,24 +1361,37 @@ impl Shell {
     /// Closes the surface `id`, and the popup open from it first. Closing a menu returns the focus
     /// to its widget.
     fn remove(&mut self, id: SurfaceId) {
-        if let Some(open) = self.popup.filter(|p| p.surface == id || p.parent == id) {
-            self.popup = None;
-            self.surfaces.retain(|s| s.id != open.surface);
-            if let Some(from) = self.get_mut(open.parent) {
-                open.closed(&mut from.ui);
-                from.dirty = true;
+        // The dialogs open on it close with it, first, and the application ends what they held.
+        let open: Vec<SurfaceId> = self.surfaces.iter().map(|s| s.id).collect();
+        for surface in self.dialogs.close(id, &open) {
+            if let Some(popup) = self
+                .popup
+                .filter(|p| p.surface == surface || p.parent == surface)
+            {
+                self.popup = None;
+                self.surfaces.retain(|s| s.id != popup.surface);
+                self.closed_popups.push(popup);
+                if let Some(from) = self.get_mut(popup.parent) {
+                    popup.closed(&mut from.ui);
+                    from.dirty = true;
+                }
+            }
+            self.surfaces.retain(|s| s.id != surface);
+            if surface != id {
+                self.closing.push(surface);
             }
         }
-        self.surfaces.retain(|s| s.id != id);
     }
 
     /// Draws the surfaces whose widgets changed.
     fn draw_dirty(&mut self) -> Result<(), Error> {
         for surface in &mut self.surfaces {
             if surface.dirty {
-                let first = !surface.drawn;
+                let (first, was_pending) = (!surface.drawn, surface.frame_pending);
                 surface.draw(&mut self.pool, &self.qh)?;
-                if first && surface.drawn {
+                let after = (surface.drawn, surface.frame_pending);
+                if reported(first, surface.report, was_pending, after) {
+                    surface.report = false;
                     self.first_frames.push(surface.id);
                 }
             }
@@ -1186,12 +1400,33 @@ impl Shell {
     }
 }
 
+/// The height a drop-down's menu may take, in logical pixels: that of `output`, the output of
+/// the drop-down's surface; when it is not known, as for a window or a layer surface the
+/// compositor placed, that of the shortest of `outputs`, which the menu fits on whichever it
+/// opens on; and without any, the surface's own height `own`. Heights of 0 are not known ones.
+fn menu_max_height(output: Option<f32>, outputs: &[f32], own: u32) -> Option<f32> {
+    let known = |h: &f32| *h > 0.0;
+    output
+        .filter(known)
+        .or_else(|| outputs.iter().copied().filter(known).reduce(f32::min))
+        .or_else(|| (own > 0).then_some(own as f32))
+}
+
 /// Calls `lost` on the surface `next` finds in `state` until it finds none, so that one `lost`
 /// closed along the way is not lost after: `lost` closes the surface it is given.
 fn lose_each<T, S>(state: &mut T, next: impl Fn(&T) -> Option<S>, mut lost: impl FnMut(&mut T, S)) {
     while let Some(surface) = next(state) {
         lost(state, surface);
     }
+}
+
+/// Whether a draw reports its surface through [`Application::drawn`]: its first frame since its
+/// first configure, `drawn` after it, or, while [`Shell::report_next_frame`] asked to `report`,
+/// a frame it committed: none was pending before, and one is after. A draw while a frame is
+/// pending only lays out; the frame callback marks the surface for the draw that commits.
+fn reported(first: bool, report: bool, was_pending: bool, after: (bool, bool)) -> bool {
+    let (drawn, pending) = after;
+    (first && drawn) || (report && !was_pending && pending)
 }
 
 /// Calls `call` on each of `surfaces` that `open` finds open in `state` when its turn comes, so
@@ -1207,6 +1442,25 @@ fn each_open<T, S: Copy>(
             call(state, surface);
         }
     }
+}
+
+/// One turn of `event_loop`, then an error if the compositor ended `conn`, so that the process
+/// exits and its unit's `Restart=` applies (#1129). calloop-wayland-source returns an end of file,
+/// but only logs a protocol error, and the dead socket then wakes the loop at every turn with
+/// nothing to dispatch. The error names the protocol error's code and object, and its message
+/// where the backend keeps one: libwayland's keeps none. Every caller of [`run`] logs it before
+/// it exits.
+fn dispatch<D>(
+    event_loop: &mut EventLoop<'static, D>,
+    conn: &Connection,
+    timeout: Option<Duration>,
+    data: &mut D,
+) -> Result<(), Error> {
+    let turn = event_loop.dispatch(timeout, data);
+    if let Some(error) = conn.backend().last_error() {
+        return Err(format!("the compositor ended the Wayland connection: {error}").into());
+    }
+    Ok(turn?)
 }
 
 /// How long the loop waits for an event: not at all while a surface is queued `pending` for the
@@ -1314,6 +1568,12 @@ fn requested(size: (u32, u32), stretch: (bool, bool)) -> (u32, u32) {
     )
 }
 
+/// The maximum size of a window whose widgets take `size`: that size when the window is not
+/// resizable, as GTK sets a fixed window's on Wayland, and none otherwise.
+fn max_size(ui: &Ui, size: (u32, u32)) -> Option<(u32, u32)> {
+    (!ui.resizable).then_some(size)
+}
+
 /// The widgets' size in whole logical pixels, never empty.
 fn logical_size(ui: &Ui) -> (u32, u32) {
     let (w, h) = ui.size();
@@ -1374,7 +1634,8 @@ struct Surface {
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
     /// integer one.
     scale: f32,
-    /// The logical size last asked of a layer surface, or configured of a lock surface.
+    /// The logical size last asked of a layer surface, configured of a lock surface, or given as
+    /// a window's minimum.
     size: (u32, u32),
     /// Whether a layer surface is anchored to both ends of its width, and of its height: it then
     /// asks 0 along that axis and takes the size the compositor configures.
@@ -1387,6 +1648,8 @@ struct Surface {
     configured: bool,
     /// A frame was committed since the first configure.
     drawn: bool,
+    /// The next frame committed is reported drawn ([`Shell::report_next_frame`]).
+    report: bool,
     /// A frame is committed and its callback has not come: the next one waits for it, so that
     /// drawing never runs ahead of the compositor, which throttles a covered surface.
     frame_pending: bool,
@@ -1396,6 +1659,10 @@ struct Surface {
     dirty: bool,
     /// The motion under way, which each frame callback advances.
     motion: Option<Running>,
+    /// A window's application id, which its dialogs take.
+    app_id: String,
+    /// A dialog's `xdg_dialog_v1`, when the compositor offers the global.
+    modal: Option<dialog::XdgDialogV1>,
 }
 
 impl Drop for Surface {
@@ -1403,6 +1670,10 @@ impl Drop for Surface {
         // Every close drops the surface: at the application's asking, the compositor's, or with
         // its output.
         self.withdraw();
+        // Before the toplevel, which the fields drop after this.
+        if let Some(modal) = self.modal.take() {
+            modal.destroy();
+        }
         // Before the wl_surface, which the fields drop after this.
         if let Some((scale, viewport)) = self.fractional.take() {
             scale.destroy();
@@ -1494,15 +1765,23 @@ impl Surface {
     }
 
     /// Sets, for the next commit, how the buffer drawn at `scale` maps onto the surface, and a
-    /// layer surface's size when its widgets' changed.
+    /// layer surface's size, or a window's minimum size, when its widgets' changed.
     fn place(&mut self) {
         let size = logical_size(&self.ui);
-        if let Shown::Layer(surface) = &self.shown {
-            let asked = requested(size, self.stretch);
-            if asked != self.size {
-                surface.set_size(asked.0, asked.1);
-                self.size = asked;
+        match &self.shown {
+            Shown::Layer(surface) => {
+                let asked = requested(size, self.stretch);
+                if asked != self.size {
+                    surface.set_size(asked.0, asked.1);
+                    self.size = asked;
+                }
             }
+            Shown::Window(window) if size != self.size => {
+                window.set_min_size(Some(size));
+                window.set_max_size(max_size(&self.ui, size));
+                self.size = size;
+            }
+            _ => {}
         }
         match &self.fractional {
             Some((_, viewport)) => {
@@ -1691,19 +1970,38 @@ type ImeField = (SurfaceId, WidgetId, ContentHint);
 fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let id = ui.focus().filter(|&id| ui.field_text(id).is_some())?;
     let widget = ui.widget(id);
-    let hint = match widget.kind {
+    let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // An input method neither shows, learns nor suggests what a password field is given.
+        Kind::Field(field) if field.is_password() => {
+            ContentHint::HiddenText | ContentHint::SensitiveData
+        }
         _ => ContentHint::None,
     };
     Some((id, widget.rect, hint))
 }
 
+/// The content type a field asks the input method for: a password's for hidden text.
+fn content_type(hint: ContentHint) -> (ContentHint, ContentPurpose) {
+    let purpose = if hint.contains(ContentHint::HiddenText) {
+        ContentPurpose::Password
+    } else {
+        ContentPurpose::Normal
+    };
+    (hint, purpose)
+}
+
+/// A preedit and its cursor, a byte range in it. Overwritten when dropped.
+type Preedit = (zeroize::Zeroizing<String>, Option<(usize, usize)>);
+
 /// The events of text-input-v3 that take effect together at its next `done`.
 #[derive(Default)]
 struct Pending {
-    /// The preedit and its cursor, a byte range in it.
-    preedit: Option<(String, Option<(usize, usize)>)>,
-    commit: Option<String>,
+    /// The preedit and its cursor, a byte range in it. Overwritten when dropped: a password
+    /// field never shows it, but the input method sends it all the same.
+    preedit: Option<Preedit>,
+    /// Overwritten when dropped: it may be a password field's text.
+    commit: Option<zeroize::Zeroizing<String>>,
 }
 
 /// The preedit without what a single-line field drops from it, the newline included, with its
@@ -1712,7 +2010,7 @@ struct Pending {
 fn printable_preedit(
     text: &str,
     cursor: Option<(usize, usize)>,
-) -> (String, Option<(usize, usize)>) {
+) -> Preedit {
     let kept = |at: usize| {
         text.is_char_boundary(at).then(|| {
             let dropped: usize = text[..at]
@@ -1725,6 +2023,14 @@ fn printable_preedit(
     };
     let cursor = cursor.and_then(|(begin, end)| kept(begin).zip(kept(end)));
     (crate::text::printable(text, false), cursor)
+}
+
+/// Overwrites the text of a key that no field took: it may be a character of a password.
+/// `Ui::key` does the same for the keys it takes.
+fn forget(key: &mut Key) {
+    if let Key::Text(text) = key {
+        zeroize::Zeroize::zeroize(text);
+    }
 }
 
 /// The user data of the text-input-v3 objects.
@@ -1766,9 +2072,12 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
                 let cursor = usize::try_from(cursor_begin)
                     .ok()
                     .zip(usize::try_from(cursor_end).ok());
-                app.ime.pending.preedit = Some((text.unwrap_or_default(), cursor));
+                app.ime.pending.preedit =
+                    Some((zeroize::Zeroizing::new(text.unwrap_or_default()), cursor));
             }
-            Event::CommitString { text } => app.ime.pending.commit = text,
+            Event::CommitString { text } => {
+                app.ime.pending.commit = text.map(zeroize::Zeroizing::new);
+            }
             // ponytail: the field sends no surrounding text, so an input method has none to
             // delete; send it with set_surrounding_text when an engine needs it.
             Event::DeleteSurroundingText { .. } => {}
@@ -1776,6 +2085,52 @@ impl Dispatch2<ZwpTextInputV3, App> for TextInput {
             _ => {}
         }
     }
+}
+
+/// Where an event of a surface's widgets goes, other than a window button's.
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// A field opens its own context menu, whose items the driver does.
+    FieldMenu(WidgetId),
+    /// A drop-down opens its own items, as a menu the driver does too.
+    DropDown(WidgetId),
+    /// An item of the driver's own menu was activated: a menu item, a check or a radio.
+    Chosen(WidgetId),
+    /// The driver keeps it: the application never opened its menus, and gets none of their
+    /// events, such as a context-menu event of an item at a press of the Menu key, nor the click
+    /// of a drop-down with nothing to offer.
+    Kept,
+    /// The application's.
+    Application(Event),
+}
+
+/// Where `event` of `ui` goes; `own` when `ui` is a menu the driver opened.
+fn route(ui: &Ui, event: Event, own: bool) -> Route {
+    let drop_down = |widget: WidgetId| {
+        ui.widgets
+            .get(widget)
+            .is_some_and(|w| matches!(w.kind, Kind::DropDown(_)))
+    };
+    match event {
+        Event::Clicked(item) | Event::Toggled(item) | Event::Selected(item) if own => {
+            Route::Chosen(item)
+        }
+        _ if own => Route::Kept,
+        Event::ContextMenu(widget) if ui.field_text(widget).is_some() => Route::FieldMenu(widget),
+        Event::Clicked(widget) if drop_down(widget) => match ui.chosen(widget) {
+            Some(_) => Route::DropDown(widget),
+            None => Route::Kept,
+        },
+        event => Route::Application(event),
+    }
+}
+
+/// What an item of a menu the driver opened does.
+enum Choice {
+    /// A field's context menu: the edit of this key.
+    Edit(Key),
+    /// A drop-down's items: choose the one at this index.
+    Item(usize),
 }
 
 struct App {
@@ -1806,8 +2161,9 @@ struct App {
     loop_handle: LoopHandle<'static, App>,
     modifiers: Modifiers,
     clipboards: clipboard::Clipboards,
-    /// The context menu open on a field: its popup, and the key each of its items does.
-    field_menu: Option<(SurfaceId, Vec<(WidgetId, Key)>)>,
+    /// The menu the driver opened, a field's context menu or a drop-down's items: its popup,
+    /// and what each of its items does.
+    own_menu: Option<(SurfaceId, Vec<(WidgetId, Choice)>)>,
     /// Where a button is being pressed, while its press is handled: a field's context menu
     /// opens there.
     pressed_at: Option<(f32, f32)>,
@@ -1836,6 +2192,7 @@ impl App {
     /// Hands an event of `id`'s widgets to the application, then redraws what changed and
     /// updates the accessibility trees.
     fn update(&mut self, id: SurfaceId, event: Option<Event>) {
+        let dialog = self.shell.dialogs.is_dialog(id);
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
@@ -1847,26 +2204,24 @@ impl App {
                     window.set_minimized();
                 }
             }
-            Some(Event::Window(WindowButton::Close)) => {
+            // A dialog's Close is the application's to answer.
+            Some(Event::Window(WindowButton::Close)) if !dialog => {
                 self.shell.exit = true;
                 return;
             }
-            // A field opens its own context menu, whose items the driver does.
-            Some(Event::ContextMenu(widget)) if surface.ui.field_text(widget).is_some() => {
-                self.open_field_menu(id, widget);
+            Some(event) => {
+                let own = self.own_menu.as_ref().is_some_and(|m| m.0 == id);
+                match route(&surface.ui, event, own) {
+                    Route::FieldMenu(widget) => self.open_field_menu(id, widget),
+                    Route::DropDown(widget) => self.open_drop_down(id, widget),
+                    Route::Chosen(item) => self.menu_chosen(item),
+                    Route::Kept => {}
+                    Route::Application(event) => self.application.event(&mut self.shell, id, event),
+                }
             }
-            Some(Event::Clicked(item)) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {
-                self.field_edit(item);
-            }
-            // The field's menu is the driver's: the application never opened it, and gets none
-            // of its events, such as a context-menu event of an item at a press of the Menu key.
-            Some(_) if self.field_menu.as_ref().is_some_and(|m| m.0 == id) => {}
-            Some(event) => self.application.event(&mut self.shell, id, event),
             None => {}
         }
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
     }
 
     /// Opens the edit menu of field `widget` of `id`, as GTK's entry does: under the pointer for
@@ -1886,19 +2241,54 @@ impl App {
             .shell
             .show_popup(id, widget, self.pressed_at, menu, Side::Bottom, true)
         {
-            Ok(surface) => self.field_menu = Some((surface, items)),
+            Ok(surface) => {
+                let items = items.into_iter().map(|(item, key)| (item, Choice::Edit(key)));
+                self.own_menu = Some((surface, items.collect()));
+            }
             Err(error) => eprintln!("athanor-sal: no context menu for the field: {error}"),
         }
     }
 
-    /// Does what `item` of the open field menu says in its field, once the menu has closed and
-    /// the focus returned to the field, with the serial of the click or the key that chose it.
-    fn field_edit(&mut self, item: WidgetId) {
-        let (Some((surface, items)), Some(open)) = (self.field_menu.take(), self.shell.popup)
+    /// Opens the items of drop-down `widget` of `id` in a menu under it, with the focus on the
+    /// chosen one, as GTK's DropDown does.
+    fn open_drop_down(&mut self, id: SurfaceId, widget: WidgetId) {
+        let max_height = self.shell.surfaces.iter().find(|s| s.id == id).and_then(|from| {
+            let height = |info: &OutputInfo| info.logical_size.map(|(_, h)| h as f32);
+            let output = from.output.as_ref().and_then(|output| {
+                let (_, info) = self.shell.outputs.iter().find(|(o, _)| o == output)?;
+                height(info)
+            });
+            let outputs: Vec<f32> = self.shell.outputs.iter().filter_map(|(_, i)| height(i)).collect();
+            menu_max_height(output, &outputs, from.size.1)
+        });
+        let Some((menu, items)) = self
+            .shell
+            .ui(id)
+            .and_then(|ui| ui.drop_down_menu(widget, max_height))
         else {
             return;
         };
-        let Some((_, key)) = items.into_iter().find(|&(i, _)| i == item) else {
+        let chosen = items.iter().find(|&&(item, _)| menu.is_active(item)).map(|&(item, _)| item);
+        match self.shell.show_popup(id, widget, None, menu, Side::Bottom, true) {
+            Ok(surface) => {
+                if let Some(ui) = self.shell.ui_mut(surface) {
+                    ui.set_focus(chosen);
+                }
+                let items = items.into_iter().map(|(item, index)| (item, Choice::Item(index)));
+                self.own_menu = Some((surface, items.collect()));
+            }
+            Err(error) => eprintln!("athanor-sal: no menu for the drop-down: {error}"),
+        }
+    }
+
+    /// Does what `item` of the driver's open menu says, once the menu has closed and the focus
+    /// returned to its widget: edits the field, or chooses in the drop-down.
+    fn menu_chosen(&mut self, item: WidgetId) {
+        let (Some((surface, items)), Some(open)) = (self.own_menu.take(), self.shell.popup)
+        else {
+            return;
+        };
+        let Some((_, choice)) = items.into_iter().find(|&(i, _)| i == item) else {
             return;
         };
         if open.surface != surface {
@@ -1908,7 +2298,13 @@ impl App {
         let event = self
             .shell
             .get_mut(open.parent)
-            .and_then(|parent| parent.ui.field_edit(open.anchor, key));
+            .and_then(|parent| {
+                let anchor = open.anchor_in(&parent.ui)?;
+                match choice {
+                    Choice::Edit(key) => parent.ui.field_edit(anchor, key),
+                    Choice::Item(index) => parent.ui.choose(anchor, index),
+                }
+            });
         self.changed(open.parent, event);
     }
 
@@ -1939,9 +2335,7 @@ impl App {
         match seen {
             Ok(Some(id)) => {
                 self.application.output_changed(&mut self.shell, id, &info);
-                if let Err(error) = self.shell.draw_dirty() {
-                    self.fail(error);
-                }
+                self.draw_dirty();
             }
             Ok(None) => {}
             Err(error) => self.fail(error),
@@ -1997,7 +2391,8 @@ impl App {
         }
         if let Some((_, (_, r, hint))) = field {
             text_input.enable();
-            text_input.set_content_type(hint, ContentPurpose::Normal);
+            let (hint, purpose) = content_type(hint);
+            text_input.set_content_type(hint, purpose);
             text_input.set_cursor_rectangle(r.x as i32, r.y as i32, r.w as i32, r.h as i32);
         } else {
             text_input.disable();
@@ -2022,14 +2417,39 @@ impl App {
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
-    /// selection its fields offered ends with it.
+    /// selection its fields offered ends with it, and the popups closed with it hand their
+    /// keyboard back ([`App::popups_closed`]).
     fn close(&mut self, id: SurfaceId) {
         self.shell.remove(id);
+        self.popups_closed();
         self.forget(id);
     }
 
-    /// Ends the text input and the primary selection of the closed surface `id`.
+    /// Hands the keyboard of the popups [`Shell::remove`] closed, by the driver or by the
+    /// application, back to the nearest open surface they were opened from, a dialog's window
+    /// when the dialog closed with them, without waiting for the compositor's `enter` on it, and
+    /// ends what the popups held.
+    fn popups_closed(&mut self) {
+        let popups = std::mem::take(&mut self.shell.closed_popups);
+        let shell = &self.shell;
+        self.keyboard_focus = keyboard_after_closed(
+            &popups,
+            self.keyboard_focus,
+            |id| shell.ui(id).is_some(),
+            |id| shell.dialogs.parent_of(id),
+        );
+        for popup in popups {
+            self.forget(popup.surface);
+        }
+    }
+
+    /// Ends the text input and the primary selection of the closed surface `id`; a dialog that
+    /// held the keyboard hands it to the surface it was opened on, while that one is open.
     fn forget(&mut self, id: SurfaceId) {
+        let parent = self.shell.dialogs.take_parent(id);
+        if self.keyboard_focus == Some(id) {
+            self.keyboard_focus = parent.filter(|&parent| self.shell.ui(parent).is_some());
+        }
         self.unselect(id);
         if self.ime.entered == Some(id) {
             self.leave_text_input();
@@ -2037,27 +2457,60 @@ impl App {
     }
 
     /// Ends what the surfaces [`Shell::close`] closed held: their place on their output, their
-    /// text input and their primary selection.
+    /// text input and their primary selection; the popups closed hand their keyboard back first.
     fn closed_by_application(&mut self) {
+        self.popups_closed();
         for id in std::mem::take(&mut self.shell.closing) {
             self.outputs.closed(id);
             self.forget(id);
         }
     }
 
-    /// Closes `id`, which the application did not ask to close, and tells it.
+    /// Ends the pointer's press and hover on each window a dialog opened on in this turn and
+    /// still blocks, as if the pointer left it: the release it waits for is the dialog's, a drag
+    /// under way ends over no widget, and its tooltip, shown or waiting, ends. A paste still
+    /// being read into it is dropped: its text would reach a window that takes no input.
+    fn blocked_by_dialogs(&mut self) {
+        for parent in std::mem::take(&mut self.shell.blocking) {
+            if !self.shell.dialogs.blocked(parent) {
+                continue;
+            }
+            if self.tooltip.target().is_some_and(|&(id, _)| id == parent) {
+                self.point_tooltip(None);
+            }
+            self.drop_paste_into(parent);
+            let Some(surface) = self.shell.get_mut(parent) else {
+                continue;
+            };
+            let event = surface.ui.pointer_leave();
+            self.changed(parent, event);
+        }
+    }
+
+    /// Closes `id`, which the application did not ask to close, and tells it. One the
+    /// application closes from Application::closed is closed at its asking, and it is not told
+    /// of it. Only layer surfaces are lost today, and dialogs open on windows only: the dialogs
+    /// of `id`, told first, each before the surface it was opened on, are for a window lost.
     fn lost(&mut self, id: SurfaceId) {
-        self.outputs.closed(id);
-        self.close(id);
-        self.application.closed(&mut self.shell, id);
+        let order = self.shell.dialogs.closing_order(id);
+        each_open(
+            self,
+            order,
+            |app, surface| app.shell.surfaces.iter().any(|s| s.id == surface),
+            |app, surface| {
+                app.outputs.closed(surface);
+                app.close(surface);
+                app.application.closed(&mut app.shell, surface);
+            },
+        );
     }
 
     /// Moves the accessibility adapters' window focus to the surface that takes the keys, after
     /// every event: the open menu's while it holds them, though the compositor may keep the
-    /// keyboard on its parent, then back to the parent once it closes. An adapter emits its
-    /// focus events only while its window is focused.
+    /// keyboard on its parent, then back to the parent once it closes, and a blocked window's
+    /// topmost dialog. An adapter emits its focus events only while its window is focused.
     fn sync_window_focus(&mut self) {
-        let focused = focused_window(self.shell.popup, self.keyboard_focus);
+        let focused = focused_window(self.shell.popup, self.key_target());
         if focused == self.window_focus {
             return;
         }
@@ -2070,6 +2523,24 @@ impl App {
             }
         }
         self.window_focus = focused;
+    }
+
+    /// Closes a drop-down's menu whose items the application replaced, as Escape does, then
+    /// draws the surfaces whose widgets changed.
+    fn draw_dirty(&mut self) {
+        if let Some(open) = self.shell.popup {
+            let stale = self
+                .shell
+                .get_mut(open.parent)
+                .is_some_and(|from| std::mem::take(&mut from.ui.stale_popup));
+            if stale {
+                self.own_menu = None;
+                self.close_popup();
+            }
+        }
+        if let Err(error) = self.shell.draw_dirty() {
+            self.fail(error);
+        }
     }
 
     /// Closes the popup open, and redraws the surface it was opened from.
@@ -2095,7 +2566,8 @@ impl App {
     }
 
     /// The widget with a tooltip under the pointer, or newly focused, is now `target`: the
-    /// tooltip shown hides, and the target's shows after GTK's delay.
+    /// tooltip shown hides, and the target's shows after GTK's delay, if the widget was not
+    /// removed since.
     fn point_tooltip(&mut self, target: Option<(SurfaceId, WidgetId)>) {
         let (hide, wait) = self.tooltip.point(target, Instant::now());
         if hide {
@@ -2128,7 +2600,7 @@ impl App {
         let Some(ui) = self.shell.ui(id) else {
             return;
         };
-        let text = (widget.index() < ui.len() && ui.is_visible(widget))
+        let text = (ui.contains(widget) && ui.is_visible(widget))
             .then(|| ui.tooltip(widget))
             .flatten();
         let Some(text) = text else {
@@ -2164,6 +2636,7 @@ impl App {
     /// as with GTK's popovers; a press on a window's title bar outside its buttons moves it.
     fn pointer_pressed(&mut self, id: SurfaceId, (x, y): (f32, f32), button: u32, serial: u32) {
         self.shell.grab.pressed(serial);
+        self.shell.input_surface = Some(id);
         self.hide_tooltip();
         if self
             .shell
@@ -2193,6 +2666,11 @@ impl App {
         let event = surface.ui.pointer_press(x, y, button);
         self.pressed_at = Some((x, y));
         self.changed(id, event);
+        if button == PointerButton::Primary && !self.shell.exit {
+            self.application.pressed(&mut self.shell, id, (x, y));
+            // What the application changed is drawn, and the input method follows the focus.
+            self.changed(id, None);
+        }
         self.pressed_at = None;
     }
 
@@ -2201,7 +2679,7 @@ impl App {
     /// answers an older state sends no new state; the next one that answers the latest does.
     fn text_input_done(&mut self, serial: u32) {
         let (Pending { preedit, commit }, current) = self.ime.done(serial);
-        let Some(id) = self.ime.entered else {
+        let Some(id) = self.ime.entered.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return;
         };
         let Some(surface) = self.shell.get_mut(id) else {
@@ -2225,16 +2703,20 @@ impl App {
             return;
         };
         self.application.keyboard(&mut self.shell, id, focused);
-        if let Err(error) = self.shell.draw_dirty() {
-            self.fail(error);
-        }
+        self.draw_dirty();
+    }
+
+    /// The surface that takes the keys the compositor sends: the one it focused, or the topmost
+    /// dialog that blocks it, which the compositor may never focus.
+    fn key_target(&self) -> Option<SurfaceId> {
+        self.keyboard_focus.map(|id| self.shell.dialogs.topmost(id))
     }
 
     /// A key held down: as pressed again, with the serial of its press, which the repeat does
     /// not carry, except the keys that act once per press.
     fn repeat(&mut self, event: KeyEvent) {
         let focused = self
-            .keyboard_focus
+            .key_target()
             .and_then(|id| self.shell.ui(id))
             .and_then(|ui| Some((ui, ui.focus()?)));
         let in_field = focused.is_some_and(|(ui, id)| ui.field_text(id).is_some());
@@ -2248,12 +2730,16 @@ impl App {
     }
 
     fn key(&mut self, event: KeyEvent) {
-        let key = match event.keysym {
+        let mut key = match event.keysym {
             Keysym::Tab if self.modifiers.shift => Key::BackTab,
             Keysym::Tab => Key::Tab,
             Keysym::ISO_Left_Tab => Key::BackTab,
             Keysym::Left if self.modifiers.shift => Key::SelectLeft,
             Keysym::Right if self.modifiers.shift => Key::SelectRight,
+            Keysym::Left if self.modifiers.ctrl => Key::ControlLeft,
+            Keysym::Right if self.modifiers.ctrl => Key::ControlRight,
+            Keysym::Up if self.modifiers.ctrl => Key::ControlUp,
+            Keysym::Down if self.modifiers.ctrl => Key::ControlDown,
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
             Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
@@ -2274,7 +2760,8 @@ impl App {
             Keysym::Menu => Key::Menu,
             _ => match event.utf8 {
                 Some(text) if !text.chars().any(char::is_control) => Key::Text(text),
-                _ => return,
+                Some(text) => return forget(&mut Key::Text(text)),
+                None => return,
             },
         };
         self.hide_tooltip();
@@ -2288,16 +2775,30 @@ impl App {
             return;
         }
         // An open menu takes the keys, whichever of the application's surfaces the compositor
-        // sends them to.
+        // sends them to, and a blocked window's topmost dialog takes them from it.
         let target = match self.shell.popup {
             Some(open) if open.menu => Some(open.surface),
-            _ => self.keyboard_focus,
+            _ => self.key_target(),
         };
-        let Some(id) = target else {
-            return;
+        let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
+            return forget(&mut key);
         };
+        // A key shows the ring, the application's hook's too (AX8's `:focus-visible`).
+        if let Some(ui) = self.shell.ui_mut(id) {
+            ui.quiet_focus = None;
+        }
+        let modifiers = KeyModifiers::from(self.modifiers);
+        let arrow = key.control_arrow();
+        if self.shell.get_mut(id).is_some()
+            && self
+                .application
+                .key(&mut self.shell, id, arrow.as_ref().unwrap_or(&key), modifiers)
+        {
+            self.changed(id, None);
+            return forget(&mut key);
+        }
         let Some(surface) = self.shell.get_mut(id) else {
-            return;
+            return forget(&mut key);
         };
         let before = surface.ui.focus();
         let event = surface.ui.key(key);
@@ -2503,8 +3004,18 @@ impl SessionLockHandler for App {
 }
 
 impl WindowHandler for App {
-    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
-        self.shell.exit = true;
+    /// Ends the run, but for a dialog, whose application is asked as at its Close button, and
+    /// for a window a dialog blocks, which stays open with the dialog unanswered, as GTK's.
+    fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, window: &Window) {
+        let Some(id) = self.shell.find(window.wl_surface()).map(|s| s.id) else {
+            self.shell.exit = true;
+            return;
+        };
+        match self.shell.dialogs.close_request(id) {
+            CloseRequest::Dialog => self.update(id, Some(Event::Window(WindowButton::Close))),
+            CloseRequest::Ignored => {}
+            CloseRequest::Exit => self.shell.exit = true,
+        }
     }
 
     fn configure(
@@ -2537,15 +3048,35 @@ impl PopupHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         popup: &Popup,
-        _: PopupConfigure,
+        configure: PopupConfigure,
     ) {
         // ponytail: the popup keeps its widgets' size and the place the compositor gave it; a
         // menu whose items change while it is open would need a reposition.
-        let Some(surface) = self.shell.find(popup.wl_surface()) else {
+        let Some(id) = self.shell.find(popup.wl_surface()).map(|surface| surface.id) else {
+            return;
+        };
+        // The middle of the widget it opened from, in the popup's own coordinates, for the
+        // arrow of its island: the compositor may have slid the popup along the edge.
+        let anchor = self
+            .shell
+            .popup
+            .filter(|open| open.surface == id)
+            .and_then(|open| {
+                let parent = self.shell.ui(open.parent)?;
+                Some(parent.widget(open.anchor_in(parent)?).rect)
+            });
+        let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
         surface.configured = true;
-        let id = surface.id;
+        if let (Some(arrow), Some(r)) = (surface.ui.arrow.as_mut(), anchor) {
+            let (x, y) = configure.position;
+            arrow.at = match arrow.side {
+                Some(Side::Left | Side::Right) => Some(r.y + r.h / 2.0 - y as f32),
+                Some(_) => Some(r.center_x() - x as f32),
+                None => None,
+            };
+        }
         self.changed(id, None);
     }
 
@@ -2651,9 +3182,13 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
         _: &[u32],
-        _: &[Keysym],
+        held: &[Keysym],
     ) {
-        self.keyboard_focus = self.shell.find(wl).map(|surface| surface.id);
+        let entered = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = entered;
+        if let Some(ui) = entered.and_then(|id| self.shell.ui_mut(id)) {
+            enter_focus(ui, !held.is_empty());
+        }
         self.keyboard_moved(wl, true);
     }
 
@@ -2665,7 +3200,10 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
     ) {
-        self.keyboard_focus = None;
+        // A closed popup's leave, which may come after its keyboard was handed back, leaves the
+        // focus where it is.
+        let left = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = keyboard_after_leave(self.keyboard_focus, left);
         self.keyboard_moved(wl, false);
     }
 
@@ -2678,6 +3216,7 @@ impl KeyboardHandler for App {
         event: KeyEvent,
     ) {
         self.shell.grab.key(Some(serial));
+        self.shell.input_surface = self.keyboard_focus;
         self.key(event);
         self.shell.grab.key(None);
     }
@@ -2735,7 +3274,11 @@ impl PointerHandler for App {
                 PointerEventKind::Leave { .. } => self.point_tooltip(None),
                 _ => {}
             }
-            if let Some(surface) = self.shell.find(&event.surface) {
+            // A parent a dialog blocks takes nothing but the pointer leaving it.
+            let leaving = matches!(event.kind, PointerEventKind::Leave { .. });
+            let open = self.shell.find(&event.surface).map(|s| s.id);
+            let blocked = !leaving && open.is_some_and(|id| self.shell.dialogs.blocked(id));
+            if let Some(surface) = self.shell.find(&event.surface).filter(|_| !blocked) {
                 let id = surface.id;
                 let at = (event.position.0 as f32, event.position.1 as f32);
                 match event.kind {
@@ -2757,12 +3300,15 @@ impl PointerHandler for App {
                             .pointer_release(at.0, at.1, PointerButton::Primary);
                         self.changed(id, event);
                     }
-                    // wl_pointer's axis values are in surface coordinates: logical pixels.
-                    PointerEventKind::Axis { vertical, .. } => {
-                        let moved = surface.ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+                    PointerEventKind::Axis {
+                        horizontal,
+                        vertical,
+                        ..
+                    } => {
+                        let (changed, event) = axis(&mut surface.ui, at, horizontal, vertical);
                         self.hide_tooltip();
-                        if moved {
-                            self.changed(id, None);
+                        if changed {
+                            self.changed(id, event);
                         }
                     }
                     _ => {}
@@ -2772,9 +3318,7 @@ impl PointerHandler for App {
                 if let Some(id) = self.shell.find(&event.surface).map(|s| s.id) {
                     let inside = matches!(event.kind, PointerEventKind::Enter { .. });
                     self.application.pointer(&mut self.shell, id, inside);
-                    if let Err(error) = self.shell.draw_dirty() {
-                        self.fail(error);
-                    }
+                    self.draw_dirty();
                 }
             }
             // The press grabs no more once its button is up or the pointer has left, on any
@@ -2787,6 +3331,30 @@ impl PointerHandler for App {
             }
         }
     }
+}
+
+/// The wheel or the touchpad turned at `at` on `ui`: the innermost scroll or text area under
+/// the pointer takes the vertical axis, whether or not it moves, as GTK's scrolled window does,
+/// and the widget under it gets what no scroll took, each axis on its own, as whole steps
+/// ([`Ui::pointer_wheel`]). Whether the widgets changed, and the event.
+fn axis(
+    ui: &mut Ui,
+    at: (f32, f32),
+    horizontal: AxisScroll,
+    vertical: AxisScroll,
+) -> (bool, Option<Event>) {
+    // wl_pointer's axis values are in surface coordinates: logical pixels.
+    let taken = ui.scroll_under(at.0, at.1).is_some();
+    let moved = ui.pointer_axis(at.0, at.1, vertical.absolute as f32);
+    let steps = crate::widget::wheel::steps;
+    let dx = steps(horizontal.value120, horizontal.discrete);
+    let dy = if taken {
+        0
+    } else {
+        steps(vertical.value120, vertical.discrete)
+    };
+    let event = ui.pointer_wheel(at.0, at.1, dx, dy);
+    (moved || event.is_some(), event)
 }
 
 impl ShmHandler for App {
@@ -2805,6 +3373,15 @@ impl ProvidesRegistryState for App {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(App);
+
+impl TokenHandler for App {
+    type RequestUdata = u64;
+
+    fn new_token(&mut self, token: String, data: &RequestData<u64>) {
+        self.application
+            .activation_token(&mut self.shell, data.udata, token);
+    }
+}
 
 /// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
 /// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut
@@ -2827,6 +3404,19 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
 
 /// Forgets the settling of a motion of `id` that a new one replaces, so that the application
 /// is not told of it during the new one, and queues `id` once if the new motion `ended` at once.
+/// Focuses the first control of a surface the keyboard enters (AX7), as GTK's at map. Entered
+/// by a key, as Ctrl+Alt+Tab with its keys still held, it shows the ring at once, as a bar or
+/// dock that holds the keyboard does; entered with no key held, as at map, the ring waits for
+/// the first key (AX8's `:focus-visible`).
+fn enter_focus(ui: &mut Ui, by_key: bool) {
+    if let Some(first) = focus::on_enter(ui) {
+        ui.focus_quietly(first);
+    }
+    if by_key {
+        ui.quiet_focus = None;
+    }
+}
+
 fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
     settled.retain(|s| *s != id);
     if ended {
@@ -2837,6 +3427,181 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::os::unix::net::UnixStream;
+    use wayland_client::protocol::wl_registry;
+
+    /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
+    /// move with Ctrl+Up and Ctrl+Down: a calendar alone reads Ctrl+arrow apart.
+    /// Entered at map, a surface focuses its first control without its ring; entered by a key,
+    /// as Ctrl+Alt+Tab, the ring shows at once, on the focus it kept too.
+    #[test]
+    fn a_surface_entered_by_a_key_shows_its_ring_at_once() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.add(Ui::ROOT, Kind::Button("Clock".into()));
+        ui.layout();
+        enter_focus(&mut ui, false);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), Some(first)));
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.layout();
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+    }
+
+    #[test]
+    fn an_application_reads_ctrl_with_an_arrow_as_the_arrow() {
+        let arrows = [
+            (Key::ControlLeft, Key::Left),
+            (Key::ControlRight, Key::Right),
+            (Key::ControlUp, Key::Up),
+            (Key::ControlDown, Key::Down),
+        ];
+        for (held, arrow) in arrows {
+            assert_eq!(held.control_arrow(), Some(arrow));
+        }
+        assert_eq!(Key::Up.control_arrow(), None, "an arrow is itself");
+        assert_eq!(Key::Text("a".into()).control_arrow(), None);
+    }
+
+    #[test]
+    fn a_turn_no_scroll_takes_reaches_the_widget_as_whole_steps_and_each_axis_apart() {
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        for n in 0..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        let item = ui.add(Ui::ROOT, Kind::Button("Item".into()));
+        ui.layout();
+        let r = ui.widget(item).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        let turn = |value120, absolute| AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        };
+        let none = AxisScroll::default();
+        // A high resolution wheel sends a quarter of a notch per event.
+        for _ in 0..3 {
+            assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (false, None));
+        }
+        let step = Event::Wheel { widget: item, dx: 0, dy: 1 };
+        assert_eq!(axis(&mut ui, at, none, turn(30, 3.75)), (true, Some(step)));
+        // The deprecated discrete count, from an older compositor.
+        let old = AxisScroll {
+            discrete: -1,
+            ..turn(0, -15.0)
+        };
+        let up = Event::Wheel { widget: item, dx: 0, dy: -1 };
+        assert_eq!(axis(&mut ui, at, none, old), (true, Some(up)));
+        // Over the scroll, the scroll takes the vertical axis, and the horizontal one is kept.
+        let s = ui.widget(scroll).rect;
+        let over = (s.x + 1.0, s.y + 1.0);
+        let (moved, event) = axis(&mut ui, over, turn(120, 15.0), turn(120, 15.0));
+        assert!(moved, "the scroll follows");
+        assert!(
+            matches!(event, Some(Event::Wheel { dx: 1, dy: 0, .. })),
+            "the vertical turn the scroll took reaches no widget: {event:?}"
+        );
+    }
+
+    /// A turn of `value120` 120ths of a notch, `absolute` logical pixels.
+    fn turn(value120: i32, absolute: f64) -> AxisScroll {
+        AxisScroll {
+            absolute,
+            value120,
+            ..AxisScroll::default()
+        }
+    }
+
+    #[test]
+    fn a_scroll_at_its_end_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        // At offset 0, a turn up over a button inside moves nothing and reaches no widget.
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let first = ui.add(scroll, Kind::Button("Line 0".into()));
+        for n in 1..20 {
+            ui.add(scroll, Kind::Button(format!("Line {n}")));
+        }
+        ui.layout();
+        let r = ui.widget(first).rect;
+        assert_eq!(axis(&mut ui, (r.x + 1.0, r.y + 1.0), none, turn(-120, -15.0)), (false, None));
+    }
+
+    #[test]
+    fn a_scroll_whose_content_fits_takes_the_vertical_turn() {
+        let none = AxisScroll::default();
+        let mut ui = Ui::new("Tray", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 400.0);
+        let only = ui.add(scroll, Kind::Button("Only".into()));
+        ui.layout();
+        let r = ui.widget(only).rect;
+        let at = (r.x + 1.0, r.y + 1.0);
+        assert_eq!(axis(&mut ui, at, none, turn(120, 15.0)), (false, None));
+        assert_eq!(axis(&mut ui, at, none, turn(-120, -15.0)), (false, None));
+    }
+
+    #[test]
+    fn a_window_that_is_not_resizable_takes_its_minimum_as_its_maximum() {
+        let mut ui = Ui::new("Fixed", crate::Theme::default(), false);
+        assert_eq!(max_size(&ui, (420, 300)), None, "a window is resizable by default");
+        ui.resizable = false;
+        assert_eq!(max_size(&ui, (420, 300)), Some((420, 300)));
+    }
+
+    #[test]
+    fn a_drop_down_menu_is_bounded_by_its_output_else_the_shortest_one() {
+        assert_eq!(menu_max_height(Some(1080.0), &[720.0, 1080.0], 40), Some(1080.0), "its own");
+        assert_eq!(
+            menu_max_height(None, &[1440.0, 720.0, 1080.0], 40),
+            Some(720.0),
+            "a window, or a layer surface the compositor placed"
+        );
+        assert_eq!(menu_max_height(Some(0.0), &[0.0, 900.0], 40), Some(900.0), "0 is unknown");
+        assert_eq!(menu_max_height(None, &[], 40), Some(40.0), "no output: the surface");
+        assert_eq!(menu_max_height(None, &[0.0], 0), None, "nothing known");
+    }
+
+    /// The path of a choice in a drop-down's menu, as the driver runs it: the item activated in
+    /// the menu, its event routed, then the item's index chosen in the drop-down.
+    #[test]
+    fn an_item_activated_in_a_drop_down_menu_chooses_it_and_a_cancel_chooses_nothing() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Firefox", "Spotify"], 0);
+        let empty = ui.drop_down(Ui::ROOT, "Nothing", &[], 0);
+        let opened = ui.activate(players).map(|event| route(&ui, event, false));
+        assert_eq!(opened, Some(Route::DropDown(players)));
+        let kept = ui.activate(empty).map(|event| route(&ui, event, false));
+        assert_eq!(kept, Some(Route::Kept), "an empty drop-down opens nothing");
+        let Some((mut menu, items)) = ui.drop_down_menu(players, None) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        let (spotify, index) = items[1];
+        let routed = menu.activate(spotify).map(|event| route(&menu, event, true));
+        assert_eq!(routed, Some(Route::Chosen(spotify)));
+        open.closed(&mut ui);
+        assert_eq!(ui.choose(players, index), Some(Event::Changed(players)));
+        assert_eq!(ui.chosen(players), Some(1));
+        // Escape, or a press outside, closes the menu and chooses nothing.
+        let Some((mut menu, _)) = ui.drop_down_menu(players, None) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        let open = OpenPopup::opened(0, players, 1, &mut ui, &mut menu, true);
+        assert!(open.dismissed_by(Dismiss::Escape) && open.dismissed_by(Dismiss::Press(0)));
+        assert!(!open.dismissed_by(Dismiss::Press(1)), "a press in the menu");
+        open.closed(&mut ui);
+        assert_eq!(ui.chosen(players), Some(1));
+        assert_eq!(route(&menu, Event::Escape, true), Route::Kept);
+        assert_eq!(
+            route(&ui, Event::Escape, false),
+            Route::Application(Event::Escape)
+        );
+    }
 
     #[test]
     fn a_new_motion_forgets_the_settling_of_the_one_it_replaces() {
@@ -3133,6 +3898,21 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_is_reported_first_and_when_asked_once_committed() {
+        // The first frame, whether or not the draw committed it.
+        assert!(reported(true, false, false, (true, true)));
+        assert!(!reported(true, false, false, (false, false)), "not configured yet");
+        // Later frames only when asked, and only a draw that committed one.
+        assert!(!reported(false, false, false, (true, true)));
+        assert!(reported(false, true, false, (true, true)));
+        assert!(
+            !reported(false, true, true, (true, true)),
+            "a draw while a frame is pending only lays out"
+        );
+        assert!(!reported(false, true, false, (true, false)), "nothing committed");
+    }
+
+    #[test]
     fn a_surface_closed_before_its_turn_is_not_reported_drawn() {
         // Surfaces 1, 2 and 3 drew their first frame; 2 closed since, and drawing 1 closes 3.
         let mut state = (vec![1, 3], Vec::new());
@@ -3178,9 +3958,8 @@ mod tests {
     fn set_layer_moves_a_layer_surface_to_another_layer_and_keeps_its_namespace() {
         let placed = (Layer::Background, "athanor-osd".to_owned());
         let mut options = LayerOptions {
-            layer: Layer::Background,
             namespace: "athanor-osd".into(),
-            ..LayerOptions::default()
+            ..LayerOptions::new(Layer::Background)
         };
         assert_eq!(layer_change(&placed, &options, 4).ok(), Some(None));
         options.layer = Layer::Overlay;
@@ -3215,9 +3994,10 @@ mod tests {
             commits: 2,
             ..Ime::default()
         };
-        ime.pending.commit = Some("a".into());
+        ime.pending.commit = Some(zeroize::Zeroizing::new("a".into()));
         let (pending, current) = ime.done(1);
-        assert_eq!((pending.commit.as_deref(), current), (Some("a"), false));
+        let commit = pending.commit.as_ref().map(|text| text.as_str());
+        assert_eq!((commit, current), (Some("a"), false));
         assert!(
             ime.pending.commit.is_none(),
             "a stale done still applies its text"
@@ -3232,12 +4012,12 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // `a` closes without a `leave`: App::close ends its text input.
         ime.entered = None;
         assert!(ime.change(None));
         ime.entered = Some(b);
-        let field = Some((b, WidgetId(1), ContentHint::None));
+        let field = Some((b, WidgetId(1, 0), ContentHint::None));
         assert!(ime.change(field), "no enable for the new field");
         assert_eq!(ime.commits, 3);
         assert!(!ime.change(field));
@@ -3247,10 +4027,30 @@ mod tests {
     fn every_change_of_the_focused_field_enables_the_text_input_again() {
         let a = SurfaceId(1);
         let mut ime = Ime::default();
-        assert!(ime.change(Some((a, WidgetId(1), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(1, 0), ContentHint::None))));
         // Another field of the same hint, on the same surface.
-        assert!(ime.change(Some((a, WidgetId(2), ContentHint::None))));
-        assert!(!ime.change(Some((a, WidgetId(2), ContentHint::None))));
+        assert!(ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+        assert!(!ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+    }
+
+    #[test]
+    fn a_field_focused_in_a_removed_fields_slot_enables_the_text_input_again() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.field(column, "Old", "");
+        ui.layout();
+        ui.set_focus(Some(old));
+        let a = SurfaceId(1);
+        let field = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (a, id, hint));
+        let mut ime = Ime::default();
+        assert!(ime.change(field(&ui)));
+        ui.remove_children(column);
+        let new = ui.field(column, "New", "");
+        ui.layout();
+        ui.set_focus(Some(new));
+        assert_eq!(new.index(), old.index(), "the slot is reused");
+        assert!(ime.change(field(&ui)), "the removed field's cursor rectangle stays");
+        assert!(!ime.change(field(&ui)));
     }
 
     #[test]
@@ -3260,7 +4060,7 @@ mod tests {
             entered: Some(a),
             ..Ime::default()
         };
-        ime.pending.preedit = Some(("ni".into(), None));
+        ime.pending.preedit = Some((zeroize::Zeroizing::new("ni".into()), None));
         assert_eq!(ime.leave(), Some(a));
         assert_eq!(ime.entered, None);
         // The first done after the next enter applies nothing from before the leave.
@@ -3284,6 +4084,22 @@ mod tests {
         assert!(!ui.end_composition(), "a second end changed the field");
     }
 
+    /// An input method neither shows, learns nor suggests a password: the field asks for hidden,
+    /// sensitive text of a password, and a plain field for none of it.
+    #[test]
+    fn a_password_field_asks_for_hidden_sensitive_text_of_a_password() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let password = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (id, content_type(hint)));
+        ui.set_focus(Some(password));
+        let hidden = ContentHint::HiddenText | ContentHint::SensitiveData;
+        assert_eq!(asked(&ui), Some((password, (hidden, ContentPurpose::Password))));
+        ui.set_focus(Some(name));
+        assert_eq!(asked(&ui), Some((name, (ContentHint::None, ContentPurpose::Normal))));
+    }
+
     #[test]
     fn a_text_area_asks_for_multiline_text() {
         let mut ui = Ui::new("Text", Theme::default(), false);
@@ -3298,15 +4114,126 @@ mod tests {
     }
 
     #[test]
+    fn a_key_no_field_takes_is_overwritten() {
+        let mut typed = Key::Text("h".into());
+        forget(&mut typed);
+        assert_eq!(typed, Key::Text(String::new()));
+        let mut tab = Key::Tab;
+        forget(&mut tab);
+        assert_eq!(tab, Key::Tab);
+    }
+
+    #[test]
     fn the_preedit_cursor_follows_the_text_printable_keeps() {
         // "a\tbç": the tab goes, so the cursor after "b" (byte 3) moves to byte 2.
         assert_eq!(
             printable_preedit("a\tb\u{e7}", Some((3, 5))),
-            ("ab\u{e7}".to_owned(), Some((2, 4)))
+            (zeroize::Zeroizing::new("ab\u{e7}".to_owned()), Some((2, 4)))
         );
-        assert_eq!(printable_preedit("ab", None), ("ab".to_owned(), None));
+        assert_eq!(
+            printable_preedit("ab", None),
+            (zeroize::Zeroizing::new("ab".to_owned()), None)
+        );
         // Inside "ç", or past the end: no cursor.
         assert_eq!(printable_preedit("\u{e7}", Some((1, 1))).1, None);
         assert_eq!(printable_preedit("ab", Some((0, 3))).1, None);
+    }
+
+    #[test]
+    fn the_preedit_is_overwritten_wherever_it_drops() {
+        // A password field shows no preedit, but the input method sends one all the same.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        let pending = Pending {
+            preedit: Some((zeroize::Zeroizing::new("hunter2".into()), None)),
+            ..Pending::default()
+        };
+        if let Some((preedit, _)) = &pending.preedit {
+            overwritten(preedit);
+        }
+        overwritten(&printable_preedit("hunter2", None).0);
+    }
+
+    /// A client that dispatches nothing: the registry it asks for gives the compositor an object
+    /// to raise a protocol error on.
+    struct Client;
+
+    impl wayland_client::Dispatch<wl_registry::WlRegistry, ()> for Client {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    /// An event loop on the client end of a socket pair, as the driver runs one on the
+    /// compositor's socket, its registry as object 2, and the server end, which has read the
+    /// request for it.
+    fn on_socket_pair(
+    ) -> Result<(EventLoop<'static, Client>, Connection, wl_registry::WlRegistry, UnixStream), Error>
+    {
+        let (client, mut server) = UnixStream::pair()?;
+        let conn = Connection::from_socket(client)?;
+        let queue = conn.new_event_queue::<Client>();
+        let registry = conn.display().get_registry(&queue.handle(), ());
+        conn.flush()?;
+        // Read, so that closing the server end ends the stream instead of resetting it.
+        server.read_exact(&mut [0; 12])?;
+        let event_loop = EventLoop::try_new()?;
+        WaylandSource::new(conn.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|e| e.error.to_string())?;
+        Ok((event_loop, conn, registry, server))
+    }
+
+    /// The error of the first of a hundred turns of the loop that fails, if one does.
+    fn first_error(event_loop: &mut EventLoop<'static, Client>, conn: &Connection) -> Option<String> {
+        (0..100).find_map(|_| {
+            let turn = dispatch(event_loop, conn, Some(Duration::from_millis(10)), &mut Client);
+            turn.err().map(|error| error.to_string())
+        })
+    }
+
+    #[test]
+    fn the_loop_ends_with_the_protocol_error_that_ended_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, registry, mut server) = on_socket_pair()?;
+        assert_eq!(registry.id().protocol_id(), 2);
+        // wl_display.error(wl_registry 2, code 3, "invalid size"), then the compositor closes.
+        // Not on wl_display itself: libwayland reports its codes as an errno, ENOMEM for 2.
+        let text = b"invalid size\0\0\0\0";
+        let mut message = Vec::new();
+        for word in [1, (8 + 12 + text.len() as u32) << 16, 2, 3, 13] {
+            message.extend_from_slice(&u32::to_ne_bytes(word));
+        }
+        message.extend_from_slice(text);
+        server.write_all(&message)?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        let ended = "the compositor ended the Wayland connection: \
+                     Protocol error 3 on object wl_registry@2";
+        // The Rust backend keeps the message; libwayland's does not. Which one runs is not Sal's
+        // to choose: any crate built with it may turn on wayland-backend's client_system, as Sal's
+        // `gpu` feature does, and Cargo unifies features across a build, so both forms are right.
+        let message = format!("{ended}: invalid size");
+        assert!(
+            error.as_deref() == Some(&message) || error.as_deref() == Some(ended),
+            "{error:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_loop_ends_when_the_compositor_closes_the_connection() -> Result<(), Error> {
+        let (mut event_loop, conn, _registry, server) = on_socket_pair()?;
+        drop(server);
+        let error = first_error(&mut event_loop, &conn);
+        assert!(
+            error.as_deref().is_some_and(|e| e.starts_with("the compositor ended the Wayland")),
+            "{error:?}"
+        );
+        Ok(())
     }
 }

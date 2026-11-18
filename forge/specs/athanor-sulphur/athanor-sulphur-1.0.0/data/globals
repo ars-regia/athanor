@@ -23,21 +23,42 @@ zwp_pointer_gestures_v1 standard
 zxdg_decoration_manager_v1 standard
 zxdg_exporter_v2 standard
 zxdg_importer_v2 standard
+xdg_wm_dialog_v1 standard
 wp_fractional_scale_manager_v1 standard
 wp_presentation standard
 wp_cursor_shape_manager_v1 standard
+xdg_system_bell_v1 standard
 xdg_activation_v1 standard
 wl_data_device_manager standard
 ext_idle_notifier_v1 standard
 zwp_idle_inhibit_manager_v1 standard
 zwp_primary_selection_device_manager_v1 standard
+# Decision 33, wave 2a.
+wl_fixes standard
+wp_alpha_modifier_v1 standard
+wp_fifo_manager_v1 standard
+wp_commit_timing_manager_v1 standard
+org_kde_kwin_server_decoration_manager standard
+xdg_toplevel_icon_manager_v1 standard
+# Decision 35.
+ext_background_effect_manager_v1 standard
+# Decision 36.
+wp_content_type_manager_v1 standard
+xdg_toplevel_tag_manager_v1 standard
+# On the udev backend only, for the GPU it draws on.
+wp_drm_lease_device_v1 unconfined
 # Under doc_own_stack.md decision 30's rule (`constraints.rs`).
 zwp_pointer_constraints_v1 standard
 zwp_relative_pointer_manager_v1 standard
 zwp_keyboard_shortcuts_inhibit_manager_v1 standard
+wp_pointer_warp_v1 standard
 # On a render node only, and linux-drm-syncobj-v1 only on one that can wait on a syncobj.
 zwp_linux_dmabuf_v1 standard
 wp_linux_drm_syncobj_manager_v1 standard
+# Decision 33, wave 2b: on a render node only, the one linux-dmabuf's feedback names (`wl_drm.rs`).
+wl_drm standard
+# Decision 33, wave 2b: a surface's presentation hint, honoured as vsync (`tearing.rs`).
+wp_tearing_control_manager_v1 standard
 wp_security_context_manager_v1 unconfined
 zwp_text_input_manager_v3 unconfined
 zwlr_layer_shell_v1 layer-gated
@@ -57,5 +78,9 @@ athanor_toplevel_actions_v1 privileged
 athanor_keyboard_group_manager_v1 privileged
 athanor_a11y_manager_v1 privileged
 athanor_workspace_tiling_manager_v1 privileged
+# The dock's intellihide (doc_own_stack.md decision 35, `dock_overlap.rs`).
+athanor_dock_overlap_manager_v1 privileged
+# Each output's material tier, for the shell's surfaces (decision 35, VL13, `material.rs`).
+athanor_material_manager_v1 privileged
 ext_data_control_manager_v1 privileged
 zwlr_data_control_manager_v1 privileged

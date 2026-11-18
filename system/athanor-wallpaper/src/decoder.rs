@@ -16,8 +16,9 @@ use nix::sys::socket::{
 };
 
 /// How long one decode may take, the connection and every frame included: the decoder's unit
-/// ends it after `RuntimeMaxSec=5` too.
-pub const DEADLINE: Duration = Duration::from_secs(5);
+/// ends it after `RuntimeMaxSec=18` too, the time measured for the 8 sizes of a request's
+/// maximum with a margin (maintainer decision, 2026-11-07).
+pub const DEADLINE: Duration = Duration::from_secs(18);
 
 /// The pixels of each size asked, in the order asked: straight RGBA8, rows packed.
 pub type Frames = Vec<((u32, u32), Vec<u8>)>;
@@ -170,6 +171,14 @@ mod tests {
         assert!(protocol::parse_request(&request).is_some());
     }
 
+    /// Writes what follows a header the client refuses: the client may already have
+    /// hung up on reading it, and then the write meets a closed socket.
+    fn write_after_refused(stream: &mut UnixStream, bytes: &[u8]) {
+        if let Err(error) = stream.write_all(bytes) {
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe, "{error}");
+        }
+    }
+
     #[test]
     fn the_frames_asked_are_read() {
         let frames = run("good", &[(2, 1), (1, 1)], |mut stream| {
@@ -194,7 +203,7 @@ mod tests {
             stream
                 .write_all(&protocol::frame_header((1, 2)))
                 .expect("header");
-            stream.write_all(&[0; 8]).expect("pixels");
+            write_after_refused(&mut stream, &[0; 8]);
         });
         assert!(other.is_err(), "{other:?}");
         let short = run("short", &[(2, 1)], |mut stream| {

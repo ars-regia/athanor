@@ -39,25 +39,28 @@ LONG = "x" * 100_000
 
 
 def alerts(app, Atspi):
-    """The names of the showing popups, or None when a rebuild removed a node mid-walk."""
-    try:
-        return [
-            name
-            for role, name, shown, _ in walk(app, Atspi)
-            if shown and role in ALERT_ROLES
-        ]
-    except GLib.Error:
-        return None
+    """The names of the showing popups."""
+    return [name for role, name, shown, _ in walk(app, Atspi) if shown and role in ALERT_ROLES]
 
 
 def never(seen, seconds):
-    """True when `seen` stays false for `seconds`."""
+    """True when `seen` stays false for `seconds`. An error from it raises. A node destroyed
+    mid-read is read again from the root by atspi_check.walk, so `seen` answers on the tree
+    as it is after the rebuild, and raises only when the tree keeps changing."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if seen():
             return False
         time.sleep(0.2)
     return not seen()
+
+
+def dnd_switches(app, Atspi):
+    """The do not disturb switch: GTK's reaches AT-SPI as a check box, AccessKit's
+    Role::Switch as a toggle button."""
+    return labelled(app, Atspi, "check box", "Do not disturb") or labelled(
+        app, Atspi, "toggle button", "Do not disturb"
+    )
 
 
 def toggle_list(app, Atspi, open_):
@@ -148,20 +151,14 @@ def main():
         return lambda: line in log.read_text(encoding="utf-8").splitlines()
 
     def shows(name):
-        return lambda: name in (alerts(app, Atspi) or [])
+        return lambda: name in alerts(app, Atspi)
 
     def in_list(name):
         """A showing node named `name`: with the list open the popups are hidden, so it is
         a card of the list."""
 
         def seen():
-            try:
-                return any(
-                    node_name == name and shown
-                    for _, node_name, shown, _ in walk(app, Atspi)
-                )
-            except GLib.Error:
-                return False
+            return any(node_name == name and shown for _, node_name, shown, _ in walk(app, Atspi))
 
         return seen
 
@@ -174,7 +171,7 @@ def main():
 
     check(
         "three popups show and the fourth waits (BR4)",
-        wait_for(lambda: len(alerts(app, Atspi) or []) == 3, 5),
+        wait_for(lambda: len(alerts(app, Atspi)) == 3, 5),
         repr(alerts(app, Atspi)),
     )
     check(
@@ -271,7 +268,7 @@ def main():
         repr(problems(nodes, 7)),
     )
 
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     check("the do not disturb switch shows", bool(switches))
     if switches:
         switches[0].do_action(0)
@@ -282,7 +279,7 @@ def main():
     notify("Loud", hints={"urgency": GLib.Variant("y", 2)})
     check("a critical popup shows under do not disturb", wait_for(shows("Loud"), 3))
     check("the list opens for the switch", toggle_list(app, Atspi, True))
-    switches = labelled(app, Atspi, "check box", "Do not disturb")
+    switches = dnd_switches(app, Atspi)
     if switches:
         switches[0].do_action(0)
     check("do not disturb turns off", wait_for(logged("SetDoNotDisturb False"), 3))

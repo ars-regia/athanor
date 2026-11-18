@@ -3,7 +3,6 @@
 //! `org.a11y.Status.ScreenReaderEnabled`; 2.61 dropped that property and serves `IsEnabled`
 //! alone, so the key is the one source that Fedora 43 and Fedora 45 both serve.
 
-use gtk4::gio;
 
 pub use crate::magnifier::SCHEMA;
 pub const KEY: &str = "screen-reader-enabled";
@@ -23,7 +22,7 @@ pub fn settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gtk4::gio::prelude::*;
+    use gio::prelude::*;
     use std::path::PathBuf;
 
     /// GNOME's schema reduced to the magnifier's key, with or without the reader's, compiled

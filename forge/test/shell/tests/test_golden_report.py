@@ -111,8 +111,8 @@ class GoldenReportTest(unittest.TestCase):
         self.assertEqual(len(found), len({tag for _, tag in found}))
         layout = [tag for surface, tag in found if surface == "layout"]
         self.assertEqual((len(layout), sum("-2o-" in tag for tag in layout)), (27, 6))
-        self.assertEqual(len(found) - len(layout), 17 * 12)
-        self.assertEqual(len(found), 231)
+        self.assertEqual(len(found) - len(layout), 22 * 12)
+        self.assertEqual(len(found), 291)
         # No cosmic component has a case (open question 1).
         self.assertFalse([s for s in wanted if s.startswith("cosmic")])
 
@@ -129,6 +129,159 @@ class GoldenReportTest(unittest.TestCase):
         known = {tag for _, tag in gr.expected(gr.surfaces())}
         self.assertLessEqual({e["case"] for e in entries}, known)
 
+    def test_the_chooser_answers_every_item_of_t1_task_4(self):
+        """Each of the eleven differences of the toolkit chooser against the GTK chooser
+        (docs/spikes/t1-own-toolkit.md, task 4) is closed or recorded with its reason, and the
+        report reads none of them."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [e for e in table.get("gtk-difference", []) if e.get("surface") == "chooser"]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 12)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertNotIn("item", {key for e in table.get("difference", []) for key in e})
+
+
+    def test_the_control_center_answers_every_item_of_its_port(self):
+        """Each difference of the Sal control center against the GTK one found in its port is
+        closed or recorded with its reason; the recorded look of VL10 names #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface", "").startswith("control-center")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 19)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(
+            all("#1147" in e["reason"] for e in items if e["item"] in (1, 2, 3, 4, 6, 12))
+        )
+
+    def test_the_tray_answers_every_item_of_its_port(self):
+        """Each difference of the Sal tray and its menu against the GTK one found in its port is
+        closed or recorded with its reason."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [e for e in table.get("gtk-difference", []) if e.get("surface") == "bar-tray"]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 6)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+
+    def test_the_bar_answers_every_item_of_its_port(self):
+        """Each difference of the Sal bar's strip and of its clock, input, tiling, accessibility
+        and power popovers against the GTK bar found in their port is closed or recorded with
+        its reason; the recorded look of VL10 names #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        surfaces = ("bar", "bar-calendar", "bar-input", "bar-tiling", "bar-accessibility", "bar-power")
+        items = [e for e in table.get("gtk-difference", []) if e.get("surface") in surfaces]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 14)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(
+            all("#1147" in e["reason"] for e in items if e["item"] in (4, 5, 6, 7, 10, 12, 13))
+        )
+
+    def test_the_bar_shield_answers_every_item_of_its_port(self):
+        """Each difference of the Sal trust shield against the GTK one found in its port is
+        closed or recorded with its reason."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface", "").startswith("bar-shield")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 6)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+
+    def test_the_notifications_answer_every_item_of_their_port(self):
+        """Each difference of the Sal notification list and popups against the GTK ones found
+        in their port is closed or recorded with its reason."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        for surface, count in (("bar-popups", 5), ("bar-notifications", 4)):
+            items = [
+                e for e in table.get("gtk-difference", []) if e.get("surface") == surface
+            ]
+            self.assertEqual(sorted(e["item"] for e in items), list(range(1, count + 1)))
+            for entry in items:
+                self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+                self.assertTrue(entry["what"].strip(), entry["item"])
+                self.assertTrue(entry["reason"].strip(), entry["item"])
+
+    def test_the_bar_audio_and_battery_answer_every_item_of_their_port(self):
+        """Each difference of the Sal bar's audio and battery popovers against the GTK ones found
+        in their port is closed or recorded with its reason; the recorded look of VL10 names
+        #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface") in ("bar-audio", "bar-battery")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 15)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(all("#1147" in e["reason"] for e in items if e["item"] in (6, 12)))
+
+    def test_the_merged_bar_closes_what_waited_on_its_other_modules(self):
+        """The differences that waited on another module's branch or on the locale's names are
+        closed once every module is merged into the bar and it formats dates in the locale."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        merged = {
+            ("bar", 1), ("bar-calendar", 8), ("bar-tray", 1), ("bar-audio", 1), ("bar-audio", 2),
+            ("bar-battery", 7), ("bar-battery", 8), ("bar-network", 1), ("bar-network", 2), ("bar-network", 12),
+        }
+        states = {
+            (e.get("surface"), e.get("item")): e["state"]
+            for e in table.get("gtk-difference", [])
+            if (e.get("surface"), e.get("item")) in merged
+        }
+        self.assertEqual(states, {key: "closed" for key in merged})
+
+    def test_the_bar_network_and_bluetooth_popovers_answer_every_item_of_their_port(self):
+        """Each difference of the Sal bar's network and Bluetooth popovers against the GTK bar's
+        is closed or recorded with its reason; the recorded look of VL10 names #1147."""
+        import tomllib
+
+        table = tomllib.loads(gr.EXPLANATIONS.read_text(encoding="utf-8"))
+        items = [
+            e
+            for e in table.get("gtk-difference", [])
+            if e.get("surface") in ("bar-network", "bar-bluetooth")
+        ]
+        self.assertEqual(sorted(e["item"] for e in items), list(range(1, 14)))
+        for entry in items:
+            self.assertIn(entry["state"], ("closed", "recorded"), entry["item"])
+            self.assertTrue(entry["what"].strip(), entry["item"])
+            self.assertTrue(entry["reason"].strip(), entry["item"])
+        self.assertTrue(all("#1147" in e["reason"] for e in items if e["item"] in (5, 6)))
 
     def test_the_controls_decision_28_hides_follow_the_presets(self):
         bar_ws, bar_lib = "bar-workspaces", "bar-library"
@@ -164,7 +317,11 @@ class GoldenReportTest(unittest.TestCase):
         rig = (Path(gr.HERE) / "rig.sh").read_text(encoding="utf-8")
         body = rig.split("capture_bar() {", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("preset=float", body.splitlines()[1])
-        bar = set(re.findall(r"^\s+([a-z-]+)\).*\bpreset=bar\b", body, re.MULTILINE))
+        self.assertIn('bar_scene "$surface"', body)
+        # bar-running is no surface of its own: an Orca walk of the bar preset's scene.
+        scene = rig.split("bar_scene() {", 1)[1].split("\n}\n", 1)[0]
+        bar = set(re.findall(r"^\s+([a-z| -]+)\).*\bpreset=bar\b", scene, re.MULTILINE))
+        bar = {name.strip() for names in bar for name in names.split("|")} - {"bar-running"}
         self.assertEqual(bar, set(gr.BAR_PRESET_SURFACES))
 
     def test_a_differing_case_names_each_control_decision_28_hides(self):

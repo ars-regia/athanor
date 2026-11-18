@@ -7,6 +7,7 @@ members = [
   "forge/specs/athanor-bar/athanor-bar-1.0.0",
   "system/athanor-controls",
   "forge/specs/athanor-dock/athanor-dock-1.0.0",
+  "forge/specs/athanor-osd/athanor-osd-1.0.0",
   "forge/specs/athanor-launcher/athanor-launcher-1.0.0",
   "forge/specs/athanor-control-center/athanor-control-center-1.0.0",
   "forge/specs/athanor-update/athanor-update-1.0.0",
@@ -45,9 +46,10 @@ exclude = [
   "fuzz",
   "forge/tools/calmo-cosmic-theme",
   "forge/specs/athanor-recovery/athanor-recovery-1.0.0",
-  # A published crate carried with a patch, not code of ours: no workspace lint, format or test
-  # runs over it (system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md).
+  # Published crates carried with a patch, not code of ours: no workspace lint, format or test
+  # runs over them (each one's PATCHES.md).
   "system/athanor-sal/vendor/accesskit_atspi_common",
+  "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend",
 ]
 
 resolver = "2"
@@ -60,7 +62,7 @@ futures-util = "0.3.30"
 libc = "0.2.189"
 
 # D-Bus & Inter-Process Communication
-zbus = { version = "5.18.0", features = ["tokio"] }
+zbus = { version = "6.2.1", features = ["tokio"] }
 
 # GUI, Display & Wayland Ecosystem
 gtk4 = { version = "0.11.4", features = ["v4_18"] }
@@ -92,7 +94,7 @@ libpulse-binding = "2.30"
 # Serialization & Error Handling
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
-toml = "0.8"
+toml = "1.1"
 thiserror = "2.0.19"
 anyhow = "1.0.99"
 
@@ -103,22 +105,24 @@ tracing-subscriber = "0.3.23"
 xcursor = "0.3.11"
 
 # Hashing & Utilities
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 hex = "0.4.3"
 zeroize = "1.8.1"
 subtle = "2.6.1"
 
 # System Utilities & CLI
-nix = "0.29.0"
+nix = "0.31.3"
 calloop = "0.14.5"
 clap = { version = "4.6.4", features = ["derive"] }
 greetd_ipc = "0.10.3"
 landlock = "0.4"
 # The greeter's read of the lastlog2 database (doc_lock_and_prompts.md LP19): linked to the
 # system SQLite, never a bundled copy, so that its security updates come with the image.
-rusqlite = { version = "0.40.2", default-features = false }
+rusqlite = { version = "0.41", default-features = false }
 rand = "0.8.5"
-chrono = "0.4.45"
+# Dates and time zones: chrono is unmaintained (RUSTSEC-2026-0543). The system time zone
+# and /usr/share/zoneinfo only, so no bundled time zone database enters the tree.
+jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 
 [profile.dev]
 panic = "abort"
@@ -135,5 +139,9 @@ overflow-checks = true
 # AccessKit's AT-SPI bridge with the expandable, expanded, collapsed and has-popup states (#638),
 # until an AccessKit release maps them; the gallery's manifest carries the same entry.
 # system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md says what it changes and when it goes.
+# wayland-backend with a wire parser that rejects a null its signature forbids, as libwayland
+# does, until a release of wayland-backend does. PATCHES.md, in its directory under
+# forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/, says what it changes and when it goes.
 [patch.crates-io]
 accesskit_atspi_common = { path = "system/athanor-sal/vendor/accesskit_atspi_common" }
+wayland-backend = { path = "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }

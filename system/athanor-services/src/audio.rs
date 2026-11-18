@@ -26,22 +26,25 @@ use tokio::sync::{mpsc, watch};
 
 /// The sound server's 100 %, `PA_VOLUME_NORM`.
 pub const NORMAL: u32 = 0x10000;
+/// The highest volume the model reads or sets, in percent: CC5's opt-in amplifies up to 150 %
+/// (doc_control_center.md CC5, doc_osd.md OD6). A slider that stops at 100 % clamps itself.
+pub const MAX_PERCENT: f64 = 150.0;
 pub const MAX_DEVICES: usize = 16;
 const FIRST_RETRY: Duration = Duration::from_secs(1);
 const LAST_RETRY: Duration = Duration::from_secs(30);
 
-/// A volume as a percentage. Above 100 % the slider shows 100 %: the bar does not amplify.
+/// A volume as a percentage, up to [`MAX_PERCENT`].
 pub fn percent(raw: u32) -> f64 {
-    (f64::from(raw) * 100.0 / f64::from(NORMAL)).clamp(0.0, 100.0)
+    (f64::from(raw) * 100.0 / f64::from(NORMAL)).clamp(0.0, MAX_PERCENT)
 }
 
 pub fn raw(percent: f64) -> u32 {
     let percent = if percent.is_finite() {
-        percent.clamp(0.0, 100.0)
+        percent.clamp(0.0, MAX_PERCENT)
     } else {
         0.0
     };
-    // At most NORMAL, so the cast cannot truncate.
+    // At most 1.5 NORMAL, so the cast cannot truncate.
     (percent * f64::from(NORMAL) / 100.0).round() as u32
 }
 
@@ -106,7 +109,8 @@ pub struct AudioState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AudioCommand {
-    /// `percent` of the server's 100 %, from 0 to 100; the balance between channels is kept.
+    /// `percent` of the server's 100 %, from 0 to [`MAX_PERCENT`]; the balance between
+    /// channels is kept.
     Volume {
         sink: bool,
         name: String,
@@ -563,12 +567,14 @@ mod tests {
     fn volumes_round_trip_and_are_bounded() {
         assert_eq!(percent(NORMAL), 100.0);
         assert_eq!(percent(NORMAL / 2), 50.0);
-        assert_eq!(percent(NORMAL * 3 / 2), 100.0, "amplified shows as 100");
+        assert_eq!(percent(NORMAL * 3 / 2), 150.0, "amplified, as CC5 lets it be");
+        assert_eq!(percent(NORMAL * 2), 150.0, "beyond the opt-in's ceiling");
         assert_eq!(raw(100.0), NORMAL);
-        assert_eq!(raw(150.0), NORMAL);
+        assert_eq!(raw(150.0), NORMAL * 3 / 2);
+        assert_eq!(raw(200.0), NORMAL * 3 / 2);
         assert_eq!(raw(-3.0), 0);
         assert_eq!(raw(f64::NAN), 0);
-        for p in [0.0, 1.0, 33.0, 50.0, 99.0] {
+        for p in [0.0, 1.0, 33.0, 50.0, 99.0, 130.0, 150.0] {
             assert!((percent(raw(p)) - p).abs() < 0.01, "{p}");
         }
     }

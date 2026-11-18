@@ -218,6 +218,7 @@ impl State {
                 }
                 let serial = SERIAL_COUNTER.next_serial();
                 self.last_input_serial = Some(serial);
+                self.grab_serials.press = Some(serial);
                 handle.down(self, &DownEvent { serial, time });
             }
             TabletToolTipState::Up => {
@@ -260,6 +261,9 @@ impl State {
         }
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
+        if state == ButtonState::Pressed {
+            self.grab_serials.press = Some(serial);
+        }
         handle.button(
             self,
             &ButtonEvent {
@@ -344,6 +348,7 @@ impl State {
             }
             InputEvent::DeviceRemoved { device } => {
                 self.absolute_device_gone(&device.id());
+                self.touch_device_gone(&device.id());
                 if device.has_capability(DeviceCapability::TabletTool) {
                     self.tablet_removed(&TabletDescriptor::from(&device));
                 }

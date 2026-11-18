@@ -353,8 +353,7 @@ impl Application for Wallpaper {
                 let wanted = self.picture_for(&connector, size);
                 self.cache.get(&wanted).cloned()
             });
-        let mut options = LayerOptions::default();
-        options.layer = Layer::Background;
+        let mut options = LayerOptions::new(Layer::Background);
         options.namespace = NAMESPACE.into();
         options.anchor = Anchor::all();
         options.exclusive_zone = -1;

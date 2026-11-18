@@ -16,12 +16,12 @@ pub mod wire;
 use std::error::Error;
 use std::path::Path;
 
-/// Landlock (BR1): reads beneath `/usr` and `/etc`, every access beneath `state_dir`, nothing
-/// else. No `/proc`: a caller's unit comes from the bus and systemd ([`sender`]). The caller
+/// Landlock (BR1): reads beneath `/usr` and `/etc`, every access beneath `state_dir`, held as
+/// `athanor_unit::dirs::owned_dir` checked it (#1052), nothing else. No `/proc`: a caller's unit comes from the bus and systemd ([`sender`]). The caller
 /// has proved the process single-threaded (`athanor_unit::sandbox::ensure_single_threaded`).
 pub fn confine(state_dir: &Path) -> Result<(), Box<dyn Error>> {
     athanor_unit::sandbox::restrict(
         &[Path::new("/usr"), Path::new("/etc")],
-        &[std::fs::File::open(state_dir)?],
+        &[athanor_unit::dirs::owned_dir(state_dir)?],
     )
 }

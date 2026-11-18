@@ -27,6 +27,7 @@ use smithay_client_toolkit::reexports::protocols::wp::primary_selection::zv1::cl
 use std::cell::Cell;
 use std::io::{self, Read, Write};
 use std::rc::Rc;
+use zeroize::{Zeroize, Zeroizing};
 use std::time::Duration;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::{
@@ -68,28 +69,61 @@ pub(super) struct Clipboards {
     pending: Option<Pending>,
 }
 
-/// A paste being read: its pipe and its deadline, both sources of the event loop.
+/// A paste being read: the surface it pastes into, and its pipe and its deadline, both sources
+/// of the event loop.
 pub(super) struct Pending {
+    surface: SurfaceId,
     pipe: RegistrationToken,
     deadline: RegistrationToken,
 }
 
-/// Reads a paste from `pipe` through the event loop of `handle`, and hands its text to `done`.
-/// One paste at a time: the one still in `slot`, which `pending` finds in the loop's data, is
-/// dropped with its pipe, and a paste whose owner has not sent the whole text in `timeout` is
-/// dropped too, so that an owner that never closes its pipe holds no descriptor.
-fn read_paste<D: 'static>(
+impl Pending {
+    /// Drops the paste: its pipe closes, and its deadline ends.
+    fn drop_from<D>(self, handle: &LoopHandle<'static, D>) {
+        handle.remove(self.pipe);
+        handle.remove(self.deadline);
+    }
+}
+
+/// Drops the paste in `slot` if it pastes into `surface`, which no longer takes input: a paste
+/// may take up to its deadline, and a dialog may open on the surface meanwhile.
+fn drop_paste_into<D>(
     handle: &LoopHandle<'static, D>,
     slot: &mut Option<Pending>,
-    pending: fn(&mut D) -> &mut Option<Pending>,
+    surface: SurfaceId,
+) {
+    if slot.as_ref().is_some_and(|paste| paste.surface == surface) {
+        if let Some(paste) = slot.take() {
+            paste.drop_from(handle);
+        }
+    }
+}
+
+/// The event loop's data a paste is read for.
+trait PasteHost {
+    /// The paste being read, which the loop's sources find here.
+    fn pending_paste(&mut self) -> &mut Option<Pending>;
+    /// Whether a dialog keeps `surface`'s input from it.
+    fn blocked(&self, surface: SurfaceId) -> bool;
+}
+
+/// Reads a paste into `surface` from `pipe` through the event loop of `handle`, and hands its
+/// text to `done`, unless a dialog now keeps the surface's input from it: one may open in the
+/// same dispatch as the pipe completes, before the driver drops the paste. One paste at a
+/// time: the one still in `slot`, the loop data's [`PasteHost::pending_paste`], is dropped
+/// with its pipe, and a paste whose owner has not sent the whole text in `timeout` is dropped
+/// too, so that an owner that never closes its pipe holds no descriptor.
+fn read_paste<D: PasteHost + 'static>(
+    handle: &LoopHandle<'static, D>,
+    slot: &mut Option<Pending>,
+    surface: SurfaceId,
     pipe: ReadPipe,
     timeout: Duration,
-    mut done: impl FnMut(&mut D, String) + 'static,
+    mut done: impl FnMut(&mut D, &str) + 'static,
 ) -> Result<(), String> {
     if let Some(old) = slot.take() {
         eprintln!("athanor-sal: the paste not yet read gives way to the next");
-        handle.remove(old.pipe);
-        handle.remove(old.deadline);
+        old.drop_from(handle);
     }
     let mut incoming = Incoming::default();
     let loop_handle = handle.clone();
@@ -97,11 +131,19 @@ fn read_paste<D: 'static>(
         let Some(result) = incoming.read(&**pipe) else {
             return PostAction::Continue;
         };
-        if let Some(read) = pending(data).take() {
+        if let Some(read) = data.pending_paste().take() {
             loop_handle.remove(read.deadline);
         }
         match result {
-            Ok(text) => done(data, text),
+            // Overwritten once given: it may be a password field's text.
+            Ok(mut text) => {
+                if data.blocked(surface) {
+                    eprintln!("athanor-sal: nothing pasted: a dialog now blocks the window");
+                } else {
+                    done(data, &text);
+                }
+                text.zeroize();
+            }
             Err(error) => eprintln!("athanor-sal: nothing pasted: {error}"),
         }
         PostAction::Remove
@@ -109,7 +151,7 @@ fn read_paste<D: 'static>(
     let read = read.map_err(|e| e.to_string())?;
     let loop_handle = handle.clone();
     let deadline = handle.insert_source(Timer::from_duration(timeout), move |_, _, data| {
-        if let Some(late) = pending(data).take() {
+        if let Some(late) = data.pending_paste().take() {
             loop_handle.remove(late.pipe);
         }
         eprintln!(
@@ -120,6 +162,7 @@ fn read_paste<D: 'static>(
     match deadline {
         Ok(deadline) => {
             *slot = Some(Pending {
+                surface,
                 pipe: read,
                 deadline,
             });
@@ -160,18 +203,29 @@ fn choose(offered: &[String]) -> Option<&'static str> {
 }
 
 /// A text read from a clipboard's pipe, as it comes.
-#[derive(Default)]
-struct Incoming(Vec<u8>);
+/// What was read of a paste, in one buffer of [`READ_MAX`] bytes, overwritten when dropped: a
+/// buffer grown as the text came would free smaller ones holding its start, which may be a
+/// password.
+struct Incoming(Zeroizing<Vec<u8>>);
+
+impl Default for Incoming {
+    fn default() -> Self {
+        Self(Zeroizing::new(Vec::with_capacity(READ_MAX)))
+    }
+}
 
 impl Incoming {
     /// Reads once what the pipe has: `None` while more may come, then the text, or why there is
     /// none: it is longer than [`READ_MAX`], or not UTF-8.
     fn read(&mut self, mut pipe: impl Read) -> Option<Result<String, String>> {
-        let mut chunk = [0; PIPE_BUF];
-        match pipe.read(&mut chunk) {
+        let mut chunk = Zeroizing::new([0; PIPE_BUF]);
+        match pipe.read(&mut *chunk) {
             Ok(0) => Some(
-                String::from_utf8(std::mem::take(&mut self.0))
-                    .map_err(|e| format!("the text is not UTF-8: {e}")),
+                String::from_utf8(std::mem::take(&mut *self.0)).map_err(|e| {
+                    let why = format!("the text is not UTF-8: {}", e.utf8_error());
+                    e.into_bytes().zeroize();
+                    why
+                }),
             ),
             Ok(n) if self.0.len() + n > READ_MAX => {
                 Some(Err(format!("the text is longer than {READ_MAX} bytes")))
@@ -266,13 +320,55 @@ fn retry(e: &io::Error) -> bool {
     )
 }
 
+/// The requests of `clips` that an application made outside a key or a click: a copy or a cut
+/// is refused, and logged, since only the serial of the input it answers can offer it, and the
+/// clipboard is never replaced at a later, unrelated input; a refused cut leaves its text in
+/// place. The others are kept.
+fn outside_input(clips: Vec<Clip>) -> Vec<Clip> {
+    clips
+        .into_iter()
+        .filter(|clip| match clip {
+            Clip::Copy(_) => {
+                eprintln!("athanor-sal: nothing copied: Ui::copy outside a key or a click");
+                false
+            }
+            Clip::Cut(..) => {
+                eprintln!("athanor-sal: nothing cut: a cut outside a key or a click");
+                false
+            }
+            Clip::Paste(_) | Clip::PastePrimary(_) | Clip::Select(_) | Clip::Unselect => true,
+        })
+        .collect()
+}
+
 impl App {
-    /// Serves what the widgets of `id` asked of the clipboards.
+    /// Serves what the widgets of `id` asked of the clipboards while a key or a click of `id`
+    /// was handled.
     pub(super) fn clips(&mut self, id: SurfaceId) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
-        for clip in surface.ui.take_clips() {
+        let clips = surface.ui.take_clips();
+        self.serve(id, clips);
+    }
+
+    /// Serves what the widgets of every surface asked of the clipboards since their last
+    /// event, at the end of a turn of the event loop, once no input is being handled: the
+    /// copies are refused ([`outside_input`]), and nothing waits for a later input.
+    pub(super) fn clips_outside_input(&mut self) {
+        let ids: Vec<SurfaceId> = self.shell.surfaces().collect();
+        for id in ids {
+            let Some(surface) = self.shell.get_mut(id) else {
+                continue;
+            };
+            let clips = outside_input(surface.ui.take_clips());
+            self.serve(id, clips);
+        }
+    }
+
+    /// Serves `clips`, which the widgets of `id` asked for, in order.
+    fn serve(&mut self, id: SurfaceId, clips: Vec<Clip>) {
+        for clip in clips {
             match clip {
                 Clip::Copy(text) => {
                     self.copy(text);
@@ -385,21 +481,31 @@ impl App {
         let read = read_paste(
             &self.loop_handle,
             &mut self.clipboards.pending,
-            |app| &mut app.clipboards.pending,
+            id,
             pipe,
             PASTE_TIMEOUT,
-            move |app, text| app.pasted(id, widget, &text),
+            move |app, text| app.pasted(id, widget, text),
         );
         if let Err(error) = read {
             eprintln!("athanor-sal: nothing pasted: {error}");
         }
     }
 
-    /// Puts the text read from a clipboard into `widget` of `id`.
+    /// Drops the paste being read into `id`, which a dialog now blocks.
+    pub(super) fn drop_paste_into(&mut self, id: SurfaceId) {
+        drop_paste_into(&self.loop_handle, &mut self.clipboards.pending, id);
+    }
+
+    /// Puts the text read from a clipboard into `widget` of `id`, unless the widget was removed
+    /// while the text was read: its id is then stale, and the field in its slot takes nothing.
     fn pasted(&mut self, id: SurfaceId, widget: WidgetId, text: &str) {
         let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
+        if !surface.ui.contains(widget) {
+            eprintln!("athanor-sal: nothing pasted: its field was removed");
+            return;
+        }
         if let Some(event) = surface.ui.paste(widget, text) {
             self.changed(id, Some(event));
         }
@@ -414,6 +520,16 @@ impl App {
         if let Err(error) = write_offer(&self.loop_handle, text, pipe, OFFER_TIMEOUT) {
             eprintln!("athanor-sal: the clipboard's reader took no text: {error}");
         }
+    }
+}
+
+impl PasteHost for App {
+    fn pending_paste(&mut self) -> &mut Option<Pending> {
+        &mut self.clipboards.pending
+    }
+
+    fn blocked(&self, surface: SurfaceId) -> bool {
+        self.shell.dialogs.blocked(surface)
     }
 }
 
@@ -543,6 +659,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_copy_or_a_cut_outside_a_key_or_a_click_is_refused_and_the_rest_kept() {
+        let clips = vec![
+            Clip::Copy("late".into()),
+            Clip::Unselect,
+            Clip::Cut(WidgetId(2, 0), "cut".into()),
+            Clip::Paste(WidgetId(3, 0)),
+            Clip::Copy("later".into()),
+        ];
+        assert_eq!(
+            outside_input(clips),
+            [Clip::Unselect, Clip::Paste(WidgetId(3, 0))]
+        );
+    }
+
+    #[test]
     fn the_best_type_of_text_is_read() {
         let offered = |m: &[&str]| m.iter().map(|m| m.to_string()).collect::<Vec<_>>();
         assert_eq!(
@@ -565,6 +696,19 @@ mod tests {
                 return done;
             }
         }
+    }
+
+    /// A paste of several reads is read into the one buffer of the bound it started with.
+    #[test]
+    fn a_paste_is_read_into_one_buffer_that_never_grows() -> io::Result<()> {
+        let (reader, mut writer) = io::pipe()?;
+        let text = "x".repeat(3 * PIPE_BUF + 1);
+        writer.write_all(text.as_bytes())?;
+        drop(writer);
+        let read = read_all(reader);
+        assert_eq!(read.as_ref().map(String::len), Ok(text.len()));
+        assert_eq!(read.map(|text| text.capacity()), Ok(READ_MAX));
+        Ok(())
     }
 
     #[test]
@@ -646,6 +790,18 @@ mod tests {
     struct Pastes {
         pending: Option<Pending>,
         pasted: Vec<String>,
+        /// The surfaces a dialog blocks.
+        blocked: Vec<SurfaceId>,
+    }
+
+    impl PasteHost for Pastes {
+        fn pending_paste(&mut self) -> &mut Option<Pending> {
+            &mut self.pending
+        }
+
+        fn blocked(&self, surface: SurfaceId) -> bool {
+            self.blocked.contains(&surface)
+        }
     }
 
     /// Starts a paste from a new pipe, as the clipboard's owner would get it; returns the
@@ -660,10 +816,10 @@ mod tests {
         read_paste(
             &event_loop.handle(),
             &mut pastes.pending,
-            |pastes| &mut pastes.pending,
+            SurfaceId(0),
             pipe,
             timeout,
-            |pastes, text| pastes.pasted.push(text),
+            |pastes, text| pastes.pasted.push(text.to_owned()),
         )?;
         Ok(writer)
     }
@@ -722,6 +878,39 @@ mod tests {
         let mut third = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
         event_loop.dispatch(Some(Duration::from_millis(50)), &mut pastes)?;
         assert!(pastes.pending.is_some() && !closed(&mut third));
+        Ok(())
+    }
+
+    /// A paste still being read when a dialog opens on its surface is dropped, and pastes
+    /// nothing when its owner sends the text; a paste into another surface stays.
+    #[test]
+    fn a_paste_into_a_surface_a_dialog_blocks_is_dropped() -> Result<(), Box<dyn Error>> {
+        let mut event_loop = EventLoop::try_new()?;
+        let mut pastes = Pastes::default();
+        let mut owner = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
+        drop_paste_into(&event_loop.handle(), &mut pastes.pending, SurfaceId(1));
+        assert!(
+            pastes.pending.is_some(),
+            "another surface's dialog drops nothing"
+        );
+        drop_paste_into(&event_loop.handle(), &mut pastes.pending, SurfaceId(0));
+        assert!(pastes.pending.is_none());
+        assert!(closed(&mut owner), "the pipe is closed");
+        drop(owner);
+        event_loop.dispatch(Some(Duration::from_millis(50)), &mut pastes)?;
+        assert!(pastes.pasted.is_empty());
+        // A dialog that opens in the same dispatch as the pipe completes, before the paste is
+        // dropped: the text is read, and pasted nowhere.
+        let mut owner = paste(&event_loop, &mut pastes, Duration::from_secs(10))?;
+        owner.write_all(b"too late")?;
+        drop(owner);
+        pastes.blocked.push(SurfaceId(0));
+        settle(&mut event_loop, &mut pastes)?;
+        assert!(
+            pastes.pending.is_none(),
+            "the paste and its deadline are gone"
+        );
+        assert!(pastes.pasted.is_empty());
         Ok(())
     }
 

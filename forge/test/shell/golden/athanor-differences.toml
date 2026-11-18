@@ -6,8 +6,7 @@
 #
 #   #737: cosmic-comp draws a shadow of its own around a window it clips; athanor-sulphur draws none, and the client's own shadow stays (maintainer decision, 2026-11-01)
 #   #918: at scale 1.5 both compositors place a window at the same logical position and round it to physical pixels differently, so the window, its divider and the outline's inner edge land one physical pixel apart on one or more sides (accepted, maintainer decision, 2026-11-05)
-#   #743: at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden
-#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)
+#   #744: cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)
 #
 # Decision 28 of doc_own_stack.md hides controls under the own compositor until their replacement
 # comes: one entry per case and hidden control, covering its absence and the move it causes, for
@@ -287,63 +286,33 @@ cause = "at scale 1.5 both compositors place the window at the same logical posi
 issue = 918
 
 [[difference]]
-case = "launcher-light-1.5-en"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
-case = "launcher-light-1.5-de"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
-case = "launcher-light-1.5-rtl"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
-case = "launcher-dark-1.5-en"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
-case = "launcher-dark-1.5-de"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
-case = "launcher-dark-1.5-rtl"
-cause = "at scale 1.5 the launcher card's bottom edge row is the client's translucent pixel under athanor-sulphur; cosmic-comp 1.11 alters that row in the golden"
-issue = 743
-
-[[difference]]
 case = "layout-float-top-visible-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-float-top-visible-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-bar-bottom-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.0-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
 case = "layout-minimal-top-none-2o-1.5-land"
-cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws the pointer in no capture yet and ignores paint_cursors (capture.rs, until the portal of task 7) (accepted, maintainer decision, 2026-11-05)"
+cause = "cosmic-comp 1.11 draws the pointer at the top left of the two-output captures, although the rig's grim -o asks for no cursor; athanor-sulphur draws it only in a capture that asks for cursors (paint_cursors), which grim -o does not (accepted, maintainer decision, 2026-11-05)"
 issue = 744
 
 [[difference]]
@@ -2340,3 +2309,625 @@ issue = 835
 case = "layout-float-bottom-visible-1o-1.0-port"
 cause = "decision 28 hides the dock's application library button"
 issue = 836
+
+# The layout chooser drawn with athanor-sal against the GTK chooser's goldens, by the item of
+# docs/spikes/t1-own-toolkit.md task 4 (the toolkit's look, then GTK's): closed, or recorded with
+# its reason. golden_report.py reads only the [[difference]] table above.
+
+[[gtk-difference]]
+surface = "chooser"
+item = 1
+what = "no compositor border or shadow around the window"
+state = "recorded"
+reason = "cosmic-comp draws the outline and clips the window, and athanor-sulphur draws no shadow (#737); the client draws neither, as the GTK chooser draws none of its own under cosmic-comp (maintainer decision, 2026-11-12)"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 2
+what = "a white title bar with a regular title and round grey buttons"
+state = "recorded"
+reason = "closed but for the bar's colour: TitleBarStyle::Bare gives the bold title and the bare buttons of GTK's header bar; the bar takes VL10's bar token, where the GTK chooser drew GTK's built-in header bar colour, which no Calmo token names (doc_visual_language.md VL1, VL10): maintainer decision, 2026-11-13: on the port to Sal, the Calmo palette prevails over Adwaita's header-bar colour; this applies to every Sal window. Its height is GTK's through Theme::title_bar_height: 39 px at scale 1 from the top of the window to the bar's bottom border, as the GTK goldens draw it"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 3
+what = "headings in regular weight and dark ink"
+state = "closed"
+reason = "the headings are Calmo's small size, 11.5 px, semi-bold, in ink2, as .layout-group-title"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 4
+what = "toggles with a grey fill, no border, a radius of about 6 and a height of 30"
+state = "closed"
+reason = "the toggles take button.layout-choice's surf2 fill, 1 px line border, radius 8, minimum height 34 and 14 px padding"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 5
+what = "the selected purple differs slightly"
+state = "closed"
+reason = "the accent is the appearance's, through athanor_style::sal::palette, the GTK chooser's 145, 65, 172"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 6
+what = "an off-white background"
+state = "recorded"
+reason = "the window and its toggles take VL10's surf and surf2, which the generator retuned for the toolkit only: light surf is 254, 253, 254 where the GTK sheet keeps #fdfdfe, and dark surf is 42, 27, 47, tinted purple, where it keeps #1b1e2f; the GTK shell keeps its tables until it is removed (doc_visual_language.md VL1, VL10)"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 7
+what = "the system sans"
+state = "recorded"
+reason = "closed but for the font features: Theme::font_family sets Calmo's family, Inter, ahead of the system's sans-serif. The GTK sheet also sets the features tnum and cv11 on every text, which draw a single-storey a and a spaced hyphen; VL10 keeps only tnum for the toolkit, through a numeric class, so the toolkit draws Inter's double-storey a, and the chooser shows no numbers"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 8
+what = "wider buttons and larger padding, the German window about 650 px wide"
+state = "recorded"
+reason = "closed but for 3 px: the toggles take the GTK chooser's 14 px padding and the window its 420 px default width. The German window stays 3 px narrower at scale 1, 616 px against 619, a residue of the text widths that is recorded, not traced further"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 9
+what = "no dark variant"
+state = "closed"
+reason = "the theme follows the appearance's variant, as the GTK chooser's Calmo sheet did"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 10
+what = "right to left, rows of 42 px"
+state = "closed"
+reason = "#987 made the Latin font lead the sans-serif family under Arabic and Hebrew"
+
+[[gtk-difference]]
+surface = "chooser"
+item = 11
+what = "the window sits lower on the screen"
+state = "closed"
+reason = "#941 placed the toolkit's windows as cosmic-comp places GTK's, and a toolkit window gives its minimum size as GTK does, so cosmic-comp centres a window wider than the size it first suggests, as the German one at scale 1.5"
+
+[[gtk-difference]]
+surface = "bar"
+item = 1
+what = "no shield button at the end of the bar, so the modules after the clock sit further towards the end edge and the power popover is pushed in from it"
+state = "closed"
+reason = "the shield's branch is merged into the bar's port: the bar draws its button at the end, as GTK did, and the goldens are captured again with it"
+
+[[gtk-difference]]
+surface = "bar"
+item = 2
+what = "the module's button not drawn pressed while its popover is open"
+state = "closed"
+reason = "Sal fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs)"
+
+[[gtk-difference]]
+surface = "bar"
+item = 3
+what = "the clock and the popovers in the system sans"
+state = "closed"
+reason = "the bar's and its popovers' themes set Calmo's family, Inter, as the GTK bar's sheet (look::FONT_FAMILY, test the_bar_and_its_popovers_take_calmos_family)"
+
+[[gtk-difference]]
+surface = "bar"
+item = 4
+what = "the running application's mark a straight 2 px line, where GTK's inset shadow follows the button's rounded corners"
+state = "recorded"
+reason = "Sal's icon button draws the dock's and the bar's running mark as one straight bar (render.rs INDICATOR); a rounded mark is a change to Sal's renderer that the dock shares (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 5
+what = "the focus ring on the first control of a popover when it opens: the calendar's previous-month arrow, the first input source, the first switch, the tiling switch and Lock"
+state = "recorded"
+reason = "Sal gives the first control the focus and shows its ring, as the control center's pages (item 6); GTK focused the same control, as its Orca references say, without the ring (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 6
+what = "no days of the adjacent months, as many weeks as the month holds (five for September 2026, where GTK draws six), and the month and year a few pixels higher"
+state = "recorded"
+reason = "Sal's calendar widget (#1122) shows the month's own days in its own weeks, and its header row takes VL10's metrics (#1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 7
+what = "today in the accent's purple, where GTK draws Adwaita's blue selection"
+state = "recorded"
+reason = "the maintainer decided on 2026-11-13 that the Calmo palette prevails over Adwaita's on the port to Sal, for every Sal surface (VL10, #1147)"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 8
+what = "the month and weekday names and the clock's day and month in English under German and the right-to-left pseudo-locale, where GTK shows the locale's names"
+state = "closed"
+reason = "the bar makes its interface thread's LC_TIME the session's through athanor_i18n::use_time_locale, a thread locale with no setlocale, so GLib names the months and days in the locale, as under GTK's start"
+
+[[gtk-difference]]
+surface = "bar-calendar"
+item = 9
+what = "both month and year arrows pointing the left-to-right way in a right-to-left language"
+state = "closed"
+reason = "the clock gives the calendar pan-end-symbolic as its start arrow and pan-start-symbolic as its end one when the language runs right to left, as GTK's pan-start-symbolic-rtl (clock::arrow_icons, test the_arrows_point_to_their_edges_in_both_directions)"
+
+[[gtk-difference]]
+surface = "bar-input"
+item = 10
+what = "radios and switches in Sal's look, an off switch with a pale track, rows a few pixels closer than GTK's, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's radio, switch and metrics and the palette's surface follow VL10, as the control center's items 13 and 14 and the chooser's item 6 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-accessibility"
+item = 11
+what = "the Colour filter heading in body text"
+state = "closed"
+reason = "the heading is a note in Calmo's caption size and ink2, as the GTK bar's bar-popover-note (look::note)"
+
+[[gtk-difference]]
+surface = "bar-power"
+item = 12
+what = "the actions in rows about 26 px tall at scale 1, where GTK's popover menu rows are about 36, with less room around them"
+state = "recorded"
+reason = "the actions are Sal's flat buttons at VL10's padding, where GTK drew its model buttons' menu padding (#1147)"
+
+[[gtk-difference]]
+surface = "bar-tiling"
+item = 13
+what = "the tiling switch in Sal's look, its off track pale and its knob smaller"
+state = "recorded"
+reason = "Sal's switch follows VL10, as the control center's item 14 (#1147)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 1
+what = "the quick tiles drawn as Sal tile modules, not GTK toggle buttons with a label box"
+state = "recorded"
+reason = "the tiles are Sal's tile widget, whose look follows VL10 (#1147); the title and second line remain two labels, as the GTK tile's box"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 2
+what = "the panel's width and corners: 458 px on the tiles and 344 px on a page at scale 1 in English, where GTK keeps 374 px, with a 30 px radius"
+state = "recorded"
+reason = "the panel takes VL10's panel radius and its tiles' modules (#1147); its width comes from the tile modules on the main view and from the page's content on a page"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 3
+what = "flat buttons without GTK's raised frame"
+state = "recorded"
+reason = "Sal's button follows VL10's flat button (#1147)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 4
+what = "the media cover placeholder drawn as Sal's image placeholder"
+state = "recorded"
+reason = "Sal draws VL10's placeholder for a missing cover (#1147), where GTK drew the theme's audio-x-generic icon"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 5
+what = "the text in the toolkit's default face and size"
+state = "closed"
+reason = "the surface's theme sets Inter at 13 px, as calmo's body text (test the_theme_is_the_panel_of_the_visual_language)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 6
+what = "the back button unframed, and the keyboard focus on the first control when a page opens"
+state = "recorded"
+reason = "the back button is VL10's unframed icon button (#1147); Sal puts the initial focus on the first control of a page, where GTK left it on the panel, so the keyboard reaches the page without a Tab"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 7
+what = "switches beside their label and sliders at their natural width"
+state = "closed"
+reason = "a page's column fills the panel's width, so a switch sits at the end edge and a slider takes the width, as the GTK rows (Ui::set_fill on a widget, test a_widget_set_to_fill_takes_the_width_of_its_column)"
+
+[[gtk-difference]]
+surface = "control-center-network"
+item = 8
+what = "no Network heading, the wired state as body text, and network rows without their icon"
+state = "closed"
+reason = "the page has the Network heading, 'Wired: connected' in calmo's caption size and ink2, and each Wi-Fi and Bluetooth row its icon before its name; a row is built again when its strength's icon changes, as the GTK rows"
+
+[[gtk-difference]]
+surface = "control-center-network"
+item = 9
+what = "the VPN connections as check boxes"
+state = "closed"
+reason = "each VPN is a Sal switch, as the GTK switch row; 'Office VPN', the fixture's connection, joins the labels the AT-SPI and Orca comparisons hear as a switch"
+
+[[gtk-difference]]
+surface = "control-center-audio"
+item = 10
+what = "the artist in body text, and the device rows and media controls at the start edge"
+state = "closed"
+reason = "the artist is a note in calmo's caption size and ink2; the device rows fill the page and the media controls are centred, as the GTK page"
+
+[[gtk-difference]]
+surface = "control-center-battery"
+item = 11
+what = "the time left in body text, and the power modes further apart than GTK's 28 px"
+state = "closed"
+reason = "the time left is a note in caption size and ink2; the power modes' column takes its own spacing (Ui::set_spacing) so the rows are 28 px apart, as the GTK radio rows; the theme's shared section gap is unchanged"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 12
+what = "each page as tall as its content"
+state = "recorded"
+reason = "the panel takes the height of the page it shows, where GTK's stack kept the tallest page's height (#1147); the network list's scroll is as tall as its rows up to its maximum (Ui::set_natural_height)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 13
+what = "headings and secondary lines about a tenth smaller than GTK's"
+state = "recorded"
+reason = "Sal's type steps are relative to calmo's 13 px body (heading 1.0, caption 0.82, VL10's sal.size), where GTK's built-in theme set .heading and .caption in points, 11 pt and 9 pt (#1147)"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 14
+what = "an off switch with a pale knob and an unfilled track, an unselected radio with a faint ring, and an insensitive row dimmed"
+state = "recorded"
+reason = "Sal draws VL10's switch, radio and insensitive states (#1147), where GTK drew Adwaita's grey track, white knob and full ink on an insensitive flat button"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 15
+what = "a page's title at the top of its header row, beside the back button"
+state = "recorded"
+reason = "a Sal label stretched across a row draws its text at the top, where GTK's label centres it (yalign 0.5); changing it is a change to every Sal surface, not to the control center"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 16
+what = "rows, buttons and sections a few pixels further apart or closer than GTK's: network rows 40 px apart against 36, sections 8 px apart against 16"
+state = "recorded"
+reason = "the rows and sections take Sal's theme metrics, the control padding and the section gap of VL10 (#1147); only the power modes, whose 28 px pitch the maintainer asked for, take their own spacing"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 17
+what = "in right-to-left the back arrow, the chevrons, the volume icon and the media skip icons pointed as in left-to-right"
+state = "closed"
+reason = "GTK's icon lookup takes a name's -rtl variant in a right-to-left reading; the control center now looks that variant up first, and keeps the plain name of an icon that has none"
+
+[[gtk-difference]]
+surface = "control-center"
+item = 18
+what = "in right-to-left a tile's second line ran past its disc"
+state = "closed"
+reason = "a line broken at the tile's room is aligned to the start of that room; Sal's tile now takes that alignment offset back, so both lines end beside the disc, as GTK's"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 1
+what = "the shield's button is missing at the end of the bar, so the row is shorter and its buttons sit further towards the end edge"
+state = "closed"
+reason = "the shield's branch is merged into the bar's port, and the tray's capture shows the bar with its button"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 2
+what = "the menu's rows are 28 px apart at scale 1, not 30, the menu is about 10 px narrower and its labels start about 5 px nearer its start edge"
+state = "recorded"
+reason = "Sal's menu entries take their height and padding from the bar's popover theme, whose padding is the bar buttons'; GTK's PopoverMenu uses its model buttons' own; to close with the gallery's menus page, which compares Sal's menu entries with GTK's popover menu"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 3
+what = "the check box and the radio ring are about 17 px, not 14, and an unselected ring is filled with a light tint"
+state = "recorded"
+reason = "Sal's menu entries reuse the check button's and the radio's drawing at the check button's size (c6a4f797); to close with the gallery's menus page"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 4
+what = "the first entry carries a focus ring when the menu opens without the keyboard"
+state = "recorded"
+reason = "Sal's open_popup focuses the menu's first item and draws its ring; GTK focuses it but draws the ring only after a key press; the captures open the menu through ATHANOR_BAR_OPEN, with no key pressed"
+
+[[gtk-difference]]
+surface = "bar-tray"
+item = 5
+what = "the submenu's arrow is drawn in ink, where GTK draws it dimmed"
+state = "recorded"
+reason = "Sal draws a submenu entry's arrow in the label's colour; to close with the gallery's menus page"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 1
+what = "the build and check dates read 15 September 2026, where GTK wrote the locale's short date, 09/15/2026 and 15.09.2026"
+state = "recorded"
+reason = "the GTK bar's %x read the LC_TIME that GTK set; the Sal bar sets no locale, so %x gives the C locale's 09/15/26, which reads the wrong way round in most languages. The sheet writes day, month and year with the month from the bar's catalog, as the expiry of a postponed restart already did; the rig's German test catalog has no month names, so the German capture keeps the English month"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 2
+what = "the sheet's seal touched its title"
+state = "closed"
+reason = "Sal's inline takes a spacing of its own now (Ui::set_spacing), and the heading keeps the GTK heading box's 8 px between the seal and the title"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 3
+what = "the seal showed no badge, then no seal at all"
+state = "closed"
+reason = "Sal draws a symbolic icon's success, warning and error classes in their colours (IconTheme::symbolic), and reads all of Fedora's hicolor index, whose scalable directories, the seal's among them, come after the first 256"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 4
+what = "Restart to update and Go back to the previous version are flat rows at the start edge, where GTK centred them as buttons"
+state = "recorded"
+reason = "they are the rows of a menu, as the power menu's, so the arrow keys move between them as in GTK; Sal aligns a widget in a column only at the start, at the end or across it, and has no centre"
+
+[[gtk-difference]]
+surface = "bar-shield"
+item = 5
+what = "the switch shows the focus ring when the sheet opens"
+state = "recorded"
+reason = "a Sal menu popup puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar does; the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 1
+what = "a popup card casts no shadow"
+state = "recorded"
+reason = "a Sal island draws its fill and its outline, and no shadow; the GTK popup's box-shadow has no counterpart in Sal yet"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 2
+what = "a critical popup's amber outline"
+state = "closed"
+reason = "Sal's island takes an ink for its outline now (Ui::set_ink), and a critical card takes the warning ink, as GTK's .critical class"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 3
+what = "the cards were 28 px wider than GTK's"
+state = "closed"
+reason = "GTK's 360 px width request included the card's margin; the Sal island's minimum width includes its margin too, so the card takes the same 360 px"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 4
+what = "an action or a click on a popup reaches the daemon without an activation token"
+state = "closed"
+reason = "athanor-sal binds xdg-activation-v1 and the bar asks the compositor for a token with the surface and serial of the last press or key, as GDK did with its seat's last serial; InvokeAction carries it (BR4)"
+
+[[gtk-difference]]
+surface = "bar-popups"
+item = 5
+what = "the text's lines stand further apart, so a card is taller"
+state = "recorded"
+reason = "the Sal bar's font and line height differ from GTK's across the bar, not in the popups alone; the cards keep GTK's padding, spacing and width"
+
+# bar-notifications: the list is the bar's popover, as the GTK bar drew it, an interim until the
+# control center's panel holds it (doc_notification_center.md NC1, #1189).
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 1
+what = "Clear all shows the focus ring when the list opens"
+state = "recorded"
+reason = "a Sal menu popup puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar does; the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 2
+what = "the list kept 480 px however few notifications it held"
+state = "closed"
+reason = "the scroll takes its content's natural height up to 480 px (Ui::set_natural_height), as GTK's propagate-natural-height"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 3
+what = "the separator above Do not disturb was missing"
+state = "closed"
+reason = "the separator fills the column's width (Ui::set_fill); left to its natural width it had none and drew nothing"
+
+[[gtk-difference]]
+surface = "bar-notifications"
+item = 4
+what = "the cards of the list take the popover's corner radius"
+state = "recorded"
+reason = "a Sal Ui draws every island with its theme's one radius, so a card in the list rounds at the popover's 24 px; GTK's .notification-card class gave the cards 18 px, which the popups, on a Ui of their own, keep"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 1
+what = "no Network, Bluetooth or shield button in the bar, which is shorter, and the popover further towards the end edge"
+state = "closed"
+reason = "the network, Bluetooth and shield branches are merged into the bar's port, and the goldens are captured again with their buttons"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 2
+what = "the module's button not drawn pressed while its popover is open"
+state = "closed"
+reason = "the bar's branch, merged with this module's, fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs), as the bar's item 2"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 3
+what = "the focus ring drawn on the output's slider when the popover opens"
+state = "recorded"
+reason = "Sal gives the first control the focus and shows its ring, as the control center's pages (item 6); GTK focused the same slider, as its Orca reference says, without the ring"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 4
+what = "the device rows raised on the bar's chip, and the popover about 50 px wider"
+state = "closed"
+reason = "the page opens in a theme with flat buttons on the popover's fill and a 160 px least slider, so the widest row of labels and switches sets the width, as GTK's (controls::theme)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 5
+what = "the artist in body text"
+state = "closed"
+reason = "the artist is a note in calmo's caption size and ink2, as bar-popover-note (controls::look)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 6
+what = "headings and notes a tenth smaller, an off switch with a pale knob, rows a few pixels apart from GTK's, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's type steps, switch and metrics and the palette's surface follow VL10, as the control center's items 13, 14 and 16 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 7
+what = "no Network, Bluetooth or shield button in the bar, which is shorter, and the popover against the end edge"
+state = "closed"
+reason = "the network, Bluetooth and shield branches are merged into the bar's port, and the goldens are captured again with their buttons"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 8
+what = "the module's button not drawn pressed while its popover is open"
+state = "closed"
+reason = "the bar's branch, merged with this module's, fills an icon or labelled button while the popup it opens is expanded, as GTK's checked menu button (render.rs), as the bar's item 2"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 9
+what = "the focus on Power saver when the popover opens, and each power mode its own Tab stop"
+state = "closed"
+reason = "a Sal radio group is one Tab stop on its chosen radio, which the arrows move along the group, as GTK's and the WAI-ARIA radio group (maintainer decision, 2026-11-15); the focus opens on Balanced and the Orca walk takes GTK's two Tabs"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 10
+what = "the power modes 32 px apart and the popover about 50 px wider"
+state = "closed"
+reason = "the page takes a 2.25 px radio gap for GTK's 30 px pitch and a 160 px least slider, so the widest row sets the width (controls::look, controls::theme)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 11
+what = "the time left in body text"
+state = "closed"
+reason = "the time left is a note in calmo's caption size and ink2, as bar-popover-note (controls::look)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 12
+what = "headings and notes a tenth smaller, an unselected radio with a faint ring, and the dark popover in Calmo's tinted fill"
+state = "recorded"
+reason = "Sal's type steps and radio and the palette's surface follow VL10, as the control center's items 13 and 14 (#1147)"
+
+[[gtk-difference]]
+surface = "bar-audio"
+item = 13
+what = "in right-to-left the volume button's and the media buttons' icons pointed left to right"
+state = "closed"
+reason = "the icons are looked up under the theme's -rtl variant when the reading is right-to-left, as GTK's lookup takes it, and tinted as symbolic (Icons::reading)"
+
+[[gtk-difference]]
+surface = "bar-battery"
+item = 14
+what = "the focus ring drawn on the chosen power mode when the popover opens"
+state = "recorded"
+reason = "Sal shows the ring of the control it gives the focus, as on the audio popover's slider (item 3); GTK focused the same mode, as its Orca reference says, without the ring"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 1
+what = "the bar shows no Sound, Battery or shield button, so the network button sits further toward the end edge and its popover meets the screen's edge"
+state = "closed"
+reason = "the audio, battery and shield branches are merged into the bar's port: the bar holds every module's button and the network popover opens under its button; the AT-SPI and Orca comparisons hold the same buttons"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 2
+what = "the text in the system sans, where GTK drew Inter"
+state = "closed"
+reason = "the tray's branch, merged into the bar's port, sets Calmo's family, Inter, on the bar's and the popovers' themes, as the bar's item 3 (look::FONT_FAMILY)"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 3
+what = "the Wi-Fi switch shows the focus ring when the popover opens"
+state = "recorded"
+reason = "a Sal popover puts the keyboard focus on its first control when it opens and draws the ring, as every popover of the Sal bar and the control center's pages (control-center item 6); the GTK popover gave the focus without the ring to a popover opened by the pointer"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 4
+what = "an off switch's track tinted with the bar's chip, and a row's icon against its name"
+state = "closed"
+reason = "a page takes the popover's theme with the popover's fill as its surface and the GTK row box's 8 px between a row's icon and its name (look::page, test a_page_draws_its_buttons_on_the_popover_fill)"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 5
+what = "an off switch with a pale knob and an unfilled track, and the network that needs Settings dimmed in full"
+state = "recorded"
+reason = "Sal draws VL10's switch and insensitive states (#1147), as control-center item 14, where GTK drew Adwaita's grey track and white knob and dimmed only the row's icon"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 6
+what = "rows 40 px apart against 36, and the heading and the wired state about a tenth smaller"
+state = "recorded"
+reason = "the page takes Sal's theme metrics and type steps, the control padding of VL10 and calmo's 13 px body (#1147), as control-center items 13 and 16"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 7
+what = "the password field has no button that shows the password, and Connect is not the accent's filled button"
+state = "recorded"
+reason = "athanor-sal's password field has no peek toggle and its button no suggested style; the page is the control center's (#1165), so the change is athanor-sal's for both surfaces"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 8
+what = "a change of the appearance while the password page is open cancels NetworkManager's request"
+state = "recorded"
+reason = "the bar builds a popover again on a change of the appearance, and a page whose widgets are dropped answers the request it showed with a cancel, so that no request waits on a page nobody sees; GTK restyled the open page in place"
+
+[[gtk-difference]]
+surface = "bar-bluetooth"
+item = 9
+what = "the Pair button is described by one text holding the device, the digits and the note, where GTK pointed at the three labels with DescribedBy"
+state = "recorded"
+reason = "AccessKit's AT-SPI bridge sends ControllerFor alone of the relations (accesskit_atspi_common 0.21.1), so the page sets the three texts as the button's description; Orca reads the description as it read the relation's targets (bar_modules_e2e.py, description)"
+
+[[gtk-difference]]
+surface = "bar-bluetooth"
+item = 10
+what = "Pair is not the accent's filled button"
+state = "recorded"
+reason = "athanor-sal's button has no suggested style, as the power menu's confirmation"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 11
+what = "in the dark style the bar and the popovers are filled with calmo's plum, #2d1c33, where GTK filled them with navy, #1c2033"
+state = "recorded"
+reason = "the Sal bar takes its fills from athanor-style's generated Sal palette, the GTK bar took them from its own style sheet; the change is the bar's, across every surface of it and both popovers, not the popovers'"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 12
+what = "the clock writes the weekday and the date in English in every locale, Fri for Fr in German and the Latin digits and names in the right-to-left case"
+state = "closed"
+reason = "the bar formats dates in the session's time locale (athanor_i18n::use_time_locale), as the calendar's item 8"
+
+[[gtk-difference]]
+surface = "bar-network"
+item = 13
+what = "the popover casts no shadow"
+state = "recorded"
+reason = "a Sal popup card draws no shadow, as bar-popups records for every popup of the Sal bar; both popovers show it"

@@ -408,7 +408,7 @@ class CompositorSession(unittest.TestCase):
         self.assertEqual(state.split()[0], "Z", "the grandchild is still running")
         calls = self.calls()
         scope_check = calls.index(
-            "systemctl --user is-active --quiet cosmic-idle.scope",
+            "systemctl --user is-active --quiet cosmic-greeter-locker.scope",
             calls.index("systemctl --user start --wait athanor-sulphur.service"),
         )
         unit_stop = (

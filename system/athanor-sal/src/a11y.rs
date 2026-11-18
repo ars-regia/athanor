@@ -2,7 +2,7 @@
 //! the same paths as the keyboard and the pointer.
 
 use crate::focus::list_stop;
-use crate::widget::{Event, Kind, RootRole, Ui, WidgetId};
+use crate::widget::{Event, Kind, Mark, Priority, RootRole, Ui, WidgetId};
 use accesskit::{
     Action, ActionData, ActionRequest, HasPopup, Live, Node, NodeId, Orientation, Rect, Role,
     TextPosition, TextSelection, Toggled, TreeId, TreeInfo, TreeUpdate,
@@ -10,19 +10,43 @@ use accesskit::{
 use std::ops::Range;
 use std::sync::Mutex;
 
-/// The AccessKit node id of a widget.
+/// The bits of a node id below which its widget's slot lies.
+const SLOT_BITS: u32 = 24;
+/// The bits of a node id below which its widget's slot and generation lie: the line of a text
+/// run lies above, and the announcement's bit 63 above that.
+const WIDGET_BITS: u32 = 40;
+
+/// The AccessKit node id of a widget: its slot, and the low 16 bits of its generation above,
+/// so that a node an assistive technology cached for a widget since removed names no widget,
+/// also once another widget takes the slot: the slot is retired before those bits come back
+/// (`Widgets::free`).
 pub fn node_id(id: WidgetId) -> NodeId {
-    NodeId(u64::from(id.0))
+    NodeId(u64::from(id.0) | u64::from(id.1 & 0xffff) << SLOT_BITS)
 }
 
 /// The node of line `line` of a field's text, beside the widgets' ids: a single-line field has
 /// one line, a text area one per line as it is seen.
+// ponytail: 23 bits of line, past 8 million lines a run would reach the announcement's bit.
 pub fn text_run_id(id: WidgetId, line: usize) -> NodeId {
-    NodeId(u64::from(id.0) | (line as u64 + 1) << 32)
+    NodeId(node_id(id).0 | (line as u64 + 1) << WIDGET_BITS)
 }
 
-/// The node of a list row's label, beside the widgets' ids: a row has no text runs, so it takes
-/// the id of a first one.
+/// The widget `node` names, while it is the one the node was published for: `None` for a node
+/// of a text run or of the announcement, past the arena, or once the widget was removed,
+/// whatever took its slot since.
+fn widget_of(ui: &Ui, node: NodeId) -> Option<WidgetId> {
+    if node.0 >> WIDGET_BITS != 0 {
+        return None;
+    }
+    let index = (node.0 & ((1 << SLOT_BITS) - 1)) as u32;
+    let generation = ui.widgets.generation(index as usize)?;
+    let id = WidgetId(index, generation);
+    (node_id(id) == node).then_some(id)
+}
+
+/// The node of a list row's label, beside the widgets' ids: a row is neither a label nor a field
+/// and has no text runs, so it takes the id of a first one.
+#[cfg(test)]
 pub fn row_label_id(id: WidgetId) -> NodeId {
     text_run_id(id, 0)
 }
@@ -41,23 +65,53 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
                 RootRole::Window => Role::Window,
                 RootRole::Status => Role::Status,
                 RootRole::AlertDialog => Role::AlertDialog,
+                RootRole::Dialog => Role::Dialog,
             });
             node.set_label(ui.title.as_str());
+            if ui.modal {
+                node.set_modal();
+            }
             node
         }
-        Kind::Column | Kind::Row | Kind::TitleBar | Kind::Island { .. } => {
+        Kind::Column
+        | Kind::Row
+        | Kind::TitleBar
+        | Kind::Island { .. }
+        | Kind::Inline { .. }
+        | Kind::CenterBox => {
             Node::new(Role::GenericContainer)
         }
+        // GTK's calendar reaches AT-SPI as an unnamed panel, which AccessKit's Group is; a
+        // GenericContainer would leave no node at all (accesskit_consumer, filters.rs).
+        Kind::Calendar(_) => Node::new(Role::Group),
+        Kind::Alert(name) => {
+            // A column as a group is, and says so as GTK's vertical box does.
+            let mut node = Node::new(Role::Alert);
+            node.set_label(name.as_str());
+            node.set_orientation(group_orientation(widget));
+            node
+        }
         Kind::Group(name) => {
-            // A group stacks its children as a column, and says so as GTK's vertical box does.
+            // A group stacks its children as a column, and says so as GTK's vertical box does,
+            // unless the application lays it out as a row (Ui::set_horizontal).
             let mut node = Node::new(Role::Group);
             node.set_label(name.as_str());
-            node.set_orientation(Orientation::Vertical);
+            node.set_orientation(group_orientation(widget));
             node
         }
         Kind::Label(text) => {
             let mut node = Node::new(Role::Label);
             node.set_value(text.as_str());
+            node
+        }
+        // GTK's day and weekday labels; a day takes the focus, so it is named by its number too.
+        Kind::CalendarCell(cell) => {
+            let mut node = Node::new(Role::Label);
+            node.set_value(cell.text.as_str());
+            if let Some(mark) = cell.day {
+                node.set_label(cell.text.as_str());
+                node.set_selected(mark.selected);
+            }
             node
         }
         Kind::WindowButton(button) => {
@@ -66,7 +120,9 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.add_action(Action::Click);
             node
         }
-        Kind::Button(label) | Kind::IconButton { label, .. } => {
+        Kind::Button(label)
+        | Kind::IconButton { label, .. }
+        | Kind::LabelledButton { label, .. } => {
             let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.add_action(Action::Click);
@@ -76,6 +132,28 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::MenuItem(label) => {
             let mut node = Node::new(Role::MenuItem);
             node.set_label(label.as_str());
+            node.add_action(Action::Click);
+            node
+        }
+        // GTK's model buttons: a check or a radio menu item with its state; a submenu's item and
+        // its page's title are menu items, expanded while the page is shown, as GTK sets them.
+        Kind::MenuEntry { label, mark } => {
+            let mut node = Node::new(match mark {
+                Mark::Check(_) => Role::MenuItemCheckBox,
+                Mark::Radio(_) => Role::MenuItemRadio,
+                Mark::Submenu(_) | Mark::Back(_) => Role::MenuItem,
+            });
+            node.set_label(label.as_str());
+            match *mark {
+                Mark::Check(on) | Mark::Radio(on) => {
+                    node.set_toggled(if on { Toggled::True } else { Toggled::False });
+                }
+                Mark::Submenu(page) => {
+                    node.set_has_popup(HasPopup::Menu);
+                    node.set_expanded(ui.is_visible(page));
+                }
+                Mark::Back(_) => node.set_expanded(true),
+            }
             node.add_action(Action::Click);
             node
         }
@@ -98,17 +176,72 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node
         }
         // A button with a toggled state: AT-SPI shows it as a toggle button, pressed when
-        // active, as GTK's ToggleButton; a radio as a radio button, checked when active.
+        // active, as GTK's ToggleButton; a radio as a radio button, checked when active, and as
+        // a radio menu item in a menu, as a drop-down's items.
         Kind::Toggle {
             label,
             active,
             radio,
         } => {
-            let mut node = Node::new(if *radio {
-                Role::RadioButton
-            } else {
-                Role::Button
+            let in_menu = widget
+                .parent
+                .is_some_and(|p| matches!(ui.widget(p).kind, Kind::Menu));
+            let mut node = Node::new(match (*radio, in_menu) {
+                (true, true) => Role::MenuItemRadio,
+                (true, false) => Role::RadioButton,
+                (false, _) => Role::Button,
             });
+            node.set_label(label.as_str());
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        // A tile: a toggle button, as GTK's ToggleButton, pressed while on, and described by its
+        // second line, as the GTK panel's tiles are.
+        Kind::Tile(crate::tile::Tile {
+            title: label,
+            subtitle,
+            active,
+            ..
+        }) => {
+            let mut node = Node::new(Role::Button);
+            node.set_label(label.as_str());
+            if !subtitle.is_empty() {
+                node.set_description(subtitle.as_str());
+            }
+            node.set_toggled(if *active {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
+            node.add_action(Action::Click);
+            node
+        }
+        // A drop-down: a combo box, as GTK's DropDown, which names it by its chosen item and
+        // gives the name an application sets as its description, through the tooltip GTK's
+        // panels set to it; without an item it has no name, as GTK's, and Orca reads the
+        // description. The value is the chosen item too, though AT-SPI reads no value of a combo
+        // box (AccessKit#824). Its menu is announced by the popup state every widget with one
+        // carries; a description or a tooltip set on the drop-down takes the place of its name
+        // below.
+        Kind::DropDown(drop) => {
+            let mut node = Node::new(Role::ComboBox);
+            let chosen = drop.chosen_text();
+            if !chosen.is_empty() {
+                node.set_label(chosen);
+            }
+            node.set_description(drop.name.as_str());
+            node.set_value(chosen);
+            node.add_action(Action::Click);
+            node
+        }
+        // An icon toggle: a toggle button, as GTK's ToggleButton, pressed while on.
+        Kind::IconToggle(crate::icon_toggle::IconToggle { label, active, .. }) => {
+            let mut node = Node::new(Role::Button);
             node.set_label(label.as_str());
             node.set_toggled(if *active {
                 Toggled::True
@@ -158,10 +291,14 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             node.set_orientation(Orientation::Horizontal);
             node
         }
-        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines.
+        // A text area reaches AT-SPI as GTK's TextView does: a text input of several lines. A
+        // password field is password text, as GTK's PasswordEntry, and its value and text runs
+        // are its masks (password.rs).
         Kind::Field(field) | Kind::TextArea(field) => {
             let mut node = Node::new(if matches!(widget.kind, Kind::TextArea(_)) {
                 Role::MultilineTextInput
+            } else if field.is_password() {
+                Role::PasswordInput
             } else {
                 Role::TextInput
             });
@@ -191,14 +328,24 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         Kind::ListRow(text) => {
             let mut node = Node::new(Role::ListBoxOption);
             node.set_label(text.as_str());
-            // As GTK's rows, selected or not once the list has a selection, and neither before.
-            if let Some(selected) = widget.parent.and_then(|list| ui.selected(list)) {
-                node.set_selected(selected == id);
+            // As the rows of GTK's single-selection ListBox: selectable from the start, so
+            // selected or not before the first selection as after it.
+            let in_list = |&list: &WidgetId| matches!(ui.widget(list).kind, Kind::List { .. });
+            if let Some(list) = widget.parent.filter(in_list) {
+                node.set_selected(ui.selected(list) == Some(id));
             }
             node.add_action(Action::Click);
             node
         }
+        // As GTK's row that is neither selectable nor activatable: an option with no name, no
+        // selected state and no action, its text a label inside it.
+        Kind::ListHeading(_) => Node::new(Role::ListBoxOption),
     };
+    // The selected row of a list stands for the widget while it has the focus: a field that
+    // moves the selection of the list under it, as a combo box's entry.
+    if let Some(row) = ui.active_descendant(id) {
+        node.set_active_descendant(node_id(row));
+    }
     let sensitive = ui.is_sensitive(id);
     // A list is focusable as GTK's ListBox is, while it has a row to take the focus.
     if (widget.is_focusable() || list_stop(ui, id).is_some()) && sensitive {
@@ -211,17 +358,21 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
         node.set_has_popup(HasPopup::Menu);
         node.set_expanded(expanded);
     }
-    if let Some(description) = ui.description(id) {
+    // A tile's second line stays its description over a tooltip, as the GTK panel sets the
+    // description after the tooltip its name gives.
+    let second_line = matches!(&widget.kind, Kind::Tile(tile) if !tile.subtitle.is_empty());
+    if let Some(description) = ui.description(id).filter(|_| !second_line) {
         node.set_description(description);
     }
     node.set_bounds(bounds(ui, id, scale));
-    let shown = widget.children.iter().filter(|&&c| ui.widget(c).visible);
+    let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
-    if let Kind::ListRow(_) = widget.kind {
-        children.push(row_label_id(id));
-    }
+    children.extend((0..shown_labels(ui, id).len()).map(|n| text_run_id(id, n)));
     if id == Ui::ROOT && ui.announcement.is_some() {
         children.push(ANNOUNCEMENT);
+    }
+    if let Kind::Label(_) = &widget.kind {
+        children.push(text_run_id(id, 0));
     }
     if let Kind::Field(field) | Kind::TextArea(field) = &widget.kind {
         let lines = field.line_ranges();
@@ -241,39 +392,84 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
 }
 
 /// A field's committed text as one run per line as it is seen, which AT-SPI's Text and
-/// EditableText interfaces read: AccessKit offers them only for a text input with runs. A line
-/// that ends in a newline holds it.
+/// EditableText interfaces read: AccessKit offers them only for a text input or a label with
+/// runs. A line that ends in a newline holds it. A label's text is one run, so that it offers
+/// the Text interface as GTK's labels do: Orca reads a focused list row's labels through it,
+/// past the one its name repeats (`_generate_descendants`, Orca 49).
 fn text_runs(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
-    let (Kind::Field(field) | Kind::TextArea(field)) = &ui.widget(id).kind else {
-        return Vec::new();
+    let run = |n: usize, line: &str| {
+        let mut run = Node::new(Role::TextRun);
+        let lengths: Vec<u8> = line.chars().map(|c| c.len_utf8() as u8).collect();
+        run.set_value(line);
+        run.set_character_lengths(lengths);
+        // ponytail: every run has its widget's bounds; the line's own, when a screen reader
+        // asks where a character is.
+        run.set_bounds(bounds(ui, id, scale));
+        (text_run_id(id, n), run)
     };
-    let text = field.text();
-    let lines = field.line_ranges().into_iter().enumerate();
-    lines
-        .map(|(n, range)| {
-            let line = text.get(range).unwrap_or_default();
-            let mut run = Node::new(Role::TextRun);
-            let lengths: Vec<u8> = line.chars().map(|c| c.len_utf8() as u8).collect();
-            run.set_value(line);
-            run.set_character_lengths(lengths);
-            // ponytail: every run has the field's bounds; the line's own, when a screen reader
-            // asks where a character is.
-            run.set_bounds(bounds(ui, id, scale));
-            (text_run_id(id, n), run)
+    match &ui.widget(id).kind {
+        Kind::Label(text) => vec![run(0, text.as_str())],
+        Kind::Field(field) | Kind::TextArea(field) => {
+            let text = field.text();
+            let lines = field.line_ranges().into_iter().enumerate();
+            lines
+                .map(|(n, range)| run(n, text.get(range).unwrap_or_default()))
+                .collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The orientation a group or an alert says: see [`Ui::set_horizontal`].
+fn group_orientation(widget: &crate::widget::Widget) -> Orientation {
+    if widget.horizontal {
+        Orientation::Horizontal
+    } else {
+        Orientation::Vertical
+    }
+}
+
+/// The texts widget `id` shows as labels inside it: a list heading's, a list row's unless it
+/// shows widgets of its own, a labelled button's when it shows one, and a tile's title and its
+/// second line, as the GtkLabels inside the GTK panel's tiles.
+fn shown_labels(ui: &Ui, id: WidgetId) -> Vec<&str> {
+    match &ui.widget(id).kind {
+        Kind::ListRow(text) | Kind::ListHeading(text) if has_row_label(ui, id) => vec![text],
+        Kind::LabelledButton { text, .. } if !text.is_empty() => vec![text],
+        Kind::Tile(tile) => [&tile.title, &tile.subtitle]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .map(String::as_str)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
+/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label. A
+/// labelled button's text is a label inside it the same way, as the GtkLabel of a GTK button
+/// whose name is set apart, and a tile's two lines are two labels inside it.
+fn row_labels(ui: &Ui, id: WidgetId, scale: f64) -> Vec<(NodeId, Node)> {
+    let labels = shown_labels(ui, id).into_iter().enumerate();
+    labels
+        .map(|(n, text)| {
+            let mut label = Node::new(Role::Label);
+            label.set_value(text);
+            label.set_bounds(bounds(ui, id, scale));
+            (text_run_id(id, n), label)
         })
         .collect()
 }
 
-/// A list row's text as a label inside the row, as GTK's ListBox holds a GtkLabel in each of its
-/// rows: AT-SPI reads the row as a list item named by its text, and the text as that label.
-fn row_label(ui: &Ui, id: WidgetId, scale: f64) -> Option<(NodeId, Node)> {
-    let Kind::ListRow(text) = &ui.widget(id).kind else {
-        return None;
-    };
-    let mut label = Node::new(Role::Label);
-    label.set_value(text.as_str());
-    label.set_bounds(bounds(ui, id, scale));
-    Some((row_label_id(id), label))
+/// Whether row or heading `id` holds its text as a label: a row that shows widgets of its own
+/// has them in its place.
+fn has_row_label(ui: &Ui, id: WidgetId) -> bool {
+    let widget = ui.widget(id);
+    match widget.kind {
+        Kind::ListHeading(_) => true,
+        Kind::ListRow(_) => ui.visible_children(id).is_empty(),
+        _ => false,
+    }
 }
 
 /// Byte `index` of field `id`'s `text`, split in `lines` as its runs, as a run and a character
@@ -299,13 +495,17 @@ fn bounds(ui: &Ui, id: WidgetId, scale: f64) -> Rect {
     }
 }
 
-/// The announcement of [`Ui::announce`]: a polite live region, which the AT-SPI bridge announces
-/// as the node is added (`accesskit_atspi_common`, `adapter.rs`, `add_node`).
+/// The announcement of [`Ui::announce`]: a live region, polite or assertive as its priority,
+/// which the AT-SPI bridge announces as the node is added (`accesskit_atspi_common`,
+/// `adapter.rs`, `add_node`).
 fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
-    let text = ui.announcement.as_deref()?;
+    let (text, priority) = ui.announcement.as_ref()?;
     let mut node = Node::new(Role::Label);
-    node.set_value(text);
-    node.set_live(Live::Polite);
+    node.set_value(text.as_str());
+    node.set_live(match priority {
+        Priority::Polite => Live::Polite,
+        Priority::Assertive => Live::Assertive,
+    });
     node.set_bounds(bounds(ui, Ui::ROOT, scale));
     Some((ANNOUNCEMENT, node))
 }
@@ -399,7 +599,7 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
         nodes: shown()
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
-            .chain(shown().filter_map(|id| row_label(ui, id, scale)))
+            .chain(shown().flat_map(|id| row_labels(ui, id, scale)))
             .chain(announcement(ui, scale))
             .collect(),
         tree: Some(tree),
@@ -427,14 +627,20 @@ pub fn missing(ui: &Ui, update: &TreeUpdate) -> Vec<WidgetId> {
 
 impl Ui {
     /// Carries out an assistive technology's request on the widget it names, unless it is
-    /// hidden or insensitive.
+    /// hidden or insensitive. A request for a node of a widget since removed is refused, and
+    /// logged: it never reaches the widget that took the slot ([`node_id`]).
     pub(crate) fn do_action(&mut self, request: &ActionRequest) -> Option<Event> {
-        let id = u32::try_from(request.target_node.0)
-            .ok()
-            .map(WidgetId)
-            .filter(|&id| {
-                id.index() < self.len() && self.is_visible(id) && self.is_sensitive(id)
-            })?;
+        let Some(id) = widget_of(self, request.target_node) else {
+            let slot = request.target_node.0 & ((1 << SLOT_BITS) - 1);
+            if request.target_node.0 >> WIDGET_BITS == 0 && (slot as usize) < self.len() {
+                self.widgets
+                    .warn(format_args!("no action on slot {slot}: its widget was removed"));
+            }
+            return None;
+        };
+        if !self.is_visible(id) || !self.is_sensitive(id) {
+            return None;
+        }
         match (request.action, &request.data) {
             (Action::Click, _) => self.activate(id),
             // A list's focus goes to its stop, as the Tab key's does.
@@ -480,9 +686,11 @@ mod tests {
         ui.set_visible(hidden, false);
         ui.layout();
         let mut update = tree_update(&ui, 1.0);
-        // Every visible widget, and the field's text run.
-        let visible = ui.ids().filter(|&id| ui.is_visible(id)).count();
-        assert_eq!(update.nodes.len(), visible + 1);
+        // Every visible widget, the field's text run and each label's.
+        let visible: Vec<WidgetId> = ui.ids().filter(|&id| ui.is_visible(id)).collect();
+        let label = |id: &&WidgetId| matches!(ui.widget(**id).kind, Kind::Label(_));
+        let labels = visible.iter().filter(label).count();
+        assert_eq!(update.nodes.len(), visible.len() + 1 + labels);
         assert!(update.nodes.iter().all(|(n, _)| *n != node_id(hidden)));
         assert_eq!(missing(&ui, &update), Vec::<WidgetId>::new());
 
@@ -608,6 +816,67 @@ mod tests {
     }
 
     #[test]
+    fn a_node_cached_for_a_removed_widget_never_reaches_the_one_in_its_slot() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let old = ui.add(column, Kind::Button("Old".into()));
+        ui.layout();
+        let cached = node_id(old);
+        assert!(tree_update(&ui, 1.0).nodes.iter().any(|(n, _)| *n == cached));
+        let click = |node| ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node,
+            data: None,
+        };
+        // The application replaces the button, and the tree is published again; the assistive
+        // technology still acts on the node it cached.
+        ui.remove_children(column);
+        let new = ui.add(column, Kind::Button("New".into()));
+        ui.layout();
+        let published = tree_update(&ui, 1.0);
+        assert_eq!(new.index(), old.index(), "the slot is reused");
+        assert_ne!(node_id(new), cached, "under another node");
+        assert!(!published.nodes.iter().any(|(n, _)| *n == cached));
+        assert_eq!(ui.do_action(&click(cached)), None);
+        assert_ne!(ui.focus(), Some(new));
+        // A request on the node published for the new button acts on it.
+        assert_eq!(ui.do_action(&click(node_id(new))), Some(Event::Clicked(new)));
+        // A text run's node names no widget, whatever its slot.
+        assert_eq!(ui.do_action(&click(text_run_id(new, 0))), None);
+    }
+
+    #[test]
+    fn a_slot_is_retired_before_a_cached_node_could_name_its_next_widget() {
+        let mut ui = Ui::new("Requests", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let first = ui.add(column, Kind::Button("First".into()));
+        let cached = node_id(first);
+        // 65,535 removals bring the slot's generation to the last whose low 16 bits are its own.
+        let mut last = first;
+        for _ in 0..u16::MAX {
+            ui.remove_children(column);
+            last = ui.add(column, Kind::Button("Again".into()));
+            assert_eq!(last.index(), first.index(), "the slot is reused");
+        }
+        assert_eq!(last.1, u32::from(u16::MAX));
+        // The next removal would bring them back to the first widget's: the slot is retired.
+        ui.remove_children(column);
+        let next = ui.add(column, Kind::Button("Next".into()));
+        assert_ne!(next.index(), first.index(), "a retired slot holds no widget again");
+        assert_eq!(widget_of(&ui, cached), None);
+        ui.layout();
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: cached,
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), None);
+        assert_eq!(widget_of(&ui, node_id(next)), Some(next));
+    }
+
+    #[test]
     fn requests_from_assistive_technologies_are_bounded() {
         let mut ui = Ui::new("Requests", Theme::default(), false);
         let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
@@ -626,7 +895,7 @@ mod tests {
         assert_eq!(ui.do_action(&request(label, Action::Click, None)), None);
         assert_eq!(ui.do_action(&request(label, Action::Focus, None)), None);
         assert_eq!(
-            ui.do_action(&request(WidgetId(ui.len() as u32), Action::Click, None)),
+            ui.do_action(&request(WidgetId(ui.len() as u32, 0), Action::Click, None)),
             None
         );
         assert_eq!(ui.focus(), Some(button));
@@ -656,7 +925,8 @@ mod tests {
             .widget(bar)
             .children
             .iter()
-            .map(|&id| &update.nodes[id.index()].1)
+            .filter_map(|&id| update.nodes.iter().find(|(n, _)| *n == node_id(id)))
+            .map(|(_, node)| node)
             .collect();
         let read: Vec<_> = parts
             .iter()
@@ -702,6 +972,35 @@ mod tests {
             .find(|(n, _)| *n == text_run_id(field, 0))
             .map(|(_, node)| node.character_lengths().to_vec());
         assert_eq!(lengths, Some(vec![3]));
+    }
+
+    #[test]
+    fn a_menus_checks_radios_and_submenus_read_as_gtks_model_buttons() {
+        use accesskit::HasPopup;
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", true);
+        let radio = ui.menu_radio(menu, "Low", false);
+        let (item, page) = ui.submenu(menu, "More");
+        ui.layout();
+        let read = |ui: &Ui, id: WidgetId| {
+            let n = node(ui, id, 1.0);
+            (n.role(), n.label().map(str::to_owned), n.toggled(), n.is_expanded())
+        };
+        assert_eq!(
+            read(&ui, check),
+            (Role::MenuItemCheckBox, Some("Mute".into()), Some(Toggled::True), None)
+        );
+        assert_eq!(
+            read(&ui, radio),
+            (Role::MenuItemRadio, Some("Low".into()), Some(Toggled::False), None)
+        );
+        assert_eq!(read(&ui, item), (Role::MenuItem, Some("More".into()), None, Some(false)));
+        assert_eq!(node(&ui, item, 1.0).has_popup(), Some(HasPopup::Menu));
+        assert_eq!(ui.activate(item), None);
+        let title = ui.widget(page).children[0];
+        assert_eq!(read(&ui, item).3, Some(true));
+        assert_eq!(read(&ui, title), (Role::MenuItem, Some("More".into()), None, Some(true)));
     }
 
     #[test]
@@ -841,6 +1140,20 @@ mod tests {
     }
 
     #[test]
+    fn every_row_is_selectable_before_the_first_selection() {
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Fruit");
+        let rows = [ui.list_row(list, "Apple"), ui.list_row(list, "Pear")];
+        ui.layout();
+        assert_eq!(ui.selected(list), None);
+        let update = tree_update(&ui, 1.0);
+        for row in rows {
+            // GTK's rows carry the selectable state, unselected, before any row is chosen.
+            assert_eq!(update.nodes[row.index()].1.is_selected(), Some(false));
+        }
+    }
+
+    #[test]
     fn a_list_in_a_scroll_reads_as_gtks() {
         let mut ui = Ui::new("Lists", Theme::default(), false);
         let scroll = ui.scroll(Ui::ROOT, 100.0);
@@ -850,8 +1163,6 @@ mod tests {
             .map(|name| ui.list_row(list, name))
             .collect();
         ui.layout();
-        let unselected = tree_update(&ui, 1.0);
-        assert_eq!(unselected.nodes[rows[0].index()].1.is_selected(), None);
         assert_eq!(ui.activate(rows[1]), Some(Event::Selected(rows[1])));
         ui.key(crate::Key::End);
         let update = tree_update(&ui, 1.0);
@@ -982,10 +1293,10 @@ mod tests {
         assert!(runs.iter().all(|r| r.role() == Role::TextRun));
         let children: Vec<NodeId> = (0..runs.len()).map(|n| text_run_id(area, n)).collect();
         assert_eq!(node.map(|n| n.children().to_vec()), Some(children));
-        assert_eq!(text_run_id(area, 2), NodeId(u64::from(area.0) | 3 << 32));
+        assert_eq!(text_run_id(area, 2), NodeId(node_id(area).0 | 3 << 40));
 
-        // A single-line field keeps its one run at `id | 1 << 32`.
-        assert_eq!(text_run_id(field, 0), NodeId(u64::from(field.0) | 1 << 32));
+        // A single-line field keeps its one run at `id | 1 << 40`.
+        assert_eq!(text_run_id(field, 0), NodeId(node_id(field).0 | 1 << 40));
         assert_eq!(find(text_run_id(field, 0)).and_then(Node::value), Some("one"));
         assert!(find(text_run_id(field, 1)).is_none());
     }
@@ -1133,6 +1444,104 @@ mod tests {
         assert_eq!(selection(&mut ui), Some(((run, 3), (run, 2))));
     }
 
+    /// A password field reaches AT-SPI as GTK's PasswordEntry does, password text, and nothing
+    /// AT-SPI reads or hears of it, its name, its text, its value or the events of its edits,
+    /// holds a character of what was typed (doc_accessibility.md, AX4).
+    #[test]
+    fn a_password_field_gives_at_spi_no_character_of_its_text() {
+        use accesskit::{ActionHandler, ActionRequest};
+        use accesskit_atspi_common::{
+            Adapter, AdapterCallback, AppContext, Event, FullNodeId, Granularity, InterfaceSet,
+            Role as AtspiRole, WindowBounds,
+        };
+        type Events = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
+        struct Recorder(Events);
+        impl AdapterCallback for Recorder {
+            fn register_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn unregister_interfaces(&self, _: &Adapter, _: FullNodeId, _: InterfaceSet) {}
+            fn emit_event(&self, _: &Adapter, event: Event) {
+                let mut events = self.0.lock().expect("not poisoned");
+                events.push(format!("{event:?}"));
+            }
+        }
+        struct NoActions;
+        impl ActionHandler for NoActions {
+            fn do_action(&mut self, _: ActionRequest) {}
+        }
+        // Characters no name, number or debug text of the tree holds, so any found leaked.
+        const SECRET: &str = "ŽƷ¶ŧ€";
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        let events = Events::default();
+        let mut adapter = Adapter::new(
+            &AppContext::new(None),
+            Recorder(events.clone()),
+            tree_update(&ui, 1.0),
+            true,
+            WindowBounds::default(),
+            NoActions,
+        );
+        ui.commit("ŽƷ");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("¶ŧx");
+        adapter.update(tree_update(&ui, 1.0));
+        ui.key(crate::widget::Key::Backspace);
+        adapter.update(tree_update(&ui, 1.0));
+        ui.commit("€");
+        adapter.update(tree_update(&ui, 1.0));
+        assert_eq!(ui.password_text(field), Some(SECRET));
+
+        let root = adapter.platform_node(adapter.root_id());
+        let node = (0..root.child_count().expect("children"))
+            .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+            .map(|child| root.relative(child))
+            .find(|child| child.name().ok().as_deref() == Some("Password"))
+            .expect("the field reaches AT-SPI");
+        assert_eq!(node.role().expect("a role"), AtspiRole::PasswordText);
+        assert_eq!(node.character_count().expect("a text"), 5);
+        let text = node.text(0, -1).expect("a text");
+        assert_eq!(text, "●●●●●");
+        let values: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.value().map(str::to_owned))
+            .collect();
+        assert!(values.contains(&text), "the field's value is its masks");
+        // What Orca reads character by character, word by word and line by line
+        // (doc_accessibility.md, AX4), and every node's label and description.
+        let mut strings = Vec::new();
+        for granularity in [Granularity::Char, Granularity::Word, Granularity::Line] {
+            for offset in 0..5 {
+                let (said, ..) = node.string_at_offset(offset, granularity).expect("a string");
+                strings.push(said);
+            }
+        }
+        assert!(strings.iter().any(|said| said == "●"), "a character is a mask");
+        let labels: Vec<String> = tree_update(&ui, 1.0)
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.description()])
+            .flatten()
+            .map(str::to_owned)
+            .collect();
+        assert!(labels.iter().any(|label| label == "Password"), "{labels:?}");
+
+        let events = events.lock().expect("not poisoned");
+        assert!(!events.is_empty(), "the edits are heard");
+        let heard = [node.name().expect("a name"), text]
+            .into_iter()
+            .chain(values)
+            .chain(strings)
+            .chain(labels)
+            .chain(events.iter().cloned());
+        for said in heard {
+            let leaked: Vec<char> = SECRET.chars().filter(|&c| said.contains(c)).collect();
+            assert!(leaked.is_empty(), "{leaked:?} reached AT-SPI in {said:?}");
+        }
+    }
+
     /// Through the AT-SPI bridge itself: a menu button reads as expandable, and expanded while
     /// its menu is open, and both it and a field as opening a popup, as GTK's do and W3C
     /// Core-AAM 1.2 maps `aria-expanded` and `aria-haspopup` (#638; the patch of
@@ -1202,6 +1611,11 @@ mod tests {
         announcements: Vec<(String, String)>,
         /// The windows deactivated, by name.
         deactivated: Vec<String>,
+        /// The focus gained, the window state made active and the windows activated, in the
+        /// order the bus heard them: `focused`, `active` and `activate <name>`.
+        activation: Vec<String>,
+        /// The expanded states reported, in order: `true` for expanded, `false` for collapsed.
+        expanded: Vec<bool>,
         /// The nodes with interfaces registered on the bus, and their interfaces' bits.
         registered: std::collections::HashMap<accesskit_atspi_common::FullNodeId, u32>,
     }
@@ -1216,7 +1630,7 @@ mod tests {
         use accesskit::{ActionHandler, ActionRequest};
         use accesskit_atspi_common::{
             Adapter, AdapterCallback, AppContext, Event, FullNodeId, InterfaceSet, ObjectEvent,
-            WindowBounds, WindowEvent,
+            State, WindowBounds, WindowEvent,
         };
         struct Recorder(Bus);
         impl AdapterCallback for Recorder {
@@ -1245,6 +1659,23 @@ mod tests {
                         event: WindowEvent::Deactivated,
                         ..
                     } => heard.deactivated.push(name),
+                    Event::Window {
+                        name,
+                        event: WindowEvent::Activated,
+                        ..
+                    } => heard.activation.push(format!("activate {name}")),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Focused, true),
+                        ..
+                    } => heard.activation.push("focused".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Active, true),
+                        ..
+                    } => heard.activation.push("active".into()),
+                    Event::Object {
+                        event: ObjectEvent::StateChanged(State::Expanded, expanded),
+                        ..
+                    } => heard.expanded.push(expanded),
                     _ => {}
                 }
             }
@@ -1287,6 +1718,31 @@ mod tests {
         assert_eq!(root(&ui), (AtspiRole::Alert, "Shut down now?".into()));
     }
 
+    /// A dialog's root reads as a modal dialog, and an alert dialog's keeps its role, modal too,
+    /// as GTK's modal windows and alert dialogs do.
+    #[test]
+    fn a_dialog_reads_as_a_modal_dialog() {
+        use accesskit_atspi_common::{Role as AtspiRole, State};
+        let root = |ui: &Ui| {
+            let (adapter, _) = at_spi(ui);
+            let root = adapter.platform_node(adapter.root_id());
+            let modal = root.state().contains(State::Modal);
+            (root.role().expect("a role"), modal)
+        };
+        let mut ui = Ui::new("A dialog", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Close".into()));
+        ui.layout();
+        assert_eq!(root(&ui), (AtspiRole::Frame, false));
+        ui.set_dialog();
+        assert_eq!(root(&ui), (AtspiRole::Dialog, true));
+        let mut alert = Ui::new("Replace the newer layout?", Theme::default(), false);
+        alert.root_role = RootRole::AlertDialog;
+        alert.add(Ui::ROOT, Kind::Button("Replace".into()));
+        alert.layout();
+        alert.set_dialog();
+        assert_eq!(root(&alert), (AtspiRole::Alert, true));
+    }
+
     /// The radios of a group read as radio buttons, the active one checked, where the toggles
     /// read as GTK's toggle buttons, pressed (doc_osd.md OD19, requirement S2). Activating
     /// another moves the check, as for the toggles.
@@ -1323,6 +1779,53 @@ mod tests {
         assert_eq!(read(&ui, "Headset with microphone"), (radio, [true, true, false]));
     }
 
+    /// A drop-down reaches AT-SPI as GTK's DropDown with the name and the tooltip the panels set:
+    /// a combo box named by its chosen item, with its own name as its description, renamed on
+    /// every choice through the updates a live adapter takes; a description or a tooltip set on
+    /// it describes it in place of its name; without items it has no name, as GTK's.
+    #[test]
+    fn a_drop_down_reads_as_gtks_named_by_its_chosen_item() {
+        use accesskit_atspi_common::{Adapter, Role as AtspiRole};
+        let read = |adapter: &Adapter| {
+            let root = adapter.platform_node(adapter.root_id());
+            let combo = (0..root.child_count().expect("children"))
+                .filter_map(|i| root.child_at_index(usize::try_from(i).ok()?).ok()?)
+                .map(|child| root.relative(child))
+                .find(|child| child.role().ok() == Some(AtspiRole::ComboBox))
+                .expect("the combo box reaches AT-SPI");
+            let read = (combo.name(), combo.description());
+            (read.0.expect("a name"), read.1.expect("a description"))
+        };
+        let publish = |ui: &mut Ui, adapter: &mut Adapter| {
+            ui.layout();
+            for update in tree_updates(ui, 1.0) {
+                adapter.update(update);
+            }
+        };
+        let mut ui = Ui::new("Drop-down", Theme::default(), false);
+        let players = ui.drop_down(Ui::ROOT, "Media player", &["Spotify", "Firefox"], 0);
+        ui.layout();
+        let (mut adapter, _) = at_spi(&ui);
+        assert_eq!(read(&adapter), ("Spotify".into(), "Media player".into()));
+        assert_eq!(ui.choose(players, 1), Some(Event::Changed(players)));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Media player".into()));
+        ui.set_tooltip(players, Some("Choose a player"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(read(&adapter), ("Firefox".into(), "Choose a player".into()));
+        ui.set_description(players, Some("The player the keys control"));
+        publish(&mut ui, &mut adapter);
+        assert_eq!(
+            read(&adapter),
+            ("Firefox".into(), "The player the keys control".into())
+        );
+        let mut empty = Ui::new("Drop-down", Theme::default(), false);
+        empty.drop_down(Ui::ROOT, "Media player", &[], 0);
+        empty.layout();
+        let (adapter, _) = at_spi(&empty);
+        assert_eq!(read(&adapter), (String::new(), "Media player".into()));
+    }
+
     /// An announcement reaches AT-SPI once, at polite priority, from a live region that leaves
     /// the tree with the next update, so the tree holds no stale text; the same text announced
     /// again is heard again (doc_osd.md OD11, requirement S2).
@@ -1339,7 +1842,7 @@ mod tests {
         };
         let before = children(&adapter);
         for _ in 0..2 {
-            ui.announce("Volume 45 percent");
+            ui.announce("Volume 45 percent", Priority::Polite);
             let updates = tree_updates(&mut ui, 1.0);
             assert_eq!(updates.len(), 2);
             for update in updates {
@@ -1356,6 +1859,61 @@ mod tests {
         assert_eq!(heard.announcements, [polite.clone(), polite]);
     }
 
+    /// An assertive announcement reaches AT-SPI as assertive, which interrupts the screen reader:
+    /// a critical notification's (doc_bar.md BR4, doc_notification_center.md NC11,
+    /// doc_accessibility.md AX6). The priority goes with its text: a later polite one is polite.
+    #[test]
+    fn an_assertive_announcement_is_heard_as_assertive() {
+        let mut ui = Ui::new("Notifications", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Label("Battery".into()));
+        ui.layout();
+        let (mut adapter, heard) = at_spi(&ui);
+        for (text, priority) in [
+            ("Battery critically low", Priority::Assertive),
+            ("Battery charging", Priority::Polite),
+        ] {
+            ui.announce(text, priority);
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        let heard = heard.lock().expect("not poisoned");
+        let expected = [
+            ("Battery critically low".to_owned(), "Assertive".to_owned()),
+            ("Battery charging".to_owned(), "Polite".to_owned()),
+        ];
+        assert_eq!(heard.announcements, expected);
+    }
+
+    /// A row's labels offer AT-SPI's Text interface, as GTK's labels do: Orca reads a focused
+    /// list row's second line only through it (`_get_presentable_descendants`, Orca 49), and
+    /// their runs stay out of the AT-SPI tree.
+    #[test]
+    fn a_label_offers_the_text_interface_as_gtks() {
+        use accesskit_atspi_common::PlatformNode;
+        fn find(node: &PlatformNode, name: &str) -> Option<PlatformNode> {
+            if node.name().ok()? == name {
+                return Some(node.clone());
+            }
+            (0..node.child_count().ok()?).find_map(|i| {
+                let child = node.relative(node.child_at_index(usize::try_from(i).ok()?).ok()??);
+                find(&child, name)
+            })
+        }
+        let mut ui = Ui::new("Lists", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let row = ui.list_row(list, "Row 1");
+        let column = ui.add(row, Kind::Column);
+        ui.add(column, Kind::Label("Row 1".into()));
+        ui.add(column, Kind::Label("A second line".into()));
+        ui.layout();
+        let (adapter, _) = at_spi(&ui);
+        let root = adapter.platform_node(adapter.root_id());
+        let line = find(&root, "A second line").expect("the label reaches AT-SPI");
+        assert_eq!(line.supports_text().ok(), Some(true));
+        assert_eq!(line.child_count().ok(), Some(0), "its run is not a node of AT-SPI");
+    }
+
     impl Bridge for accesskit_atspi_common::Adapter {
         fn set_focused(&mut self, focused: bool) {
             self.update_window_focus_state(focused);
@@ -1366,6 +1924,53 @@ mod tests {
         }
     }
 
+    /// A window taking the keyboard back, as one does when its dialog closes, reports the focus
+    /// of the widget that takes it before the window's activation, as GTK 4.20 does: Orca then
+    /// says the window's name and role, not its name alone (#1123; the second change of
+    /// `vendor/accesskit_atspi_common`).
+    #[test]
+    fn a_window_taking_the_keyboard_back_reports_the_focus_before_its_activation() {
+        let mut ui = Ui::new("Gallery", Theme::default(), false);
+        let button = ui.add(Ui::ROOT, Kind::Button("Open the dialog".into()));
+        ui.layout();
+        ui.set_focus(Some(button));
+        let (mut adapter, heard) = at_spi(&ui);
+        assert!(heard.lock().expect("not poisoned").activation.is_empty());
+        adapter.update_window_focus_state(true);
+        let heard = heard.lock().expect("not poisoned");
+        assert_eq!(heard.activation, ["focused", "activate Gallery", "active"]);
+    }
+
+    /// A menu button taking the focus reports its expanded state with it the first time, as GTK
+    /// 4.20 does: Orca then says "collapsed" for each one once, as for GTK's (AX6; the third
+    /// change of `vendor/accesskit_atspi_common`). A plain button reports none.
+    #[test]
+    fn a_menu_button_taking_the_focus_reports_its_expanded_state() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let plain = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        let menu = ui.add(Ui::ROOT, Kind::Button("Power".into()));
+        ui.set_has_popup(menu, true);
+        ui.layout();
+        let (mut adapter, heard) = at_spi_focused(&ui, true);
+        ui.set_focus(Some(plain));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert!(heard.lock().expect("not poisoned").expanded.is_empty());
+        ui.set_focus(Some(menu));
+        for update in tree_updates(&mut ui, 1.0) {
+            adapter.update(update);
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false]);
+        for focus in [plain, menu] {
+            ui.set_focus(Some(focus));
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        assert_eq!(heard.lock().expect("not poisoned").expanded, [false], "once");
+    }
+
     /// An announcement asked for before a surface leaves the accessibility tree and not yet
     /// published, or while it is out, is never heard (`Ui::announce`).
     #[test]
@@ -1374,10 +1979,10 @@ mod tests {
         ui.add(Ui::ROOT, Kind::Button("Mute".into()));
         ui.layout();
         let (mut adapter, heard) = at_spi(&ui);
-        ui.announce("Volume 45 percent");
+        ui.announce("Volume 45 percent", Priority::Polite);
         leave(&mut adapter, &Mutex::new(None), &mut ui, 1.0, false);
         assert!(ui.announcement.is_none(), "the next adapter would announce it");
-        ui.announce("Volume 50 percent");
+        ui.announce("Volume 50 percent", Priority::Polite);
         let tree = rejoining(&mut ui, 1.0);
         assert!(tree.nodes.iter().all(|(id, _)| *id != ANNOUNCEMENT));
         let (mut adapter, again) = at_spi(&ui);

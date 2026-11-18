@@ -38,6 +38,8 @@ Fixture keys:
   errors_on_copy {"dest": ["ref", ...]}: with moves, a copy to dest adds those refs to errors
   errors_after_reads {"ref": N}: `skopeo inspect` of ref answers N times, then fails as errors
                 does; the reads are counted in the fixture, across every process of a test
+  tier_rpms     {"registry/repo@digest": [path, ...]}  the files of a tier image: `skopeo copy` of it to
+                dir:D writes D/manifest.json and the one layer that holds them, as skopeo does
   packages      {"package": [package versions as the GitHub API returns them]}
   user_packages ["package", ...]  the container packages of the owner
   owner_type    "User" (the default) or "Organization", what /users/<owner> reports
@@ -68,6 +70,7 @@ import os
 import pathlib
 import re
 import sys
+import tarfile
 
 
 def fail(message, code=1):
@@ -99,13 +102,29 @@ def verify(args, fx):
     return 0
 
 
+def write_tier(src, dest, fx):
+    os.makedirs(dest, exist_ok=True)
+    layer = os.path.join(dest, "layer.tmp")
+    with tarfile.open(layer, "w") as tar:
+        for name in fx["tier_rpms"][src]:
+            tar.addfile(tarfile.TarInfo(name))
+    digest = hashlib.sha256(pathlib.Path(layer).read_bytes()).hexdigest()
+    os.rename(layer, os.path.join(dest, digest))
+    with open(os.path.join(dest, "manifest.json"), "w") as f:
+        json.dump({"layers": [{"digest": f"sha256:{digest}"}]}, f)
+    return 0
+
+
 def skopeo(args, fx):
     if "copy" in args:
         if "--policy" in args:
             return verify(args, fx)
         # Recorded in FAKE_LOG by main(). Nothing moves unless the fixture says "moves".
-        if args[-1].removeprefix("docker://") in fx.get("errors", []):
+        src = args[-2].removeprefix("docker://")
+        if args[-1].removeprefix("docker://") in fx.get("errors", []) or src in fx.get("errors", []):
             return fail("fake skopeo: copy failed", 1)
+        if src in fx.get("tier_rpms", {}) and args[-1].startswith("dir:"):
+            return write_tier(src, args[-1].removeprefix("dir:"), fx)
         if fx.get("moves"):
             src, dest = args[-2].removeprefix("docker://"), args[-1].removeprefix("docker://")
             fx["tags"][dest] = src.split("@", 1)[1] if "@" in src else fx["tags"][src]
@@ -289,7 +308,7 @@ def release(args, fx):
     if verb == "download":
         name = value("-p")
         if name not in rel["assets"]:
-            return fail(f"no assets match the file pattern")
+            return fail("no assets match the file pattern")
         (pathlib.Path(value("-D")) / name).write_bytes((assets_dir() / rel["assets"][name]).read_bytes())
         return 0
     return fail(f"fake gh: unsupported call {args}", 2)

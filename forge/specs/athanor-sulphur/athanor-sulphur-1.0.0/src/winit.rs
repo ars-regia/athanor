@@ -54,6 +54,7 @@ pub fn start(
     }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
+    crate::eis::start(&event_loop.handle());
     state.map_output(&output);
     state.dmabuf_state.create_global::<State>(&dh, formats);
     report_frame_times(event_loop, &mut state)?;
@@ -112,6 +113,7 @@ impl State {
                     &output,
                     age,
                     view,
+                    Vec::new(),
                     &mut nested.damage_tracker,
                     look,
                 );
@@ -153,6 +155,8 @@ impl State {
         }
         self.space.refresh();
         self.send_toplevel_states();
+        self.send_dock_overlaps();
+        self.refresh_materials();
         self.popups.cleanup();
         if let Err(error) = self.display_handle.flush_clients() {
             tracing::warn!(%error, "the clients could not be flushed");

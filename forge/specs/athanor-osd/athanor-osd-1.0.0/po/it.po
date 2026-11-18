@@ -1,0 +1,35 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: athanor-osd\n"
+"Report-Msgid-Bugs-To: forge@athanor.os\n"
+"Language: it\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/logic.rs:72
+msgid "Muted"
+msgstr "Audio disattivato"
+
+#: src/logic.rs:73
+#, rust-format
+msgid "Volume {percent} percent"
+msgstr "Volume {percent} per cento"
+
+#: src/logic.rs:74
+msgid "Microphone muted"
+msgstr "Microfono disattivato"
+
+#: src/logic.rs:75
+#, rust-format
+msgid "Microphone {percent} percent"
+msgstr "Microfono {percent} per cento"
+
+#: src/surface.rs:174
+msgid "Volume"
+msgstr "Volume"
+
+#: src/surface.rs:175
+msgid "Microphone"
+msgstr "Microfono"

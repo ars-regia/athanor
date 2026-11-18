@@ -166,7 +166,7 @@ class FlathubRemote(unittest.TestCase):
         self.assertTrue(self.problems())
 
     def test_no_key_fails(self):
-        self.write("\n".join(l for l in SHIPPED.read_text().splitlines() if not l.startswith("GPGKey=")))
+        self.write("\n".join(ln for ln in SHIPPED.read_text().splitlines() if not ln.startswith("GPGKey=")))
         self.assertTrue(self.problems())
 
     def test_a_second_key_appended_to_the_blob_fails(self):

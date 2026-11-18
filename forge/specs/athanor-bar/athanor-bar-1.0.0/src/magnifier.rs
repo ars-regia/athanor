@@ -2,8 +2,7 @@
 //! on for a session, so the bar turns the magnifier on at its start when the key is true, sends
 //! each change of the key to the compositor, and the magnifier row writes it.
 
-use gtk4::gio;
-use gtk4::gio::prelude::*;
+use gio::prelude::*;
 
 pub const SCHEMA: &str = "org.gnome.desktop.a11y.applications";
 pub const KEY: &str = "screen-magnifier-enabled";

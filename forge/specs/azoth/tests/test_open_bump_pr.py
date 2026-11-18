@@ -67,14 +67,14 @@ class OpenBumpPr(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_script(self, open_prs, **extra):
+    def run_script(self, open_prs, paths="spec", **extra):
         env = {
             **self.env,
             **extra,
             "STUB_PRS": "".join(f"{number} {head}\n" for number, head in open_prs),
         }
         return subprocess.run(
-            [str(SCRIPT), LABEL, PREFIX, "spec", str(self.out), "main"],
+            [str(SCRIPT), LABEL, PREFIX, paths, str(self.out), "main"],
             cwd=self.work,
             env=env,
             capture_output=True,
@@ -131,6 +131,26 @@ class OpenBumpPr(unittest.TestCase):
         self.assertIn(f"the label {LABEL} is not on the repository", result.stderr)
         self.assertFalse(self.pushed())
         self.assertNotIn("pr create", self.calls())
+
+    def test_several_paths_are_committed_and_nothing_else(self):
+        (self.work / "lock").write_text("new\n")
+        (self.work / "stray").write_text("left by the run\n")
+        result = self.run_script([], paths="spec lock")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        files = subprocess.run(
+            ["git", "show", "--name-only", "--format=", f"{PREFIX}-{NEW}"],
+            cwd=self.work,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()
+        self.assertEqual(sorted(files), ["lock", "spec"])
+
+    def test_a_path_list_without_a_path_fails_before_gh(self):
+        result = self.run_script([], paths=" ")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("PATH names no path", result.stderr)
+        self.assertEqual(self.calls(), "")
 
     def test_nothing_moved_opens_nothing(self):
         (self.out / "title").unlink()

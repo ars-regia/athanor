@@ -188,6 +188,66 @@ mod athanor_workspace_tiling {
     );
 }
 
+/// The client side of athanor-dock-overlap-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_dock_overlap {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml"
+    );
+}
+
+/// The client side of athanor-material-v1.
+#[allow(
+    dead_code,
+    missing_docs,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    unused_imports,
+    unused_variables,
+    clippy::all
+)]
+mod athanor_material {
+    use wayland_client;
+    use wayland_client::protocol::*;
+
+    pub mod __interfaces {
+        // The generated tables name `wayland_backend`, which wayland-client re-exports.
+        use wayland_client::backend as wayland_backend;
+        use wayland_client::protocol::__interfaces::*;
+        wayland_scanner::generate_interfaces!(
+            "../../../../system/athanor-sulphur-client/protocols/athanor-material-v1.xml"
+        );
+    }
+    use self::__interfaces::*;
+
+    wayland_scanner::generate_client_code!(
+        "../../../../system/athanor-sulphur-client/protocols/athanor-material-v1.xml"
+    );
+}
+
 /// The client side of athanor-a11y-v1.
 #[allow(
     dead_code,
@@ -273,6 +333,8 @@ const GLOBALS: [&str; 16] = [
 struct Client {
     /// What the tablet, gesture, decoration and foreign globals sent (`fixture_devices.rs`).
     devices: devices::Seen,
+    /// What the seat's wl_touch sent (`fixture/touch.rs`).
+    touch: touch::Seen,
     /// Name, interface and version of each global.
     globals: Vec<(u32, String, u32)>,
     configure: Option<u32>,
@@ -321,6 +383,8 @@ struct Client {
     released: Vec<u32>,
     /// The evdev codes of the keys held, as the last `enter` told them.
     entered_keys: Vec<u32>,
+    /// The protocol id of the surface of each `wl_keyboard.enter`, in order.
+    keyboard_entered: Vec<u32>,
     /// The keymaps the client was sent.
     keymaps: usize,
     /// The size of the last keymap the client was sent, which tells two keymaps apart.
@@ -348,8 +412,13 @@ struct Client {
     /// The serial of the last `wl_pointer.enter` the client was sent.
     pointer_enter: Option<u32>,
     pointer_motions: u32,
+    /// The `wl_pointer.axis` events the client was sent.
+    axes: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
+    /// Each key and button event the client was sent, in order: its code, and whether it was a
+    /// press.
+    input: Vec<(u32, bool)>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
     toplevel_states: Vec<(ObjectId, StateEvent)>,
     /// The token of the last xdg_activation_v1 token done.
@@ -365,6 +434,10 @@ struct Client {
     /// The `state` events of every athanor_workspace_tiling_v1 object, in order, `None` for
     /// `removed`.
     tilings: Vec<(ObjectId, Option<u32>)>,
+    /// The `overlapped` events of every athanor_dock_overlap_v1 object, in order.
+    overlaps: Vec<(ObjectId, u32)>,
+    /// The `tier` events of every athanor_material_v1 object, in order.
+    tiers: Vec<(ObjectId, u32)>,
 }
 
 /// An event of a zwlr_output_power_v1 object.
@@ -606,6 +679,40 @@ delegate_noop!(
     Client: athanor_workspace_tiling::athanor_workspace_tiling_manager_v1::AthanorWorkspaceTilingManagerV1
 );
 
+delegate_noop!(
+    Client: athanor_dock_overlap::athanor_dock_overlap_manager_v1::AthanorDockOverlapManagerV1
+);
+
+delegate_noop!(Client: athanor_material::athanor_material_manager_v1::AthanorMaterialManagerV1);
+
+impl Dispatch<athanor_material::athanor_material_v1::AthanorMaterialV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_material::athanor_material_v1::AthanorMaterialV1,
+        event: athanor_material::athanor_material_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_material::athanor_material_v1::Event::Tier { tier } = event;
+        client.tiers.push((object.id(), tier.into()));
+    }
+}
+
+impl Dispatch<athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1, ()> for Client {
+    fn event(
+        client: &mut Self,
+        object: &athanor_dock_overlap::athanor_dock_overlap_v1::AthanorDockOverlapV1,
+        event: athanor_dock_overlap::athanor_dock_overlap_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let athanor_dock_overlap::athanor_dock_overlap_v1::Event::Overlapped { overlapped } = event;
+        client.overlaps.push((object.id(), overlapped));
+    }
+}
+
 impl Dispatch<athanor_workspace_tiling::athanor_workspace_tiling_v1::AthanorWorkspaceTilingV1, ()>
     for Client
 {
@@ -701,13 +808,18 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             } => {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
+                client.input.push((key, true));
             }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
-            } => client.released.push(key),
-            wl_keyboard::Event::Enter { keys, .. } => {
+            } => {
+                client.released.push(key);
+                client.input.push((key, false));
+            }
+            wl_keyboard::Event::Enter { surface, keys, .. } => {
+                client.keyboard_entered.push(surface.id().protocol_id());
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
             }
@@ -744,11 +856,21 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         match event {
             wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
             wl_pointer::Event::Motion { .. } => client.pointer_motions += 1,
+            wl_pointer::Event::Axis { .. } => client.axes += 1,
             wl_pointer::Event::Button {
                 serial,
+                button,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
                 ..
-            } => client.button = Some(serial),
+            } => {
+                client.button = Some(serial);
+                client.input.push((button, true));
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: WEnum::Value(wl_pointer::ButtonState::Released),
+                ..
+            } => client.input.push((button, false)),
             _ => {}
         }
     }
@@ -1260,9 +1382,10 @@ const FIXTURE_ALLOW_LIST: &str = "/usr/bin/athanor-bar athanor-bar.service zwlr_
     ext_session_lock_manager_v1 ext_workspace_manager_v1 zwp_virtual_keyboard_manager_v1 \
     zwlr_virtual_pointer_manager_v1 zwp_input_method_manager_v2 athanor_toplevel_manager_v1 \
     athanor_toplevel_actions_v1 athanor_keyboard_group_manager_v1 athanor_a11y_manager_v1 \
-    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1\n\
+    zwlr_output_power_manager_v1 athanor_workspace_tiling_manager_v1 \
+    athanor_dock_overlap_manager_v1 athanor_material_manager_v1\n\
     /usr/bin/athanor-control-center athanor-control-center.service zwlr_layer_shell_v1 \
-    zwlr_output_manager_v1 athanor_toplevel_manager_v1\n";
+    zwlr_output_manager_v1 athanor_toplevel_manager_v1 athanor_material_manager_v1\n";
 
 /// The bar's executable file, as the compositor sees it.
 const BAR_FILE: FileId = FileId { dev: 1, ino: 1 };
@@ -1280,8 +1403,12 @@ struct Fake(
 );
 
 impl Process for Fake {
+    /// An empty executable cannot be read, as a process that exits while it is read.
     fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.0.lock().expect("identity").0.into())
+        match self.0.lock().expect("identity").0 {
+            "" => Err(std::io::ErrorKind::NotFound.into()),
+            executable => Ok(executable.into()),
+        }
     }
     fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
         self.2.fetch_add(1, Ordering::SeqCst);
@@ -1406,8 +1533,10 @@ fn fixture(node: Option<&Path>) {
     }
     let count = |name: &str| globals.iter().filter(|g| *g == name).count();
     assert_eq!(count("wl_output"), OUTPUTS.len());
-    // linux-dmabuf and explicit sync come with a render node, and syncobj only when it can wait.
+    // linux-dmabuf, wl_drm and explicit sync come with a render node, and syncobj only when it
+    // can wait.
     assert_eq!(count("zwp_linux_dmabuf_v1"), usize::from(node.is_some()));
+    assert_eq!(count("wl_drm"), usize::from(node.is_some()));
     assert_eq!(
         count("wp_linux_drm_syncobj_manager_v1"),
         usize::from(state.syncobj_state.is_some())
@@ -3037,13 +3166,24 @@ fn classified() -> Vec<(&'static str, Class)> {
 
 /// The globals offered only on a render node: the tests below run on Pixman, without one
 /// (`fixture` checks them on a node).
-const RENDER_NODE_GLOBALS: [&str; 2] = ["zwp_linux_dmabuf_v1", "wp_linux_drm_syncobj_manager_v1"];
+const RENDER_NODE_GLOBALS: [&str; 3] = [
+    "zwp_linux_dmabuf_v1",
+    "wp_linux_drm_syncobj_manager_v1",
+    "wl_drm",
+];
 
-/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them.
+/// The globals offered only by the udev backend, on the GPU it draws on (decision 36).
+const UDEV_GLOBALS: [&str; 1] = ["wp_drm_lease_device_v1"];
+
+/// The globals of `data/globals` whose class `admitted` holds, as Pixman offers them headless.
 fn rows(admitted: impl Fn(Class) -> bool) -> BTreeSet<&'static str> {
     classified()
         .into_iter()
-        .filter(|(interface, class)| admitted(*class) && !RENDER_NODE_GLOBALS.contains(interface))
+        .filter(|(interface, class)| {
+            admitted(*class)
+                && !RENDER_NODE_GLOBALS.contains(interface)
+                && !UDEV_GLOBALS.contains(interface)
+        })
         .map(|(interface, _)| interface)
         .collect()
 }
@@ -4951,6 +5091,35 @@ fn task5_top_layers_are_closed_to_a_client_not_granted_them() {
     run.stop();
 }
 
+/// A layer surface's size above `i32::MAX`, which Smithay would store negative, is
+/// `invalid_size` (issue #1199): its client is ended and the compositor serves the others.
+#[test]
+fn a_layer_size_above_i32_max_is_a_protocol_error() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    let compositor: wl_compositor::WlCompositor = bar.bind(4);
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = bar.bind(4);
+    let qh = bar.queue.handle();
+    let surface = compositor.create_surface(&qh, ());
+    let layer = shell.get_layer_surface(
+        &surface,
+        None,
+        zwlr_layer_shell_v1::Layer::Bottom,
+        "1199".into(),
+        &qh,
+        (),
+    );
+    layer.set_size(100, i32::MAX.unsigned_abs());
+    bar.roundtrip(&mut run);
+    assert!(bar.connection.protocol_error().is_none(), "i32::MAX is a size");
+    layer.set_size(100, u32::MAX);
+    let error = devices::protocol_error(&mut run, &mut bar);
+    assert_eq!(error.object_interface, "zwlr_layer_surface_v1");
+    assert_eq!(error.code, zwlr_layer_surface_v1::Error::InvalidSize as u32);
+    Local::connect(&mut run, None).roundtrip(&mut run);
+    run.stop();
+}
+
 /// Each client is offered exactly the globals `data/globals` gives its class of client (OS4,
 /// OS5): the bar every one but the output manager, which its line does not name; the control
 /// center the unprivileged ones and the output manager; a client with no line the unprivileged
@@ -4988,6 +5157,7 @@ fn os9_every_global_is_classified() {
     let mut expected = unprivileged.clone();
     expected.insert("zwlr_output_manager_v1");
     expected.insert("athanor_toplevel_manager_v1");
+    expected.insert("athanor_material_manager_v1");
     offered(&control_center, "the control center", expected);
 
     *run.identity.lock().expect("identity") = (SH, OTHER_UNIT);
@@ -5754,6 +5924,14 @@ mod marks;
 #[cfg(test)]
 mod full_screen;
 
+// Decision 35: the dock's intellihide (athanor-dock-overlap-v1, `dock_overlap.rs`).
+#[cfg(test)]
+mod dock_overlap;
+
+// Decision 35 and VL13: each output's material tier (athanor-material-v1, `material.rs`).
+#[cfg(test)]
+mod material;
+
 /// The surface that has the keyboard.
 fn keyboard_focus(run: &Running) -> Option<WlSurface> {
     run.state
@@ -6189,6 +6367,380 @@ fn a_token_restores_nothing_while_locked() {
         .and_then(|surface| surface.client())
         .map(|client| client.id());
     assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
+    run.stop();
+}
+
+/// Whether the compositor keeps `token`: one it did not grant activates nothing.
+fn granted(run: &Running, token: &str) -> bool {
+    use smithay::wayland::xdg_activation::XdgActivationToken;
+    run.state
+        .xdg_activation_state
+        .data_for_token(&XdgActivationToken::from(token.to_owned()))
+        .is_some()
+}
+
+/// Clicks the bar of `bar`, at the top of the first output: the press's serial, delivered to it.
+fn click_bar(run: &mut Running, bar: &Local) -> u32 {
+    press(run, (100.0, 10.0).into());
+    release(run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(Some(to), bar.id, "the press went to the bar");
+    serial.into()
+}
+
+/// A click on a bar that never takes the keyboard gives the bar a token, which raises another
+/// application's window and gives it the keyboard (doc_bar.md, BR4).
+#[test]
+fn a_click_on_a_bar_without_the_keyboard_grants_a_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let window = app.server_window(&run, &surface);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+
+    let serial = click_bar(&mut run, &bar);
+    assert_eq!(keyboard_focus(&run), focus, "the bar takes no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token), "the click grants");
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(surface_of(&window)),
+        "the window has the keyboard"
+    );
+    run.stop();
+}
+
+/// While the session is locked no client gets a token, not even the locker, which holds the
+/// keyboard on its lock surface and names its own enter serial: only the lock refuses it (L14).
+#[test]
+fn the_locker_gets_no_token() {
+    let mut run = Running::start(None);
+    let (mut locker, _lock) = lock_session(&mut run);
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface has the keyboard");
+    let serial = run
+        .state
+        .seat
+        .get_keyboard()
+        .and_then(|keyboard| keyboard.last_enter())
+        .expect("an enter");
+    let token = run.activation_token(&mut locker, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// While the session is locked a token raises no shown window and gives it no keyboard, then or
+/// at the unlock (L14). No client gets one then, so the token is the compositor's own.
+#[test]
+fn a_token_raises_nothing_while_locked() {
+    let mut run = Running::start(None);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+
+    let (mut locker, lock) = lock_session(&mut run);
+    let (token, _) = run.state.xdg_activation_state.create_external_token(None);
+    let token = String::from(&**token);
+    let before = stack(&run);
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the window is not raised");
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, locker.id, "the lock surface keeps the keyboard");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    assert_eq!(keyboard_focus(&run), focus, "the unlock gives the keyboard back");
+    run.stop();
+}
+
+/// A token made before the lock is dropped by it: used after the unlock, it raises nothing
+/// and gives no keyboard (L14).
+#[test]
+fn a_token_from_before_the_lock_activates_nothing_after_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (surface, _) = app.window.clone().expect("the window");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let focus = keyboard_focus(&run);
+    let serial = click_bar(&mut run, &bar);
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token), "the click grants");
+
+    let (mut locker, lock) = lock_session(&mut run);
+    assert!(!granted(&run, &token), "the lock drops the token");
+    lock.unlock_and_destroy();
+    locker.pump(&mut run, "the session is unlocked", |_, state| {
+        state.lock.is_none()
+    });
+    let before = stack(&run);
+    let activation: xdg_activation_v1::XdgActivationV1 = app.bind(1);
+    activation.activate(token, &surface);
+    app.roundtrip(&mut run);
+    assert_eq!(stack(&run), before, "the window is not raised");
+    assert_eq!(keyboard_focus(&run), focus, "the keyboard stays");
+    run.stop();
+}
+
+/// A press that a later one superseded grants no token, though both went to the bar.
+#[test]
+fn a_superseded_press_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let first = click_bar(&mut run, &bar);
+    let second = click_bar(&mut run, &bar);
+    let stale = run.activation_token(&mut bar, first);
+    assert!(!granted(&run, &stale), "the first press is stale");
+    let token = run.activation_token(&mut bar, second);
+    assert!(granted(&run, &token), "the last press grants");
+    run.stop();
+}
+
+/// A key press after the click, sent to another client, supersedes it: the bar gets no token.
+#[test]
+fn a_key_press_after_a_click_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    let serial = click_bar(&mut run, &bar);
+    key(&mut run.state, KEY_Q, true);
+    key(&mut run.state, KEY_Q, false);
+    let (_, to) = run.state.grab_serials.key_press.clone().expect("a key press");
+    assert_eq!(Some(to), other.id, "the key went to the window");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A window mapped after the click takes the keyboard, which supersedes the click: the bar gets
+/// no token.
+#[test]
+fn a_window_mapped_after_a_click_supersedes_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let holder = keyboard_focus(&run)
+        .and_then(|surface| surface.client())
+        .map(|client| client.id());
+    assert_eq!(holder, app.id, "the window has the keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// The keyboard moved after the click, then left for no surface when the last window closed:
+/// the click stays superseded, though Smithay forgets the enter at the leave.
+#[test]
+fn the_last_window_closing_after_a_click_keeps_it_superseded() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    assert!(run.state.minimise(&fixture));
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let mut app = Local::connect(&mut run, None);
+    let toplevel = app.toplevel(&mut run);
+    let (surface, xdg) = app.window.clone().expect("the window");
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    app.pump(&mut run, "the keyboard has no focus", |_, state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.current_focus().is_none())
+    });
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// The window that held the keyboard at the click closes, the last one shown, and the keyboard
+/// leaves for no surface: that change supersedes the click too.
+#[test]
+fn the_focused_window_closing_after_a_click_supersedes_it() {
+    let mut run = Running::start(None);
+    let (fixture, _) = fixture_window(&run);
+    assert!(run.state.minimise(&fixture));
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    let toplevel = app.toplevel(&mut run);
+    let (surface, xdg) = app.window.clone().expect("the window");
+    let serial = click_bar(&mut run, &bar);
+    toplevel.destroy();
+    xdg.destroy();
+    surface.destroy();
+    app.pump(&mut run, "the keyboard has no focus", |_, state| {
+        state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.current_focus().is_none())
+    });
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A press a window's move takes, over the bar, is delivered to no client: the bar gets no
+/// token from it.
+#[test]
+fn a_press_a_move_takes_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    moved(&mut run, &mut app);
+    run.state.pointer_to((100.0, 10.0).into(), InputTime::now());
+    // BTN_RIGHT, while the left button holds the move.
+    run.state
+        .button_input(0x111, ButtonState::Pressed, InputTime::now());
+    assert!(moving(&run), "the move goes on");
+    let serial = run.state.grab_serials.press.expect("a press");
+    assert!(run.state.grab_serials.button.is_none(), "the press went to no client");
+    let token = run.activation_token(&mut bar, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A press that ends a popup's grab goes to the surface under the pointer, and is that
+/// client's: the bar, clicked while a window's menu holds the pointer. The grab's end gives the
+/// keyboard back to the window, after the press, so the click grants the bar no token.
+#[test]
+fn a_press_that_ends_a_popup_grab_is_the_clients_under_it() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let (_, xdg) = app.window.clone().expect("the window");
+    let window = keyboard_focus(&run);
+    grabbing_popup(&mut app, &mut run, &xdg);
+    assert_ne!(keyboard_focus(&run), window, "the menu has the keyboard");
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(pointer.is_grabbed(), "the menu holds the pointer");
+    // `click_bar` checks that the press is the bar's.
+    let serial = click_bar(&mut run, &bar);
+    assert!(!pointer.is_grabbed(), "the press ended the grab");
+    assert_eq!(keyboard_focus(&run), window, "the window has the keyboard back");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token), "the keyboard moved after the click");
+    run.stop();
+}
+
+/// A press that ends the grab of a popup whose parent takes no keyboard moves no keyboard, so
+/// the click on the bar grants it a token.
+#[test]
+fn a_press_that_ends_a_pointer_only_popup_grab_grants_a_token() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity};
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let top = Anchor::Top | Anchor::Left | Anchor::Right;
+    let (mut panel, _, layer) =
+        top_surface_on(&mut run, "panel", top, KeyboardInteractivity::None, None);
+    // Below the bar's zone.
+    press(&mut run, (100.0, 40.0).into());
+    release(&mut run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(Some(to), panel.id, "the press went to the panel");
+    let compositor: wl_compositor::WlCompositor = panel.bind(4);
+    let shm: wl_shm::WlShm = panel.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = panel.bind(1);
+    let seat: wl_seat::WlSeat = panel.bind(1);
+    let qh = panel.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = xdg.get_popup(None, &positioner, &qh, ());
+    layer.get_popup(&popup);
+    popup.grab(&seat, serial.into());
+    panel.client.configure = None;
+    surface.commit();
+    panel.pump(&mut run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(panel.client.configure.expect("a configure"));
+    let (buffer, _) = panel.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    panel.roundtrip(&mut run);
+    let pointer = run.state.seat.get_pointer().expect("a pointer");
+    assert!(pointer.is_grabbed(), "the popup holds the pointer");
+    let focus = keyboard_focus(&run);
+    let serial = click_bar(&mut run, &bar);
+    assert!(!pointer.is_grabbed(), "the press ended the grab");
+    assert_eq!(keyboard_focus(&run), focus, "the grab's end moves no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(granted(&run, &token));
+    run.stop();
+}
+
+/// A press delivered to another client's window grants the bar no token.
+#[test]
+fn another_clients_press_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let mut app = Local::connect(&mut run, None);
+    app.toplevel(&mut run);
+    let id = app.id.clone().expect("an id");
+    let at = location_of(&run, &id).to_f64() + Point::from((20.0, 10.0));
+    press(&mut run, at);
+    release(&mut run);
+    let (serial, to) = run.state.grab_serials.button.clone().expect("a press");
+    assert_eq!(to, id, "the press went to the window");
+    let token = run.activation_token(&mut bar, serial.into());
+    assert!(!granted(&run, &token));
+    run.stop();
+}
+
+/// A client behind a security context gets no token from a press alone: it still needs the
+/// keyboard.
+#[test]
+fn a_press_alone_grants_a_sandboxed_client_no_token() {
+    let mut run = Running::start(None);
+    let context = sandbox(&run);
+    let mut sandboxed = Local::connect(&mut run, Some(context));
+    sandboxed.toplevel(&mut run);
+    let id = sandboxed.id.clone().expect("an id");
+    let mut other = Local::connect(&mut run, None);
+    other.toplevel(&mut run);
+    // As if its window had the press, with the keyboard on the other window.
+    let serial = SERIAL_COUNTER.next_serial();
+    run.state.grab_serials.button = Some((serial, id));
+    run.state.grab_serials.press = Some(serial);
+    let token = run.activation_token(&mut sandboxed, serial.into());
+    assert!(!granted(&run, &token));
     run.stop();
 }
 
@@ -8587,6 +9139,14 @@ fn os9_a_virtual_pointer_stays_inside_the_outputs() {
 /// Locks the session for a new client, with a lock surface on the first output that has the
 /// keyboard, and returns the client, which records its keys, and its lock.
 fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLockV1) {
+    let (locker, lock, _) = lock_session_with_surface(run);
+    (locker, lock)
+}
+
+/// `lock_session`, and the lock surface's `wl_surface` on the client's side.
+fn lock_session_with_surface(
+    run: &mut Running,
+) -> (Local, ext_session_lock_v1::ExtSessionLockV1, wl_surface::WlSurface) {
     let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
     let mut locker = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = locker.bind(4);
@@ -8611,7 +9171,7 @@ fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLoc
     locker.pump(run, "the lock surface has the keyboard", |_, state| {
         focus(state).and_then(|s| s.client()).map(|c| c.id()) == Some(id.clone())
     });
-    (locker, lock)
+    (locker, lock, surface)
 }
 
 /// A lock whose client goes without unlocking leaves the session locked, its outputs blank and
@@ -9014,12 +9574,13 @@ fn os9_a_virtual_pointer_coming_and_going_is_no_activity() {
 }
 
 /// A capture source of output `index`, named by `local`'s own `wl_output` of it, and a session
-/// of it that has its constraints.
+/// of it with `options` that has its constraints.
 fn output_session(
     local: &mut Local,
     run: &mut Running,
     copy: &ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
     index: usize,
+    options: ext_image_copy_capture_manager_v1::Options,
 ) -> (
     ext_image_capture_source_v1::ExtImageCaptureSourceV1,
     ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
@@ -9037,12 +9598,7 @@ fn output_session(
         .expect("the output's global");
     let output: wl_output::WlOutput = local.registry.bind(name, version.min(4), &qh, ());
     let source = sources.create_source(&output, &qh, ());
-    let session = copy.create_session(
-        &source,
-        ext_image_copy_capture_manager_v1::Options::empty(),
-        &qh,
-        (),
-    );
+    let session = copy.create_session(&source, options, &qh, ());
     local.pump(run, "the session has its constraints", |client, _| {
         client.capture_size.is_some()
     });
@@ -9073,7 +9629,13 @@ fn os9_an_output_is_captured_by_a_granted_client() {
     let mut bar = Local::connect(&mut run, None);
     let shm: wl_shm::WlShm = bar.bind(1);
     let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
-    let (_source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (_source, session) = output_session(
+        &mut bar,
+        &mut run,
+        &copy,
+        1,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+    );
     let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
     assert_eq!(
         bar.client.capture_size,
@@ -9112,6 +9674,87 @@ fn os9_an_output_is_captured_by_a_granted_client() {
     run.stop();
 }
 
+/// Output `index` as `bar` captures it, through a new session with `options`, in the client's
+/// B, G, R, A.
+fn captured_output(
+    bar: &mut Local,
+    run: &mut Running,
+    copy: &ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+    index: usize,
+    options: ext_image_copy_capture_manager_v1::Options,
+) -> Vec<u8> {
+    let shm: wl_shm::WlShm = bar.bind(1);
+    let (_source, session) = output_session(bar, run, copy, index, options);
+    let (w, h) = (OUTPUTS[index].width, OUTPUTS[index].height);
+    let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
+    bar.client.captured = None;
+    let frame = session.create_frame(&bar.queue.handle(), ());
+    frame.attach_buffer(&buffer);
+    frame.damage_buffer(0, 0, w, h);
+    frame.capture();
+    bar.pump(run, "the frame is captured", |client, _| {
+        client.captured.is_some()
+    });
+    assert_eq!(bar.client.captured, Some(Ok(())), "the frame is ready");
+    contents(&file, usize::try_from(w * h * 4).expect("size"))
+}
+
+/// An output is captured with the pointer only when the session asks for cursors
+/// (`paint_cursors` of ext-image-copy-capture-v1, #744). With the pointer at 40,30 of output 0,
+/// a session with the option has the theme's fallback square there, 12 pixels a side at scale
+/// 1, and every other pixel as the fixture reads the output back; a session without it, and a
+/// session of output 1, where the pointer is not, have the output as the fixture reads it back.
+#[test]
+fn os9_an_output_capture_draws_the_pointer_when_asked() {
+    use ext_image_copy_capture_manager_v1::Options;
+    let mut run = Running::start(None);
+    run.state.cursor = crate::cursor::Cursor::new("athanor-no-such-theme", 24);
+    let first = run.state.space.outputs().next().expect("output 0").clone();
+    let area = run.state.space.output_geometry(&first).expect("mapped");
+    let pointed = area.loc + Point::from((40, 30));
+    run.state.pointer_to(pointed.to_f64(), InputTime::now());
+    let mut bar = Local::connect(&mut run, None);
+    let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
+    let read_back = |run: &mut Running, index: usize| -> Vec<u8> {
+        run.state
+            .capture(index)
+            .expect("frame of the output")
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b, a]| [b, g, r, a])
+            .collect()
+    };
+
+    let plain = read_back(&mut run, 0);
+    let without = captured_output(&mut bar, &mut run, &copy, 0, Options::empty());
+    assert!(without == plain, "no pointer without paint_cursors");
+
+    let with = captured_output(&mut bar, &mut run, &copy, 0, Options::PaintCursors);
+    let width = usize::try_from(OUTPUTS[0].width).expect("width");
+    let square = |x: usize, y: usize| (40..52).contains(&x) && (30..42).contains(&y);
+    let fallback = crate::cursor::FALLBACK_RGBA;
+    for (at, (pixel, under)) in with
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(plain.as_chunks::<4>().0)
+        .enumerate()
+    {
+        let (x, y) = (at % width, at / width);
+        if square(x, y) {
+            assert_eq!(pixel, &fallback, "the pointer's square at {x},{y}");
+        } else {
+            assert_eq!(pixel, under, "the output at {x},{y}");
+        }
+    }
+
+    let plain = read_back(&mut run, 1);
+    let elsewhere = captured_output(&mut bar, &mut run, &copy, 1, Options::PaintCursors);
+    assert!(elsewhere == plain, "no pointer on an output it is not on");
+    run.stop();
+}
+
 /// While the session is locked no output is captured (OS4, register row 10). A frame asked for
 /// in the same flush as the lock fails, its session is stopped, and the buffer keeps its own
 /// bytes; a new session of the output is refused.
@@ -9122,7 +9765,13 @@ fn os9_output_capture_is_refused_while_locked() {
     let shm: wl_shm::WlShm = bar.bind(1);
     let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
     let locks: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = bar.bind(1);
-    let (source, session) = output_session(&mut bar, &mut run, &copy, 1);
+    let (source, session) = output_session(
+        &mut bar,
+        &mut run,
+        &copy,
+        1,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+    );
     let (w, h) = (OUTPUTS[1].width, OUTPUTS[1].height);
     let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
 
@@ -10926,6 +11575,23 @@ fn top_surface_on(
     keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
     output: Option<usize>,
 ) -> (Local, WlSurface, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
+    let (local, server, layer, _) = top_surface_parts(run, namespace, anchor, keyboard, output);
+    (local, server, layer)
+}
+
+/// `top_surface_on`, with the client's `wl_surface` as well.
+fn top_surface_parts(
+    run: &mut Running,
+    namespace: &str,
+    anchor: zwlr_layer_surface_v1::Anchor,
+    keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    output: Option<usize>,
+) -> (
+    Local,
+    WlSurface,
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
+) {
     let mut local = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -10973,7 +11639,7 @@ fn top_surface_on(
             Some(layer.wl_surface().clone())
         })
         .expect("the layer surface");
-    (local, server, layer)
+    (local, server, layer, surface)
 }
 
 /// Ctrl+Alt+Tab gives the keyboard to the bar, then the dock, then the window (AX7): the
@@ -11151,6 +11817,790 @@ fn ctrl_alt_tab_from_a_popup_continues_after_its_parent() {
     assert!(
         !run.state.seat.get_pointer().expect("a pointer").is_grabbed(),
         "its grab ends with it"
+    );
+    run.stop();
+}
+
+/// The error lines Smithay and the compositor log on the thread that runs the compositor, the
+/// test's, while the guard `capture` returns lives.
+#[derive(Clone, Default)]
+struct Errors(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Errors {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("the log").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Errors {
+    fn capture(&self) -> tracing::subscriber::DefaultGuard {
+        let writer = self.clone();
+        tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .with_max_level(tracing::Level::ERROR)
+                .with_ansi(false)
+                .finish(),
+        )
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("the log")).into_owned()
+    }
+}
+
+/// A window with the keyboard, then a dock that takes it on demand, given it by Ctrl+Alt+Tab
+/// (AX7), with a `wl_keyboard`: the window's client and surface, the dock's client, its surface
+/// on the compositor's side, and its layer surface and surface on the client's side.
+fn keyboard_dock(
+    run: &mut Running,
+) -> (
+    (Local, WlSurface),
+    Local,
+    WlSurface,
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
+) {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
+    let (window_client, window) = focused_window(run);
+    let bottom = Anchor::Bottom | Anchor::Left | Anchor::Right;
+    let (dock, dock_surface, dock_layer, dock_wl) =
+        top_surface_parts(run, "dock", bottom, OnDemand, None);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    seat.get_keyboard(&dock.queue.handle(), ());
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(run).as_ref(),
+        Some(&dock_surface),
+        "the dock"
+    );
+    (
+        (window_client, surface_of(&window)),
+        dock,
+        dock_surface,
+        dock_layer,
+        dock_wl,
+    )
+}
+
+/// A key the dock was sent, whose serial a popup grab names.
+fn dock_key(run: &mut Running, dock_surface: &WlSurface) -> smithay::utils::Serial {
+    let serial = SERIAL_COUNTER.next_serial();
+    let dock_client = dock_surface.client().expect("the dock's client").id();
+    run.state.grab_serials.key_press = Some((serial, dock_client));
+    serial
+}
+
+/// What a popup `open_popup` opens is parented to.
+enum PopupParent<'a> {
+    Layer(&'a zwlr_layer_surface_v1::ZwlrLayerSurfaceV1),
+    Popup(&'a xdg_surface::XdgSurface),
+}
+
+/// A 40 by 40 popup of `parent`, opened and drawn by `dock`'s client, grabbed on `grab` when
+/// given: its xdg_popup, xdg_surface and surface on the client's side. As GTK and the toolkit
+/// open a layer surface's popup, it is created without a parent, which the layer surface then
+/// gives it, and the grab is asked before the first commit.
+fn open_popup(
+    run: &mut Running,
+    dock: &mut Local,
+    parent: PopupParent,
+    grab: Option<smithay::utils::Serial>,
+) -> (
+    xdg_popup::XdgPopup,
+    xdg_surface::XdgSurface,
+    wl_surface::WlSurface,
+) {
+    let compositor: wl_compositor::WlCompositor = dock.bind(4);
+    let shm: wl_shm::WlShm = dock.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = dock.bind(1);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    let qh = dock.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = match parent {
+        PopupParent::Layer(layer) => {
+            let popup = xdg.get_popup(None, &positioner, &qh, ());
+            layer.get_popup(&popup);
+            popup
+        }
+        PopupParent::Popup(parent) => xdg.get_popup(Some(parent), &positioner, &qh, ()),
+    };
+    if let Some(serial) = grab {
+        popup.grab(&seat, serial.into());
+    }
+    dock.client.configure = None;
+    surface.commit();
+    dock.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(dock.client.configure.expect("a configure"));
+    let (buffer, _) = dock.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    dock.roundtrip(run);
+    (popup, xdg, surface)
+}
+
+/// `keyboard_dock` with a popup it opens, as a dock's menu opens, on a key the dock was sent:
+/// the window's client and surface, the dock's client and surface, and the popup's xdg_popup,
+/// xdg_surface and surface on the client's side.
+fn dock_popup(
+    run: &mut Running,
+) -> (
+    (Local, WlSurface),
+    Local,
+    WlSurface,
+    (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    let (window, mut dock, dock_surface, dock_layer, _) = keyboard_dock(run);
+    let serial = dock_key(run, &dock_surface);
+    let popup = open_popup(
+        run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    (window, dock, dock_surface, popup)
+}
+
+/// A layer surface's popup, which xdg-shell creates without a parent and the layer surface
+/// parents, is known to the popup manager with the layer surface as its root, and its grab, on
+/// a key the layer surface was sent, takes the keyboard and the pointer; Smithay logs no
+/// "surface missing from known popups" (#1217, T9-7 of the C1 spike).
+#[test]
+fn a_layer_surfaces_popup_is_known_and_grabs_the_seat() {
+    let errors = Errors::default();
+    let _capture = errors.capture();
+    let mut run = Running::start(None);
+    let (_window, _dock, dock_surface, _popup) = dock_popup(&mut run);
+
+    let held = keyboard_focus(&run).expect("a focus");
+    let popup = run.state.popups.find_popup(&held).expect("a known popup");
+    assert_eq!(
+        smithay::desktop::find_popup_root_surface(&popup).ok(),
+        Some(dock_surface),
+        "the dock is its root"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the grab takes the keyboard"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_pointer()
+            .is_some_and(|pointer| pointer.is_grabbed()),
+        "and the pointer"
+    );
+    let logged = errors.text();
+    assert!(
+        !logged.contains("missing from known popups"),
+        "Smithay logged: {logged}"
+    );
+    run.stop();
+}
+
+/// A popup of a layer surface that takes the keyboard on demand, grabbed on a key and closed by
+/// its client, as GTK hides a popover, hands the keyboard back to the layer surface, not to the
+/// window that had it before. It is back at once, with no key pressed, as the popup's role is
+/// destroyed (decision 30, amended on 2026-11-17 by the maintainer; #1217, #614).
+#[test]
+fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, (popup, xdg, surface)) =
+        dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the dock has it back at once"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A chain of a layer surface, a popup without a grab and a grabbed popup of that one: the
+/// grabbed popup, closed, hands the keyboard at once to the grab's root, the layer surface, since
+/// the popup between them holds no grab (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_over_one_without_a_grab_hands_the_keyboard_to_the_root() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let (_menu, menu_xdg, _menu_surface) =
+        open_popup(&mut run, &mut dock, PopupParent::Layer(&dock_layer), None);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "a popup without a grab leaves the keyboard on the dock"
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the grabbed popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the root has it at once, not the popup without a grab"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A grabbed popup whose root, the layer surface, its client destroyed first, hands the
+/// keyboard as it closes to where a destroyed window's goes, the window, and not to a dead
+/// surface (#1217).
+#[test]
+fn a_closed_popup_of_a_dead_root_hands_the_keyboard_to_the_window() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, dock_wl) =
+        keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+    dock_layer.destroy();
+    dock_wl.destroy();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps it while it lives"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.destroy();
+    dock.roundtrip(&mut run);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_refocused(&mut run);
+    assert_eq!(keyboard_focus(&run), Some(window), "here, the window");
+    run.stop();
+}
+
+/// Closes a popup as a toolkit hides it: its role, its xdg_surface and its buffer go.
+fn close_popup(
+    run: &mut Running,
+    dock: &mut Local,
+    (popup, xdg, surface): (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(run);
+}
+
+/// Asserts that the keyboard is where `refocus` puts a destroyed window's: on a live surface,
+/// or nothing, that `focus_top`, run again, does not move it from.
+fn assert_refocused(run: &mut Running) {
+    let focus = keyboard_focus(run);
+    assert!(
+        focus.as_ref().is_none_or(|surface| surface.is_alive()),
+        "the keyboard is on a live surface"
+    );
+    run.state.focus_top();
+    assert_eq!(keyboard_focus(run), focus, "where refocus puts it");
+}
+
+/// Puts the keyboard straight on `popup`, with no grab, as after something that took it from
+/// the popup and ended its grab, so that the popup's destruction reaches `popup_destroyed` with
+/// the keyboard on it.
+fn give_back_to_popup(run: &mut Running, popup: Option<WlSurface>) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    keyboard.set_focus(&mut run.state, popup.clone(), SERIAL_COUNTER.next_serial());
+    assert_eq!(
+        keyboard_focus(run),
+        popup,
+        "the popup has the keyboard again"
+    );
+}
+
+/// Two nested popups of a layer surface, each grabbed: the inner one, closed, hands the keyboard
+/// at once to the outer one, the popup grab's current popup, and not to the layer surface
+/// (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_nested_popup_hands_the_keyboard_to_its_grabbed_parent() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (_menu, menu_xdg, menu_wl) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let menu = keyboard_focus(&run);
+    assert!(
+        menu.is_some() && menu.as_ref() != Some(&dock_surface),
+        "the outer popup has the keyboard"
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let submenu = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held != menu && held.as_ref() != Some(&dock_surface),
+        "the inner popup has the keyboard"
+    );
+
+    close_popup(&mut run, &mut dock, submenu);
+
+    assert_eq!(keyboard_focus(&run), menu, "the outer popup has it at once");
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&menu_wl.id().protocol_id()),
+        "the dock's client is told"
+    );
+    run.stop();
+}
+
+/// Two nested popups of a layer surface, each grabbed, whose client destroys the outer one and
+/// then the inner one, which holds the keyboard: the inner one hands the keyboard at once to the
+/// root, the layer surface, past its destroyed parent (decision 30, amended on 2026-11-17;
+/// #1217). Destroying a popup before its child is a protocol error that Smithay posts at the
+/// next `PopupManager::cleanup`, which the backends run at each frame and the fixture does not,
+/// so this case lives only until then.
+#[test]
+fn a_closed_popup_past_its_destroyed_parent_hands_the_keyboard_to_the_root() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (menu, menu_xdg, menu_wl) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the inner popup has the keyboard"
+    );
+
+    menu.destroy();
+    menu_xdg.destroy();
+    menu_wl.attach(None, 0, 0);
+    menu_wl.commit();
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the root has it at once"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A popup the keyboard has left, by Ctrl+Alt+Tab, which dismisses it, and that its client
+/// destroys after: the keyboard stays where it went, and is not taken back to the popup's root
+/// (#1217).
+#[test]
+fn a_closed_popup_without_the_keyboard_leaves_the_keyboard_alone() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, popup) = dock_popup(&mut run);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&window),
+        "Ctrl+Alt+Tab takes the keyboard to the window"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(keyboard_focus(&run), Some(window), "the window keeps it");
+    assert_ne!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock is not given it back"
+    );
+    run.stop();
+}
+
+/// A popup whose grab the compositor ended, sending `popup_done` to it as a click on another
+/// client's surface does, but that still has the keyboard, which Smithay moves only at the next
+/// key: closed by its client, it hands the keyboard at once to its root (#1217).
+#[test]
+fn a_closed_popup_whose_grab_ended_hands_the_keyboard_to_the_root() {
+    use smithay::desktop::PopupUngrabStrategy;
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    let mut grab = run.state.popup_grab.clone().expect("a popup grab");
+    grab.ungrab(PopupUngrabStrategy::All);
+    assert!(grab.has_ended(), "the grab has ended");
+    assert_eq!(keyboard_focus(&run), held, "the popup keeps the keyboard");
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the dock has it at once"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A dock that takes the keyboard on demand, and commits an interactivity of `none` while its
+/// popup holds the keyboard: the popup, closed, hands the keyboard to where a destroyed window's
+/// goes, the window, since the dock cannot keep it, and the popup's grab ends (#1217).
+#[test]
+fn a_closed_popup_of_a_root_that_takes_no_keyboard_hands_it_to_the_window() {
+    use zwlr_layer_surface_v1::KeyboardInteractivity;
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, dock_wl) =
+        keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let popup = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    dock_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+    dock_wl.commit();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "not the dock"
+    );
+    assert_refocused(&mut run);
+    assert_eq!(keyboard_focus(&run), Some(window), "here, the window");
+    assert!(
+        !run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the popup's grab has ended"
+    );
+    run.stop();
+}
+
+/// A dock that unmaps, committing a null buffer, while its popup holds the keyboard: the popup,
+/// closed, does not hand the keyboard to the dock, which shows nothing, but to where `refocus`
+/// puts a destroyed window's, and the popup's grab ends (decision 30, amended on 2026-11-17;
+/// #1217).
+#[test]
+fn a_closed_popup_of_an_unmapped_root_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, dock_layer, dock_wl) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let popup = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    dock_wl.attach(None, 0, 0);
+    dock_wl.commit();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "not the dock"
+    );
+    assert_refocused(&mut run);
+    assert!(
+        !run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the popup's grab has ended"
+    );
+    run.stop();
+}
+
+/// A placed window with the keyboard, over another of its client's, and a popup of it grabbed
+/// on a key it was sent: the client, the window, its surface on the compositor's side, its
+/// objects on the client's side, and the popup's.
+fn window_popup(
+    run: &mut Running,
+) -> (
+    Local,
+    smithay::desktop::Window,
+    WlSurface,
+    Other,
+    (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    let (mut local, first) = focused_window(run);
+    local.pump(run, "the first window is placed", |_, state| {
+        state.workspace_of(&first).is_some()
+    });
+    let menu = local.another(run, "menu");
+    let window = local.server_window(run, &menu.surface);
+    local.pump(run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    run.state.focus(&window);
+    let window_surface = surface_of(&window);
+    let serial = dock_key(run, &window_surface);
+    let popup = open_popup(run, &mut local, PopupParent::Popup(&menu.xdg), Some(serial));
+    let held = keyboard_focus(run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&window_surface),
+        "the popup has the keyboard"
+    );
+    (local, window, window_surface, menu, popup)
+}
+
+/// A window minimised while its popup holds the keyboard, which dismisses the popup and ends its
+/// grab, the keyboard put back on the popup, and the popup then destroyed by its client: the
+/// keyboard is where `refocus` puts a destroyed window's, not on the window the user cannot see,
+/// which minimising took out of the space (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_not_shown_leaves_it_the_keyboard() {
+    let mut run = Running::start(None);
+    let (mut local, window, window_surface, _menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(run.state.minimise(&window), "the window is minimised");
+    give_back_to_popup(&mut run, held.clone());
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the window the user cannot see"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A window that draws nothing, committing a null buffer while its popup holds the keyboard:
+/// the popup, closed, does not hand the keyboard to it but to where `refocus` puts a destroyed
+/// window's (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_drawing_nothing_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (mut local, _window, window_surface, menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    menu.surface.attach(None, 0, 0);
+    menu.surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the window drawing nothing"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A window whose client destroys its xdg_toplevel, keeping its surface and buffer, while its
+/// popup holds the keyboard: the window leaves the space, and the popup, closed, does not hand
+/// the keyboard to the bare surface but to where `refocus` puts a destroyed window's (decision
+/// 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_out_of_the_space_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (mut local, _window, window_surface, menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    menu.toplevel.destroy();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the surface that left the space"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A surface that holds the keyboard exclusively, mapped while a dock's popup holds it, takes
+/// the keyboard and ends the popup's grab; with the keyboard put back on the popup, the popup,
+/// closed by its client, leaves the keyboard on that surface and does not hand it to the dock
+/// (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_leaves_the_keyboard_on_a_surface_that_holds_it_exclusively() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::Exclusive};
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    let (_launcher, launcher_surface, _) = top_surface_on(
+        &mut run,
+        "launcher",
+        Anchor::Top | Anchor::Left | Anchor::Right,
+        Exclusive,
+        None,
+    );
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&launcher_surface),
+        "the exclusive surface takes the keyboard"
+    );
+    give_back_to_popup(&mut run, held);
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(launcher_surface),
+        "the exclusive surface keeps it"
+    );
+    assert_refocused(&mut run);
+    assert_ne!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock is not given it back"
+    );
+    run.stop();
+}
+
+/// The session locked while a dock's popup holds the keyboard, and the popup closed by its
+/// client while locked: the keyboard stays on the lock surface (decision 30; #1217).
+#[test]
+fn a_popup_closed_while_locked_leaves_the_keyboard_on_the_lock_surface() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let (locker, _lock) = lock_session(&mut run);
+    let locked = keyboard_focus(&run);
+    assert_eq!(
+        locked
+            .as_ref()
+            .and_then(|surface| surface.client())
+            .map(|client| client.id()),
+        locker.id.clone(),
+        "the lock surface has the keyboard"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(keyboard_focus(&run), locked, "the lock surface keeps it");
+    assert_refocused(&mut run);
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(dock_surface),
+        "not the popup's root"
     );
     run.stop();
 }
@@ -12269,9 +13719,14 @@ fn a_window_is_maximised_on_its_output() {
 mod clipboard;
 #[cfg(test)]
 mod devices;
+#[cfg(test)]
+mod touch;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod eis;
 
 #[cfg(test)]
 mod aids;
@@ -12288,3 +13743,23 @@ mod tiling;
 // SD4: athanor-idle's notifications, overlay and output power.
 #[cfg(test)]
 mod idle;
+
+// Decision 33, wave 2a: the standard globals.
+#[cfg(test)]
+mod wave2a;
+
+// Decision 33, wave 2b: wl_drm on a render node.
+#[cfg(test)]
+mod wave2b;
+
+// Decision 35: ext-background-effect-v1's blur.
+#[cfg(test)]
+mod background_effect;
+
+// Decision 36: content type, toplevel tag and DRM lease.
+#[cfg(test)]
+mod decision36;
+
+// Nulls the wire signature forbids (vendor/wayland-backend/PATCHES.md).
+#[cfg(test)]
+mod null_arguments;
