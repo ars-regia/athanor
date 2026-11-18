@@ -107,9 +107,7 @@ impl<H: Host> Shared<H> {
                 (End::StoppedClosed(ticket), Some((Stage::Connected(_), now))) if now == ticket => {
                     sessions.close(handle)
                 }
-                (End::StoppedClosed(_), _) | (End::Stopped, Some((Stage::Connected(_), _))) => {
-                    None
-                }
+                (End::StoppedClosed(_), _) | (End::Stopped, Some((Stage::Connected(_), _))) => None,
                 _ => sessions.close(handle),
             }
         };
