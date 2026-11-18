@@ -35,6 +35,11 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 ROOTS = ("forge", "system", "scripts", ".github", "Justfile", "flake.nix")
 SUFFIXES = {".sh", ".py", ".yml", ".yaml", ".nix", ".rs", ".toml", ".mjs", ".js", ""}
 GATE = {"forge/scripts/verify_image.sh", "forge/scripts/registry_probe.sh"}
+# Files that name athanor-builder:<hash> as text and never pull or run it.
+BUILDER_NAMED_NOT_RUN = {
+    # A line of the evidence bundle: the builder the signatures were verified in.
+    "system/evidence-bundle.sh",
+}
 # registry_probe.sh answers only whether a tag exists. verify_image.sh is the gate built on it;
 # check_idempotency_test.sh tests it against the live registry, and the CI path filter of
 # scripts/ci/changes.py names it without running it. No hit asks it directly, the builder's
@@ -200,6 +205,8 @@ class CacheHitGateTest(unittest.TestCase):
         self.assertRegex(text, r'verify_image\.sh" "\$\{IMAGE_URL_LOWER#docker://\}" "\$SIGNER"\)')
 
     def test_no_workflow_or_forge_script_runs_the_builder_by_tag(self):
+        for rel in BUILDER_NAMED_NOT_RUN:
+            self.assertTrue((REPO / rel).is_file(), rel)
         # A job pulls, runs or uses as its container the builder only by the digest that
         # verify_image.sh verified signed by a trusted run of call-build-builder.yml (issue
         # #1205): athanor-builder:<tag> is read for its digest by resolve_builder_image.sh, the
@@ -208,7 +215,7 @@ class CacheHitGateTest(unittest.TestCase):
         resolver = "forge/scripts/resolve_builder_image.sh"
         seen = []
         for rel, text in pipeline_files():
-            if not rel.startswith((".github/", "forge/")) or rel.startswith("forge/specs/"):
+            if rel.startswith("forge/specs/") or rel in BUILDER_NAMED_NOT_RUN:
                 continue
             seen.append(rel)
             if rel == resolver:

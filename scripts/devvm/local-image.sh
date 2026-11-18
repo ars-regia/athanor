@@ -16,7 +16,9 @@
 # A clean checkout already built for the same specs skips steps 1 to 3. The tag goes to
 # .scratch/local-image/tag. OWNER (default $REGISTRY_HOST/$GITHUB_REPOSITORY_OWNER, which
 # default to ghcr.io and ars-regia), BUILDER and TIER3 name the
-# published images. Needs podman, rpm, skopeo, jq and, for --push-to-vm, gh and the VM.
+# published images; without BUILDER the builder is OWNER's latest, run by the digest
+# forge/scripts/resolve_builder_image.sh verified signed by a trusted run (#1205). Needs podman,
+# rpm, skopeo, jq, cosign and, for --push-to-vm, gh and the VM.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -24,7 +26,7 @@ ROOT=$(git -C "$HERE" rev-parse --show-toplevel)
 # shellcheck source-path=SCRIPTDIR
 source "$HERE/acceptance/lib.sh"
 OWNER=${OWNER:-${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}}
-BUILDER=${BUILDER:-$OWNER/athanor-builder:latest}
+BUILDER=${BUILDER:-$(bash "$ROOT/forge/scripts/resolve_builder_image.sh" "$OWNER" latest)}
 TIER3=${TIER3:-$OWNER/athanor-forge-tier3-repo}
 OVERLAY=${ACC_REGISTRY%%/*}/${TIER3#*/}
 # Packages the switch retires: their published RPMs must not reach the image.
