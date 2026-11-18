@@ -44,7 +44,7 @@ The repository variables set are `SETTINGS_APP_CLIENT_ID`, `EVIDENCE_REGISTRY` a
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
-| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:100), `call-build-builder.yml:12`, `call-dag-compile.yml:20-21`, `forge-ghcr-cleanup.yml:34,41`, `promote-stable.yml:37,42`, `rust-security-audit.yml:49`, `spec-build-check.yml:106` |
+| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:111), `accept.yml:49,181`, `call-build-builder.yml:15`, `call-dag-compile.yml:19`, `forge-ghcr-cleanup.yml:37,44`, `maintenance.yml:103`, `promote-stable.yml:52,88,152`, `rust-security-audit.yml:47`, `spec-build-check.yml:62` |
 | VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:63`) | orchestrator (:153, :206, :268), `kernel-build.yml:55`, `kernel-bump.yml:61,259`, `nvidia-kmod.yml:45`, `call-nvidia-kmod-prepare.yml:37`, `system-image-check.yml:53` |
 | VAR3 | `BUILDER_STABLE_TAG` | `latest` | `rust-security-audit.yml:48` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `accept.yml`, `promote-stable.yml` |
