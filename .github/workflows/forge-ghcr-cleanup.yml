@@ -2,11 +2,11 @@ name: 🧹 Forge GHCR Cleanup
 
 # The weekly janitor of the container packages (forge/scripts/clean_ghcr.sh). The kernel
 # packages azoth* are excluded: their only pruner is forge/specs/azoth/retention.sh
-# (docs/architecture/doc_build_ordering.md, O6).
+# (docs/architecture/doc_build_ordering.md, O6). It runs only by hand until clean_ghcr.sh keeps
+# the tier digests that the forge-tier<N>.digest labels of a kept system image name
+# (doc_build_system.md, PLAT-N01): a scheduled run would delete them (#1275).
 
 on:
-  schedule:
-    - cron: '0 0 * * 0'
   workflow_dispatch:
 
 concurrency:
