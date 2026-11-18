@@ -481,6 +481,18 @@ jobs:
         env:
           RIG_COMPOSITOR: athanor
         run: bash forge/test/shell/rig.sh orca dock it
+      - name: Build and test the toolkit dock
+        run: bash forge/test/shell/rig.sh build-dock-toolkit
+      - name: Orca's speech on the toolkit dock under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
+          ATHANOR_DOCK_BIN: /out/toolkit-dock/athanor-dock
+        run: bash forge/test/shell/rig.sh orca dock
+      - name: Orca's speech on the toolkit dock in Italian under athanor-sulphur against its transcript
+        env:
+          RIG_COMPOSITOR: athanor
+          ATHANOR_DOCK_BIN: /out/toolkit-dock/athanor-dock
+        run: bash forge/test/shell/rig.sh orca dock it
       - name: Openers, running windows, pinning, the knob and presets live, and memory
         run: bash forge/test/shell/rig.sh dock-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

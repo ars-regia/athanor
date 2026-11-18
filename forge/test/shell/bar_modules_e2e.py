@@ -259,6 +259,21 @@ def network(ctx):
 
     check("the network module shows", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
     check("the bar registered its secret agent once", wait_for(lambda: registrations() == 1, 5))
+    # NetworkManager keeps one agent per ID and user: a second registrant is refused, and the
+    # bar's agent keeps answering the prompts below.
+    try:
+        fx.call(
+            bus, fx.NM, fx.NM_AGENT_MANAGER, "org.freedesktop.NetworkManager.AgentManager",
+            "RegisterWithCapabilities", "(su)", ("os.athanor.Bar", 0),
+        )
+        second, message = "", ""
+    except GLib.Error as err:
+        second = Gio.DBusError.get_remote_error(err) or ""
+        # PyGObject hands a copy of the error, so strip_remote_error cannot strip it.
+        message = err.message.removeprefix(f"GDBus.Error:{second}: ")
+    check("a second registration of the agent ID is refused", second == fx.NM_AGENT_HELD, second)
+    check("with NetworkManager's message", message == fx.NM_AGENT_HELD_MESSAGE, message)
+    check("and the bar's registration stands", registrations() == 1)
     check(
         "the network list opens with the connected network",
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
@@ -380,12 +395,29 @@ def network(ctx):
                     for args in mock_calls(bus, fx.NM, NM_PATH, "ActivateConnection")), 5))
     press(app, Atspi, "Network")
 
-    # NetworkManager restarts: the module hides, comes back, and the agent registers again.
-    for pid in mock_pids(fx.NM_TEMPLATE):
-        os.kill(pid, signal.SIGTERM)
-    check("without NetworkManager the module hides", wait_for(lambda: not buttons(app, Atspi, "Network"), 10))
-    ctx.spawned.append(fx.networkmanager(bus))
-    check("NetworkManager back: the module shows again", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+    def restart(held=None):
+        for pid in mock_pids(fx.NM_TEMPLATE):
+            os.kill(pid, signal.SIGTERM)
+        check("without NetworkManager the module hides", wait_for(lambda: not buttons(app, Atspi, "Network"), 10))
+        ctx.spawned.append(fx.networkmanager(bus, held))
+        check("NetworkManager back: the module shows again", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+
+    # NetworkManager restarts with the agent ID held by another process of this user: the bar
+    # is refused, says so once and does not ask again.
+    client_log = Path("/out") / f"{os.environ['RIG_TAG']}-client.log"
+
+    def held_lines():
+        text = client_log.read_text(encoding="utf-8", errors="replace") if client_log.exists() else ""
+        return text.count("another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets")
+
+    before = held_lines()
+    restart(held=bus.get_unique_name())
+    check("the bar says once that another process holds its agent ID", wait_for(lambda: held_lines() == before + 1, 10))
+    time.sleep(3)  # longer than the first wait before another registration
+    check("and does not register again", registrations() == 0 and held_lines() == before + 1)
+
+    # NetworkManager restarts with the ID free: the module comes back and the agent registers.
+    restart()
     check("the agent registered with the new NetworkManager", wait_for(lambda: registrations() == 1, 10))
 
 
@@ -621,6 +653,11 @@ def battery(ctx):
         found = labelled(app, Atspi, "slider", "Screen brightness")
         return found[0] if found else None
 
+    def brightness_is(percent):
+        # One query of the accessibility tree: the slider can leave it between two.
+        slider = brightness()
+        return slider is not None and abs(slider.get_current_value() - percent) < 1.0
+
     def display_device(state, percent, to_empty, to_full, present):
         fx.call(
             bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
@@ -652,7 +689,7 @@ def battery(ctx):
 
     check(
         "the brightness slider shows the backlight's 60 %",
-        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+        brightness_is(60.0),
     )
     brightness().set_current_value(30.0)
     check(
@@ -665,7 +702,7 @@ def battery(ctx):
     brightness().set_current_value(5.0)
     check(
         "a refused brightness puts the slider back",
-        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+        wait_for(lambda: brightness_is(30.0), 5),
     )
     check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
 
