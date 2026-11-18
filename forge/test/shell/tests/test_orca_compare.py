@@ -175,10 +175,10 @@ class CompareTest(unittest.TestCase):
 
     def test_the_airplane_switch_of_the_bar_network_page_is_heard_as_a_switch(self):
         for said, heard in [
-            ("Airplane mode check box not checked.", "Airplane mode toggle button not pressed."),
+            ("Airplane mode off switch", "Airplane mode toggle button not pressed"),
             (
-                "Modalità aereo casella di spunta non spuntata.",
-                "Modalità aereo pulsante di commutazione non premuto.",
+                "Modalità aereo non attivo selettore",
+                "Modalità aereo pulsante di commutazione non premuto",
             ),
         ]:
             self.assertEqual(compare.compare([said], [heard])[1], [])
@@ -207,10 +207,10 @@ class CompareTest(unittest.TestCase):
 
     def test_the_switches_of_the_bar_are_heard_as_switches_in_both_languages(self):
         for reference, heard in (
-            ("Tile windows check box not checked.", "Tile windows toggle button not pressed."),
+            ("Tile windows off switch", "Tile windows toggle button not pressed"),
             (
-                "Contrasto elevato casella di spunta spuntata.",
-                "Contrasto elevato pulsante di commutazione premuto.",
+                "Contrasto elevato attivo selettore",
+                "Contrasto elevato pulsante di commutazione premuto",
             ),
         ):
             self.assertEqual(compare.compare([reference], [heard])[1], [], reference)
