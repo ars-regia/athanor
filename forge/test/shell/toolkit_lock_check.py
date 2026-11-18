@@ -41,6 +41,7 @@ ACK = re.compile(r"-> ext_session_lock_surface_v1#(\d+)\.ack_configure\((\d+)\)"
 DESTROY = re.compile(r"-> ext_session_lock_surface_v1#(\d+)\.destroy\(\)")
 UNLOCK = re.compile(r"-> ext_session_lock_v1#(\d+)\.unlock_and_destroy\(\)")
 LOCK_DESTROY = re.compile(r"-> ext_session_lock_v1#(\d+)\.destroy\(\)")
+SURFACE = re.compile(r"-> wl_compositor#\d+\.create_surface\(new id wl_surface#(\d+)\)")
 VIEWPORT = re.compile(
     r"-> wp_viewporter#\d+\.get_viewport\(new id wp_viewport#(\d+), wl_surface#(\d+)\)"
 )
@@ -74,9 +75,18 @@ def committed_as_the_protocol_asks(lines, surface):
     """Whether the lock surface `surface`'s wl_surface was first committed after its first
     ack_configure, with a buffer attached in between, and every commit after had, through its
     viewport, the size of the configure last acknowledged, which is the one a commit answers:
-    None when it holds, else what does not. Only the lines from its creation to its destruction
-    count, since a later object can take a destroyed one's id."""
-    wl, _, _, start = lock_surfaces(lines)[surface]
+    None when it holds, else what does not. Only the lines from the creation of its wl_surface,
+    which precedes its viewport and the lock surface, to the lock surface's destruction count,
+    since a later object can take a destroyed one's id."""
+    wl, _, _, got = lock_surfaces(lines)[surface]
+    created = [
+        i
+        for i, line in enumerate(lines[:got])
+        if (m := SURFACE.search(line)) and m[1] == wl
+    ]
+    if not created:
+        return "its wl_surface was never created"
+    start = created[-1]
     viewport = None
     acked = attached = False
     sizes = {}
