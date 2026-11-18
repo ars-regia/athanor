@@ -134,7 +134,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 - **Secrets, variables:** `GITHUB_TOKEN`.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI33 `sign-images`, one maintainer approval per release (D43), none once the job is in `signing-images` at the end of the key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8).
 - **Runner:** hosted. **Concurrency:** caller's.
-- **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/rechunk-image.sh`, `system/shared-layers.sh`, `system/check-image-kernel.sh`, `system/check-image-rpms.sh`, `system/check-image-contacts.sh`, `system/image-digests.sh`, `system/upgrade-bytes.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
+- **Scripts:** `scripts/fetch_repo_rpms.sh` (in `forge/`), `system/build-image.sh`, `system/rechunk-image.sh`, `system/shared-layers.sh`, `system/check-image-kernel.sh`, `system/check-image-rpms.sh`, `system/check-image-own.sh`, `system/check-image-contacts.sh`, `system/image-digests.sh`, `system/upgrade-bytes.sh`, `forge/scripts/sbom_rootfs.sh`, `sign_attest.sh`, `build_iso.sh`, `retry.sh`.
 - **Health:** `gh run list --workflow call-system-image.yml --branch iso-v0 --limit 5`.
 
 ### CI6 NVIDIA kmod

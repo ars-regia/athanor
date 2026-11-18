@@ -163,6 +163,12 @@ jobs:
         # per-package image once shipped athanor-recovery 1.0.0-5 while its spec said 6.
         run: bash system/check-image-rpms.sh "$(<artifacts/system-image.iid)"
 
+      - name: 🪶 Check the image for what is not yet Athanor's own
+        # ADR-0141 decision 7: a cosmic-* RPM, pop-launcher, gtk-layer-shell, gtk4-layer-shell or
+        # xdg-user-dirs-gtk that forge/config/own-allow.txt does not list fails the build, and so
+        # does an entry the image no longer needs. verify.py own checks the crates of the same list.
+        run: bash system/check-image-own.sh "$(<artifacts/system-image.iid)"
+
       - name: 🔒 Check the enabled units against the contacts list
         # forge/config/contacts.toml lists what the image contacts by itself (ADR-0056); an
         # enabled timer it does not list, or an enabled unit it calls silent, fails the build.

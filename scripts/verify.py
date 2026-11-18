@@ -6588,6 +6588,119 @@ def check_line_citations():
     return r
 
 
+OWN_ALLOW = "forge/config/own-allow.txt"
+# The toolkits an athanor-* crate may not reach (ADR-0141 decision 7).
+OWN_REFUSED_CRATES = {"gtk4", "libadwaita", "libcosmic", "iced"}
+
+
+def third_party_cargo(path):
+    """A manifest or lockfile of a crate Athanor vendors or packages from upstream."""
+    return "/vendor/" in path or "/SOURCES/" in path
+
+
+def dev_only_dependencies(manifest, renames):
+    """The package names MANIFEST takes as dev-dependencies only, in any target table.
+    RENAMES maps a [workspace.dependencies] key to its package, for `workspace = true`."""
+    def names(tables):
+        out = set()
+        for table in tables:
+            for key, dep in table.items():
+                dep = dep if isinstance(dep, dict) else {}
+                out.add(dep.get("package") or (renames.get(key, key) if dep.get("workspace") else key))
+        return out
+
+    targets = list(manifest.get("target", {}).values())
+    dev = names([manifest.get("dev-dependencies", {})] + [t.get("dev-dependencies", {}) for t in targets])
+    run = names([manifest.get(k, {}) for k in ("dependencies", "build-dependencies")]
+                + [t.get(k, {}) for t in targets for k in ("dependencies", "build-dependencies")])
+    return dev - run
+
+
+def toolkit_crates(root=None):
+    """{athanor-* crate: the refused toolkits it reaches}, over every lockfile of the repository
+    but the vendored and packaged ones. A lockfile holds the optional dependencies of every
+    feature, so a crate counts while any feature reaches a toolkit; the dev-dependencies of a
+    member are left out, as they are not shipped (toolkit-boundary does the same), and a
+    registry crate's never reach the lockfile."""
+    root = Path(root or ROOT)
+    listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
+                            capture_output=True, text=True, check=True).stdout.split("\0")
+    paths = [p for p in listed if p and not third_party_cargo(p)]
+    manifests, renames = {}, {}
+    for path in (p for p in paths if p.endswith("Cargo.toml")):
+        data = tomllib.loads(read(root / path))
+        for key, dep in data.get("workspace", {}).get("dependencies", {}).items():
+            if isinstance(dep, dict) and dep.get("package"):
+                renames[key] = dep["package"]
+        if "package" in data:
+            manifests[data["package"]["name"]] = data
+    hits = {}
+    for lock in (p for p in paths if p.endswith("Cargo.lock")):
+        packages = tomllib.loads(read(root / lock)).get("package", [])
+        by_name = {}
+        for package in packages:
+            by_name.setdefault(package["name"], []).append(package)
+
+        def dependencies(package):
+            member = "source" not in package and package["name"] in manifests
+            skip = dev_only_dependencies(manifests[package["name"]], renames) if member else set()
+            for dep in package.get("dependencies", []):
+                name, *version = dep.split(" ")
+                if name not in skip:
+                    yield from (c for c in by_name.get(name, []) if not version or c["version"] == version[0])
+
+        for package in packages:
+            if "source" in package or not re.match(r"athanor[-_]", package["name"]):
+                continue
+            seen, stack = set(), [package]
+            while stack:
+                for dep in dependencies(stack.pop()):
+                    key = (dep["name"], dep["version"])
+                    if key not in seen:
+                        seen.add(key)
+                        stack.append(dep)
+                        if dep["name"] in OWN_REFUSED_CRATES:
+                            hits.setdefault(package["name"], set()).add(dep["name"])
+    return hits
+
+
+def own_problems(root=None, base=None):
+    """ADR-0141 decision 7 on the crates: every athanor-* crate that reaches a refused toolkit is
+    listed in OWN_ALLOW, every crate entry still reaches one, and against BASE the list adds no
+    entry. The rpm entries are checked on the built image (forge/scripts/check_image_own.py)."""
+    root = Path(root or ROOT)
+    parse = load_module("forge/scripts/check_image_own.py").parse_allow_list
+    try:
+        entries = parse(read(root / OWN_ALLOW))
+    except (OSError, ValueError) as err:
+        return [f"{OWN_ALLOW}: {err}"]
+    crates = {name for kind, name, _ in entries if kind == "crate"}
+    hits = toolkit_crates(root)
+    problems = [f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
+                "(ADR-0141 decision 7)" for name in sorted(set(hits) - crates)]
+    problems += [f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))}; "
+                 "remove its entry" for name in sorted(crates - set(hits))]
+    if base is not None:
+        shown = subprocess.run(["git", "-C", str(root), "show", f"{base}:{OWN_ALLOW}"],
+                               capture_output=True, text=True)
+        if shown.returncode == 0:
+            try:
+                before = {(kind, name) for kind, name, _ in parse(shown.stdout)}
+            except ValueError as err:
+                return problems + [f"{OWN_ALLOW} at {base}: {err}"]
+            problems += [f"{OWN_ALLOW}: {kind} {name} is not listed at {base}; the list only shrinks"
+                         for kind, name, _ in entries if (kind, name) not in before]
+    return problems
+
+
+@check("own", "No athanor-* crate reaches gtk4, libadwaita, libcosmic or iced unless own-allow.txt lists it, and the list only shrinks (ADR-0141 decision 7)")
+def check_own():
+    r = Result()
+    for problem in own_problems(base=BASE_REF):
+        r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
