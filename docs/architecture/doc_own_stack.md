@@ -409,7 +409,7 @@ magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+
 decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
 (decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_sulphur_client::shortcuts`
-as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
+as their interface (OS5, `doc_settings.md`), and the compositor reads what that module writes, laid over these defaults (decision 38, proposed on 2026-11-18). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
@@ -1901,6 +1901,74 @@ compositor and that the own compositor did not yet offer:
     - night light as a gamma ramp on the CRTC, which a frame drawn for capture would not carry and
       which an HDR output, after decision 21, would not take in the same way;
     - `xdg_session_manager_v1` in 1.0, which adds state on disk for a protocol few clients use.
+
+38. **The user's bindings, and the input and window settings the compositor follows** (OS5,
+    OS13; `doc_settings.md` SE14 to SE16, section 7, SE-Q5 and SE-Q6; `doc_overview.md` OV3;
+    proposed on 2026-11-18, awaiting the maintainer's approval under ADR-0074). The compositor
+    reads no configuration of the user's but decision 27's `xkb_config` and decision 28's
+    accessibility files (`src/bindings.rs:1-6`, `src/xkb_config.rs:1-6`,
+    `src/screen_filter.rs:1-7`), while the Keyboard, Mouse and Touchpad and Desktop pages of
+    Settings write settings that only cosmic-comp read, and cosmic-comp leaves the image in release
+    1.0 (ADR-0141 decision 3). Each item below comes with its fixture tests (OS19, item 2):
+    - **The user's bindings, from the files `shortcuts` writes** (SE-Q6). The compositor reads
+      the user's copies of COSMIC's `custom`, a key combination to an action, and
+      `system_actions`, a system action to the command it runs, under
+      `$XDG_CONFIG_HOME/cosmic/com.system76.CosmicSettings.Shortcuts/v1/`, the files
+      `athanor_sulphur_client::shortcuts` writes (`system/athanor-sulphur-client/src/shortcuts.rs:1-12`,
+      `:25`, `:89`), at its start and at each change, followed as decision 27 follows
+      `xkb_config`. A user binding is laid over the defaults of OS13 and may take a default's
+      key, except the protected keys of decision 30, which no user binding takes; a system action
+      runs the user's command in place of the default's. A binding the compositor refuses (a
+      protected key, an action it does not carry out, a combination it cannot parse) is skipped and
+      logged, and the others apply; a file it refuses whole (malformed, larger than its limit)
+      changes nothing and is logged. While the session is locked no user binding acts (L14).
+      The reader is an exception to SH2's containment outside `athanor-sulphur-client`, as
+      decision 27's is: one source file of the compositor, `src/user_bindings.rs`, which reads
+      these two files, writes nothing in the user's configuration and names no other COSMIC key,
+      named by path in SH2's exceptions and in `verify.py boundary`. It leaves when the bindings
+      move to a store of Athanor's own after release 1.0, with the stores of `doc_settings.md`
+      SE-Q2. Fixture tests: a custom command bound and run; a default's key taken by a user
+      binding; a protected key refused; a system action's command replaced; a malformed file
+      leaving the last good set; a change followed without a restart; nothing acting while
+      locked.
+    - **Input, window management and workspaces in files of Athanor's own** (SE-Q5). Two files
+      under `$XDG_CONFIG_HOME/athanor/sulphur/`, in TOML with `schema = 1`, as `software.toml`
+      (`doc_software.md` SW2) and `favorites.toml` (`doc_bar.md` BR7) are:
+      - `input.toml`: `[mouse]`, `[touchpad]` and one `[[device]]` per device by its name, with
+        the keys of SE16 (speed, acceleration profile, primary button, natural scrolling, scroll
+        speed, middle-button emulation; for the touchpad its state, tap to click, tap and drag,
+        drag lock, the tap button map, click and scroll methods and disable while typing; for a
+        tablet or a touchscreen the output it maps to and, for a tablet, left-handed
+        orientation), and `[keyboard]` with Num Lock at the start of the session (SE15);
+      - `windows.toml`: the workspace and window keys of SE14 (the workspaces' layout and
+        wraparound, the action on typing, automatic tiling and its behaviour, the active window's
+        hint, focus follows the pointer and its delay, the pointer follows focus, and the edge
+        snap threshold).
+      A key that is absent takes the compositor's default, compiled into it: for the touchpad the
+      values cosmic-comp shipped (click method by finger count, two-finger scrolling, tap and drag
+      on; SE16), which leave the image with cosmic-comp. The files are written only through
+      `athanor_sulphur_client::input` and `window_management`, by a write to a new file and a
+      rename, so a reader never sees half a file; the overview reads the workspaces' layout and
+      the action on typing through the same module (OV3). The compositor reads both files at its
+      start and at each change, through the inotify watch of decision 27 on their directory; a
+      file it refuses whole changes nothing and is logged, and a key whose value it refuses
+      (outside its range, of the wrong type, unknown) is skipped alone and logged. Settings shows
+      a row only for a key the compositor applies, and a key it does not apply yet is absent
+      rather than inert, as SE18 does for the keyboard aids. The files are Athanor's, so they need
+      no exception to SH2. The compositor parses them with `toml`, already a dependency of the
+      workspace (`Cargo.toml`, `[workspace.dependencies]`), which it gains. Fixture tests: each
+      key reaches the libinput device or the window rule it names in the fixture of OS6, an absent
+      key gives the default, a refused file and a refused key leave the rest, and a change is
+      followed without a restart.
+
+    Not taken:
+    - for the bindings, a bindings file of Athanor's own in release 1.0 (SE-Q6, option 2), which
+      would rewrite `shortcuts` before the other COSMIC stores move after 1.0; and shortcuts read
+      only in 1.0 (option 3), which leaves `DisplayToggle` of `doc_settings.md` SE12 unbound;
+    - for the settings, cosmic-comp's keys kept as a format (SE-Q5, option 2), a COSMIC store
+      that the compositor alone would read once cosmic-comp has left; GNOME's keys relayed by a
+      privileged client (option 3), a relay for settings only the compositor uses; and the
+      settings left out of 1.0 until the compositor has a store (option 4).
 
 ## 8. Risks
 
