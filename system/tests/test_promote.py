@@ -9,7 +9,7 @@ import subprocess
 import unittest
 
 from test_kernel_artifacts import Tool
-from test_sign_images import BUILDER, PODMAN
+from test_sign_images import BUILDER, BUILDER_DIGEST, BUILDER_SIGNER, PODMAN
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTE = ROOT / "system" / "promote.sh"
@@ -59,7 +59,9 @@ class Promote(Tool):
         self.artifacts.mkdir(parents=True, exist_ok=True)
         request = {"builder_content_hash": builder} if builder else {}
         (self.artifacts / "release-request.json").write_text(json.dumps(request))
-        fx = {"tags": {}, "configs": {}, "raw": {}, "sigstore_keys": {}, "moves": moves}
+        fx = {"tags": {}, "configs": {}, "raw": {}, "sigstore_keys": {}, "signatures": {}, "moves": moves}
+        if builder:
+            self.builder_fixture(fx, builder)
         lines = []
         for i, name in enumerate(NAMES):
             new, old = digest(i + 1), digest(i + 4)
@@ -93,6 +95,13 @@ class Promote(Tool):
             f"{REG}/athanor-iso {ISO}\n{REG}/athanor-system {digest(1)}\n"
         )
         self.registry(fx)
+
+    @staticmethod
+    def builder_fixture(fx, builder):
+        """athanor-builder:BUILDER as call-build-builder.yml publishes it: signed and labelled."""
+        fx["tags"][f"{REG}/athanor-builder:{builder}"] = BUILDER_DIGEST
+        fx["signatures"][f"{REG}/athanor-builder@{BUILDER_DIGEST}"] = BUILDER_SIGNER
+        fx["configs"][f"{REG}/athanor-builder@{BUILDER_DIGEST}"] = {"tier.content.sha256": builder}
 
     def evidence(self, gate, name, digest_, run_id=412, verdict="pass", finished=OLD):
         (self.artifacts / "evidence").mkdir(parents=True, exist_ok=True)
@@ -182,7 +191,9 @@ class Promote(Tool):
         for name, between in (("at plan", None), ("at apply", True)):
             with self.subTest(name=name):
                 self.published()
-                other = lambda: self.set_tag(f"{base}:promoted-412", digest(9))
+                def other():
+                    self.set_tag(f"{base}:promoted-412", digest(9))
+
                 if between is None:
                     other()
                 r, copies = self.promote(between=other if between else None)
@@ -231,7 +242,7 @@ class Promote(Tool):
         self.assertEqual(copies, [])
 
     def promote_iso(self, run="412"):
-        """The iso job: promote-iso.sh on the plan directory, after the promote job."""
+        """The ISO step: promote-iso.sh on the plan, after promote.sh in the promote job."""
         (self.dir / "calls.log").unlink(missing_ok=True)
         r = subprocess.run(
             ["bash", str(PROMOTE_ISO), run, str(self.artifacts / "promotion.json")],
@@ -253,7 +264,7 @@ class Promote(Tool):
         self.assertIn(f"{REG}/athanor-iso:stable -> {ISO}", r.stdout)
 
     def test_the_iso_job_refuses_once_a_later_promotion_moved_the_system(self):
-        """A late re-run of an older promotion's iso job would put the ISO behind the system."""
+        """A late re-run of an older promotion's job would put the ISO behind the system."""
         self.published()
         r, _ = self.promote()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -607,6 +618,143 @@ class Promote(Tool):
                 reasons = {s["name"]: s["reason"] for s in self.record()["skipped"]}
                 self.assertEqual(reasons["athanor-system"], f"already stable at {digest(1)}")
 
+    def test_a_rerun_after_a_complete_apply_moves_nothing_and_succeeds(self):
+        # "Re-run failed jobs" after the ISO step failed: promote.sh runs again on the same plan.
+        override = ("--hardware-override", "athanor-system-nvidia")
+        for flags, stable_created in (
+            ((), "2026-09-10T10:00:00Z"),
+            (override, "2026-09-10T10:00:00Z"),
+            ((), None),
+        ):
+            with self.subTest(flags=flags, first=stable_created is None):
+                self.published(stable_created=stable_created)
+                r, _ = self.promote(*flags)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                plan = (self.artifacts / "promotion.json").read_bytes()
+                r, copies = self.promote(*flags, plan=False)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(copies, [])
+                self.assertIn("stable already at the plan", r.stdout)
+                self.assertIn(
+                    f"{REG}/athanor-system@{digest(1)} (applied by an earlier attempt",
+                    r.stdout,
+                )
+                self.assertEqual((self.artifacts / "promotion.json").read_bytes(), plan)
+
+    def test_a_rerun_after_a_partial_apply_goes_on_or_stops_as_before(self):
+        base, nvidia = f"{REG}/athanor-system", f"{REG}/athanor-system-nvidia"
+        override = ("--hardware-override", "athanor-system-nvidia")
+
+        def first_image_moved():
+            # athanor-system's four tags moved, then nvidia's copies failed.
+            day = self.record()["day"]
+            for tag, value in (
+                ("promoted-412", digest(1)),
+                ("stable-previous", digest(4)),
+                (f"stable-{day}", digest(1)),
+                ("stable", digest(1)),
+            ):
+                self.set_tag(f"{base}:{tag}", value)
+
+        # Only promoted-412 written: :stable still names the plan's previous, the record equals
+        # the plan, and the apply goes on with the rest.
+        self.published()
+        r, copies = self.promote(
+            between=lambda: self.set_tag(f"{base}:promoted-412", digest(1))
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(
+            [dest for _, dest in copies],
+            [
+                f"{base}:stable-previous",
+                f"{base}:stable-{self.record()['day']}",
+                f"{base}:stable",
+            ],
+        )
+        # One image of two moved: the record differs from the plan and from the plan applied.
+        self.published()
+        r, copies = self.promote(*override, between=first_image_moved)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("differs from the plan", r.stderr)
+        self.assertEqual(copies, [])
+        self.assertNotIn(nvidia, r.stdout)
+
+    def test_a_rerun_on_a_plan_that_no_longer_matches_is_refused(self):
+        base = f"{REG}/athanor-system"
+        for name, after in (
+            (
+                # Rolled back to an older build since: a newer one stops on UT5 instead.
+                "stable moved since",
+                lambda: self.set_tag(
+                    f"{base}:stable", digest(9), "2026-09-12T10:00:00Z"
+                ),
+            ),
+            (
+                "evidence replaced",
+                lambda: self.evidence(
+                    "signature",
+                    "athanor-system",
+                    digest(1),
+                    finished="2026-09-15T11:30:00Z",
+                ),
+            ),
+            ("override added", None),
+        ):
+            with self.subTest(name=name):
+                self.published()
+                r, _ = self.promote()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                flags = (
+                    ("--hardware-override", "athanor-system-nvidia")
+                    if after is None
+                    else ()
+                )
+                if after:
+                    after()
+                r, copies = self.promote(*flags, plan=False)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("differs from the plan", r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_a_stable_copied_outside_the_promotion_is_not_taken_as_applied(self):
+        # ADR-0111 item 5: a packages: write token can copy the signed digest onto :stable.
+        base = f"{REG}/athanor-system"
+        for name, tags in (
+            ("stable alone", {"stable": digest(1)}),
+            (
+                "no stable-previous",
+                {
+                    "promoted-412": digest(1),
+                    "stable-DAY": digest(1),
+                    "stable": digest(1),
+                },
+            ),
+        ):
+            with self.subTest(name=name):
+                self.published()
+
+                def copy_outside():
+                    for tag, value in tags.items():
+                        self.set_tag(
+                            f"{base}:{tag.replace('DAY', self.record()['day'])}", value
+                        )
+
+                r, copies = self.promote(between=copy_outside)
+                self.assertEqual(r.returncode, 1)
+                self.assertIn("was not moved by this promotion", r.stderr)
+                self.assertEqual(copies, [])
+
+    def test_the_iso_step_after_a_rerun_of_a_complete_apply_moves_only_the_iso(self):
+        self.published()
+        r, _ = self.promote()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r, copies = self.promote(plan=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(copies, [])
+        r, copies = self.promote_iso()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(copies, [f"{REG}/athanor-iso:stable"])
+
     def test_the_stable_build_promoted_again_still_needs_its_evidence(self):
         self.published()
         r, _ = self.promote()
@@ -699,7 +847,7 @@ class Promote(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         runs = [json.loads(line) for line in (self.dir / "podman.log").read_text().splitlines()]
         # athanor-system alone, verified by the plan and again by the apply.
-        self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder:{BUILDER}"] * 2)
+        self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder@{BUILDER_DIGEST}"] * 2)
         self.assertIn((f"{REG}/athanor-system@{digest(1)}", f"{REG}/athanor-system:stable"), copies)
         self.assertEqual(self.record()["builder_content_hash"], BUILDER)
 
@@ -710,11 +858,26 @@ class Promote(Tool):
             (self.artifacts / "release-request.json").write_text(
                 json.dumps({"builder_content_hash": "cd" * 32})
             )
+            fx = json.loads((self.dir / "registry.json").read_text())
+            self.builder_fixture(fx, "cd" * 32)
+            self.registry(fx)
 
         r, copies = self.promote(between=rebuild)
         self.assertEqual(r.returncode, 1)
         self.assertIn("differs from the plan", r.stderr)
         self.assertEqual(copies, [])
+
+    def test_an_unsigned_builder_fails_the_plan_before_any_pull(self):
+        """Issue #1220: the policy pull runs only in a builder a trusted run signed."""
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["signatures"] = {}
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"the builder {REG}/athanor-builder:{BUILDER} is not one a trusted run", r.stderr)
+        self.assertEqual(copies, [])
+        self.assertFalse((self.dir / "podman.log").exists())
 
     def test_a_release_request_without_a_builder_image_fails_the_plan(self):
         self.published(builder=None)

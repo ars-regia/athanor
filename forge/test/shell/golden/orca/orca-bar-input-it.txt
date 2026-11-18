@@ -1,0 +1,3 @@
+Lettore schermo attivo.
+English (US) selezionato pulsante radio.
+Lettore schermo disattivato.

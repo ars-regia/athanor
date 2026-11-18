@@ -155,7 +155,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0085 | 0085 | [Keyring prompter: the secret exchange comes from upstream oo7](0085-keyring-prompter-secret-exchange-source.md) | amended by ADR-0103 | security, shell |
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | amended by ADR-0103 | security, build |
-| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098, ADR-0104 | build, signing, security |
+| ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098, ADR-0104, ADR-0137 | build, signing, security |
 | ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | amended by ADR-0103, ADR-0116 | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
@@ -170,7 +170,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0100 | 0100 | [Notification center revision 2: battery notices in the session daemon](0100-notification-center-rev2.md) | accepted | shell, session, desktop |
 | ADR-0101 | 0101 | [One backup mechanism: athanor-backup, without athanor-timewarp](0101-backup-one-mechanism.md) | amended by ADR-0103 | software, backup |
 | ADR-0102 | 0102 | [Audit calendar and audit types](0102-audit-calendar.md) | accepted | process, security |
-| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121, ADR-0132 | platform, kernel, build, signing, security, shell, apps, docs |
+| ADR-0103 | 0103 | [Audit 5 decisions and the scope of 1.0](0103-audit-5-decisions.md) | amended by ADR-0104, ADR-0107, ADR-0112, ADR-0113, ADR-0115, ADR-0117, ADR-0119, ADR-0121, ADR-0132, ADR-0138 | platform, kernel, build, signing, security, shell, apps, docs |
 | ADR-0104 | 0104 | [Sign :latest automatically in its own release workflow; approve only the promotion to :stable](0104-release-workflow-and-stable-gate.md) | accepted | build, signing |
 | ADR-0105 | 0105 | [Four releases before 1.0: chain, base, defences, surface](0105-releases-before-1-0.md) | amended by ADR-0112, ADR-0115, ADR-0121, ADR-0123, ADR-0128 | platform, build, signing, security, shell, docs, process |
 | ADR-0106 | 0106 | [Update chain decisions for release 0.3](0106-update-chain-decisions-2026-10-09.md) | amended by ADR-0115 | update, build, signing, security, kernel |
@@ -179,18 +179,18 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0109 | 0109 | [Weekly kernel bumps](0109-weekly-kernel-bumps.md) | accepted | kernel, build, process |
 | ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | accepted | kernel, build, signing, process |
 | ADR-0111 | 0111 | [Approve pipeline revision 3 with its review fixes and four accepted risks](0111-pipeline-revision-3-approval.md) | accepted | build, signing, release, process |
-| ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115 | process, docs, shell |
+| ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115, ADR-0135 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
-| ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | accepted | update, build, release, security |
-| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131 | process, docs, platform, security, shell |
+| ADR-0114 | 0114 | [Installed systems follow :stable with the signature policy, set by the kickstart's %post](0114-install-follows-stable-signed.md) | amended by ADR-0136 | update, build, release, security |
+| ADR-0115 | 0115 | [Ship 0.9 within one week and move rows to 1.1](0115-zero-nine-in-one-week.md) | amended by ADR-0121, ADR-0123, ADR-0129, ADR-0131, ADR-0138 | process, docs, platform, security, shell |
 | ADR-0116 | 0116 | [Give the public firewall zone back to the image where the installer wrote it](0116-migrate-the-installer-firewall-zone.md) | accepted | security, network |
 | ADR-0117 | 0117 | [Admit an internal USB device only when it settles, within three runs](0117-internal-usb-devices-admitted-when-they-settle.md) | accepted | security, storage |
 | ADR-0118 | 0118 | [Approve pipeline revision 4: place bot-merge, fuzz and the rig build image](0118-pipeline-revision-4-approval.md) | accepted | build, process |
 | ADR-0119 | 0119 | [An upgrade does not keep ssh in the installer's public zone, sshd enabled or not](0119-ssh-closes-in-the-public-zone-on-upgrade.md) | accepted | security, network |
 | ADR-0120 | 0120 | [Security-class updates ship in 1.0, not 0.9](0120-security-class-updates-in-1-0.md) | amended by ADR-0123 | security, update, process |
-| ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122, ADR-0126, ADR-0132 | shell, security, process |
-| ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | amended by ADR-0132 | shell, security, process |
-| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | amended by ADR-0128, ADR-0132 | process, docs, platform, security, update, shell |
+| ADR-0121 | 0121 | [Athanor writes its own compositor on Smithay and its own toolkit](0121-own-compositor-and-toolkit.md) | amended by ADR-0122, ADR-0126, ADR-0132, ADR-0135 | shell, security, process |
+| ADR-0122 | 0122 | [The own compositor ships as an optional session before 1.0, and takes the desktop first](0122-own-compositor-optional-session-and-desktop-first.md) | amended by ADR-0132, ADR-0135 | shell, security, process |
+| ADR-0123 | 0123 | [Name the Fedora rebase release 0.10 and place rows 7 and 25 in it](0123-rebase-release-0-10-rows-7-and-25.md) | amended by ADR-0128, ADR-0132, ADR-0135 | process, docs, platform, security, update, shell |
 | ADR-0124 | 0124 | [Visual language revision 3: materials in tiers, the accent's measure, springs and the toolkit's surfaces](0124-visual-language-revision-3.md) | accepted | shell, accessibility |
 | ADR-0125 | 0125 | [A change of the Fedora base lands through a protected rebase integration branch](0125-rebase-integration-branches.md) | accepted | process, build, security |
 | ADR-0126 | 0126 | [The toolkit stays in this repository and is kept ready to leave it](0126-toolkit-ready-to-leave-the-repository.md) | amended by ADR-0134 | shell, process, security |
@@ -199,6 +199,12 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0129 | 0129 | [Release 0.9 ships without screenshot and screen share](0129-capture-leaves-0-9.md) | accepted | process, docs, shell |
 | ADR-0130 | 0130 | [The upgrade acceptance seeds a file the image ships and requires the attestation](0130-upgrade-acceptance-seed-and-attestation.md) | accepted | update, security, process |
 | ADR-0131 | 0131 | [The GitHub Release of each promotion, and release 0.9 without the VSA](0131-github-release-of-each-promotion.md) | accepted | build, release, process, security |
-| ADR-0132 | 0132 | [The own compositor becomes the default session before its full acceptance](0132-own-compositor-default-before-full-acceptance.md) | accepted | shell, security, process |
+| ADR-0132 | 0132 | [The own compositor becomes the default session before its full acceptance](0132-own-compositor-default-before-full-acceptance.md) | amended by ADR-0135 | shell, security, process |
 | ADR-0133 | 0133 | [The own compositor takes the magnifier, the colour filters and the keyboard aids](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md) | accepted | accessibility, shell |
 | ADR-0134 | 0134 | [The pillars of Athanor take alchemical names; every other package keeps a descriptive one](0134-alchemical-names-for-the-pillars.md) | accepted | shell, update, security, process |
+| ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138, ADR-0139 | process, docs, shell, security |
+| ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
+| ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | accepted | process, build |
+| ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | accepted | shell, security, process, docs |
+| ADR-0139 | 0139 | [Pull requests that change only files under docs/ do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
+| ADR-0140 | 0140 | [Cache the Rust builds of the shell jobs in CI through the rig's compiler cache](0140-cache-the-shell-jobs-rust-builds.md) | accepted | build, process, security |

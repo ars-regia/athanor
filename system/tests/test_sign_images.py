@@ -53,7 +53,18 @@ STUB = textwrap.dedent("""\
     signed = json.loads((state / "signed.json").read_text())
     lag_file = state / "lag.json"
     lag = json.loads(lag_file.read_text()) if lag_file.exists() else {}
-    if args[0] == "inspect":
+    # registry_probe.sh and verify_image.sh bound each read.
+    if args[:2] == ["--command-timeout", "30s"]:
+        args = args[2:]
+    if args[0] == "inspect" and "--config" in args:
+        # configs.json: the labels of each repo@digest.
+        configs_file = state / "configs.json"
+        configs = json.loads(configs_file.read_text()) if configs_file.exists() else {}
+        ref = args[-1].removeprefix("docker://")
+        if ref not in configs:
+            sys.exit("manifest unknown")
+        print(json.dumps({"config": {"Labels": configs[ref]}}))
+    elif args[0] == "inspect":
         ref = args[-1].removeprefix("docker://")
         if ref not in tags:
             sys.exit("manifest unknown")
@@ -132,7 +143,7 @@ PODMAN = textwrap.dedent("""\
         host = pathlib.Path(mount.split(":")[0])
         for d in (host, *host.parents):
             assert not (d / "key").exists() and not (d / "passphrase").exists(), f"key file reachable from {mount}"
-    image = next(a for a in args if "/athanor-builder:" in a)
+    image = next(a for a in args if "/athanor-builder@sha256:" in a)
     with open(state / "podman.log", "a") as log:
         log.write(json.dumps({"mounts": mounts, "image": image, "args": args}) + "\\n")
     cmd = args[args.index(image) + 1:]
@@ -144,13 +155,28 @@ COSIGN = textwrap.dedent("""\
     # records every call in cosign.log. verify-attestation prints the envelopes of a digest whose
     # predicate type is --type, one JSON document per line, as cosign does. STUB_ATTEST_FAIL fails
     # attest; STUB_ONLY_KEY names the one public key that verifies, STUB_DOWN_KEY one that cannot
-    # reach the registry.
-    import base64, json, os, pathlib, stat, sys
+    # reach the registry. verify is the keyless check of system/tier-digests.sh: signers.json names
+    # the signing identity of each signed repo@digest, and STUB_COSIGN_DOWN fails it as a TUF outage.
+    import base64, json, os, pathlib, re, stat, sys
     state = pathlib.Path(os.environ["STUB_STATE"])
     args = sys.argv[1:]
     stdin = sys.stdin.read() if args[0] == "attest" else ""
     with open(state / "cosign.log", "a") as log:
         log.write(json.dumps({"args": args, "stdin": stdin, "env": sorted(k for k in os.environ if k.startswith("COSIGN_"))}) + "\\n")
+    if args[0] == "verify":
+        if os.environ.get("STUB_COSIGN_DOWN"):
+            sys.exit("Error: getting trusted root: GET https://tuf-repo-cdn.sigstore.dev/timestamp.json: 502 Bad Gateway")
+        signers_file = state / "signers.json"
+        signers = json.loads(signers_file.read_text()) if signers_file.exists() else {}
+        regex = args[args.index("--certificate-identity-regexp") + 1]
+        identity = signers.get(args[-1])
+        if identity is None:
+            print("Error: no signatures found", file=sys.stderr)
+            sys.exit(10)
+        if not re.search(regex, identity):
+            sys.exit("Error: no matching signatures: failed to verify certificate identity: no matching "
+                     f'CertificateIdentity found, last error: expected SAN value to match regex "{regex}", got "{identity}"')
+        sys.exit(0)
     store = state / "attested.json"
     attested = json.loads(store.read_text()) if store.exists() else {}
     kind = args[args.index("--type") + 1]
@@ -192,6 +218,9 @@ COSIGN = textwrap.dedent("""\
         sys.exit(f"stub cosign: unsupported {args}")
     """)
 BUILDER = "ab" * 32
+# The digest the builder's hash tag names, and the run that signs a trusted builder (issue #1220).
+BUILDER_DIGEST = "sha256:" + "be" * 32
+BUILDER_SIGNER = "https://github.com/ars-regia/athanor/.github/workflows/call-build-builder.yml@refs/heads/iso-v0"
 
 
 class SignImages(unittest.TestCase):
@@ -314,6 +343,17 @@ class SignImages(unittest.TestCase):
             text=True,
             env={**clean, **env},
         )
+
+    def publish_builder(self, signer=BUILDER_SIGNER, label=BUILDER, tag=BUILDER):
+        """athanor-builder:TAG names BUILDER_DIGEST, signed by SIGNER and labelled with LABEL
+        (None: no signature, no label)."""
+        ref = f"{REG}/athanor-builder@{BUILDER_DIGEST}"
+        tags = json.loads((self.state / "tags.json").read_text())
+        tags[f"{REG}/athanor-builder:{tag}"] = BUILDER_DIGEST
+        (self.state / "tags.json").write_text(json.dumps(tags))
+        (self.state / "signers.json").write_text(json.dumps({ref: signer} if signer else {}))
+        labels = {"tier.content.sha256": label} if label else {}
+        (self.state / "configs.json").write_text(json.dumps({ref: labels}))
 
     def tag(self, *args, **env):
         target = list(args) or [str(self.file)]
@@ -502,6 +542,7 @@ class SignImages(unittest.TestCase):
     def test_with_the_builder_the_verification_runs_in_its_image(self):
         self.digests()
         self.sign()
+        self.publish_builder()
         r = self.verify("--builder", BUILDER)
         self.assertEqual(r.returncode, 0, r.stderr)
         runs = [
@@ -510,13 +551,52 @@ class SignImages(unittest.TestCase):
         ]
         self.assertEqual(len(runs), 3)
         for run in runs:
-            self.assertEqual(run["image"], f"{REG}/athanor-builder:{BUILDER}")
+            # By the digest a trusted run signed, never by the tag (issue #1220).
+            self.assertEqual(run["image"], f"{REG}/athanor-builder@{BUILDER_DIGEST}")
             self.assertEqual(
                 len(run["mounts"]), 2, "only the rendered policy and the public keys"
             )
             self.assertNotIn("-e", run["args"])
             self.assertIn("--cap-drop=all", run["args"])
         self.assertEqual(r.stdout.count("verified with the shipped policy"), 3)
+
+    def test_a_builder_no_trusted_run_signed_fails_before_any_image_is_pulled(self):
+        """Issue #1220: a builder of anyone's choosing would report every image verified."""
+        self.digests()
+        self.sign()
+        other = "https://github.com/ars-regia/athanor/.github/workflows/"
+        for case, builder in (
+            ("absent", None),
+            ("unsigned", {"signer": None}),
+            ("signed by another workflow", {"signer": other + "call-dag-compile.yml@refs/heads/iso-v0"}),
+            ("signed on an untrusted branch", {"signer": other + "call-build-builder.yml@refs/heads/feature"}),
+            ("a trusted builder of another hash", {"label": "cd" * 32}),
+            ("unlabelled", {"label": None}),
+        ):
+            with self.subTest(case=case):
+                for name in ("signers.json", "configs.json", "podman.log", "calls.log"):
+                    (self.state / name).unlink(missing_ok=True)
+                (self.state / "tags.json").write_text(json.dumps(
+                    {ref: d for ref, d in json.loads((self.state / "tags.json").read_text()).items()
+                     if "/athanor-builder:" not in ref}))
+                if builder is not None:
+                    self.publish_builder(**builder)
+                r = self.verify("--builder", BUILDER)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(f"the builder {REG}/athanor-builder:{BUILDER} is not one a trusted run", r.stderr)
+                self.assertFalse((self.state / "podman.log").exists())
+                self.assertFalse(any("--policy" in call["args"] for call in self.calls()))
+                self.assertNotIn("verified with the shipped policy", r.stdout)
+
+    def test_a_builder_whose_signature_cannot_be_checked_fails_closed(self):
+        self.digests()
+        self.sign()
+        self.publish_builder()
+        r = self.verify("--builder", BUILDER, STUB_COSIGN_DOWN="1")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn("502 Bad Gateway", r.stderr)
+        self.assertIn(f"the builder {REG}/athanor-builder:{BUILDER} could not be verified", r.stderr)
+        self.assertFalse((self.state / "podman.log").exists())
 
     def test_a_builder_that_is_not_a_content_hash_is_refused_before_the_registry(self):
         self.digests()

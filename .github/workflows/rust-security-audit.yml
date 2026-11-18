@@ -1,15 +1,34 @@
 name: Rust Security & FFI Audit
 
+# pr.yml calls this workflow as its `rust_audit` job when scripts/ci/changes.py selects it
+# (Rust sources, Cargo files, deny.toml, the builder); its verdict reaches the required `gate`.
 on:
+  workflow_call:
+  # A merge into iso-v0 that touches the same paths: two pull requests green on their own can
+  # merge into a red iso-v0. The filter repeats the rust_audit area of scripts/ci/changes.py
+  # (scripts/ci/tests/test_pr_workflow.py).
   push:
     branches: [iso-v0]
-  pull_request:
-    branches: [iso-v0]
-  # The advisory database changes without a commit: the weekly run catches an advisory
-  # published against a lockfile nobody touched.
-  schedule:
-    - cron: "17 4 * * 1"
+    paths:
+      - "**.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/rust-toolchain"
+      - "**/rust-toolchain.toml"
+      - "**/clippy.toml"
+      - "**/.clippy.toml"
+      - ".cargo/**"
+      - "deny.toml"
+      - "forge/builder/**"
+      - "flake.nix"
+      - "flake.lock"
+      - "forge/scripts/retry.sh"
+      - "scripts/ci/security-audit.sh"
+      - ".github/workflows/rust-security-audit.yml"
+  # The advisory database changes without a commit: maintenance.yml calls this workflow every
+  # day, and its alert job opens a ci-alert issue when the run fails (PL51).
 
+# Called from pr.yml the group is the caller's "Pull Request-<ref>", apart from "pr-<number>".
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,9 +53,12 @@ jobs:
           persist-credentials: false
 
       - name: Restore the Cargo cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: rust-security-audit
+          # Saved by a push to iso-v0 alone: every pull request, queue and daily run reads the
+          # default branch's entry, and the entries of their own refs filled the 10 GB (#1177).
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' }}
 
       - name: Run the audit in the builder image
         run: |

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-kernel-profile
 Version:        1.0.0
-Release:        5%{?dist}
+Release:        5%{?athanor_content}%{?dist}
 Summary:        Athanor kernel profile: effective settings per role combination and their checker
 
 License:        GPL-3.0-or-later

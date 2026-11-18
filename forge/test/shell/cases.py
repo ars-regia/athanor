@@ -9,6 +9,7 @@ right-to-left pseudo-locale}. Layouts: the 27 cases of SH13 over the 14 layouts 
     cases.py toolkit-gallery        tag, variant, scale, locale, catalog, page, direction (tab-separated);
     cases.py gtk-gallery            every page of the gallery at both scales, left to right and right to left
     cases.py gallery-pages          page, Tabs of its walk (tab-separated)
+    cases.py control-center-pages   page, interactive widgets, Tabs of its walk (tab-separated)
 """
 
 import sys
@@ -62,7 +63,19 @@ SURFACES = {
     # doc_launcher.md, LA11: the launcher with a query and its preview (plan 3a); the
     # library's 12 cases come with plan 3b.
     "launcher": {"variants": ("light", "dark"), "scales": ("1.0", "1.5")},
-    # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-toolkit's chooser under
+    # doc_control_center.md, CC13: the panel with every tile its fixtures provide, and the
+    # detail pages it has (CC5), against the same fixtures.
+    **{
+        surface: {"variants": ("light", "dark"), "scales": ("1.0", "1.5")}
+        for surface in (
+            "control-center",
+            "control-center-network",
+            "control-center-bluetooth",
+            "control-center-audio",
+            "control-center-battery",
+        )
+    },
+    # doc_own_stack.md, C1 task 1 and T1 task 4: athanor-sal's chooser under
     # athanor-sulphur, in the GTK chooser's catalogs. The toolkit has no dark theme yet:
     # one variant.
     "toolkit-chooser": {"variants": ("light",), "scales": ("1.0", "1.5")},
@@ -72,8 +85,31 @@ SURFACES = {
 # page and the number of controls on it, insensitive ones left out as Tab skips them; a widget
 # task adds its page here. Both galleries start a
 # page with the focus on its toggle in the page row.
-GALLERY_PAGES = {"buttons": 5, "choices": 3, "values": 1, "lists": 1, "text": 1, "states": 1}
+GALLERY_PAGES = {
+    "buttons": 5,
+    "choices": 3,
+    "values": 1,
+    "lists": 2,
+    "text": 1,
+    "states": 1,
+    "calendar": 5,
+    "dialogs": 1,
+    # Its menu, open at the start, takes the walk's Space and gives the focus back to its button,
+    # one control past the page's toggle: the walk counts no control after it.
+    "menus": 0,
+}
 GALLERIES = ("toolkit-gallery", "gtk-gallery")
+# doc_control_center.md, CC13 and CC5: each page Show opens, against system_fixtures.py, with the
+# interactive widgets of its tree (`rig.sh atspi control-center`, the minimum atspi_check.py asks)
+# and the Tabs of its walk (`rig.sh orca control-center`): from the focus on its first control,
+# one for each other control, and one more that comes back round to the first.
+CONTROL_CENTER_PAGES = {
+    "panel": (18, 18),
+    "network": (7, 7),
+    "bluetooth": (4, 4),
+    "audio": (10, 10),
+    "battery": (5, 5),
+}
 GalleryCase = namedtuple("GalleryCase", "tag variant scale locale catalog page direction")
 
 # SH7: factory knobs per preset; "-" is "no dock knob" (the bar).
@@ -197,6 +233,10 @@ if __name__ == "__main__":
     if len(args) == 1 and args[0] in GALLERIES:
         for case in gallery_cases(args[0]):
             print("\t".join(case))
+        sys.exit(0)
+    if args == ["control-center-pages"]:
+        for page, (widgets, tabs) in CONTROL_CENTER_PAGES.items():
+            print(f"{page}\t{widgets}\t{tabs}")
         sys.exit(0)
     if args == ["gallery-pages"]:
         for page, tabs in gallery_walks():

@@ -1,0 +1,455 @@
+[
+ {
+  "depth": 0,
+  "role": "application",
+  "name": "athanor-control-center",
+  "states": [],
+  "value": ""
+ },
+ {
+  "depth": 1,
+  "role": "frame",
+  "name": "",
+  "states": [
+   "active",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 2,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 3,
+  "role": "grouping",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 5,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "button",
+  "name": "Back",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "label",
+  "name": "Sound",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 6,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 7,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Output",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "slider",
+  "name": "Output volume",
+  "states": [
+   "focusable",
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": "39.9993896484375"
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Mute output",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "check box",
+  "name": "Mute output",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "button",
+  "name": "Speakers, in use",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "label",
+  "name": "Speakers, in use",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "button",
+  "name": "Headphones",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 11,
+  "role": "label",
+  "name": "Headphones",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Input",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "slider",
+  "name": "Input volume",
+  "states": [
+   "focusable",
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": "54.998779296875"
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "label",
+  "name": "Mute microphone",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "check box",
+  "name": "Mute microphone",
+  "states": [
+   "checkable",
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 8,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "vertical",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Night Drive",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "label",
+  "name": "Calmo",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 9,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "horizontal",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "button",
+  "name": "Previous track",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "button",
+  "name": "Pause",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 10,
+  "role": "button",
+  "name": "Next track",
+  "states": [
+   "focusable",
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ },
+ {
+  "depth": 4,
+  "role": "panel",
+  "name": "",
+  "states": [
+   "sensitive",
+   "showing",
+   "visible"
+  ],
+  "value": ""
+ }
+]

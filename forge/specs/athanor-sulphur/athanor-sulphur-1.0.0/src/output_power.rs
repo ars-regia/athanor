@@ -90,11 +90,11 @@ impl Dispatch2<ZwlrOutputPowerManagerV1, State> for Power {
             return;
         };
         let object = data_init.init(id, Power);
-        let power = &mut state.output_power;
-        let Some(output) = Output::from_resource(&output) else {
+        let Some(output) = state.shown_output(&output) else {
             object.failed();
             return;
         };
+        let power = &mut state.output_power;
         if power
             .controller(&output)
             .is_some_and(|controller| *controller != client.id())

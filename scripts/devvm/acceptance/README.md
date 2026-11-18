@@ -14,8 +14,9 @@ host where `athanor-runner.service` is active, `run.sh` refuses to start while a
 on a self-hosted runner. Do not dispatch one meanwhile.
 
 The `probes` stage (issue #312) runs `probes.py` on the finished guest: listening sockets and
-firewall zones, `systemd-analyze security` ceilings, SELinux denials since boot, PAM, sysctl,
-masked units, the trust state, one Nix build with `nix store gc` and one run of the hourly
+firewall zones, `systemd-analyze security` ceilings, SELinux denials since boot, PAM, sysctl
+(the boot's warnings, and the kernel's value of each key the `sysctl.d` files set), masked
+units, the trust state, one Nix build with `nix store gc` and one run of the hourly
 snapshot (issue #595), each against
 `expectations.toml`. It fails naming the check; `run.sh probes` runs it alone. Change a line of
 the expectations only with the review of the exposure it declares.

@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use athanor_sulphur_client::glib_loop::GlibSource;
 use athanor_sulphur_client::Client;
 use athanor_dock::start::{self, Prepared};
-use athanor_toolkit::driver;
+use athanor_sal::driver;
 use wayland_client::Connection;
 
 fn main() -> ExitCode {
@@ -38,7 +38,12 @@ fn main() -> ExitCode {
         .map_err(|err| err.to_string())
         .and_then(|connection| Client::connect_wayland(&connection).map_err(|err| err.to_string()));
     let client = match client {
-        Ok(client) => Some(client),
+        Ok(client) => {
+            if let Err(err) = client.watch_windows() {
+                tracing::warn!(error = %err, "the windows are not followed");
+            }
+            Some(client)
+        }
         Err(err) => {
             // No windows to list and no secure launch (SH1, BR2): no dock surface at all.
             tracing::error!(error = %err, "no compositor client; the dock shows no surface");

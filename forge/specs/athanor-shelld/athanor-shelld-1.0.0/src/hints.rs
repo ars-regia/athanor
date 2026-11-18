@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 use serde::de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
-use zbus::zvariant::{OwnedValue, Signature, Type};
+use zbus::{OwnedVariant, Signature, Type};
 
 use crate::icon::{self, Icon};
 use crate::image::{self, Image, Raw};
@@ -25,7 +25,7 @@ pub struct Hints {
 }
 
 impl Type for Hints {
-    const SIGNATURE: &'static Signature = <HashMap<String, OwnedValue> as Type>::SIGNATURE;
+    const SIGNATURE: &'static Signature = <HashMap<String, OwnedVariant> as Type>::SIGNATURE;
 }
 
 impl<'de> Deserialize<'de> for Hints {
@@ -174,25 +174,26 @@ fn is_desktop_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zbus::zvariant::serialized::Context;
-    use zbus::zvariant::{to_bytes, Value, LE};
+    use zbus::wire::serialized::Context;
+    use zbus::wire::{to_bytes, LE};
+    use zbus::Variant;
 
-    fn decode(map: HashMap<&str, Value<'_>>) -> Hints {
-        let encoded = to_bytes(Context::new_dbus(LE, 0), &map).expect("encode");
+    fn decode(map: HashMap<&str, Variant<'_>>) -> Hints {
+        let encoded = to_bytes(Context::new(LE, 0), &map).expect("encode");
         encoded.deserialize::<Hints>().expect("decode").0
     }
 
-    fn image_value(width: i32, height: i32, rowstride: i32, data: Vec<u8>) -> Value<'static> {
-        Value::new((width, height, rowstride, false, 8i32, 3i32, data))
+    fn image_value(width: i32, height: i32, rowstride: i32, data: Vec<u8>) -> Variant<'static> {
+        Variant::new((width, height, rowstride, false, 8i32, 3i32, data))
     }
 
     #[test]
     fn known_hints_are_read() {
         let hints = decode(HashMap::from([
-            ("urgency", Value::U8(2)),
-            ("transient", Value::Bool(true)),
-            ("desktop-entry", Value::from("org.gnome.Nautilus")),
-            ("image-path", Value::from("file:///a.png")),
+            ("urgency", Variant::U8(2)),
+            ("transient", Variant::Bool(true)),
+            ("desktop-entry", Variant::from("org.gnome.Nautilus")),
+            ("image-path", Variant::from("file:///a.png")),
             ("image-data", image_value(2, 2, 8, vec![0; 14])),
         ]));
         assert_eq!(hints.urgency, Some(2));
@@ -205,12 +206,12 @@ mod tests {
     #[test]
     fn a_hint_of_the_wrong_type_is_ignored_not_an_error() {
         let hints = decode(HashMap::from([
-            ("urgency", Value::U32(2)),
+            ("urgency", Variant::U32(2)),
             (
                 "image-data",
-                Value::new((2i32, 2i32, 8i32, false, 8i32, 3i32)),
+                Variant::new((2i32, 2i32, 8i32, false, 8i32, 3i32)),
             ),
-            ("desktop-entry", Value::from("../evil")),
+            ("desktop-entry", Variant::from("../evil")),
         ]));
         assert_eq!(hints, Hints::default());
     }
@@ -232,8 +233,8 @@ mod tests {
     #[test]
     fn a_large_unknown_hint_is_skipped() {
         let hints = decode(HashMap::from([
-            ("x-huge", Value::new(vec![7u8; 256 * 1024])),
-            ("resident", Value::Bool(true)),
+            ("x-huge", Variant::new(vec![7u8; 256 * 1024])),
+            ("resident", Variant::Bool(true)),
         ]));
         assert!(hints.resident);
     }

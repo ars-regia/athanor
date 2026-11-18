@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:76.fc43}
+Release:        %{?autorelease}%{!?autorelease:76.fc43%{?athanor_content}}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -14,8 +14,9 @@ Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
-# session-components runs the session's screen locker and idle daemon.
-Requires: cosmic-greeter cosmic-idle
+# session-components runs the session's screen locker; athanor-idle is the idle daemon's
+# own guard unit (doc_session_daemons.md, SD22).
+Requires: cosmic-greeter athanor-idle
 # Core UI andDaemons
 Requires: athanor-greeter-ui
 Requires: athanor-calmo
@@ -78,6 +79,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 /usr/lib/tmpfiles.d/10-athanor-greetd.conf
 /usr/lib/environment.d/50-athanor-desktop.conf
 /usr/share/glib-2.0/schemas/org.athanor.desktop.appearance.gschema.xml
+/usr/share/glib-2.0/schemas/org.athanor.desktop.background.gschema.xml
+/usr/share/glib-2.0/schemas/org.athanor.desktop.idle.gschema.xml
 /usr/share/glib-2.0/schemas/90_athanor-appearance.gschema.override
 /usr/share/glib-2.0/schemas/90_athanor-network.gschema.override
 /usr/share/athanor-system-config/greetd.toml

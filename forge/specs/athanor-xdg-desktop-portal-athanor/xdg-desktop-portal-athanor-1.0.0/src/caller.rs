@@ -6,6 +6,8 @@
 //! application id in the call is whatever that process says. So every method answers only
 //! the frontend, and every other caller is refused with a journal line (doc_portal.md, PT3).
 
+use std::time::Duration;
+
 use zbus::fdo::DBusProxy;
 use zbus::message::Header;
 use zbus::names::{BusName, UniqueName};
@@ -14,6 +16,8 @@ use zbus::Connection;
 use crate::Error;
 
 const FRONTEND: &str = "org.freedesktop.portal.Desktop";
+/// Bound on the one question to the bus. `conn` is the query connection (issue #1035).
+const ASK: Duration = Duration::from_secs(2);
 
 /// Refuses the call unless its sender is the current owner of the frontend's name.
 pub async fn authorise(header: &Header<'_>, conn: &Connection) -> Result<(), Error> {
@@ -28,23 +32,33 @@ pub async fn authorise(header: &Header<'_>, conn: &Connection) -> Result<(), Err
     Err(Error::AccessDenied(format!("only {FRONTEND} may call this interface")))
 }
 
-/// Whether `sender` owns the frontend's name. Fails closed: a bus that cannot say, or a
-/// name nobody owns, is `false`.
+/// Whether `sender` owns the frontend's name. Fails closed: a bus that cannot say, a bus that
+/// does not answer within `ASK`, or a name nobody owns, is `false`. `conn` must be a connection
+/// that serves nothing and subscribes to nothing, so that the reply is never queued behind
+/// the calls this daemon is answering.
 async fn is_frontend(conn: &Connection, sender: &UniqueName<'_>) -> bool {
+    is_frontend_within(conn, sender, ASK).await
+}
+
+async fn is_frontend_within(conn: &Connection, sender: &UniqueName<'_>, limit: Duration) -> bool {
     let Ok(name) = BusName::from_static_str(FRONTEND) else {
         return false;
     };
     let Ok(bus) = DBusProxy::new(conn).await else {
         return false;
     };
-    match bus.get_name_owner(name).await {
-        Ok(owner) => owner.as_str() == sender.as_str(),
-        Err(_) => false,
+    match tokio::time::timeout(limit, bus.get_name_owner(name)).await {
+        Ok(Ok(owner)) => owner.as_str() == sender.as_str(),
+        Ok(Err(_)) => false,
+        Err(_) => {
+            tracing::warn!("the bus did not say who owns {FRONTEND} in time");
+            false
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::{BTreeMap, HashMap};
     use std::io::{BufRead, BufReader};
     use std::process::{Child, Command, Stdio};
@@ -52,7 +66,7 @@ mod tests {
     use std::{env, fs, path::PathBuf, process};
 
     use zbus::connection::Builder;
-    use zbus::zvariant::OwnedValue;
+    use zbus::OwnedVariant;
 
     use super::*;
     use crate::settings::{Portal, Store};
@@ -62,14 +76,14 @@ mod tests {
     const SETTINGS: &str = "org.freedesktop.impl.portal.Settings";
 
     /// A private dbus-daemon, as the tests of `athanor-shelld` use.
-    struct Bus {
+    pub(crate) struct Bus {
         daemon: Child,
         address: String,
         dir: PathBuf,
     }
 
     impl Bus {
-        fn start(name: &str) -> Bus {
+        pub(crate) fn start(name: &str) -> Bus {
             let dir = env::temp_dir().join(format!("athanor-portal-{name}-{}", process::id()));
             fs::create_dir_all(&dir).expect("mkdir");
             let mut daemon = Command::new("dbus-daemon")
@@ -89,8 +103,8 @@ mod tests {
             }
         }
 
-        fn builder(&self) -> Builder<'static> {
-            Builder::address(self.address.as_str()).expect("address")
+        pub(crate) fn builder(&self) -> Builder<'static> {
+            Builder::address(self.address.as_str())
         }
     }
 
@@ -106,7 +120,7 @@ mod tests {
     #[tokio::test]
     async fn only_the_owner_of_the_frontend_name_is_the_frontend() {
         let bus = Bus::start("owner");
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
         let other = bus.builder().build().await.expect("other");
         let frontend_id = frontend.unique_name().expect("unique name").clone();
         let other_id = other.unique_name().expect("unique name").clone();
@@ -123,8 +137,25 @@ mod tests {
         assert!(!is_frontend(&other, &other_id).await);
     }
 
+    /// A bus daemon that accepts the connection and never answers a call to it.
+    #[tokio::test]
+    async fn a_bus_that_does_not_answer_is_not_the_frontend() {
+        let bus = Bus::start("silent");
+        let query = bus.builder().build().await.expect("query");
+        let id = query.unique_name().expect("unique name").clone();
+        // Stopped: the socket stays open, the process answers nothing.
+        let pid = bus.daemon.id().to_string();
+        assert!(Command::new("kill").args(["-STOP", &pid]).status().expect("kill").success());
+        let started = std::time::Instant::now();
+        let frontend = is_frontend_within(&query, &id, Duration::from_millis(300)).await;
+        Command::new("kill").args(["-CONT", &pid]).status().expect("kill");
+        assert!(!frontend);
+        assert!(started.elapsed() < Duration::from_secs(5), "the check hung");
+    }
+
     /// A portal serving one appearance value, on `bus`.
     async fn portal(bus: &Bus) -> Connection {
+        let query = bus.builder().build().await.expect("query");
         let mut store = Store::new();
         store.insert(
             "org.freedesktop.appearance".into(),
@@ -132,9 +163,7 @@ mod tests {
         );
         bus.builder()
             .name(PORTAL_NAME)
-            .expect("name")
-            .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store))))
-            .expect("serve")
+            .serve_at(PATH, Portal::new(Arc::new(RwLock::new(store)), query))
             .build()
             .await
             .expect("portal")
@@ -150,14 +179,14 @@ mod tests {
     async fn a_method_answers_the_frontend_and_refuses_a_stranger() {
         let bus = Bus::start("method");
         let _portal = portal(&bus).await;
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
         let stranger = bus.builder().build().await.expect("stranger");
 
         let refused = read(&stranger, "org.freedesktop.appearance", "color-scheme")
             .await
             .expect_err("a stranger must be refused");
         assert!(
-            matches!(&refused, zbus::Error::MethodError(name, _, _) if name.as_str() == "org.freedesktop.DBus.Error.AccessDenied"),
+            matches!(&refused, zbus::Error::FDO(err) if matches!(**err, zbus::fdo::Error::AccessDenied(_))),
             "{refused}"
         );
         let refused = stranger
@@ -169,14 +198,14 @@ mod tests {
         let reply = read(&frontend, "org.freedesktop.appearance", "color-scheme")
             .await
             .expect("the frontend is answered");
-        let value: OwnedValue = reply.body().deserialize().expect("a variant");
+        let value: OwnedVariant = reply.body().deserialize().expect("a variant");
         assert_eq!(u32::try_from(value).expect("a u32"), 1);
 
         let reply = frontend
             .call_method(Some(PORTAL_NAME), PATH, Some(SETTINGS), "ReadAll", &(vec!["org.freedesktop.*"],))
             .await
             .expect("the frontend is answered");
-        let all: HashMap<String, HashMap<String, OwnedValue>> =
+        let all: HashMap<String, HashMap<String, OwnedVariant>> =
             reply.body().deserialize().expect("a{sa{sv}}");
         assert_eq!(all.len(), 1);
         assert!(all["org.freedesktop.appearance"].contains_key("color-scheme"));
@@ -187,7 +216,7 @@ mod tests {
     async fn a_setting_that_is_not_served_is_not_found() {
         let bus = Bus::start("missing");
         let _portal = portal(&bus).await;
-        let frontend = bus.builder().name(FRONTEND).expect("name").build().await.expect("frontend");
+        let frontend = bus.builder().name(FRONTEND).build().await.expect("frontend");
         for (namespace, key) in [("org.freedesktop.appearance", "missing"), ("org.example", "color-scheme")] {
             let missing = read(&frontend, namespace, key).await.expect_err("not served");
             assert!(

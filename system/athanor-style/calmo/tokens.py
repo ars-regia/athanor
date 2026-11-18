@@ -1,4 +1,5 @@
 """Loads tokens.toml and resolves each variant to concrete colours."""
+import colorsys
 import tomllib
 from pathlib import Path
 
@@ -66,3 +67,13 @@ def colors(tokens, variant, accent=None):
 def presets(tokens):
     """{name: colour} of libadwaita's nine accent presets."""
     return {name: from_hex(spec) for name, spec in tokens["accent"].get("presets", {}).items()}
+
+
+def sal(tokens):
+    """`tokens` as the toolkit's theme reads them (doc_visual_language.md VL10): `[accent]`'s
+    hue and saturation, on which the neutrals are tinted, are the HSL hue and saturation of
+    `[sal.accent] factory`, one of the presets, rounded as the tokens write them."""
+    r, g, b, _ = presets(tokens)[tokens["sal"]["accent"]["factory"]]
+    hue, _, saturation = colorsys.rgb_to_hls(r, g, b)
+    accent = {**tokens["accent"], "hue": round(hue * 360), "saturation": round(saturation * 100)}
+    return {**tokens, "accent": accent}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Athanor wallpaper decoder socket
+Documentation=https://github.com/ars-regia/athanor/blob/iso-v0/docs/architecture/doc_session_daemons.md
+# Static (doc_session_daemons.md, SD17): athanor-wallpaper.service wants it.
+
+[Socket]
+# athanor_wallpaper::protocol::SOCKET, beneath $XDG_RUNTIME_DIR.
+ListenStream=%t/athanor-wallpaper/decode
+SocketMode=0600
+DirectoryMode=0700
+RemoveOnStop=yes
+# One instance of athanor-wallpaper-decode@.service per connection.
+Accept=yes
+# athanor_wallpaper::protocol::MAX_CONNECTIONS, the most decodes the daemon runs at once.
+MaxConnections=4
+MaxConnectionsPerSource=4
+# With the default limit, 200 connections in 2 s would put the socket in failed and leave
+# every output without its picture until the next login; MaxConnections already bounds them.
+TriggerLimitIntervalSec=0

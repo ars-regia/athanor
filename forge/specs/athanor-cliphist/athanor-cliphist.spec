@@ -2,7 +2,7 @@
 
 Name:           athanor-cliphist
 Version:        0.7.0
-Release:        3%{?dist}
+Release:        3%{?athanor_content}%{?dist}
 Summary:        Wayland clipboard manager
 
 License:        GPL-3.0-only

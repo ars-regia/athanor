@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The idle times read by athanor-idle (doc_session_daemons.md, SD3, SD4), and LP5's default
+  timers. 0 means never.
+-->
+<schemalist>
+  <schema id="org.athanor.desktop.idle" path="/org/athanor/desktop/idle/">
+    <key name="blank-after" type="u">
+      <range min="0" max="7200"/>
+      <default>300</default>
+      <summary>Blank, and so lock, after this idle time</summary>
+      <description>Seconds of idle time before the screens fade to black, turn off and the session locks. 0 means never, and is set only by a person's choice.</description>
+    </key>
+    <key name="suspend-after-battery" type="u">
+      <range min="0" max="14400"/>
+      <default>900</default>
+      <summary>Automatic suspend on battery</summary>
+      <description>Seconds of idle time before the machine suspends while it runs on battery. 0 means never.</description>
+    </key>
+    <key name="suspend-after-ac" type="u">
+      <range min="0" max="14400"/>
+      <default>0</default>
+      <summary>Automatic suspend on mains</summary>
+      <description>Seconds of idle time before the machine suspends while it runs on mains power. 0 means never.</description>
+    </key>
+    <key name="migrated" type="b">
+      <default>false</default>
+      <summary>The one-time migration from cosmic-idle has run</summary>
+      <description>Set by athanor-idle after it copies com.system76.CosmicIdle (SD16). Nothing is copied at start once it is true.</description>
+    </key>
+  </schema>
+</schemalist>

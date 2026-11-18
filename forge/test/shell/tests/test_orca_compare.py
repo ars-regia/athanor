@@ -39,6 +39,13 @@ class WalksTest(unittest.TestCase):
         self.assertEqual(len(compare.walk_problems([])), 1)
         self.assertEqual(len(compare.walk_problems([self.ON, self.OFF])), 1)
 
+    def test_a_key_echo_before_or_after_a_walks_last_line_is_not_part_of_the_walk(self):
+        for echo in ("tab", "tabulazione"):
+            before = [self.ON, "Galleria", echo, "Minimize button.", self.OFF]
+            after = [self.ON, "Galleria", "Minimize button.", echo, self.OFF]
+            with self.subTest(echo=echo):
+                self.assertEqual(compare.walk_problems(before + after), [])
+
     def test_walks_that_speak_nothing_fail(self):
         silent = [self.ON, self.OFF, self.ON, self.OFF]
         self.assertEqual(len(compare.walk_problems(silent)), 1)
@@ -113,6 +120,19 @@ class CompareTest(unittest.TestCase):
             ["'Name text.': missing", "'Screen reader off.': missing"],
         )
 
+    def test_a_field_and_the_query_the_recipe_types_may_be_heard_as_one_entry_utterance(self):
+        reference = ["Search text.", "cc window.", "Cerca testo.", "cc window."]
+        transcript = ["Search entry cc window.", "Cerca campo inserimento cc window."]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Search entry cc window.'", lines[0])
+
+    def test_a_field_is_not_joined_to_a_query_the_recipe_does_not_type(self):
+        self.assertEqual(
+            compare.compare(["Search text.", "cc terminal."], ["Search entry cc terminal."])[1],
+            ["'Search text.': missing", "'cc terminal.': missing"],
+        )
+
     def test_a_switch_is_heard_as_a_toggle_button_in_english_and_italian(self):
         lines, failures = compare.compare(
             ["A switch check box checked.", "A switch check box not checked.",
@@ -136,6 +156,90 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(
                 compare.compare([reference], [heard])[1], [f"{reference!r}: missing"]
             )
+
+    def test_a_control_center_switch_is_heard_as_a_toggle_button_and_a_check_box_is_not(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        lines, failures = compare.compare(
+            ["Mute output check box not checked.", "Wi-Fi check box checked.",
+             "Silenzia l'uscita casella di spunta non spuntata."],
+            ["Mute output toggle button not pressed.", "Wi-Fi toggle button pressed.",
+             "Silenzia l'uscita pulsante di commutazione non premuto."],
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Mute output toggle button not pressed.'", lines[0])
+        # A check box of the control center that is none of its switches still fails.
+        reference = "Speakers check box checked."
+        self.assertEqual(
+            compare.compare([reference], ["Speakers toggle button pressed."])[1],
+            [f"{reference!r}: missing"],
+        )
+
+    def test_the_airplane_switch_of_the_bar_network_page_is_heard_as_a_switch(self):
+        for said, heard in [
+            ("Airplane mode check box not checked.", "Airplane mode toggle button not pressed."),
+            (
+                "Modalità aereo casella di spunta non spuntata.",
+                "Modalità aereo pulsante di commutazione non premuto.",
+            ),
+        ]:
+            self.assertEqual(compare.compare([said], [heard])[1], [])
+
+    def test_the_vpn_of_the_control_center_fixture_is_heard_as_a_switch(self):
+        lines, failures = compare.compare(
+            ["Office VPN check box not checked."], ["Office VPN toggle button not pressed."]
+        )
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Office VPN toggle button not pressed.'", lines[0])
+
+    def test_the_calendars_unnamed_arrows_are_heard_by_their_names_only_where_named(self):
+        reference = ["button.", "tab", "button."]
+        transcript = ["Calendar", "Previous month button.", "tab", "Next month button."]
+        lines, failures = compare.compare(reference, transcript, arrows=True)
+        self.assertEqual(failures, [])
+        self.assertIn("as 'Previous month button.'", lines[0])
+        self.assertEqual(
+            compare.compare(reference, transcript)[1], ["'button.': missing"]
+        )
+        # A named button the reference says itself speaks for no unnamed one.
+        self.assertEqual(
+            compare.compare(["button.", "OK button."], ["OK button."], arrows=True)[1],
+            ["'button.': missing"],
+        )
+
+    def test_the_switches_of_the_bar_are_heard_as_switches_in_both_languages(self):
+        for reference, heard in (
+            ("Tile windows check box not checked.", "Tile windows toggle button not pressed."),
+            (
+                "Contrasto elevato casella di spunta spuntata.",
+                "Contrasto elevato pulsante di commutazione premuto.",
+            ),
+        ):
+            self.assertEqual(compare.compare([reference], [heard])[1], [], reference)
+
+    def test_a_control_center_switch_the_catalog_lacks_is_named(self):
+        compare.control_center_labels.cache_clear()
+        try:
+            with self.assertRaisesRegex(LookupError, "no translation of Nowhere"):
+                compare.control_center_labels("Wi-Fi", "Nowhere")
+        finally:
+            compare.control_center_labels.cache_clear()
+
+    def test_the_gallery_strings_are_read_only_for_a_switch_or_a_text_area(self):
+        # Another surface's walk passes without the file; a gallery's fails with its name.
+        compare.gallery_labels.cache_clear()
+        moved = compare.STRINGS
+        compare.STRINGS = moved.with_name("moved.tsv")
+        try:
+            self.assertEqual(compare.compare(REFERENCE, REFERENCE)[1], [])
+            with self.assertRaises(FileNotFoundError):
+                compare.compare(["A switch check box checked."], ["A switch toggle button pressed."])
+        finally:
+            compare.STRINGS = moved
+            compare.gallery_labels.cache_clear()
+
+    def test_a_missing_key_of_the_gallery_strings_is_named(self):
+        with self.assertRaisesRegex(LookupError, "no key nowhere"):
+            compare.gallery_labels("switch", "nowhere")
 
     def test_a_label_that_ends_in_text_is_matched_as_it_is_said(self):
         self.assertEqual(compare.compare(["Sample text"], ["Sample text"])[1], [])
@@ -166,6 +270,51 @@ class CompareTest(unittest.TestCase):
 
 
 GOLDEN = Path(__file__).resolve().parent.parent / "golden/orca"
+
+
+class SecondLineTest(unittest.TestCase):
+    """A focused list row that holds more labels than its name is read with them: Orca 49 speaks
+    the row's name, then each label its name does not repeat (_generate_descendants), which a
+    label offers only through AT-SPI's Text interface. The gallery's lists page pins it."""
+
+    def test_the_gallery_walk_reads_the_first_rows_second_line(self):
+        for lang, golden, row, line in (
+            ("en", "orca-gallery.txt", "Row 1.", "A second line."),
+            ("it", "orca-gallery-it.txt", "Riga 1.", "Una seconda riga."),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                self.assertIn(row, reference)
+                self.assertEqual(reference[reference.index(row) + 1], line)
+                spoken = [u for u in reference if u != line]
+                self.assertEqual(compare.compare(reference, spoken)[1], [f"{line!r}: missing"])
+
+
+class LauncherResultsTest(unittest.TestCase):
+    """doc_launcher.md LA5, need 6: the launcher announces the number of its results and the row
+    the arrows select while the keyboard stays in the field (#751). Its reference holds the count
+    and both rows that athanor-sal's launcher speaks, so a walk that hears no result fails."""
+
+    def test_the_launcher_walk_hears_the_count_and_each_row(self):
+        for lang, golden, results in (
+            (
+                "en",
+                "orca-launcher.txt",
+                ["Results List with 3 items", "cc window, Web search.", "CC Window, Application."],
+            ),
+            (
+                "it",
+                "orca-launcher-it.txt",
+                ["Risultati Elenco con 3 voci", "cc window, Ricerca sul web.", "CC Window, Applicazione."],
+            ),
+        ):
+            with self.subTest(lang=lang):
+                reference = (GOLDEN / golden).read_text().splitlines()
+                silent = [utterance for utterance in reference if utterance not in results]
+                self.assertEqual(
+                    compare.compare(reference, silent)[1],
+                    [f"{line!r}: missing" for line in results],
+                )
 
 
 class HiddenTest(unittest.TestCase):
@@ -220,6 +369,52 @@ class HiddenTest(unittest.TestCase):
                 "exemption 'Workspaces button.' names no utterance of the reference",
             ],
         )
+
+
+class FocusReturnTest(unittest.TestCase):
+    """The line Orca says when the focus returns from the gallery's dialog (#1123)."""
+
+    RETURN = ["Chiudi button.", "spazio", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+    HEARD = ["Chiudi button.", "spazio", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+
+    def setUp(self):
+        # The gallery's strings, as its strings.tsv holds them.
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        strings = Path(folder.name) / "strings.tsv"
+        strings.write_text("title\tGallery\tGalleria\ndialog.close\tClose\tChiudi\n", encoding="utf-8")
+        moved = compare.STRINGS
+        compare.STRINGS = strings
+        compare.gallery_labels.cache_clear()
+        self.addCleanup(compare.gallery_labels.cache_clear)
+        self.addCleanup(setattr, compare, "STRINGS", moved)
+
+    def test_the_frame_title_after_a_dialog_close_is_heard_as_the_title(self):
+        lines, failures = compare.compare(self.RETURN, self.HEARD)
+        self.assertEqual(failures, [])
+        self.assertIn(f"'Galleria cornice': spoken as 'Galleria'; note: {compare.FOCUS_RETURN}", lines)
+
+    def test_the_same_line_outside_a_dialog_return_fails(self):
+        reference = ["Lettore schermo attivo.", "Galleria cornice", "Dialoghi pulsante di commutazione premuto."]
+        transcript = ["Lettore schermo attivo.", "Galleria", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(reference, transcript)[1], ["'Galleria cornice': missing"])
+        # A line that also follows something else is not covered by its return either.
+        self.assertEqual(
+            compare.compare(reference + self.RETURN, transcript + self.HEARD)[1],
+            ["'Galleria cornice': missing"],
+        )
+
+    def test_the_title_heard_elsewhere_than_after_the_dialog_close_fails(self):
+        # The gallery says its title as a walk starts; that is not the focus's return.
+        transcript = ["Galleria", "Chiudi button.", "spazio", "Dialoghi pulsante di commutazione premuto."]
+        self.assertEqual(compare.compare(self.RETURN, transcript)[1], ["'Galleria cornice': missing"])
+
+    def test_another_missing_word_after_a_dialog_close_fails(self):
+        for line in ("Galleria finestra", "Pagine cornice", "Gallery cornice"):
+            with self.subTest(line=line):
+                reference = ["Chiudi button.", "spazio", line]
+                transcript = ["Chiudi button.", "spazio", line.split()[0]]
+                self.assertEqual(compare.compare(reference, transcript)[1], [f"{line!r}: missing"])
 
 
 if __name__ == "__main__":

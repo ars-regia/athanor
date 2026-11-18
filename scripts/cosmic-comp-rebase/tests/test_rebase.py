@@ -1,9 +1,16 @@
 """Unit test of the cosmic-comp rebase drill (python3 -B -m unittest discover -s scripts/cosmic-comp-rebase/tests -v)."""
 
+import hashlib
+import http.client
+import io
 import json
 import pathlib
+import signal
 import subprocess
 import sys
+import tarfile
+import unittest.mock
+import urllib.error
 import tempfile
 import unittest
 
@@ -87,6 +94,47 @@ class Drill(unittest.TestCase):
         lines = [f"Patch{i}:         {n}" for i, n in enumerate(names)]
         self.spec.write_text(SPEC + "\n".join(lines) + "\n")
 
+    def exit_of(self, *extra, repo=None):
+        """The exit status and stderr of a drill that stops before its report."""
+        stderr = io.StringIO()
+        with unittest.mock.patch.object(sys, "stderr", stderr), self.assertRaises(SystemExit) as stopped:
+            rebase.main(
+                [str(self.tmp / "out"), "--spec", str(self.spec), "--patches", str(self.patches),
+                 "--repo", repo or str(self.upstream), *extra]
+            )
+        return stopped.exception.code, stderr.getvalue()
+
+    def test_a_failing_ls_remote_has_its_own_status_and_names_the_command(self):
+        code, stderr = self.exit_of(repo=str(self.tmp / "no-such-repo"))
+        self.assertEqual(code, rebase.LS_REMOTE_FAILED)
+        self.assertIn("git ls-remote", stderr)
+        self.assertNotIn("Traceback", stderr)
+
+    def test_a_failing_clone_has_its_own_status_and_names_the_command(self):
+        code, stderr = self.exit_of("--tag", "epoch-9.9.9")
+        self.assertEqual(code, rebase.CLONE_FAILED)
+        self.assertIn("git clone", stderr)
+
+    def test_a_git_apply_check_that_answers_128_stops_the_drill_and_1_is_a_failing_patch(self):
+        (self.patches / "p.patch").write_text("x")
+        self.declare("p.patch")
+        real = subprocess.run
+
+        def answering(status):
+            def run(cmd, **kwargs):
+                if "--check" in cmd:
+                    return subprocess.CompletedProcess(cmd, status, "", "fatal: corrupt patch")
+                return real(cmd, **kwargs)
+            return run
+
+        with unittest.mock.patch.object(rebase.subprocess, "run", answering(128)):
+            code, stderr = self.exit_of()
+        self.assertEqual(code, rebase.APPLY_FAILED)
+        self.assertIn("exited 128", stderr)
+        with unittest.mock.patch.object(rebase.subprocess, "run", answering(1)):
+            status, report, _ = self.run_drill()
+        self.assertEqual((status, report["patches"][0]["applies"]), (1, False))
+
     def test_a_spec_that_declares_no_patches_is_a_clean_empty_set(self):
         status, report, text = self.run_drill()
         self.assertEqual((status, report["tag"], report["patches"]), (0, "epoch-1.9.0", []))
@@ -125,6 +173,111 @@ class Drill(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.run_drill()
 
+    def crate(self, sha256=None, member="wayland-backend-0.3.15/src/wire.rs", manifest=None, source=None, macros=""):
+        """A crate archive holding `member`, declared as Source1 by a file:// URL through a
+        %global, its sha256 in sources.sha256, and a patch on it. `manifest` replaces the
+        manifest's text, `source` the Source1 value, `macros` adds lines to the spec."""
+        body = b"pub fn parse() {}\n"
+        packed = io.BytesIO()
+        with tarfile.open(fileobj=packed, mode="w:gz") as tar:
+            entry = tarfile.TarInfo(member)
+            entry.size = len(body)
+            tar.addfile(entry, io.BytesIO(body))
+        archive = self.tmp / "wayland-backend-0.3.15.crate"
+        archive.write_bytes(packed.getvalue())
+        digest = sha256 or hashlib.sha256(packed.getvalue()).hexdigest()
+        (self.patches / "sources.sha256").write_text(
+            f"{digest}  wayland-backend-0.3.15.crate\n" if manifest is None else manifest
+        )
+        (self.patches / "0001-vendor.patch").write_text(
+            "--- a/vendor/wayland-backend-0.3.15/src/wire.rs\n"
+            "+++ b/vendor/wayland-backend-0.3.15/src/wire.rs\n"
+            "@@ -1 +1,2 @@\n pub fn parse() {}\n+pub fn check() {}\n"
+        )
+        if source is None:
+            source = f"{archive.parent.as_uri()}/wayland-backend-%{{wayland_backend_version}}.crate"
+        self.spec.write_text(
+            SPEC
+            + "%global wayland_backend_version 0.3.15\n"
+            + macros
+            + f"Source1:        {source}\n"
+            + "Patch0:         0001-vendor.patch\n"
+        )
+
+    def drill_exits(self):
+        """The SystemExit of a drill that stops before its report."""
+        with self.assertRaises(SystemExit) as stopped:
+            self.run_drill()
+        return stopped.exception.code
+
+    def test_a_patch_on_a_crate_the_spec_unpacks_under_vendor_applies(self):
+        self.crate()
+        status, report, _ = self.run_drill()
+        self.assertEqual((status, [(p["patch"], p["applies"]) for p in report["patches"]]), (0, [("0001-vendor.patch", True)]))
+
+    def test_a_crate_whose_sha256_differs_from_the_manifest_is_an_error(self):
+        self.crate(sha256="0" * 64)
+        self.assertIn("sha256 differs", self.drill_exits())
+
+    def test_a_crate_the_manifest_does_not_list_is_an_error(self):
+        self.crate(manifest=f"{'0' * 64}  cosmic-comp-1.8.0.tar.gz\n")
+        self.assertIn("no sha256 for wayland-backend-0.3.15.crate", self.drill_exits())
+
+    def test_a_malformed_manifest_line_is_an_error(self):
+        for line in ("not-a-hash", f"{'0' * 64}  a.crate  b.crate", f"{'g' * 64}  a.crate"):
+            with self.subTest(line=line):
+                self.crate(manifest=line + "\n")
+                self.assertIn("not a `sha256  name` line", self.drill_exits())
+
+    def test_an_undefined_macro_is_an_error(self):
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-%{undefined}.crate")
+        self.assertIn("%{undefined} is not defined", self.drill_exits())
+
+    def test_a_macro_that_names_itself_is_an_error_not_a_hang(self):
+        self.crate(source="https://static.crates.io/%{again}.crate", macros="%global again %{again}\n")
+
+        def hung(*_):
+            raise TimeoutError("the expansion did not stop")
+
+        signal.signal(signal.SIGALRM, hung)
+        self.addCleanup(signal.alarm, 0)
+        signal.alarm(5)
+        self.assertIn("does not finish expanding", self.drill_exits())
+
+    def test_a_file_name_that_is_not_one_path_component_is_an_error(self):
+        for name in ("../../x.crate", "a/b.crate", ".hidden.crate"):
+            with self.subTest(name=name):
+                self.crate(source=f"{self.tmp.as_uri()}/wayland-backend-0.3.15.crate#/{name}")
+                self.assertIn("invalid file name", self.drill_exits())
+
+    def test_a_crate_url_that_is_not_http_https_or_file_is_an_error(self):
+        self.crate(source="ftp://example.org/wayland-backend-0.3.15.crate")
+        self.assertIn("is not an http, https or file URL", self.drill_exits())
+
+    def test_a_member_outside_vendor_is_refused(self):
+        self.crate(member="../escaped.rs")
+        self.assertIn("escaped.rs", self.drill_exits())
+
+    def test_a_crate_that_cannot_be_downloaded_exits_apart_from_a_patch_that_fails(self):
+        self.crate(source=(self.tmp / "absent").as_uri() + "/wayland-backend-0.3.15.crate")
+        self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
+        rebase.RETRY_DELAY = 0
+        self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
+
+    def test_a_download_is_tried_four_times_with_a_timeout_whatever_fails(self):
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-0.3.15.crate")
+        failures = [
+            http.client.IncompleteRead(b"x", 10),
+            http.client.BadStatusLine("x"),
+            urllib.error.URLError("x"),
+            TimeoutError("x"),
+        ]
+        self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
+        rebase.RETRY_DELAY = 0
+        with unittest.mock.patch.object(rebase.urllib.request, "urlopen", side_effect=failures) as urlopen:
+            self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
+        self.assertEqual(urlopen.call_count, 4)
+        self.assertTrue(all(call.kwargs.get("timeout") for call in urlopen.call_args_list))
 
 if __name__ == "__main__":
     unittest.main()

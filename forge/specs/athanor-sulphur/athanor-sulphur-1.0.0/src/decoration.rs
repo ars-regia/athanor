@@ -2,9 +2,19 @@
 //! is decorated by its client. The compositor draws no title bar, so whatever mode a client
 //! asks for, or none, it is configured with client-side decoration, and a client that asks for
 //! a title bar draws its own, as under GNOME.
+//!
+//! org_kde_kwin_server_decoration_manager (decision 33, standard), KDE's older protocol, gets
+//! the same answer: client-side decoration as the default mode at bind, for every new
+//! decoration and for every request, whatever mode it names.
 
 use crate::state::State;
 use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode;
+use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration::{
+    Mode as KdeMode, OrgKdeKwinServerDecoration,
+};
+use smithay::reexports::wayland_protocols_misc::server_decoration::server::org_kde_kwin_server_decoration_manager::Mode as KdeDefaultMode;
+use smithay::reexports::wayland_server::WEnum;
+use smithay::wayland::shell::kde::decoration::{KdeDecorationHandler, KdeDecorationState};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{DisplayHandle, Resource};
 use smithay::wayland::shell::xdg::decoration::{XdgDecorationHandler, XdgDecorationState};
@@ -14,6 +24,11 @@ use smithay::wayland::shell::xdg::{ToplevelSurface, XdgToplevelSurfaceData};
 /// Offers the global to every client.
 pub fn global(dh: &DisplayHandle) {
     XdgDecorationState::new::<State>(dh);
+}
+
+/// Offers KDE's global to every client, with client-side decoration as its default mode.
+pub fn kde_global(dh: &DisplayHandle) -> KdeDecorationState {
+    KdeDecorationState::new::<State>(dh, KdeDefaultMode::Client)
 }
 
 /// How many configures of any kind (resizes and state changes the compositor sends, and the
@@ -102,5 +117,25 @@ impl XdgDecorationHandler for State {
 
     fn unset_mode(&mut self, toplevel: ToplevelSurface) {
         self.answer_decoration(&toplevel);
+    }
+}
+
+impl KdeDecorationHandler for State {
+    fn kde_decoration_state(&self) -> &KdeDecorationState {
+        &self.kde_decoration
+    }
+
+    fn new_decoration(&mut self, _surface: &WlSurface, decoration: &OrgKdeKwinServerDecoration) {
+        decoration.mode(KdeMode::Client);
+    }
+
+    /// Smithay's default grants the mode asked for; the compositor draws no title bar.
+    fn request_mode(
+        &mut self,
+        _surface: &WlSurface,
+        decoration: &OrgKdeKwinServerDecoration,
+        _mode: WEnum<KdeMode>,
+    ) {
+        decoration.mode(KdeMode::Client);
     }
 }

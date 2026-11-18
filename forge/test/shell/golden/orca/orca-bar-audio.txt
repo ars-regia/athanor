@@ -1,0 +1,21 @@
+Screen reader on.
+Output volume horizontal slider 40 39 percent.
+tab
+Mute output check box not checked.
+tab
+Speakers, in use button.
+tab
+Headphones button.
+tab
+Input volume horizontal slider 55 54 percent.
+tab
+Mute microphone check box not checked.
+tab
+Previous track button.
+tab
+Pause button.
+tab
+Next track button.
+tab
+Output volume horizontal slider 40 39 percent.
+Screen reader off.

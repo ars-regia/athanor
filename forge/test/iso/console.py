@@ -326,17 +326,51 @@ KARG_PROBE_WAIT = 5.0
 # origin; a file read without a container reference follows no image and answers WRONG
 # with `none`. As with the other probes printf assembles the marker, so the echo of the
 # typed line cannot pass for the answer.
-ORIGIN_PROBE = (
-    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
-    b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
-    b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
-    b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
-    b" ostree-image-signed:docker://*:stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
-    b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
-    b" esac; fi"
-)
+# The repository is the one the ISO was built from (ATHANOR_ISO_REPOSITORY, passed by
+# run_iso_test.sh): the signed :stable of any other repository answers WRONG (issue 462).
+REPOSITORY = re.compile(r"[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+")
+
+
+def origin_probe(repository: str) -> bytes:
+    """ORIGIN_PROBE for one repository. The name goes into a shell `case` pattern, so
+    only the characters of a repository name are accepted."""
+    if not REPOSITORY.fullmatch(repository):
+        raise ValueError(f"not a repository name: {repository!r}")
+    return (
+        b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+        b" f=$(printf 'collaudo\\n' | sudo -S sh -c 'cat \"$(readlink -f /sysroot$1).origin\"' _ \"$p\");"
+        b" o=$(printf '%s\\n' \"$f\" | sed -n 's/^container-image-reference=//p');"
+        b' if [ -z "$f" ]; then printf \'ORIGIN_%s %s\\n\' UNREADABLE "${p:-none}"; else case "$o" in'
+        b" ostree-image-signed:docker://" + repository.encode() + b":stable) printf 'ORIGIN_%s %s\\n' OK \"$o\";;"
+        b" *) printf 'ORIGIN_%s %s\\n' WRONG \"${o:-none}\";;"
+        b" esac; fi"
+    )
+
+
 # A cmdline read, a symlink and a file read under sudo.
 ORIGIN_PROBE_WAIT = 10.0
+
+# Ask the guest which image it booted (issue 402). The comparison is on the layers, not on
+# the manifest digest `bootc status` reports: the ISO builder re-serialises the manifest
+# (the installed system's imageDigest is in no registry), and the config digest changes
+# with it, while the uncompressed layer digests (`rootfs.diff_ids`) do not. ostree-ext keeps
+# the image config in the booted commit's metadata, `ostree.container.image-config`; the
+# guest lists its diff_ids in order and answers one short line, BOOTED_LAYERS sha256:<hex>,
+# the digest of that list one id per line (the host computes the same from the registry
+# config). Nothing readable answers BOOTED_UNREADABLE. The grep does not depend on how
+# ostree quotes the string. As with the other probes printf assembles the marker.
+BOOTED_PROBE = (
+    b"p=$(tr ' ' '\\n' < /proc/cmdline | sed -n 's/^ostree=//p');"
+    b' d=$(readlink -f "/sysroot$p");'
+    b" c=$(printf 'collaudo\\n' | sudo -S ostree show --repo=/sysroot/ostree/repo"
+    b' --print-metadata-key=ostree.container.image-config "$(basename "$d" | cut -d. -f1)");'
+    b" l=$(printf '%s\\n' \"$c\" | grep -o 'diff_ids[^]]*' | grep -o 'sha256:[0-9a-f]\\{64\\}');"
+    b' if [ -n "$l" ]; then printf \'BOOTED_%s sha256:%s\\n\' LAYERS'
+    b' "$(printf \'%s\\n\' "$l" | sha256sum | cut -d" " -f1)";'
+    b" else printf 'BOOTED_%s\\n' UNREADABLE; fi"
+)
+# A cmdline read, a symlink, a metadata read under sudo and one hash.
+BOOTED_PROBE_WAIT = 10.0
 
 # The password as QEMU's `sendkey` wants it, one key per command. QEMU names a letter key
 # by the letter, and letters are all the password has.
@@ -351,18 +385,43 @@ GREETER_PASSWORD_KEYS = tuple(GUEST_PASSWORD.decode())
 # is for. The names that are down go into the answer, so a dead session says what died.
 SESSION_UNITS = (
     b"athanor-session.target athanor-bar.service athanor-dock.service athanor-shelld.service"
-    b" cosmic-bg.service"
+    b" athanor-wallpaper.service"
 )
-SESSION_PROBE = (
-    b"for i in $(seq 60); do"
-    b' s=$(loginctl list-sessions --no-legend 2>/dev/null | awk \'$3=="collaudo" && $4=="seat0"{print $1; exit}\');'
-    b' [ -n "$s" ] && systemctl --user -q is-active athanor-session.target && break; sleep 1; done; sleep 15;'
-    b" down=; for u in "
-    + SESSION_UNITS
-    + b'; do systemctl --user -q is-active "$u" || down="$down $u"; done;'
-    b' if [ -n "$s" ] && [ "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" = wayland ] && [ -z "$down" ];'
-    b' then printf \'SESSION_%s %s\\n\' ALIVE "$s"; else printf \'SESSION_%s %s down:%s\\n\' DEAD "${s:-none}" "$down"; fi'
-)
+
+def session_probe(skip_absent: bool) -> bytes:
+    """The question above. With skip_absent a unit whose LoadState is not-found is not a
+    dead one: it is listed after `absent:` and the session is judged without it. That is
+    for the image the upgrade case starts from, which cannot ship a unit added since it
+    was published; a unit that exists and is inactive or failed is down either way."""
+    absent = (
+        b' if [ "$u" != athanor-session.target ] && [ "$(systemctl --user show -p LoadState --value "$u")" = not-found ];'
+        b' then gone="$gone $u"; else down="$down $u"; fi;'
+        if skip_absent
+        else b' down="$down $u";'
+    )
+    tail = b"${gone:+ absent:$gone}" if skip_absent else b""
+    return (
+        b"for i in $(seq 60); do"
+        b' s=$(loginctl list-sessions --no-legend 2>/dev/null | awk \'$3=="collaudo" && $4=="seat0"{print $1; exit}\');'
+        b' [ -n "$s" ] && systemctl --user -q is-active athanor-session.target && break; sleep 1; done; sleep 15;'
+        b" down=;"
+        + (b" gone=;" if skip_absent else b"")
+        + b" for u in "
+        + SESSION_UNITS
+        + b"; do systemctl --user -q is-active \"$u\" ||"
+        + absent
+        + b" done;"
+        b' if [ -n "$s" ] && [ "$(loginctl show-session "$s" -p Type --value 2>/dev/null)" = wayland ] && [ -z "$down" ];'
+        b" then printf 'SESSION_%s %s%s\\n' ALIVE \"$s\" \"" + tail + b"\";"
+        b" else printf 'SESSION_%s %s down:%s%s\\n' DEAD \"${s:-none}\" \"$down\" \"" + tail + b"\"; fi"
+    )
+
+
+SESSION_PROBE = session_probe(False)
+# What the upgrade case asks wherever the guest runs the published :stable image: the
+# serial console before the upgrade, and the SSH stage after GoBack() (SESSION_HELD).
+# The SSH stage on the candidate asks SESSION_PROBE.
+SESSION_PROBE_HELD = session_probe(True)
 # Sixty seconds of looking plus fifteen of watching, and a margin.
 SESSION_PROBE_WAIT = 85.0
 
@@ -373,7 +432,7 @@ SESSION_DIAGNOSTICS = (
     b"loginctl list-sessions --no-pager",
     b"systemctl --user list-units --failed --no-pager",
     b"systemctl --user status athanor-session.target athanor-desktop.service"
-    b" athanor-bar.service athanor-dock.service athanor-shelld.service cosmic-bg.service"
+    b" athanor-bar.service athanor-dock.service athanor-shelld.service athanor-wallpaper.service"
     b" --no-pager -l | head -60",
     # The compositor's own words, and the greeter's before them, under the tags the
     # session scripts log them with.
@@ -503,6 +562,7 @@ PROBES = {
     "MOK": MOK_PROBE,
     "GREETER": GREETER_PROBE,
     "SESSION": SESSION_PROBE,
+    "SESSION_HELD": SESSION_PROBE_HELD,
     "SETTINGS": SETTINGS_PROBE,
 }
 
@@ -531,6 +591,10 @@ def main() -> int:
         print("usage: console.py SOCKET LOG PHASES MONITOR", file=sys.stderr)
         return 2
     sock_path, log_path, phase_path, monitor_path = sys.argv[1:5]
+    iso_repository = os.environ.get("ATHANOR_ISO_REPOSITORY", "")
+    if not REPOSITORY.fullmatch(iso_repository):
+        print(f"ATHANOR_ISO_REPOSITORY is not a repository name: {iso_repository!r}", file=sys.stderr)
+        return 2
     decided = DECIDED - {"settings-alive"} if HOLD else DECIDED
 
     for _ in range(180):
@@ -605,8 +669,12 @@ def main() -> int:
         note("profile-asked")
         ask(KARG_PROBE, KARG_PROBE_WAIT)
         note("karg-asked")
-        ask(ORIGIN_PROBE, ORIGIN_PROBE_WAIT)
+        ask(origin_probe(iso_repository), ORIGIN_PROBE_WAIT)
         note("origin-asked")
+        # The upgrade case boots an ISO whose layers the run does not know (HOLD).
+        if not HOLD:
+            ask(BOOTED_PROBE, BOOTED_PROBE_WAIT)
+            note("booted-asked")
         ask(GREETER_PROBE, GREETER_PROBE_WAIT)
         note("greeter-asked")
 
@@ -615,7 +683,7 @@ def main() -> int:
         guest whether the desktop came up, and keep a picture of the screen as it is
         when it answers."""
         monitor(*(f"sendkey {key}" for key in GREETER_PASSWORD_KEYS), "sendkey ret")
-        ask(SESSION_PROBE, SESSION_PROBE_WAIT)
+        ask(SESSION_PROBE_HELD if HOLD else SESSION_PROBE, SESSION_PROBE_WAIT)
         monitor(f"screendump {pathlib.Path(log_path).with_name('screen-session.ppm')}")
         note("login-sent")
 

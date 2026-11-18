@@ -4,7 +4,8 @@ name: Pull Request
 # request and every merge group runs it whole: no path filter decides whether it runs (PL3).
 #
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
-#   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs.
+#   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs. On
+#   merge_group it selects no build (kernel, specs, shell): the pull request proved them (PL44).
 # check-*: the parts of `just check`, the gate a contributor runs locally, one job and one recipe
 #   each so they run in parallel: check-static (lint, every verify.py check with
 #   scripts/ci/known-red.txt, kernel profile, Calmo), check-system and check-other (the Python
@@ -13,6 +14,8 @@ name: Pull Request
 # kernel:  the kernel check (call-kernel.yml) when changes.json selects the kernel.
 # specs:   Spec Build Check (spec-build-check.yml) when changes.json selects the specs.
 # shell:   the visual tests of the shell rig (shell-surfaces.yml) when changes.json selects shell.
+# rust_audit: clippy and the cargo-deny advisories (rust-security-audit.yml) when changes.json
+#   selects rust_audit.
 # gate:    the one required check. It needs every other job, always runs, and is red when a job
 #   it needs failed or was cancelled, or when an area the change selects did not run
 #   (scripts/ci/gate.py). A skipped build is a pass.
@@ -46,13 +49,15 @@ jobs:
       changes: ${{ steps.changes.outputs.json }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Change detection (scripts/ci/changes.py)
         id: changes
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$BASE"
-          python3 -B scripts/ci/changes.py "$BASE" "$RUNNER_TEMP/out/changes.json"
+          python3 -B scripts/ci/changes.py "$BASE" "$RUNNER_TEMP/out/changes.json" "$GITHUB_EVENT_NAME"
           echo "json=$(< "$RUNNER_TEMP/out/changes.json")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -69,8 +74,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
+        env:
+          ATHANOR_INSTALL_SEMGREP: "1"
         run: |
           set -euo pipefail
           bash scripts/ci/install-tools.sh "$RUNNER_TEMP/tools"
@@ -90,6 +99,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -110,6 +121,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -132,6 +145,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Pinned tools (scripts/ci/install-tools.sh)
         run: |
@@ -175,8 +190,15 @@ jobs:
       contents: read
     uses: ./.github/workflows/shell-surfaces.yml
 
+  rust_audit:
+    needs: changes
+    if: ${{ fromJSON(needs.changes.outputs.changes).rust_audit }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/rust-security-audit.yml
+
   gate:
-    needs: [changes, check-static, check-system, check-other, check-rust, kernel, specs, shell]
+    needs: [changes, check-static, check-system, check-other, check-rust, kernel, specs, shell, rust_audit]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -186,6 +208,8 @@ jobs:
       NEEDS: ${{ toJSON(needs) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Verdict (scripts/ci/gate.py)
         run: |

@@ -4,6 +4,9 @@ Applications button.
 Friday 18 September 2026, 10:00 collapsed button.
 opens popup
 collapsed
+Input source: English (US) collapsed button.
+opens popup
+collapsed
 Accessibility collapsed button.
 opens popup
 collapsed
@@ -16,5 +19,4 @@ collapsed
 System image verified collapsed button.
 opens popup
 collapsed
-Workspaces button.
 Screen reader off.

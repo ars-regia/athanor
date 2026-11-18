@@ -2,10 +2,12 @@
 # repo-input: system/athanor-sulphur-client/protocols/athanor-keyboard-group-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml
 # repo-input: system/athanor-sulphur-client/protocols/athanor-workspace-tiling-v1.xml
+# repo-input: system/athanor-sulphur-client/protocols/athanor-dock-overlap-v1.xml
+# repo-input: system/athanor-sulphur-client/protocols/athanor-material-v1.xml
 %global debug_package %{nil}
 Name:           athanor-sulphur
 Version:        1.0.0
-Release:        18%{?dist}
+Release:        25%{?athanor_content}%{?dist}
 Summary:        Athanor's own Wayland compositor and its session
 License:        GPL-3.0-or-later
 Obsoletes:      athanor-compositor < %{version}-%{release}
@@ -55,6 +57,79 @@ install -D -m 0644 forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/data/privil
 /usr/share/athanor/sulphur/privileged-clients
 
 %changelog
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-25
+- Serve ext_background_effect_manager_v1 (doc_own_stack.md decision 35): on an output of
+  tier M2, what lies under a surface's blur region, windows included, is blurred with a dual
+  Kawase blur from half resolution, three passes, saturated in the last one, and drawn under
+  the surface; it is blurred again only when what lies under it changes. On M0 and M1, and
+  in software, the region is drawn as it is. Each blur element keeps its own copy of what
+  lies under it and the blur's levels in the damage tracker's effects cache. An output blurs,
+  front to back, at most eight regions a frame, of at most its own area together, counted
+  before the magnifier scales them, and draws the rest as they are. A copy is freed when its
+  element or its region goes, or when the output drops below M2.
+
+* Thu Nov 12 2026 Athanor Forge <forge@athanor.os> - 1.0.0-24
+- Serve xdg_wm_dialog_v1 (doc_own_stack.md decision 33): a click on the parent of a shown
+  modal dialog gives the keyboard to the dialog, which stays above its parent.
+- Serve wp_pointer_warp_v1 (decision 33): a warp moves the pointer only within the surface
+  that has both the pointer focus and the keyboard focus, and never under a pointer lock,
+  while the session is locked or while Ctrl+Alt+Tab has suspended its client.
+- Serve xdg_system_bell_v1 (decision 33): a bell from the client of the focused window, at
+  most one a second and never while the session is locked, blinks that window's focus
+  outline once, or widens it for half a second under reduced motion; a bell where no outline
+  is drawn is dropped.
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-23
+- Keep the name of a withdrawn wl_output global reserved for five seconds, as wlroots does:
+  the global is disabled, which sends global_remove, and destroyed only after the grace, so a
+  client that bound the old name before it read the removal is not given another output or
+  another interface.
+
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-22
+- Apply modes, positions, enabling and disabling and adaptive sync through
+  wlr-output-management, besides scales and transforms: a configuration is checked whole
+  before any of it is applied, one the outputs cannot take or that leaves no output enabled
+  fails and changes nothing, a step the GPU refuses undoes those taken, and every manager is
+  sent the result (doc_session_daemons.md SD23).
+- Keep what the user configured: an output given no position keeps its own, and a monitor
+  whose modes change while it stays plugged in keeps its place and, while it still offers
+  it, its mode.
+- Keep the modes of a disabled monitor's head up to date when its connector's modes change.
+- Refuse an output configuration that places an output more than 2^24 pixels from the
+  origin, past which the sums of the space would overflow.
+- Place an output enabled again at the origin when the right of the others would take it
+  past 2^24 pixels.
+- Give the keyboard to a lock surface still shown when the output whose lock surface had it
+  is disabled.
+- Check a tested output configuration as an applied one, as far as the backend can tell
+  before applying it: adaptive sync on an output without it, and any step on the nested
+  output, fail both; a step a monitor refuses at apply still fails and undoes the others.
+- Confirm the lock only once every step of an output configuration is taken, not while
+  they are taken.
+- Keep an output the power client turned off off when a refused configuration drives it
+  again.
+- Refuse a layer surface, a lock surface and a power control asked for on a stale wl_output
+  of an output no longer shown, and give a full screen asked for on one the window's own
+  output.
+- Withdraw the global an output still has before it is offered again, so that no client
+  sees two globals for one output.
+* Fri Nov 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-21
+- Report a monitor's make, model and serial from the EDID blob of its DRM connector, read
+  with athanor-edid: wl_output and xdg_output carry the make and model, and the serial
+  reaches only wlr-output-management; a monitor with no valid EDID keeps make Athanor, model
+  DRM and an empty serial (doc_osd.md OD4).
+
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-20
+- At a fractional scale a client's opaque region keeps only the output's pixels it covers
+  whole, for windows, popups, layer surfaces, the lock surface and the cursor: a pixel the
+  region covers by half, which the client antialiases, is blended with what lies beneath it
+  instead of being drawn over nothing (#978).
+
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 1.0.0-19
+- Clear the outputs to cosmic-comp's clear colour, srgb(39,41,42), in place of Calmo's
+  dark bg1, so that the shell's surfaces match the cosmic-comp goldens where no surface
+  is drawn (#736).
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-18
 - Rename the package, its binaries, its user unit and its session script from
   athanor-compositor to athanor-sulphur, and its data directory from

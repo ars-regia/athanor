@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The wallpaper keys read by athanor-wallpaper (doc_session_daemons.md, SD3). Scaling is
+  always "zoom" (fill and crop), so there is no key for it.
+-->
+<schemalist>
+  <schema id="org.athanor.desktop.background" path="/org/athanor/desktop/background/">
+    <key name="picture" type="s">
+      <default>'hearth'</default>
+      <summary>The wallpaper</summary>
+      <description>"hearth", the image that follows the colour scheme, or an absolute path to an image. A path that is not a regular file shows the hearth.</description>
+    </key>
+    <key name="per-output" type="a{ss}">
+      <default>{}</default>
+      <summary>The wallpaper of each output</summary>
+      <description>Connector name to "hearth" or an absolute path. An output not listed shows "picture". Ignored while "same-on-all" is true.</description>
+    </key>
+    <key name="same-on-all" type="b">
+      <default>true</default>
+      <summary>One wallpaper for every output</summary>
+      <description>True: every output shows "picture" and "per-output" is ignored.</description>
+    </key>
+    <key name="migrated" type="b">
+      <default>false</default>
+      <summary>The one-time migration from cosmic-bg has run</summary>
+      <description>Set by athanor-wallpaper after it copies com.system76.CosmicBackground (SD16). Nothing is copied again once it is true.</description>
+    </key>
+  </schema>
+</schemalist>

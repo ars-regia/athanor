@@ -6,13 +6,16 @@
 //! client's request or commit, input, an output or the lock), at most once a refresh, and not
 //! at all while idle.
 
-use crate::capture::Target;
+use crate::capture::{Pointer, Target};
 use crate::a11y::Look;
-use crate::cursor::{pointer_elements, Cursor, PointerElement};
+use crate::cursor::{pointer_on, Cursor, PointerElement};
 use crate::look::FilterElement;
-use crate::marks::{Marks, Stacked};
+use crate::background_effect::Blurred;
+use crate::marks::{surface_elements, Marks, Stacked, SurfaceElement};
 use crate::headless::{gles, report_frame_times};
-use crate::state::{Backend, OutputGlobal, State, BACKGROUND, FRAME_THROTTLE};
+use crate::output_management::{set_can_sync, Step};
+use crate::state::{Backend, State, BACKGROUND, FRAME_THROTTLE};
+use crate::drm_lease::{Ended, Held, Lease};
 use crate::Error;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::gbm::{GbmAllocator, GbmBufferFlags, GbmDevice};
@@ -22,21 +25,19 @@ use smithay::backend::drm::exporter::gbm::GbmFramebufferExporter;
 use smithay::backend::drm::output::{DrmOutput, DrmOutputManager, DrmOutputRenderElements};
 use smithay::backend::drm::{
     DrmAccessError, DrmDevice, DrmDeviceFd, DrmError, DrmEvent, DrmEventMetadata, DrmEventTime,
-    DrmNode, NodeType,
+    DrmNode, NodeType, VrrSupport,
 };
 use smithay::backend::input::InputEvent;
 use smithay::backend::libinput::{
     LibinputInputBackend, LibinputSessionInterface, PointerScrollAxis,
 };
 use smithay::backend::renderer::damage::Error as DamageError;
-use smithay::backend::renderer::element::surface::{
-    render_elements_from_surface_tree, WaylandSurfaceRenderElement,
-};
 use smithay::backend::renderer::element::utils::RescaleRenderElement;
 use smithay::backend::renderer::element::{Kind, RenderElementStates};
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::renderer::multigpu::gbm::GbmGlesBackend;
 use smithay::backend::renderer::multigpu::GpuManager;
+use smithay::backend::renderer::sync::SyncPoint;
 use smithay::backend::renderer::ImportDma;
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
@@ -48,27 +49,33 @@ use smithay::desktop::Window;
 use smithay::output::{Mode, Output};
 use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, RegistrationToken};
-use smithay::reexports::drm::control::{connector, crtc, ModeTypeFlags};
+use smithay::reexports::drm::control::{
+    connector, crtc, property, Device as ControlDevice, ModeTypeFlags,
+};
 use smithay::reexports::drm::Device as _;
 use smithay::reexports::input::event::gesture::{
     GestureHoldEvent, GesturePinchEvent, GestureSwipeEvent,
 };
 use smithay::reexports::input::event::{
     DeviceEvent, EventTrait, GestureEvent, KeyboardEvent, PointerEvent, SwitchEvent,
-    TabletToolEvent,
+    TabletToolEvent, TouchEvent,
 };
 use smithay::reexports::input::{
     Device as InputDevice, Event as LibinputEvent, Libinput, SendEventsMode,
 };
 use smithay::reexports::rustix::fs::OFlags;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
-use smithay::reexports::wayland_server::Display;
+use smithay::reexports::wayland_server::{Display, DisplayHandle};
 use smithay::utils::{DeviceFd, Transform};
 use smithay::wayland::dmabuf::DmabufFeedbackBuilder;
+use smithay::wayland::drm_lease::{
+    DrmLease, DrmLeaseBuilder, DrmLeaseHandler, DrmLeaseRequest, DrmLeaseState, LeaseRejected,
+};
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState};
 use smithay::wayland::presentation::Refresh;
 use smithay_drm_extras::drm_scanner::{DrmScanEvent, DrmScanner};
-use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 /// The formats tried for each output's swapchain, in order: 8 bits a channel.
@@ -84,15 +91,16 @@ type HeadOutput = DrmOutput<Allocator, Exporter, OutputPresentationFeedback, Drm
 smithay::backend::renderer::element::render_elements! {
     Element<=GlesRenderer>;
     Space=Stacked<GlesRenderer>,
-    Surface=WaylandSurfaceRenderElement<GlesRenderer>,
+    Surface=SurfaceElement<GlesRenderer>,
     Pointer=PointerElement<GlesRenderer>,
 }
 
-// The frame as the magnifier and the colour filters show it: the elements scaled, or the whole
-// frame drawn offscreen and shown through the colour pass (`look.rs`).
+// The frame as the magnifier and the colour filters show it: the elements, with the blur under
+// each blur region (`background_effect.rs`), scaled, or the whole frame drawn offscreen and
+// shown through the colour pass (`look.rs`).
 smithay::backend::renderer::element::render_elements! {
     Frame<=GlesRenderer>;
-    Zoomed=RescaleRenderElement<Element>,
+    Zoomed=RescaleRenderElement<Blurred<GlesRenderer, Element>>,
     Filtered=FilterElement<GlesTexture>,
 }
 
@@ -111,13 +119,18 @@ pub struct Drm {
     outputs: HashMap<crtc::Handle, Head>,
     /// The monitors that could not be set up, with the modes and the CRTC they failed with.
     failed: HashMap<connector::Handle, (connector::Info, crtc::Handle)>,
+    /// The EDID faults already warned of, per connector, so a rescan logs them at debug.
+    edid_faults: HashSet<(connector::Handle, EdidFault)>,
     /// The overlay planes are left alone on NVIDIA's driver, as anvil does.
     nvidia: bool,
-    cursor: Cursor,
     /// The devices that can tap, which the touchpad key turns off and on (D16).
     touchpads: Vec<InputDevice>,
     /// Whether the touchpad key has turned them off.
     touchpads_off: bool,
+    /// The lease device of decision 36, when the GPU's primary node could be offered.
+    leasing: Option<DrmLeaseState>,
+    /// The connectors offered for lease, those marked `non-desktop`, with the CRTC of each.
+    leasable: HashMap<connector::Handle, Offer>,
 }
 
 /// What a scheduled draw of an output is for.
@@ -128,6 +141,117 @@ enum Wake {
     /// The frame callbacks of a surface shown on no output, at `FRAME_THROTTLE`: a request to
     /// draw does not wait for it.
     Throttle,
+}
+
+/// The EDID of a connector: the bytes of its "EDID" blob property, `None` when it has none
+/// (a monitor that does not answer, or a virtual connector).
+fn read_edid(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+) -> std::io::Result<Option<Vec<u8>>> {
+    let set = device.get_properties(connector)?;
+    let (handles, values) = set.as_props_and_values();
+    // A property that cannot be described is skipped: it may not be the EDID. When none turns
+    // out to be the EDID, the last such error is the failure, since it may have been its own.
+    let mut unreadable = None;
+    for (handle, raw) in handles.iter().zip(values) {
+        let info = match device.get_property(*handle) {
+            Ok(info) => info,
+            Err(error) => {
+                unreadable = Some(error);
+                continue;
+            }
+        };
+        if info.name() != c"EDID" {
+            continue;
+        }
+        return match info.value_type().convert_value(*raw) {
+            // A zero blob id is "no blob".
+            property::Value::Blob(id) if id != 0 => device.get_property_blob(id).map(Some),
+            _ => Ok(None),
+        };
+    }
+    unreadable.map_or(Ok(None), Err)
+}
+
+/// The two ways a connector's EDID can fail, each logged once per connector.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum EdidFault {
+    Unreadable,
+    Invalid,
+}
+
+/// Whether `fault` of `connector` is new, and so deserves a warning; a scan that finds it
+/// again logs at debug.
+fn first_fault(
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    connector: connector::Handle,
+    fault: EdidFault,
+) -> bool {
+    seen.insert((connector, fault))
+}
+
+/// The output of `connector`, reporting the make, model and serial in its EDID
+/// (`athanor-edid`, so the strings equal athanor-osd's), or today's placeholder when the
+/// connector has no EDID blob, it cannot be read, or it does not parse.
+fn connector_output(
+    device: &impl ControlDevice,
+    connector: connector::Handle,
+    name: &str,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    mode: Mode,
+) -> Output {
+    let edid = match read_edid(device, connector) {
+        Ok(edid) => edid,
+        Err(error) => {
+            if first_fault(seen, connector, EdidFault::Unreadable) {
+                tracing::warn!(%error, output = name, "the EDID of a monitor could not be read");
+            } else {
+                tracing::debug!(%error, output = name, "the EDID of a monitor could not be read");
+            }
+            None
+        }
+    };
+    output_of(edid.as_deref(), name, connector, seen, mode)
+}
+
+/// The output that `edid` describes, drawn at `mode`: what `set_up` hands the clients.
+pub(crate) fn output_of(
+    edid: Option<&[u8]>,
+    name: &str,
+    connector: connector::Handle,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+    mode: Mode,
+) -> Output {
+    let identity = identity_of(edid, name, connector, seen);
+    crate::state::build_output(
+        name,
+        &identity,
+        mode.size,
+        mode.refresh,
+        Transform::Normal,
+        1.0,
+    )
+}
+
+/// `edid` as an identity, or the placeholder.
+fn identity_of(
+    edid: Option<&[u8]>,
+    name: &str,
+    connector: connector::Handle,
+    seen: &mut HashSet<(connector::Handle, EdidFault)>,
+) -> athanor_edid::Identity {
+    let Some(edid) = edid else {
+        return crate::state::placeholder_identity("DRM");
+    };
+    athanor_edid::parse(edid).unwrap_or_else(|error| {
+        if first_fault(seen, connector, EdidFault::Invalid) {
+            tracing::warn!(%error, output = name, "the EDID of a monitor is not valid");
+        } else {
+            tracing::debug!(%error, output = name, "the EDID of a monitor is not valid");
+        }
+        crate::state::placeholder_identity("DRM")
+    })
 }
 
 /// A monitor: the output and what draws it.
@@ -147,6 +271,57 @@ struct Head {
     not_before: Option<Instant>,
     /// Whether it is on: an output the power client turned off draws nothing (`power_output`).
     powered: bool,
+    /// Whether its last frame met decision 33's conditions for a torn flip (`tearing.rs`).
+    tears: bool,
+}
+
+/// The connector of the monitor an output shows, so that a configuration finds it again.
+struct DrmConnector(connector::Handle);
+
+/// The connector of the monitor `output` shows, if it shows one.
+fn connector_of(output: &Output) -> Option<connector::Handle> {
+    output
+        .user_data()
+        .get::<DrmConnector>()
+        .map(|shown| shown.0)
+}
+
+/// Offers the modes of `connector` on `output`, and of the others only the one it shows.
+fn offer_modes(output: &Output, connector: &connector::Info) {
+    let offered: Vec<Mode> = connector
+        .modes()
+        .iter()
+        .map(|&mode| Mode::from(mode))
+        .collect();
+    for mode in output.modes() {
+        if !offered.contains(&mode) && output.current_mode() != Some(mode) {
+            output.delete_mode(mode);
+        }
+    }
+    for mode in offered {
+        output.add_mode(mode);
+    }
+}
+
+/// The mode an output keeps when its monitor's modes change: the one it shows while the monitor
+/// still offers it, else the monitor's preferred one.
+fn kept_mode(offered: &[Mode], current: Option<Mode>, preferred: Mode) -> Mode {
+    current
+        .filter(|mode| offered.contains(mode))
+        .unwrap_or(preferred)
+}
+
+/// The mode of `connector` that `wanted` is, the preferred one first.
+// ponytail: the first of the modes that read the same, interlaced or not; their flags when a
+// client needs to tell them apart.
+fn drm_mode(
+    connector: &connector::Info,
+    wanted: Mode,
+) -> Option<smithay::reexports::drm::control::Mode> {
+    let same = |mode: &smithay::reexports::drm::control::Mode| Mode::from(*mode) == wanted;
+    preferred_mode(connector)
+        .filter(same)
+        .or_else(|| connector.modes().iter().copied().find(same))
 }
 
 /// Turns `device`'s events on or off; a device that cannot is logged.
@@ -167,7 +342,8 @@ fn send_events(device: &InputDevice, on: bool) {
 }
 
 /// A libinput event as `LibinputInputBackend` hands it to `State::process_input_event`, for the
-/// devices, the switches, the gestures, the tablet tools and the kinds that handler acts on;
+/// devices, the switches, the gestures, the tablet tools, the touchscreens and the kinds that
+/// handler acts on;
 /// `None` for the rest, which it takes only as activity. A kind the handler starts to act on is added here as well (`State::take_queued_input`).
 fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend>> {
     Some(match event {
@@ -225,6 +401,14 @@ fn backend_event(event: LibinputEvent) -> Option<InputEvent<LibinputInputBackend
             TabletToolEvent::Proximity(event) => InputEvent::TabletToolProximity { event },
             TabletToolEvent::Tip(event) => InputEvent::TabletToolTip { event },
             TabletToolEvent::Button(event) => InputEvent::TabletToolButton { event },
+            _ => return None,
+        },
+        LibinputEvent::Touch(touch) => match touch {
+            TouchEvent::Down(event) => InputEvent::TouchDown { event },
+            TouchEvent::Motion(event) => InputEvent::TouchMotion { event },
+            TouchEvent::Up(event) => InputEvent::TouchUp { event },
+            TouchEvent::Cancel(event) => InputEvent::TouchCancel { event },
+            TouchEvent::Frame(event) => InputEvent::TouchFrame { event },
             _ => return None,
         },
         _ => return None,
@@ -292,10 +476,12 @@ pub fn start(
         scanner: DrmScanner::new(),
         outputs: HashMap::new(),
         failed: HashMap::new(),
+        edid_faults: HashSet::new(),
         nvidia,
-        cursor: Cursor::from_env(),
         touchpads: Vec::new(),
         touchpads_off: false,
+        leasing: None,
+        leasable: HashMap::new(),
     };
     let dh = display.handle();
     let mut state = State::new(event_loop, display, Backend::Drm(Box::new(drm)))?;
@@ -304,8 +490,10 @@ pub fn start(
     }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
+    crate::eis::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
 
+    crate::wl_drm::global(&dh, render_node, &dmabuf_formats);
     let feedback = DmabufFeedbackBuilder::new(render_node.dev_id(), dmabuf_formats).build()?;
     state
         .dmabuf_state
@@ -316,6 +504,7 @@ pub fn start(
     } else {
         tracing::info!("explicit sync: none, the GPU cannot wait on a syncobj");
     }
+    state.offer_leases(&dh);
     report_frame_times(event_loop, &mut state)?;
 
     let handle = event_loop.handle();
@@ -353,11 +542,10 @@ pub fn start(
     // A monitor plugged in later is set up then; one plugged in that cannot be set up would
     // leave a compositor that shows nothing.
     if let Backend::Drm(drm) = &state.backend {
-        let plugged = drm
-            .scanner
-            .connectors()
-            .values()
-            .any(|info| info.state() == connector::State::Connected);
+        // A display offered for lease is no monitor of the session.
+        let plugged = drm.scanner.connectors().values().any(|info| {
+            info.state() == connector::State::Connected && !drm.leasable.contains_key(&info.handle())
+        });
         if drm.outputs.is_empty() && plugged {
             return Err("no monitor plugged in could be set up".into());
         }
@@ -366,6 +554,11 @@ pub fn start(
 }
 
 impl Drm {
+    /// The GPU's render node, which draws.
+    pub fn render_node(&self) -> DrmNode {
+        self.render_node
+    }
+
     pub fn import_dmabuf(&mut self, dmabuf: &Dmabuf) -> Result<(), Error> {
         gles(&mut self.gpus, &self.render_node)?.import_dmabuf(dmabuf, None)?;
         Ok(())
@@ -377,12 +570,14 @@ impl Drm {
         what: &Target,
         space: &smithay::desktop::Space<Window>,
         marks: &Marks,
+        pointer: Option<Pointer<'_>>,
     ) -> Result<Vec<u8>, Error> {
         crate::capture::read_back::<_, GlesTexture>(
             gles(&mut self.gpus, &self.render_node)?,
             what,
             space,
             marks,
+            pointer,
         )
     }
 }
@@ -392,13 +587,37 @@ impl State {
     /// there is none; while the session is paused, another terminal has the seat, and nothing
     /// here switches it.
     pub fn switch_vt(&mut self, vt: i32) {
-        if let Backend::Drm(drm) = &mut self.backend {
-            if !drm.session.is_active() {
-                return;
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        let from = shown_vt();
+        if !drm.session.is_active() || from == Some(vt) {
+            return;
+        }
+        let Some(number) = self.leases_before_switch(from) else {
+            return;
+        };
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        if let Err(error) = drm.session.change_vt(vt) {
+            tracing::warn!(%error, vt, "the virtual terminal could not be switched");
+            self.leases.switch_failed();
+            return;
+        }
+        // A switch that pauses nothing would refuse grants for the rest of the session: a while
+        // after it, one that left its own terminal shown is over (`switch_settled`).
+        let settled = Timer::from_duration(SWITCH_SETTLES);
+        let timer = self.loop_handle.insert_source(settled, move |_, _, state| {
+            let shown = shown_vt();
+            let active = matches!(&state.backend, Backend::Drm(drm) if drm.session.is_active());
+            if state.leases.switch_settled(number, shown, active) && active && shown.is_none() {
+                tracing::error!(vt, "a switch of virtual terminal paused nothing, and the terminal shown cannot be read: no display is leased until the session resumes");
             }
-            if let Err(error) = drm.session.change_vt(vt) {
-                tracing::warn!(%error, vt, "the virtual terminal could not be switched");
-            }
+            TimeoutAction::Drop
+        });
+        if let Err(error) = timer {
+            tracing::error!(%error, "a switch of virtual terminal has no timer: no display is leased until the session resumes");
         }
     }
 
@@ -482,6 +701,9 @@ impl State {
     /// The session is paused, on a switch to another virtual terminal: the GPU and the input
     /// devices are given up until it resumes.
     pub(crate) fn pause(&mut self) {
+        // Decision 36: no lease is granted and the GPU is not touched until the resume; a switch
+        // the compositor makes has ended the leases before it (`switch_vt`).
+        self.pause_leases();
         if let Backend::Drm(drm) = &mut self.backend {
             tracing::info!("the session is paused");
             drm.libinput.suspend();
@@ -498,6 +720,7 @@ impl State {
         self.kept_keys.clear();
         self.super_tap = None;
         self.aids_paused();
+        self.eis_suspend();
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning
@@ -528,8 +751,8 @@ impl State {
                     self.track_touchpads(&event);
                     self.process_input_event(event)
                 }
-                // As `process_input_event` does for every event: a touch, a gesture or a
-                // tablet event keeps the session awake although the handler does not act on it.
+                // As `process_input_event` does for every event: a gesture or a tablet event
+                // keeps the session awake although the handler does not act on it.
                 None => self.activity(),
             }
         }
@@ -560,6 +783,12 @@ impl State {
             self.fail(format!("the GPU could not be taken back: {error}"));
             return;
         }
+        // Decision 36: the leases end now, before any output is drawn; the GPU was not touched
+        // while the session was paused.
+        self.resume_leases();
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
         for head in drm.outputs.values_mut() {
             head.frames.session_resumed();
             // The switch was activity: the idle daemon decides again from it (output power
@@ -602,6 +831,7 @@ impl State {
             return;
         };
         if device_id == drm.node.dev_id() {
+            self.revoke_device_leases();
             self.fail("the GPU the compositor draws on was removed".into());
         } else {
             tracing::warn!(device_id, "a GPU was removed; only the primary one is used");
@@ -633,7 +863,14 @@ impl State {
                 DrmScanEvent::Disconnected {
                     connector,
                     crtc: Some(crtc),
-                } => self.disconnected(&connector, crtc),
+                } => {
+                    self.unleasable(connector.handle());
+                    self.disconnected(&connector, crtc)
+                }
+                DrmScanEvent::Disconnected {
+                    connector,
+                    crtc: None,
+                } => self.unleasable(connector.handle()),
                 // The modes changed while it stayed plugged in: a monitor that could not be set
                 // up with the modes it first reported is set up now, and one whose preferred
                 // mode is another is set up again in it.
@@ -642,10 +879,13 @@ impl State {
                     crtc: Some(crtc),
                 } => self.changed(&connector, crtc),
                 DrmScanEvent::Connected { crtc: None, .. }
-                | DrmScanEvent::Disconnected { crtc: None, .. }
                 | DrmScanEvent::Changed { crtc: None, .. } => {}
             }
         }
+        // A connector's `non-desktop` mark changes with no event of the scanner's.
+        self.reconcile_leasable();
+        self.retry_leases();
+        self.confirm_lock();
         self.retry_dark_monitors();
     }
 
@@ -680,8 +920,9 @@ impl State {
     }
 
     /// The modes of the monitor on `connector`, driven by `crtc`, changed: set up when it has no
-    /// output; else its output goes to the preferred mode when it shows another. The new mode is
-    /// tried first, and when the GPU refuses it the output keeps the mode it has.
+    /// output; else its output keeps the mode it shows while the monitor still offers it, and
+    /// goes to the preferred mode when it does not (`kept_mode`), keeping its place. The new
+    /// mode is tried first, and when the GPU refuses it the output keeps the mode it has.
     fn changed(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
         let Backend::Drm(drm) = &mut self.backend else {
             return;
@@ -689,11 +930,23 @@ impl State {
         let Some(head) = drm.outputs.get_mut(&crtc) else {
             return self.connected(connector, crtc);
         };
-        let Some(wanted) = preferred_mode(connector) else {
+        let Some(preferred) = preferred_mode(connector) else {
             return;
         };
-        let wl_mode = Mode::from(wanted);
+        let offered: Vec<Mode> = connector
+            .modes()
+            .iter()
+            .map(|&mode| Mode::from(mode))
+            .collect();
+        let wl_mode = kept_mode(&offered, head.output.current_mode(), Mode::from(preferred));
+        let Some(wanted) = drm_mode(connector, wl_mode) else {
+            return;
+        };
+        head.output.set_preferred(Mode::from(preferred));
         if head.output.current_mode() == Some(wl_mode) {
+            let output = head.output.clone();
+            offer_modes(&output, connector);
+            self.output_heads_changed();
             return;
         }
         let used = match gles(&mut drm.gpus, &drm.render_node) {
@@ -725,9 +978,9 @@ impl State {
             "a monitor changed mode"
         );
         output.change_current_state(Some(wl_mode), None, None, None);
-        output.set_preferred(wl_mode);
+        offer_modes(&output, connector);
         layer_map_for_output(&output).arrange();
-        self.arrange_outputs();
+        self.fit_to_outputs();
         self.request_redraw();
     }
 
@@ -760,6 +1013,19 @@ impl State {
     /// to the right of the others. One that could not be set up is remembered with the modes and
     /// the CRTC it failed with, and is tried again only when either changes.
     fn connected(&mut self, connector: &connector::Info, crtc: crtc::Handle) {
+        // Decision 36: a display marked `non-desktop` is offered for lease, never an output.
+        if self.leasable(connector, crtc) {
+            return;
+        }
+        // A monitor a configuration disabled stays dark until one enables it, offering the modes
+        // it has now.
+        let mut disabled = self.output_management.disabled.iter();
+        let shown = disabled.find(|output| connector_of(output) == Some(connector.handle()));
+        if let Some(output) = shown.cloned() {
+            offer_modes(&output, connector);
+            self.output_heads_changed();
+            return;
+        }
         let Backend::Drm(drm) = &mut self.backend else {
             return;
         };
@@ -807,14 +1073,40 @@ impl State {
         };
         let mode = preferred_mode(connector).ok_or("the monitor has no mode")?;
         let wl_mode = Mode::from(mode);
-        let output = crate::state::build_output(
+        let output = connector_output(
+            drm.heads.device(),
+            connector.handle(),
             name,
-            "DRM",
-            wl_mode.size,
-            wl_mode.refresh,
-            Transform::Normal,
-            1.0,
+            &mut drm.edid_faults,
+            wl_mode,
         );
+        output
+            .user_data()
+            .insert_if_missing(|| DrmConnector(connector.handle()));
+        offer_modes(&output, connector);
+        self.drive(connector, crtc, &output, mode)?;
+        crate::state::publish_output(&self.display_handle, &output);
+        tracing::info!(
+            output = name,
+            size = ?wl_mode.size,
+            refresh_mhz = wl_mode.refresh,
+            "a monitor was plugged in"
+        );
+        self.map_output(&output);
+        Ok(())
+    }
+
+    /// Drives `output` on `crtc` in `mode`, for the monitor of `connector`, and draws it.
+    fn drive(
+        &mut self,
+        connector: &connector::Info,
+        crtc: crtc::Handle,
+        output: &Output,
+        mode: smithay::reexports::drm::control::Mode,
+    ) -> Result<(), String> {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return Err("not the DRM backend".into());
+        };
         let mut planes = drm
             .heads
             .device()
@@ -831,18 +1123,17 @@ impl State {
                 crtc,
                 mode,
                 &[connector.handle()],
-                &output,
+                output,
                 Some(planes),
                 renderer,
                 &DrmOutputRenderElements::default(),
             )
             .map_err(|error| error.to_string())?;
-        crate::state::publish_output(&self.display_handle, &output);
-        tracing::info!(
-            output = name,
-            size = ?wl_mode.size,
-            refresh_mhz = wl_mode.refresh,
-            "a monitor was plugged in"
+        let support =
+            drm_output.with_compositor(|compositor| compositor.vrr_supported(connector.handle()));
+        set_can_sync(
+            output,
+            support.is_ok_and(|support| support != VrrSupport::NotSupported),
         );
         drm.outputs.insert(
             crtc,
@@ -855,11 +1146,120 @@ impl State {
                 wanted: true,
                 not_before: None,
                 powered: true,
+                tears: false,
             },
         );
-        self.map_output(&output);
-        self.schedule(crtc, Duration::ZERO);
+        // An output the power client turned off stays off when a refused configuration drives
+        // it again; one it never saw, a new monitor or one enabled again, is on (output power
+        // plan, D8).
+        if self.output_power.is_on(output) || !self.turn_off(crtc) {
+            self.schedule(crtc, Duration::ZERO);
+        }
         Ok(())
+    }
+
+    /// Stops driving `output`: its CRTC is cleared as its `DrmOutput` goes, and nothing more is
+    /// drawn on it.
+    fn undrive(&mut self, output: &Output) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        let driven = drm.outputs.iter().find(|(_, head)| head.output == *output);
+        let Some(crtc) = driven.map(|(&crtc, _)| crtc) else {
+            return;
+        };
+        if let Some((timer, _)) = drm.outputs.remove(&crtc).and_then(|head| head.timer) {
+            self.loop_handle.remove(timer);
+        }
+    }
+
+    /// Takes a step of an output configuration on the monitor `step` names; the GPU's refusal
+    /// is the error.
+    pub(crate) fn drm_step(&mut self, step: &Step) -> Result<(), String> {
+        let output = step.output();
+        let handle = connector_of(output).ok_or("the output shows no monitor")?;
+        let Backend::Drm(drm) = &mut self.backend else {
+            return Err("not the DRM backend".into());
+        };
+        let connector = drm
+            .scanner
+            .connectors()
+            .get(&handle)
+            .cloned()
+            .ok_or("the monitor is gone")?;
+        let offered = |wanted: Mode| {
+            drm_mode(&connector, wanted).ok_or("the monitor does not offer the mode")
+        };
+        match step {
+            Step::Disable { .. } => {
+                self.undrive(output);
+                Ok(())
+            }
+            Step::Enable { mode, sync, .. } => {
+                let crtc = drm
+                    .scanner
+                    .crtc_for_connector(&handle)
+                    .ok_or("no CRTC is left to drive the monitor")?;
+                self.drive(&connector, crtc, output, offered(*mode)?)?;
+                if *sync {
+                    if let Err(error) = self.use_adaptive_sync(output, handle, true) {
+                        self.undrive(output);
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            }
+            Step::Mode { to, .. } => {
+                let mode = offered(*to)?;
+                let head = drm
+                    .outputs
+                    .values_mut()
+                    .find(|head| head.output == *output)
+                    .ok_or("the output is not driven")?;
+                let renderer =
+                    gles(&mut drm.gpus, &drm.render_node).map_err(|error| error.to_string())?;
+                head.drm_output
+                    .use_mode::<_, Element>(mode, renderer, &DrmOutputRenderElements::default())
+                    .map_err(|error| error.to_string())?;
+                // As in `changed`: the test commit lights the CRTC of an output turned off.
+                if !head.powered {
+                    if let Err(error) = head
+                        .drm_output
+                        .with_compositor(|compositor| compositor.clear())
+                    {
+                        tracing::warn!(%error, output = output.name(), "the output could not be kept off");
+                    }
+                }
+                Ok(())
+            }
+            Step::AdaptiveSync { on, .. } => self.use_adaptive_sync(output, handle, *on),
+        }
+    }
+
+    /// Turns adaptive sync on or off on the monitor of `connector`, which `output` shows.
+    fn use_adaptive_sync(
+        &mut self,
+        output: &Output,
+        connector: connector::Handle,
+        on: bool,
+    ) -> Result<(), String> {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return Err("not the DRM backend".into());
+        };
+        let head = drm
+            .outputs
+            .values_mut()
+            .find(|head| head.output == *output)
+            .ok_or("the output is not driven")?;
+        head.drm_output.with_compositor(|compositor| {
+            let support = compositor
+                .vrr_supported(connector)
+                .map_err(|error| error.to_string())?;
+            if on && support == VrrSupport::NotSupported {
+                return Err("the monitor has no adaptive sync".to_string());
+            }
+            compositor.use_vrr(on).map_err(|error| error.to_string())
+        })
     }
 
     /// The monitor driven by `crtc` unplugged: its output goes, with its global and its layer
@@ -870,7 +1270,17 @@ impl State {
         };
         // Bandwidth or a CRTC may be free now: the monitors that failed are tried again.
         drm.failed.clear();
+        // Another monitor on this connector is warned of afresh.
+        drm.edid_faults
+            .retain(|(handle, _)| *handle != connector.handle());
         let Some(head) = drm.outputs.remove(&crtc) else {
+            // A monitor a configuration disabled is a head no more.
+            let disabled = &mut self.output_management.disabled;
+            let before = disabled.len();
+            disabled.retain(|output| connector_of(output) != Some(connector.handle()));
+            if disabled.len() != before {
+                self.output_heads_changed();
+            }
             return;
         };
         if let Some((timer, _)) = head.timer {
@@ -893,7 +1303,7 @@ impl State {
             "a monitor was unplugged"
         );
         self.remove_output(&output);
-        remove_global(&self.display_handle, &output);
+        crate::state::withdraw_output(self, &output);
         // The monitor that was the only one not yet showing the lock, or the last one, is gone.
         self.confirm_lock();
         self.request_redraw();
@@ -1039,26 +1449,47 @@ impl State {
             self.schedule(crtc, Duration::ZERO);
             return true;
         }
-        if let Err(error) = head.drm_output.with_compositor(|compositor| compositor.clear()) {
-            tracing::warn!(%error, output = output.name(), "the output could not be turned off");
+        if !self.turn_off(crtc) {
             return true;
+        }
+        tracing::info!(output = output.name(), "the output is off");
+        // The lock may have waited only for this output.
+        self.confirm_lock();
+        false
+    }
+
+    /// Turns the head of `crtc` off: its CRTC disabled, its timer gone and nothing drawn, its
+    /// surfaces' frame callbacks sent at the throttle. False when the GPU refused, and the
+    /// head stays on.
+    fn turn_off(&mut self, crtc: crtc::Handle) -> bool {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return false;
+        };
+        let Some(head) = drm.outputs.get_mut(&crtc) else {
+            return false;
+        };
+        if let Err(error) = head
+            .drm_output
+            .with_compositor(|compositor| compositor.clear())
+        {
+            let output = head.output.name();
+            tracing::warn!(%error, output, "the output could not be turned off");
+            return false;
         }
         head.powered = false;
         head.frames.powered_off();
         if let Some((timer, _)) = head.timer.take() {
             self.loop_handle.remove(timer);
         }
-        tracing::info!(output = output.name(), "the output is off");
-        // The lock may have waited only for this output.
-        self.confirm_lock();
         if self.frame_callbacks_waiting() {
             self.wake(crtc, FRAME_THROTTLE, Wake::Throttle);
         }
-        false
+        true
     }
 
-    /// A lock is confirmed only once every output presented a frame drawn locked.
-    fn confirm_lock(&mut self) {
+    /// A lock is confirmed only once every output presented a frame drawn locked. The other
+    /// backends confirm from their frames alone: they draw every output each frame.
+    pub(crate) fn confirm_lock(&mut self) {
         if let Backend::Drm(drm) = &self.backend {
             if lock_shown(drm.outputs.values().map(|head| (head.powered, &head.frames.lock))) {
                 self.locked_drawn();
@@ -1125,7 +1556,7 @@ impl State {
                 &popups,
                 &marks,
                 pointer.as_ref(),
-                &mut drm.cursor,
+                &mut self.cursor,
                 look,
             ),
             Err(error) => {
@@ -1134,7 +1565,7 @@ impl State {
                 return;
             }
         };
-        let (rendered, states) = match drawn {
+        let (rendered, states, sync) = match drawn {
             Ok(drawn) => drawn,
             Err(error) => {
                 self.draw_failed(crtc, error, period);
@@ -1143,6 +1574,9 @@ impl State {
         };
         if let Some(stats) = &mut self.frame_stats {
             stats.drew(started.elapsed());
+        }
+        if let (true, Some(sync)) = (rendered, sync) {
+            self.time_frame(&output, started, sync);
         }
         self.frame_done(&output, &states, false, frame_target, period);
         if rendered {
@@ -1187,6 +1621,8 @@ impl State {
         self.serve_captures();
         self.space.refresh();
         self.send_toplevel_states();
+        self.send_dock_overlaps();
+        self.refresh_materials();
         self.popups.cleanup();
         self.flush();
     }
@@ -1421,25 +1857,20 @@ fn render(
     )>,
     cursor: &mut Cursor,
     look: Look,
-) -> Result<(bool, RenderElementStates), SwapBuffersError> {
+) -> Result<(bool, RenderElementStates, Option<SyncPoint>), SwapBuffersError> {
     let output = &head.output;
     let scale = output.current_scale().fractional_scale();
     let mut elements: Vec<Element> = Vec::new();
-    if let (Some((location, status)), Some(area)) = (pointer, space.output_geometry(output)) {
-        if area.to_f64().contains(*location) {
-            let at = *location - area.loc.to_f64();
-            elements.extend(
-                pointer_elements(renderer, cursor, status, at, scale)
-                    .into_iter()
-                    .map(Element::Pointer),
-            );
-        }
+    if let Some((location, status)) = pointer {
+        let pointer: Vec<PointerElement<_>> =
+            pointer_on(renderer, cursor, status, *location, space, output);
+        elements.extend(pointer.into_iter().map(Element::Pointer));
     }
     match lock {
         Some(lock) => {
             if let Some(surface) = lock.surface_on(output) {
                 elements.extend(
-                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                    surface_elements::<_, SurfaceElement<_>>(
                         renderer,
                         surface,
                         (0, 0),
@@ -1455,7 +1886,7 @@ fn render(
         None => {
             for (surface, at) in popups {
                 elements.extend(
-                    render_elements_from_surface_tree::<_, WaylandSurfaceRenderElement<_>>(
+                    surface_elements::<_, SurfaceElement<_>>(
                         renderer,
                         surface,
                         at.to_physical_precise_round(scale),
@@ -1471,7 +1902,34 @@ fn render(
             elements.extend(stacked.into_iter().map(Element::Space));
         }
     }
+    // No region is blurred on the lock screen.
+    let blurred = if lock.is_some() {
+        None
+    } else {
+        Some(&*marks.blurred)
+    };
+    let elements = crate::background_effect::behind(output, blurred, elements);
     let zoomed = crate::look::zoomed(elements, look.zoom);
+    // Read for each frame: a flip in flight when the lock or a layer above arrives completes,
+    // and the next frame follows the new state.
+    let tears = crate::tearing::tears(crate::tearing::conditions(
+        space,
+        output,
+        lock,
+        popups,
+        marks,
+        &zoomed,
+    ));
+    if tears != head.tears {
+        head.tears = tears;
+        // ponytail: every frame is a vsync flip; pass PresentationMode::Async to render_frame
+        // here once Smithay's DRM backend has an asynchronous page flip (Smithay #1948).
+        tracing::debug!(
+            output = output.name(),
+            tears,
+            "decision 33's conditions for a torn flip changed; the frames stay vsync, as Smithay's DRM backend has no asynchronous page flip"
+        );
+    }
     let (frame, filtered) = match look.filter {
         Some(affine) => {
             let (element, states) = crate::look::filtered(renderer, output, &zoomed, affine)
@@ -1508,22 +1966,497 @@ fn render(
                 .map_err(|error| SwapBuffersError::TemporaryFailure(Box::new(error)))?;
         }
     }
+    // The live check of VL13 times the frame to this sync point (`State::time_frame`).
+    let sync = match &result.primary_element {
+        PrimaryPlaneElement::Swapchain(element) => Some(element.sync.clone()),
+        _ => None,
+    };
     // Under the colour pass the frame is one element: the states are those of what it shows.
-    Ok((!result.is_empty, filtered.unwrap_or(result.states)))
+    Ok((!result.is_empty, filtered.unwrap_or(result.states), sync))
 }
 
-/// Withdraws the global of `output`, which clients bound to it see go.
-fn remove_global(dh: &smithay::reexports::wayland_server::DisplayHandle, output: &Output) {
-    output.leave_all();
-    if let Some(OutputGlobal(global)) = output.user_data().get::<OutputGlobal>() {
-        dh.remove_global::<State>(global.clone());
+// Decision 36: the leases of the displays the kernel marks `non-desktop` (`drm_lease.rs`).
+
+/// What a connector is by its `non-desktop` mark: a display offered for lease, a monitor of the
+/// session, or, while the mark cannot be read, neither.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Role {
+    Leased,
+    Monitor,
+    Unread,
+}
+
+impl Role {
+    fn of(mark: &std::io::Result<bool>) -> Self {
+        match mark {
+            Ok(true) => Self::Leased,
+            Ok(false) => Self::Monitor,
+            Err(_) => Self::Unread,
+        }
+    }
+
+    /// Whether the connector is offered for lease.
+    fn offered(self) -> bool {
+        self == Self::Leased
+    }
+
+    /// Whether the connector may be set up as an output of the session.
+    fn output(self) -> bool {
+        self == Self::Monitor
+    }
+}
+
+/// Whether the kernel marks `connector` `non-desktop`, as a headset's. A property that cannot be
+/// described is skipped; when none is the mark, the last such error is the failure.
+fn non_desktop(device: &impl ControlDevice, connector: connector::Handle) -> std::io::Result<bool> {
+    let set = device.get_properties(connector)?;
+    let (handles, values) = set.as_props_and_values();
+    let mut unreadable = None;
+    for (handle, raw) in handles.iter().zip(values) {
+        match device.get_property(*handle) {
+            Ok(info) if info.name() == c"non-desktop" => {
+                return Ok(info.value_type().convert_value(*raw).as_boolean() == Some(true));
+            }
+            Ok(_) => {}
+            Err(error) => unreadable = Some(error),
+        }
+    }
+    unreadable.map_or(Ok(false), Err)
+}
+
+/// How long after a switch of virtual terminal the compositor asked for a switch that paused
+/// nothing is taken to be over: logind pauses the session well within it.
+const SWITCH_SETTLES: Duration = Duration::from_secs(2);
+
+/// The virtual terminal the kernel shows, from `tty0`. A switch to it pauses nothing, so
+/// `switch_vt` does not start one. One that cannot be read is no virtual terminal.
+fn shown_vt() -> Option<i32> {
+    let active = std::fs::read_to_string("/sys/class/tty/tty0/active")
+        .map_err(|error| tracing::warn!(%error, "the virtual terminal shown could not be read"))
+        .ok()?;
+    active.trim().strip_prefix("tty")?.parse().ok()
+}
+
+/// A connector offered for lease: the CRTC that drives it, and the name its clients are told.
+struct Offer {
+    crtc: crtc::Handle,
+    name: String,
+}
+
+/// Ends a lease that was dropped: revokes it, confirms from the GPU's list of lessees that it
+/// is gone, disables its CRTCs, so that the lessee's last frame does not stay on them, and
+/// offers its connectors still marked `non-desktop` anew. Only the list counts: a lease its
+/// client destroyed, or whose connector is gone, may still be listed, and a revocation that
+/// failed because Smithay's drop had revoked it already is no failure once the list confirms
+/// it. These are ioctls of the GPU's master; why one failed is the error. Nothing outside the
+/// udev backend leases a GPU; the fixture's headless backend fails as it is told.
+fn finish(backend: &mut Backend, ended: &Ended) -> Result<(), String> {
+    let drm = match backend {
+        Backend::Drm(drm) => drm,
+        #[cfg(test)]
+        Backend::Headless(headless) => return headless.lease_refused.clone().map_or(Ok(()), Err),
+        #[allow(unreachable_patterns)]
+        _ => return Ok(()),
+    };
+    let device = drm.heads.device();
+    let lessee = std::num::NonZeroU32::new(ended.id).ok_or("the lease has no id")?;
+    let revoked = device.revoke_lease(lessee);
+    let lessees = device
+        .list_lessees()
+        .map_err(|error| format!("the lessees could not be listed: {error}"))?;
+    if lessees.contains(&lessee) {
+        return Err(match revoked {
+            Err(error) => format!("the revocation failed: {error}"),
+            Ok(()) => "the lessee is listed after its revocation".into(),
+        });
+    }
+    for &crtc in &ended.crtcs {
+        device
+            .set_crtc(crtc, None, (0, 0), &[], None)
+            .map_err(|error| format!("CRTC {crtc:?} could not be disabled: {error}"))?;
+    }
+    for &connector in &ended.connectors {
+        drm.offer_again(connector);
+    }
+    Ok(())
+}
+
+impl Drm {
+    /// Offers `connector` to the lease clients, while the session is active. Smithay's record
+    /// of it is withdrawn first: that drops a lease of it Smithay still keeps, which would offer
+    /// it a second time when its client destroys it, so each connector is offered once.
+    fn offer_again(&mut self, connector: connector::Handle) {
+        let (Some(leasing), Some(offer)) = (&mut self.leasing, self.leasable.get(&connector))
+        else {
+            return;
+        };
+        leasing.withdraw_connector(connector);
+        if self.session.is_active() {
+            leasing.add_connector::<State>(connector, offer.name.clone(), offer.name.clone());
+        }
+    }
+
+    /// The session pauses: the lease clients are told that every connector went away.
+    /// `suspend` is not used, since its `resume` offers a second time each connector that a
+    /// lease destroyed in between offered again.
+    fn withdraw_offers(&mut self) {
+        if let Some(leasing) = &mut self.leasing {
+            for &connector in self.leasable.keys() {
+                leasing.withdraw_connector(connector);
+            }
+        }
+    }
+
+    /// The session resumes: every connector still offered is offered again.
+    fn offer_all(&mut self) {
+        let connectors: Vec<connector::Handle> = self.leasable.keys().copied().collect();
+        for connector in connectors {
+            self.offer_again(connector);
+        }
+    }
+}
+
+impl State {
+    /// Offers the lease device of the GPU's primary node to the unconfined clients.
+    fn offer_leases(&mut self, dh: &DisplayHandle) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        match crate::drm_lease::global(dh, &drm.node) {
+            Ok(leasing) => drm.leasing = Some(leasing),
+            Err(error) => tracing::warn!(%error, "no DRM lease device: no display is leased"),
+        }
+    }
+
+    /// Whether `connector`, driven by `crtc`, is kept from being set up as an output: one marked
+    /// `non-desktop` is offered for lease; one whose mark cannot be read is neither leased nor an
+    /// output until a scan reads it.
+    fn leasable(&mut self, connector: &connector::Info, crtc: crtc::Handle) -> bool {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return false;
+        };
+        let handle = connector.handle();
+        let mark = non_desktop(drm.heads.device(), handle);
+        if let Err(error) = &mark {
+            tracing::error!(%error, connector = ?handle, "whether a display is non-desktop could not be read: it is neither leased nor shown until a scan reads it");
+        }
+        let role = Role::of(&mark);
+        if !role.offered() {
+            return !role.output();
+        }
+        if let Entry::Vacant(entry) = drm.leasable.entry(handle) {
+            let name = format!(
+                "{}-{}",
+                connector.interface().as_str(),
+                connector.interface_id()
+            );
+            tracing::info!(connector = name, "a non-desktop display is offered for lease");
+            entry.insert(Offer { crtc, name });
+            drm.offer_again(handle);
+        }
+        true
+    }
+
+    /// `connector` is offered for lease no more: it was unplugged or is no longer
+    /// `non-desktop`. The lease that holds it is revoked and its CRTCs disabled; its other
+    /// connectors, which Smithay forgot with the withdrawal, are offered anew (`finish`).
+    fn unleasable(&mut self, connector: connector::Handle) {
+        let Backend::Drm(drm) = &mut self.backend else {
+            return;
+        };
+        if drm.leasable.remove(&connector).is_none() {
+            return;
+        }
+        if let Some(leasing) = &mut drm.leasing {
+            leasing.withdraw_connector(connector);
+        }
+        let device = drm.node.dev_id();
+        self.leases
+            .revoke_connector(device, connector, |ended| finish(&mut self.backend, ended));
+        tracing::info!(?connector, "a display is offered for lease no more");
+    }
+
+    /// After a scan: a connector offered for lease that is unplugged or no longer `non-desktop`
+    /// is withdrawn, and a monitor, shown or disabled, that became `non-desktop` is taken down,
+    /// for `retry_dark_monitors` to offer it. A mark that cannot be read withdraws a lease, and
+    /// `retry_dark_monitors` then sets up no output on it (`leasable`).
+    fn reconcile_leasable(&mut self) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        let device = drm.heads.device();
+        let connectors = drm.scanner.connectors();
+        let plugged = |handle: &connector::Handle| {
+            connectors
+                .get(handle)
+                .is_some_and(|info| info.state() == connector::State::Connected)
+        };
+        let withdrawn: Vec<connector::Handle> = drm
+            .leasable
+            .keys()
+            .filter(|handle| !plugged(handle) || !Role::of(&non_desktop(device, **handle)).offered())
+            .copied()
+            .collect();
+        let disabled = &self.output_management.disabled;
+        let monitor = |info: &connector::Info, crtc: &crtc::Handle| {
+            drm.outputs.contains_key(crtc)
+                || disabled
+                    .iter()
+                    .any(|output| connector_of(output) == Some(info.handle()))
+        };
+        let became: Vec<(connector::Info, crtc::Handle)> = drm
+            .scanner
+            .crtcs()
+            .filter(|(info, crtc)| {
+                plugged(&info.handle())
+                    && monitor(info, crtc)
+                    && Role::of(&non_desktop(device, info.handle())).offered()
+            })
+            .map(|(info, crtc)| (info.clone(), crtc))
+            .collect();
+        for connector in withdrawn {
+            self.unleasable(connector);
+        }
+        for (info, crtc) in became {
+            tracing::info!(connector = ?info.handle(), "a monitor became a non-desktop display");
+            self.disconnected(&info, crtc);
+        }
+    }
+
+    /// The GPU is lost, about to be on a switch of virtual terminal, or back from a pause: its
+    /// leases end.
+    fn revoke_device_leases(&mut self) {
+        let Backend::Drm(drm) = &self.backend else {
+            return;
+        };
+        let device = drm.node.dev_id();
+        self.leases
+            .revoke_device(device, |ended| finish(&mut self.backend, ended));
+    }
+
+    /// The session pauses: the GPU is not touched until the resume, as libseat requires once the
+    /// pause is acknowledged, and the lease clients are told that the connectors went away.
+    pub(crate) fn pause_leases(&mut self) {
+        self.leases.paused();
+        if let Backend::Drm(drm) = &mut self.backend {
+            drm.withdraw_offers();
+        }
+    }
+
+    /// The session resumed, before any output is drawn: every lease ends, the ones left from
+    /// before the pause included, and the connectors are offered again.
+    pub(crate) fn resume_leases(&mut self) {
+        self.leases.resumed();
+        self.leases
+            .revoke_all(|ended| finish(&mut self.backend, ended));
+        if let Backend::Drm(drm) = &mut self.backend {
+            drm.offer_all();
+        }
+    }
+
+    /// Before a switch of virtual terminal the compositor makes from terminal `from`
+    /// (decision 36): from here to the resume no lease is granted, and every lease ends while
+    /// the compositor is still the GPU's master, which it is no longer when the pause is heard.
+    /// The switch's number; `None` when a lease could not be ended, and then the terminal is
+    /// not switched, for the lessee would go on scanning out on the seat another session holds.
+    pub(crate) fn leases_before_switch(&mut self, from: Option<i32>) -> Option<u32> {
+        let number = self.leases.switching(from);
+        self.leases
+            .revoke_all(|ended| finish(&mut self.backend, ended));
+        if self.leases.proof().is_some() {
+            return Some(number);
+        }
+        tracing::error!(connectors = ?self.leases.ending_connectors(), "a lease could not be ended before a switch of virtual terminal: the terminal is not switched");
+        self.leases.switch_failed();
+        None
+    }
+
+    /// A lock was requested: from now on no lease is granted, and every one ends.
+    pub fn leases_locked(&mut self) {
+        self.leases
+            .lock_requested(|ended| finish(&mut self.backend, ended));
+    }
+
+    /// Tries again to end the leases that wait.
+    pub fn retry_leases(&mut self) {
+        self.leases.retry(|ended| finish(&mut self.backend, ended));
+    }
+
+    /// Whether a lease may be granted now. A backend without a session has no GPU to lease.
+    pub(crate) fn may_lease(&self) -> bool {
+        self.leases.may_grant()
+            && match &self.backend {
+                Backend::Drm(drm) => drm.session.is_active(),
+                _ => true,
+            }
+    }
+
+    /// A lease was granted; one granted while no grant may be made ends at once.
+    pub(crate) fn lease_granted(&mut self, held: Held<Lease>) {
+        self.leases
+            .granted(held, |ended| finish(&mut self.backend, ended));
+    }
+}
+
+impl DrmLeaseHandler for State {
+    /// The lease device of the udev backend. The global exists only there, made with that
+    /// state, which is never dropped or replaced, so every request of a lease client finds it.
+    /// Smithay's trait returns no `Option` (its drm_syncobj handler's does), so the other arm,
+    /// which no request reaches, has nothing to return and ends the compositor (debt tracked by
+    /// #1186).
+    fn drm_lease_state(&mut self, _node: DrmNode) -> &mut DrmLeaseState {
+        if let Backend::Drm(drm) = &mut self.backend {
+            if let Some(leasing) = &mut drm.leasing {
+                return leasing;
+            }
+        }
+        tracing::error!("a DRM lease request reached a compositor without a lease device");
+        std::process::abort()
+    }
+
+    /// Leases the connectors asked for, each with its CRTC and a primary plane of that CRTC,
+    /// while the session is active and no lock is requested. Smithay goes on after the
+    /// `empty_lease` error it raises, so an empty request is refused here.
+    fn lease_request(
+        &mut self,
+        node: DrmNode,
+        request: DrmLeaseRequest,
+    ) -> Result<DrmLeaseBuilder, LeaseRejected> {
+        if !self.may_lease() || request.connectors.is_empty() {
+            return Err(LeaseRejected::default());
+        }
+        let Backend::Drm(drm) = &self.backend else {
+            return Err(LeaseRejected::default());
+        };
+        if node != drm.node {
+            return Err(LeaseRejected::default());
+        }
+        let device = drm.heads.device();
+        let mut builder = DrmLeaseBuilder::new(device);
+        for connector in request.connectors {
+            let crtc = drm
+                .leasable
+                .get(&connector)
+                .ok_or_else(LeaseRejected::default)?
+                .crtc;
+            let planes = device.planes(&crtc).map_err(LeaseRejected::with_cause)?;
+            let (plane, claim) = planes
+                .primary
+                .iter()
+                .find_map(|info| {
+                    device
+                        .claim_plane(info.handle, crtc)
+                        .map(|claim| (info.handle, claim))
+                })
+                .ok_or_else(LeaseRejected::default)?;
+            builder.add_connector(connector);
+            builder.add_crtc(crtc);
+            builder.add_plane(plane, claim);
+        }
+        Ok(builder)
+    }
+
+    fn new_active_lease(&mut self, node: DrmNode, lease: DrmLease) {
+        let held = Held {
+            device: node.dev_id(),
+            id: lease.id(),
+            connectors: lease.connectors().copied().collect(),
+            crtcs: lease.crtcs().copied().collect(),
+            lease: Lease::Drm(Box::new(lease)),
+        };
+        tracing::info!(lease = held.id, connectors = ?held.connectors, "a non-desktop display is leased");
+        self.lease_granted(held);
+    }
+
+    /// The client destroyed its lease: it ends as any other, from what the GPU lists.
+    fn lease_destroyed(&mut self, _node: DrmNode, lease_id: u32) {
+        tracing::info!(lease = lease_id, "a lease was destroyed by its client");
+        self.leases
+            .destroyed(lease_id, |ended| finish(&mut self.backend, ended));
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{lock_shown, pacing, FailureLog, Frames, LockFrames, Wake};
+pub(crate) mod tests {
+    use super::{
+        first_fault, identity_of, kept_mode, lock_shown, output_of, pacing, EdidFault, FailureLog,
+        Frames, LockFrames, Role, Wake,
+    };
     use std::time::{Duration, Instant};
+
+    /// A base block for "DEL", product 0xA0B3, serial 1, with a name descriptor and a correct
+    /// checksum.
+    pub(crate) fn dell() -> Vec<u8> {
+        let mut b = vec![0u8; 128];
+        b[..8].copy_from_slice(&[0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0]);
+        b[8..10].copy_from_slice(&((4u16 << 10) | (5 << 5) | 12).to_be_bytes());
+        b[10..12].copy_from_slice(&0xA0B3u16.to_le_bytes());
+        b[12] = 1;
+        b[54 + 3] = 0xFC;
+        b[54 + 5..54 + 5 + 10].copy_from_slice(b"U2412M\n   ");
+        let sum = b.iter().fold(0u8, |s, x| s.wrapping_add(*x));
+        b[127] = 0u8.wrapping_sub(sum);
+        b
+    }
+
+    fn handle() -> smithay::reexports::drm::control::connector::Handle {
+        smithay::reexports::drm::control::from_u32(7).expect("a nonzero id")
+    }
+
+    #[test]
+    fn an_edid_fault_warns_once_per_connector_and_kind() {
+        let mut seen = Default::default();
+        let other = smithay::reexports::drm::control::from_u32(8).expect("a nonzero id");
+        assert!(first_fault(&mut seen, handle(), EdidFault::Invalid));
+        let again = first_fault(&mut seen, handle(), EdidFault::Invalid);
+        assert!(!again, "a rescan");
+        let kind = first_fault(&mut seen, handle(), EdidFault::Unreadable);
+        assert!(kind, "another kind");
+        let conn = first_fault(&mut seen, other, EdidFault::Invalid);
+        assert!(conn, "another connector");
+        // identity_of records the fault it meets.
+        let id = identity_of(Some(&[0u8; 5]), "DP-1", other, &mut seen);
+        assert_eq!(id.model, "DRM");
+        assert!(!first_fault(&mut seen, other, EdidFault::Invalid));
+    }
+
+    #[test]
+    fn an_output_reports_the_identity_in_its_edid() {
+        let id = identity_of(Some(&dell()), "DP-1", handle(), &mut Default::default());
+        assert_eq!(
+            (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+    }
+
+    #[test]
+    fn set_up_builds_the_output_from_the_identity_in_the_edid() {
+        let mode = smithay::output::Mode {
+            size: (1920, 1080).into(),
+            refresh: 60_000,
+        };
+        let edid = dell();
+        let output = output_of(Some(&edid), "DP-1", handle(), &mut Default::default(), mode);
+        let physical = output.physical_properties();
+        assert_eq!(
+            (physical.make.as_str(), physical.model.as_str(), physical.serial_number.as_str()),
+            ("DEL", "U2412M", "1")
+        );
+        assert_eq!(output.current_mode(), Some(mode));
+    }
+
+    #[test]
+    fn an_output_with_no_edid_or_a_bad_one_keeps_the_placeholder() {
+        let mut bad = dell();
+        bad[127] = bad[127].wrapping_add(1);
+        for edid in [None, Some(bad.as_slice()), Some(&[0u8; 7][..])] {
+            let id = identity_of(edid, "DP-1", handle(), &mut Default::default());
+            assert_eq!(
+                (id.make.as_str(), id.model.as_str(), id.serial.as_str()),
+                ("Athanor", "DRM", "")
+            );
+        }
+    }
 
     #[test]
     fn an_output_draws_only_when_asked_and_at_most_once_a_refresh() {
@@ -1697,6 +2630,38 @@ mod tests {
     #[test]
     fn a_lock_with_no_output_is_shown() {
         assert!(lock_shown([]));
+    }
+
+    /// A monitor whose modes change keeps the mode the user set while it still offers it, and
+    /// goes to its preferred mode only when it does not.
+    #[test]
+    fn a_changed_monitor_keeps_the_mode_it_still_offers() {
+        let mode = |width: i32| smithay::output::Mode {
+            size: (width, 1080).into(),
+            refresh: 60_000,
+        };
+        let offered = [mode(1920), mode(1280)];
+        assert_eq!(
+            kept_mode(&offered, Some(mode(1280)), mode(1920)),
+            mode(1280)
+        );
+        assert_eq!(
+            kept_mode(&offered, Some(mode(1024)), mode(1920)),
+            mode(1920)
+        );
+        assert_eq!(kept_mode(&offered, None, mode(1920)), mode(1920));
+    }
+
+    /// A connector whose `non-desktop` mark cannot be read is neither offered for lease nor set
+    /// up as an output; only a mark read `false` makes a monitor of the session.
+    #[test]
+    fn an_unread_mark_neither_leases_nor_shows_a_connector() {
+        let unread = Role::of(&Err(std::io::Error::from_raw_os_error(5)));
+        assert!(!unread.offered() && !unread.output(), "unread");
+        let leased = Role::of(&Ok(true));
+        assert!(leased.offered() && !leased.output(), "non-desktop");
+        let monitor = Role::of(&Ok(false));
+        assert!(!monitor.offered() && monitor.output(), "a monitor");
     }
 
     #[test]

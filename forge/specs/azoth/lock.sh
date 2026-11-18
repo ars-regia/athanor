@@ -86,7 +86,7 @@ splice() { # splice SIG RPM OUT: koji.splice_rpm_sighdr in coreutils
 }
 
 fetch() { # fetch DIR KEYID ENTRY...: signed RPMs into DIR, ENTRY = FILE:NAME/VERSION/RELEASE
-    local dir=$1 keyid=$2 entry file nvr arch
+    local dir=$1 keyid=$2 entry file nvr arch part
     shift 2
     for entry in "$@"; do
         file=${entry%%:*} nvr=${entry#*:}
@@ -96,7 +96,16 @@ fetch() { # fetch DIR KEYID ENTRY...: signed RPMs into DIR, ENTRY = FILE:NAME/VE
             "$KOJI/packages/$nvr/$arch/$file" "$dir/$file.unsigned" \
             "$KOJI/packages/$nvr/data/sigcache/$keyid/$arch/$file.sig" "$dir/$file.sig"
     done > "$dir/curl.conf"
-    curl --fail --silent --show-error --retry 3 --parallel --parallel-max 8 --config "$dir/curl.conf"
+    # --parallel reports only the last transfer's exit code: --fail-early stops on the first
+    # failure, and the loop below names any file that did not arrive or is empty.
+    curl --fail --fail-early --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+        --parallel --parallel-max 8 --config "$dir/curl.conf"
+    for entry in "$@"; do
+        file=${entry%%:*}
+        for part in "$file.unsigned" "$file.sig"; do
+            [[ -s $dir/$part ]] || die "koji did not deliver $part"
+        done
+    done
     for entry in "$@"; do
         file=${entry%%:*}
         splice "$dir/$file.sig" "$dir/$file.unsigned" "$dir/$file"

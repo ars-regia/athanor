@@ -12,6 +12,9 @@ Uso:
     python3 scripts/verify.py --list
     python3 scripts/verify.py --known-red scripts/ci/known-red.txt [--known-red-base REF]
                                            # a listed red check does not fail the run (PQ12)
+    python3 scripts/verify.py specs --known-red-base REF
+                                           # REF is also the base `specs` measures Release raises
+                                           # against (#1202)
 
 Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
@@ -22,6 +25,7 @@ import collections
 import datetime
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -39,12 +43,22 @@ except ImportError:
 
 ROOT = Path(__file__).resolve().parent.parent
 RS_DIRS = ["system", "forge/specs"]
+# Published crates the repository carries with a patch of its own, by directory: somebody else's
+# code, whose manifest declares upstream's licence exactly and whose panics the budget does not
+# count. Each directory's PATCHES.md says what it changes and when it goes.
+VENDORED_CRATES = {
+    "system/athanor-sal/vendor/accesskit_atspi_common": "MIT OR Apache-2.0",
+    "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend": "MIT",
+}
 
 # --------------------------------------------------------------------------- #
 # infrastruttura minima
 # --------------------------------------------------------------------------- #
 
 CHECKS = {}
+# The revision the change is measured against, from --known-red-base: the base of the pull
+# request or of the merge group in pr.yml (`just check-static`), None when none is given.
+BASE_REF = None
 BOLD, DIM, RED, GRN, YEL, OFF = "\033[1m", "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m"
 if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
     BOLD = DIM = RED = GRN = YEL = OFF = ""
@@ -94,6 +108,11 @@ def walk(base, suffix):
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
+
+
+def vendored(path):
+    """Whether `path`, relative to the repository, lies in a crate of VENDORED_CRATES."""
+    return any(path.startswith(d + "/") for d in VENDORED_CRATES)
 
 
 def rust_files():
@@ -157,8 +176,28 @@ def check_workflows():
                 if host in line:
                     r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
+        # 1f. A workflow that runs on its own sets the token's permissions, or it gets the
+        # repository default (CodeQL actions/missing-workflow-permissions, 2026-11-14). A
+        # reusable workflow takes them from its caller.
+        if yaml is None:
+            r.fail(f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked")
+            continue
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError as e:
+            r.fail(f"{wf.name}: not valid YAML ({e})")
+            continue
+        if not isinstance(doc, dict):
+            r.fail(f"{wf.name}: not a YAML mapping")
+            continue
+        events = triggers(doc)
+        if events != {"workflow_call"} and "permissions" not in doc:
+            r.fail(f"{wf.name}: no top-level permissions, so the token gets the repository "
+                   f"default (triggers: {', '.join(sorted(events)) or 'none'})")
+
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT) + policy_pull_problems(ROOT):
+    for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -359,33 +398,56 @@ def signing_environments(root):
     return holders, problems
 
 
+def ruleset_refs(ruleset):
+    """The ref patterns a ruleset includes, or None when it names none or `~ALL` (every ref)."""
+    include = ((ruleset.get("conditions") or {}).get("ref_name") or {}).get("include")
+    return None if not include or "~ALL" in include else include
+
+
+def refs_overlap(a, b):
+    """Whether two lists of ref patterns (None: every ref) can match the same ref. Excludes are
+    ignored, which can only report more."""
+    # Two globs that overlap without one matching the other (`a*`, `*b`) read as disjoint: the
+    # rulesets name literal branches or a single glob, so this holds until two globs meet.
+    return a is None or b is None or any(
+        fnmatch.fnmatchcase(x, y) or fnmatch.fnmatchcase(y, x) for x in a for y in b)
+
+
 def merge_queue_problems(root):
-    """PIPE-N06: a ruleset with a merge queue needs every required status context reported by
-    a workflow that runs on merge_group; otherwise a merge group never gets the context and
-    cannot be satisfied. A job reports its name (its id when it has none); a job that calls a
-    reusable workflow reports `<name> / <inner context>`, and a matrix job without a name reports
-    `<id> (<values>)`, so both are matched as GitHub composes them."""
+    """PIPE-N06: a ruleset with a merge queue needs every status context required on the
+    branches it covers reported by a workflow that runs on merge_group; otherwise a merge group
+    never gets the context and cannot be satisfied. A context required only on another branch
+    (`Kernel gate` on `main` for a queue on `iso-v0`) does not count. A job reports its name
+    (its id when it has none); a job that calls a reusable workflow reports
+    `<name> / <inner context>`, and a matrix job without a name reports `<id> (<values>)`, so
+    both are matched as GitHub composes them."""
     root = Path(root)
     rulesets = json.loads(read(root / RULESETS_JSON))
     queued = sorted(name for name, rs in rulesets.items()
                     if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", [])))
     if not queued:
         return []
-    required = {check["context"]
-                for protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).values() if protection
-                for check in (protection.get("required_status_checks") or {}).get("checks", [])}
-    required |= {check["context"] for rs in rulesets.values() for rule in rs.get("rules", [])
-                 if rule.get("type") == "required_status_checks"
-                 for check in rule["parameters"]["required_status_checks"]}
+    sources = [([f"refs/heads/{branch}"], check["context"])
+               for branch, protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).items()
+               if protection
+               for check in (protection.get("required_status_checks") or {}).get("checks", [])]
+    sources += [(ruleset_refs(rs), check["context"]) for rs in rulesets.values()
+                for rule in rs.get("rules", []) if rule.get("type") == "required_status_checks"
+                for check in rule["parameters"]["required_status_checks"]]
     reported = set()
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
         if isinstance(doc, dict) and "merge_group" in triggers(doc):
             reported |= job_contexts(root, doc)
-    return [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
-            f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
-            for name in queued for context in sorted(required)
-            if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+    problems = []
+    for name in queued:
+        refs = ruleset_refs(rulesets[name])
+        required = {context for where, context in sources if refs_overlap(refs, where)}
+        problems += [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
+                     f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
+                     for context in sorted(required)
+                     if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
+    return problems
 
 
 def job_contexts(root, doc, depth=0):
@@ -510,6 +572,119 @@ def release_problems(root):
                                     "which only tag-latest of release.yml writes (PL35, PL56)")
                 if STABLE_WRITER.search(run) and environment != "release":
                     problems.append(f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)")
+    return problems
+
+
+# PL10: the actions a release-path job may use, each checked to restore and save no cache,
+# compared in lower case as GitHub resolves names and without the ref; a local composite action
+# is also read step by step. Any other action fails the check until it is checked and listed.
+RELEASE_PATH_ACTIONS = {
+    "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
+    "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
+    "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
+}
+# The settings that give a build a cache from outside the job: sccache on the Actions cache, and
+# a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
+# own disk or volume is not one.
+CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b|\bcache-(?:from|to)\b", re.I)
+LOCAL_WORKFLOW = "./.github/workflows/"
+LOCAL_ACTION = "./.github/actions/"
+# The token grants of a job that publishes: id-token for a keyless signature, attestation or
+# provenance, packages for a push to GHCR with the job's token. A push to another registry with
+# a credential of its own is not seen.
+PUBLISHING_GRANTS = ("id-token", "packages")
+
+
+def publishes(permissions):
+    """Whether a permissions block grants the token a write that publishes (PUBLISHING_GRANTS)."""
+    if permissions == "write-all":
+        return True
+    return isinstance(permissions, dict) and any(permissions.get(g) == "write" for g in PUBLISHING_GRANTS)
+
+
+def release_path_workflows(root):
+    """{workflow: (jobs, env)} for the release path of PL10: every workflow with a job in a
+    signing environment (D43) or in release (PL60), or with a job whose token may sign keylessly,
+    attest or push to the registry (id-token or packages write, from the job or, when the job
+    sets none, from the workflow), and every reusable workflow of this repository such a
+    workflow calls, at any depth. The whole workflow counts: its other jobs build what the
+    publishing job signs or pushes. Workflows that are not YAML are left to signing_problems."""
+    root = Path(root)
+    workflows = {}
+    for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(read(wf))
+        except yaml.YAMLError:
+            continue
+        if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
+            jobs = {job_id: job for job_id, job in doc["jobs"].items() if isinstance(job, dict)}
+            workflows[wf.name] = jobs, doc.get("env"), doc.get("permissions")
+    def releasing(job, permissions):
+        environment = (job_environment(job) or "").lower()
+        return (environment.startswith("signing") or environment == "release"
+                or publishes(job.get("permissions", permissions)))
+    pending = [name for name, (jobs, _, permissions) in workflows.items()
+               if any(releasing(job, permissions) for job in jobs.values())]
+    path = {}
+    while pending:
+        name = pending.pop()
+        if name in path or name not in workflows:
+            continue
+        path[name] = workflows[name][:2]
+        pending += [uses[len(LOCAL_WORKFLOW):] for job in path[name][0].values()
+                    if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)]
+    return path
+
+
+def expanded_steps(root, steps, problems, depth=0):
+    """The steps of a job, each followed by the steps of the local composite action it uses, at
+    any depth GitHub allows. A manifest that is not YAML is a line of problems."""
+    for step in steps or []:
+        if not isinstance(step, dict):
+            continue
+        yield step
+        uses = str(step.get("uses", ""))
+        if uses.startswith(LOCAL_ACTION) and depth < 10:
+            for manifest in ("action.yml", "action.yaml"):
+                path = Path(root) / uses / manifest
+                if not path.is_file():
+                    continue
+                try:
+                    action = yaml.safe_load(read(path))
+                except yaml.YAMLError as error:
+                    problems.append(f"{uses}/{manifest}: not YAML the PL10 check can read: "
+                                    f"{str(error).splitlines()[0]}")
+                    continue
+                runs = action.get("runs") if isinstance(action, dict) else None
+                yield from expanded_steps(root, (runs or {}).get("steps") if isinstance(runs, dict) else None,
+                                          problems, depth + 1)
+
+
+def release_cache_problems(root):
+    """PL10: no job of a release-path workflow (release_path_workflows) restores or saves a
+    cache, through its own steps or those of a local composite action it uses: an action outside
+    RELEASE_PATH_ACTIONS, sccache on the Actions cache, or a cache-from or cache-to. A cache is an
+    input the provenance does not name (PL20), and any job of the default branch can write one."""
+    if yaml is None:
+        return []
+    problems = []
+    for name, (jobs, env) in sorted(release_path_workflows(root).items()):
+        for job_id, job in jobs.items():
+            called = str(job.get("uses", ""))
+            if called and not (called.startswith(LOCAL_WORKFLOW) and "/" not in called[len(LOCAL_WORKFLOW):]):
+                problems.append(f"{name}: job {job_id} calls {called}, which the check cannot follow: call "
+                                f"a workflow of this repository as {LOCAL_WORKFLOW}<file> (PL10)")
+            steps = list(expanded_steps(root, job.get("steps"), problems))
+            for step in steps:
+                action = str(step.get("uses", "")).split("@")[0]
+                if action and action.lower() not in RELEASE_PATH_ACTIONS:
+                    problems.append(f"{name}: job {job_id} uses {action}, which is not in RELEASE_PATH_ACTIONS: "
+                                    "add it once it is checked to restore and save no cache (PL10)")
+            if CACHE_BACKEND.search(json.dumps([env, job, steps], default=str)):
+                problems.append(f"{name}: job {job_id} gives a build a cache from outside the job (sccache "
+                                "on the Actions cache, cache-from or cache-to) on the release path, which "
+                                "restores and saves no cache (PL10)")
     return problems
 
 
@@ -1048,12 +1223,16 @@ def check_os_release():
 # toolkit-boundary: the toolkit stays ready to leave the repository (ADR-0126)
 # --------------------------------------------------------------------------- #
 
-TOOLKIT = "system/athanor-toolkit"
+TOOLKIT = "system/athanor-sal"
 # SPDX identifier -> the licence file that carries its text.
 TOOLKIT_LICENCE_FILES = {"MIT": "LICENSE-MIT", "Apache-2.0": "LICENSE-APACHE"}
 # The gallery is a client of the toolkit outside the workspace: its one dependency.
 GALLERY_MANIFEST = f"{TOOLKIT}/gallery/Cargo.toml"
-GALLERY_DEPENDENCY = {"athanor-toolkit": {"path": ".."}}
+GALLERY_DEPENDENCY = {"athanor-sal": {"path": ".."}}
+# The one patch the gallery may carry: the toolkit's own patch of AccessKit's AT-SPI bridge, the
+# same as the repository root's, which a workspace root of its own does not inherit (#638;
+# system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md). It goes when the patch does.
+GALLERY_PATCH = {"crates-io": {"accesskit_atspi_common": {"path": "../vendor/accesskit_atspi_common"}}}
 
 
 def dependency_tables(data, kinds):
@@ -1068,7 +1247,7 @@ def dependency_tables(data, kinds):
 
 def gallery_problems(root):
     """The gallery depends on the toolkit by its path and on nothing else, as an application
-    outside Athanor would (ADR-0126)."""
+    outside Athanor would (ADR-0126), and patches nothing but the toolkit's AccessKit patch."""
     if not (root / GALLERY_MANIFEST).is_file():
         return []
     try:
@@ -1077,14 +1256,83 @@ def gallery_problems(root):
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
     tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
     out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
-           for kind in ("patch", "replace") if kind in data]
+           for kind in ("patch", "replace") if kind in data and data[kind] != GALLERY_PATCH]
     out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
             for key in data.get("workspace", {})]
     for table, deps in tables:
         for name, dep in deps.items():
             if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
                 out.append(f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
-                           'the gallery depends only on athanor-toolkit = { path = ".." }')
+                           'the gallery depends only on athanor-sal = { path = ".." }')
+    return out
+
+
+# The one module the toolkit's root exposes: the rest of its surface is re-exported by `pub use`
+# (decision 3 of #649), so an application never names a module whose signatures carry accesskit,
+# vello_cpu or parley types. Widening the list is a decision of the API, not of the author.
+TOOLKIT_PUBLIC_MODULES = {"driver"}
+
+
+def use_paths(tree, prefix=()):
+    """The full paths of a `use` tree, without `as` aliases and a leading `crate::` or `self::`."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(tree + ","):
+        depth += (ch == "{") - (ch == "}")
+        if ch == "," and depth == 0:
+            item, start = tree[start:i].strip(), i + 1
+            item = re.sub(r"\s+as\s+\w+$", "", item)
+            if not item:  # a trailing comma
+                continue
+            head, brace, rest = item.partition("{")
+            segs = prefix + tuple(x.strip() for x in head.split("::") if x.strip())
+            if brace:
+                out += use_paths(rest[: rest.rindex("}")], segs)
+            elif segs:
+                out.append([x for x in segs if x])
+    return [p[1:] if p[0] in ("crate", "self") and len(p) > 1 else p for p in out]
+
+
+def api_problems(root):
+    """The toolkit's root declares no `pub mod` outside TOOLKIT_PUBLIC_MODULES, and WidgetId is no
+    alias of an integer: any id of that type would address another Ui's widgets (#649).
+
+    `pub use` of a private module of the root (`text`, `crate::{text as t}`, `text::*`) fails; a
+    glob of the root (`crate::*`) does not.
+
+    Limit: it does not see a foreign crate's type in a public signature; the rustdoc run with
+    `--all-features -- --document-private-items` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
+    lib = f"{TOOLKIT}/src/lib.rs"
+    try:
+        text = read(root / lib)
+    except OSError as err:
+        return [f"{lib}: cannot read ({err})"]
+    # Only the root's own items count: comments are dropped and a `mod t { .. }` body is skipped.
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+    depth, top, stack = 0, [], []
+    for i, ch in enumerate(text):
+        if ch == "{":
+            stack.append(text[:i].rstrip().endswith("::"))  # a `use a::{b, c}` group is no block
+            depth += not stack[-1]
+        elif ch == "}" and stack:
+            depth -= not stack.pop()
+        top.append(ch if depth == 0 else " ")
+    top = "".join(top)
+    out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
+           "make it pub(crate) and re-export what an application needs"
+           for name in re.findall(r"\bpub\s+mod\s+(\w+)", top) if name not in TOOLKIT_PUBLIC_MODULES]
+    private = set(re.findall(r"\bmod\s+(\w+)", top)) - TOOLKIT_PUBLIC_MODULES
+    for use in re.findall(r"\bpub\s+use\s+([^;]*);", top):
+        for path in use_paths(use):
+            # A path of one segment, or `m::*`, that names a private module re-exports it whole;
+            # `crate::*` and an item of a module (`crate::widget::Kind`) are left alone.
+            if path[-1:] == ["*"]:
+                path = path[:-1]
+            if len(path) == 1 and path[0] in private:
+                out.append(f"{lib}: `pub use` of the module `{path[0]}` is outside the public modules "
+                           f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items")
+    for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
+        if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
+            out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")
     return out
 
 
@@ -1122,10 +1370,10 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out + gallery_problems(root)
+    return out + gallery_problems(root) + api_problems(root)
 
 
-@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, and its licence files match its license")
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():
@@ -1296,6 +1544,436 @@ def check_attestation_absent():
     r = Result()
     if (ROOT / "system" / "confidential_computing").exists():
         r.fail("system/confidential_computing exists: athanor-attestation is deleted (ADR-0103 D10)")
+    return r
+
+
+def inherits_from_workspace(table):
+    """True if a manifest table takes any key from a parent workspace (`x = { workspace = true }`
+    or `x.workspace = true`, at any depth)."""
+    return isinstance(table, dict) and (
+        table.get("workspace") is True or any(inherits_from_workspace(v) for v in table.values()))
+
+
+def stale_lock_problems(locks, manifests):
+    """A Cargo.lock beside a crate that inherits from a parent workspace and has no [workspace]
+    table of its own is never read: cargo builds the crate with the parent's lock, or, when the
+    parent excludes it, cannot build it at all. A crate that inherits nothing is its own root and
+    keeps its lock. `locks` are paths relative to the root; `manifests` maps a lock's Cargo.toml
+    to its text, or to None when there is none, as beside a spec's source archive. A vendored
+    crate keeps the lock it was published with."""
+    out = []
+    for lock in sorted(locks):
+        if "/vendor/" in f"/{lock}":
+            continue
+        name = str(Path(lock).with_name("Cargo.toml"))
+        text = manifests.get(name)
+        if text is None:
+            continue
+        try:
+            manifest = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as e:
+            out.append(f"{name}: not valid TOML ({e})")
+            continue
+        if "workspace" not in manifest and inherits_from_workspace(manifest):
+            out.append(f"{lock}: its crate inherits from a parent workspace, so cargo never reads "
+                       f"this lock and its pins only raise advisories; delete it")
+    return out
+
+
+@check("cargo-locks", "No Cargo.lock beside a crate that inherits from a parent workspace, where cargo never reads it")
+def check_cargo_locks():
+    r = Result()
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
+                            capture_output=True, text=True)
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    locks = [p for p in listed.stdout.split("\0") if p]
+    manifests = {}
+    for lock in locks:
+        manifest = Path(lock).with_name("Cargo.toml")
+        manifests[str(manifest)] = read(ROOT / manifest) if (ROOT / manifest).is_file() else None
+    for problem in stale_lock_problems(locks, manifests):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# translations — a string that is not extracted stays in English (issue #1211)
+# --------------------------------------------------------------------------- #
+
+# A call xgettext extracts with the keywords of the update.sh scripts: tr or tr_with on a literal.
+GETTEXT_CALL = re.compile(r'\btr(?:_with)?\(\s*r?#*"')
+# An out-of-line module and the attributes before it.
+MOD_DECL = re.compile(
+    r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(\w+)\s*;"
+)
+# An inline module, whose out-of-line children resolve under its name.
+INLINE_MOD = re.compile(
+    r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?\bmod\s+(\w+)\s*\{"
+)
+RUST_CHAR = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)|[^\\'\n])'")
+RUST_RAW = re.compile(r'b?r(#*)"')
+
+
+def block_end(masked, brace):
+    """The index just past the brace that closes the one at `brace`, in text whose strings,
+    characters and comments are blanked."""
+    depth, end = 0, brace
+    while end < len(masked):
+        depth += {"{": 1, "}": -1}.get(masked[end], 0)
+        end += 1
+        if depth == 0:
+            break
+    return end
+
+
+def rust_code(text):
+    """`text` as a build reads it, twice and of the same length: with its comments and its
+    `#[cfg(test)]` items blanked, and the same with the contents of its strings blanked too,
+    where braces and declarations can be searched."""
+    code, masked = list(text), list(text)
+
+    def blank(chars, start, end):
+        for k in range(start, end):
+            if chars[k] != "\n":
+                chars[k] = " "
+
+    i, n = 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            end = n if end < 0 else end
+            blank(code, i, end)
+            blank(masked, i, end)
+            i = end
+        elif text.startswith("/*", i):
+            # ponytail: a nested block comment ends at its first */; no source here nests one.
+            end = text.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            blank(code, i, end)
+            blank(masked, i, end)
+            i = end
+        elif text[i] == "'":
+            char = RUST_CHAR.match(text, i)
+            if char:
+                # '{' and '}' would unbalance the braces of a test module.
+                blank(masked, i + 1, char.end() - 1)
+            i = char.end() if char else i + 1
+        elif (raw := RUST_RAW.match(text, i)) and (
+            i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")
+        ):
+            close = '"' + raw.group(1)
+            end = text.find(close, raw.end())
+            end = n if end < 0 else end
+            blank(masked, raw.end(), end)
+            i = end + len(close)
+        elif text[i] == '"':
+            k = i + 1
+            while k < n and text[k] != '"':
+                k += 2 if text[k] == "\\" else 1
+            blank(masked, i + 1, min(k, n))
+            i = k + 1
+        else:
+            i += 1
+    flat = "".join(masked)
+    for attr in re.finditer(r"#\[cfg\(test\)\]", flat):
+        start = attr.end()
+        brace, semi = flat.find("{", start), flat.find(";", start)
+        if brace < 0 or 0 <= semi < brace:
+            end = n if semi < 0 else semi + 1
+        else:
+            end = block_end(flat, brace)
+        blank(code, attr.start(), end)
+        blank(masked, attr.start(), end)
+    return "".join(code), "".join(masked)
+
+
+def cfg_value(predicate, features):
+    """Whether `#[cfg(predicate)]` holds in a build with `features`, and not under test: True,
+    False, or None for a predicate this cannot judge, such as `target_os`."""
+    tokens = re.findall(r'"[^"]*"|\w+|[(),=]', predicate)
+
+    # True, False, or None for what cannot be judged.
+    def parse(i):
+        name, i = tokens[i], i + 1
+        if i < len(tokens) and tokens[i] == "(":
+            args, i = [], i + 1
+            while tokens[i] != ")":
+                value, i = parse(i)
+                args.append(value)
+                if tokens[i] == ",":
+                    i += 1
+            if name == "not":
+                value = None if args[0] is None else not args[0]
+            elif name == "all":
+                value = False if False in args else None if None in args else True
+            elif name == "any":
+                value = True if True in args else None if None in args else False
+            else:
+                value = None
+            return value, i + 1
+        if i < len(tokens) and tokens[i] == "=":
+            value = tokens[i + 1].strip('"') in features if name == "feature" else None
+            return value, i + 2
+        return (False if name == "test" else None), i
+
+    try:
+        return parse(0)[0]
+    except IndexError:
+        return None
+
+
+def cfg_holds(predicate, features):
+    """Whether `#[cfg(predicate)]` holds; a predicate `cfg_value` cannot judge holds, and so
+    does its `not`: its module is kept."""
+    return cfg_value(predicate, features) is not False
+
+
+def cfg_attr_paths(attrs, features):
+    """The `path = "..."` of each `#[cfg_attr(predicate, path = "...")]` in `attrs`, with the
+    predicate's `cfg_value`: [(True|False|None, path)]. Each attribute is read on its
+    own, its parentheses balanced."""
+    found = []
+    for start in re.finditer(r"#\[cfg_attr\(", attrs):
+        depth, quoted, parts, begin, i = 1, False, [], start.end(), start.end()
+        while i < len(attrs) and depth:
+            c = attrs[i]
+            if c == '"':
+                quoted = not quoted
+            elif not quoted:
+                depth += {"(": 1, ")": -1}.get(c, 0)
+                if c == "," and depth == 1:
+                    parts.append(attrs[begin:i])
+                    begin = i + 1
+            i += 1
+        parts.append(attrs[begin : i - 1])
+        for part in parts[1:]:
+            path = re.fullmatch(r'\s*path\s*=\s*"([^"]*)"\s*', part)
+            if path:
+                found.append((cfg_value(parts[0], features), path.group(1)))
+    return found
+
+
+def module_files(root_file, features):
+    """The source files of the module tree under `root_file` that a build with `features`
+    compiles, test modules left out, and the modules declared there whose file is missing:
+    (files, [(declaring file, expected file)])."""
+    files, missing, todo = [], [], [(Path(root_file), True)]
+
+    def holds(code, match):
+        attrs = code[match.start(1) : match.end(1)]
+        return all(
+            cfg_holds(c, features) for c in re.findall(r"#\[cfg\((.*)\)\]", attrs)
+        )
+
+    while todo:
+        path, owns_dir = todo.pop()
+        if path in files:
+            continue
+        files.append(path)
+        code, masked = rust_code(read(path))
+        base = (
+            path.parent
+            if owns_dir or path.name == "mod.rs"
+            else path.parent / path.stem
+        )
+        inline = [
+            (m.end() - 1, block_end(masked, m.end() - 1), m.group(2), holds(code, m))
+            for m in INLINE_MOD.finditer(masked)
+        ]
+        for decl in MOD_DECL.finditer(masked):
+            outer = sorted(b for b in inline if b[0] < decl.start() < b[1])
+            if not holds(code, decl) or not all(b[3] for b in outer):
+                continue
+            here = base.joinpath(*(b[2] for b in outer))
+            attrs = code[decl.start(1) : decl.end(1)]
+            explicit = re.search(r'#\[path\s*=\s*"([^"]*)"\]', attrs)
+            # `#[cfg_attr(predicate, path = "...")]`: the path applies when the predicate
+            # holds; when it cannot be judged, that file or any other the module may take
+            # will do, and every one of them that exists is scanned, as a build for another
+            # target compiles it.
+            conditional = cfg_attr_paths(attrs, features)
+            name = decl.group(2)
+            at = here if outer else path.parent
+            normal = [(here / f"{name}.rs", False), (here / name / "mod.rs", True)]
+            holding = [(at / target, True) for value, target in conditional if value]
+            undecided = [(at / t, True) for value, t in conditional if value is None]
+            candidates = holding[-1:] or undecided + normal
+            if explicit:
+                candidates = [(at / explicit.group(1), True)]
+            found = [c for c in candidates if c[0].is_file()]
+            if not found:
+                missing.append((path, candidates[0][0]))
+            todo += found
+    return files, missing
+
+
+def crate_features(manifest, requested, defaults):
+    """The features of a crate that `requested` turn on, with its default ones when `defaults`,
+    and what they ask of its dependencies: (features, {dependency key: features},
+    optional dependencies turned on)."""
+    table = manifest.get("features", {})
+    on = set(requested) | ({"default"} if defaults and "default" in table else set())
+    asked, optional, todo = collections.defaultdict(set), set(), list(on)
+    while todo:
+        for entry in table.get(todo.pop(), []):
+            if entry.startswith("dep:"):
+                optional.add(entry[4:])
+            elif "/" in entry:
+                dep, feature = entry.split("/", 1)
+                asked[dep.rstrip("?")].add(feature)
+                if not dep.endswith("?"):
+                    optional.add(dep)
+            elif entry not in on:
+                on.add(entry)
+                todo.append(entry)
+    optional |= on
+    return on, asked, optional
+
+
+def potfiles_problems(root):
+    """Every source file a translated program compiles, its own or a path dependency's, that
+    calls tr or tr_with on a literal is listed in the program's po/POTFILES.in, which its
+    update.sh hands to xgettext: a file left out never reaches the catalog. A dependency counts
+    with the features the program turns on in it, as the gtk and sal pages of a shared crate
+    belong to different programs; the program itself counts with every feature, as each builds
+    one of its binaries."""
+    root = Path(root).resolve()
+    problems = []
+    for potfiles in sorted(walk(root / "forge/specs", "POTFILES.in")):
+        package = potfiles.parent.parent
+        listed = {
+            (package / line.strip()).resolve()
+            for line in read(potfiles).splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+        manifests, state, todo = {}, {}, [package]
+
+        def load(crate):
+            """The manifest of `crate`, or None after a problem says why it cannot be read."""
+            if crate not in manifests:
+                try:
+                    manifests[crate] = tomllib.loads(read(crate / "Cargo.toml"))
+                except (OSError, tomllib.TOMLDecodeError) as err:
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                        f"cannot be read ({err})"
+                    )
+                    manifests[crate] = None
+            return manifests[crate]
+
+        def workspace(crate):
+            """The directory and manifest of the workspace `crate` belongs to, or None."""
+            for d in [crate, *crate.parents]:
+                if d != root and root not in d.parents:
+                    return None
+                if (d / "Cargo.toml").is_file() and "workspace" in (load(d) or {}):
+                    return d, manifests[d]
+            return None
+
+        if load(package) is None:
+            continue
+        state[package] = (set(manifests[package].get("features", {})), True)
+        while todo:
+            crate = todo.pop()
+            manifest = manifests[crate]
+            on, asked, optional = crate_features(manifest, *state[crate])
+            if crate == package:
+                optional |= {
+                    k
+                    for k, v in manifest.get("dependencies", {}).items()
+                    if isinstance(v, dict)
+                }
+            tables = [manifest.get("dependencies", {})] + [
+                t.get("dependencies", {}) for t in manifest.get("target", {}).values()
+            ]
+            for key, spec in ((k, v) for table in tables for k, v in table.items()):
+                if not isinstance(spec, dict):
+                    continue
+                if spec.get("optional") and key not in optional:
+                    continue
+                base = crate
+                if spec.get("workspace"):
+                    ws = workspace(crate)
+                    entry = ws and ws[1].get("workspace", {}).get("dependencies", {}).get(key)
+                    if entry is None:
+                        problems.append(
+                            f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                            f"takes {key} from a workspace that does not declare it"
+                        )
+                        continue
+                    if not isinstance(entry, dict):
+                        continue
+                    # The workspace sets the source and default-features; the member adds features.
+                    base, spec = ws[0], {
+                        **entry,
+                        "features": entry.get("features", []) + spec.get("features", []),
+                    }
+                if "path" not in spec:
+                    continue
+                dep = (base / spec["path"]).resolve()
+                if load(dep) is None:
+                    continue
+                features, defaults = state.get(dep, (set(), False))
+                merged = (
+                    features | set(spec.get("features", [])) | asked[key],
+                    defaults or spec.get("default-features", True),
+                )
+                if dep not in state or merged != (features, defaults):
+                    state[dep] = merged
+                    todo.append(dep)
+            state[crate] = (on, state[crate][1])
+        for crate, (features, defaults) in sorted(state.items()):
+            on = crate_features(manifests[crate], features, defaults)[0]
+            manifest = manifests[crate]
+            implicit, roots = [], []
+            if "path" in manifest.get("lib", {}):
+                roots.append(crate / manifest["lib"]["path"])
+            else:
+                implicit.append(crate / "src/lib.rs")
+            if crate == package:
+                implicit += [crate / "src/main.rs"]
+                implicit += sorted((crate / "src/bin").glob("*.rs"))
+                implicit += sorted((crate / "src/bin").glob("*/main.rs"))
+                roots += [
+                    crate / b["path"] for b in manifest.get("bin", []) if "path" in b
+                ]
+            for named in roots:
+                if not named.is_file():
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
+                        f"names {named.relative_to(root)}, which does not exist"
+                    )
+            roots = [r for r in roots + implicit if r.is_file()]
+            sources = set()
+            for found, missing in (module_files(r, on) for r in roots):
+                sources |= set(found)
+                for declaring, expected in missing:
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {declaring.relative_to(root)} declares a "
+                        f"module whose file {expected.relative_to(root)} does not exist"
+                    )
+            for source in sorted(sources):
+                if source.resolve() not in listed and GETTEXT_CALL.search(
+                    rust_code(read(source))[0]
+                ):
+                    problems.append(
+                        f"{potfiles.relative_to(root)}: {source.relative_to(root)} calls tr or tr_with "
+                        f"and is compiled into the program, but is not listed: xgettext never extracts "
+                        f"its strings, and they stay in English"
+                    )
+    return list(dict.fromkeys(problems))
+
+
+@check(
+    "potfiles",
+    "Every source a translated program compiles that calls tr or tr_with is in its POTFILES.in",
+)
+def check_potfiles():
+    r = Result()
+    for problem in potfiles_problems(ROOT):
+        r.fail(problem)
     return r
 
 
@@ -1623,8 +2301,8 @@ def check_shipped():
     exempt_file = ROOT / "experimental" / "EXEMPT"
     exempt = set()
     if exempt_file.exists():
-        exempt = {l.strip() for l in read(exempt_file).split("\n")
-                  if l.strip() and not l.startswith("#")}
+        exempt = {ln.strip() for ln in read(exempt_file).split("\n")
+                  if ln.strip() and not ln.startswith("#")}
 
     built = crates_built_by_specs()
     for m in members:
@@ -1936,12 +2614,13 @@ BUDGET = {
     ".unwrap()": 0,
     ".expect(": 0,
     "panic!(": 0,
-    "assert!(": 2,
+    "assert!(": 1,
     "assert_eq!(": 1,
     "assert_ne!(": 0,
     "unreachable!(": 0,
     "todo!(": 0,
     "unimplemented!(": 0,
+    "process::abort(": 2,  # the fuzz entry and the DRM lease handler of Sulphur, #1186
 }
 
 
@@ -2094,7 +2773,7 @@ def check_panics():
     files = list(rust_files())
     test_modules = test_module_files(files)
     for p in files:
-        if is_test_file(p) or p in test_modules:
+        if is_test_file(p) or p in test_modules or vendored(rel(p)):
             continue
         txt = without_literals(without_test_items(read(p)))
         for i, code in enumerate(txt.split("\n"), 1):
@@ -2129,7 +2808,7 @@ def check_panics():
 SHELL_BUDGETS = {
     "forge/build": 7,
     "forge/builder": 1,
-    "forge/scripts": 15,
+    "forge/scripts": 14,
     "forge/test": 9,
     "forge/tools": 0,
     "scripts": 40,
@@ -2145,11 +2824,15 @@ GUEST_SHELL_BUDGET = 8
 DEV_NULL = r"""["']?/dev/null["']?"""
 # Not covered: `|& cmd >/dev/null`, which no simple pattern tells from a plain stdout discard;
 # a quote that spans lines; text run through `eval` or `$(...)`; a construct split across byte
-# strings that the guest's shell joins with `+`.
+# strings that the guest's shell joins with `+`; a here-document opened inside a double-quoted
+# `$(...)` that spans lines (`out="$(cat <<EOF`), whose body is read as code (a false positive);
+# a `#` after an escaped space (`\ #`), read as a comment (a false negative).
+NOOP = r"(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)"
 HIDDEN_FAILURE = re.compile(
-    rf"2>>?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\s*{DEV_NULL}\s+2>&1|2>&-"
-    r"|\|\|\s*(?:(?:(?:/usr)?/bin/true|true|:|exit\s+0|return\s+0)(?![\w-])"
-    r"|\{\s*(?:exit|return)\s+0\s*;?\s*\})"
+    rf"2>[>|]?\s*{DEV_NULL}|&>>?\s*{DEV_NULL}|>&\s*{DEV_NULL}|>\|?\s*{DEV_NULL}\s+2>&1|2>&-"
+    rf"|\|\|\s*(?:{NOOP}(?![\w-])|\{{\s*{NOOP}\s*;?\s*\}}|\(\s*{NOOP}\s*;?\s*\))"
+    rf"|\|\|(?!\s*[{{(])[^;|&]*(?:;|&&)\s*{NOOP}(?![\w-])"
+    r"|\|\|\s*[{(][^;|&]*;\s*(?:true|:)\s*;?\s*[})]"
     r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
 # and the one error sent away is "No such process". Only a plain operand (no substitution) and
@@ -2204,6 +2887,17 @@ def shell_code(line):
     return line, ARITHMETIC.sub(lambda m: " " * len(m.group()), "".join(bare))
 
 
+OR_CONTINUED = re.compile(r"\|\|\s*\\$")
+
+
+def or_continued(carry, code):
+    """`(code, wait)`: `code` joined to the `|| \\` carried from the line above, and whether it
+    ends with another one, so that the next line is joined in its turn."""
+    if carry:
+        code = carry + code.lstrip()
+    return OR_CONTINUED.sub("|| ", code), bool(OR_CONTINUED.search(code))
+
+
 def hidden(code):
     """The constructs of `code` that hide a failure, a probe left out."""
     return HIDDEN_FAILURE.findall(PROBE.sub(" ", code))
@@ -2213,7 +2907,7 @@ def scan_shell(text):
     """`(found, open_from)`: the numbers of the lines of shell `text` with a construct that
     hides a failure, and the line of a here-document still open at the end, whose rest no one
     checked (0 when none is). Neither a comment nor the body of a here-document counts."""
-    found, pending = [], []
+    found, pending, carry, start = [], [], "", 0
     for i, line in enumerate(text.split("\n"), 1):
         if pending:
             word, tabs, _ = pending[0]
@@ -2221,12 +2915,20 @@ def scan_shell(text):
                 pending.pop(0)
             continue
         code, bare = shell_code(line)
-        if hidden(code):
-            found.append(i)
         for m in HEREDOC_START.finditer(bare):
             w = HEREDOC_WORD.match(code, m.end())
             if w:
                 pending.append((w.group(2), m.group(1) == "-", i))
+        # A `|| \\` goes on in the next line: the two are read as one, reported at the first.
+        code, wait = or_continued(carry, code)
+        if wait:
+            carry, start = code, start or i
+        else:
+            if hidden(code):
+                found.append(start or i)
+            carry, start = "", 0
+    if carry and hidden(carry):
+        found.append(start)
     return found, pending[0][2] if pending else 0
 
 
@@ -2260,8 +2962,18 @@ def shell_scripts(base):
 def workflow_failures(text):
     """The numbers of the lines of workflow `text` that hide a failure. A step's script is
     indented in the YAML, so a here-document's end is not looked for: every line is read."""
-    return [i for i, line in enumerate(text.split("\n"), 1)
-            if CONTINUE_ON_ERROR.match(line) or hidden(shell_code(line)[0])]
+    found, carry, start = [], "", 0
+    for i, line in enumerate(text.split("\n"), 1):
+        code, wait = or_continued(carry, shell_code(line)[0])
+        if wait:
+            carry, start = code, start or i
+            continue
+        if CONTINUE_ON_ERROR.match(line) or hidden(code):
+            found.append(start or i)
+        carry, start = "", 0
+    if carry and hidden(carry):
+        found.append(start)
+    return found
 
 
 def guest_failures(text):
@@ -2326,6 +3038,126 @@ def check_shell_failures():
 
 
 # --------------------------------------------------------------------------- #
+# 7-ter. css — the shell's CSS takes its lengths and its motion from the tokens
+# --------------------------------------------------------------------------- #
+
+# doc_visual_language.md VL11: a length in `px` that does not come from a token, a font size in
+# `px`, and a transition or an animation whose duration is not one of `[sal.motion]`'s three or
+# whose curve is not its `curve` fail. The GTK shell keeps today's CSS until it is removed (VL1,
+# ADR-0124 decision 7), so what it holds today stands here by file and kind, a budget that only
+# goes down; a file not named, the toolkit's included, has a budget of zero.
+CSS_DIRS = ["system", "forge/specs"]
+CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
+CSS_BUDGETS = {
+    "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
+    "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
+    "system/athanor-style/src/accent_template.css": {"px": 2},
+    "system/athanor-style/src/style.css": {"px": 178, "font-px": 15, "duration": 9, "curve": 15},
+}
+# A literal length in pixels; `${token}px` in a template, or `{}px` in Rust, is not one.
+CSS_PX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)px\b")
+# A value runs to `;` or a brace; a template's `${token}` is part of it.
+CSS_DECLARATION = re.compile(r"([a-z-]+)\s*:\s*((?:\$\{\w+\}|[^;{}])*)")
+# A string literal of Rust source holds CSS when it holds a declaration, ended by `;` or by the
+# `}` of its rule. Only whole literals are read: CSS built with `concat!` or `format!`, or split
+# across literals, is seen piece by piece, and a piece without a declaration is not read.
+CSS_IN_RUST = re.compile(r"[a-z-]+\s*:\s*[^;{}\n]+(?:;|\})")
+CSS_MOTION = {"transition", "transition-duration", "transition-timing-function", "transition-delay",
+              "animation", "animation-duration", "animation-timing-function", "animation-delay"}
+CSS_TIME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)(ms|s)\b")
+CSS_CURVE = re.compile(r"cubic-bezier\(([^)]*)\)|\b(?:ease(?:-in-out|-in|-out)?|linear|step-start|step-end|steps)\b")
+
+
+def css_texts(path, text):
+    """[(line, css)]: a stylesheet whole, or each string literal of Rust source outside its
+    test items that holds a CSS declaration, with the line it starts on."""
+    if path.suffix != ".rs":
+        return [(1, text)]
+    code, found, i, line = without_test_items(text), [], 0, 1
+    while i < len(code):
+        j = skip_rust(code, i)
+        if j == i:
+            line += code[i] == "\n"
+            i += 1
+            continue
+        if code[i] not in "/'" and CSS_IN_RUST.search(code, i, j):
+            found.append((line, code[i:j]))
+        line += code.count("\n", i, j)
+        i = j
+    return found
+
+
+def css_problems(css, motion):
+    """[(line, kind, text)] of `css`, lines counted from 0: each literal `px` length (kind
+    `px`), font size in `px` (`font-px`), and duration or delay (`duration`) or curve (`curve`)
+    of a transition or an animation that `motion`, the `[sal.motion]` table, does not hold; a
+    time of zero is none."""
+    durations = {motion["fast"], motion["normal"], motion["slow"]}
+    curve = [float(x) for x in motion["curve"]]
+    found = []
+    for m in CSS_PX.finditer(css):
+        if float(m.group(1)):
+            found.append((css.count("\n", 0, m.start()), "px", m.group(0)))
+    for m in CSS_DECLARATION.finditer(css):
+        name, value = m.group(1), m.group(2)
+        at = css.count("\n", 0, m.start())
+        if name in ("font", "font-size") and "px" in value:
+            found.append((at, "font-px", f"{name}: {value.strip()}"))
+        if name not in CSS_MOTION:
+            continue
+        for t in CSS_TIME.finditer(value):
+            ms = round(float(t.group(1)) * (1 if t.group(2) == "ms" else 1000), 3)
+            if ms and ms not in durations:
+                found.append((at, "duration", t.group(0)))
+        for c in CSS_CURVE.finditer(value):
+            if c.group(1) is None or [float(x) for x in c.group(1).split(",")] != curve:
+                found.append((at, "curve", c.group(0)))
+    return found
+
+
+def css_findings(root=ROOT):
+    """{path: [(line, kind, text)]} over the stylesheets, templates and Rust sources of
+    CSS_DIRS, generated sheets, vendored crates and test code aside."""
+    motion = tomllib.loads(read(root / CSS_TOKENS))["sal"]["motion"]
+    rust = [p for d in CSS_DIRS for p in walk(root / d, ".rs")]
+    tests = test_module_files(rust)
+    files = [p for d in CSS_DIRS for suffix in (".css", ".css.in") for p in walk(root / d, suffix)]
+    files += [p for p in rust if not (is_test_file(p) or p in tests)]
+    found = {}
+    for p in sorted(files):
+        path = str(p.relative_to(root))
+        if "/generated/" in path or vendored(path):
+            continue
+        for start, css in css_texts(p, read(p)):
+            for line, kind, text in css_problems(css, motion):
+                found.setdefault(path, []).append((start + line, kind, text))
+    return found
+
+
+def css_budget(r, found, budgets):
+    """Fails `r` per finding of a file and kind over its budget in `budgets`, and once per
+    budget above its findings, so that the budget comes down with them."""
+    for path in sorted(set(found) | set(budgets)):
+        for kind in ("px", "font-px", "duration", "curve"):
+            hits = [f for f in found.get(path, []) if f[1] == kind]
+            budget = budgets.get(path, {}).get(kind, 0)
+            if len(hits) > budget:
+                for line, _, text in hits:
+                    r.fail(f"{path}:{line}: {text}: {kind} over the budget of {budget}; take the "
+                           "value from a token of tokens.toml (doc_visual_language.md VL11)")
+            elif len(hits) < budget:
+                r.fail(f"{path}: {kind}: {len(hits)} finding(s) under the budget of {budget}; "
+                       "lower CSS_BUDGETS in scripts/verify.py to match")
+
+
+@check("css", "The shell's CSS takes its lengths and motion from the tokens (VL11)")
+def check_css():
+    r = Result()
+    css_budget(r, css_findings(), CSS_BUDGETS)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # 7a. allow-list — a shell client that needs a privileged global has its line
 # --------------------------------------------------------------------------- #
 
@@ -2343,7 +3175,6 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # must keep one line, for the unit it runs in, and a spec that comes to install one ends its
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
 UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-            "/usr/bin/cosmic-idle": "cosmic-idle.scope",
             "/usr/bin/cosmic-osd": "cosmic-osd.service",
             "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
 SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
@@ -2367,9 +3198,13 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # client binds the capture globals at the first `Client::capture`, the window actions at the
 # first action of `Client::window_actions`, the keyboard group at the first
 # `Client::watch_keyboard_group`, athanor-sulphur's accessibility manager at the first
-# `Client::watch_accessibility`, and its tiling manager at the first `Client::watch_tiling`;
-# capture.rs, actions.rs, keyboard_group.rs, a11y.rs and workspace_tiling.rs hold every name of
-# them in the crate.
+# `Client::watch_accessibility`, its tiling manager at the first `Client::watch_tiling`, and the
+# toplevel list and athanor-sulphur's toplevel manager at the first `Client::watch_windows`;
+# capture.rs, actions.rs, keyboard_group.rs, a11y.rs, workspace_tiling.rs and windows.rs hold
+# every name of them in the crate. connection.rs binds the rest when a client connects, so it
+# counts for a target only when code outside the crate names `Client`, the one type that
+# connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
+# does, binds nothing through it (maintainer decision, 2026-11-07).
 ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
              ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/actions.rs":
@@ -2383,12 +3218,18 @@ ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
               re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)")),
              "system/athanor-sulphur-client/src/workspace_tiling.rs":
              ("system/athanor-sulphur-client",
-              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)"))}
+              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/windows.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
-# first watch of the accessibility state and at the first watch of the tiling. Each names at least
-# one, or the check no longer sees what the client binds.
+# first watch of the accessibility state, at the first watch of the tiling and at the first watch
+# of the windows. Each names at least one, or the check no longer sees what the client binds.
 CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
                 "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
                 "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
@@ -2397,7 +3238,9 @@ CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
                 "system/athanor-sulphur-client/src/a11y.rs":
                 "at the first watch of the accessibility state",
                 "system/athanor-sulphur-client/src/workspace_tiling.rs":
-                "at the first watch of the tiling"}
+                "at the first watch of the tiling",
+                "system/athanor-sulphur-client/src/windows.rs":
+                "at the first watch of the windows"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 
@@ -2578,6 +3421,23 @@ def path_dependencies(crate, manifest, root):
                 yield name, entry, (base / path).resolve()
 
 
+def depends_on(root, where, owner):
+    """Whether the crate of `where`, a file relative to `root`, reaches the crate at `owner`,
+    relative to `root` too, through the path dependencies of its Cargo.toml, under any name,
+    directly or through the dependencies of those."""
+    root = root.resolve()
+    crate = next((d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None)
+    seen, todo = set(), [crate] if crate else []
+    while todo:
+        crate = todo.pop()
+        if crate in seen:
+            continue
+        seen.add(crate)
+        manifest = tomllib.loads(read(crate / "Cargo.toml"))
+        todo += [dep for _, _, dep in path_dependencies(crate, manifest, root)]
+    return (root / owner).resolve() in seen
+
+
 def target_files(crate, entry, features, defaults, root):
     """The production files a binary target is built from: its own, and those of the path
     dependencies its code names, followed transitively with the features the build enables
@@ -2732,9 +3592,14 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
         layer, names = None, {}
         files = {path.relative_to(root.resolve()): text for path, text in
                  target_files(crate, entry, features, defaults, root).items()}
+        # The call is looked for only in crates whose Cargo.toml depends on the owner: a crate
+        # that does not cannot reach its calls, whatever its code names (Sal's
+        # `DecorationMode::Client` is no `Client` of athanor-sulphur-client; maintainer
+        # decision, 2026-11-07).
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
             owner, call = ON_DEMAND[where.as_posix()]
-            if not any(call.search(text) for other, text in files.items() if not other.is_relative_to(owner)):
+            if not any(call.search(text) for other, text in files.items()
+                       if not other.is_relative_to(owner) and depends_on(root, other, owner)):
                 del files[where]
         layer = top_layer(files)
         for where, text in sorted(files.items()):
@@ -3077,10 +3942,53 @@ def faillock_problems(root=None):
     return problems
 
 
-@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090)")
+LOCK_PAM_DIR = "forge/specs/athanor-unlockd/SOURCES/usr/lib/pam.d"
+LOCK_PAM = {
+    "athanor-lock": [
+        "auth requisite pam_faillock.so preauth",
+        "auth include system-auth",
+        "account include system-auth",
+    ],
+    "athanor-lock-fingerprint": [
+        "auth requisite pam_faillock.so preauth silent",
+        "auth [success=done authinfo_unavail=die user_unknown=die default=bad] pam_fprintd.so max-tries=1",
+        "auth required pam_faillock.so authfail",
+        "auth required pam_deny.so",
+        "account include system-auth",
+    ],
+}
+LOCK_PAM_BANNED = ("pam_gnome_keyring", "pam_oo7", "nullok")
+
+
+def lock_pam_problems(root=None):
+    """The session lock's stacks are LP8's lines: no keyring, no nullok, only system-auth included."""
+    root = root or ROOT
+    problems = []
+    for name, expected in LOCK_PAM.items():
+        where = f"{LOCK_PAM_DIR}/{name}"
+        try:
+            text = read(root / where)
+        except OSError as err:
+            problems.append(f"{where}: cannot read ({err})")
+            continue
+        lines = [" ".join(line.split()) for line in text.splitlines()
+                 if line.strip() and not line.lstrip().startswith("#")]
+        for number, line in enumerate(lines, 1):
+            for word in LOCK_PAM_BANNED:
+                if word in line:
+                    problems.append(f"{where}: rule {number} names {word} (LP8)")
+            words = line.split()
+            if len(words) > 2 and words[1] in ("include", "substack") and words[2] != "system-auth":
+                problems.append(f"{where}: rule {number} includes {words[2]}, not system-auth (LP8)")
+        if lines != expected:
+            problems.append(f"{where}: the rules are not LP8's {len(expected)} lines: {lines}")
+    return problems
+
+
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090), the lock's stacks (LP8)")
 def check_pam():
     r = Result()
-    for problem in nullok_problems() + pwquality_problems() + faillock_problems():
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems() + lock_pam_problems():
         r.fail(problem)
     return r
 
@@ -3160,11 +4068,122 @@ def manifest_spec_problems(root=None):
     return problems
 
 
+# Specs whose Release does not carry %{?athanor_content}: they follow an upstream release or the
+# kernel's, and still raise Release by hand on a payload change (forge/AGENTS.md).
+RELEASE_BY_HAND = {
+    "forge/specs/azoth/microvm/azoth-microvm.spec",
+    "forge/specs/cosmic-comp/cosmic-comp.spec",
+    "forge/specs/greenboot-rs/greenboot-rs.spec",
+    "forge/specs/polkit/polkit.spec",
+}
+# The RELEASE_BY_HAND spec whose Version-Release is the kernel's NVR: build.sh defines kversion
+# and krelease from nvr.sh, which reads the kernel pins, so the spec cannot raise it, and the
+# kernel pipeline already rebuilds and tests a change to microvm/ (build-inputs.py hashes its
+# spec and kernel-local, kernel_unchanged.py checks the whole directory).
+RELEASE_FROM_KERNEL = {"forge/specs/azoth/microvm/azoth-microvm.spec"}
+# Directories under a RELEASE_BY_HAND spec's directory that no Source line and no section of the
+# spec reads, so a change to them leaves the package as it is and raises no Release (#1202). The
+# spec file itself is never listed: a comment-only edit of a spec raises Release too.
+RELEASE_UNPACKAGED = {
+    "forge/specs/greenboot-rs/tests/": "unittest suites of the patches, run by just check, not packaged",
+    "forge/specs/polkit/tests/": "unittest suites of the agent helper, run by just check, not packaged",
+}
+
+
+def load_module(path):
+    """The Python module at PATH, relative to the repository, loaded by its file path: the
+    directories of scripts/ci and forge/scripts are not packages verify.py can import."""
+    spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def unraised_releases(root, base):
+    """The RELEASE_BY_HAND specs of ROOT (but RELEASE_FROM_KERNEL) whose directory differs from
+    revision BASE outside RELEASE_UNPACKAGED while their Version-Release did not rise (#1202).
+
+    The working tree is compared with BASE, a two-tree diff as scripts/ci/changes.py makes: in
+    pr.yml BASE is the first parent of the checked-out merge, so the diff is the pull request's.
+    A spec absent at BASE is new, one absent from the tree is removed, and one whose base Release
+    still carried %{?athanor_content} had no hand Release to raise: none of them is compared.
+    Raises ValueError when BASE is not a commit or git cannot diff it.
+    """
+    rpms = load_module("forge/scripts/check_image_rpms.py")
+    classes = load_module("scripts/ci/release_class.py")
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+    if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
+        raise ValueError(f"{base} is not a commit of {root}")
+    diff = git("diff", "--name-only", "--no-renames", "-z", base, "--")
+    if diff.returncode != 0:
+        raise ValueError(f"git diff {base} failed: {diff.stderr.strip()}")
+    changed = [p for p in diff.stdout.split("\0") if p]
+
+    problems = []
+    for spec in sorted(RELEASE_BY_HAND - RELEASE_FROM_KERNEL):
+        directory = spec.rsplit("/", 1)[0] + "/"
+        content = [p for p in changed if p.startswith(directory)
+                   and not any(p.startswith(d) for d in RELEASE_UNPACKAGED)]
+        if not content or not (Path(root) / spec).is_file():
+            continue
+        listed = git("ls-tree", "-z", "--name-only", base, "--", spec)
+        if listed.returncode != 0:
+            problems.append(f"{spec}: cannot list it at {base}: {listed.stderr.strip()}")
+            continue
+        if not listed.stdout:
+            continue
+        before = git("show", f"{base}:{spec}")
+        if before.returncode != 0:
+            problems.append(f"{spec}: cannot read it at {base}: {before.stderr.strip()}")
+            continue
+        if re.search(r"^Release:.*%\{\?athanor_content\}", before.stdout, re.M):
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            old_spec = Path(tmp) / Path(spec).name
+            old_spec.write_text(before.stdout, encoding="utf-8")
+            try:
+                old = rpms.read_spec(old_spec)[1]()
+                new = rpms.read_spec(Path(root) / spec)[1]()
+                raised = classes.evrcmp(new, old) > 0
+            except (KeyError, ValueError, classes.ClassError) as e:
+                problems.append(f"{spec}: cannot read its Version-Release: {e}")
+                continue
+        if not raised:
+            problems.append(
+                f"{spec}: {', '.join(c[len(directory):] for c in content)} changed but "
+                f"Version-Release {new} is not higher than {old} at {base}: raise Release and add "
+                f"a %changelog entry, or add a path no build reads to RELEASE_UNPACKAGED in "
+                f"scripts/verify.py, only with its reason")
+    return problems
+
+
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
     for problem in manifest_spec_problems():
         r.fail(problem)
+    if BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the Release raises of RELEASE_BY_HAND "
+               "were not checked")
+    else:
+        try:
+            for problem in unraised_releases(ROOT, BASE_REF):
+                r.fail(problem)
+        except ValueError as e:
+            r.fail(f"Release raises against {BASE_REF}: {e}")
+        else:
+            commits = {
+                subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+                                f"{ref}^{{commit}}"], capture_output=True, text=True).stdout
+                for ref in (BASE_REF, "HEAD")
+            }
+            if len(commits) == 1:
+                r.note(f"the base {BASE_REF} is the checked-out commit, so only uncommitted edits were compared for "
+                       "Release raises: pass the pull request's base, e.g. "
+                       "`just check-static origin/iso-v0`")
     import shlex
 
     def sections(text):
@@ -3206,6 +4225,13 @@ def check_specs():
 
     for spec in walk(ROOT, ".spec"):
         text = read(spec)
+        release = re.search(r"^Release:[ \t]*(\S+)", text, re.M)
+        by_hand = rel(spec) in RELEASE_BY_HAND
+        if rel(spec).startswith("forge/specs/") and release and by_hand == ("%{?athanor_content}" in release.group(1)):
+            r.fail(f"{rel(spec)}: Release {release.group(1)} " + (
+                "carries %{?athanor_content}: drop the spec from RELEASE_BY_HAND" if by_hand else
+                "lacks %{?athanor_content}: write <N>%{?athanor_content}%{?dist}, or list the spec in "
+                "RELEASE_BY_HAND and raise its Release by hand (forge/AGENTS.md)"))
         sec = sections(text)
         prep = sec.get("prep", "")
         # senza %setup/%autosetup rpmbuild non entra in una sottodirectory:
@@ -3416,6 +4442,138 @@ def check_gpu_grants():
     return r
 
 
+# landlock::PathFd opens a path following links, and a ruleset can name any descriptor: a
+# write grant built from either widens to wherever a link put at the path points (#1052).
+# athanor_unit::sandbox takes its write grants as dirs::Checked, which only athanor_unit::dirs
+# builds. This check holds the rest: no crate but athanor-unit depends on the landlock crate,
+# so every other one confines through athanor_unit::sandbox; no other Rust file names PathFd,
+# under any name a `use ... as` gives it; and in athanor_unit's sandbox.rs, PathFd appears only
+# in its import and as the parent of a read grant.
+LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
+LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
+PATH_FD = re.compile(r"\bPathFd\b")
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
+LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
+# In sandbox.rs, outside its tests module: a rule's descriptor is `<name>.as_fd()`; a
+# public function takes its grants only as these types, so a write grant is a dirs::Checked or
+# a dirs::CheckedNode; and nothing there opens a descriptor or builds rules from paths.
+PATH_BENEATH = re.compile(r"PathBeneath::new\(")
+PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
+SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
+SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
+SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
+
+
+def landlock_dependencies(manifest):
+    """The dependency tables of a Cargo manifest that name the landlock crate, by its own
+    name or as the `package` of a renamed one."""
+    tables = {name: manifest.get(name, {}) for name in ("dependencies", "dev-dependencies", "build-dependencies")}
+    for target, spec in manifest.get("target", {}).items():
+        for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            tables[f"target.{target}.{name}"] = spec.get(name, {})
+    return [table for table, deps in tables.items()
+            if any(name == "landlock" or (isinstance(dep, dict) and dep.get("package") == "landlock")
+                   for name, dep in deps.items())]
+
+
+def without_tests_module(text):
+    """text without its `#[cfg(test)] mod tests { ... }`, matched at the start of a line and cut
+    at its closing brace, so code before or after it is still read. A module whose braces do not
+    balance leaves the whole text, which the tests' own descriptors then fail: closed, not open."""
+    match = re.search(r"^#\[cfg\(test\)\]\s*mod\s+tests\s*\{", text, re.M)
+    if not match:
+        return text
+    depth = 0
+    for pos in range(match.end() - 1, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[pos], 0)
+        if depth == 0:
+            return text[:match.start()] + "\n" * text.count("\n", match.start(), pos + 1) + text[pos + 1:]
+    return text
+
+
+def sandbox_grant_problems(relative, code, read_grants):
+    """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
+    other than a dirs::Checked or dirs::CheckedNode."""
+    found = []
+    def line(pos):
+        return code.count("\n", 0, pos) + 1
+
+    for match in PATH_BENEATH.finditer(code):
+        if any(start <= match.start() < end for start, end in read_grants):
+            continue
+        # One built on PathFd is the PathFd finding below; this one is any other descriptor.
+        if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(r"\s*PathFd\b", code[match.end():]):
+            found.append(f"{relative}:{line(match.start())}: a rule whose descriptor is not "
+                         f"`<name>.as_fd()`; a write grant is a dirs::Checked descriptor")
+    for match in SANDBOX_PUB_FN.finditer(code):
+        for parameter in filter(None, (p.strip() for p in match.group(2).split(","))):
+            kind = re.sub(r"\s+", "", parameter.partition(":")[2])
+            if kind not in SANDBOX_PARAMETERS:
+                found.append(f"{relative}:{line(match.start())}: {match.group(1)} takes "
+                             f"`{parameter}`; a grant is one of {', '.join(sorted(SANDBOX_PARAMETERS))}")
+    for match in SANDBOX_OPENS.finditer(code):
+        found.append(f"{relative}:{line(match.start())}: {match.group(1)} opens a descriptor or "
+                     f"builds rules from paths; grants come from athanor_unit::dirs")
+    return found
+
+
+def landlock_fd_problems(root):
+    """No crate but athanor-unit depends on landlock; no Rust file names PathFd but
+    athanor_unit's sandbox.rs, and that only in its import and as the parent of a read grant.
+    So a Landlock write grant is never built from a path."""
+    root = Path(root)
+    problems = []
+    # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
+    # as well as one under system, and git-ignored trees (.scratch, worktrees) are not the code.
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
+    if listed.returncode:
+        return [f"cannot list the repository files: {listed.stderr.strip()}"]
+    files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
+    for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
+        path = root / relative
+        if relative == LANDLOCK_CRATE:
+            continue
+        try:
+            manifest = tomllib.loads(read(path))
+        except tomllib.TOMLDecodeError as err:
+            problems.append(f"{relative}: not valid TOML: {err}")
+            continue
+        for table in landlock_dependencies(manifest):
+            problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
+                            f"athanor_unit::sandbox, whose grants are dirs::Checked")
+    for relative in (name for name in files if name.endswith(".rs")):
+        path = root / relative
+        text = read(path)
+        allowed = []
+        if relative == LANDLOCK_SANDBOX:
+            allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
+            allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
+                        if not re.search(r"\bPathFd\s+as\b", match.group())]
+        if relative == LANDLOCK_SANDBOX:
+            problems += sandbox_grant_problems(relative, without_tests_module(text), allowed)
+        for match in PATH_FD.finditer(text):
+            if any(start <= match.start() < end for start, end in allowed):
+                continue
+            line = text.count("\n", 0, match.start()) + 1
+            if relative == LANDLOCK_SANDBOX:
+                problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
+                                f"grant; a write grant is a dirs::Checked descriptor")
+            else:
+                problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
+                                f"links; grant by an athanor_unit::dirs::Checked descriptor")
+    return problems
+
+
+@check("landlock-fd", "Landlock write grants go by a checked descriptor, never by path (#1052)")
+def check_landlock_fd():
+    r = Result()
+    for problem in landlock_fd_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
 # Placeholders the unit tests use for an owner: they name no real registry namespace.
 PLACEHOLDER_OWNERS = {"owner", "o"}
 # Where the pipeline names its images.
@@ -3457,6 +4615,69 @@ def registry_problems(root):
 def check_registry():
     r = Result()
     for problem in registry_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# PL8: a tool runs from the nixpkgs revision of flake.lock (`nix shell --inputs-from <checkout>
+# nixpkgs#<tool>`), never from whatever a bare `nixpkgs#` resolves to at run time (F12, #671).
+# --inputs-from pins only the bare `nixpkgs#` of its own nix command: `nixpkgs/<ref>#`,
+# `nixpkgs-<alias>#`, `nixpkgs?<query>#`, `flake:nixpkgs#` and `github:NixOS/nixpkgs[/<ref>]#`
+# name a source of their own.
+PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+", re.I)
+# Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
+NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
+
+
+def logical_lines(text):
+    """(first line number, text) of each command, its backslash continuations joined; comment
+    lines are dropped."""
+    start, parts = None, []
+    for i, line in enumerate(text.split("\n"), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if start is None:
+            start = i
+        parts.append(line[:-1] if line.endswith("\\") else line)
+        if not line.endswith("\\"):
+            yield start, " ".join(parts)
+            start, parts = None, []
+    if parts:
+        yield start, " ".join(parts)
+
+
+def pinning_problems(root):
+    """Every nixpkgs#<tool> a workflow, action, recipe or script runs is a bare nixpkgs#
+    reference after --inputs-from in the same nix command, so nixpkgs is the locked input of
+    the repository flake."""
+    root = Path(root)
+    paths = [root / f for f in REGISTRY_FILES]
+    for base in PINNING_DIRS:
+        paths += walk(root / base, "")
+    problems = []
+    for path in sorted(set(paths)):
+        relative = path.relative_to(root)
+        # Unit test fixtures need an unpinned reference to prove the check reports one.
+        if (not path.is_file() or relative.parts[1:2] == ("tests",)
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
+            continue
+        for i, line in logical_lines(read(path)):
+            for ref in NIXPKGS_REF.finditer(line):
+                command = NIX_COMMAND_BREAK.split(line[:ref.start()])[-1]
+                if not ref.group().startswith("nixpkgs#") or "--inputs-from " not in command:
+                    problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
+                                    f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
+                                    f"nix command, so nixpkgs is flake.lock's")
+    return problems
+
+
+@check("pinning", "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)")
+def check_pinning():
+    r = Result()
+    for problem in pinning_problems(ROOT):
         r.fail(problem)
     return r
 
@@ -3552,9 +4773,9 @@ OWN_LICENCE_EXCEPTIONS = {
         ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
     # The toolkit is permissive so that applications outside Athanor can use it (ADR-0121,
     # doc_own_stack.md OS7).
-    "system/athanor-toolkit/Cargo.toml":
+    "system/athanor-sal/Cargo.toml":
         ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
-    "system/athanor-toolkit/gallery/Cargo.toml":
+    "system/athanor-sal/gallery/Cargo.toml":
         ("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None),
 }
 # The crate whose dependency forces the greeter's exception above; a crate that depends on it
@@ -3626,7 +4847,7 @@ def licence_problems(root=None):
             if pkg is None:
                 continue
             lic = pkg.get("license")
-            want = OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
+            want = VENDORED_CRATES.get(f.rsplit("/", 1)[0]) or OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
                 out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):
@@ -4034,9 +5255,15 @@ SESSION_UNITS = {
     "athanor-bar.service": ("surface", True, "preset"),
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
+    "athanor-idle.service": ("guard", True, "preset"),
+    "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
+    # Started by nothing until its bus service file comes with doc_osd.md's retirement step
+    # (OD15, OD17 step 5).
+    "athanor-osd.service": ("surface", True, "activated"),
     "athanor-update-notify.service": ("surface", False, "preset"),
+    "athanor-sessiond.service": ("guard", False, "preset"),
     # SN6 names no class for the Super+C oneshot (doc_control_center.md, CC9); it runs once
     # per login and never restarts, as a session step does.
     "athanor-control-center-shortcut.service": ("step", False, "preset"),
@@ -4044,8 +5271,6 @@ SESSION_UNITS = {
     "xdg-desktop-portal-athanor.service": ("helper", True, "activated"),
     "athanor-desktop.service": ("step", False, "target"),
     "athanor-skel-sync.service": ("step", False, "target"),
-    "athanor-appearance-reset.service": ("step", False, "preset"),
-    "cosmic-bg.service": ("cosmic", True, "target"),
     "cosmic-osd.service": ("cosmic", True, "target"),
     "cosmic-settings-daemon.service": ("cosmic", True, "target"),
     # The own compositor (SN15): athanor-sulphur-session starts it and waits on it, and its
@@ -4057,6 +5282,8 @@ SESSION_TARGET = "athanor-session.target"
 NOT_SESSION_UNITS = {
     "athanor-launcher-rates.service": "the launcher's exchange-rate job, started by its timer",
     "athanor-launcher-rates.timer": "the launcher's exchange-rate timer, under timers.target",
+    "athanor-wallpaper-decode.socket": "the wallpaper decoder's static socket, wanted by athanor-wallpaper.service (doc_session_daemons.md, SD17)",
+    "athanor-wallpaper-decode@.service": "the wallpaper decoder, one instance per connection to its socket",
 }
 # SN6's policy per class: each setting's required value, None where the unit must not set it.
 # A time span is compared in seconds. Restart= unset is Restart=no (systemd.service(5)).
@@ -4100,7 +5327,6 @@ SESSION_EXEMPT = {
     ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
         "SN13 step 1 does not list it",
     ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
-    ("cosmic-bg.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("athanor-launcher.service", ACTIVATED_INSTALL):
@@ -4298,6 +5524,46 @@ def shipped_user_units(root):
     return units, problems
 
 
+# A tmpfiles.d line that creates a directory under the user's state directory.
+TMPFILES_DIRECTORY = re.compile(r"^[dD]!?\s+%S/([^/\s]+)")
+
+
+def shipped_user_state_directories(root):
+    """The top-level names under the user's state directory that a user tmpfiles.d file creates
+    (`d %S/<name>`), counting only the files a spec lists in its %files."""
+    names = set()
+    for spec in sorted(root.glob("forge/specs/*/*.spec")):
+        text = read(spec)
+        files = text.split("%files", 1)[1].split("%changelog", 1)[0] if "%files" in text else ""
+        for conf in sorted((spec.parent / "SOURCES/usr/share/user-tmpfiles.d").glob("*.conf")):
+            if f"/usr/share/user-tmpfiles.d/{conf.name}" not in files:
+                continue
+            for line in read(conf).splitlines():
+                match = TMPFILES_DIRECTORY.match(line.strip())
+                if match:
+                    names.add(match.group(1))
+    return names
+
+
+def state_link_problems(units, created):
+    """A finding for every top-level name a user unit takes as StateDirectory= that `created`
+    does not hold. When that directory is missing and ~/.config/<name> exists, whoever made it,
+    systemd 254 and later links the first to the second, and the state lives in the configuration
+    (#1238); a tmpfiles.d entry creates it before any unit starts.
+    ponytail: top-level names only; a nested StateDirectory= whose own ~/.config path exists
+    would still be linked, check the full path if one ever appears."""
+    state = {}
+    for unit, text in units.items():
+        for path in unit_names(unit_section(text, "Service"), "StateDirectory"):
+            state.setdefault(path.split(":")[0].split("/")[0], set()).add(unit)
+    return [
+        f"'{name}' is StateDirectory= of {', '.join(sorted(state[name]))} and no shipped user tmpfiles.d "
+        f"line 'd %S/{name}' creates it: systemd links a missing ~/.local/state/{name} to an existing "
+        f"~/.config/{name} (#1238)"
+        for name in sorted(state.keys() - created)
+    ]
+
+
 @check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
@@ -4307,8 +5573,128 @@ def check_session_units():
     enabled = {unit for verb, unit, _ in preset_lines(ROOT) if verb == "enable"}
     for problem in session_exempt_problems(session_unit_problems(units, enabled)):
         r.fail(problem)
+    for problem in state_link_problems(units, shipped_user_state_directories(ROOT)):
+        r.fail(problem)
     for (unit, finding), why in SESSION_EXEMPT.items():
         r.note(f"exempt: {unit}: {finding}: {why}")
+    return r
+
+
+# Properties that put a user unit in namespaces of its own. Under the user manager each one
+# gives the unit a user namespace, a sibling of every other unit's, and the kernel refuses a
+# ptrace-read (`readlink /proc/<pid>/exe`) between siblings (doc_session_daemons.md SD17).
+NAMESPACING_PROPERTY = re.compile(
+    r"^(Private(?:Network|IPC|Users|Tmp|PIDs|Devices|Mounts)|ProtectSystem|ProtectHome|Protect(?:Kernel\w+|ControlGroups|Proc|Hostname|Clock)"
+    r"|TemporaryFileSystem|InaccessiblePaths|ReadOnlyPaths|ReadWritePaths|BindPaths|BindReadOnlyPaths|MountAPIVFS|RootDirectory|RootImage"
+    r"|ProcSubset|ExecPaths|NoExecPaths|MountImages|ExtensionDirectories|ExtensionImages|PrivateBPF"
+    r"|ReadWriteDirectories|ReadOnlyDirectories|InaccessibleDirectories)\s*=(.*)$"
+)
+# The values that leave a namespacing property off: empty, a false boolean in any of systemd's
+# spellings, ProtectProc=default or ProcSubset=all.
+NAMESPACING_OFF = ("", "0", "no", "n", "false", "f", "off", "default", "all")
+# The command lines of a unit, each a program its namespaces hold.
+UNIT_EXEC = re.compile(r"(Exec(?:Start(?:Pre|Post)?|Condition|Reload|Stop(?:Post)?))\s*=\s*[-@:+!]*(\S+)")
+# A read of a process's executable: any mention of `admit_user_unit` but its definition, an
+# import under another name included, or a path `/proc/<pid>/exe` built in code.
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\b|/proc/\{[^}]*\}/exe\b|\.join\(\s*\"exe\"\s*\)")
+# The namespaced user units' programs that are no binary of a crate here, each with why it
+# admits no peer by its executable. A wrapper (env, sh -c, systemd-run) is listed only with its
+# unit, so a wrapper that starts one of this repository's daemons is never passed by name.
+FOREIGN_PROGRAMS = {
+    ("athanor-launcher-rates.service", "mkdir"): "an ExecStartPre= that creates qalculate's directory",
+    ("athanor-launcher-rates.service", "qalc"): "Qalculate's command line refreshes the currency rates and accepts no connection",
+    ("athanor-skel-sync.service", "bash"): "a script that copies /etc/skel once and accepts no connection",
+    ("cosmic-osd.service", "cosmic-osd"): "upstream COSMIC's program; no code of this repository runs in it",
+    ("cosmic-settings-daemon.service", "cosmic-settings-daemon"): "upstream COSMIC's program; no code of this repository runs in it",
+}
+# A library file whose exe read is the body of a function matched by name at each call site, so
+# depending on its crate reads nothing: athanor-unit's peer.rs, the read of admit_user_unit.
+READ_BY_CALL = {"system/athanor-unit/src/peer.rs"}
+
+
+def crate_programs(root):
+    """({binary: first file:line of an exe-reading call or None}) for every crate under system/
+    and forge/specs: its package name, its [[bin]] names and its src/bin/*.rs files. A read in
+    a crate of this repository that the binary's crate depends on, directly or not, counts."""
+    crates = {}
+    for base in ("system", "forge/specs"):
+        for manifest in walk(root / base, "Cargo.toml"):
+            try:
+                package = tomllib.loads(read(manifest))
+            except tomllib.TOMLDecodeError:
+                continue
+            name = package.get("package", {}).get("name")
+            bins = {name} | {b.get("name") for b in package.get("bin", [])}
+            bins |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
+            bins.discard(None)
+            tables = [package.get("dependencies", {})] + [t.get("dependencies", {}) for t in package.get("target", {}).values()]
+            deps = {(spec.get("package", key) if isinstance(spec, dict) else key) for table in tables for key, spec in table.items()}
+            reads = []
+            for source in walk(manifest.parent / "src", ".rs"):
+                for number, line in enumerate(read(source).split("\n"), 1):
+                    if EXE_READING_ADMISSION.search(line.split("//")[0]):
+                        reads.append((source.relative_to(root).as_posix(), number))
+            crates[name or rel(manifest)] = (bins, deps, reads)
+
+    def reads_of(name, seen):
+        bins, deps, reads = crates[name]
+        own = next((f"{path}:{number}" for path, number in reads if not seen or path not in READ_BY_CALL), None)
+        if own:
+            return own
+        seen.add(name)
+        return next((r for d in sorted(deps) if d in crates and d not in seen for r in [reads_of(d, seen)] if r), None)
+
+    programs = {}
+    for name, (bins, _, _) in crates.items():
+        reads = reads_of(name, set())
+        for binary in bins:
+            programs[binary] = programs.get(binary) or reads
+    return programs
+
+
+def user_unit_texts(root, units):
+    """{unit: text} of the shipped user units with every drop-in of `<unit>.d/*.conf` appended."""
+    texts = dict(units)
+    for conf in walk(root / "forge" / "specs", ".conf"):
+        if conf.parent.name.endswith(".service.d") and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
+            unit = conf.parent.name[:-2]
+            texts[unit] = texts.get(unit, "") + "\n" + read(conf)
+    return texts
+
+
+def peer_admission_problems(units, programs):
+    """A unit that sets a namespacing property and runs a program that reads its peer's
+    executable fails with EACCES and refuses every peer. A unit that sets one and runs a
+    program this scan cannot place is a problem too: it would otherwise pass unseen."""
+    problems = []
+    for unit, text in sorted(units.items()):
+        lines = [line.strip() for line in text.split("\n")]
+        namespaced = next((m for m in map(NAMESPACING_PROPERTY.match, lines) if m and m.group(2).strip().lower() not in NAMESPACING_OFF), None)
+        if not namespaced:
+            continue
+        for line in lines:
+            m = UNIT_EXEC.match(line)
+            if not m:
+                continue
+            program = m.group(2).rsplit("/", 1)[-1]
+            if program in programs:
+                if programs[program]:
+                    problems.append(f"{unit}: runs {program}, which reads a peer's executable at {programs[program]}, and sets {namespaced.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer by control group (athanor_unit::peer::admit_user_unit_cgroup, doc_session_daemons.md SD17)")
+            elif (unit, program) not in FOREIGN_PROGRAMS:
+                problems.append(f"{unit}: sets {namespaced.group(1)}= and its {m.group(1)}= runs {m.group(2)}, which is neither a binary of a crate under system/ or forge/specs nor in FOREIGN_PROGRAMS: say which it is")
+    return problems
+
+
+@check("peer-exe", "A user unit with namespacing properties runs no program that reads its peer's executable")
+def check_peer_exe():
+    r = Result()
+    units, problems = shipped_user_units(ROOT)
+    for problem in problems:
+        r.fail(problem)
+    for problem in peer_admission_problems(user_unit_texts(ROOT, units), crate_programs(ROOT)):
+        r.fail(problem)
+    for (unit, program), why in FOREIGN_PROGRAMS.items():
+        r.note(f"foreign: {unit}: {program}: {why}")
     return r
 
 
@@ -4759,6 +6145,150 @@ def check_bus_api_residue():
 
 
 # --------------------------------------------------------------------------- #
+# zbus-replies: an object-server method does not await a reply on its own connection
+# --------------------------------------------------------------------------- #
+
+ZBUS_INTERFACE = re.compile(r"#\[(?:zbus::)?interface\b")
+ZBUS_CONNECTION_ARG = re.compile(r"#\[zbus\(connection\)\]\s*(\w+)\s*:")
+# What a method may do with its connection without waiting for a reply: build an emitter, name
+# the object server, emit.
+ZBUS_NO_REPLY_BEFORE = re.compile(r"(?:SignalEmitter::new|\bemit_\w+|\bbar_emitter\([^()]*,)\s*\(?\s*&?$")
+ZBUS_NO_REPLY_AFTER = re.compile(r"\s*\.(?:object_server|unique_name|emit_signal|request_name|release_name)\b")
+
+
+def matching(txt, at, open_, close):
+    """The index just past the bracket that closes the one at `txt[at]`, or len(txt)."""
+    depth = 0
+    for i in range(at, len(txt)):
+        depth += txt[i] == open_
+        depth -= txt[i] == close
+        if depth == 0:
+            return i + 1
+    return len(txt)
+
+
+def zbus_replies(files, root):
+    """Findings for the Rust `files` (paths under `root`): a method of an `#[interface]` impl
+    that takes `#[zbus(connection)] conn` and awaits a statement that passes `conn` on, or calls
+    on it. zbus 5.19 reads one socket per connection and hands each message to every stream
+    with a queue of 64. A handler that awaits a reply on that connection while a stream of it
+    fills stops the reader, so the reply is never read and the wait is for good
+    (issue #1035). The fix is a second connection that serves nothing, subscribes to nothing and
+    owns no name, with each query under `tokio::time::timeout`; a method then reads it from
+    `self`, not from the argument.
+
+    A source scan, not a type check. It follows no helper: a statement that awaits and names the
+    argument is a finding, except an emitter (`SignalEmitter::new`, `emit_*`, `bar_emitter`) or
+    `conn.object_server()`, `.unique_name()` and the name calls. A connection reached through
+    `self`, and a loop over a stream of a connection whose body awaits a call on that
+    connection, are not seen. Code under `#[cfg(test)]`, tests, benches and examples is skipped.
+    """
+    problems = []
+    for path in files:
+        txt = without_literals(without_test_items(read(path)))
+        for iface in ZBUS_INTERFACE.finditer(txt):
+            brace = txt.find("{", iface.end())
+            if brace < 0:
+                continue
+            block = txt[brace:matching(txt, brace, "{", "}")]
+            for fn in re.finditer(r"\bfn\s+(\w+)[^(]*\(", block):
+                params_end = matching(block, fn.end() - 1, "(", ")")
+                arg = ZBUS_CONNECTION_ARG.search(block, fn.end(), params_end)
+                body_start = block.find("{", params_end)
+                if not arg or body_start < 0:
+                    continue
+                body = block[body_start:matching(block, body_start, "{", "}")]
+                name = re.escape(arg.group(1))
+                for use in re.finditer(rf"(?<![\w.]){name}\b", body):
+                    start = max(body.rfind(c, 0, use.start()) for c in ";{}") + 1
+                    end = body.find(";", use.end())
+                    statement = body[start:end if end >= 0 else len(body)]
+                    if ".await" not in statement:
+                        continue
+                    if ZBUS_NO_REPLY_BEFORE.search(body[start:use.start()]) or ZBUS_NO_REPLY_AFTER.match(body, use.end()):
+                        continue
+                    at = txt[:brace + body_start + use.start()].count("\n") + 1
+                    problems.append(f"{Path(path).relative_to(root)}:{at}: `{fn.group(1)}` awaits a reply on the connection that serves it")
+                    break
+    return problems
+
+
+@check("zbus-replies", "an object-server method awaits no reply on the connection that serves it (issue #1035)")
+def check_zbus_replies():
+    r = Result()
+    files = list(rust_files())
+    skip = test_module_files(files)
+    for problem in zbus_replies([p for p in files if not is_test_file(p) and p not in skip and not vendored(rel(p))], ROOT):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
+# landlock-proc: no Landlock read grant names /proc
+# --------------------------------------------------------------------------- #
+
+# A Landlock grant in Rust source: `athanor_unit::sandbox::restrict`, a crate's own copy, or a
+# rule built directly.
+LANDLOCK_GRANT = re.compile(r"\brestrict\s*\(|\bPathBeneath::new\b")
+# /proc itself, or the directory of this process or thread: a literal a grant can name.
+PROC_LITERAL = re.compile(r'"/proc(?:/(?:self|thread-self))?/?"')
+
+
+def crate_of(path, root):
+    """The directory of the nearest Cargo.toml above `path`, up to `root`, or None."""
+    for parent in Path(path).parents:
+        if (parent / "Cargo.toml").is_file():
+            return parent
+        if parent == root:
+            return None
+    return None
+
+
+def landlock_proc_problems(root):
+    """A crate that confines itself with Landlock names no /proc in its non-test sources. Landlock
+    grants a whole tree and cannot narrow /proc to one file of one process, so a read grant of
+    /proc reads the environ, cmdline and maps of every process of the user, where tokens live
+    (issue #1047). A caller's unit comes from the bus and systemd (athanor_unit::bus_caller);
+    a read of /proc before the ruleset, such as the thread count, names a deeper path and passes.
+
+    A source scan, not a type check: a crate with a grant call anywhere is scanned whole, since
+    its grants may be listed in one file and applied in another. Comments, code under
+    `#[cfg(test)]`, tests, benches and examples are skipped."""
+    root = Path(root)
+    problems = []
+    for base in RS_DIRS:
+        files = list(walk(root / base, ".rs"))
+        skip = test_module_files(files)
+        crates = {}
+        for path in sorted(files):
+            relative = path.relative_to(root).as_posix()
+            if is_test_file(path) or path in skip or vendored(relative):
+                continue
+            # Comment lines blanked, not dropped, so that line numbers hold.
+            code = "\n".join("" if line.lstrip().startswith("//") else line
+                             for line in without_test_items(read(path)).split("\n"))
+            crates.setdefault(crate_of(path, root), []).append((relative, code))
+        for sources in crates.values():
+            if not any(LANDLOCK_GRANT.search(code) for _, code in sources):
+                continue
+            for relative, code in sources:
+                for i, line in enumerate(code.split("\n"), 1):
+                    if PROC_LITERAL.search(line):
+                        problems.append(f"{relative}:{i}: a Landlock-confined crate names /proc; "
+                                        f"ask the bus and systemd for a caller's unit "
+                                        f"(athanor_unit::bus_caller), never grant /proc")
+    return problems
+
+
+@check("landlock-proc", "No Landlock read grant of a daemon names /proc (issue #1047)")
+def check_landlock_proc():
+    r = Result()
+    for problem in landlock_proc_problems(ROOT):
+        r.fail(problem)
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # agent-docs: the instructions agents read name things that exist
 # --------------------------------------------------------------------------- #
 
@@ -4902,6 +6432,191 @@ def check_agent_docs():
 
 
 # --------------------------------------------------------------------------- #
+# line-citations: a `path:N` in an architecture document still names what the sentence names
+# --------------------------------------------------------------------------- #
+
+# What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
+LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
+# What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
+# `cosmic-osd.service`), or a bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
+CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
+# The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
+LINE_RANGE_LIMIT = 200
+# A markdown line that holds no words: blank, or a table's rule (`| --- | --- |`).
+EMPTY_LINE = re.compile(r"[\s|:-]*")
+# The row a sentence names in a table of a cited document: `Archives row`.
+ROW_NAME = re.compile(r"\b([A-Z][a-z]+) row\b")
+# The id of a section of a specification (`SH3`, `BR2`); a section starts at its `**BR2.` line and
+# ends at the next such line or heading.
+SECTION_ID = re.compile(r"\b[A-Z]{1,4}\d+\b")
+SECTION_START = re.compile(r"\*\*[A-Z]{1,4}\d+[a-z]?\b|#{1,3} ")
+
+
+def section_lines(rows, ident):
+    """The first and the last line (from 1) of the section `ident` of a document, or None."""
+    for first, row in enumerate(rows, 1):
+        if row.startswith(f"**{ident}."):
+            end = next((n for n in range(first + 1, len(rows) + 1) if SECTION_START.match(rows[n - 1])),
+                       len(rows) + 1)
+            return first, end - 1
+    return None
+
+# Findings the heuristic cannot settle, each (document, cited path, cited lines, token, n) with the
+# reason: one entry covers one citation, the n-th (from 1) of the document that has the same path,
+# lines and token. An entry that matches no finding fails, so the list only shrinks.
+LINE_CITATIONS_KEPT = {
+    ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
+        "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
+}
+
+
+def holds_token(text, token):
+    """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
+    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open."""
+    word = re.escape(token.rsplit("::", 1)[-1])
+    return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
+
+
+def citation_findings(doc, text, tracked, read_file):
+    """The citations of the document's `text` that no longer name what they cite, as
+    (line, path, lines, token, message); `token` is None when the finding is not a moved line.
+    `tracked` is the repository's files, `read_file(path)` the text of one.
+
+    A citation is `path:N`, `path:N-M` or a list `path:N, M-K`; `:N` alone cites the file named
+    last in the same line, with or without a line of its own. A backtick span that is no file name
+    (an identifier) leaves that file as it was; a file name that resolves to no file, or a
+    citation of one, clears it, and a `:N` after that cites nothing and is not checked. A path resolves as written, then under the crate whose full path the line names
+    before it, then by the one tracked file whose path ends with it; a name that several files
+    end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
+    repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
+    file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
+    reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
+    document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
+    sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
+    and the section ids of the sentence (`BR2`) that the document has as a `**BR2.` line fix the
+    sections the cited lines lie in (or name the id themselves, as a list of other documents does).
+
+    The token is the nearest code token before the citation in its sentence (after the last `. `,
+    `; `, `: `, `), ` or ` | `) that the cited file holds as a whole word; the cited lines must
+    hold it, as a whole identifier. For a list the lines of all its entries count together: a list names the places of
+    several words of one sentence (`packages.json:2, 51` for two lists), so the token cannot be
+    attributed to one entry; each entry must still be a line range.
+
+    Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
+    place holding the token, and a word that the cited lines hold in a comment or a string
+    satisfies the check as it does in code. A citation of another document with no token, no row
+    name and no section id in its sentence is checked only for a first line that holds words, so
+    a stale one that still lands on text goes unseen (#1089)."""
+    known = set(tracked)
+    prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
+    suffixes = {}
+    for path in known:
+        parts = path.split("/")
+        for i in range(len(parts)):
+            suffixes.setdefault("/".join(parts[i:]), []).append(path)
+
+    def resolve(name, crate):
+        for candidate in (f"{crate}/{name}" if crate else None, name):
+            if candidate in known:
+                return candidate
+        found = suffixes.get(name, [])
+        return found[0] if len(found) == 1 else None
+
+    out = []
+    for number, line in enumerate(text.split("\n"), 1):
+        last = crate = None
+        for span in re.finditer(r"`([^`]+)`", line):
+            m = LINE_CITATION.fullmatch(span.group(1))
+            if not m:
+                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
+                continue
+            named, spec = m.groups()
+            path = last if named is None else resolve(named, crate)
+            if path is None and named and (named.startswith(prefixes) or (
+                    named.endswith(".md") and "/" not in named
+                    and not any(t.endswith("/" + named) for t in known))):
+                out.append((number, named, spec, None,
+                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
+            last = path
+            if path is None:
+                continue
+            body = read_file(path)
+            if (c := CRATE_ROOT.match(path)):
+                crate = c.group(1)
+            ranges = []
+            for part in re.split(r",\s*", spec):
+                first, _, end = part.partition("-")
+                ranges.append((int(first), int(end or first)))
+            rows = body.split("\n")
+            if rows[-1] == "":
+                rows.pop()
+            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
+                            f"(fewer than {LINE_RANGE_LIMIT} lines)"))
+                continue
+            if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
+                continue
+            start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
+            own = {part.split(".")[0] for part in path.split("/")}
+            sentence = line[start + 1:span.start()]
+            found = [(m.start(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            if path.endswith(".md"):
+                found += [(m.start(), m.group(1)) for m in ROW_NAME.finditer(sentence)]
+            if path.endswith(".md"):
+                spans = {i: section_lines(rows, i) for i in dict.fromkeys(SECTION_ID.findall(sentence))}
+                spans = {i: lines for i, lines in spans.items() if lines}
+                if spans:
+                    low = min(first for first, _ in spans.values())
+                    high = max(last for _, last in spans.values())
+                    if any(not (low <= f and e <= high or any(holds_token("\n".join(rows[f - 1:e]), i)
+                                                               for i in spans)) for f, e in ranges):
+                        named = ", ".join(spans)
+                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
+                                    f"the section of {named}, which its sentence names: the lines moved"))
+                        continue
+            tokens = [t for _, t in sorted(found)
+                      if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
+            held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
+            if tokens and not holds_token(held, tokens[-1]):
+                out.append((number, path, spec, tokens[-1], f"{doc}:{number}: `{path}:{spec}` does not hold "
+                            f"`{tokens[-1]}`, which its sentence names: the lines moved"))
+    return out
+
+
+@check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
+def check_line_citations():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = {f for f in listed.stdout.split("\0") if f}
+
+    def read_file(path):
+        try:
+            return read(ROOT / path)
+        except OSError:
+            return ""
+
+    seen = set()
+    for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
+        counted = {}
+        for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
+            n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
+            seen.add((doc.name, path, spec, token, n))
+            if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
+                r.fail(problem)
+    for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
+        r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
@@ -5033,9 +6748,8 @@ def main(argv):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    if known_red_ref and not known_red_path:
-        print("--known-red-base needs --known-red", file=sys.stderr)
-        return 2
+    global BASE_REF
+    BASE_REF = known_red_ref
 
     if "--list" in argv:
         for n, f in CHECKS.items():

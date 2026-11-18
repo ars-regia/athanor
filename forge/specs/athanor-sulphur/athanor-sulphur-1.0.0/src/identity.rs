@@ -46,6 +46,12 @@ pub enum Privilege {
     KeyboardGroup,
     /// `athanor_workspace_tiling_manager_v1`: whether each workspace is tiled, read and set.
     WorkspaceTiling,
+    /// `athanor_dock_overlap_manager_v1`: whether a window covers the dock's rectangle, the
+    /// dock's (doc_own_stack.md decision 35).
+    DockOverlap,
+    /// `athanor_material_manager_v1`: each output's material tier, the shell surfaces'
+    /// (doc_own_stack.md decision 35, doc_visual_language.md VL13).
+    Material,
     /// `athanor_a11y_manager_v1`: the magnifier and the colour filters switched, and the
     /// keyboard aids configured (doc_accessibility.md AX10, AX11).
     A11y,
@@ -62,7 +68,7 @@ pub enum Privilege {
 }
 
 impl Privilege {
-    const ALL: [(Self, &'static str); 20] = [
+    const ALL: [(Self, &'static str); 22] = [
         (Self::TopLayers, "zwlr_layer_shell_v1"),
         (Self::ToplevelList, "ext_foreign_toplevel_list_v1"),
         (
@@ -91,6 +97,8 @@ impl Privilege {
             Self::WorkspaceTiling,
             "athanor_workspace_tiling_manager_v1",
         ),
+        (Self::DockOverlap, "athanor_dock_overlap_manager_v1"),
+        (Self::Material, "athanor_material_manager_v1"),
         (Self::TrustedPrompt, MARK),
     ];
 
@@ -645,6 +653,7 @@ mod tests {
             ("athanor-control-center", false),
             ("athanor-dock", false),
             ("athanor-launcher", false),
+            ("athanor-osd", false),
         ] {
             let client = Identity {
                 executable: format!("/usr/bin/{name}").into(),
@@ -809,10 +818,10 @@ mod tests {
     /// interfaces each uses (doc_session.md, SN12; #683, widened). `Client::connect` binds every
     /// privileged global the compositor offers it; a client is granted only the ones it uses:
     /// the dock lists windows, the launcher lists and captures them, the control center only
-    /// draws on the overlay layer. Then the upstream clients of doc_session.md revision 4,
-    /// SN12 and SN15, which no crate of the tree builds: the locker, the idle daemon and
-    /// cosmic-osd.
-    const SHELL_CLIENTS: [(&str, &str, &[&str]); 8] = [
+    /// draws on the overlay layer; athanor-idle blanks the outputs and draws its fade
+    /// (doc_session_daemons.md, SD22). Then the upstream clients of doc_session.md revision 4,
+    /// SN12 and SN15, which no crate of the tree builds: the locker and cosmic-osd.
+    const SHELL_CLIENTS: [(&str, &str, &[&str]); 9] = [
         (
             "athanor-bar",
             "athanor-bar.service",
@@ -825,6 +834,7 @@ mod tests {
                 "athanor_keyboard_group_manager_v1",
                 "athanor_a11y_manager_v1",
                 "athanor_workspace_tiling_manager_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -838,6 +848,7 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -849,6 +860,8 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "athanor_toplevel_manager_v1",
                 "athanor_toplevel_actions_v1",
+                "athanor_dock_overlap_manager_v1",
+                "athanor_material_manager_v1",
             ],
         ),
         (
@@ -860,17 +873,27 @@ mod tests {
                 "ext_workspace_manager_v1",
                 "ext_foreign_toplevel_list_v1",
                 "athanor_toplevel_manager_v1",
+                "athanor_material_manager_v1",
             ],
+        ),
+        (
+            "athanor-osd",
+            "athanor-osd.service",
+            &[
+                "zwlr_layer_shell_v1",
+                "ext_workspace_manager_v1",
+                "athanor_material_manager_v1",
+            ],
+        ),
+        (
+            "athanor-idle",
+            "athanor-idle.service",
+            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
         ),
         (
             "cosmic-greeter",
             "cosmic-greeter-locker.scope",
             &["ext_session_lock_manager_v1"],
-        ),
-        (
-            "cosmic-idle",
-            "cosmic-idle.scope",
-            &["zwlr_output_power_manager_v1", "zwlr_layer_shell_v1"],
         ),
         ("cosmic-osd", "cosmic-osd.service", &["zwlr_layer_shell_v1"]),
         (

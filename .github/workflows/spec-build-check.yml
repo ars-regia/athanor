@@ -6,7 +6,8 @@ name: Spec Build Check
 # inputs (flake.nix, flake.lock, forge/builder), forge/config/rpmmacros, build_spec.sh,
 # run_spec_build.sh or fetch_sources.sh. The specs build in the builder of the checkout, named by
 # its content hash (forge/scripts/check_idempotency.sh, the tag the DAG pulls): the published
-# athanor-builder:<hash> when the registry has it, else a builder image made from the pull request
+# athanor-builder:<hash> when the registry has it signed by a trusted run, pulled by the digest
+# that lookup verified, else a builder image made from the pull request
 # (forge/scripts/builder_image.sh, handed to the build jobs as a one-day workflow artifact, never
 # pushed). Never athanor-builder:latest: that is the default branch's builder, which lags a
 # change to the builder's inputs until the Orchestrator promotes the new one, and which a pull
@@ -33,13 +34,19 @@ jobs:
     timeout-minutes: 10
     outputs:
       builder: ${{ steps.builder.outputs.build }}
-      builder_hash: ${{ steps.builder.outputs.hash }}
+      # The digest the lookup verified, on a hit: the build jobs pull it, never the tag again.
+      builder_image: ${{ steps.builder.outputs.image }}
       specs: ${{ steps.select.outputs.specs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           # The merge commit and its first parent, the base: the change is the diff.
           fetch-depth: 2
+      # The flake's cosign verifies the published builder (#1205).
+      - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
 
       - name: Select the specs and the builder (forge/scripts/select_check_specs.py)
         id: select
@@ -53,16 +60,23 @@ jobs:
         working-directory: forge
         env:
           REGISTRY_HOST: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
+          # Reads the rules of a rebase/* base branch, whose signatures system/tier-digests.sh
+          # trusts only when a ruleset protects it.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           # retry.sh: a transient registry error is asked again; one that outlasts the attempts
-          # fails the check. A failed attempt prints nothing on stdout.
-          bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
+          # fails the check. A failed attempt prints nothing on stdout. A builder no trusted run
+          # of call-build-builder.yml signed is a miss: the pull request builds its own.
+          nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
             --registry "$REGISTRY_HOST" --owner "$GITHUB_REPOSITORY_OWNER" \
             --image-name athanor-builder > "$RUNNER_TEMP/idemp.out"
           source "$RUNNER_TEMP/idemp.out"
-          echo "hash=$CONTENT_HASH" >> "$GITHUB_OUTPUT"
-          if [[ $CACHE_HIT == true ]]; then echo "build=false"; else echo "build=true"; fi >> "$GITHUB_OUTPUT"
+          if [[ $CACHE_HIT == true ]]; then
+            printf 'build=false\nimage=%s\n' "$IMAGE"
+          else
+            echo "build=true"
+          fi >> "$GITHUB_OUTPUT"
 
   builder:
     needs: select
@@ -72,6 +86,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
           extra_nix_config: "experimental-features = nix-command flakes"
@@ -105,13 +121,14 @@ jobs:
       matrix:
         spec: ${{ fromJSON(needs.select.outputs.specs) }}
     env:
-      REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}
-      BUILDER_HASH: ${{ needs.select.outputs.builder_hash }}
+      BUILDER_IMAGE: ${{ needs.select.outputs.builder_image }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - if: needs.builder.result == 'success'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: athanor-builder-image
           path: ${{ runner.temp }}/spec-check
@@ -121,7 +138,7 @@ jobs:
           SPEC: ${{ matrix.spec }}
         run: |
           set -euo pipefail
-          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "${REGISTRY,,}/athanor-builder:${BUILDER_HASH}")
+          image=$(bash forge/scripts/builder_image.sh resolve "$RUNNER_TEMP/spec-check/athanor-builder.tar.gz" "$BUILDER_IMAGE")
           bash forge/scripts/run_spec_build.sh "$image" "$SPEC"
 
   gate:

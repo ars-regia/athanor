@@ -7,7 +7,7 @@ description = "The shell's headless daemon: desktop notifications and the Status
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
-athanor-unit = { path = "../../../../system/athanor-unit" }
+athanor-unit = { path = "../../../../system/athanor-unit", features = ["bus-caller"] }
 futures-util = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

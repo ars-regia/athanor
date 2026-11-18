@@ -5,13 +5,16 @@
 
 mod a11y;
 mod actions;
-#[cfg(feature = "gtk")]
+pub mod background;
+#[cfg(feature = "capture")]
 mod capture;
 mod connection;
 mod cosmic_config;
 pub mod favorites;
+pub mod idle;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
+pub mod keyboard;
 mod keyboard_group;
 mod keymap;
 mod launch;
@@ -22,6 +25,7 @@ mod protocols;
 pub mod shortcuts;
 pub mod theme;
 mod unit;
+mod windows;
 mod workspace_tiling;
 
 /// GLib's default main context has one owner at a time, and the tests of a binary run on
@@ -30,6 +34,8 @@ mod workspace_tiling;
 pub(crate) static MAIN_CONTEXT: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub use actions::WindowActions;
+#[cfg(feature = "capture")]
+pub use capture::{Picture, PixelFormat};
 pub use connection::{Client, Error};
 pub use launch::{LaunchError, Opener};
 pub use shortcuts::SETTINGS_PAGE_PREFIX;

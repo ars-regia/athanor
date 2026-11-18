@@ -28,16 +28,20 @@ pub fn announce(socket: &OsStr, x11: Option<u32>) -> Result<(), Error> {
         Some(display) => set.push(format!("DISPLAY=:{display}")),
         None => unset.push(String::from("DISPLAY")),
     }
-    zbus::blocking::connection::Builder::session()?
-        .method_timeout(TIMEOUT)
-        .build()?
-        .call_method(
-            Some("org.freedesktop.systemd1"),
-            "/org/freedesktop/systemd1",
-            Some("org.freedesktop.systemd1.Manager"),
-            "UnsetAndSetEnvironment",
-            &(unset, set),
-        )?;
+    zbus::block_on(async {
+        zbus::connection::Builder::session()
+            .method_timeout(TIMEOUT)
+            .build()
+            .await?
+            .call_method(
+                Some("org.freedesktop.systemd1"),
+                "/org/freedesktop/systemd1",
+                Some("org.freedesktop.systemd1.Manager"),
+                "UnsetAndSetEnvironment",
+                &(unset, set),
+            )
+            .await
+    })?;
     athanor_unit::notify::notify_ready()?;
     tracing::info!(socket = name, ?x11, "ready");
     Ok(())

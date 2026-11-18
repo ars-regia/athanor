@@ -37,7 +37,7 @@ class ShownTest(unittest.TestCase):
         self.assertEqual(check.shown("abc\n\n"), "")
 
     def test_the_toolkits_messages_are_not_the_fields_text(self):
-        log = "abc\nathanor-toolkit: nothing pasted: the text is not UTF-8\n"
+        log = "abc\nathanor-sal: nothing pasted: the text is not UTF-8\n"
         self.assertEqual(check.shown(log), "abc")
 
     def test_before_the_first_edit_there_is_no_text(self):
@@ -50,7 +50,9 @@ class RefusalTest(unittest.TestCase):
         self.assertIn("cosmic-comp", why)
 
     def test_a_rig_without_wl_clipboard_is_refused(self):
-        which = lambda tool: None if tool.startswith("wl-") else tool
+        def which(tool):
+            return None if tool.startswith("wl-") else tool
+
         why = check.refusal({}, which=which)
         self.assertIn("wl-copy, wl-paste", why)
 

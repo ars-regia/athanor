@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-"""toolkit_clipboard_check.py - athanor-toolkit's text field on the clipboard and the primary
-selection (#719). Run as RIG_HOLD beside athanor-toolkit-field, under cosmic-comp: types into the
+"""toolkit_clipboard_check.py - athanor-sal's text field on the clipboard and the primary
+selection (#719). Run as RIG_HOLD beside athanor-sal-field, under cosmic-comp: types into the
 field through wtype's virtual keyboard, copies, cuts and pastes with Ctrl+C, Ctrl+X and Ctrl+V,
 then with the items of the field's context menu, opened with the Menu key and Shift+F10, and reads
 and sets the clipboards with wl-paste and wl-copy. The field's text is the last line the example
@@ -24,7 +24,7 @@ TIMEOUT = 10
 # client has handled it.
 SETTLE_S = 0.5
 # The toolkit's messages share the log with the example's lines.
-OWN_PREFIX = "athanor-toolkit"
+OWN_PREFIX = "athanor-sal"
 
 
 def log_path():
@@ -57,6 +57,13 @@ def wait_shown(expected):
 
 
 def keys(*args):
+    # cosmic-comp 1.11 applies a virtual keyboard's modifiers to the seat's keymap at once, but
+    # makes the device's keymap active only at its first key, which resets them
+    # (src/wayland/handlers/virtual_keyboard.rs:91-110 against src/input/mod.rs:287): wtype's -M
+    # is lost unless a key comes first. Shift_L does nothing in the field. Drop this once the
+    # job no longer runs on cosmic-comp.
+    if "-M" in args:
+        args = ("-k", "Shift_L", *args)
     subprocess.run(["wtype", *args], check=True, timeout=TIMEOUT)
     time.sleep(SETTLE_S)
 

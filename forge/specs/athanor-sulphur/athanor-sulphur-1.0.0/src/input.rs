@@ -14,9 +14,9 @@ use smithay::backend::input::{
     PointerMotionEvent,
 };
 use smithay::input::keyboard::{
-    FilterResult, KeyboardHandle, KeyboardSource, Keycode, Xkb, XkbConfig,
+    FilterResult, KeyboardHandle, KeyboardSource, Keycode, KeymapFile, Xkb, XkbConfig,
 };
-use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
+use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
 use smithay::output::Output;
 use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, Rectangle, Size, Transform, SERIAL_COUNTER};
@@ -25,13 +25,14 @@ use smithay::wayland::virtual_keyboard::{
     VirtualKeyboardSpecialEvent,
 };
 use smithay::wayland::virtual_pointer::{VirtualPointerBackend, VirtualPointerHandler};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 
 impl State {
-    /// A click at `location` focuses the window it lands on, or the layer surface there that
-    /// asks for the keyboard on demand. A click on a layer surface that takes the keyboard, of a
-    /// identity Super+Escape took the keyboard from, gives its exclusive surfaces the keyboard
-    /// back; a click on its windows, or on its surfaces that take no keyboard, does not.
+    /// A click at `location` focuses the window it lands on, or its modal dialog
+    /// (`State::focus_clicked`), or the layer surface there that asks for the keyboard on
+    /// demand. A click on a layer surface that takes the keyboard, of a identity Super+Escape
+    /// took the keyboard from, gives its exclusive surfaces the keyboard back; a click on its
+    /// windows, or on its surfaces that take no keyboard, does not.
     pub fn click_focus(&mut self, location: Point<f64, Logical>) {
         // A click on a surface of a client Ctrl+Alt+Tab suspended ends the suspension.
         if let Some(client) = self
@@ -49,7 +50,7 @@ impl State {
             }
         }
         match under {
-            Some((Under::Window(window), _)) => self.focus(&window),
+            Some((Under::Window(window), _)) => self.focus_clicked(&window),
             Some((Under::Layer(layer), _)) => self.focus_layer(&layer),
             None => {}
         }
@@ -86,6 +87,11 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
+        // A physical press wins over an EIS context's hold of the key (decision 33); a virtual
+        // keyboard's yields before its keymap is loaded (`process_virtual_keyboard_event`).
+        if key_state == KeyState::Pressed && source == KeyboardSource::Physical {
+            self.eis_yield_key(code, time);
+        }
         self.end_finished_popup_grab();
         if !past_grab {
             self.resume_input_method_grab();
@@ -98,6 +104,9 @@ impl State {
             return;
         };
         let serial = SERIAL_COUNTER.next_serial();
+        if key_state == KeyState::Pressed {
+            self.grab_serials.press = Some(serial);
+        }
         // A key the input method's grab takes is no client's to name.
         let mut to = keyboard
             .current_focus()
@@ -133,9 +142,10 @@ impl State {
                 }
                 match key_state {
                     KeyState::Pressed => {
-                        // Any other press disarms Super alone (D4). Only a hardware key counts:
-                        // the input method sends the keys it forwards a second time, as a
-                        // virtual keyboard's.
+                        // Any other press disarms Super alone (D4). Of the seat's keys only a
+                        // hardware key counts: the input method sends the keys it forwards a
+                        // second time, as a virtual keyboard's. An EIS context's key, which
+                        // never passes here, disarms it in `eis::eis_send_key`.
                         // A second Super while one is held is not Super alone either, and
                         // nothing arms while the session is locked or the focused surface
                         // inhibits the bindings.
@@ -286,6 +296,10 @@ impl State {
         if button_state == ButtonState::Pressed {
             self.aids_pointer_pressed();
         }
+        // A press of the seat's wins over an EIS context's hold of the button (decision 33).
+        if button_state == ButtonState::Pressed && !self.eis.injecting() {
+            self.eis_yield_button(button, time);
+        }
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };
@@ -297,10 +311,7 @@ impl State {
         // token made from the click that focused a window is in range.
         let serial = SERIAL_COUNTER.next_serial();
         self.last_input_serial = Some(serial);
-        if button_state == ButtonState::Pressed {
-            let to = pointer.current_focus().and_then(|surface| surface.client());
-            self.grab_serials.button = to.map(|client| (serial, client.id()));
-        }
+        self.eis.seat_button(button, button_state);
         pointer.button(
             self,
             &ButtonEvent {
@@ -310,12 +321,23 @@ impl State {
                 time,
             },
         );
+        // After the grab: every grab sends the press to the pointer's focus then, so a press is
+        // the client's it was delivered to. A move or a resize sends it to no client, and a
+        // popup's grab that the press dismisses sends it to the surface under the pointer.
+        if button_state == ButtonState::Pressed {
+            self.grab_serials.press = Some(serial);
+            let to = pointer.current_focus().and_then(|surface| surface.client());
+            self.grab_serials.button = to.map(|client| (serial, client.id()));
+        }
         pointer.frame(self);
         self.a11y.set_pointing(false);
     }
 
     /// Input from the backend; it may change what is on screen, the pointer or the stacking.
-    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
+    pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>)
+    where
+        I::Device: 'static,
+    {
         self.activity();
         self.request_redraw();
         match event {
@@ -346,28 +368,10 @@ impl State {
                 let Some(pointer) = self.seat.get_pointer() else {
                     return;
                 };
-                let source = event.source();
                 if self.scroll_zooms(&event) {
                     return;
                 }
-                let mut frame = AxisFrame::new(event.time()).source(source);
-                for axis in [Axis::Horizontal, Axis::Vertical] {
-                    let discrete = event.amount_v120(axis);
-                    let amount = event
-                        .amount(axis)
-                        .unwrap_or_else(|| discrete.unwrap_or(0.0) * 15.0 / 120.0);
-                    if amount != 0.0 {
-                        frame = frame.value(axis, amount);
-                        if let Some(discrete) = discrete {
-                            frame = frame.v120(axis, discrete as i32);
-                        }
-                    }
-                    if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
-                        frame = frame.stop(axis);
-                    }
-                }
-                pointer.axis(self, frame);
-                pointer.frame(self);
+                scroll(self, &pointer, &event);
             }
             // A gesture goes to the focused surface; one still disarms Super alone (D4).
             event @ (InputEvent::GestureSwipeBegin { .. }
@@ -394,6 +398,11 @@ impl State {
             | InputEvent::TabletToolProximity { .. }
             | InputEvent::TabletToolTip { .. }
             | InputEvent::TabletToolButton { .. }) => self.tablet_event(event),
+            event @ (InputEvent::TouchDown { .. }
+            | InputEvent::TouchMotion { .. }
+            | InputEvent::TouchUp { .. }
+            | InputEvent::TouchCancel { .. }
+            | InputEvent::TouchFrame { .. }) => self.touch_event(event),
             _ => {}
         }
     }
@@ -436,7 +445,16 @@ impl State {
         &self,
         position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
     ) -> Option<Point<f64, Logical>> {
-        let output = self.space.outputs().next()?;
+        self.on_output(self.space.outputs().next()?, position)
+    }
+
+    /// Where in the space an absolute device points on `output`, as `on_first_panel` has it for
+    /// the first output: under `output`'s own transform, kept on it.
+    pub(crate) fn on_output(
+        &self,
+        output: &Output,
+        position: impl FnOnce(Size<i32, Logical>) -> Point<f64, Logical>,
+    ) -> Option<Point<f64, Logical>> {
         let area = self.space.output_geometry(output)?;
         Some(self.unzoomed(clamp_into(area, on_panel(output, area, position))))
     }
@@ -504,7 +522,7 @@ impl State {
             return true;
         };
         let current = self.virtual_keymap.as_ref();
-        if current.is_some_and(|current| current.device == *device && current.keymap == keymap) {
+        if current.is_some_and(|current| current.device == *device && current.keymap.id() == keymap.id()) {
             return true;
         }
         let (seat_keymap, seat_layouts, seat_modifiers) = match current {
@@ -514,16 +532,16 @@ impl State {
                 current.seat_modifiers,
             ),
             None => (
-                keyboard.with_xkb_state(self, |context| keymap_text(context.xkb())),
+                keyboard.keymap_file(),
                 keyboard.with_xkb_state(self, |context| layout_names(context.xkb())),
                 self.seat_modifiers(keyboard),
             ),
         };
-        if *keymap == *seat_keymap {
+        if keymap.id() == seat_keymap.id() {
             self.restore_seat_keymap();
             return true;
         }
-        if let Err(error) = keyboard.set_keymap_from_string(self, keymap.to_string()) {
+        if let Err(error) = keyboard.set_keymap_from_keymap_file(self, keymap.clone()) {
             tracing::warn!(
                 ?error,
                 "a virtual keyboard's keymap did not load: its key is dropped"
@@ -559,7 +577,7 @@ impl State {
         else {
             return;
         };
-        if let Err(error) = keyboard.set_keymap_from_string(self, current.seat_keymap) {
+        if let Err(error) = keyboard.set_keymap_from_keymap_file(self, current.seat_keymap) {
             // The seat's configuration, as `State::new` gives it, so that the seat never stays
             // on a client's keymap.
             tracing::error!(
@@ -584,10 +602,10 @@ impl State {
 /// A virtual keyboard's keymap the seat has in place of its own (`State::with_keymap_of`).
 pub struct VirtualKeymap {
     device: VirtualKeyboardDevice,
-    keymap: Arc<str>,
+    keymap: KeymapFile,
     /// The seat's keymap and its modifiers (depressed, latched, locked, layout) when the
     /// virtual keymap was loaded, which `State::restore_seat_keymap` gives back.
-    seat_keymap: String,
+    seat_keymap: KeymapFile,
     /// The names of the seat's layouts, which the current keymap no longer has.
     pub(crate) seat_layouts: Vec<String>,
     pub(crate) seat_modifiers: [u32; 4],
@@ -631,6 +649,12 @@ impl VirtualKeyboardHandler for State {
                 // The input method's forwarded keys went through the keyboard aids as the
                 // hardware's.
                 let past_grab = forwarded || self.holds_keyboard_grab(device.client());
+                // The seat wins, physical or virtual (decision 33): an EIS context lets go of the
+                // key under the seat's keymap and its own modifiers before this keyboard's keymap
+                // and modifiers are loaded for the press, so that the press is read under them.
+                if key_state == KeyState::Pressed {
+                    self.eis_yield_key(code, time);
+                }
                 self.with_keymap_of(&device, |state| {
                     if past_grab {
                         state.typed(code, key_state, time, device.source(), true)
@@ -770,10 +794,38 @@ impl VirtualPointerHandler for State {
 }
 
 /// The evdev codes of buttons, BTN_MISC to KEY_MAX.
-const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
+pub(crate) const BUTTONS: std::ops::RangeInclusive<u32> = 0x100..=0x2ff;
 
 /// The xkb codes of evdev's keys, 0 to KEY_MAX, each the evdev code plus 8.
-const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
+pub(crate) const KEYS: std::ops::RangeInclusive<u32> = 8..=0x2ff + 8;
+
+/// A scroll, to the pointer's focus, framed: what reads the scroll for a binding comes before
+/// (`State::scroll_zooms`), and an injected scroll has none (`eis.rs`).
+pub(crate) fn scroll<I: InputBackend>(
+    state: &mut State,
+    pointer: &PointerHandle<State>,
+    event: &impl PointerAxisEvent<I>,
+) {
+    let source = event.source();
+    let mut frame = AxisFrame::new(event.time()).source(source);
+    for axis in [Axis::Horizontal, Axis::Vertical] {
+        let discrete = event.amount_v120(axis);
+        let amount = event
+            .amount(axis)
+            .unwrap_or_else(|| discrete.unwrap_or(0.0) * 15.0 / 120.0);
+        if amount != 0.0 {
+            frame = frame.value(axis, amount);
+            if let Some(discrete) = discrete {
+                frame = frame.v120(axis, discrete as i32);
+            }
+        }
+        if source == AxisSource::Finger && event.amount(axis) == Some(0.0) {
+            frame = frame.stop(axis);
+        }
+    }
+    pointer.axis(state, frame);
+    pointer.frame(state);
+}
 
 /// Where a relative motion from `from` to `to` leaves the pointer: at `to` when an output of
 /// `outputs` shows it, else at the edge of the output it is on (the first one when on none),

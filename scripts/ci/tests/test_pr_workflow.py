@@ -9,6 +9,8 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 PR = ROOT / ".github" / "workflows" / "pr.yml"
 SHELL = ROOT / ".github" / "workflows" / "shell-surfaces.yml"
+AUDIT = ROOT / ".github" / "workflows" / "rust-security-audit.yml"
+MAINTENANCE = ROOT / ".github" / "workflows" / "maintenance.yml"
 
 spec = importlib.util.spec_from_file_location("changes", ROOT / "scripts/ci/changes.py")
 changes = importlib.util.module_from_spec(spec)
@@ -73,6 +75,54 @@ class ShellAreaTest(unittest.TestCase):
         glob = "/" + "*" * 2
         as_area = {p[: -len(glob) + 1] if p.endswith(glob) else p for p in triggers["push"]["paths"]}
         self.assertEqual(as_area, set(changes.AREAS["shell"]))
+
+
+class RustAuditTest(unittest.TestCase):
+    """The Rust audit runs on a pull request only through pr.yml, when its area is selected,
+    and on a push to iso-v0 only for the paths of the same area."""
+
+    def test_no_pull_request_trigger_of_its_own(self):
+        triggers = yaml.safe_load(AUDIT.read_text())[True]
+        self.assertEqual(set(triggers), {"workflow_call", "push"})
+        job = yaml.safe_load(PR.read_text())["jobs"]["rust_audit"]
+        self.assertEqual(job["uses"], "./.github/workflows/rust-security-audit.yml")
+
+    def test_maintenance_runs_it_daily_and_alerts(self):
+        jobs = yaml.safe_load(MAINTENANCE.read_text())["jobs"]
+        self.assertEqual(jobs["rust-advisories"]["uses"], "./.github/workflows/rust-security-audit.yml")
+        alert = jobs["alert"]
+        # The hours-long mutants job has an alert job of its own, so the first one does not wait for it.
+        alert_mutants = jobs["alert-mutants"]
+        self.assertEqual(set(alert["needs"]), set(jobs) - {"alert", "alert-mutants", "mutants"})
+        self.assertEqual(set(alert_mutants["needs"]), {"mutants"})
+        for job in (alert, alert_mutants):
+            self.assertIn("always()", job["if"])
+            self.assertIn("github.event_name == 'schedule'", job["if"])
+        writers = {n for n, j in jobs.items() if j.get("permissions", {}).get("issues") == "write"}
+        self.assertEqual(writers, {"alert", "alert-mutants"})
+
+    def test_push_filter_matches_the_rust_audit_area(self):
+        push = yaml.safe_load(AUDIT.read_text())[True]["push"]
+        self.assertEqual(push["branches"], ["iso-v0"])
+        any_dir = "*" * 2
+
+        def as_area(path):
+            if path.endswith("/" + any_dir):
+                return path[: -len(any_dir)]
+            if path.startswith(any_dir):
+                return path[len(any_dir) - 1 :]
+            return path
+
+        self.assertEqual({as_area(p) for p in push["paths"]}, set(changes.AREAS["rust_audit"]))
+
+    def test_only_a_push_to_iso_v0_saves_the_audit_cache(self):
+        steps = yaml.safe_load(AUDIT.read_text())["jobs"]["security-audit"]["steps"]
+        caches = [s for s in steps if s.get("uses", "").startswith("Swatinem/rust-cache@")]
+        self.assertEqual(len(caches), 1)
+        self.assertEqual(
+            caches[0]["with"].get("save-if"),
+            "${{ github.event_name == 'push' && github.ref == 'refs/heads/iso-v0' }}",
+        )
 
 
 if __name__ == "__main__":

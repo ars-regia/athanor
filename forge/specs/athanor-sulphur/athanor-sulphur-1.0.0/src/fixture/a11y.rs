@@ -808,7 +808,13 @@ fn a_capture_has_neither_the_filter_nor_the_magnifier() {
     bar.roundtrip(&mut run);
     let shm: wl_shm::WlShm = bar.bind(1);
     let copy: ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1 = bar.bind(1);
-    let (_source, session) = output_session(&mut bar, &mut run, &copy, 0);
+    let (_source, session) = output_session(
+        &mut bar,
+        &mut run,
+        &copy,
+        0,
+        ext_image_copy_capture_manager_v1::Options::empty(),
+    );
     let (w, h) = (OUTPUTS[0].width, OUTPUTS[0].height);
     let (buffer, file) = bar.buffer(&shm, w, h, [0x55; 4]);
     let frame = session.create_frame(&bar.queue.handle(), ());

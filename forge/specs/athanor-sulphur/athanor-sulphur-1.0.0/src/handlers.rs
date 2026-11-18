@@ -2,30 +2,34 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{is_full_screen, ClientState, State};
+use crate::layer::mapped;
+use crate::state::{is_full_screen, unconfined, ClientState, State};
 use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
-    PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupGrab,
+    PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
+use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
 use smithay::input::{Seat, SeatHandler, SeatState};
 use smithay::output::Output;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventSource, Interest, RegistrationToken};
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::protocol::ProtocolError;
-use smithay::reexports::wayland_server::backend::ClientId;
+use smithay::reexports::wayland_server::backend::{ClientId, ObjectId};
 use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
-    add_blocker, add_pre_commit_hook, get_parent, is_sync_subsurface, with_states, Blocker,
-    BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SurfaceAttributes,
+    add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
+    with_states, Barrier, Blocker, BlockerState, BufferAssignment, CompositorClientState,
+    CompositorHandler, CompositorState, SurfaceAttributes,
 };
 use smithay::wayland::dmabuf::{
     get_dmabuf, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
@@ -43,6 +47,7 @@ use smithay::wayland::selection::data_device::{
 };
 use smithay::wayland::selection::primary_selection::set_primary_focus;
 use smithay::wayland::selection::SelectionHandler;
+use smithay::wayland::shell::xdg::dialog::{ToplevelDialogHint, XdgDialogHandler};
 use smithay::wayland::shell::xdg::{
     Configure, PopupSurface, PositionerState, SurfaceCachedState, ToplevelSurface,
     XdgShellHandler, XdgShellState, XdgToplevelSurfaceData,
@@ -53,17 +58,32 @@ use smithay::wayland::xdg_activation::{
 };
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// How long an activation token stays good.
 const ACTIVATION_TOKEN_LIFETIME: Duration = Duration::from_secs(10);
 
-/// How many commits one client may hold waiting on a fence. Each holds an event source with a
-/// file descriptor and pins its buffer; a client keeps a few frames in flight per surface, and
-/// one that queues more without its fences signalling is flooding the compositor, which
-/// disconnects it rather than run out of file descriptors.
+/// How many commits one client may have waiting to be applied, whatever they wait on: a fence, a
+/// `wp_commit_timer_v1` timestamp, a FIFO barrier or an earlier commit of the same surface that
+/// waits. Smithay queues them per client without a bound and walks the whole queue at each
+/// commit; a held commit also takes an event source, a fence's with a file descriptor, and pins
+/// its buffer. A client keeps a few frames in flight per surface, and one that queues more is
+/// flooding the compositor, which disconnects it rather than run out of memory, file
+/// descriptors or main-thread time (`queue_commit`, `hold_slot`). The same number bounds, per
+/// surface, the commits a synchronised subsurface keeps for its parent's next commit (`Retained`).
 pub const MAX_HELD_COMMITS: usize = 64;
+
+/// How many commits all of one client's synchronised subsurfaces may keep together, each a copy of
+/// its surface's state held until its parent's next commit (`Retained`). The per-surface bound
+/// alone multiplies by a number of surfaces nothing bounds: a client creating subsurfaces by the
+/// thousand and committing each 64 times would have the compositor keep millions of copies from a
+/// few megabytes of requests. A client commits its synchronised subsurfaces, then their parent,
+/// once a frame, so each keeps one or two commits at a time: 1024 lets sixteen subsurfaces reach
+/// `MAX_HELD_COMMITS` at once, or several hundred keep a frame or two each, while it holds the
+/// copies a flooding client makes to about a thousand, a few megabytes at most.
+pub const MAX_RETAINED_COMMITS: usize = 1024;
 
 /// `wl_display.error.no_memory`, the reason recorded for a client closed for holding too many
 /// commits. wayland-server sends no `wl_display.error` on `Client::kill`, and `post_error` reads
@@ -71,11 +91,92 @@ pub const MAX_HELD_COMMITS: usize = 64;
 /// no such error: the client sees its socket close, and the reason reaches `disconnected`.
 const NO_MEMORY: u32 = 2;
 
-/// A commit held on a fence: its client, and the event source that waits on the fence.
+/// A commit held on a fence or a timestamp: its client and surface, the event source that
+/// waits, and whether it waits on a timestamp.
 pub struct HeldCommit {
-    client: ClientId,
+    client: Client,
+    surface: ObjectId,
     seq: u64,
     token: RegistrationToken,
+    timed: bool,
+}
+
+/// Counts one commit in its client's `ClientState::queued` from the moment it is committed until
+/// Smithay applies it or drops it: a blocker that never blocks, put on each commit that goes to
+/// the client's queue, and dropped with the transaction that carries it.
+struct Queued(Arc<AtomicUsize>);
+
+/// The same for a commit of a synchronised subsurface, counted in the surface's `Retained`.
+struct Kept(Arc<Retained>);
+
+/// How many commits a synchronised subsurface keeps, each with its own copy of the surface's
+/// state, until a commit of its parent takes them (Smithay 62ec78d, `PrivateSurfaceData::commit`
+/// and `CachedState::commit`). They are the surface's, not the client's queue: they stay after a
+/// `set_desync` until the surface's next commit, and with a destroyed `wl_subsurface`, which
+/// leaves the surface synchronised and without a parent, until the surface has a parent again or
+/// is destroyed. They count per surface against `MAX_HELD_COMMITS`, and with every other
+/// synchronised subsurface's of their client against `MAX_RETAINED_COMMITS`; a destroyed surface
+/// takes them out of the client's count at once, whatever still holds it. Both are only changed on
+/// the compositor's thread, where Smithay drops blockers and calls destruction hooks.
+struct Retained {
+    /// The commits the surface keeps.
+    kept: AtomicUsize,
+    /// Its client's `ClientState::retained`.
+    client: Arc<AtomicUsize>,
+    /// Whether the surface is destroyed, its commits out of `client`.
+    destroyed: AtomicBool,
+}
+
+impl Retained {
+    /// Counts one more commit kept, and returns how many the surface and its client keep.
+    fn keep(&self) -> (usize, usize) {
+        let kept = self.kept.fetch_add(1, Ordering::Relaxed) + 1;
+        if self.destroyed.load(Ordering::Relaxed) {
+            return (kept, 0);
+        }
+        (kept, self.client.fetch_add(1, Ordering::Relaxed) + 1)
+    }
+
+    /// Counts one commit applied or dropped.
+    fn release(&self) {
+        self.kept.fetch_sub(1, Ordering::Relaxed);
+        if !self.destroyed.load(Ordering::Relaxed) {
+            self.client.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Takes the surface's commits out of its client's count, once, when the surface is
+    /// destroyed.
+    fn destroy(&self) {
+        if !self.destroyed.swap(true, Ordering::Relaxed) {
+            self.client
+                .fetch_sub(self.kept.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
+}
+
+impl Blocker for Queued {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Queued {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl Blocker for Kept {
+    fn state(&self) -> BlockerState {
+        BlockerState::Released
+    }
+}
+
+impl Drop for Kept {
+    fn drop(&mut self) {
+        self.0.release();
+    }
 }
 
 /// Marks a window the compositor has placed: placement happens once, at its first sized commit.
@@ -100,7 +201,8 @@ pub(crate) fn shown(window: &Window) -> bool {
 
 /// Whether `window` floats on a tiled workspace (D5, cosmic-comp's `layout::is_dialog`): it has
 /// a parent, or a minimum and a maximum size that are set and the same. The modal hint of
-/// xdg-dialog-v1, the reference's third case, reaches no window here: the global is not served.
+/// xdg-dialog-v1, the reference's third case, is not read here: decision 33 gives it the click of
+/// `focus_clicked` only.
 pub(crate) fn floats(window: &Window) -> bool {
     let Some(toplevel) = window.toplevel() else {
         return false;
@@ -153,13 +255,26 @@ impl CompositorHandler for State {
 
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, dh, surface| {
-            state.wait_for_fence(dh, surface)
+            if state.queue_commit(surface) {
+                state.wait_for_fence(dh, surface);
+                state.pace(surface);
+            }
+        });
+        add_destruction_hook::<Self, _>(surface, |state, surface| {
+            if let Some(retained) =
+                with_states(surface, |states| states.data_map.get::<Arc<Retained>>().cloned())
+            {
+                retained.destroy();
+            }
+            state.release_held_of(surface);
+            state.fifo_surfaces.remove(&surface.id());
         });
     }
 
     fn commit(&mut self, surface: &WlSurface) {
         // Also reached outside a dispatch of the clients, when a held commit's fence signals.
         self.request_redraw();
+        self.fifo_committed(surface);
         on_commit_buffer_handler::<Self>(surface);
         if !is_sync_subsurface(surface) {
             let mut root = surface.clone();
@@ -277,58 +392,206 @@ impl State {
         B: Blocker + Send + 'static,
         S: EventSource<Event = (), Ret = std::io::Result<()>> + 'static,
     {
-        let Some(client) = surface.client() else {
+        let Some((client, seq)) = self.hold_slot(surface) else {
             return;
         };
-        let id = client.id();
-        if self.held.iter().filter(|held| held.client == id).count() >= MAX_HELD_COMMITS {
-            tracing::warn!(
-                ?id,
-                "a client holds too many commits on fences: disconnected"
-            );
-            client.kill(
-                &self.display_handle,
-                ProtocolError {
-                    code: NO_MEMORY,
-                    object_id: 1,
-                    object_interface: "wl_display".into(),
-                    message: format!("more than {MAX_HELD_COMMITS} commits wait on a fence"),
-                },
-            );
+        let owner = client.clone();
+        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
+            state.unhold(&client, seq);
+            Ok(())
+        };
+        let token = self.loop_handle.insert_source(source, unblock);
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, blocker, owner, seq, token, false);
+    }
+
+    /// Holds the pending commit of `surface`, which carries a `wp_commit_timer_v1` timestamp,
+    /// on the barrier `register` makes until `wait` has passed, under the bound of
+    /// `hold_commit`: the barrier is made only once the commit has its place. Every barrier of
+    /// the surface due by then is signalled (`pacing.rs`).
+    pub fn hold_until(
+        &mut self,
+        surface: &WlSurface,
+        wait: Duration,
+        register: impl FnOnce() -> Option<Barrier>,
+    ) {
+        let Some((client, seq)) = self.hold_slot(surface) else {
             return;
+        };
+        let Some(barrier) = register() else {
+            return;
+        };
+        let owner = client.clone();
+        let weak = surface.downgrade();
+        let unblock = move |_, _: &mut (), state: &mut State| {
+            if let Ok(surface) = weak.upgrade() {
+                crate::pacing::timestamps_due(&surface, state.clock.now());
+            }
+            state.unhold(&client, seq);
+            TimeoutAction::Drop
+        };
+        let token = self
+            .loop_handle
+            .insert_source(Timer::from_duration(wait), unblock);
+        let token = token.map_err(|error| error.error);
+        self.held_on(surface, barrier, owner, seq, token, true);
+    }
+
+    /// Counts the commit `surface` is making, until it is applied or dropped, and whether it goes
+    /// on: past `MAX_HELD_COMMITS` its client is disconnected instead. A synchronised
+    /// subsurface's commit counts in the subsurface's `Retained`, and its client is also
+    /// disconnected past `MAX_RETAINED_COMMITS` of them; any other counts in its client's queued
+    /// commits. The commits of a surface destroyed since stay in the queue until Smithay next
+    /// looks at it and drops them, so a client at the bound has its queue looked at before it is
+    /// judged.
+    fn queue_commit(&mut self, surface: &WlSurface) -> bool {
+        let Some(client) = surface.client() else {
+            return true;
+        };
+        let Some((queued, retained_by_client)) = client
+            .get_data::<ClientState>()
+            .map(|data| (data.queued.clone(), data.retained.clone()))
+        else {
+            return true;
+        };
+        if is_sync_subsurface(surface) {
+            let retained = with_states(surface, |states| {
+                states
+                    .data_map
+                    .get_or_insert_threadsafe(|| {
+                        Arc::new(Retained {
+                            kept: AtomicUsize::new(0),
+                            client: retained_by_client,
+                            destroyed: AtomicBool::new(false),
+                        })
+                    })
+                    .clone()
+            });
+            let (kept, kept_by_client) = retained.keep();
+            add_blocker(surface, Kept(retained));
+            if kept > MAX_HELD_COMMITS || kept_by_client > MAX_RETAINED_COMMITS {
+                self.flooded(&client, "kept by synchronised subsurfaces");
+                return false;
+            }
+            return true;
+        }
+        let mut waiting = queued.fetch_add(1, Ordering::Relaxed) + 1;
+        add_blocker(surface, Queued(queued.clone()));
+        if waiting > MAX_HELD_COMMITS {
+            let dh = self.display_handle.clone();
+            self.client_compositor_state(&client)
+                .blocker_cleared(self, &dh);
+            waiting = queued.load(Ordering::Relaxed);
+        }
+        if waiting > MAX_HELD_COMMITS {
+            self.flooded(&client, "queued");
+            return false;
+        }
+        true
+    }
+
+    /// Disconnects `client`, which has more than its bound of commits `how`.
+    fn flooded(&self, client: &Client, how: &str) {
+        let id = client.id();
+        tracing::warn!(?id, how, "a client has too many commits waiting: disconnected");
+        client.kill(
+            &self.display_handle,
+            ProtocolError {
+                code: NO_MEMORY,
+                object_id: 1,
+                object_interface: "wl_display".into(),
+                message: format!("more than {MAX_HELD_COMMITS} commits are {how}"),
+            },
+        );
+    }
+
+    /// The client of `surface` and a sequence number for one more held commit, or nothing,
+    /// when the surface has no client or its client is disconnected for holding too many.
+    fn hold_slot(&mut self, surface: &WlSurface) -> Option<(Client, u64)> {
+        let client = surface.client()?;
+        let id = client.id();
+        let held = self.held.iter().filter(|held| held.client.id() == id);
+        if held.count() >= MAX_HELD_COMMITS {
+            self.flooded(&client, "held");
+            return None;
         }
         let seq = self.next_held;
         self.next_held += 1;
-        let unblock = move |_, _: &mut S::Metadata, state: &mut State| {
-            state.held.retain(|held| held.seq != seq);
-            let dh = state.display_handle.clone();
-            state
-                .client_compositor_state(&client)
-                .blocker_cleared(state, &dh);
-            Ok(())
-        };
-        match self.loop_handle.insert_source(source, unblock) {
+        Some((client, seq))
+    }
+
+    /// Records the held commit `seq` once its event source is in the loop, and blocks it.
+    fn held_on<B: Blocker + Send + 'static>(
+        &mut self,
+        surface: &WlSurface,
+        blocker: B,
+        client: Client,
+        seq: u64,
+        token: Result<RegistrationToken, smithay::reexports::calloop::Error>,
+        timed: bool,
+    ) {
+        match token {
             Ok(token) => {
                 self.held.push(HeldCommit {
-                    client: id,
+                    client,
+                    surface: surface.id(),
                     seq,
                     token,
+                    timed,
                 });
                 add_blocker(surface, blocker);
             }
-            Err(error) => tracing::warn!(error = %error.error, "a fence cannot be waited on"),
+            Err(error) => tracing::warn!(%error, "a held commit cannot be waited on"),
         }
     }
 
-    /// Drops the commits `client` holds on fences, with their event sources.
+    /// The held commit `seq` of `client` is released: its client's blocked commits are tried.
+    fn unhold(&mut self, client: &Client, seq: u64) {
+        self.held.retain(|held| held.seq != seq);
+        let dh = self.display_handle.clone();
+        self.client_compositor_state(client)
+            .blocker_cleared(self, &dh);
+    }
+
+    /// Drops the commits `client` holds on fences and timestamps, with their event sources.
     pub fn release_held(&mut self, client: &ClientId) {
         let loop_handle = &self.loop_handle;
         self.held.retain(|held| {
-            let keep = &held.client != client;
+            let keep = held.client.id() != *client;
             if !keep {
                 loop_handle.remove(held.token);
             }
             keep
+        });
+    }
+
+    /// When `surface` is destroyed: signals at once the timestamps its held commits wait on,
+    /// frees their timers and places, and tries its client's commits once the destruction is
+    /// over. A synchronised subsurface's timed commit waits inside its parent's commit, which
+    /// stays while the parent lives: a timer dropped unsignalled would hold that commit, and the
+    /// parent's after it, until the client goes. A commit held on a fence keeps its event source,
+    /// which releases it when the fence signals, and goes with its client.
+    fn release_held_of(&mut self, surface: &WlSurface) {
+        let id = surface.id();
+        let mut client = None;
+        let loop_handle = &self.loop_handle;
+        self.held.retain(|held| {
+            let keep = !held.timed || held.surface != id;
+            if !keep {
+                loop_handle.remove(held.token);
+                client = Some(held.client.clone());
+            }
+            keep
+        });
+        let Some(client) = client else {
+            return;
+        };
+        crate::pacing::timestamps_due(surface, self.clock.now() + crate::pacing::MAX_TIMED_WAIT);
+        self.loop_handle.insert_idle(move |state| {
+            let dh = state.display_handle.clone();
+            state
+                .client_compositor_state(&client)
+                .blocker_cleared(state, &dh);
         });
     }
 
@@ -541,6 +804,45 @@ impl State {
         }
     }
 
+    /// A click on `window`: it is raised with its dialogs, and the keyboard goes to its modal
+    /// dialog, if one is shown, else to it (decision 33). The dialog was above it, and stays.
+    pub(crate) fn focus_clicked(&mut self, window: &Window) {
+        let Some(dialog) = self.modal_of(window) else {
+            return self.focus(window);
+        };
+        self.space.raise_element(window, false);
+        for kept in self.subtree(window) {
+            self.space.raise_element(&kept, false);
+        }
+        self.focus(&dialog);
+    }
+
+    /// The topmost shown child of `window` with xdg-dialog-v1's modal hint, and down the chain
+    /// that one's own; none when `window` has no modal child shown.
+    fn modal_of(&self, window: &Window) -> Option<Window> {
+        let mut found = None;
+        let mut at = window.clone();
+        // A loop of parents ends: each step takes another window.
+        for _ in 0..self.space.elements().count() {
+            let Some(parent) = at.toplevel().map(|t| t.wl_surface().clone()) else {
+                break;
+            };
+            let child = self.space.elements().rev().find(|kept| {
+                shown(kept)
+                    && kept.toplevel().is_some_and(|t| {
+                        t.parent().as_ref() == Some(&parent)
+                            && dialog_hint(t) == ToplevelDialogHint::Modal
+                    })
+            });
+            let Some(child) = child.cloned() else {
+                break;
+            };
+            found = Some(child.clone());
+            at = child;
+        }
+        found
+    }
+
     /// The window of `window`'s parent, mapped, minimised or on an inactive workspace.
     fn parent_window(&self, window: &Window) -> Option<Window> {
         let parent = window.toplevel()?.parent()?;
@@ -600,30 +902,43 @@ impl State {
             .collect()
     }
 
-    /// The pointer, the start of its grab and the window, when the client of `surface` may
+    /// The device, the start of its grab and the window, when the client of `surface` may
     /// start a window grab with `serial`: the session is not locked, and `serial` is the last
-    /// button press, sent to that client and still held. A client cannot take the pointer when
-    /// it likes, as the popup grab checks.
+    /// button press or touch-down, sent to that client and still held. A client cannot take the
+    /// pointer or a finger when it likes, as the popup grab checks.
     fn window_grab(
         &self,
         surface: &ToplevelSurface,
         seat: &wl_seat::WlSeat,
         serial: Serial,
-    ) -> Option<(PointerHandle<Self>, GrabStartData<Self>, Window)> {
+    ) -> Option<(Grabbed, Window)> {
         if self.lock.is_some() {
             return None;
         }
-        let pointer = Seat::<Self>::from_resource(seat)?.get_pointer()?;
+        let seat = Seat::<Self>::from_resource(seat)?;
         let client = surface.wl_surface().client()?.id();
-        if !self.grab_serials.clicked(serial, &client) || !pointer.has_grab(serial) {
-            return None;
-        }
-        let start = pointer.grab_start_data()?;
+        let pointer = seat.get_pointer().filter(|pointer| {
+            self.grab_serials.clicked(serial, &client) && pointer.has_grab(serial)
+        });
+        let touch = seat.get_touch().filter(|touch| {
+            self.grab_serials.touched(serial, &client) && touch.has_grab(serial)
+        });
+        let grabbed = match (pointer, touch) {
+            (Some(pointer), _) => {
+                let start = pointer.grab_start_data()?;
+                Grabbed::Pointer(pointer, start)
+            }
+            (None, Some(touch)) => {
+                let start = touch.grab_start_data()?;
+                Grabbed::Touch(touch, start)
+            }
+            (None, None) => return None,
+        };
         // A full-screen window has no place to be dragged from.
         let window = self
             .window_for(surface.wl_surface())
             .filter(|window| !is_full_screen(window))?;
-        Some((pointer, start, window))
+        Some((grabbed, window))
     }
 
     /// Orders the windows of the workspace `id`, when it is tiled, in layers, each window keeping
@@ -832,6 +1147,19 @@ impl State {
             Some((map.layer_geometry(layer)?.loc + area.loc, area))
         })
     }
+
+    /// Whether `root`, a popup's root, can keep the keyboard a closing popup hands back: its
+    /// interactivity takes it, it shows a buffer, it has a place in the space, and no other
+    /// surface holds the keyboard exclusively. A window drawing nothing shows no buffer; a
+    /// minimised or parked window, which leaves the space, has no place.
+    fn keeps_keyboard(&self, root: &WlSurface) -> bool {
+        self.takes_keyboard(root)
+            && mapped(root)
+            && self.popup_root_place(root).is_some()
+            && self
+                .exclusive_layer()
+                .is_none_or(|surface| &surface == root)
+    }
 }
 
 impl BufferHandler for State {
@@ -888,27 +1216,32 @@ impl XdgShellHandler for State {
         self.repoint();
     }
 
-    /// The window follows the pointer until every button is up. A maximised window is
-    /// restored first, its top edge where it was and its centre under the pointer.
+    /// The window follows the pointer until every button is up, or the finger until it is
+    /// lifted. A maximised window is restored first, its top edge where it was and its centre
+    /// under the pointer or the finger.
     fn move_request(&mut self, surface: ToplevelSurface, seat: wl_seat::WlSeat, serial: Serial) {
-        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+        let Some((grabbed, window)) = self.window_grab(&surface, &seat, serial) else {
             return;
         };
         let Some(mut from) = self.space.element_geometry(&window).map(|g| g.loc) else {
             return;
         };
+        let at = grabbed.location();
         if let Some(kept) = self.restore(&window) {
-            from.x = start
-                .location
-                .to_i32_round::<i32>()
-                .x
-                .saturating_sub(kept.size.w / 2);
-            if let Some(area) = self.window_area_at(start.location) {
+            from.x = at.to_i32_round::<i32>().x.saturating_sub(kept.size.w / 2);
+            if let Some(area) = self.window_area_at(at) {
                 self.move_window(&window, kept_reachable(area, from, kept.size));
             }
         }
-        let grab = MoveGrab::new(start, window, from);
-        pointer.set_grab(self, grab, serial, Focus::Clear);
+        match grabbed {
+            Grabbed::Pointer(pointer, start) => {
+                let grab = MoveGrab::new(start, at, window, from);
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
+            Grabbed::Touch(touch, start) => {
+                touch.set_grab(self, MoveGrab::new(start, at, window, from), serial);
+            }
+        }
     }
 
     /// The window's `edges` follow the pointer until every button is up. A maximised window
@@ -925,15 +1258,23 @@ impl XdgShellHandler for State {
         if edges == xdg_toplevel::ResizeEdge::None || maximised {
             return;
         }
-        let Some((pointer, start, window)) = self.window_grab(&surface, &seat, serial) else {
+        let Some((grabbed, window)) = self.window_grab(&surface, &seat, serial) else {
             return;
         };
         let Some(from) = self.space.element_geometry(&window) else {
             return;
         };
         moved(&window);
-        let grab = ResizeGrab::new(start, window, edges, from);
-        pointer.set_grab(self, grab, serial, Focus::Clear);
+        let at = grabbed.location();
+        match grabbed {
+            Grabbed::Pointer(pointer, start) => {
+                let grab = ResizeGrab::new(start, at, window, edges, from);
+                pointer.set_grab(self, grab, serial, Focus::Clear);
+            }
+            Grabbed::Touch(touch, start) => {
+                touch.set_grab(self, ResizeGrab::new(start, at, window, edges, from), serial);
+            }
+        }
     }
 
     /// A full-screen window keeps its output, and is told what it has.
@@ -966,7 +1307,8 @@ impl XdgShellHandler for State {
     fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
         if let Some(window) = self.window_or_minimised(surface.wl_surface()) {
             self.end_window_grab(&window);
-            self.full_screen(&window, output.as_ref().and_then(Output::from_resource));
+            let output = output.as_ref().and_then(|output| self.shown_output(output));
+            self.full_screen(&window, output);
             self.repoint();
         }
     }
@@ -1018,6 +1360,48 @@ impl XdgShellHandler for State {
         });
         self.unconstrain_popup(&surface);
         surface.send_repositioned(token);
+    }
+
+    /// A popup that holds the keyboard hands it back as it is destroyed, at once (decision 30,
+    /// amended on 2026-11-17): to its parent when the parent is a popup that still holds a grab,
+    /// the popup grab's current popup, and otherwise to the popups' root surface. A parent
+    /// destroyed first resets its popup data, which cuts the chain `find_popup_root_surface`
+    /// walks, so the root is then the grab's. A root that is gone or can no longer keep the
+    /// keyboard (`keeps_keyboard`) is not given it: the popup's grab, which would hold the
+    /// keyboard on the popup, ends, and the focus is chosen again as when the focused window
+    /// closes. Smithay's grab moves the keyboard only at the next key, which leaves it on the
+    /// popup's bare surface until then, so that a toolkit waiting for an `enter` to give the
+    /// focus back to the control that opened the popup would have none (#1217). The grab lets
+    /// the change through: its current popup, or anything once it has ended.
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard.current_focus().as_ref() != Some(surface.wl_surface()) {
+            return;
+        }
+        let grabbed =
+            keyboard.with_grab(|_, current| current.is::<PopupKeyboardGrab<State>>()) == Some(true);
+        let grab = self.popup_grab.as_ref().filter(|_| grabbed);
+        let root = find_popup_root_surface(&PopupKind::Xdg(surface.clone()))
+            .ok()
+            .or_else(|| grab.and_then(|grab| grab.keyboard_grab_start_data().focus.clone()));
+        let current = grab
+            .filter(|grab| !grab.has_ended())
+            .and_then(PopupGrab::current_grab);
+        let parent = surface
+            .get_parent_surface()
+            .filter(|parent| Some(parent) != root.as_ref() && Some(parent) == current.as_ref());
+        let target = parent.or_else(|| root.filter(|root| self.keeps_keyboard(root)));
+        match target.filter(|target| target.is_alive()) {
+            Some(target) => self.set_keyboard_focus(Some(target)),
+            None => {
+                if grabbed {
+                    keyboard.unset_grab(self);
+                }
+                self.refocus(surface.wl_surface());
+            }
+        }
     }
 
     /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
@@ -1091,8 +1475,10 @@ impl XdgShellHandler for State {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
             }
+            self.eis_focusing(grab.current_grab().as_ref());
             keyboard.set_focus(self, grab.current_grab(), serial);
             keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+            self.popup_grab = Some(grab.clone());
         }
         if let Some(pointer) = pointer {
             let previous = grab.previous_serial().unwrap_or_else(|| grab.serial());
@@ -1141,6 +1527,8 @@ impl SeatHandler for State {
     /// The text inputs follow the keyboard too, except while the session is locked
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // Smithay calls this for every new focus but none; `set_keyboard_focus` marks that.
+        self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
         // The focus outline moves.
         self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
@@ -1165,6 +1553,27 @@ impl SeatHandler for State {
         if let Some(surface) = focused.cloned().filter(|_| !self.a11y.pointing) {
             self.loop_handle
                 .insert_idle(move |state| state.zoom_to_focus(&surface));
+        }
+    }
+
+    /// Each finger goes to the surface under it (`touch.rs`).
+    fn touch_down_grab(&mut self, start_data: TouchGrabStartData<Self>) -> impl TouchGrab<Self> {
+        crate::touch::Fingers::new(start_data)
+    }
+}
+
+/// The device a window grab follows, with the start of its own grab.
+enum Grabbed {
+    Pointer(PointerHandle<State>, GrabStartData<State>),
+    Touch(TouchHandle<State>, TouchGrabStartData<State>),
+}
+
+impl Grabbed {
+    /// Where the press or the touch was.
+    fn location(&self) -> Point<f64, Logical> {
+        match self {
+            Self::Pointer(_, start) => start.location,
+            Self::Touch(_, start) => start.location,
         }
     }
 }
@@ -1265,17 +1674,44 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation_state
     }
 
-    /// A token is good only when the client that asks for it holds the keyboard focus of this
-    /// seat, which it gets from the user's click or from mapping a window while nothing else
-    /// holds it (`place`). The serial must also be one this compositor sent since that focus;
-    /// the focused client always holds its own enter serial, so the range only keeps out serials
-    /// never sent, and the focus check is what keeps other clients out.
+    /// A token is good when its serial is the user's input to the client that asks for it, on
+    /// this seat, in one of two ways.
+    ///
+    /// The serial is the last button press, and this compositor delivered it to a surface of
+    /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
+    /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
+    /// The press must be the latest input: a later press of any kind, a key, a button, a finger
+    /// or a pen, to whichever client, or a later change of the keyboard focus, to a surface or
+    /// to none, supersedes it; its release does not. A client behind a security context gets no
+    /// token this way.
+    ///
+    /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
+    /// user's click or from mapping a window while nothing else holds it (`place`), and the
+    /// serial is one this compositor sent since that focus; the focused client always holds its
+    /// own enter serial, so the range only keeps out serials never sent, and the focus check is
+    /// what keeps other clients out.
+    ///
+    /// No client gets a token while the session is locked: the lock surfaces hold the input
+    /// (L14).
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
+        if self.lock.is_some() {
+            return false;
+        }
         let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
+        if Seat::from_resource(&seat).as_ref() != Some(&self.seat) {
+            return false;
+        }
+        // The seat named is a resource of the client that asks.
+        let outside = seat.client().is_some_and(|asking| unconfined(&asking));
+        let latest = self.grab_serials.press == Some(serial)
+            && self.grab_serials.focus.is_none_or(|focus| serial.is_no_older_than(&focus));
+        if outside && latest && self.grab_serials.clicked(serial, &client) {
+            return true;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
@@ -1286,9 +1722,7 @@ impl XdgActivationHandler for State {
             .current_focus()
             .and_then(|surface| surface.client())
             .map(|focused| focused.id());
-        Seat::from_resource(&seat).as_ref() == Some(&self.seat)
-            && focused == Some(client)
-            && serial_since_focus(serial, enter, self.last_input_serial)
+        focused == Some(client) && serial_since_focus(serial, enter, self.last_input_serial)
     }
 
     fn request_activation(
@@ -1300,23 +1734,40 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
-            // While the session is locked a token restores nothing (L14).
+            // While the session is locked a token restores, raises and focuses nothing (L14),
+            // as a popup grab takes nothing: the unlock gives the keyboard to the window on top
+            // before the lock.
             if self.lock.is_none() {
-                // A focused client can make a token at any time: it switches no workspace, and a
-                // window on an inactive one stays there.
+                // A token switches no workspace: a window on an inactive one stays there.
                 if let Some(window) = self
                     .window_or_minimised(&surface)
                     .filter(|window| self.on_active_workspace(window))
                 {
                     self.unminimise(&window);
                 }
-            }
-            if let Some(window) = self.window_for(&surface) {
-                self.focus(&window);
+                if let Some(window) = self.window_for(&surface) {
+                    self.focus(&window);
+                }
             }
         }
     }
 }
+
+/// The hint xdg-dialog-v1 gives `toplevel`; `Unknown` without one.
+fn dialog_hint(toplevel: &ToplevelSurface) -> ToplevelDialogHint {
+    with_states(toplevel.wl_surface(), |states| {
+        states
+            .data_map
+            .get::<XdgToplevelSurfaceData>()
+            .and_then(|data| data.lock().ok())
+            .map(|role| role.dialog_hint)
+            .unwrap_or_default()
+    })
+}
+
+/// xdg_wm_dialog_v1 (decision 33, standard): the modal hint is read at a click
+/// (`State::focus_clicked`); a window with a parent stays above it whatever its hint.
+impl XdgDialogHandler for State {}
 
 /// The title and the app id `toplevel` has set, empty when it has set none.
 fn names(toplevel: &ToplevelSurface) -> (String, String) {
@@ -1360,7 +1811,59 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
     serial.is_no_older_than(&enter) && newest.is_no_older_than(&serial)
 }
 
-smithay::delegate_dispatch2!(State);
+/// xdg-toplevel-icon (doc_own_stack.md decision 33, standard): the compositor answers the
+/// manager (`toplevel_icon.rs`); each icon passes its requests on to Smithay's, whose checks
+/// need this handler.
+impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
+
+/// What `smithay::delegate_dispatch2!(State)` writes, with one step before Smithay's handler: a
+/// request `crate::layer::refused` refuses ends its client and never reaches that handler.
+impl<I, U> smithay::reexports::wayland_server::Dispatch<I, U> for State
+where
+    I: Resource,
+    I::Request: 'static,
+    U: smithay::wayland::Dispatch2<I, State>,
+{
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &I,
+        request: I::Request,
+        data: &U,
+        dhandle: &DisplayHandle,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        if crate::layer::refused(resource, &request) {
+            return;
+        }
+        data.request(state, client, resource, request, dhandle, data_init);
+    }
+
+    fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &U) {
+        data.destroyed(state, client, resource);
+    }
+}
+
+impl<I, U> smithay::reexports::wayland_server::GlobalDispatch<I, U> for State
+where
+    I: Resource,
+    U: smithay::wayland::GlobalDispatch2<I, State>,
+{
+    fn bind(
+        state: &mut Self,
+        dhandle: &DisplayHandle,
+        client: &Client,
+        resource: smithay::reexports::wayland_server::New<I>,
+        data: &U,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        data.bind(state, dhandle, client, resource, data_init);
+    }
+
+    fn can_view(client: Client, data: &U) -> bool {
+        data.can_view(&client)
+    }
+}
 
 #[cfg(test)]
 mod tests {

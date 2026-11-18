@@ -1,0 +1,106 @@
+Lettore schermo attivo.
+Centro di controllo raggruppamento
+Wi-Fi pulsante di commutazione premuto.
+Attivato.
+Apri la pagina Wi-Fi button.
+tabulazione
+Bluetooth pulsante di commutazione premuto.
+Attivato.
+tabulazione
+Apri la pagina Bluetooth button.
+tabulazione
+Modalità scura pulsante di commutazione non premuto.
+Disattivato.
+tabulazione
+Modalità di alimentazione pulsante di commutazione non premuto.
+Bilanciato.
+tabulazione
+Apri la pagina Modalità di alimentazione button.
+tabulazione
+Silenzia l'uscita pulsante di commutazione non premuto.
+tabulazione
+Volume di uscita controllo scorrevole orizzontale 40 39 percento.
+tabulazione
+Apri la pagina Audio button.
+tabulazione
+Silenzia il microfono pulsante di commutazione non premuto.
+tabulazione
+Volume di ingresso controllo scorrevole orizzontale 55 54 percento.
+tabulazione
+Apri la pagina Audio button.
+tabulazione
+Luminosità controllo scorrevole orizzontale 60 60 percento.
+tabulazione
+Contenuti multimediali raggruppamento
+Brano precedente button.
+tabulazione
+Pausa button.
+tabulazione
+Brano successivo button.
+tabulazione
+Impostazioni button.
+tabulazione
+Wi-Fi pulsante di commutazione premuto.
+Attivato.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Indietro button.
+tabulazione
+Wi-Fi casella di spunta spuntata.
+tabulazione
+Athanor Lab, connessa button.
+tabulazione
+Corner Café button.
+tabulazione
+Home Network, protetta button.
+tabulazione
+Office VPN casella di spunta non spuntata.
+tabulazione
+Indietro button.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Indietro button.
+tabulazione
+Bluetooth casella di spunta spuntata.
+tabulazione
+Headphones, connesso button.
+tabulazione
+Keyboard button.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Indietro button.
+tabulazione
+Volume di uscita controllo scorrevole orizzontale 40 39 percento.
+tabulazione
+Silenzia l'uscita casella di spunta non spuntata.
+tabulazione
+Speakers, in uso button.
+tabulazione
+Headphones button.
+tabulazione
+Volume di ingresso controllo scorrevole orizzontale 55 54 percento.
+tabulazione
+Silenzia il microfono casella di spunta non spuntata.
+tabulazione
+Brano precedente button.
+tabulazione
+Pausa button.
+tabulazione
+Brano successivo button.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Indietro button.
+tabulazione
+Bilanciato selezionato pulsante radio.
+tabulazione
+Luminosità dello schermo controllo scorrevole orizzontale 60 60 percento.
+tabulazione
+Indietro button.
+tabulazione
+Bilanciato selezionato pulsante radio.
+tabulazione
+Lettore schermo disattivato.

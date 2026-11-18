@@ -8,6 +8,8 @@ use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
+use crate::background_effect::Blurs;
+use crate::cursor::Cursor;
 use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
@@ -23,7 +25,6 @@ use smithay::backend::input::InputTime;
 use smithay::backend::renderer::damage::{
     Error as DamageError, OutputDamageTracker, RenderOutputResult,
 };
-use smithay::backend::renderer::element::surface::render_elements_from_surface_tree;
 use smithay::backend::renderer::element::{
     default_primary_scanout_output_compare, Kind, RenderElement, RenderElementStates,
 };
@@ -35,7 +36,7 @@ use smithay::desktop::utils::{
     with_surfaces_surface_tree, OutputPresentationFeedback,
 };
 use smithay::desktop::{
-    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+    layer_map_for_output, LayerSurface, PopupGrab, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
 use smithay::input::pointer::CursorImageStatus;
@@ -43,12 +44,14 @@ use smithay::input::{Seat, SeatState};
 use smithay::output::{Mode, Output, PhysicalProperties, Scale, Subpixel};
 use smithay::reexports::calloop::channel::{self, Channel};
 use smithay::reexports::calloop::generic::Generic;
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay::reexports::calloop::{EventLoop, Interest, LoopHandle, LoopSignal, PostAction};
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::backend::{
-    ClientData, ClientId, DisconnectReason, GlobalId,
+    ClientData, ClientId, DisconnectReason, GlobalId, ObjectId,
 };
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::{Client, Display, DisplayHandle};
 use smithay::utils::{
@@ -82,22 +85,28 @@ use smithay::wayland::viewporter::ViewporterState;
 use smithay::wayland::virtual_keyboard::{VirtualKeyboardDevice, VirtualKeyboardManagerState};
 use smithay::wayland::virtual_pointer::{VirtualPointerDevice, VirtualPointerManagerState};
 use smithay::wayland::xdg_activation::XdgActivationState;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// What the outputs show where no surface is: Calmo's `bg1` in the dark variant, #101323, the
-/// colour the desktop's hearth wallpaper starts from (system/athanor-style/calmo/tokens.toml).
-// ponytail: dark always; the session's light or dark theme when the compositor reads appearance.
 /// A surface on no output, or shown on another one, still gets a frame callback this often.
 pub const FRAME_THROTTLE: Duration = Duration::from_secs(1);
 
-pub const BACKGROUND: [f32; 4] = [16.0 / 255.0, 19.0 / 255.0, 35.0 / 255.0, 1.0];
+/// How long a withdrawn `wl_output` global keeps its name before it is destroyed, as wlroots'
+/// `wlr_global_destroy_safe` does: a client that sent `bind` before it read `global_remove` is
+/// still answered by the global it meant.
+pub const OUTPUT_GRACE: Duration = Duration::from_secs(5);
+
+/// What the outputs show where no surface is: cosmic-comp's clear colour, srgb(39,41,42), so
+/// that the shell's surfaces match the cosmic-comp goldens (OS19, item 1; #736). cosmic-bg
+/// covers it with the wallpaper in both sessions.
+pub const BACKGROUND: [f32; 4] = [39.0 / 255.0, 41.0 / 255.0, 42.0 / 255.0, 1.0];
 
 /// The keyboard's repeat: the delay before a held key repeats, in milliseconds, and the
 /// repeats per second.
@@ -117,11 +126,16 @@ pub enum Backend {
 pub struct State {
     pub display_handle: DisplayHandle,
     pub loop_handle: LoopHandle<'static, State>,
+    /// `OUTPUT_GRACE`, a field so that a test need not wait for it.
+    pub output_grace: Duration,
     pub loop_signal: LoopSignal,
     pub clock: Clock<Monotonic>,
 
     pub space: Space<Window>,
     pub popups: PopupManager,
+    /// The last popup grab that took the keyboard: a popup destroyed under it hands the keyboard
+    /// to the grab's current popup (`popup_destroyed`).
+    pub popup_grab: Option<PopupGrab<Self>>,
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
@@ -139,6 +153,12 @@ pub struct State {
     pub gesture: Option<crate::gestures::Kind>,
     /// The windows owed an answer to a decoration request (`decoration.rs`).
     pub decoration_owed: Vec<WlSurface>,
+    /// KDE's server-decoration global, which answers client-side to every request.
+    pub kde_decoration: smithay::wayland::shell::kde::decoration::KdeDecorationState,
+    /// The surfaces whose current content has a FIFO barrier not yet cleared (`pacing.rs`).
+    pub fifo_surfaces: HashMap<ObjectId, WlSurface>,
+    /// The touch points the seat was told of (`touch.rs`).
+    pub touches: crate::touch::Touches,
     /// The barrel buttons each tablet tool holds pressed, as the seat knows them (`tablet.rs`).
     pub tool_pressed: std::collections::HashMap<
         smithay::backend::input::TabletToolDescriptor,
@@ -151,6 +171,8 @@ pub struct State {
     pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
     pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The EIS contexts of the portal backend's sessions (`eis.rs`).
+    pub(crate) eis: crate::eis::Eis,
     /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
     pub aids: crate::aids::Aids,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
@@ -182,6 +204,8 @@ pub struct State {
     /// The cursor a client set last and that client, or the default and no client: shown only
     /// while that client holds the pointer's focus (`shown_cursor`).
     pub cursor_status: (CursorImageStatus, Option<ClientId>),
+    /// The cursor theme the pointer is drawn with, on a monitor and in a capture that asks for it.
+    pub cursor: Cursor,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -219,11 +243,17 @@ pub struct State {
     pub lock_state: SessionLockManagerState,
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
+    /// The DRM leases granted (decision 36); only the udev backend grants one.
+    pub leases: crate::drm_lease::Leases<crate::drm_lease::Lease>,
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
     /// The keyboard-shortcuts inhibitors and the clients Ctrl+Alt+Tab suspended (`constraints`).
     pub input_hold: crate::constraints::Held,
+    /// xdg_system_bell_v1's bells, shown on the focus outline (decision 33).
+    pub bell: crate::bell::Bell,
+    /// The surfaces that set an ext-background-effect-v1 blur region (decision 35).
+    pub blurred: crate::background_effect::Regions,
     /// What the clients of ext-workspace-v1 were sent.
     pub workspace_clients: Vec<Bound>,
     /// The workspaces of each output (`workspace`).
@@ -240,6 +270,10 @@ pub struct State {
     pub lifted: Option<Window>,
     /// The live objects of athanor-workspace-tiling-v1, those of a workspace gone excepted.
     pub workspace_tilings: Vec<AthanorWorkspaceTilingV1>,
+    /// The live objects of athanor-dock-overlap-v1 (decision 35).
+    pub dock_overlaps: Vec<crate::dock_overlap::Overlap>,
+    /// Each output's material tier and the objects that follow it (`material.rs`).
+    pub materials: crate::material::Materials,
     /// The live state objects of athanor-toplevel-state-v1, an inert one excepted.
     pub toplevel_states: Vec<AthanorToplevelStateV1>,
     /// The live objects of athanor-keyboard-group-v1, an inert one excepted.
@@ -269,19 +303,32 @@ pub struct State {
 
 /// The serials a popup grab may name, as mutter takes them, each with the client it was sent
 /// to: the last button press, sent to the client under the pointer, and the last key press and
-/// release, sent to the focused client. Serials come from one counter and can be guessed; the
-/// client is what keeps one client from naming another's.
+/// release, sent to the focused client; a window grab may also name the last touch-down, sent to
+/// the client under the finger. Serials come from one counter and can be guessed; the client is
+/// what keeps one client from naming another's.
 #[derive(Debug, Default)]
 pub struct GrabSerials {
     pub button: Option<(Serial, ClientId)>,
+    pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
+    /// The last press of any kind, a key, a button, a finger or a pen, whether a client or the
+    /// compositor took it: a click grants a token only while it is the last (`token_created`).
+    pub press: Option<Serial>,
+    /// A serial taken at the last change of the keyboard focus, to a surface or to none: a
+    /// click older than it grants no token (`token_created`).
+    pub focus: Option<Serial>,
 }
 
 impl GrabSerials {
     /// Whether `serial` is the last button press, and was sent to `client`.
     pub fn clicked(&self, serial: Serial, client: &ClientId) -> bool {
         sent(self.button.as_ref(), serial, client)
+    }
+
+    /// Whether `serial` is the last touch-down, and was sent to `client`.
+    pub fn touched(&self, serial: Serial, client: &ClientId) -> bool {
+        sent(self.touch.as_ref(), serial, client)
     }
 
     /// Whether `serial` is the last key press or release, and was sent to `client`.
@@ -350,6 +397,8 @@ impl State {
         crate::toplevel_state::global(&dh);
         crate::keyboard_group::global(&dh);
         crate::workspace_tiling::global(&dh);
+        crate::dock_overlap::global(&dh);
+        crate::material::global(&dh);
         crate::a11y::global(&dh);
         crate::output_management::global(&dh);
         crate::output_power::global(&dh);
@@ -363,7 +412,25 @@ impl State {
         crate::gestures::global(&dh);
         crate::tablet::global(&dh);
         crate::decoration::global(&dh);
+        let kde_decoration = crate::decoration::kde_global(&dh);
         crate::foreign::global(&dh);
+        // Decision 33, wave 2a. Smithay applies a surface's alpha multiplier to that surface's
+        // own elements, never to the marks of decision 31 drawn around its window (`marks.rs`).
+        smithay::wayland::fixes::FixesState::new::<Self>(&dh);
+        smithay::wayland::alpha_modifier::AlphaModifierState::new::<Self>(&dh);
+        crate::pacing::globals(&dh);
+        crate::toplevel_icon::global(&dh);
+        smithay::wayland::shell::xdg::dialog::XdgDialogState::new::<Self>(&dh);
+        crate::bell::global(&dh);
+        // Decision 35.
+        crate::background_effect::global(&dh);
+        // Decision 36. A surface's content type and a toplevel's tag are kept, applied with the
+        // commit; nothing reads the type at 1.0, and the tag grants nothing.
+        smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
+        crate::toplevel_tag::global(&dh);
+        // Decision 33, wave 2b. A surface's presentation hint is kept, applied with the commit;
+        // the DRM backend presents every frame with vsync (`tearing.rs`).
+        crate::tearing::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -372,6 +439,8 @@ impl State {
         let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "seat0");
         seat.add_keyboard(Default::default(), REPEAT_DELAY, REPEAT_RATE)?;
         seat.add_pointer();
+        // wl_touch (decision 33); each finger goes to its own surface (`touch.rs`).
+        seat.add_touch();
 
         dispatch_clients(event_loop, display)?;
         let (client_gone, gone) = channel::channel();
@@ -380,10 +449,12 @@ impl State {
         Ok(Self {
             display_handle: dh,
             loop_handle: event_loop.handle(),
+            output_grace: OUTPUT_GRACE,
             loop_signal: event_loop.get_signal(),
             clock,
             space: Space::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
@@ -393,10 +464,14 @@ impl State {
             foreign: Default::default(),
             gesture: None,
             decoration_owed: Vec::new(),
+            kde_decoration,
+            fifo_surfaces: HashMap::new(),
+            touches: Default::default(),
             tool_pressed: Default::default(),
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            eis: Default::default(),
             aids: Default::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
@@ -407,6 +482,7 @@ impl State {
             lock_requests: 0,
             fatal: None,
             cursor_status: (CursorImageStatus::default_named(), None),
+            cursor: Cursor::from_env(),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -432,9 +508,12 @@ impl State {
             captures: Vec::new(),
             lock_state,
             lock: None,
+            leases: Default::default(),
             idle_notifier_state,
             inhibitors: HashMap::new(),
             input_hold,
+            bell: crate::bell::Bell::default(),
+            blurred: Default::default(),
             workspace_clients: Vec::new(),
             workspaces: Vec::new(),
             next_workspace: 0,
@@ -442,6 +521,8 @@ impl State {
             tilings: Vec::new(),
             lifted: None,
             workspace_tilings: Vec::new(),
+            dock_overlaps: Vec::new(),
+            materials: Default::default(),
             toplevel_states: Vec::new(),
             keyboard_groups: Vec::new(),
             sent_group: 0,
@@ -495,6 +576,8 @@ impl State {
         });
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: context.is_some(),
             grants,
@@ -508,6 +591,8 @@ impl State {
     pub fn satellite_state(&self) -> Arc<ClientState> {
         Arc::new(ClientState {
             compositor_state: CompositorClientState::default(),
+            queued: Arc::default(),
+            retained: Arc::default(),
             gone: self.client_gone.clone(),
             confined: true,
             grants: Vec::new(),
@@ -516,7 +601,9 @@ impl State {
         })
     }
 
-    /// Maps `output` to the right of the outputs already in the space.
+    /// Maps `output` to the right of the outputs already in the space, or at the origin when
+    /// that would take it past `REACH`, the farthest a configuration may place an output; there
+    /// it overlaps what is there, as outputs a configuration places may.
     pub fn map_output(&mut self, output: &Output) {
         let x = self
             .space
@@ -526,6 +613,11 @@ impl State {
             .max()
             .unwrap_or(0);
         self.space.map_output(output, (x, 0));
+        let reach = crate::output_management::REACH;
+        let area = self.space.output_geometry(output);
+        if area.is_some_and(|area| area.loc.x + area.size.w > reach) {
+            self.space.map_output(output, (0, 0));
+        }
         if let Some(shown) = self.space.output_geometry(output) {
             let known = output.user_data().get_or_insert(KnownArea::default);
             known.0.set(shown);
@@ -534,11 +626,23 @@ impl State {
         self.workspaces_changed();
     }
 
-    /// An output that goes: its layer surfaces are closed, and its windows join the first
-    /// output's active workspace, centred on that output when it does not show them.
+    /// The output `wl_output` names, while it is shown: a client may still name one disabled
+    /// or unplugged, whose global is gone, and none is then given.
+    pub fn shown_output(&self, wl_output: &WlOutput) -> Option<Output> {
+        Output::from_resource(wl_output).filter(|output| self.space.outputs().any(|o| o == output))
+    }
+
+    /// An output that goes: its layer surfaces are closed, its lock surface is forgotten, so
+    /// that it shows only the background if it comes back while locked, and its windows join
+    /// the first output's active workspace, centred on that output when it does not show them.
     pub fn remove_output(&mut self, output: &Output) {
         self.forget_output_power(output);
         self.close_layers(output);
+        if let Some(lock) = &mut self.lock {
+            lock.forget_output(output);
+            // The keyboard leaves a lock surface the output took with it.
+            self.set_keyboard_focus(None);
+        }
         self.space.unmap_output(output);
         self.fit_to_outputs();
         self.workspaces_changed();
@@ -1169,6 +1273,7 @@ impl State {
         for (surface, _) in &popups {
             with_surfaces_surface_tree(surface, scanout);
         }
+        self.fifo_frame_done(output);
         if damaged {
             self.presentation_feedback(output, states).presented(
                 frame_target,
@@ -1383,25 +1488,27 @@ impl<'a> View<'a> {
     }
 }
 
-/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents, as
-/// `look` says of the magnifier and the colour filters.
+/// Draws `view` on `output` into `framebuffer`, with `pointer` above it, `age` frames after its
+/// previous contents, as `look` says of the magnifier and the colour filters.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_view<'d, R>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
     output: &Output,
     age: usize,
     view: View<'_>,
+    pointer: Vec<Stacked<R>>,
     damage_tracker: &'d mut OutputDamageTracker,
     look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
 where
-    R: Filters,
+    R: Filters + Blurs,
     R::TextureId: Send + Clone + Texture + 'static,
     FilterElement<R::TextureId>: RenderElement<R>,
 {
     let scale = output.current_scale().fractional_scale();
     let surface = |renderer: &mut R, surface: &WlSurface, at: Point<i32, Physical>| {
-        render_elements_from_surface_tree::<_, Stacked<R>>(
+        crate::marks::surface_elements::<_, Stacked<R>>(
             renderer,
             surface,
             at,
@@ -1410,8 +1517,11 @@ where
             Kind::Unspecified,
         )
     };
-    // The popups and the lock surface are surfaces as the space's are, above them.
-    let mut elements: Vec<Stacked<R>> = Vec::new();
+    // The pointer above all; the popups and the lock surface are surfaces as the space's are,
+    // above them.
+    let mut elements: Vec<Stacked<R>> = pointer;
+    // No region is blurred on the lock screen.
+    let mut blurred = None;
     match view {
         View::Space(space, popups, marks) => {
             for (popup, at) in popups {
@@ -1419,10 +1529,12 @@ where
                 elements.extend(surface(renderer, popup, at));
             }
             elements.extend(crate::marks::stack(renderer, space, output, marks));
+            blurred = Some(&*marks.blurred);
         }
         View::Locked(Some(lock)) => elements.extend(surface(renderer, lock, Point::default())),
         View::Locked(None) => {}
     }
+    let elements = crate::background_effect::behind(output, blurred, elements);
     crate::look::draw(
         renderer,
         framebuffer,
@@ -1450,16 +1562,27 @@ pub fn new_output(
     transform: Transform,
     scale: f64,
 ) -> Output {
-    let output = build_output(name, model, size, refresh, transform, scale);
+    let identity = placeholder_identity(model);
+    let output = build_output(name, &identity, size, refresh, transform, scale);
     publish_output(dh, &output);
     output
 }
 
+/// What an output with no readable EDID reports: make "Athanor", the given model, no serial.
+pub fn placeholder_identity(model: &str) -> athanor_edid::Identity {
+    athanor_edid::Identity {
+        make: "Athanor".into(),
+        model: model.into(),
+        serial: String::new(),
+    }
+}
+
 /// An output with no global yet (`publish_output`): for a backend that learns whether the
-/// monitor works only after it has the output.
+/// monitor works only after it has the output. `identity` is what `wl_output` reports as make
+/// and model, and wlr-output-management as make, model and serial.
 pub fn build_output(
     name: &str,
-    model: &str,
+    identity: &athanor_edid::Identity,
     size: Size<i32, Physical>,
     refresh: i32,
     transform: Transform,
@@ -1470,9 +1593,9 @@ pub fn build_output(
         PhysicalProperties {
             size: (0, 0).into(),
             subpixel: Subpixel::Unknown,
-            make: "Athanor".into(),
-            model: model.into(),
-            serial_number: String::new(),
+            make: identity.make.clone(),
+            model: identity.model.clone(),
+            serial_number: identity.serial.clone(),
         },
     );
     let mode = Mode { size, refresh };
@@ -1486,16 +1609,52 @@ pub fn build_output(
     output
 }
 
-/// Offers `output` to the clients; the global is kept in its user data.
+/// Offers `output` to the clients; the global is kept in its user data. One it had still is
+/// destroyed first, so that no client sees two globals for one output.
 pub fn publish_output(dh: &DisplayHandle, output: &Output) {
+    let slot = output.user_data().get_or_insert(OutputGlobal::default);
+    if let Some(old) = take_global(output) {
+        tracing::warn!(output = output.name(), "an output was offered twice");
+        output.leave_all();
+        dh.remove_global::<State>(old);
+    }
     let global = output.create_global::<State>(dh);
-    output
-        .user_data()
-        .insert_if_missing(|| OutputGlobal(global));
+    *slot.0.borrow_mut() = Some(global);
 }
 
-/// The global of an output, kept in its user data: removed with the output.
-pub struct OutputGlobal(pub GlobalId);
+/// Withdraws the global of `output`, which clients bound to it see go; an output disabled by a
+/// configuration gets a new one when it is enabled again (`publish_output`). The global is
+/// disabled now and destroyed after `State::output_grace`: `wayland-backend` hands the lowest
+/// free name to the next global, and a client that has not yet read `global_remove` may send
+/// `bind` for the old name, which must not reach another output (or another interface).
+pub fn withdraw_output(state: &State, output: &Output) {
+    output.leave_all();
+    let Some(global) = take_global(output) else {
+        return;
+    };
+    let dh = &state.display_handle;
+    dh.disable_global::<State>(global.clone());
+    let doomed = global.clone();
+    let timer = Timer::from_duration(state.output_grace);
+    if let Err(error) = state.loop_handle.insert_source(timer, move |_, _, state| {
+        state.display_handle.remove_global::<State>(doomed.clone());
+        TimeoutAction::Drop
+    }) {
+        tracing::warn!(%error, "no timer for the grace of a withdrawn output; destroying it now");
+        dh.remove_global::<State>(global);
+    }
+}
+
+fn take_global(output: &Output) -> Option<GlobalId> {
+    output
+        .user_data()
+        .get::<OutputGlobal>()
+        .and_then(|slot| slot.0.borrow_mut().take())
+}
+
+/// The global of an output, kept in its user data while the output is offered.
+#[derive(Default)]
+pub struct OutputGlobal(RefCell<Option<GlobalId>>);
 
 /// Dispatches the clients' requests. The callback owns the display: it dispatches without the
 /// unsafe access a source holding it would need.
@@ -1557,6 +1716,10 @@ pub fn listen(handle: &LoopHandle<'static, State>) -> Result<OsString, Error> {
 /// What the compositor keeps per client.
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// How many of its commits are queued and not yet applied (`State::queue_commit`).
+    pub queued: Arc<AtomicUsize>,
+    /// How many commits its synchronised subsurfaces keep, all together (`State::queue_commit`).
+    pub retained: Arc<AtomicUsize>,
     gone: channel::Sender<ClientId>,
     /// Whether it is confined: it connected through a security context, as a sandboxed
     /// application does, or through xwayland-satellite's socket.
@@ -1576,6 +1739,15 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `client` has no identity though it could have one: it connected outside a security
+/// context and its process could not be read, or it has no client state. A confined client has
+/// none by design.
+pub fn unidentified(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_none_or(|data| !data.confined && data.identity.is_none())
 }
 
 /// Whether `a` and `b` connected through security contexts that name one application instance:
@@ -1607,12 +1779,20 @@ pub fn unconfined(client: &Client) -> bool {
 }
 
 impl State {
-    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31).
+    /// What a frame's marks are drawn from (`doc_own_stack.md` decision 31), with the bell of
+    /// decision 33 on the focused window's outline.
     pub fn marks(&self) -> Marks {
+        let focused = self.focused_window();
+        let outline = self.focus_theme.outline();
+        let outline = match &focused {
+            Some(window) => self.bell.outline(window, outline),
+            None => outline,
+        };
         Marks {
-            focused: self.focused_window(),
-            outline: self.focus_theme.outline(),
+            focused,
+            outline,
             edge: self.focus_theme.edge(),
+            blurred: self.blurred.clone(),
         }
     }
 }
@@ -2075,6 +2255,9 @@ mod tests {
             button: Some((s(7), b.clone())),
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
+            touch: Some((s(10), b.clone())),
+            press: Some(s(10)),
+            focus: None,
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");
@@ -2083,5 +2266,9 @@ mod tests {
         assert!(serials.typed(s(8), &b) && serials.typed(s(9), &m));
         assert!(!serials.typed(s(8), &m), "B's key named by M");
         assert!(!serials.typed(s(7), &b), "a click is not a key");
+        assert!(serials.touched(s(10), &b));
+        assert!(!serials.touched(s(10), &m), "B's touch named by M");
+        assert!(!serials.touched(s(7), &b), "a click is not a touch");
+        assert!(!serials.clicked(s(10), &b), "a touch is not a click");
     }
 }

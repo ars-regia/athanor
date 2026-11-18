@@ -4,7 +4,8 @@
 //! buttons. Generic over `Host`, which each program implements for its own state.
 //!
 //! Without the default `gtk` feature the model, the entries and their acts (`entries`), the
-//! favourites and the translations build, for a surface drawn without GTK.
+//! favourites and the translations build, for a surface drawn without GTK; the `sal`
+//! feature draws the row with Athanor's own toolkit.
 
 pub mod entries;
 pub mod favorites;
@@ -16,6 +17,8 @@ pub mod model;
 pub mod openers;
 #[cfg(feature = "gtk")]
 pub mod row;
+#[cfg(feature = "sal")]
+pub mod sal;
 #[cfg(feature = "gtk")]
 pub mod timing;
 

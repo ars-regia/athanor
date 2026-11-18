@@ -1,0 +1,6256 @@
+//! The widget tree: a flat arena of widgets, laid out in logical pixels and mirrored in
+//! right-to-left.
+
+use crate::focus;
+use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
+use crate::theme::{Rgba, Theme, TitleBarStyle};
+use crate::wrap::{self, Wrap};
+use parley::Layout;
+use std::fmt;
+use std::time::{Duration, Instant};
+
+mod alert;
+mod calendar;
+mod exact_value;
+mod horizontal;
+mod spacing;
+mod natural;
+pub(crate) mod labelled;
+mod rows;
+mod strip;
+pub(crate) mod wheel;
+
+pub use calendar::{Calendar, CalendarText, Cell, Date};
+
+/// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
+/// the widget's slot in the `Ui` and the slot's generation, and is meaningful only in the `Ui`
+/// that returned it.
+///
+/// The id is live until [`Ui::remove_children`] removes its widget, and stale from then on, also
+/// once another widget takes the slot under the next generation. A method given a stale id never
+/// reaches the widget in the slot: a setter changes nothing and logs it, returning `false` or
+/// `None` where it returns either, [`Ui::add`] adds nothing and returns the stale id, and a
+/// reader reads a hidden column without children. A method given an id past the slots of the
+/// `Ui`, as an id of another `Ui` can be, panics, as its `# Panics` says.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WidgetId(pub(crate) u32, pub(crate) u32);
+
+impl WidgetId {
+    /// The widget's place in its `Ui`'s arena.
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+/// The widgets of a [`Ui`], in the order they were added, indexed by their ids. A type of the
+/// crate's own, so that indexing by [`WidgetId`] stays out of the public API.
+///
+/// Indexed by a stale id, it gives a hidden column without children, and takes what is written
+/// to it into a widget that nothing reads: so a method of [`Ui`] given a stale id does nothing.
+pub(crate) struct Widgets {
+    slots: Vec<Widget>,
+    /// The generation of each slot, which [`Widgets::free`] advances.
+    generations: Vec<u32>,
+    /// What a stale id reads.
+    dead: Widget,
+    /// What a stale id writes, emptied at every write.
+    scratch: Widget,
+    /// The warnings of stale ids and of widgets refused, said at most once a minute.
+    hush: Hush,
+}
+
+/// How long [`Hush`] holds back the warnings after one it says.
+const HUSH: Duration = Duration::from_secs(60);
+
+/// A warning said at most once a [`HUSH`], with the count of those held back since: an
+/// application that keeps a stale id, or an assistive technology that keeps acting on a cached
+/// node, does not flood the journal.
+#[derive(Default)]
+struct Hush {
+    said: std::cell::Cell<Option<Instant>>,
+    held: std::cell::Cell<u64>,
+}
+
+impl Hush {
+    /// Whether to say a warning at `now`, and how many were held back since the last one said.
+    fn due(&self, now: Instant) -> Option<u64> {
+        if self
+            .said
+            .get()
+            .is_some_and(|said| now.duration_since(said) < HUSH)
+        {
+            self.held.set(self.held.get() + 1);
+            return None;
+        }
+        self.said.set(Some(now));
+        Some(self.held.replace(0))
+    }
+}
+
+/// The generation of a retired slot, which holds no widget again: the first whose low 16 bits,
+/// all an accessibility node carries of it (`a11y::node_id`), are those of generation 0.
+const RETIRED: u32 = 1 << 16;
+
+/// The id [`Ui::add`] returns when the `Ui` is full: the root's slot, whose generation is always
+/// 0, since the root is never removed, under the last generation, so that it is always stale.
+const REFUSED: WidgetId = WidgetId(0, u32::MAX);
+
+/// The most widgets a `Ui` holds, as many as an accessibility node of a widget names.
+const MAX_WIDGETS: usize = 1 << 24;
+
+/// A hidden column without children: the widget of a freed slot, and of a stale id.
+fn dead() -> Widget {
+    let mut widget = Widget::new(Kind::Column, None);
+    widget.visible = false;
+    widget
+}
+
+impl Widgets {
+    fn new(root: Widget) -> Self {
+        Self {
+            slots: vec![root],
+            generations: vec![0],
+            dead: dead(),
+            scratch: dead(),
+            hush: Hush::default(),
+        }
+    }
+
+    /// Whether `id` names a widget, as it is now: neither stale nor past the arena.
+    pub(crate) fn contains(&self, id: WidgetId) -> bool {
+        self.generations.get(id.index()) == Some(&id.1)
+    }
+
+    /// The widget `id` names, `None` when it is stale or past the arena.
+    pub(crate) fn get(&self, id: WidgetId) -> Option<&Widget> {
+        self.contains(id).then(|| &self.slots[id.index()])
+    }
+
+    /// The widget `id` names, `None` when it is stale or past the arena.
+    pub(crate) fn get_mut(&mut self, id: WidgetId) -> Option<&mut Widget> {
+        if !self.contains(id) {
+            return None;
+        }
+        self.slots.get_mut(id.index())
+    }
+
+    /// The generation of the slot at `index`, `None` past the arena and for a retired slot.
+    pub(crate) fn generation(&self, index: usize) -> Option<u32> {
+        self.generations.get(index).copied().filter(|&g| g != RETIRED)
+    }
+
+    /// Adds `widget` in a new slot, of generation 0.
+    fn push(&mut self, widget: Widget) {
+        self.slots.push(widget);
+        self.generations.push(0);
+    }
+
+    /// Empties the slot of `id` and advances its generation, so that `id` is stale: returns the
+    /// id of the slot's next widget, or `None` when the slot is retired. A node carries only the
+    /// low 16 bits of the generation, so a slot freed 65,536 times holds no widget again: a node
+    /// an assistive technology cached for any of its widgets never names another. A retired slot
+    /// is in no tree, so it is never freed again.
+    fn free(&mut self, id: WidgetId) -> Option<WidgetId> {
+        self.slots[id.index()] = dead();
+        let generation = self.generations[id.index()] + 1;
+        self.generations[id.index()] = generation;
+        (generation != RETIRED).then_some(WidgetId(id.0, generation))
+    }
+
+    /// Logs the use of stale `id`.
+    fn stale(&self, id: WidgetId) {
+        self.warn(format_args!("{id:?} names a removed widget: nothing done"));
+    }
+
+    /// Logs `what`, unless a warning was logged less than a minute ago: then it is counted, and
+    /// the count logged with the next one.
+    pub(crate) fn warn(&self, what: fmt::Arguments<'_>) {
+        match self.hush.due(Instant::now()) {
+            None => {}
+            Some(0) => eprintln!("athanor-sal: {what}"),
+            Some(held) => eprintln!("athanor-sal: {what} ({held} more held back)"),
+        }
+    }
+}
+
+impl std::ops::Deref for Widgets {
+    type Target = [Widget];
+
+    fn deref(&self) -> &[Widget] {
+        &self.slots
+    }
+}
+
+impl std::ops::Index<WidgetId> for Widgets {
+    type Output = Widget;
+
+    /// # Panics
+    ///
+    /// When `id` is past the arena.
+    fn index(&self, id: WidgetId) -> &Widget {
+        let widget = &self.slots[id.index()];
+        if self.generations[id.index()] == id.1 {
+            return widget;
+        }
+        self.stale(id);
+        &self.dead
+    }
+}
+
+impl std::ops::IndexMut<WidgetId> for Widgets {
+    /// # Panics
+    ///
+    /// When `id` is past the arena.
+    fn index_mut(&mut self, id: WidgetId) -> &mut Widget {
+        if self.generations[id.index()] == id.1 {
+            return &mut self.slots[id.index()];
+        }
+        self.stale(id);
+        self.scratch = dead();
+        &mut self.scratch
+    }
+}
+
+/// How urgently assistive technologies speak an announcement ([`Ui::announce`]), as GTK's
+/// `GtkAccessibleAnnouncementPriority` and AT-SPI's politeness.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Priority {
+    /// After what the screen reader is saying: GTK's low and medium priorities.
+    #[default]
+    Polite,
+    /// At once, interrupting what the screen reader is saying: GTK's high priority, for what
+    /// needs attention now, such as a critical notification.
+    Assertive,
+}
+
+/// The longest length layout keeps, in logical pixels: 2^64 times less than the largest `f32`,
+/// so that the sizes, paddings, gaps and offsets a tree adds up to place its widgets, a few for
+/// each widget, stay finite for any tree that fits in memory (#1153).
+pub(crate) const LENGTH_MAX: f32 = f32::MAX / (1u128 << 64) as f32;
+
+/// `v` as a length layout keeps: 0 when it is not finite or below 0, and at most
+/// [`LENGTH_MAX`].
+pub(crate) fn length(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(0.0, LENGTH_MAX)
+    } else {
+        0.0
+    }
+}
+
+/// A rectangle in logical pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Rect {
+    /// The distance from the left edge.
+    pub x: f32,
+    /// The distance from the top edge.
+    pub y: f32,
+    /// The width.
+    pub w: f32,
+    /// The height.
+    pub h: f32,
+}
+
+impl Rect {
+    /// The part of the rectangle inside `other`, empty where they do not meet.
+    pub(crate) fn intersect(self, other: Rect) -> Rect {
+        let (x, y) = (self.x.max(other.x), self.y.max(other.y));
+        let right = (self.x + self.w).min(other.x + other.w);
+        let bottom = self.bottom().min(other.bottom());
+        let (w, h) = ((right - x).max(0.0), (bottom - y).max(0.0));
+        Rect { x, y, w, h }
+    }
+
+    /// Whether the point is inside the rectangle; the right and bottom edges are outside.
+    pub fn contains(&self, x: f32, y: f32) -> bool {
+        x >= self.x && x < self.x + self.w && y >= self.y && y < self.y + self.h
+    }
+
+    /// The horizontal middle.
+    pub fn center_x(&self) -> f32 {
+        self.x + self.w / 2.0
+    }
+
+    /// The vertical position of the bottom edge.
+    pub fn bottom(&self) -> f32 {
+        self.y + self.h
+    }
+}
+
+/// What a widget is and what it shows. New kinds are added over time: match with a `_` arm.
+#[non_exhaustive]
+pub enum Kind {
+    /// Children stacked top to bottom, aligned to the start edge.
+    Column,
+    /// Children side by side in reading order, left to right or right to left, with equal
+    /// shares of the row, as a homogeneous GTK box. In a column or a group it fills the width.
+    Row,
+    /// A column with an accessible name, for a heading and the controls it names.
+    Group(String),
+    /// A column with an accessible name that assistive technologies read as an alert, as GTK's
+    /// `alert` role: laid out as a [`Kind::Group`]. It sets no live priority, so showing it
+    /// announces nothing by itself; [`Ui::announce`] speaks. Add it with [`Ui::alert`].
+    Alert(String),
+    /// A line of text that takes no input.
+    Label(String),
+    /// A button with a label; activating it raises [`Event::Clicked`].
+    Button(String),
+    /// A toggle button. The toggles that share a parent form a radio group: activating one
+    /// releases the others. Add it with [`Ui::toggle`], or with [`Ui::radio`] for one that
+    /// assistive technologies read as a radio button.
+    #[non_exhaustive]
+    Toggle {
+        /// The text of the toggle.
+        label: String,
+        /// Whether this toggle is the active one of its group.
+        active: bool,
+        /// Whether it is a radio button, checked when active, rather than GTK's grouped toggle
+        /// button, pressed when active: assistive technologies read it so, and it is drawn as
+        /// GTK's radio check button, a ring at the start edge with its label after it, the
+        /// chosen one's ring and the dot in it in the accent.
+        radio: bool,
+    },
+    /// A check button: a box and a label, on or off on its own. Unlike the toggles, the checks
+    /// that share a parent are independent; activating one raises [`Event::Toggled`]. Add it
+    /// with [`Ui::check`].
+    #[non_exhaustive]
+    Check {
+        /// The text beside the box.
+        label: String,
+        /// Whether the box is checked.
+        active: bool,
+    },
+    /// A switch: a label at the start edge and a track with a knob at the end edge, on or off
+    /// on its own. It fills the width of its column or group, or its cell in a row, where every
+    /// child gets an equal share of the row's width; activating it raises [`Event::Toggled`].
+    /// Add it with [`Ui::switch`].
+    #[non_exhaustive]
+    Switch {
+        /// The text of the switch, which names it for assistive technologies.
+        label: String,
+        /// Whether the switch is on.
+        active: bool,
+    },
+    /// A slider: a knob on a track that picks a number between a minimum and a maximum, in
+    /// steps. It fills the width of its column or group, or its cell in a row, and takes the
+    /// pointer, the arrows, Home, End, Page Up and Page Down; it raises [`Event::Changed`]. Add
+    /// it with [`Ui::slider`], which keeps its range valid; change its value with
+    /// [`Ui::set_value`] and its range with [`Ui::set_range`].
+    Slider(Slider),
+    /// A tile of the control center: a toggle of its own with an icon in a disc, a title and a
+    /// second line, 64 logical pixels tall at least (VL7). It fills the width of its column or
+    /// group, or its cell in a row, and raises [`Event::Toggled`]. Add it with [`Ui::tile`].
+    Tile(crate::tile::Tile),
+    /// A drop-down, as GTK's `DropDown`: a raised button that shows its chosen item and opens
+    /// its items in a menu, where choosing one raises [`Event::Changed`]. Activating it raises
+    /// [`Event::Clicked`], which the driver takes to open the menu. Add it with [`Ui::drop_down`].
+    DropDown(crate::drop_down::DropDown),
+    /// A raised button that shows only an icon and turns on and off by itself, as a mute
+    /// button; it raises [`Event::Toggled`]. Add it with [`Ui::icon_toggle`].
+    IconToggle(crate::icon_toggle::IconToggle),
+    /// A level: a bar that shows a number from 0 to a maximum and takes no input, as GTK's
+    /// `LevelBar`. The part up to the level's full mark is drawn in the accent, the part beyond
+    /// it in the theme's warning colour (doc_osd.md OD9: a volume above 100 %). It fills the
+    /// width of its column or group, or its cell in a row; [`Ui::set_sensitive`] gives it the
+    /// insensitive look. Add it with [`Ui::level`], which keeps its range valid.
+    Level(Level),
+    /// A single-line text field, or a password field ([`Ui::password`]).
+    Field(Box<TextField>),
+    /// A text field of several lines, as GTK's `TextView` in a `ScrolledWindow`: as wide as a
+    /// field, its text wrapped at that width, a number of lines tall, and scrolled to keep the
+    /// caret in view and under the wheel. Enter breaks the line, Up and Down move between lines,
+    /// and Tab leaves it. Add it with [`Ui::text_area`].
+    TextArea(Box<TextField>),
+    /// A viewport `height` logical pixels high onto its child, which it fills the width with and
+    /// scrolls under the wheel and the touchpad, and to keep the keyboard focus in view, as GTK's
+    /// `ScrolledWindow`. What lies outside the viewport is not drawn and takes no pointer input;
+    /// a thin indicator at the end edge shows the position while the child is taller. Add it
+    /// with [`Ui::scroll`].
+    #[non_exhaustive]
+    Scroll {
+        /// The height of the viewport, in logical pixels.
+        height: f32,
+        /// How far the child is scrolled, in logical pixels from its top: from 0 to its height
+        /// less the viewport's.
+        offset: f32,
+    },
+    /// A list of rows of text, stacked top to bottom, of which the user chooses one, as GTK's
+    /// `ListBox`. It is one stop of the Tab order, on its selected row (the first while none is):
+    /// the arrows, Page Up, Page Down, Home and End choose another; Up on the first row and Down
+    /// on the last leave the list as Shift+Tab and Tab do. A row chosen by the keyboard, a click
+    /// or Enter raises [`Event::Selected`]. It fills the width of its column, group or scroll.
+    /// Add it with [`Ui::list`] and its rows with [`Ui::list_row`].
+    #[non_exhaustive]
+    List {
+        /// The name assistive technologies read for the list.
+        name: String,
+        /// The row chosen, if any; see [`Ui::selected`].
+        selected: Option<WidgetId>,
+    },
+    /// A row of a [`Kind::List`], with its text at the start edge. The pointer chooses it; the
+    /// keyboard reaches it only through its list. A row may hold widgets of its own, added under
+    /// it as under any parent: an image and a group of labels, say. They are then laid side by
+    /// side from the start edge with the theme's gap, each centred across the row, and its text
+    /// is not drawn: it is only the name assistive technologies read. The last of them takes the
+    /// rest of the row when it is a column, a group or a wrapping label, as a GTK box gives an
+    /// ellipsized label its natural width: its labels then end in an ellipsis only where the row
+    /// is too narrow for them.
+    ListRow(String),
+    /// A heading among the rows of a [`Kind::List`], with its text at the start edge, as a GTK
+    /// row that is neither selectable nor activatable: the keyboard and the pointer pass over
+    /// it. Add it with [`Ui::list_heading`].
+    ListHeading(String),
+    /// The title bar the window draws when the compositor leaves the decorations to it, as GTK
+    /// does: the title centred and the window's buttons at the end edge. See [`Ui::add_title_bar`].
+    TitleBar,
+    /// One of the title bar's buttons.
+    WindowButton(WindowButton),
+    /// A menu: its items and separators stacked top to bottom, all as wide as the widest. The
+    /// up and down arrows cycle through its items. Shown in a popup, see
+    /// [`crate::driver::Shell::open_popup`].
+    Menu,
+    /// An item of a [`Kind::Menu`], with its label; activating it raises [`Event::Clicked`].
+    MenuItem(String),
+    /// An item of a [`Kind::Menu`] with a mark, as GTK's model buttons: a check or a radio at
+    /// the start edge, or an arrow to a submenu at the end edge, or the arrow back from one at
+    /// the start edge of a submenu's title. When one item of a menu has a check or a radio, the
+    /// labels of all of them start after the room it takes, as GTK's indicator size group. Add it
+    /// with [`Ui::menu_check`], [`Ui::menu_radio`] or [`Ui::submenu`].
+    #[non_exhaustive]
+    MenuEntry {
+        /// The text of the item.
+        label: String,
+        /// What the item shows beside its label and does when activated.
+        mark: Mark,
+    },
+    /// A line between groups of a menu's items. It takes no input.
+    Separator,
+    /// The text of a tooltip, which the driver shows in a popup of its own.
+    Tooltip(String),
+    /// An image drawn in a square of `size` logical pixels, scaled from its own pixels to fit it
+    /// with its aspect ratio kept, centred. It takes no input. Add it with [`Ui::image`].
+    #[non_exhaustive]
+    Image {
+        /// The pixels: a PNG, or an SVG rasterised at the size it is drawn at.
+        image: crate::icon::Image,
+        /// The side of the square, in logical pixels.
+        size: f32,
+        /// What the image shows, which names it for assistive technologies; empty for an image
+        /// that only decorates.
+        description: String,
+    },
+    /// A picture of decoded pixels that fills its column's width and the rest of its height, a
+    /// wallpaper's surface whole when it is the root's only child and the theme's margin is 0. It
+    /// is drawn with "zoom": scaled by one factor until it covers its rectangle in physical
+    /// pixels, the overflow cut equally on both sides. It takes no input and adds nothing to its
+    /// column's size, so a layer surface anchored on all four edges takes the size the
+    /// compositor configures. It takes a size only as a child of a [`Kind::Column`], the root
+    /// included, a [`Kind::Group`] or a [`Kind::Alert`]: elsewhere it is 0 by 0 and not drawn.
+    /// Add it with [`Ui::picture`].
+    #[non_exhaustive]
+    Picture {
+        /// The pixels, from [`crate::Image::from_rgba8`].
+        image: crate::icon::Image,
+        /// What the picture shows, which names it for assistive technologies; empty for a
+        /// picture that only decorates.
+        description: String,
+    },
+    /// A dock's island along an edge of its window: its children stacked top to bottom when
+    /// `vertical`, side by side in reading order otherwise, each stretched across the line and
+    /// all centred along it. As the root's child it fills the window, so a surface stretched
+    /// along the edge keeps the island in its middle. Only the children and the theme's
+    /// `island_padding` around them are filled, with `island` and rounded by `island_radius`.
+    /// Add it with [`Ui::island`].
+    #[non_exhaustive]
+    Island {
+        /// Whether the children are stacked top to bottom.
+        vertical: bool,
+        /// The room kept free around the fill, top, right, bottom and left, as CSS's margin.
+        margin: [f32; 4],
+    },
+    /// A flat button that shows an image, named by its label for assistive technologies;
+    /// activating it raises [`Event::Clicked`]. It is at least the theme's `button_min` on
+    /// each side, with the theme's padding added left and right, as GTK's min-width and
+    /// padding: a 16 or 24 pixel image in a 48 by 32 button with the dock's theme. Add it with
+    /// [`Ui::icon_button`].
+    #[non_exhaustive]
+    IconButton {
+        /// The name assistive technologies read.
+        label: String,
+        /// The image, drawn in a square of `size` logical pixels in the middle.
+        image: crate::icon::Image,
+        /// The side of the image's square, in logical pixels.
+        size: f32,
+        /// A line in the accent colour along this side, for an application that holds the
+        /// focus, as the GTK dock's inset shadow.
+        indicator: Option<crate::driver::Side>,
+    },
+    /// Its children side by side in reading order, each at its own width and all at its
+    /// height, as a GTK box that is not homogeneous: a bar's group of buttons. `padding` is
+    /// kept free left and right, then above and below. Add it with [`Ui::inline`].
+    #[non_exhaustive]
+    Inline {
+        /// The room kept free inside its edges, horizontal then vertical, on both sides.
+        padding: [f32; 2],
+    },
+    /// Three children along a line, as GTK's `CenterBox`: the first at the start edge, the
+    /// second centred on the whole line, moved aside only when its neighbours need the room,
+    /// and the third at the end edge, all at its height. In a column it fills the line. A
+    /// child that is not shown keeps its place empty, and a child past the third is never shown.
+    CenterBox,
+    /// A flat button that shows an image beside a text, as a GTK button holding a box of an
+    /// image and a label: named by its label for assistive technologies, which read the text
+    /// it shows as a label inside it. Activating it raises [`Event::Clicked`]. Its content
+    /// is centred, the image at the start, the theme's gap between the two; it is at least
+    /// the theme's `button_min` on each side, with the theme's padding added left and right,
+    /// as [`Kind::IconButton`]. Its text takes [`Ui::set_text_style`]. Add it with
+    /// [`Ui::labelled_button`].
+    #[non_exhaustive]
+    LabelledButton {
+        /// The name assistive technologies read.
+        label: String,
+        /// The image, drawn in a square of `size` logical pixels; none shows the text alone.
+        image: Option<crate::icon::Image>,
+        /// The side of the image's square, in logical pixels.
+        size: f32,
+        /// The text shown after the image; empty shows the image alone.
+        text: String,
+    },
+    /// A month, as GTK's `Calendar`: a heading with the month and the year, each between
+    /// buttons to the one before and the one after, the weekdays' short names from the
+    /// locale's first, and six weeks of [`Kind::CalendarCell`]s. The days are one stop of the
+    /// focus: the arrows move it between them, Ctrl+Left and Ctrl+Right change the month,
+    /// Ctrl+Up and Ctrl+Down the year, the wheel the month, and Enter, Space or a click select
+    /// the focused day. A change of the selected day raises [`Event::Changed`] for the
+    /// calendar. In a column it fills the line. Add it with [`Ui::calendar`].
+    Calendar(Box<Calendar>),
+    /// A weekday's name or a day of a [`Kind::Calendar`], which makes them; a day takes the
+    /// focus and reads as a label with its number.
+    CalendarCell(Cell),
+}
+
+/// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
+/// the maximum, and a value from 0 to the maximum. The fields are closed to applications so
+/// that these hold: make one with [`Ui::level`] and change it with [`Ui::set_level`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Level {
+    pub(crate) name: String,
+    pub(crate) value: f64,
+    pub(crate) full: f64,
+    pub(crate) max: f64,
+}
+
+/// The state of a [`Kind::Slider`]: a name, a range and a value that is always on one of its
+/// steps. The fields are closed to applications so that the invariants hold: the range is
+/// finite and `min < max`, `step > 0`, and the value lies on a step counted from `min`, or at
+/// `max`, which is always a value even when the step does not divide the range. Make one with
+/// [`Ui::slider`], change its value with [`Ui::set_value`] and its range with [`Ui::set_range`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slider {
+    pub(crate) name: String,
+    pub(crate) value: f64,
+    pub(crate) min: f64,
+    pub(crate) max: f64,
+    pub(crate) step: f64,
+}
+
+impl Slider {
+    /// The slider [`Ui::slider`] adds; `None` for the numbers it refuses.
+    pub(crate) fn new(name: &str, min: f64, max: f64, step: f64, value: f64) -> Option<Slider> {
+        let finite = [min, max, step, value].iter().all(|n| n.is_finite());
+        if !(finite && min < max && step > 0.0) {
+            return None;
+        }
+        // The span must be finite too (-1e308 to 1e308 is not), and the steps few enough to be
+        // counted, so that the index arithmetic and the drawing never leave the numbers.
+        let span = max - min;
+        if !(span.is_finite() && span / step <= Ui::SLIDER_MAX_STEPS) {
+            return None;
+        }
+        let mut slider = Slider {
+            name: name.to_owned(),
+            value: min,
+            min,
+            max,
+            step,
+        };
+        slider.value = slider.snap(value)?;
+        Some(slider)
+    }
+
+    /// How many steps `value` is from `min`, the last one being `max`.
+    fn last(&self) -> i64 {
+        // A hair under the exact quotient, so that a range the step divides does not count
+        // `max` twice when the division rounds up.
+        (((self.max - self.min) / self.step) - 1e-9).ceil() as i64
+    }
+
+    /// The value `index` steps from `min`, never past `max`.
+    fn at(&self, index: i64) -> f64 {
+        (self.min + index as f64 * self.step).min(self.max)
+    }
+
+    /// The index of the step `value` is on, or the nearest one.
+    fn index(&self, value: f64) -> i64 {
+        if value >= self.max {
+            return self.last();
+        }
+        (((value - self.min) / self.step).round() as i64).clamp(0, self.last())
+    }
+
+    /// The step nearest to `value`, inside the range; `None` for NaN.
+    fn snap(&self, value: f64) -> Option<f64> {
+        if value.is_nan() {
+            return None;
+        }
+        let value = value.clamp(self.min, self.max);
+        let below = self.at(self.index(value));
+        Some(if (self.max - value).abs() < (value - below).abs() {
+            self.max
+        } else {
+            below
+        })
+    }
+}
+
+/// What a [`Kind::MenuEntry`] shows and does, as GTK's model buttons in a sliding
+/// `PopoverMenu`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Mark {
+    /// A check box, ticked when `true`. Activating the item flips it and raises
+    /// [`Event::Toggled`].
+    Check(bool),
+    /// A radio ring, filled when `true`. Activating the item fills it and raises
+    /// [`Event::Toggled`]; the other radios of the menu are the application's to clear, as GTK's
+    /// radio items each have an action of their own.
+    Radio(bool),
+    /// An arrow at the end edge to the submenu `page`, a [`Kind::Menu`] that shares the parent
+    /// of the item's menu. Activating the item, or the right arrow on it, slides to the page,
+    /// which takes the place of the item's menu, and focuses the page's title.
+    Submenu(WidgetId),
+    /// The title of a submenu's page, its label centred and an arrow at the start edge.
+    /// Activating it, or the left arrow on it, slides back to the menu of `item` and focuses it.
+    Back(WidgetId),
+}
+
+/// A button of the title bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WindowButton {
+    /// Minimizes the window.
+    Minimize,
+    /// Closes the window.
+    Close,
+}
+
+impl WindowButton {
+    /// The name assistive technologies read: GTK's for the same buttons.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Minimize => "Minimize",
+            Self::Close => "Close",
+        }
+    }
+}
+
+/// One node of the tree: what it is, where it sits and where it was laid out.
+pub struct Widget {
+    /// What the widget is and shows.
+    pub kind: Kind,
+    /// The widget it is a child of; `None` for the root.
+    pub parent: Option<WidgetId>,
+    /// The children, in reading order.
+    pub children: Vec<WidgetId>,
+    /// Where the last layout put the widget, in logical pixels.
+    pub rect: Rect,
+    pub(crate) visible: bool,
+    pub(crate) text: Option<Layout<Brush>>,
+    /// How its text is set: see [`Ui::set_text_style`].
+    pub(crate) style: TextStyle,
+    /// `Some` for a widget that opens a popup: whether it is open.
+    pub(crate) expanded: Option<bool>,
+    pub(crate) tooltip: Option<String>,
+    pub(crate) description: Option<String>,
+    /// Whether the widget itself takes input, as GTK's `sensitive` property: see
+    /// [`Ui::set_sensitive`].
+    pub(crate) sensitive: bool,
+    /// Where it sits in its column, across it and along it: see [`Ui::set_align`].
+    pub(crate) align: [crate::Align; 2],
+    /// How a label wraps, see [`Ui::set_wrap`], the width its last place gave it, if one has,
+    /// and the narrowest it can be, its longest word, as its last measure found it.
+    pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
+    /// The least width it measures, as GTK's `width-request`: see [`Ui::set_min_width`].
+    pub(crate) min_w: f32,
+    /// The colour of a label's text, or an island's outline, in place of the theme's: see
+    /// [`Ui::set_ink`].
+    pub(crate) ink: Option<Rgba>,
+    /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
+    /// [`Ui::set_fill`].
+    pub(crate) fill: bool,
+    /// Whether a group or an alert says it is horizontal: see [`Ui::set_horizontal`].
+    pub(crate) horizontal: bool,
+    /// The room a column keeps between its children: see [`Ui::set_spacing`].
+    pub(crate) spacing: Option<f32>,
+    /// Whether a scroll is as tall as its content, up to its height: see
+    /// [`Ui::set_natural_height`].
+    pub(crate) natural: bool,
+    /// The fewest equal cells a row is split into: see [`Ui::set_slots`]. 0 gives each child
+    /// shown a cell.
+    pub(crate) slots: usize,
+    /// The width the last measure gave it, which an inline adds a fill share to: placing it
+    /// again, as a scroll does, starts from this and never from the last placement.
+    pub(crate) natural_w: f32,
+}
+
+impl Widget {
+    fn new(kind: Kind, parent: Option<WidgetId>) -> Self {
+        Self {
+            kind,
+            parent,
+            children: Vec::new(),
+            rect: Rect::default(),
+            visible: true,
+            text: None,
+            style: TextStyle::default(),
+            expanded: None,
+            tooltip: None,
+            description: None,
+            sensitive: true,
+            align: [crate::Align::Fill; 2],
+            wrap: None,
+            min_w: 0.0,
+            ink: None,
+            fill: false,
+            horizontal: false,
+            spacing: None,
+            natural: false,
+            slots: 0,
+            natural_w: 0.0,
+        }
+    }
+
+    /// How its text is set; [`Ui::set_text_style`] changes it.
+    pub fn text_style(&self) -> &TextStyle {
+        &self.style
+    }
+
+    /// Whether the keyboard can focus the widget: not when it is insensitive itself. An
+    /// insensitive ancestor makes it unreachable too; see [`Ui::is_sensitive`].
+    pub fn is_focusable(&self) -> bool {
+        self.sensitive
+            && matches!(
+                self.kind,
+                Kind::Button(_)
+                    | Kind::Toggle { .. }
+                    | Kind::Check { .. }
+                    | Kind::Switch { .. }
+                    | Kind::Tile(_)
+                    | Kind::IconToggle(_)
+                    | Kind::Slider(_)
+                    | Kind::DropDown(_)
+                    | Kind::Field(_)
+                    | Kind::TextArea(_)
+                    | Kind::WindowButton(_)
+                    | Kind::MenuItem(_)
+                    | Kind::MenuEntry { .. }
+                    | Kind::IconButton { .. }
+                    | Kind::LabelledButton { .. }
+                    | Kind::ListRow(_)
+                    | Kind::CalendarCell(Cell { day: Some(_), .. })
+            )
+    }
+}
+
+/// What the user did, for the application to act on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Event {
+    /// A button was activated by the pointer, the keyboard or an assistive technology.
+    Clicked(WidgetId),
+    /// A toggle became the active one of its group.
+    Selected(WidgetId),
+    /// A check button, a switch, a tile or an icon toggle was turned on or off; ask
+    /// [`Ui::is_active`] which.
+    Toggled(WidgetId),
+    /// A slider's value changed; ask [`Ui::value`] what it is.
+    Changed(WidgetId),
+    /// A field's committed text changed, or [`Ui::set_text`] changed a widget's text.
+    Edited(WidgetId),
+    /// Enter was pressed in a single-line field, as GTK's `GtkEntry::activate`: the form it
+    /// belongs to may submit. A text area breaks the line instead.
+    Activated(WidgetId),
+    /// A button of the title bar was activated; the driver acts on it.
+    Window(WindowButton),
+    /// The secondary button was pressed on a widget, or Shift+F10 or the Menu key with the
+    /// widget focused: the application may open its context menu. A field or a text area opens
+    /// its own, the edit menu, and the driver hands the application no such event for it.
+    ContextMenu(WidgetId),
+    /// The pointer, pressed on the widget, moved past [`Ui::DRAG_THRESHOLD`]. A drag never
+    /// activates the widget.
+    DragStarted(WidgetId),
+    /// The button that started a drag was released, over the widget `to` if any.
+    #[non_exhaustive]
+    DragEnded {
+        /// The widget the drag started from.
+        from: WidgetId,
+        /// The widget under the pointer at the release, if any.
+        to: Option<WidgetId>,
+    },
+    /// Escape reached the surface and no menu took it: the application may close the surface,
+    /// as a dialog or an on-screen display does (doc_osd.md, requirement S5). An open menu
+    /// closes at Escape, and the surface gets no such event.
+    Escape,
+    /// The primary button was pressed on no widget and on the root outside every shown child of
+    /// it, an island's transparent margin included, on any surface but a popup. A surface over
+    /// the whole output that draws its panel in a child of the root closes the panel at it, as
+    /// the control center does (doc_control_center.md CC9). A normal window or a dialog raises
+    /// it too, at a press on its bare background: it is not a request to close, and such a
+    /// surface ignores it, since the compositor's own focus and the window's close button say
+    /// when it goes.
+    PressedOutside,
+    /// The middle button was pressed on a widget that is not a field or a text area, which
+    /// paste the primary selection instead: a tray's item asks for its secondary activation.
+    /// It neither focuses nor activates the widget.
+    MiddleClick(WidgetId),
+    /// The wheel turned over a widget, in whole steps, as GTK's scroll controller with
+    /// discrete steps: a high resolution wheel's turns add up to them. A scroll or a text area
+    /// under the pointer takes the vertical turn, even at its limit or when its content fits,
+    /// and the event then carries no vertical step. See [`Ui::pointer_wheel`].
+    #[non_exhaustive]
+    Wheel {
+        /// The focusable widget under the pointer.
+        widget: WidgetId,
+        /// To the right when positive.
+        dx: i32,
+        /// Down when positive.
+        dy: i32,
+    },
+}
+
+/// A pointer button, as the driver maps it from the evdev codes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PointerButton {
+    /// The primary button, the left one of a right-handed mouse: it activates and drags.
+    Primary,
+    /// The secondary button: it asks for the context menu.
+    Secondary,
+    /// The middle button: it pastes the primary selection into a field.
+    Middle,
+}
+
+/// What a field asks of the clipboards, which the driver takes with [`Ui::take_clips`] and
+/// serves on Wayland.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Clip {
+    /// The text copied, for the clipboard.
+    Copy(String),
+    /// The text cut from the field, for the clipboard: the field deletes it with [`Ui::cut`]
+    /// once the clipboard took it, and keeps it when there is no clipboard to take it.
+    Cut(WidgetId, String),
+    /// The text selected, for the primary selection.
+    Select(String),
+    /// The selection offered as the primary selection is gone: its field's selection ended,
+    /// by a collapse or an edit, and no other selection of these widgets replaced it.
+    Unselect,
+    /// The clipboard's text is to be pasted into the field, with [`Ui::paste`].
+    Paste(WidgetId),
+    /// The primary selection's text is to be pasted into the field, with [`Ui::paste`].
+    PastePrimary(WidgetId),
+}
+
+/// A press of the primary button, until its release.
+#[derive(Clone, Copy, Debug)]
+struct Press {
+    widget: WidgetId,
+    x: f32,
+    y: f32,
+    dragging: bool,
+}
+
+/// A key, already translated from the keyboard layout by the driver.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Key {
+    /// Moves the focus to the next widget in reading order.
+    Tab,
+    /// Moves the focus to the previous widget in reading order.
+    BackTab,
+    /// The left arrow.
+    Left,
+    /// The right arrow.
+    Right,
+    /// The up arrow.
+    Up,
+    /// The down arrow.
+    Down,
+    /// Activates the focused widget.
+    Enter,
+    /// Deletes before the caret.
+    Backspace,
+    /// Deletes after the caret.
+    Delete,
+    /// Text to type, which may be several characters (a composed or pasted character).
+    Text(String),
+    /// Home: the least value of a slider.
+    Home,
+    /// End: the greatest value of a slider.
+    End,
+    /// Page Up: ten steps more on a slider.
+    PageUp,
+    /// Page Down: ten steps fewer on a slider.
+    PageDown,
+    /// Escape: closes the open menu, which the driver handles; with none open, the surface
+    /// hands the application [`Event::Escape`].
+    Escape,
+    /// Shift+F10 or the Menu key: asks for the focused widget's context menu.
+    Menu,
+    /// Shift+Left: moves a field's selection one cluster to the left on screen.
+    SelectLeft,
+    /// Shift+Right: moves a field's selection one cluster to the right on screen.
+    SelectRight,
+    /// Ctrl+A: selects a field's whole text.
+    SelectAll,
+    /// Ctrl+C: copies a field's selection to the clipboard.
+    Copy,
+    /// Ctrl+X: moves a field's selection to the clipboard.
+    Cut,
+    /// Ctrl+V: pastes the clipboard into a field.
+    Paste,
+    /// Ctrl+Left: the month before on a calendar; elsewhere the left arrow.
+    ControlLeft,
+    /// Ctrl+Right: the month after on a calendar; elsewhere the right arrow.
+    ControlRight,
+    /// Ctrl+Up: the year before on a calendar; elsewhere the up arrow.
+    ControlUp,
+    /// Ctrl+Down: the year after on a calendar; elsewhere the down arrow.
+    ControlDown,
+}
+
+impl Key {
+    /// The arrow a Ctrl+arrow is outside a calendar, its Ctrl left to the modifiers: what an
+    /// application's key hook and every other widget read.
+    pub(crate) fn control_arrow(&self) -> Option<Key> {
+        match self {
+            Key::ControlLeft => Some(Key::Left),
+            Key::ControlRight => Some(Key::Right),
+            Key::ControlUp => Some(Key::Up),
+            Key::ControlDown => Some(Key::Down),
+            _ => None,
+        }
+    }
+}
+
+/// What the root of a surface is to assistive technologies, named by [`Ui::title`]. New roles
+/// may be added: match with a `_` arm.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RootRole {
+    /// A window, as GTK's: AT-SPI's frame.
+    Window,
+    /// A status that never takes the focus, such as an on-screen display: ARIA's `status`,
+    /// AT-SPI's status bar.
+    Status,
+    /// A dialog that asks for an answer before the work goes on: ARIA's `alertdialog`, AT-SPI's
+    /// alert.
+    AlertDialog,
+    /// A dialog, as GTK's modal windows: ARIA's `dialog`, AT-SPI's dialog.
+    Dialog,
+}
+
+/// One window's widgets, theme, reading direction and keyboard focus.
+pub struct Ui {
+    pub(crate) widgets: Widgets,
+    /// The title of the window, which the title bar shows and assistive technologies read as
+    /// the root's name, whatever its [`Ui::root_role`].
+    pub title: String,
+    /// What the root is to assistive technologies: a window unless the application says
+    /// otherwise.
+    pub root_role: RootRole,
+    /// The colours and sizes the widgets draw with.
+    pub theme: Theme,
+    /// Whether the interface is mirrored, for a right-to-left language.
+    pub rtl: bool,
+    /// The window's width in logical pixels when its widgets need less, as GTK's default width.
+    pub min_width: f32,
+    /// The window's height in logical pixels when its widgets need less.
+    pub min_height: f32,
+    /// Whether the driver shows it in a popup, where a press outside the root's children is
+    /// still on the menu and raises no [`Event::PressedOutside`].
+    pub(crate) popup: bool,
+    /// Whether the compositor may make the window larger than its widgets, as GTK's
+    /// `resizable`: when false, the window's maximum size is its minimum. True by default.
+    pub resizable: bool,
+    /// The items of a drop-down whose menu is open changed: the driver closes the menu, whose
+    /// items are the old ones.
+    pub(crate) stale_popup: bool,
+    pub(crate) focus: Option<WidgetId>,
+    /// The focus given without its ring, until a key is pressed: see [`Ui::focus_quietly`].
+    pub(crate) quiet_focus: Option<WidgetId>,
+    pub(crate) text: TextContext,
+    pub(crate) title_bar: Option<WidgetId>,
+    /// A modal dialog's widgets: see [`Ui::set_dialog`].
+    pub(crate) modal: bool,
+    size: (f32, f32),
+    hover: Option<WidgetId>,
+    press: Option<Press>,
+    /// The widget under the pointer the wheel last turned over, and the turns on each axis,
+    /// in 120ths, that made no whole step yet ([`Ui::pointer_wheel`]).
+    wheel: Option<(WidgetId, [i32; 2])>,
+    /// What the fields asked of the clipboards since the driver last took it.
+    clips: Vec<Clip>,
+    /// The field whose selection these widgets offered last as the primary selection, and its
+    /// text, until the selection ends.
+    offered: Option<(WidgetId, String)>,
+    /// The text [`Ui::announce`] asked for and its priority, until the driver publishes it.
+    pub(crate) announcement: Option<(String, Priority)>,
+    /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
+    pub(crate) pose: crate::motion::Pose,
+    /// The ids of the next widgets of the slots [`Ui::remove_children`] freed, which
+    /// [`Ui::add`] fills again.
+    free: std::collections::BTreeSet<WidgetId>,
+    /// The widgets whose active descendant is the selected row of a list, by the widget: see
+    /// [`Ui::set_active_descendant`].
+    pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
+    /// The island whose fill points at the widget this popup opened from ([`Ui::set_arrow`]).
+    pub(crate) arrow: Option<Arrow>,
+}
+
+/// The arrow of an island marked by [`Ui::set_arrow`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Arrow {
+    /// The island it stands out of.
+    pub island: WidgetId,
+    /// Where the popup stands from its widget, set when it opens: the arrow is on the island's
+    /// edge that faces the widget.
+    pub side: Option<crate::driver::Side>,
+    /// The middle of the widget along that edge, in this surface's logical pixels, once the
+    /// compositor placed the popup. Nothing is drawn before.
+    pub at: Option<f32>,
+}
+
+impl Ui {
+    /// An empty window titled `title`, with only the root column, drawn with `theme` and mirrored when `rtl`.
+    pub fn new(title: &str, theme: Theme, rtl: bool) -> Self {
+        Self {
+            widgets: Widgets::new(Widget::new(Kind::Column, None)),
+            title: title.to_owned(),
+            root_role: RootRole::Window,
+            theme,
+            rtl,
+            min_width: 0.0,
+            min_height: 0.0,
+            popup: false,
+            resizable: true,
+            stale_popup: false,
+            focus: None,
+            quiet_focus: None,
+            text: TextContext::default(),
+            title_bar: None,
+            modal: false,
+            size: (0.0, 0.0),
+            hover: None,
+            press: None,
+            wheel: None,
+            clips: Vec::new(),
+            offered: None,
+            announcement: None,
+            pose: crate::motion::Pose::REST,
+            free: std::collections::BTreeSet::new(),
+            descendants: Vec::new(),
+            arrow: None,
+        }
+    }
+
+    /// The root column every widget descends from.
+    pub const ROOT: WidgetId = WidgetId(0, 0);
+    /// The most steps a slider may have between its minimum and its maximum.
+    pub const SLIDER_MAX_STEPS: f64 = 2_147_483_648.0;
+    /// The longest text a field takes from outside the keyboard, in characters.
+    pub const FIELD_MAX_CHARS: usize = 1024;
+    /// How far the pointer moves on either axis, in logical pixels, from a press before a drag
+    /// starts: GTK's default `gtk-dnd-drag-threshold`.
+    pub const DRAG_THRESHOLD: f32 = 8.0;
+
+    /// Adds `kind` as the last child of `parent`.
+    ///
+    /// Under a widget that [`Ui::remove_children`] removed, as an icon loaded late for a row
+    /// removed since, nothing is added: the refusal is logged, and the id returned is `parent`,
+    /// stale, so that nothing done with it reaches the widget that takes its slot. In a `Ui`
+    /// that already holds 2²⁴ widgets, as many as an accessibility node of a widget names, with
+    /// no removed widget's slot to fill, nothing is added either: the refusal is logged, and the
+    /// id returned is stale.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` is past the widgets of this `Ui`.
+    pub fn add(&mut self, parent: WidgetId, kind: Kind) -> WidgetId {
+        if parent.index() < self.widgets.len() && !self.widgets.contains(parent) {
+            self.widgets
+                .warn(format_args!("nothing added under {parent:?}, a removed widget"));
+            return parent;
+        }
+        if let Some(id) = self.reuse(parent) {
+            self.widgets[parent].children.push(id);
+            self.widgets[id] = Widget::new(kind, Some(parent));
+            return id;
+        }
+        let next = self.widgets.len();
+        // The parent first: an id past the arena panics before the arena changes.
+        let parent_children = &mut self.widgets[parent].children;
+        if next >= MAX_WIDGETS {
+            self.widgets
+                .warn(format_args!("nothing added under {parent:?}: the Ui is full"));
+            return REFUSED;
+        }
+        let id = WidgetId(next as u32, 0);
+        parent_children.push(id);
+        self.widgets.push(Widget::new(kind, Some(parent)));
+        id
+    }
+
+    /// Adds a text field named `name` for assistive technologies.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn field(&mut self, parent: WidgetId, name: &str, text: &str) -> WidgetId {
+        let field = TextField::new(name, text, self.theme.font_size, self.rtl);
+        self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Adds an empty password field named `name` for assistive technologies, as GTK's
+    /// `PasswordEntry` (doc_accessibility.md, AX4): it shows one mask for each character typed,
+    /// and AT-SPI reads it as password text holding only the masks. Nothing is copied, cut or
+    /// offered as the primary selection out of it; text is pasted in. Read what was typed with
+    /// [`Ui::password_text`]. Every copy Sal makes of what is typed, committed, pasted or set is
+    /// overwritten when dropped; the copies made before it reaches Sal, by libxkbcommon, the
+    /// Wayland connection's buffers, the compositor, the input method or the clipboard's owner,
+    /// are not Sal's to overwrite.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn password(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let field = TextField::password(name, self.theme.font_size, self.rtl);
+        self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// What was typed in the password field `id`, or `None` if it is not one. Every other read
+    /// of the field, [`Ui::field_text`] among them, gives only its masks. Clear it with
+    /// [`Ui::set_field_text`] once it is used: the old text is overwritten.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn password_text(&self, id: WidgetId) -> Option<&str> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) => field.password_text(),
+            _ => None,
+        }
+    }
+
+    /// Adds a text area named `name` for assistive technologies, holding `text`: `lines` lines
+    /// tall and as wide as the theme's field, its text wrapped at that width. See
+    /// [`Kind::TextArea`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn text_area(&mut self, parent: WidgetId, name: &str, text: &str, lines: usize) -> WidgetId {
+        let t = &self.theme;
+        let width = t.field_width - 2.0 * t.padding;
+        let mut area = TextField::area(name, text, (t.font_size, self.rtl), width, lines);
+        // The caret follows the text, as gtk_text_buffer_set_text leaves a text view's.
+        area.move_to_end(&mut self.text);
+        self.add(parent, Kind::TextArea(Box::new(area)))
+    }
+
+    /// Adds a toggle showing `label`, the active one of its group when `active`. See
+    /// [`Kind::Toggle`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn toggle(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        let radio = false;
+        self.add(parent, Kind::Toggle { label, active, radio })
+    }
+
+    /// Adds a radio button showing `label`, the chosen one of its group when `active`: a
+    /// dialog's choices, drawn and read as GTK's radio check buttons, where [`Ui::toggle`]
+    /// gives GTK's grouped toggle buttons. See [`Kind::Toggle`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn radio(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        let radio = true;
+        self.add(parent, Kind::Toggle { label, active, radio })
+    }
+
+    /// Announces `text` to assistive technologies at `priority`, once, as a live region of the
+    /// root that leaves the tree as soon as it is announced, so no stale text stays behind: what
+    /// `gtk_accessible_announce` does. Takes effect when the driver next publishes the tree, with
+    /// the next frame; a later call before then replaces the text and its priority. A surface out
+    /// of the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
+    pub fn announce(&mut self, text: &str, priority: Priority) {
+        self.announcement = Some((text.to_owned(), priority));
+    }
+
+    /// The text and priority [`Ui::announce`] asked for that the driver has not published
+    /// yet.
+    pub fn announcement(&self) -> Option<(&str, Priority)> {
+        self.announcement
+            .as_ref()
+            .map(|(text, priority)| (text.as_str(), *priority))
+    }
+
+    /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn check(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Check { label, active })
+    }
+
+    /// Adds to `menu` an item showing `label` and a check box, ticked when `active`. See
+    /// [`Mark::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_check(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Check(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` and a radio ring, filled when `active`. See
+    /// [`Mark::Radio`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_radio(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Radio(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` that opens a submenu, and the submenu's page: a
+    /// hidden [`Kind::Menu`] beside `menu`, under the same parent, whose first row is its title,
+    /// `label` again. Returns the item and the page, to which the submenu's items are added. The
+    /// menus that share a parent are the pages of one popup, each as wide as the widest, as GTK's
+    /// stack of pages; one is shown at a time. See [`Mark::Submenu`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn submenu(&mut self, menu: WidgetId, label: &str) -> (WidgetId, WidgetId) {
+        let parent = self.widgets[menu].parent.unwrap_or(Self::ROOT);
+        let page = self.add(parent, Kind::Menu);
+        self.widgets[page].visible = false;
+        let label = label.to_owned();
+        let mark = Mark::Submenu(page);
+        let item = self.add(menu, Kind::MenuEntry { label: label.clone(), mark });
+        self.add(page, Kind::MenuEntry { label, mark: Mark::Back(item) });
+        (item, page)
+    }
+
+    /// Adds a switch named `label`, on when `active`. See [`Kind::Switch`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn switch(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(parent, Kind::Switch { label, active })
+    }
+
+    /// Adds an island, its children stacked top to bottom when `vertical`, with `margin` kept
+    /// free around its fill: top, right, bottom and left. Add its children to the id it
+    /// returns. See [`Kind::Island`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn island(&mut self, parent: WidgetId, vertical: bool, margin: [f32; 4]) -> WidgetId {
+        self.add(parent, Kind::Island { vertical, margin })
+    }
+
+    /// Marks `island` to point at the widget a popup of these widgets opens from, as GTK's
+    /// popover arrow: once the compositor placed the popup, a triangle of the theme's
+    /// `island_arrow` stands out of the island's edge that faces the widget, at the widget's
+    /// middle, kept clear of the island's corners. The island's margin on that edge leaves it
+    /// room. Only the latest island marked has one.
+    pub fn set_arrow(&mut self, island: WidgetId) {
+        self.arrow = Some(Arrow {
+            island,
+            side: None,
+            at: None,
+        });
+    }
+
+    /// Adds a flat button named `label` for assistive technologies, showing `image` in a
+    /// square of `size` logical pixels, with the accent line of `indicator` along that side.
+    /// See [`Kind::IconButton`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn icon_button(
+        &mut self,
+        parent: WidgetId,
+        label: &str,
+        image: crate::icon::Image,
+        size: f32,
+        indicator: Option<crate::driver::Side>,
+    ) -> WidgetId {
+        let label = label.to_owned();
+        let kind = Kind::IconButton {
+            label,
+            image,
+            size,
+            indicator,
+        };
+        self.add(parent, kind)
+    }
+
+    /// Adds `image` in a square of `size` logical pixels, named by `description` for assistive
+    /// technologies; an empty description marks an image that only decorates. See
+    /// [`Kind::Image`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn image(
+        &mut self,
+        parent: WidgetId,
+        image: crate::icon::Image,
+        size: f32,
+        description: &str,
+    ) -> WidgetId {
+        let description = description.to_owned();
+        let kind = Kind::Image {
+            image,
+            size,
+            description,
+        };
+        self.add(parent, kind)
+    }
+
+    /// Adds `image` as a picture that fills the rest of `parent`, named by `description` for
+    /// assistive technologies; an empty description marks a picture that only decorates.
+    /// `parent` is a column or a group, the root's included: the picture takes its parent's full
+    /// width and the rest of its height there, and has no size anywhere else. See
+    /// [`Kind::Picture`].
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn picture(
+        &mut self,
+        parent: WidgetId,
+        image: crate::icon::Image,
+        description: &str,
+    ) -> WidgetId {
+        let description = description.to_owned();
+        self.add(parent, Kind::Picture { image, description })
+    }
+
+    /// Puts the title bar above the widgets, once: the root's first child, so it comes first in
+    /// the tree, as GTK's does. Its buttons come first in the Tab order too, where GTK's Tab
+    /// never reaches them, so the keyboard can minimize and close the window.
+    pub fn add_title_bar(&mut self) {
+        if self.title_bar.is_some() {
+            return;
+        }
+        let bar = self.add(Self::ROOT, Kind::TitleBar);
+        let root = &mut self.widgets[Self::ROOT].children;
+        root.pop();
+        root.insert(0, bar);
+        let title = self.add(bar, Kind::Label(self.title.clone()));
+        if self.theme.title_bar_style == TitleBarStyle::Bare {
+            self.widgets[title].style.weight = 700;
+        }
+        // A dialog is not minimized on its own, as GTK's title bar hides the button of one.
+        if !self.modal {
+            self.add(bar, Kind::WindowButton(WindowButton::Minimize));
+        }
+        self.add(bar, Kind::WindowButton(WindowButton::Close));
+        self.title_bar = Some(bar);
+    }
+
+    /// Whether `id` names a widget of this `Ui` as it is now: not one [`Ui::remove_children`]
+    /// removed.
+    pub(crate) fn contains(&self, id: WidgetId) -> bool {
+        self.widgets.contains(id)
+    }
+
+    /// Makes these widgets a modal dialog's, as [`crate::Shell::open_dialog`] does: the root
+    /// reads as a modal dialog, an alert dialog's role kept, the title bar has only Close, and
+    /// Escape is [`Event::Window`] with [`WindowButton::Close`], as GTK's dialogs close at
+    /// Escape.
+    pub(crate) fn set_dialog(&mut self) {
+        self.modal = true;
+        if self.root_role == RootRole::Window {
+            self.root_role = RootRole::Dialog;
+        }
+    }
+
+    /// Whether the point, in logical pixels, is on the title bar: where a press moves the window.
+    pub fn in_title_bar(&self, x: f32, y: f32) -> bool {
+        self.title_bar
+            .is_some_and(|bar| self.widgets[bar].rect.contains(x, y))
+    }
+
+    /// The widget `id`.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn widget(&self, id: WidgetId) -> &Widget {
+        &self.widgets[id]
+    }
+
+    /// Every widget of the tree in the order of the tree: the root first, a parent before its
+    /// children, and each widget's subtree before its next sibling. The order the widgets are
+    /// drawn and found under the pointer in, whichever slots of the arena they hold; the slots
+    /// [`Ui::remove_children`] freed are not in it.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = WidgetId> {
+        let mut order = Vec::with_capacity(self.widgets.len());
+        let mut stack = vec![Self::ROOT];
+        while let Some(id) = stack.pop() {
+            order.push(id);
+            stack.extend(self.widgets[id].children.iter().rev());
+        }
+        order.into_iter()
+    }
+
+    /// The number of widgets in the tree, the root included.
+    pub fn len(&self) -> usize {
+        self.widgets.len()
+    }
+
+    /// Whether the tree has no widgets; always `false`, as the root exists from the start.
+    pub fn is_empty(&self) -> bool {
+        self.widgets.is_empty()
+    }
+
+    /// Whether `id` is a toggle that is the active one of its group, or a check button that is
+    /// checked, or a switch, a tile or an icon toggle that is on.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_active(&self, id: WidgetId) -> bool {
+        matches!(
+            self.widgets[id].kind,
+            Kind::Toggle { active: true, .. }
+                | Kind::Check { active: true, .. }
+                | Kind::Switch { active: true, .. }
+                | Kind::MenuEntry {
+                    mark: Mark::Check(true) | Mark::Radio(true),
+                    ..
+                }
+                | Kind::Tile(crate::tile::Tile { active: true, .. })
+                | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
+        )
+    }
+
+    /// Sets the state of the toggle, check button, switch, tile or icon toggle `id` as
+    /// activating it would, without moving the focus, and returns the event the activation
+    /// raises: [`Event::Toggled`] for a check button, a switch, a tile or an icon toggle,
+    /// [`Event::Selected`] for a toggle, which becomes the active one of its group and releases
+    /// the others. Only another toggle of its group releases a toggle, as a click does, so
+    /// setting one inactive changes nothing. `None`, and nothing
+    /// changes, for another kind and for the state the widget already has. An insensitive
+    /// widget is set as well.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_active(&mut self, id: WidgetId, active: bool) -> Option<Event> {
+        match self.widgets[id].kind {
+            Kind::Check {
+                active: ref mut now,
+                ..
+            }
+            | Kind::Switch {
+                active: ref mut now,
+                ..
+            }
+            | Kind::Tile(crate::tile::Tile {
+                active: ref mut now,
+                ..
+            })
+            | Kind::IconToggle(crate::icon_toggle::IconToggle {
+                active: ref mut now,
+                ..
+            }) => {
+                if *now == active {
+                    return None;
+                }
+                *now = active;
+                Some(Event::Toggled(id))
+            }
+            Kind::Toggle { active: false, .. } if active => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut now) | Mark::Radio(ref mut now),
+                ..
+            } if *now != active => {
+                *now = active;
+                Some(Event::Toggled(id))
+            }
+            _ => None,
+        }
+    }
+
+    /// Makes the toggle `id` the active one of its group, the toggles that share its parent.
+    fn select_toggle(&mut self, id: WidgetId) -> Event {
+        let siblings = self.widgets[id]
+            .parent
+            .map(|p| self.widgets[p].children.clone())
+            .unwrap_or_default();
+        for s in siblings {
+            if let Kind::Toggle { active, .. } = &mut self.widgets[s].kind {
+                *active = s == id;
+            }
+        }
+        Event::Selected(id)
+    }
+
+    /// Replaces the text widget `id` shows, or the name assistive technologies read for one that
+    /// shows none: the text of a label, a button, a toggle, a check button, a switch, a menu's
+    /// item, a list's row or a tooltip; the name of a group, an alert, a list, a slider, an icon
+    /// button, a labelled button, whose shown text [`Ui::set_shown_text`] sets, or an icon
+    /// toggle; the title of a tile; the description of an image; what a drop-down is for, its
+    /// description ([`Ui::drop_down`]). Returns [`Event::Edited`] when the text changed.
+    /// `None`, and nothing changes, for the same text, for a field or a text area, whose text
+    /// [`Ui::set_field_text`] sets, for the title bar's title, the window's, which [`Ui::new`]
+    /// takes, and for a widget that has no text. Call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_text(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        if self.is_fixed(id) {
+            return None;
+        }
+        let now = match &mut self.widgets[id].kind {
+            Kind::Group(t)
+            | Kind::Alert(t)
+            | Kind::Label(t)
+            | Kind::Button(t)
+            | Kind::MenuItem(t)
+            | Kind::MenuEntry { label: t, .. }
+            | Kind::ListRow(t)
+            | Kind::ListHeading(t)
+            | Kind::Tooltip(t)
+            | Kind::Toggle { label: t, .. }
+            | Kind::Check { label: t, .. }
+            | Kind::Switch { label: t, .. }
+            | Kind::IconButton { label: t, .. }
+            | Kind::Tile(crate::tile::Tile { title: t, .. })
+            | Kind::LabelledButton { label: t, .. }
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { label: t, .. })
+            | Kind::List { name: t, .. }
+            | Kind::Image { description: t, .. }
+            | Kind::Picture { description: t, .. } => t,
+            Kind::Slider(slider) => &mut slider.name,
+            Kind::DropDown(drop) => &mut drop.name,
+            Kind::Level(level) => &mut level.name,
+            _ => return None,
+        };
+        if *now == text {
+            return None;
+        }
+        *now = text.to_owned();
+        Some(Event::Edited(id))
+    }
+
+    /// Adds a slider named `name` for assistive technologies, from `min` to `max` in steps of
+    /// `step` counted from `min` (`max` is always a value, even when the step does not divide
+    /// the range), set to the step nearest to `value`. `None`, and nothing added, unless every
+    /// number is finite, `min < max`, `step > 0`, `max - min` is finite and the range holds
+    /// at most [`Ui::SLIDER_MAX_STEPS`] steps, and under a removed widget, as [`Ui::add`].
+    ///
+    /// # Panics
+    ///
+    /// When the numbers are taken and `parent` names no widget of this `Ui`.
+    pub fn slider(
+        &mut self,
+        parent: WidgetId,
+        name: &str,
+        min: f64,
+        max: f64,
+        step: f64,
+        value: f64,
+    ) -> Option<WidgetId> {
+        let slider = Slider::new(name, min, max, step, value)?;
+        let id = self.add(parent, Kind::Slider(slider));
+        self.contains(id).then_some(id)
+    }
+
+    /// Adds a level named `name` for assistive technologies, from 0 to `max`, drawn in the
+    /// warning colour beyond `full`, set to `value` held to 0 to `max`. `None`, and nothing
+    /// added, unless every number is finite and `0 < full <= max`, and under a removed widget,
+    /// as [`Ui::add`].
+    ///
+    /// # Panics
+    ///
+    /// When the numbers are taken and `parent` names no widget of this `Ui`.
+    pub fn level(
+        &mut self,
+        parent: WidgetId,
+        name: &str,
+        value: f64,
+        full: f64,
+        max: f64,
+    ) -> Option<WidgetId> {
+        let finite = [value, full, max].iter().all(|n| n.is_finite());
+        if !(finite && 0.0 < full && full <= max) {
+            return None;
+        }
+        let level = Level {
+            name: name.to_owned(),
+            value: value.clamp(0.0, max),
+            full,
+            max,
+        };
+        let id = self.add(parent, Kind::Level(level));
+        self.contains(id).then_some(id)
+    }
+
+    /// Sets the level `id` to `value`, held to 0 to its maximum. `false`, and nothing changes,
+    /// for a widget that is not a level and for NaN. Only the application sets a level: an
+    /// assistive technology reads it.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_level(&mut self, id: WidgetId, value: f64) -> bool {
+        let Kind::Level(level) = &mut self.widgets[id].kind else {
+            return false;
+        };
+        if value.is_nan() {
+            return false;
+        }
+        level.value = value.clamp(0.0, level.max);
+        true
+    }
+
+    /// The value of the slider or level `id`, or `None` if it is neither.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn value(&self, id: WidgetId) -> Option<f64> {
+        match &self.widgets[id].kind {
+            Kind::Slider(slider) => Some(slider.value),
+            Kind::Level(level) => Some(level.value),
+            _ => None,
+        }
+    }
+
+    /// Sets the slider `id` to the step nearest to `value`, inside its range, as an assistive
+    /// technology's SetValue does. `None`, and nothing changes, for a widget that is not a
+    /// slider, for NaN and for a value that lands where the slider already is.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_value(&mut self, id: WidgetId, value: f64) -> Option<Event> {
+        let Kind::Slider(slider) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        let value = slider.snap(value)?;
+        let moved = value != slider.value;
+        slider.value = value;
+        moved.then_some(Event::Changed(id))
+    }
+
+    /// Moves the slider `id` by `steps` steps, stopping at either end.
+    pub(crate) fn step_value(&mut self, id: WidgetId, steps: i64) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let index = (slider.index(slider.value).saturating_add(steps)).clamp(0, slider.last());
+        let value = slider.at(index);
+        self.set_value(id, value)
+    }
+
+    /// Sets the slider `id` from the pointer at `x`, in logical pixels.
+    fn slide(&mut self, id: WidgetId, x: f32) -> Option<Event> {
+        let Kind::Slider(slider) = &self.widgets[id].kind else {
+            return None;
+        };
+        let fraction = slider_fraction(self.widgets[id].rect, self.rtl, self.theme.font_size, x);
+        let value = slider.min + f64::from(fraction) * (slider.max - slider.min);
+        self.set_value(id, value)
+    }
+
+    /// Adds a scroll whose viewport is `height` logical pixels high; add its child to the id it
+    /// returns. A height that is negative or not finite counts as 0, and one past 2^64 times
+    /// less than the largest `f32` as that length.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn scroll(&mut self, parent: WidgetId, height: f32) -> WidgetId {
+        self.add(
+            parent,
+            Kind::Scroll {
+                height: length(height),
+                offset: 0.0,
+            },
+        )
+    }
+
+    /// Adds a list named `name` for assistive technologies, with no row selected.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn list(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let name = name.to_owned();
+        self.add(parent, Kind::List { name, selected: None })
+    }
+
+    /// Adds a row showing `text` at the end of the list `list`.
+    ///
+    /// # Panics
+    ///
+    /// When `list` names no widget of this `Ui`.
+    pub fn list_row(&mut self, list: WidgetId, text: &str) -> WidgetId {
+        self.add(list, Kind::ListRow(text.to_owned()))
+    }
+
+    /// The selected row of the list `list`, or `None` if no row is or `list` is not a list.
+    ///
+    /// # Panics
+    ///
+    /// When `list` names no widget of this `Ui`.
+    pub fn selected(&self, list: WidgetId) -> Option<WidgetId> {
+        match self.widgets[list].kind {
+            Kind::List { selected, .. } => selected,
+            _ => None,
+        }
+    }
+
+    /// The list `id` is a row of, if it is one.
+    fn list_of(&self, id: WidgetId) -> Option<WidgetId> {
+        let parent = self.widgets[id].parent?;
+        let is_row = matches!(self.widgets[id].kind, Kind::ListRow(_));
+        let in_list = matches!(self.widgets[parent].kind, Kind::List { .. });
+        (is_row && in_list).then_some(parent)
+    }
+
+    /// The height of the visible children of the scroll `id`, which its viewport shows part of.
+    pub(crate) fn content_height(&self, id: WidgetId) -> f32 {
+        let children = self.visible_children(id);
+        children.iter().map(|&c| self.widgets[c].rect.h).sum()
+    }
+
+    /// Scrolls the scroll `id` by `dy` logical pixels, down when positive, within its content,
+    /// and places its content again; returns whether it moved.
+    fn scroll_by(&mut self, id: WidgetId, dy: f32) -> bool {
+        if let Kind::TextArea(area) = &mut self.widgets[id].kind {
+            return area.scroll_by(&mut self.text, dy);
+        }
+        let most = self.content_height(id);
+        let Kind::Scroll { height, offset } = &mut self.widgets[id].kind else {
+            return false;
+        };
+        let to = (*offset + dy).min(most - *height).max(0.0);
+        if to == *offset {
+            return false;
+        }
+        *offset = to;
+        let r = self.widgets[id].rect;
+        self.place(id, r.x, r.y);
+        true
+    }
+
+    /// Scrolls every scroll that holds `id`, the innermost first, until `id` is inside its
+    /// viewport, or its top is when it is taller than the viewport.
+    fn reveal(&mut self, id: WidgetId) {
+        let mut at = self.widgets[id].parent;
+        while let Some(scroll) = at {
+            if let Kind::Scroll { .. } = self.widgets[scroll].kind {
+                let (view, r) = (self.widgets[scroll].rect, self.widgets[id].rect);
+                let dy = if r.y < view.y {
+                    r.y - view.y
+                } else {
+                    (r.bottom() - view.bottom()).min(r.y - view.y).max(0.0)
+                };
+                self.scroll_by(scroll, dy);
+            }
+            at = self.widgets[scroll].parent;
+        }
+    }
+
+    /// The part of the window where widget `id` can be seen: the intersection of the viewports
+    /// of the scrolls that hold it, or `None` when no scroll does.
+    pub(crate) fn clip(&self, id: WidgetId) -> Option<Rect> {
+        let mut clip: Option<Rect> = None;
+        let mut at = self.widgets[id].parent;
+        while let Some(w) = at {
+            if let Kind::Scroll { .. } = self.widgets[w].kind {
+                let v = self.widgets[w].rect;
+                clip = Some(clip.map_or(v, |c| c.intersect(v)));
+            }
+            at = self.widgets[w].parent;
+        }
+        clip
+    }
+
+    /// The pointer's wheel or touchpad scrolled by `dy` logical pixels, down when positive, at
+    /// the point, in logical pixels: the innermost scroll under it follows, within its content.
+    /// Returns whether anything moved, and so needs drawing again.
+    pub fn pointer_axis(&mut self, x: f32, y: f32, dy: f32) -> bool {
+        if !dy.is_finite() {
+            return false;
+        }
+        let Some(scroll) = self.scroll_under(x, y) else {
+            return false;
+        };
+        let moved = self.scroll_by(scroll, dy);
+        if moved {
+            self.hover = self.hit(x, y);
+        }
+        moved
+    }
+
+    /// The innermost scroll or text area under the point, in logical pixels, that would take
+    /// the vertical turn of a wheel there, as GTK's scrolled window claims it even at its limit
+    /// or when its content fits.
+    pub(crate) fn scroll_under(&self, x: f32, y: f32) -> Option<WidgetId> {
+        let under = self.ids().filter(|&id| {
+            matches!(self.widgets[id].kind, Kind::Scroll { .. } | Kind::TextArea(_))
+                && self.widgets[id].rect.contains(x, y)
+                && self.clip(id).is_none_or(|c| c.contains(x, y))
+                && self.is_visible(id)
+                && self.is_sensitive(id)
+        });
+        // The innermost: the one with the most ancestors.
+        let depth = |id: WidgetId| {
+            std::iter::successors(Some(id), |&w| self.widgets[w].parent).count()
+        };
+        under.max_by_key(|&id| depth(id))
+    }
+
+    /// The text of the field `id`, or `None` if it is not a field.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_text(&self, id: WidgetId) -> Option<String> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => Some(field.text()),
+            _ => None,
+        }
+    }
+
+    /// The selected text of the field `id`: `None` if it is not a field, if its selection is
+    /// only the caret, or while the input method composes. Where Ctrl+C copies something else
+    /// unless the user selected text in the field, as the launcher's result (doc_launcher.md,
+    /// LA5), [`crate::driver::Application::key`] reads it before the field takes the key.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_selection(&self, id: WidgetId) -> Option<String> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selected_text(),
+            _ => None,
+        }
+    }
+
+    /// The selection of the field `id` as the byte offsets of its anchor and focus, one
+    /// offset twice for the caret: `None` if it is not a field, or while the input method
+    /// composes. [`Ui::set_field_range`] puts it back, as on a field built again.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn field_range(&self, id: WidgetId) -> Option<(usize, usize)> {
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.selection(),
+            _ => None,
+        }
+    }
+
+    /// Puts the selection of the field `id` at the byte offsets `(anchor, focus)` of its text,
+    /// clamped to it, and scrolls the caret into view. Nothing happens to a widget that is not
+    /// a field.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_field_range(&mut self, id: WidgetId, (anchor, focus): (usize, usize)) {
+        if let Kind::Field(field) | Kind::TextArea(field) = &mut self.widgets[id].kind {
+            field.select_bytes(&mut self.text, anchor, focus);
+            field.scroll_to_caret(&mut self.text);
+        }
+    }
+
+    /// Says whether widget `id` opens a popup, as GTK's `HasPopup` property: assistive
+    /// technologies then read it as collapsed or expanded. [`crate::driver::Shell::open_popup`]
+    /// expands it while its menu is open.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_has_popup(&mut self, id: WidgetId, has: bool) {
+        let expanded = &mut self.widgets[id].expanded;
+        *expanded = has.then_some(expanded.unwrap_or(false));
+    }
+
+    /// Whether widget `id` opens a popup.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn has_popup(&self, id: WidgetId) -> bool {
+        self.widgets[id].expanded.is_some()
+    }
+
+    /// Marks the popup of widget `id` open or closed; a widget without one stays as it is.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_expanded(&mut self, id: WidgetId, open: bool) {
+        if let Some(expanded) = &mut self.widgets[id].expanded {
+            *expanded = open;
+        }
+    }
+
+    /// Whether the popup of widget `id` is open.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_expanded(&self, id: WidgetId) -> bool {
+        self.widgets[id].expanded == Some(true)
+    }
+
+    /// Sets the tooltip of widget `id`, or removes it with `None`. The driver shows it after
+    /// GTK's delay while the pointer rests on the widget or the keyboard focuses it, and it is
+    /// the widget's accessible description unless [`Ui::set_description`] gives another, as GTK's.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_tooltip(&mut self, id: WidgetId, text: Option<&str>) {
+        self.widgets[id].tooltip = text.map(str::to_owned);
+    }
+
+    /// The tooltip of widget `id`, if any.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn tooltip(&self, id: WidgetId) -> Option<&str> {
+        self.widgets[id].tooltip.as_deref()
+    }
+
+    /// Sets the accessible description of widget `id`, which assistive technologies read after
+    /// its name; `None` falls back to its tooltip.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_description(&mut self, id: WidgetId, text: Option<&str>) {
+        self.widgets[id].description = text.map(str::to_owned);
+    }
+
+    /// The accessible description of widget `id`: the one set, else its tooltip.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn description(&self, id: WidgetId) -> Option<&str> {
+        let widget = &self.widgets[id];
+        widget.description.as_deref().or(widget.tooltip.as_deref())
+    }
+
+    /// Sets the text of widget `id` in `style`: a label, a button, a toggle, a check, a switch
+    /// or a labelled button's shown text, from its next layout; a field keeps the body text.
+    /// `false`, and nothing changes, for a scale that is not a finite number above zero and for
+    /// a removed widget.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_text_style(&mut self, id: WidgetId, style: TextStyle) -> bool {
+        if !(style.scale.is_finite() && style.scale > 0.0) {
+            return false;
+        }
+        // Past the arena this panics; on a removed widget it logs, and changes nothing.
+        let live = self.contains(id);
+        self.widgets[id].style = style;
+        live
+    }
+
+    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or the outline of
+    /// island `id` in it, as a CSS `border-color`; with `None`, in the theme's text or border
+    /// colour again. `false`, and nothing changes, for a widget that is neither.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_ink(&mut self, id: WidgetId, ink: Option<Rgba>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_) | Kind::Island { .. }) {
+            return false;
+        }
+        widget.ink = ink;
+        true
+    }
+
+    /// Makes label `id` wrap as [`Wrap`] says, as GTK's `wrap`, `max-width-chars`, `lines` and
+    /// end `ellipsize`, or, with `None`, keep its text on one line again; takes effect from its
+    /// next layout. `false`, and nothing changes, for a widget that is not a label.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_wrap(&mut self, id: WidgetId, wrap: Option<Wrap>) -> bool {
+        let widget = &mut self.widgets[id];
+        if !matches!(widget.kind, Kind::Label(_)) {
+            return false;
+        }
+        widget.wrap = wrap.map(|w| (w, None, 0.0));
+        true
+    }
+
+    /// Makes widget `id` and everything under it sensitive, or insensitive, as GTK's
+    /// `set_sensitive`. An insensitive widget is drawn at half its opacity and takes neither the
+    /// focus, nor the pointer, nor an activation, nor an assistive technology's action, which
+    /// reads it as unavailable; the application's setters still change it. Making the widget
+    /// that has the focus insensitive moves the focus as hiding it does, and a press on it moves
+    /// it no more. The root, the title bar and its children stay sensitive: asking otherwise
+    /// changes nothing.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_sensitive(&mut self, id: WidgetId, sensitive: bool) {
+        if self.is_fixed(id) || self.widgets[id].sensitive == sensitive {
+            return;
+        }
+        self.widgets[id].sensitive = sensitive;
+        self.keep_focus();
+    }
+
+    /// Whether `id` and all its ancestors are sensitive: what takes input.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_sensitive(&self, id: WidgetId) -> bool {
+        std::iter::successors(Some(id), |&w| self.widgets[w].parent)
+            .all(|w| self.widgets[w].sensitive)
+    }
+
+    /// The popup opened from widget `id` closed: the focus returns to the widget, which reads as
+    /// collapsed, as when GTK's popover closes.
+    pub(crate) fn popup_closed(&mut self, id: WidgetId) {
+        self.stale_popup = false;
+        self.set_expanded(id, false);
+        self.set_focus(Some(id));
+    }
+
+    /// The widget that has the keyboard focus, if any.
+    pub fn focus(&self) -> Option<WidgetId> {
+        self.focus
+    }
+
+    /// Moves the focus to `id`, or clears it with `None`; a widget that takes no focus leaves
+    /// it where it is. A widget newly focused inside a scroll is scrolled into view.
+    ///
+    /// # Panics
+    ///
+    /// When `id` is `Some` id that names no widget of this `Ui`.
+    pub fn set_focus(&mut self, id: Option<WidgetId>) {
+        match id {
+            Some(id)
+                if !self.widgets[id].is_focusable()
+                    || !self.is_visible(id)
+                    || !self.is_sensitive(id) => {}
+            Some(id) if self.focus != Some(id) => {
+                self.move_focus(Some(id));
+                self.reveal(id);
+            }
+            _ => self.move_focus(id),
+        }
+    }
+
+    /// Focuses `id` without drawing its ring until a key is pressed, as GTK focuses a window's
+    /// first control at map and shows the ring once the keyboard is used (AX7; AX8's
+    /// `:focus-visible`). Moved elsewhere, the focus shows its ring as usual.
+    pub(crate) fn focus_quietly(&mut self, id: WidgetId) {
+        self.set_focus(Some(id));
+        self.quiet_focus = self.focus.filter(|&focus| focus == id);
+    }
+
+    /// Focuses `id`, a rebuilt surface's counterpart of `old`'s focus, without its ring while
+    /// `old`'s focus had none yet (AX8): the rebuild does not show what no key has asked for.
+    pub fn carry_focus(&mut self, old: &Ui, id: Option<WidgetId>) {
+        match id {
+            Some(id) if old.quiet_focus.is_some() => self.focus_quietly(id),
+            _ => self.set_focus(id),
+        }
+    }
+
+    /// Moves the focus to `to`. A field that loses it ends its input method's composition: the
+    /// input method sends a preedit only for the focused field, so another would stay shown.
+    fn move_focus(&mut self, to: Option<WidgetId>) {
+        if to == self.focus {
+            return;
+        }
+        self.end_composition();
+        self.focus = to;
+        self.quiet_focus = None;
+    }
+
+    /// Ends the input method's composition in the focused field, without its text, as when the
+    /// field loses the focus or its window the text input. Whether there was one.
+    pub(crate) fn end_composition(&mut self) -> bool {
+        let Some(Kind::Field(field) | Kind::TextArea(field)) =
+            self.focus.map(|id| &mut self.widgets[id].kind)
+        else {
+            return false;
+        };
+        if !field.is_composing() {
+            return false;
+        }
+        field.compose(&mut self.text, "", None);
+        // A preedit that scrolled a text area leaves the view past the shorter text.
+        field.scroll_by(&mut self.text, 0.0);
+        true
+    }
+
+    /// Shows or hides widget `id` and everything under it. A hidden widget takes no room, is not
+    /// drawn, takes no focus or input and has no node for assistive technologies; it keeps its
+    /// state. Hiding the widget that has the focus moves the focus to the next visible widget that
+    /// takes it, or the previous one. The root, the title bar and its children cannot be hidden:
+    /// asking for it changes nothing. Call [`Ui::layout`] afterwards.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_visible(&mut self, id: WidgetId, visible: bool) {
+        if self.is_fixed(id) || self.widgets[id].visible == visible {
+            return;
+        }
+        self.widgets[id].visible = visible;
+        self.keep_focus();
+    }
+
+    /// Whether `id` is the root, the title bar or one of its children, which stay shown and
+    /// sensitive.
+    fn is_fixed(&self, id: WidgetId) -> bool {
+        id == Self::ROOT
+            || std::iter::successors(Some(id), |&w| self.widgets[w].parent)
+                .any(|w| Some(w) == self.title_bar)
+    }
+
+    /// Moves the focus off a widget that can no longer hold it, hidden or insensitive. A row of a
+    /// list that still has a stop in the focus chain moves it to that stop, wherever it lies;
+    /// any other widget moves it to the first stop of the chain after it in the order of the
+    /// tree, or else the last one before it.
+    fn keep_focus(&mut self) {
+        let Some(focused) = self.focus else {
+            return;
+        };
+        if self.is_visible(focused) && self.is_sensitive(focused) {
+            return;
+        }
+        // The order of the tree, which the chain follows, as `focus::chain` walks it.
+        let mut tree = Vec::with_capacity(self.widgets.len());
+        let mut stack = vec![Self::ROOT];
+        while let Some(w) = stack.pop() {
+            tree.push(w);
+            stack.extend(self.widgets[w].children.iter().rev());
+        }
+        let place = |w: &WidgetId| tree.iter().position(|t| t == w);
+        let here = place(&focused);
+        let chain = focus::chain(self);
+        let list = self.widgets[focused]
+            .parent
+            .filter(|&p| matches!(self.widgets[p].kind, Kind::List { .. }));
+        let row = list.and_then(|l| chain.iter().find(|&&w| self.widgets[w].parent == Some(l)));
+        let next = chain.iter().find(|w| place(w) > here);
+        let previous = chain.iter().rev().find(|w| place(w) < here);
+        self.move_focus(row.or(next).or(previous).copied());
+    }
+
+    /// Whether `id` and all its ancestors are visible: what the user can see and reach.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_visible(&self, id: WidgetId) -> bool {
+        let mut at = Some(id);
+        while let Some(w) = at {
+            if !self.shown(w) {
+                return false;
+            }
+            at = self.widgets[w].parent;
+        }
+        true
+    }
+
+    /// Whether `id` is shown in its parent: visible, and not past the third child of a centre
+    /// box, which has no place for it.
+    pub(crate) fn shown(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        widget.visible
+            && widget.parent.is_none_or(|p| {
+                let parent = &self.widgets[p];
+                !matches!(parent.kind, Kind::CenterBox)
+                    || parent.children.iter().take(3).any(|&c| c == id)
+            })
+    }
+
+    /// Whether widget `id` is drawn flat, filled only under the pointer: a menu's items and
+    /// the buttons a menu holds, which then read as its rows.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn is_flat(&self, id: WidgetId) -> bool {
+        let widget = &self.widgets[id];
+        match widget.kind {
+            Kind::MenuItem(_)
+            | Kind::MenuEntry { .. }
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. } => true,
+            Kind::Button(_) => widget
+                .parent
+                .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
+            _ => false,
+        }
+    }
+
+    /// What island `id` fills after [`Ui::layout`]: its visible children and the theme's
+    /// `island_padding` around them; `None` for an island with no child shown, or another kind.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn island_fill(&self, id: WidgetId) -> Option<Rect> {
+        if !matches!(self.widgets[id].kind, Kind::Island { .. }) {
+            return None;
+        }
+        let pad = self.theme.island_padding;
+        let rects = self.visible_children(id).into_iter().map(|c| self.widgets[c].rect);
+        let (x0, y0, x1, y1) = rects.fold(None, |acc: Option<(f32, f32, f32, f32)>, r| {
+            let (x0, y0, x1, y1) = acc.unwrap_or((r.x, r.y, r.x + r.w, r.bottom()));
+            Some((x0.min(r.x), y0.min(r.y), x1.max(r.x + r.w), y1.max(r.bottom())))
+        })?;
+        Some(Rect {
+            x: x0 - pad,
+            y: y0 - pad,
+            w: x1 - x0 + 2.0 * pad,
+            h: y1 - y0 + 2.0 * pad,
+        })
+    }
+
+    /// Whether the point is on the root outside every shown child of it, outside a popup. An
+    /// island covers its fill only, so its transparent margin is outside it, as GTK's pick
+    /// passes over a widget's margin; an island with no child shown covers nothing.
+    fn outside_children(&self, x: f32, y: f32) -> bool {
+        let covers = |c: WidgetId| match self.widgets[c].kind {
+            Kind::Island { .. } => self.island_fill(c).is_some_and(|r| r.contains(x, y)),
+            _ => self.widgets[c].rect.contains(x, y),
+        };
+        !self.popup
+            && self.widgets[Self::ROOT]
+                .children
+                .iter()
+                .filter(|&&c| self.is_visible(c))
+                .all(|&c| !covers(c))
+    }
+
+    /// The window's size in logical pixels, after [`Ui::layout`].
+    pub fn size(&self) -> (f32, f32) {
+        self.size
+    }
+
+    /// Shapes every text and places every widget; returns the window's size in logical pixels.
+    pub fn layout(&mut self) -> (f32, f32) {
+        self.text.set_family(self.theme.font_family.as_deref());
+        // The theme's lengths of space and size, which measure and place add up, bounded.
+        let t = &mut self.theme;
+        for v in [
+            &mut t.padding,
+            &mut t.margin,
+            &mut t.section_gap,
+            &mut t.gap,
+            &mut t.field_width,
+            &mut t.island_padding,
+            &mut t.button_min,
+            &mut t.control_border,
+            &mut t.control_min_height,
+        ] {
+            *v = length(*v);
+        }
+        t.title_bar_height = t.title_bar_height.map(length);
+        let (mut w, mut h) = self.measure(Self::ROOT);
+        self.place(Self::ROOT, 0.0, 0.0);
+        // Height for width: a wrapping label asks for a width that does not depend on the one its
+        // place gives it, so a second pass breaks its lines at that width and settles the heights;
+        // a tile's second line ends in an ellipsis at its place's width the same way.
+        if self.rewrap() {
+            (w, h) = self.measure(Self::ROOT);
+            self.place(Self::ROOT, 0.0, 0.0);
+        }
+        self.size = (w, h);
+        self.size
+    }
+
+    /// Records the width each wrapping label and each tile was placed at; whether one changed.
+    pub(crate) fn rewrap(&mut self) -> bool {
+        let mut changed = false;
+        for widget in &mut self.widgets.slots {
+            let w = Some(widget.rect.w);
+            let given = match &mut widget.kind {
+                Kind::Tile(tile) => Some(&mut tile.placed),
+                _ => widget.wrap.as_mut().map(|(_, given, _)| given),
+            };
+            if let Some(given) = given.filter(|given| **given != w) {
+                *given = w;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub(crate) fn visible_children(&self, id: WidgetId) -> Vec<WidgetId> {
+        let children = self.widgets[id].children.iter();
+        children.copied().filter(|&c| self.shown(c)).collect()
+    }
+
+    pub(crate) fn measure(&mut self, id: WidgetId) -> (f32, f32) {
+        let t = &self.theme;
+        let (pad, gap, size, field_width) = (t.padding, t.gap, t.font_size, t.field_width);
+        let (margin, section_gap) = (t.margin, t.section_gap);
+        let (min_width, min_height) = (self.min_width, self.min_height);
+        let (island_pad, button_min) = (t.island_padding, t.button_min);
+        let inks = [t.text, t.on_accent];
+        let (control_border, control_min) = (t.control_border, t.control_min_height);
+        let rtl = self.rtl;
+        let pages = match self.widgets[id].kind {
+            Kind::Menu => self.pages_width(id),
+            _ => 0.0,
+        };
+        let bar_first = id == Self::ROOT && self.title_bar.is_some();
+        let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
+        let children = self.visible_children(id);
+        let sizes: Vec<(f32, f32)> = children.iter().map(|&c| self.measure(c)).collect();
+        let spacing = gap * children.len().saturating_sub(1) as f32;
+        let slots = self.widgets[id].slots;
+        let natural = self.widgets[id].natural;
+        let between = match self.widgets[id].kind {
+            Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
+            Kind::Inline { .. } => self.widgets[id].spacing.unwrap_or(gap),
+            _ => gap,
+        };
+        let widget = &mut self.widgets[id];
+        let style = widget.style.clone();
+        let (w, h) = match &mut widget.kind {
+            Kind::Menu => (pages, sizes.iter().map(|s| s.1).sum::<f32>()),
+            Kind::List { .. } => {
+                let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                (w, sizes.iter().map(|s| s.1).sum::<f32>())
+            }
+            Kind::Scroll { height, offset } => {
+                let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                let content = sizes.iter().map(|s| s.1).sum::<f32>();
+                // A height set through `Ui::add` is checked here; NaN falls to 0 in `max`.
+                *height = length(*height);
+                *offset = offset.min(content - *height).max(0.0);
+                (w, if natural { content.min(*height) } else { *height })
+            }
+            // A line in the middle of a gap.
+            Kind::Separator => (0.0, gap + 1.0),
+            Kind::Image { size, .. } => (*size, *size),
+            // Its place gives it its size.
+            Kind::Picture { .. } => (0.0, 0.0),
+            // GTK's box: the padding outside the minimum, across the line of text only.
+            Kind::IconButton { size, .. } => (size.max(button_min) + 2.0 * pad, size.max(button_min)),
+            Kind::Tile(tile) => crate::tile::measure(
+                tile,
+                &mut self.text,
+                &mut widget.text,
+                (size, pad, gap, rtl),
+                &style,
+                inks,
+            ),
+            // A raised button: the padding on every side, and at least the smallest button.
+            Kind::IconToggle(toggle) => {
+                let side = (toggle.size + pad).max(button_min);
+                (side, side)
+            }
+            Kind::Island { vertical, margin } => {
+                // A margin set through `Ui::island` or `Ui::add` is checked here, as a scroll's
+                // height is, before `place` adds it into the children's offsets.
+                *margin = margin.map(length);
+                let (along, across) = if *vertical { (1, 0) } else { (0, 1) };
+                let side = |i: usize| sizes.iter().map(move |s| if i == 0 { s.0 } else { s.1 });
+                let mut content = [0.0; 2];
+                content[along] = side(along).sum::<f32>() + spacing;
+                content[across] = side(across).fold(0.0, f32::max);
+                let [top, right, bottom, left] = *margin;
+                (
+                    content[0] + 2.0 * island_pad + left + right,
+                    content[1] + 2.0 * island_pad + top + bottom,
+                )
+            }
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
+                // The title bar spans the window above the root's margin.
+                let (bar, content) = match sizes.split_first() {
+                    Some((bar, rest)) if bar_first => (*bar, rest),
+                    _ => ((0.0, 0.0), &sizes[..]),
+                };
+                let spacing = between * content.len().saturating_sub(1) as f32;
+                let w = content.iter().map(|s| s.0).fold(0.0, f32::max);
+                let h = content.iter().map(|s| s.1).sum::<f32>() + spacing;
+                if id == Self::ROOT {
+                    let edge = 2.0 * margin;
+                    let w = (w + edge).max(bar.0).max(min_width);
+                    (w, (h + edge + bar.1).max(min_height))
+                } else {
+                    (w, h)
+                }
+            }
+            Kind::TitleBar => {
+                // Room for the buttons on both sides, so the centred title never meets them.
+                let title = sizes.first().map_or(0.0, |s| s.0);
+                let buttons = sizes.iter().skip(1).map(|s| s.0 + gap).sum::<f32>();
+                let h = sizes.iter().map(|s| s.1).fold(0.0, f32::max);
+                let bar = self.theme.title_bar_height.map_or(h + pad, |bar| bar.max(h));
+                (title + 2.0 * buttons + 2.0 * pad, bar)
+            }
+            Kind::WindowButton(_) => (size + pad, size + pad),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, between, *padding),
+            Kind::CenterBox => strip::measure_center(&sizes),
+            Kind::LabelledButton {
+                image, size: side, text, ..
+            } => {
+                let shown = (!text.is_empty()).then(|| self.text.layout(text, size, rtl, &style));
+                let wh = labelled::measure(
+                    image.as_ref().map(|_| *side),
+                    shown.as_ref().map(|l| (l.width(), l.height())),
+                    gap,
+                    pad,
+                    button_min,
+                );
+                widget.text = shown;
+                wh
+            }
+            Kind::Row => {
+                let widest = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
+                let cells = sizes.len().max(slots);
+                let w = widest * cells as f32 + gap * cells.saturating_sub(1) as f32;
+                (w, sizes.iter().map(|s| s.1).fold(0.0, f32::max))
+            }
+            Kind::Label(text) | Kind::Tooltip(text) => {
+                let (layout, w) = match &mut widget.wrap {
+                    Some((wrap, given, least)) => {
+                        let (word, asked) =
+                            wrap::request(&mut self.text, text, (size, rtl), &style, wrap);
+                        *least = word;
+                        // Before its first place, at the width it asks for.
+                        let at = given.unwrap_or(asked);
+                        let shaped = (size, rtl);
+                        (wrap::layout(&mut self.text, text, shaped, &style, wrap, at), asked)
+                    }
+                    None => {
+                        let layout = self.text.layout(text, size, rtl, &style);
+                        let w = layout.width();
+                        (layout, w)
+                    }
+                };
+                let wh = (w, layout.height());
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::CalendarCell(cell) => {
+                let layout = self.text.layout(&cell.text, size, rtl, &style);
+                let wh = calendar::measure_cell(layout.width(), layout.height(), pad);
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::Button(text) | Kind::Toggle { label: text, radio: false, .. } => {
+                let layout = self.text.layout(text, size, rtl, &style);
+                // GTK's box: the minimum height inside the outline, the outline outside it.
+                let h = (layout.height() + pad).max(control_min);
+                let edge = 2.0 * control_border;
+                let wh = (layout.width() + 2.0 * pad + edge, h + edge);
+                widget.text = Some(layout);
+                wh
+            }
+            // Its widgets side by side, inside the padding a row of text has.
+            Kind::ListRow(_) if !sizes.is_empty() => {
+                widget.text = None;
+                let w = sizes.iter().map(|s| s.0).sum::<f32>() + spacing;
+                (w + 2.0 * pad, sizes.iter().map(|s| s.1).fold(0.0, f32::max) + pad)
+            }
+            Kind::MenuItem(text) | Kind::ListRow(text) | Kind::ListHeading(text) => {
+                let layout = self.text.layout(text, size, rtl, &style);
+                let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
+                widget.text = Some(layout);
+                wh
+            }
+            // The mark's room at the start is the menu's to add, as every row of it takes it; a
+            // submenu's arrow at the end is its own.
+            Kind::MenuEntry { label, mark } => {
+                let (mark_w, mark_h) = mark_size(false, size);
+                let arrow = match mark {
+                    Mark::Submenu(_) | Mark::Back(_) => gap + mark_w,
+                    Mark::Check(_) | Mark::Radio(_) => 0.0,
+                };
+                let layout = self.text.layout(label, size, rtl, &style);
+                let wh = (
+                    layout.width() + 2.0 * pad + arrow,
+                    mark_h.max(layout.height()) + pad,
+                );
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::Check { label, .. }
+            | Kind::Switch { label, .. }
+            | Kind::Toggle { label, radio: true, .. } => {
+                let (mark_w, mark_h) = mark_size(is_switch, size);
+                let layout = self.text.layout(label, size, rtl, &style);
+                let wh = (
+                    mark_w + gap + layout.width(),
+                    mark_h.max(layout.height()) + pad,
+                );
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::Slider(_) | Kind::Level(_) => (field_width, slider_knob(size) + pad),
+            // The chosen item, then the arrow at the end edge.
+            Kind::DropDown(drop) => {
+                let layout = self.text.layout(drop.chosen_text(), size, rtl, &style);
+                let arrow = size * crate::drop_down::ARROW;
+                let wh = (
+                    (layout.width() + gap + arrow + 2.0 * pad).max(button_min),
+                    layout.height().max(arrow) + pad,
+                );
+                widget.text = Some(layout);
+                wh
+            }
+            Kind::Field(field) => {
+                let line = field.layout(&mut self.text).height().max(size * 1.25);
+                (field_width, line + pad)
+            }
+            Kind::TextArea(area) => (field_width, area.view_height(&mut self.text) + pad),
+        };
+        // Each container's sum ends here, bounded, so the one above it adds finite sizes.
+        let (w, h) = (length(w.max(widget.min_w)), length(h));
+        widget.rect.w = w;
+        widget.rect.h = h;
+        widget.natural_w = w;
+        (w, h)
+    }
+
+    fn place(&mut self, id: WidgetId, x: f32, y: f32) {
+        self.widgets[id].rect.x = x;
+        self.widgets[id].rect.y = y;
+        let edge = if id == Self::ROOT {
+            self.theme.margin
+        } else {
+            0.0
+        };
+        let gap = match self.widgets[id].kind {
+            Kind::Column => self.widgets[id].spacing.unwrap_or(self.theme.section_gap),
+            _ => self.theme.gap,
+        };
+        let outer = self.widgets[id].rect;
+        let children = self.visible_children(id);
+        match self.widgets[id].kind {
+            Kind::Inline { padding } => self.place_inline(id, x, y, padding),
+            Kind::CenterBox => self.place_center(id, x, y),
+            Kind::Row => {
+                let cells = children.len().max(self.widgets[id].slots).max(1);
+                let n = cells as f32;
+                let w = ((outer.w - gap * (n - 1.0)) / n).max(0.0);
+                for (at, c) in children.into_iter().enumerate() {
+                    // Each cell from its own offset, and the last one of a full row ends on the
+                    // row's far edge, so that no float residue builds up along the row.
+                    let start = at as f32 * (w + gap);
+                    let end = if at + 1 == cells { outer.w } else { start + w };
+                    let (cx, cw) = strip::mirrored(x, outer.w, start, end, self.rtl);
+                    self.widgets[c].rect.w = cw;
+                    self.place(c, cx, y);
+                }
+            }
+            Kind::Menu | Kind::List { .. } | Kind::Scroll { .. } => {
+                let mut cy = match self.widgets[id].kind {
+                    Kind::Scroll { offset, .. } => y - offset,
+                    _ => y,
+                };
+                for c in children {
+                    self.widgets[c].rect.w = outer.w;
+                    self.place(c, x, cy);
+                    cy += self.widgets[c].rect.h;
+                }
+            }
+            // A row's widgets from the start edge, inside its padding, centred across it; the
+            // last takes the rest of the row when it holds text that wraps or ellipsizes.
+            Kind::ListRow(_) => {
+                let pad = self.theme.padding;
+                if let Some((&last, rest)) = children.split_last() {
+                    let fills = matches!(self.widgets[last].kind, Kind::Column | Kind::Group(_))
+                        || self.widgets[last].wrap.is_some();
+                    if fills {
+                        let used = rest.iter().map(|&c| self.widgets[c].rect.w + gap).sum::<f32>();
+                        self.widgets[last].rect.w = (outer.w - 2.0 * pad - used).max(0.0);
+                    }
+                }
+                let mut cx = if self.rtl { x + outer.w - pad } else { x + pad };
+                for c in children {
+                    let r = self.widgets[c].rect;
+                    let cy = y + (outer.h - r.h) / 2.0;
+                    if self.rtl {
+                        cx -= r.w;
+                        self.place(c, cx, cy);
+                        cx -= gap;
+                    } else {
+                        self.place(c, cx, cy);
+                        cx += r.w + gap;
+                    }
+                }
+            }
+            Kind::TitleBar => {
+                let pad = self.theme.padding;
+                let Some((&title, buttons)) = children.split_first() else {
+                    return;
+                };
+                let r = self.widgets[title].rect;
+                self.place(title, x + (outer.w - r.w) / 2.0, y + (outer.h - r.h) / 2.0);
+                // From the end edge inwards, so Close sits at the edge.
+                let mut edge_x = if self.rtl { x + pad } else { x + outer.w - pad };
+                for &b in buttons.iter().rev() {
+                    let r = self.widgets[b].rect;
+                    let by = y + (outer.h - r.h) / 2.0;
+                    if self.rtl {
+                        self.place(b, edge_x, by);
+                        edge_x += r.w + gap;
+                    } else {
+                        edge_x -= r.w;
+                        self.place(b, edge_x, by);
+                        edge_x -= gap;
+                    }
+                }
+            }
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
+                let mut cy = y + edge;
+                let mut children = &children[..];
+                if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
+                    self.widgets[bar].rect.w = outer.w;
+                    self.place(bar, x, y);
+                    cy += self.widgets[bar].rect.h;
+                    children = &children[1..];
+                }
+                // The widgets at the bottom follow one another up to the column's end.
+                let bottom: Vec<WidgetId> = children
+                    .iter()
+                    .copied()
+                    .filter(|&c| self.widgets[c].align[1] == crate::Align::End)
+                    .collect();
+                let tail = bottom.iter().map(|&c| self.widgets[c].rect.h + gap).sum::<f32>();
+                // Where the next widget would go after the ones in the flow: the widgets at the
+                // bottom start no higher, so a column too short for both overflows at its end
+                // and never draws them over the flow.
+                let flow = cy
+                    + children
+                        .iter()
+                        .filter(|&&c| self.widgets[c].align[1] != crate::Align::End)
+                        .map(|&c| self.widgets[c].rect.h + gap)
+                        .sum::<f32>();
+                let mut end_y = (outer.bottom() - edge - (tail - gap).max(0.0)).max(flow);
+                // How far down an island in the flow may grow: to the widgets at the bottom.
+                let limit = if bottom.is_empty() {
+                    outer.bottom() - edge
+                } else {
+                    end_y - gap
+                };
+                for (at, &c) in children.iter().enumerate() {
+                    let [across, along] = self.widgets[c].align;
+                    // A wrapping label fills too, as GTK gives one its width, unless aligned
+                    // across, where it keeps the width it asks for up to the column's, and in a
+                    // narrower column breaks into more lines, never below its longest word.
+                    let inner = outer.w - 2.0 * edge;
+                    if let Some(&(_, _, least)) = self.widgets[c].wrap.as_ref() {
+                        // Nor below its least width (Ui::set_min_width), as GTK's width-request.
+                        let floor = least.max(self.widgets[c].min_w);
+                        let r = &mut self.widgets[c].rect;
+                        r.w = r.w.min(inner).max(floor);
+                    }
+                    if across == crate::Align::Fill
+                        && (matches!(
+                        self.widgets[c].kind,
+                        Kind::Row
+                            | Kind::CenterBox
+                            | Kind::Group(_)
+                            | Kind::Alert(_)
+                            | Kind::Calendar(_)
+                            | Kind::Menu
+                            | Kind::Switch { .. }
+                            | Kind::Tile(_)
+                            | Kind::Slider(_)
+                            | Kind::Level(_)
+                            | Kind::Scroll { .. }
+                            | Kind::List { .. }
+                            | Kind::Island { .. }
+                            | Kind::Picture { .. }
+                    ) || self.widgets[c].wrap.is_some()
+                        || self.widgets[c].fill
+                        || self.inline_fills(c))
+                    {
+                        // Never below its least width (Ui::set_min_width), as GTK's width-request.
+                        self.widgets[c].rect.w = inner.max(self.widgets[c].min_w);
+                    }
+                    // An island takes the rest of its column's height down to the widgets at
+                    // the bottom, unless aligned along it; a picture, which takes no alignment
+                    // (Ui::set_align), always does. Above a stack at the bottom it leaves room
+                    // for the widgets of the flow after it; without one they overflow below the
+                    // column, as they always have.
+                    if along == crate::Align::Fill
+                        && matches!(self.widgets[c].kind, Kind::Island { .. } | Kind::Picture { .. })
+                    {
+                        let after = if bottom.is_empty() {
+                            0.0
+                        } else {
+                            children[at + 1..]
+                                .iter()
+                                .filter(|&&n| self.widgets[n].align[1] != crate::Align::End)
+                                .map(|&n| self.widgets[n].rect.h + gap)
+                                .sum::<f32>()
+                        };
+                        let r = &mut self.widgets[c].rect;
+                        r.h = r.h.max(limit - cy - after);
+                    }
+                    let r = self.widgets[c].rect;
+                    // The end edge is the left one in right to left. A widget wider than the
+                    // column sits at the start edge, so that it overflows only at the end, as
+                    // a widget that fills does.
+                    let fits = r.w <= inner;
+                    let at_right = self.rtl != (fits && across == crate::Align::End);
+                    let cx = if at_right {
+                        x + outer.w - edge - r.w
+                    } else {
+                        x + edge
+                    };
+                    if along == crate::Align::End {
+                        self.place(c, cx, end_y);
+                        end_y += r.h + gap;
+                    } else {
+                        self.place(c, cx, cy);
+                        cy += r.h + gap;
+                    }
+                }
+            }
+            Kind::Island { vertical, margin } => {
+                let [top, right, bottom, left] = margin;
+                let pad = self.theme.island_padding;
+                let inside = Rect {
+                    x: x + left + pad,
+                    y: y + top + pad,
+                    w: (outer.w - left - right - 2.0 * pad).max(0.0),
+                    h: (outer.h - top - bottom - 2.0 * pad).max(0.0),
+                };
+                let lengths: Vec<f32> = children
+                    .iter()
+                    .map(|&c| {
+                        let r = self.widgets[c].rect;
+                        if vertical { r.h } else { r.w }
+                    })
+                    .collect();
+                let content = lengths.iter().sum::<f32>() + gap * lengths.len().saturating_sub(1) as f32;
+                let free = |line: f32| ((line - content) / 2.0).max(0.0);
+                // In reading order: right to left mirrors a horizontal island.
+                let mut ordered = children.clone();
+                if !vertical && self.rtl {
+                    ordered.reverse();
+                }
+                let mut at = if vertical {
+                    inside.y + free(inside.h)
+                } else {
+                    inside.x + free(inside.w)
+                };
+                for c in ordered {
+                    let r = &mut self.widgets[c].rect;
+                    if vertical {
+                        r.w = inside.w;
+                        let h = r.h;
+                        self.place(c, inside.x, at);
+                        at += h + gap;
+                    } else {
+                        r.h = inside.h;
+                        let w = r.w;
+                        self.place(c, at, inside.y);
+                        at += w + gap;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Activates `id` as a click would: a button reports it, a toggle becomes the active one of
+    /// its group, a check button, a switch, a tile or an icon toggle turns over, a list's row
+    /// becomes its selected one.
+    /// Each takes the focus.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn activate(&mut self, id: WidgetId) -> Option<Event> {
+        if !self.is_visible(id) || !self.is_sensitive(id) {
+            return None;
+        }
+        self.set_focus(Some(id));
+        if let Some(calendar) = self.calendar_of(id) {
+            return self.activate_in_calendar(calendar, id);
+        }
+        match self.widgets[id].kind {
+            Kind::Button(_)
+            | Kind::MenuItem(_)
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. }
+            | Kind::DropDown(_) => Some(Event::Clicked(id)),
+            Kind::WindowButton(button) => Some(Event::Window(button)),
+            Kind::Check { ref mut active, .. }
+            | Kind::Switch { ref mut active, .. }
+            | Kind::Tile(crate::tile::Tile { ref mut active, .. })
+            | Kind::IconToggle(crate::icon_toggle::IconToggle { ref mut active, .. }) => {
+                *active = !*active;
+                Some(Event::Toggled(id))
+            }
+            Kind::Toggle { .. } => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut active),
+                ..
+            } => {
+                *active = !*active;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Radio(ref mut active),
+                ..
+            } => {
+                *active = true;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Submenu(page),
+                ..
+            } => {
+                // The page's title, its first row, takes the focus, as in GTK.
+                let title = self.widgets[page].children.first().copied();
+                self.slide_to(id, page, title);
+                None
+            }
+            Kind::MenuEntry {
+                mark: Mark::Back(item),
+                ..
+            } => {
+                let menu = self.widgets[item].parent;
+                if let Some(menu) = menu {
+                    self.slide_to(id, menu, Some(item));
+                }
+                None
+            }
+            Kind::ListRow(_) => {
+                let list = self.list_of(id);
+                if let Some(Kind::List { selected, .. }) = list.map(|l| &mut self.widgets[l].kind) {
+                    *selected = Some(id);
+                }
+                Some(Event::Selected(id))
+            }
+            _ => None,
+        }
+    }
+
+    /// The focusable widget under the point, in logical pixels; a widget scrolled out of its
+    /// scroll's viewport, or insensitive, is not under any.
+    pub fn hit(&self, x: f32, y: f32) -> Option<WidgetId> {
+        self.ids().find(|&id| {
+            self.widgets[id].is_focusable()
+                && self.widgets[id].rect.contains(x, y)
+                && self.clip(id).is_none_or(|c| c.contains(x, y))
+                && self.is_visible(id)
+                && self.is_sensitive(id)
+        })
+    }
+
+    /// Presses and releases the primary button at the point, in logical pixels, and returns the
+    /// event of the widget there, if any.
+    pub fn click(&mut self, x: f32, y: f32) -> Option<Event> {
+        self.pointer_press(x, y, PointerButton::Primary);
+        self.pointer_release(x, y, PointerButton::Primary)
+    }
+
+    /// The widget under the pointer, which is drawn highlighted, if any.
+    pub fn hovered(&self) -> Option<WidgetId> {
+        self.hover
+            .filter(|&id| self.is_visible(id) && self.is_sensitive(id))
+    }
+
+    /// The pointer moved to the point, in logical pixels: the widget under it is hovered, and a
+    /// press that has moved past [`Ui::DRAG_THRESHOLD`] on either axis starts a drag. A press
+    /// on a widget made insensitive since moves nothing and starts no drag.
+    pub fn pointer_motion(&mut self, x: f32, y: f32) -> Option<Event> {
+        self.hover = self.hit(x, y);
+        // The wheel's rest stays with the widget it turned over.
+        if self.wheel.is_some_and(|(over, _)| self.hover != Some(over)) {
+            self.wheel = None;
+        }
+        let id = self.press?.widget;
+        if !self.is_sensitive(id) {
+            return None;
+        }
+        if let Kind::Slider(_) = self.widgets[id].kind {
+            return self.slide(id, x);
+        }
+        // A press in a field selects its text as the pointer moves, and drags nothing.
+        if self.point_in_field(id, x, y, true) {
+            return None;
+        }
+        let press = self.press.as_mut()?;
+        let moved = (x - press.x).abs().max((y - press.y).abs());
+        if press.dragging || moved <= Self::DRAG_THRESHOLD {
+            return None;
+        }
+        press.dragging = true;
+        Some(Event::DragStarted(press.widget))
+    }
+
+    /// The pointer left the surface: nothing is hovered, and the press waiting for its release
+    /// ends, since the release goes elsewhere, as when a grab starts with the button down. A
+    /// drag it started ends over no widget.
+    pub fn pointer_leave(&mut self) -> Option<Event> {
+        self.hover = None;
+        self.wheel = None;
+        let press = self.press.take()?;
+        press.dragging.then_some(Event::DragEnded {
+            from: press.widget,
+            to: None,
+        })
+    }
+
+    /// A pointer button was pressed at the point, in logical pixels. The primary button focuses
+    /// the widget there and waits for the release to activate it, as GTK's buttons do, and raises
+    /// [`Event::PressedOutside`] on the root outside its shown children; the secondary button
+    /// asks for its context menu; the middle button gives [`Event::MiddleClick`] on a widget
+    /// that is not a field or a text area, which paste the primary selection instead.
+    pub fn pointer_press(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
+        let id = self.hit(x, y);
+        match button {
+            PointerButton::Primary => {
+                self.press = id.map(|widget| Press {
+                    widget,
+                    x,
+                    y,
+                    dragging: false,
+                });
+                self.set_focus(id.or(self.focus));
+                if id.is_none() && self.outside_children(x, y) {
+                    return Some(Event::PressedOutside);
+                }
+                // A field puts its caret at the press; a slider takes its value from it, and
+                // from the drag that follows.
+                let id = id.filter(|&id| !self.point_in_field(id, x, y, false))?;
+                self.slide(id, x)
+            }
+            PointerButton::Secondary => id.map(Event::ContextMenu),
+            // The middle button pastes the primary selection where it is pressed, in the field
+            // it focuses, as in GTK's entries.
+            PointerButton::Middle => {
+                let field = |id: &WidgetId| {
+                    matches!(self.widgets[*id].kind, Kind::Field(_) | Kind::TextArea(_))
+                };
+                let Some(id) = id.filter(field) else {
+                    return id.map(Event::MiddleClick);
+                };
+                self.set_focus(Some(id));
+                self.point_in_field(id, x, y, false);
+                self.clips.push(Clip::PastePrimary(id));
+                None
+            }
+        }
+    }
+
+    /// Puts `text` on the clipboard, as Ctrl+C in a field puts its selection. Call it on the
+    /// `Ui` of the surface whose key or click the application is handling, in
+    /// [`crate::Application::key`] or [`crate::Application::event`]: the driver offers the text
+    /// once the application returns, with the serial of that key or click, which the compositor
+    /// asks for. Called at any other time, as from [`crate::Application::turn`] or for an event
+    /// no key or button caused, nothing is copied and the driver logs it, at the latest when
+    /// that turn of the event loop ends: the copy never waits for a later, unrelated input.
+    pub fn copy(&mut self, text: &str) {
+        self.clips.push(Clip::Copy(text.to_owned()));
+    }
+
+    /// What the fields asked of the clipboards since the last call, in order, ending with
+    /// [`Clip::Unselect`] once the selection offered last is no longer its field's, as a GTK
+    /// entry gives up the primary selection it owns when its selection ends.
+    pub(crate) fn take_clips(&mut self) -> Vec<Clip> {
+        if let Some((id, text)) = &self.offered {
+            let kept = match self.widgets.get(*id).map(|w| &w.kind) {
+                Some(Kind::Field(field) | Kind::TextArea(field)) => {
+                    field.selected_text().as_ref() == Some(text)
+                }
+                _ => false,
+            };
+            if !kept {
+                self.offered = None;
+                self.clips.push(Clip::Unselect);
+            }
+        }
+        std::mem::take(&mut self.clips)
+    }
+
+    /// Pastes `text` into field `id` at its caret, replacing its selection, as typing it would:
+    /// without the control characters but a text area's newlines, without the bidirectional
+    /// formats, as [`Ui::set_field_text`] takes text from outside, and at most
+    /// [`Ui::FIELD_MAX_CHARS`] of it. A field that composes or is insensitive takes none, and a
+    /// paste with no text left changes nothing, its selection included.
+    pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
+        if !self.is_sensitive(id) {
+            return None;
+        }
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        if field.is_composing() {
+            return None;
+        }
+        // Overwritten when dropped: it may be a password field's text.
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
+        // Inserting nothing would delete the selection.
+        if text.is_empty() {
+            return None;
+        }
+        field.insert(&mut self.text, &text);
+        field.scroll_to_caret(&mut self.text);
+        Some(Event::Edited(id))
+    }
+
+    /// Deletes field `id`'s selection, `text`, once the clipboard took it: the end of a cut. A
+    /// field that composes, is insensitive, or whose selection is no longer `text`, keeps it.
+    pub(crate) fn cut(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        if self.widgets.get(id).is_none() || !self.is_sensitive(id) {
+            return None;
+        }
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets.get_mut(id)?.kind
+        else {
+            return None;
+        };
+        if field.is_composing() || field.selected_text().as_deref() != Some(text) {
+            return None;
+        }
+        field.insert(&mut self.text, "");
+        field.scroll_to_caret(&mut self.text);
+        Some(Event::Edited(id))
+    }
+
+    /// The items of a field's context menu, in order, with the key each one does: GTK 4's text
+    /// menu, but Insert Emoji, as the toolkit has no emoji chooser. A separator comes before
+    /// Select All.
+    const FIELD_MENU: [(&'static str, Key); 5] = [
+        ("Cut", Key::Cut),
+        ("Copy", Key::Copy),
+        ("Paste", Key::Paste),
+        ("Delete", Key::Delete),
+        ("Select All", Key::SelectAll),
+    ];
+
+    /// The context menu of field `id`, in this window's theme and direction, and the key each
+    /// of its items does in the field with [`Ui::field_edit`]; `None` if `id` is not a field.
+    /// An item that does not apply is insensitive, as in GTK's: Cut, Copy and Delete without a
+    /// selection, Paste without text on the clipboard (`can_paste`), Select All in an empty
+    /// field, and every item while the input method composes, as the field then takes no edit
+    /// but the composition's.
+    pub(crate) fn field_menu(
+        &self,
+        id: WidgetId,
+        can_paste: bool,
+    ) -> Option<(Ui, Vec<(WidgetId, Key)>)> {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind
+        else {
+            return None;
+        };
+        let composing = field.is_composing();
+        // A password field's selection is deleted, never copied or cut.
+        let (copied, selected) = (field.selected_text().is_some(), field.has_selection());
+        let empty = field.text().is_empty();
+        let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
+        let list = menu.add(Ui::ROOT, Kind::Menu);
+        let mut items = Vec::new();
+        for (label, key) in Self::FIELD_MENU {
+            let applies = !composing
+                && match key {
+                    Key::Paste => can_paste,
+                    Key::SelectAll => !empty,
+                    Key::Delete => selected,
+                    _ => copied,
+                };
+            if key == Key::SelectAll {
+                menu.add(list, Kind::Separator);
+            }
+            let item = menu.add(list, Kind::MenuItem(label.into()));
+            menu.set_sensitive(item, applies);
+            items.push((item, key));
+        }
+        Some((menu, items))
+    }
+
+    /// Does `key`, an item of field `id`'s context menu, in the field, which takes the focus
+    /// back from the menu. The menu's Delete deletes the selection only, never the character
+    /// after the caret.
+    pub(crate) fn field_edit(&mut self, id: WidgetId, key: Key) -> Option<Event> {
+        let (Kind::Field(field) | Kind::TextArea(field)) = &self.widgets.get(id)?.kind
+        else {
+            return None;
+        };
+        if key == Key::Delete && !field.has_selection() {
+            return None;
+        }
+        self.set_focus(Some(id));
+        if self.focus != Some(id) {
+            return None;
+        }
+        self.key(key)
+    }
+
+    /// Whether a press in a field is selecting its text, which follows the pointer until the
+    /// release.
+    pub(crate) fn selecting(&self) -> bool {
+        self.press.is_some_and(|p| {
+            matches!(self.widgets[p.widget].kind, Kind::Field(_) | Kind::TextArea(_))
+        })
+    }
+
+    /// Puts the caret of field `id` at the point, in logical pixels, or moves its selection's
+    /// focus there; false if `id` is not a field. The caret stays while the input method
+    /// composes, as it is the composition's.
+    fn point_in_field(&mut self, id: WidgetId, x: f32, y: f32, extend: bool) -> bool {
+        let r = self.widgets[id].rect;
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
+            return false;
+        };
+        if !field.is_composing() {
+            let cx = &mut self.text;
+            let (ox, oy) = field.origin(cx, r, self.theme.padding, self.rtl);
+            if extend {
+                field.drag_to(cx, x - ox, y - oy);
+            } else {
+                field.press_at(cx, x - ox, y - oy);
+            }
+        }
+        true
+    }
+
+    /// A pointer button was released at the point, in logical pixels: the primary button ends a
+    /// drag, or activates the widget it was pressed on if it is still under the pointer.
+    pub fn pointer_release(&mut self, x: f32, y: f32, button: PointerButton) -> Option<Event> {
+        if button != PointerButton::Primary {
+            return None;
+        }
+        let press = self.press.take()?;
+        match &self.widgets[press.widget].kind {
+            Kind::Slider(_) => return None,
+            // The text a drag selected is the primary selection, unless the field turned
+            // insensitive during the drag.
+            Kind::Field(field) | Kind::TextArea(field) => {
+                if let Some(text) = field
+                    .selected_text()
+                    .filter(|_| self.is_sensitive(press.widget))
+                {
+                    self.offered = Some((press.widget, text.clone()));
+                    self.clips.push(Clip::Select(text));
+                }
+                return None;
+            }
+            _ => {}
+        }
+        let to = self.hit(x, y);
+        if press.dragging {
+            return Some(Event::DragEnded {
+                from: press.widget,
+                to,
+            });
+        }
+        (to == Some(press.widget))
+            .then(|| self.activate(press.widget))
+            .flatten()
+    }
+
+    /// Handles a key: a focused field takes text, deletion and the horizontal arrows; otherwise
+    /// Tab and Shift+Tab walk the logical order, the arrows the visual one, and Enter or Space
+    /// activates. A focused slider takes the arrows (Right moves the knob right, which lowers the
+    /// value when mirrored; Up and Down are not mirrored), Page Up and Page Down (ten steps) and
+    /// Home and End (the least and the greatest value). A focused list row takes Up, Down, Page
+    /// Up, Page Down (a viewport), Home and End, which choose a row of its list. A focused text
+    /// area also takes Enter, which breaks the line, and Up and Down, which move between lines
+    /// and never leave it, as GTK's `TextView`; Enter in a single-line field is
+    /// [`Event::Activated`]. Escape, focused widget or not, is
+    /// [`Event::Escape`], and in a dialog's widgets the window's Close, but while a focused field
+    /// shows the input method's preedit: the input method's to cancel, as GTK's input method
+    /// filters keys before a dialog's bindings.
+    pub fn key(&mut self, key: Key) -> Option<Event> {
+        self.quiet_focus = None;
+        if key == Key::Escape && self.modal {
+            return (!self.composing()).then_some(Event::Window(WindowButton::Close));
+        }
+        if key == Key::Escape {
+            return Some(Event::Escape);
+        }
+        if let Some(done) = self.calendar_key(&key) {
+            return done;
+        }
+        // Outside a calendar, Ctrl leaves an arrow what it is.
+        let key = match key.control_arrow() {
+            Some(arrow) => arrow,
+            None => key,
+        };
+        let focused = self.focus;
+        if let Some(id) = focused {
+            let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+            if let Kind::Field(field) | Kind::TextArea(field) = &mut self.widgets[id].kind {
+                let cx = &mut self.text;
+                let before = field.selection();
+                let edited = match &key {
+                    Key::Text(s) => {
+                        field.insert(cx, s);
+                        true
+                    }
+                    Key::Enter if multiline => {
+                        field.insert(cx, "\n");
+                        true
+                    }
+                    Key::Enter => return Some(Event::Activated(id)),
+                    Key::Backspace => {
+                        field.backspace(cx);
+                        true
+                    }
+                    Key::Delete => {
+                        field.delete(cx);
+                        true
+                    }
+                    Key::Left => {
+                        field.left(cx);
+                        false
+                    }
+                    Key::Right => {
+                        field.right(cx);
+                        false
+                    }
+                    Key::Up if multiline => {
+                        field.up(cx);
+                        false
+                    }
+                    Key::Down if multiline => {
+                        field.down(cx);
+                        false
+                    }
+                    Key::SelectLeft => {
+                        field.select_left(cx);
+                        false
+                    }
+                    Key::SelectRight => {
+                        field.select_right(cx);
+                        false
+                    }
+                    Key::SelectAll => {
+                        field.select_all(cx);
+                        false
+                    }
+                    Key::Copy => {
+                        self.clips.extend(field.selected_text().map(Clip::Copy));
+                        false
+                    }
+                    Key::Cut => {
+                        self.clips.extend(field.selected_text().map(|t| Clip::Cut(id, t)));
+                        false
+                    }
+                    Key::Paste => {
+                        self.clips.push(Clip::Paste(id));
+                        false
+                    }
+                    Key::Menu => return Some(Event::ContextMenu(id)),
+                    _ => return self.navigate(key),
+                };
+                // A new selection is the primary selection, as in GTK's entries.
+                let selected = (field.selection() != before).then(|| field.selected_text());
+                if let Some(text) = selected.flatten() {
+                    self.offered = Some((id, text.clone()));
+                    self.clips.push(Clip::Select(text));
+                }
+                field.scroll_to_caret(cx);
+                // The typed text may be a password field's: overwritten once the field has it.
+                if let Key::Text(mut text) = key {
+                    zeroize::Zeroize::zeroize(&mut text);
+                }
+                return edited.then_some(Event::Edited(id));
+            }
+        }
+        // Outside a field, Shift leaves an arrow what it is.
+        let key = match key {
+            Key::SelectLeft => Key::Left,
+            Key::SelectRight => Key::Right,
+            key => key,
+        };
+        if let Some(id) = focused {
+            // A group of radios: the arrows move the choice along the group and wrap round, left
+            // and right as read, as GTK's grouped check buttons and the WAI-ARIA radio group.
+            let group = focus::radio_group(self, id);
+            let forward = match key {
+                Key::Down => Some(true),
+                Key::Up => Some(false),
+                Key::Right => Some(!self.rtl),
+                Key::Left => Some(self.rtl),
+                _ => None,
+            };
+            if let (Some(forward), false) = (forward, group.is_empty()) {
+                let n = group.len();
+                let at = group.iter().position(|&r| r == id).unwrap_or(0);
+                let to = group[if forward { (at + 1) % n } else { (at + n - 1) % n }];
+                return if to == id && self.is_active(to) {
+                    None
+                } else {
+                    self.activate(to)
+                };
+            }
+        }
+        if let Some(id) = focused {
+            if let Kind::Slider(slider) = &self.widgets[id].kind {
+                let (min, max) = (slider.min, slider.max);
+                // What is seen: Right moves the knob right, which is toward min when mirrored.
+                let along = if self.rtl { -1 } else { 1 };
+                return match key {
+                    Key::Right => self.step_value(id, along),
+                    Key::Left => self.step_value(id, -along),
+                    Key::Up => self.step_value(id, 1),
+                    Key::Down => self.step_value(id, -1),
+                    Key::PageUp => self.step_value(id, 10),
+                    Key::PageDown => self.step_value(id, -10),
+                    Key::Home => self.set_value(id, min),
+                    Key::End => self.set_value(id, max),
+                    key => self.navigate(key),
+                };
+            }
+        }
+        if let Some((list, id)) = focused.and_then(|id| Some((self.list_of(id)?, id))) {
+            // The arrows skip an insensitive row and a heading, as GTK's ListBox does.
+            let mut rows = self.visible_children(list);
+            rows.retain(|&r| self.widgets[r].is_focusable());
+            let at = rows.iter().position(|&r| r == id).unwrap_or(0);
+            let last = rows.len().saturating_sub(1);
+            let to = match key {
+                // Past either end the focus leaves the list for the widget in that direction,
+                // if there is one, as GTK's ListBox does; it does not wrap round.
+                Key::Up if at == 0 => return self.navigate(Key::Up),
+                Key::Down if at == last => return self.navigate(Key::Down),
+                Key::Up => at - 1,
+                Key::Down => at + 1,
+                Key::Home => 0,
+                Key::End => last,
+                Key::PageUp | Key::PageDown => self.page(list, &rows, at, key == Key::PageDown),
+                key => return self.list_key(Some(id), key),
+            };
+            let unmoved = to == at && self.selected(list) == Some(id);
+            return if unmoved { None } else { self.activate(rows[to]) };
+        }
+        self.list_key(focused, key)
+    }
+
+    /// The row a viewport above or below the middle of `rows[at]`, the viewport of the scroll
+    /// that holds `list` or else the list's own height, clamped to the first and last rows.
+    fn page(&self, list: WidgetId, rows: &[WidgetId], at: usize, down: bool) -> usize {
+        let mut viewport = self.widgets[list].rect.h;
+        let mut up = self.widgets[list].parent;
+        while let Some(w) = up {
+            if let Kind::Scroll { height, .. } = self.widgets[w].kind {
+                viewport = height;
+                break;
+            }
+            up = self.widgets[w].parent;
+        }
+        let r = self.widgets[rows[at]].rect;
+        let y = r.y + r.h / 2.0 + if down { viewport } else { -viewport };
+        let past = rows.iter().take_while(|&&row| self.widgets[row].rect.y <= y);
+        past.count().saturating_sub(1).min(rows.len().saturating_sub(1))
+    }
+
+    /// What a key does on `focused` when no widget takes it for itself.
+    fn list_key(&mut self, focused: Option<WidgetId>, key: Key) -> Option<Event> {
+        match key {
+            Key::Enter => focused.and_then(|id| self.activate(id)),
+            Key::Text(s) if s == " " => focused.and_then(|id| self.activate(id)),
+            Key::Menu => focused.map(Event::ContextMenu),
+            key => self.navigate(key),
+        }
+    }
+
+    /// The menu the focus is in, or the first visible one when nothing has the focus.
+    fn menu(&self) -> Option<WidgetId> {
+        match self.focus {
+            Some(id) => self.widgets[id]
+                .parent
+                .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu)),
+            None => self
+                .ids()
+                .find(|&id| matches!(self.widgets[id].kind, Kind::Menu) && self.is_visible(id)),
+        }
+    }
+
+    /// Whether the focused item is a submenu's, which `key` opens, or a submenu's title, which
+    /// `key` leaves.
+    fn slides_on(&self, key: &Key) -> bool {
+        let mark = match self.focus.map(|id| &self.widgets[id].kind) {
+            Some(Kind::MenuEntry { mark, .. }) => *mark,
+            _ => return false,
+        };
+        matches!(
+            (key, mark),
+            (Key::Right, Mark::Submenu(_)) | (Key::Left, Mark::Back(_))
+        )
+    }
+
+    /// Shows the menu `to` in place of the menu of the item `from`, and focuses `focus` on it:
+    /// a slide between the pages of one popup.
+    fn slide_to(&mut self, from: WidgetId, to: WidgetId, focus: Option<WidgetId>) {
+        let Some(menu) = self.widgets[from].parent else {
+            return;
+        };
+        self.widgets[to].visible = true;
+        self.set_focus(focus);
+        self.widgets[menu].visible = false;
+    }
+
+    /// The room a menu leaves at the start of each row when one of its rows has a check or a
+    /// radio there, as GTK's indicator size group: the mark and the gap after it.
+    pub(crate) fn menu_indent(&self, menu: WidgetId) -> f32 {
+        let marked = self.widgets[menu].children.iter().any(|&c| {
+            let widget = &self.widgets[c];
+            widget.visible
+                && matches!(
+                    widget.kind,
+                    Kind::MenuEntry {
+                        mark: Mark::Check(_) | Mark::Radio(_),
+                        ..
+                    }
+                )
+        });
+        if marked {
+            mark_size(false, self.theme.font_size).0 + self.theme.gap
+        } else {
+            0.0
+        }
+    }
+
+    /// The width of the widest of the menus that share the parent of `menu`, the pages of one
+    /// popup, which GTK's stack makes as wide as each other; the hidden ones are measured here.
+    fn pages_width(&mut self, menu: WidgetId) -> f32 {
+        let pages: Vec<WidgetId> = match self.widgets[menu].parent {
+            Some(parent) => self.widgets[parent]
+                .children
+                .iter()
+                .copied()
+                .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu))
+                .collect(),
+            None => vec![menu],
+        };
+        let mut widest = 0.0_f32;
+        for page in pages {
+            let rows = self.widgets[page].children.clone();
+            let mut w = 0.0_f32;
+            for row in rows {
+                if self.widgets[row].visible {
+                    w = w.max(self.measure(row).0);
+                }
+            }
+            widest = widest.max(w + self.menu_indent(page));
+        }
+        widest
+    }
+
+    fn navigate(&mut self, key: Key) -> Option<Event> {
+        // GTK slides to a submenu on the right arrow and back on the left one, whatever the
+        // direction of the text.
+        if self.slides_on(&key) {
+            return self.focus.and_then(|id| self.activate(id));
+        }
+        let next = match (key, self.menu()) {
+            // Up and down cycle through a menu's items, as in GTK's menus.
+            (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
+            (Key::Down, Some(menu)) => focus::cycle(self, menu, false),
+            // Home and End go to the first and the last item, Page Up and Page Down a viewport
+            // up or down a scrolled menu, without wrapping, as in GTK's menus.
+            (key @ (Key::Home | Key::End | Key::PageUp | Key::PageDown), Some(menu)) => {
+                let items = focus::items(self, menu);
+                // A menu with no item to focus, all insensitive say, keeps the focus where it is.
+                let last = items.len().checked_sub(1)?;
+                let at = self.focus.and_then(|f| items.iter().position(|&i| i == f));
+                let to = match key {
+                    Key::Home => 0,
+                    Key::End => last,
+                    _ => self.page(menu, &items, at.unwrap_or(0), key == Key::PageDown),
+                };
+                items.get(to).copied()
+            }
+            (Key::Tab, _) => focus::step(self, false),
+            (Key::BackTab, _) => focus::step(self, true),
+            (key @ (Key::Left | Key::Right | Key::Up | Key::Down), _) => focus::arrow(self, &key),
+            _ => None,
+        };
+        if next.is_some() {
+            self.set_focus(next);
+        }
+        None
+    }
+
+    /// Whether the focused field shows the input method's preedit.
+    fn composing(&self) -> bool {
+        let Some(id) = self.focus else {
+            return false;
+        };
+        match &self.widgets[id].kind {
+            Kind::Field(field) | Kind::TextArea(field) => field.is_composing(),
+            _ => false,
+        }
+    }
+
+    /// Shows the input method's preedit in the focused field, scrolled to its caret.
+    pub fn compose(&mut self, preedit: &str, cursor: Option<(usize, usize)>) {
+        if let Some(Kind::Field(field) | Kind::TextArea(field)) =
+            self.focus.map(|id| &mut self.widgets[id].kind)
+        {
+            field.compose(&mut self.text, preedit, cursor);
+            field.scroll_to_caret(&mut self.text);
+        }
+    }
+
+    /// Commits the input method's text into the focused field, without the control
+    /// characters but a text area's newlines, as typing them would.
+    pub fn commit(&mut self, text: &str) -> Option<Event> {
+        let id = self.focus?;
+        let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        // Overwritten when dropped: it may be a password field's text.
+        let text = printable(text, multiline);
+        field.commit(&mut self.text, &text);
+        field.scroll_to_caret(&mut self.text);
+        Some(Event::Edited(id))
+    }
+
+    /// Replaces a field's text, as an assistive technology's SetValue does: without the control
+    /// characters but a text area's newlines, and without the bidirectional formats, which
+    /// would change how the text reads without being seen.
+    ///
+    /// # Panics
+    ///
+    /// When `id` names no widget of this `Ui`.
+    pub fn set_field_text(&mut self, id: WidgetId, text: &str) -> Option<Event> {
+        let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
+        let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
+            return None;
+        };
+        // Overwritten when dropped: it may be a password field's text.
+        let text = crate::password::kept(text, Self::FIELD_MAX_CHARS, |c| {
+            keeps(c, multiline) && !is_invisible_format(c)
+        });
+        field.set_text(&text);
+        if multiline {
+            // As a GTK text view's, where a single-line field's caret stays at its start.
+            field.move_to_end(&mut self.text);
+        }
+        field.scroll_to_caret(&mut self.text);
+        Some(Event::Edited(id))
+    }
+}
+
+/// The size of the box of a check button, or of the track of a switch, at text size `font`, in
+/// logical pixels.
+pub(crate) fn mark_size(is_switch: bool, font: f32) -> (f32, f32) {
+    if is_switch {
+        (font * 3.2, font * 1.6)
+    } else {
+        (font * 1.2, font * 1.2)
+    }
+}
+
+/// Where the mark of a check button (at the start edge) or of a switch (at the end edge) sits in
+/// the widget's rectangle `r`, centred vertically; the label takes the rest.
+pub(crate) fn mark_rect(r: Rect, rtl: bool, (w, h): (f32, f32), at_end: bool) -> Rect {
+    let left = rtl == at_end;
+    Rect {
+        x: if left { r.x } else { r.x + r.w - w },
+        y: r.y + (r.h - h) / 2.0,
+        w,
+        h,
+    }
+}
+
+/// The x of the label of a check button or a switch of width `width`, given its `mark`: a check's
+/// label follows its box by `gap`, wherever the widget's rectangle `r` ends; a switch's label
+/// takes the far edge, opposite its track.
+pub(crate) fn label_x(r: Rect, mark: Rect, rtl: bool, is_switch: bool, gap: f32, width: f32) -> f32 {
+    match (is_switch, rtl) {
+        (false, false) => mark.x + mark.w + gap,
+        (false, true) => mark.x - gap - width,
+        (true, false) => r.x,
+        (true, true) => r.x + r.w - width,
+    }
+}
+
+/// The knob inside the `track` of a switch: at the start edge when off, at the end edge when on,
+/// so that it mirrors in right-to-left.
+pub(crate) fn knob_rect(track: Rect, rtl: bool, active: bool) -> Rect {
+    let inset = 2.0;
+    let d = track.h - 2.0 * inset;
+    let left = active == rtl;
+    Rect {
+        x: if left {
+            track.x + inset
+        } else {
+            track.x + track.w - inset - d
+        },
+        y: track.y + inset,
+        w: d,
+        h: d,
+    }
+}
+
+/// The diameter of a slider's knob at text size `font`, in logical pixels.
+pub(crate) fn slider_knob(font: f32) -> f32 {
+    font * 1.4
+}
+
+/// The horizontal centre of the knob of a slider in rectangle `r` when its value is `fraction`
+/// of the way from min to max: the track runs from min at the start edge to max at the end
+/// edge, a knob's radius inside the rectangle so that the knob stays in it.
+pub(crate) fn slider_knob_x(r: Rect, rtl: bool, font: f32, fraction: f64) -> f32 {
+    let inset = slider_knob(font) / 2.0;
+    let length = (r.w - 2.0 * inset).max(0.0);
+    let along = fraction as f32 * length;
+    if rtl {
+        r.x + r.w - inset - along
+    } else {
+        r.x + inset + along
+    }
+}
+
+/// The inverse of [`slider_knob_x`]: how far from min to max the pointer at `x` is, from 0 to 1.
+fn slider_fraction(r: Rect, rtl: bool, font: f32, x: f32) -> f32 {
+    let (at_min, at_max) = (slider_knob_x(r, rtl, font, 0.0), slider_knob_x(r, rtl, font, 1.0));
+    if at_min == at_max {
+        return 0.0;
+    }
+    ((x - at_min) / (at_max - at_min)).clamp(0.0, 1.0)
+}
+
+/// Bidirectional overrides, isolates and marks, and the line and paragraph separators: they
+/// change how text reads without being seen.
+fn is_invisible_format(c: char) -> bool {
+    matches!(c, '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn warnings_are_said_at_most_once_a_minute_with_the_count_held_back() {
+        let hush = Hush::default();
+        let start = Instant::now();
+        assert_eq!(hush.due(start), Some(0));
+        assert_eq!(hush.due(start + Duration::from_secs(1)), None);
+        assert_eq!(hush.due(start + Duration::from_secs(59)), None);
+        assert_eq!(hush.due(start + HUSH), Some(2));
+        assert_eq!(hush.due(start + HUSH), None);
+        assert_eq!(hush.due(start + HUSH * 3), Some(1));
+    }
+
+    #[test]
+    fn the_constructors_add_each_kind_with_its_fields() {
+        use crate::driver::Side;
+
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let image = crate::icon::Image {
+            pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(1, 1)),
+        };
+        let toggle = ui.toggle(Ui::ROOT, "A", true);
+        let check = ui.check(Ui::ROOT, "B", false);
+        let switch = ui.switch(Ui::ROOT, "C", true);
+        let island = ui.island(Ui::ROOT, true, [1.0, 2.0, 3.0, 4.0]);
+        let button = ui.icon_button(island, "D", image.clone(), 24.0, Some(Side::Bottom));
+        let picture = ui.image(Ui::ROOT, image, 16.0, "E");
+
+        assert_eq!(
+            ui.widget(Ui::ROOT).children,
+            [toggle, check, switch, island, picture]
+        );
+        assert_eq!(ui.widget(island).children, [button]);
+        assert_eq!(
+            [toggle, check, switch].map(|id| ui.is_active(id)),
+            [true, false, true]
+        );
+        let kinds = [toggle, check, switch, island, button, picture].map(|id| &ui.widget(id).kind);
+        let [toggle, check, switch, island, button, picture] = kinds;
+        assert!(matches!(toggle, Kind::Toggle { label, .. } if label == "A"));
+        assert!(matches!(check, Kind::Check { label, .. } if label == "B"));
+        assert!(matches!(switch, Kind::Switch { label, .. } if label == "C"));
+        assert!(matches!(
+            island,
+            Kind::Island { vertical: true, margin } if *margin == [1.0, 2.0, 3.0, 4.0]
+        ));
+        assert!(matches!(
+            button,
+            Kind::IconButton { label, size, indicator: Some(Side::Bottom), .. }
+                if label == "D" && *size == 24.0
+        ));
+        assert!(matches!(
+            picture,
+            Kind::Image { size, description, .. } if *size == 16.0 && description == "E"
+        ));
+    }
+
+    #[test]
+    fn a_toggle_group_is_exclusive() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let toggle = |label: &str, active| Kind::Toggle {
+            label: label.into(),
+            active,
+            radio: false,
+        };
+        let a = ui.add(row, toggle("A", true));
+        let b = ui.add(row, toggle("B", false));
+        let c = ui.add(row, toggle("C", false));
+        let other = ui.add(Ui::ROOT, Kind::Row);
+        let d = ui.add(other, toggle("D", true));
+
+        assert_eq!(ui.activate(b), Some(Event::Selected(b)));
+        assert_eq!(
+            [a, b, c, d].map(|id| ui.is_active(id)),
+            [false, true, false, true]
+        );
+        ui.set_focus(Some(c));
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Selected(c)));
+        assert_eq!(
+            [a, b, c, d].map(|id| ui.is_active(id)),
+            [false, false, true, true]
+        );
+        // Activating the active toggle keeps it active: a radio group is never empty.
+        ui.activate(c);
+        assert!(ui.is_active(c));
+    }
+
+    #[test]
+    fn a_check_toggles_on_click_and_space() {
+        let mut ui = Ui::new("Checks", Theme::default(), false);
+        let check = |label: &str, active| Kind::Check {
+            label: label.into(),
+            active,
+        };
+        let a = ui.add(Ui::ROOT, check("A", false));
+        let b = ui.add(Ui::ROOT, check("B", true));
+        ui.layout();
+        assert_eq!(crate::focus::chain(&ui), [a, b]);
+
+        let r = ui.widget(a).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Toggled(a)));
+        // Checks under one parent are independent, unlike toggles.
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [true, true]);
+        assert_eq!(ui.focus(), Some(a));
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Toggled(a)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, true]);
+        ui.set_focus(Some(b));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Toggled(b)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, false]);
+    }
+
+    #[test]
+    fn a_switch_mirrors_its_knob() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Switch", Theme::default(), rtl);
+            ui.min_width = 300.0;
+            let switch = |label: &str, active| Kind::Switch {
+                label: label.into(),
+                active,
+            };
+            let off = ui.add(Ui::ROOT, switch("Off", false));
+            let on = ui.add(Ui::ROOT, switch("On", true));
+            let (w, _) = ui.layout();
+            let parts = |id: WidgetId| {
+                let widget = ui.widget(id);
+                let size = mark_size(true, ui.theme.font_size);
+                let track = mark_rect(widget.rect, rtl, size, true);
+                (widget.rect, track, knob_rect(track, rtl, ui.is_active(id)))
+            };
+            let (row, track, knob) = parts(off);
+            let margin = ui.theme.margin;
+            assert_eq!(
+                row.w,
+                w - 2.0 * margin,
+                "rtl {rtl}: the switch fills the width"
+            );
+            if rtl {
+                assert_eq!(track.x, row.x, "the track at the end edge, the left");
+                assert!(
+                    knob.x + knob.w > track.center_x(),
+                    "an off knob is at the right"
+                );
+            } else {
+                assert_eq!(track.x + track.w, row.x + row.w);
+                assert!(knob.x < track.center_x(), "an off knob is at the left");
+            }
+            let (_, track, knob) = parts(on);
+            assert_eq!(
+                knob.x + knob.w > track.center_x(),
+                !rtl,
+                "rtl {rtl}: an on knob is at the other side"
+            );
+            assert_eq!(ui.activate(off), Some(Event::Toggled(off)));
+            assert!(ui.is_active(off));
+        }
+    }
+
+    #[test]
+    fn a_check_label_follows_its_box_in_a_row_cell() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Checks", Theme::default(), rtl);
+            ui.min_width = 600.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let check = |label: &str| Kind::Check {
+                label: label.into(),
+                active: false,
+            };
+            let bold = ui.add(row, check("Bold"));
+            ui.add(row, check("A much longer label"));
+            ui.layout();
+            let widget = ui.widget(bold);
+            let width = widget.text.as_ref().expect("a laid-out label").width();
+            assert!(width > 0.0);
+            let (r, gap) = (widget.rect, ui.theme.gap);
+            let mark = mark_rect(r, rtl, mark_size(false, ui.theme.font_size), false);
+            assert!(r.w > mark.w + gap + width, "the cell is wider than its content");
+            let x = label_x(r, mark, rtl, false, gap, width);
+            if rtl {
+                assert!((x + width + gap - mark.x).abs() < 1e-3, "the label ends a gap before the box");
+            } else {
+                assert!((x - (mark.x + mark.w + gap)).abs() < 1e-3, "the label starts a gap after the box");
+            }
+            // A switch keeps the far edge.
+            let track = mark_rect(r, rtl, mark_size(true, ui.theme.font_size), true);
+            let x = label_x(r, track, rtl, true, gap, width);
+            assert_eq!(if rtl { x + width } else { x }, if rtl { r.x + r.w } else { r.x });
+        }
+    }
+
+    #[test]
+    fn a_row_fills_its_column_with_children_of_one_width() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Row", Theme::default(), rtl);
+            ui.min_width = 300.0;
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let short = ui.add(row, Kind::Button("A".into()));
+            let long = ui.add(row, Kind::Button("A longer label".into()));
+            let (w, _) = ui.layout();
+            assert_eq!(w, 300.0, "rtl {rtl}: the window's minimum width");
+            let (s, l) = (ui.widget(short).rect, ui.widget(long).rect);
+            assert!((s.w - l.w).abs() < 0.01, "rtl {rtl}: {s:?} {l:?}");
+            // In reading order from the start edge, the margin's width inside the window.
+            let (left, right) = if rtl { (l, s) } else { (s, l) };
+            let margin = ui.theme.margin;
+            assert!((left.x - margin).abs() < 0.01, "rtl {rtl}: {left:?}");
+            assert!(
+                (right.x + right.w - (w - margin)).abs() < 0.01,
+                "rtl {rtl}: {right:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_title_bar_spans_the_window_with_its_buttons_at_the_end_edge() {
+        for rtl in [false, true] {
+            let mut ui = crate::chooser::build(&athanor_i18n::Catalog::empty(), rtl).ui;
+            let plain = ui.layout();
+            ui.add_title_bar();
+            ui.add_title_bar();
+            let bar = ui.widget(Ui::ROOT).children[0];
+            ui.set_visible(bar, false);
+            assert!(
+                ui.is_visible(bar),
+                "rtl {rtl}: the title bar cannot be hidden"
+            );
+            let (w, h) = ui.layout();
+            let r = ui.widget(bar).rect;
+            assert_eq!((r.x, r.y, r.w), (0.0, 0.0, w), "rtl {rtl}");
+            assert_eq!(h, plain.1 + r.h, "rtl {rtl}: the bar adds its height once");
+            let parts = ui.widget(bar).children.clone();
+            assert_eq!(parts.len(), 3, "rtl {rtl}: the title and two buttons");
+            let (title, minimize, close) = (parts[0], parts[1], parts[2]);
+            ui.set_visible(title, false);
+            ui.set_visible(close, false);
+            assert!(
+                ui.is_visible(title) && ui.is_visible(close),
+                "rtl {rtl}: the bar's children cannot be hidden"
+            );
+            let (m, c) = (ui.widget(minimize).rect, ui.widget(close).rect);
+            let pad = ui.theme.padding;
+            if rtl {
+                assert!(c.x == pad && m.x > c.x, "rtl: {m:?} {c:?}");
+            } else {
+                assert!(c.x + c.w == w - pad && m.x < c.x, "ltr: {m:?} {c:?}");
+            }
+            let t = ui.widget(title).rect;
+            assert!((t.center_x() - w / 2.0).abs() < 0.01 && !t.contains(m.x, m.y + 1.0));
+            assert!(ui.in_title_bar(w / 2.0, 1.0) && !ui.in_title_bar(w / 2.0, r.h + 1.0));
+            assert_eq!(crate::focus::chain(&ui)[..2], [minimize, close]);
+            assert_eq!(ui.activate(close), Some(Event::Window(WindowButton::Close)));
+        }
+    }
+
+    /// A column with a button, a hidden row of two buttons and a field.
+    fn with_hidden_row() -> (Ui, [WidgetId; 5]) {
+        let mut ui = Ui::new("Hidden", Theme::default(), false);
+        let top = ui.add(Ui::ROOT, Kind::Button("Top".into()));
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let a = ui.add(row, Kind::Button("A".into()));
+        let b = ui.add(row, Kind::Button("B".into()));
+        let field = ui.field(Ui::ROOT, "Name", "");
+        (ui, [top, row, a, b, field])
+    }
+
+    #[test]
+    fn a_hidden_widget_is_gone_everywhere() {
+        use crate::a11y::{node_id, tree_update};
+        let (mut ui, [top, row, a, b, field]) = with_hidden_row();
+        let shown = ui.layout();
+        let old = ui.widget(a).rect;
+        ui.set_visible(row, false);
+        let hidden = ui.layout();
+        assert_eq!(
+            shown.1 - hidden.1,
+            ui.widget(row).rect.h + ui.theme.section_gap,
+            "the row's height and its gap leave the window"
+        );
+        assert_eq!(crate::focus::chain(&ui), [top, field]);
+        assert!(![Some(a), Some(b)].contains(&ui.hit(old.x + 1.0, old.y + 1.0)));
+        let has = |ui: &Ui, id| {
+            let update = tree_update(ui, 1.0);
+            update.nodes.iter().any(|(n, _)| *n == node_id(id))
+        };
+        assert!(![row, a, b].iter().any(|&id| has(&ui, id)));
+        assert!(!ui.is_visible(a) && ui.widget(a).visible);
+
+        ui.set_visible(row, true);
+        assert_eq!(ui.layout(), shown);
+        assert_eq!(crate::focus::chain(&ui), [top, a, b, field]);
+        assert_eq!(ui.hit(old.x + 1.0, old.y + 1.0), Some(a));
+        assert!([row, a, b].iter().all(|&id| has(&ui, id)));
+    }
+
+    #[test]
+    fn hiding_the_focus_moves_it() {
+        use crate::a11y::{node_id, tree_update};
+        use accesskit::{Action, ActionRequest, TreeId};
+        let (mut ui, [_, row, a, b, field]) = with_hidden_row();
+        ui.layout();
+        ui.set_focus(Some(a));
+        ui.set_visible(row, false);
+        assert_eq!(ui.focus(), Some(field));
+        let update = tree_update(&ui, 1.0);
+        assert!(update.nodes.iter().any(|(n, _)| *n == update.focus));
+        assert_eq!(update.focus, node_id(field));
+
+        ui.set_focus(Some(b));
+        assert_eq!(ui.focus(), Some(field), "a hidden button takes no focus");
+        assert_eq!(ui.activate(b), None);
+        let click = ActionRequest {
+            action: Action::Click,
+            target_tree: TreeId::ROOT,
+            target_node: node_id(b),
+            data: None,
+        };
+        assert_eq!(ui.do_action(&click), None);
+        assert_eq!(ui.focus(), Some(field));
+        ui.set_visible(row, true);
+        assert_eq!(ui.activate(b), Some(Event::Clicked(b)));
+    }
+
+    /// A menu of three items with a separator between the first and the second.
+    fn menu(rtl: bool) -> (Ui, [WidgetId; 4]) {
+        let mut ui = Ui::new("Menu", Theme::default(), rtl);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let first = ui.add(menu, Kind::MenuItem("New Window".into()));
+        ui.add(menu, Kind::Separator);
+        let second = ui.add(menu, Kind::MenuItem("Pin to Dock".into()));
+        let third = ui.add(menu, Kind::MenuItem("Quit".into()));
+        ui.layout();
+        (ui, [menu, first, second, third])
+    }
+
+    #[test]
+    fn a_menus_checks_and_radios_flip_and_fill_as_gtks_model_buttons() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", false);
+        let low = ui.menu_radio(menu, "Low", true);
+        let high = ui.menu_radio(menu, "High", false);
+        ui.layout();
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(ui.is_active(check));
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(!ui.is_active(check));
+        assert_eq!(ui.activate(high), Some(Event::Toggled(high)));
+        assert!(ui.is_active(high));
+        assert!(
+            ui.is_active(low),
+            "the other radios are the application's to clear"
+        );
+        assert_eq!(ui.set_active(low, false), Some(Event::Toggled(low)));
+        assert_eq!(ui.set_active(low, false), None);
+        assert!(ui.is_flat(check));
+    }
+
+    #[test]
+    fn a_submenu_slides_in_on_the_right_arrow_and_out_on_the_left_in_both_directions() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Menu", Theme::default(), rtl);
+            let menu = ui.add(Ui::ROOT, Kind::Menu);
+            let first = ui.add(menu, Kind::MenuItem("Open".into()));
+            let (item, page) = ui.submenu(menu, "Volume");
+            let low = ui.menu_radio(page, "Low", true);
+            ui.layout();
+            assert!(!ui.is_visible(page), "rtl {rtl}: the page starts hidden");
+            ui.set_focus(Some(first));
+            assert_eq!(ui.key(Key::Right), None);
+            assert_eq!(ui.focus(), Some(first), "rtl {rtl}: a plain item opens nothing");
+            ui.set_focus(Some(item));
+            assert_eq!(ui.key(Key::Right), None);
+            let title = ui.widget(page).children[0];
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: the title takes the focus");
+            assert!(ui.is_visible(page) && !ui.is_visible(menu), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Down), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: the arrows stay on the page");
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: only the title leaves");
+            ui.set_focus(Some(title));
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: back on the parent item");
+            assert!(ui.is_visible(menu) && !ui.is_visible(page), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Enter), None);
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: Enter opens it too");
+            assert_eq!(ui.activate(title), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: activating the title returns");
+        }
+    }
+
+    #[test]
+    fn a_menus_pages_are_as_wide_as_the_widest_and_a_check_indents_every_label() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let plain = ui.add(menu, Kind::MenuItem("Open".into()));
+        let (item, page) = ui.submenu(menu, "More");
+        let long = ui.menu_check(page, "A much longer row than the others", false);
+        ui.layout();
+        assert_eq!(ui.menu_indent(menu), 0.0, "no check or radio on the main page");
+        assert!(ui.menu_indent(page) > 0.0);
+        let width = ui.widget(plain).rect.w;
+        assert_eq!(width, ui.widget(item).rect.w);
+        assert_eq!(ui.activate(item), None);
+        ui.layout();
+        assert_eq!(
+            ui.widget(long).rect.w,
+            width,
+            "the hidden page set the main page's width"
+        );
+    }
+
+    #[test]
+    fn the_arrows_cycle_through_a_menus_items_past_its_separators() {
+        for rtl in [false, true] {
+            let (mut ui, [_, first, second, third]) = menu(rtl);
+            assert_eq!(ui.focus(), None);
+            let mut walk = |key: Key| {
+                assert_eq!(ui.key(key), None);
+                ui.focus()
+            };
+            assert_eq!(walk(Key::Down), Some(first), "rtl {rtl}");
+            assert_eq!(
+                walk(Key::Down),
+                Some(second),
+                "rtl {rtl}: the separator is skipped"
+            );
+            assert_eq!(walk(Key::Down), Some(third), "rtl {rtl}");
+            assert_eq!(
+                walk(Key::Down),
+                Some(first),
+                "rtl {rtl}: down wraps, as GTK's menus"
+            );
+            assert_eq!(walk(Key::Up), Some(third), "rtl {rtl}: up wraps");
+            assert_eq!(walk(Key::Up), Some(second), "rtl {rtl}");
+            assert_eq!(walk(Key::Left), Some(second), "rtl {rtl}: no item beside");
+        }
+    }
+
+    #[test]
+    fn home_end_and_the_page_keys_walk_a_long_menu_as_gtks_do() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        let names: Vec<String> = (1..=40).map(|n| format!("Player {n}")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        let players = ui.drop_down(Ui::ROOT, "Media player", &names, 0);
+        let Some((mut popup, items)) = ui.drop_down_menu(players, Some(300.0)) else {
+            unreachable!("a drop-down with items opens a menu");
+        };
+        popup.layout();
+        let items: Vec<WidgetId> = items.into_iter().map(|(item, _)| item).collect();
+        popup.set_focus(Some(items[0]));
+        let mut walk = |key: Key| {
+            assert_eq!(popup.key(key), None);
+            popup.layout();
+            popup.focus().and_then(|f| items.iter().position(|&i| i == f))
+        };
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::Home), Some(0));
+        let Some(down) = walk(Key::PageDown) else {
+            unreachable!("the focus stays in the menu");
+        };
+        assert!(down > 1 && down < 39, "a viewport down, not one item and not the end: {down}");
+        assert_eq!(walk(Key::PageUp), Some(0), "and back up");
+        assert_eq!(walk(Key::PageUp), Some(0), "no wrap at the top");
+        assert_eq!(walk(Key::End), Some(39));
+        assert_eq!(walk(Key::PageDown), Some(39), "no wrap at the end");
+    }
+
+    #[test]
+    fn the_page_keys_home_and_end_leave_a_menu_of_insensitive_items_alone() {
+        let (mut ui, [_, first, second, third]) = menu(false);
+        for item in [first, second, third] {
+            ui.set_sensitive(item, false);
+        }
+        ui.layout();
+        for key in [Key::PageDown, Key::PageUp, Key::Home, Key::End] {
+            assert_eq!(ui.key(key.clone()), None, "{key:?}");
+            assert_eq!(ui.focus(), None, "{key:?}");
+        }
+    }
+
+    #[test]
+    fn enter_space_and_a_click_activate_a_menu_item() {
+        let (mut ui, [_, first, second, third]) = menu(false);
+        ui.set_focus(Some(second));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Clicked(second)));
+        ui.set_focus(Some(third));
+        assert_eq!(ui.key(Key::Text(" ".into())), Some(Event::Clicked(third)));
+        let r = ui.widget(first).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(first)));
+        assert_eq!(ui.focus(), Some(first));
+        // Every item spans the menu, so the pointer finds one anywhere across it.
+        let widths: Vec<f32> = [first, second, third].map(|id| ui.widget(id).rect.w).into();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{widths:?}");
+    }
+
+    /// A button with a popup and a plain button beside it.
+    fn with_popup() -> (Ui, WidgetId, WidgetId) {
+        let mut ui = Ui::new("Dock", Theme::default(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let app = ui.add(row, Kind::Button("Files".into()));
+        let other = ui.add(row, Kind::Button("Terminal".into()));
+        ui.set_has_popup(app, true);
+        ui.layout();
+        (ui, app, other)
+    }
+
+    #[test]
+    fn a_button_with_a_popup_is_collapsed_until_it_opens() {
+        let (mut ui, app, other) = with_popup();
+        assert!(ui.has_popup(app) && !ui.has_popup(other));
+        assert!(!ui.is_expanded(app));
+        ui.set_expanded(app, true);
+        assert!(ui.is_expanded(app));
+        ui.set_expanded(other, true);
+        assert!(
+            !ui.is_expanded(other),
+            "a button without a popup never expands"
+        );
+        // Closing returns the focus to the button and collapses it, as GTK's popover does.
+        ui.set_focus(Some(other));
+        ui.popup_closed(app);
+        assert_eq!((ui.focus(), ui.is_expanded(app)), (Some(app), false));
+    }
+
+    #[test]
+    fn the_secondary_button_and_the_menu_key_ask_for_the_context_menu() {
+        let (mut ui, app, other) = with_popup();
+        let r = ui.widget(app).rect;
+        let at = (r.x + 2.0, r.y + 2.0);
+        assert_eq!(
+            ui.pointer_press(at.0, at.1, PointerButton::Secondary),
+            Some(Event::ContextMenu(app))
+        );
+        assert_eq!(
+            ui.pointer_release(at.0, at.1, PointerButton::Secondary),
+            None
+        );
+        ui.set_focus(Some(other));
+        assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(other)));
+        ui.set_focus(None);
+        assert_eq!(ui.key(Key::Menu), None);
+    }
+
+    /// Escape hands the application the surface's escape, whatever has the focus, a field
+    /// included, which keeps its text and its focus (requirement S5).
+    #[test]
+    fn escape_is_the_surfaces_whatever_has_the_focus() {
+        let (mut ui, app, _) = with_popup();
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        ui.set_focus(Some(app));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.key(Key::Escape), Some(Event::Escape));
+        assert_eq!(ui.field_text(field).as_deref(), Some("a"));
+        assert_eq!(ui.focus(), Some(field));
+    }
+
+    #[test]
+    fn the_primary_button_activates_on_release_over_the_pressed_widget() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        assert_eq!(
+            ui.pointer_press(a.x + 1.0, a.y + 1.0, PointerButton::Primary),
+            None
+        );
+        assert_eq!(
+            ui.focus(),
+            Some(app),
+            "a press takes the focus, as GTK's buttons"
+        );
+        assert_eq!(
+            ui.pointer_release(a.x + 3.0, a.y + 3.0, PointerButton::Primary),
+            Some(Event::Clicked(app))
+        );
+        // Released over another widget: nothing is activated, as GTK's buttons.
+        ui.pointer_press(a.x + 1.0, a.y + 1.0, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_release(o.x + 1.0, o.y + 1.0, PointerButton::Primary),
+            None
+        );
+    }
+
+    #[test]
+    fn a_drag_starts_once_the_pointer_moves_past_gtks_threshold() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_motion(x + Ui::DRAG_THRESHOLD, y),
+            None,
+            "8 px is not past"
+        );
+        assert_eq!(ui.pointer_motion(x, y - Ui::DRAG_THRESHOLD), None);
+        assert_eq!(
+            ui.pointer_motion(x + Ui::DRAG_THRESHOLD + 0.5, y),
+            Some(Event::DragStarted(app))
+        );
+        assert_eq!(ui.pointer_motion(x + 30.0, y), None, "it starts once");
+        assert_eq!(
+            ui.pointer_release(o.x + 1.0, o.y + 1.0, PointerButton::Primary),
+            Some(Event::DragEnded {
+                from: app,
+                to: Some(other)
+            }),
+            "a drag never activates"
+        );
+        // A press on no widget drags nothing.
+        ui.pointer_press(0.5, 0.5, PointerButton::Primary);
+        assert_eq!(ui.pointer_motion(40.0, 40.0), None);
+        assert_eq!(ui.pointer_release(40.0, 40.0, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn a_leave_with_the_button_down_ends_the_press() {
+        let (mut ui, app, _) = with_popup();
+        let a = ui.widget(app).rect;
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        // A grab starts with the button down: the release goes elsewhere.
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(ui.pointer_leave(), None, "no drag had started");
+        assert_eq!(
+            ui.pointer_motion(x + 30.0, y),
+            None,
+            "no button is down: nothing drags"
+        );
+        assert_eq!(ui.pointer_release(x, y, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn a_leave_during_a_drag_ends_it_over_no_widget() {
+        let (mut ui, app, _) = with_popup();
+        let a = ui.widget(app).rect;
+        let (x, y) = (a.x + 1.0, a.y + 1.0);
+        ui.pointer_press(x, y, PointerButton::Primary);
+        assert_eq!(
+            ui.pointer_motion(x + 30.0, y),
+            Some(Event::DragStarted(app))
+        );
+        assert_eq!(
+            ui.pointer_leave(),
+            Some(Event::DragEnded {
+                from: app,
+                to: None
+            })
+        );
+        assert_eq!(ui.pointer_motion(x, y), None, "it ends once");
+        assert_eq!(ui.pointer_release(x, y, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn the_hovered_widget_follows_the_pointer() {
+        let (mut ui, app, other) = with_popup();
+        let (a, o) = (ui.widget(app).rect, ui.widget(other).rect);
+        assert_eq!(ui.hovered(), None);
+        ui.pointer_motion(a.x + 1.0, a.y + 1.0);
+        assert_eq!(ui.hovered(), Some(app));
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        assert_eq!(ui.hovered(), Some(other));
+        ui.pointer_motion(0.5, 0.5);
+        assert_eq!(ui.hovered(), None);
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        ui.pointer_leave();
+        assert_eq!(ui.hovered(), None);
+        // A hidden widget takes no pointer input, hover included.
+        ui.pointer_motion(o.x + 1.0, o.y + 1.0);
+        ui.set_visible(other, false);
+        assert_eq!(ui.hovered(), None);
+    }
+
+    #[test]
+    fn a_tooltip_is_the_description_unless_one_is_set() {
+        let (mut ui, app, _) = with_popup();
+        assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+        ui.set_tooltip(app, Some("Files"));
+        assert_eq!(
+            (ui.tooltip(app), ui.description(app)),
+            (Some("Files"), Some("Files"))
+        );
+        ui.set_description(app, Some("Running"));
+        assert_eq!(ui.description(app), Some("Running"));
+        ui.set_description(app, None);
+        ui.set_tooltip(app, None);
+        assert_eq!((ui.tooltip(app), ui.description(app)), (None, None));
+    }
+
+    /// A theme as a dock's: no margin around the window, 2 between the island's children.
+    fn dock_theme() -> Theme {
+        Theme {
+            margin: 0.0,
+            gap: 2.0,
+            padding: 8.0,
+            ..Theme::default()
+        }
+    }
+
+    fn icon(label: &str, size: f32) -> Kind {
+        Kind::IconButton {
+            label: label.into(),
+            image: crate::icon::Image {
+                pixmap: std::sync::Arc::new(vello_cpu::Pixmap::new(1, 1)),
+            },
+            size,
+            indicator: None,
+        }
+    }
+
+    #[test]
+    fn an_island_fills_its_window_and_centres_its_children_along_its_line() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: true,
+                margin: [24.0, 14.0, 24.0, 6.0],
+            },
+        );
+        // The 32 of `button_min` and 2 * 8 of padding wide, as GTK's min-width and padding,
+        // by 32 tall: 48 by 32 for either image.
+        let a = ui.add(island, icon("A", 16.0));
+        let b = ui.add(island, icon("B", 24.0));
+        // 48 + 2 * 4 + 6 + 14 wide; 32 + 2 + 32 + 2 * 4 + 24 + 24 tall.
+        assert_eq!(ui.layout(), (76.0, 122.0));
+        ui.min_height = 800.0;
+        assert_eq!(ui.layout(), (76.0, 800.0));
+        // Stretched across the line, centred along it: the inside is 28 to 772, the content 66.
+        let at = |id| ui.widget(id).rect;
+        assert_eq!(
+            at(a),
+            Rect {
+                x: 10.0,
+                y: 367.0,
+                w: 48.0,
+                h: 32.0
+            }
+        );
+        assert_eq!(
+            at(b),
+            Rect {
+                x: 10.0,
+                y: 401.0,
+                w: 48.0,
+                h: 32.0
+            }
+        );
+        assert_eq!(
+            at(island),
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 76.0,
+                h: 800.0
+            }
+        );
+        // The fill hugs the children: the padding around them, not the margin.
+        assert_eq!(
+            ui.island_fill(island),
+            Some(Rect {
+                x: 6.0,
+                y: 363.0,
+                w: 56.0,
+                h: 74.0
+            })
+        );
+    }
+
+    #[test]
+    fn a_horizontal_island_follows_the_reading_order() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Dock", dock_theme(), rtl);
+            let island = ui.add(
+                Ui::ROOT,
+                Kind::Island {
+                    vertical: false,
+                    margin: [14.0, 18.0, 6.0, 18.0],
+                },
+            );
+            let a = ui.add(island, icon("A", 16.0));
+            let b = ui.add(island, icon("B", 24.0));
+            // 18 + 4 + 48 + 2 + 48 + 4 + 18 wide: both buttons 48, whatever their image.
+            assert_eq!(ui.layout(), (142.0, 60.0));
+            let (first, second) = if rtl { (b, a) } else { (a, b) };
+            let (first, second) = (ui.widget(first).rect, ui.widget(second).rect);
+            assert_eq!((first.x, first.y, first.w, first.h), (22.0, 18.0, 48.0, 32.0));
+            assert_eq!((second.x, second.y), (22.0 + first.w + 2.0, 18.0));
+        }
+    }
+
+    #[test]
+    fn an_icon_button_takes_the_focus_and_clicks() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: false,
+                margin: [0.0; 4],
+            },
+        );
+        let a = ui.add(island, icon("A", 16.0));
+        let b = ui.add(island, icon("B", 16.0));
+        ui.layout();
+        assert_eq!(crate::focus::chain(&ui), [a, b]);
+        let r = ui.widget(b).rect;
+        assert_eq!(ui.click(r.center_x(), r.y + 1.0), Some(Event::Clicked(b)));
+        assert_eq!(ui.focus(), Some(b));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Clicked(b)));
+    }
+
+    #[test]
+    fn an_empty_island_keeps_its_margin_and_padding_and_has_no_fill() {
+        let mut ui = Ui::new("Dock", dock_theme(), false);
+        let island = ui.add(
+            Ui::ROOT,
+            Kind::Island {
+                vertical: true,
+                margin: [1.0, 2.0, 3.0, 4.0],
+            },
+        );
+        assert_eq!(ui.layout(), (14.0, 12.0));
+        assert_eq!(ui.island_fill(island), None);
+    }
+
+    #[test]
+    fn a_menu_of_buttons_keeps_the_buttons_its_width() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let short = ui.add(menu, Kind::Button("Pin".into()));
+        let long = ui.add(menu, Kind::MenuItem("A much longer row".into()));
+        ui.layout();
+        assert_eq!(ui.widget(short).rect.w, ui.widget(long).rect.w);
+        assert!(ui.is_flat(short));
+        assert!(!ui.is_flat(Ui::ROOT));
+    }
+
+    fn slider(min: f64, max: f64, step: f64, value: f64, rtl: bool) -> (Ui, WidgetId) {
+        let mut ui = Ui::new("Slider", Theme::default(), rtl);
+        let id = ui
+            .slider(Ui::ROOT, "Level", min, max, step, value)
+            .unwrap_or(Ui::ROOT);
+        ui.layout();
+        ui.set_focus(Some(id));
+        (ui, id)
+    }
+
+    #[test]
+    fn a_slider_refuses_a_broken_range() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        let (inf, nan) = (f64::INFINITY, f64::NAN);
+        for (min, max, step, value) in [
+            (0.0, 10.0, 0.0, 0.0),
+            (0.0, 10.0, nan, 0.0),
+            (0.0, 10.0, -1.0, 0.0),
+            (10.0, 0.0, 1.0, 0.0),
+            (5.0, 5.0, 1.0, 5.0),
+            (-inf, 10.0, 1.0, 0.0),
+            (0.0, inf, 1.0, 0.0),
+            (0.0, 10.0, inf, 0.0),
+            (0.0, 10.0, 1.0, nan),
+            (0.0, 10.0, 1.0, inf),
+        ] {
+            assert_eq!(ui.slider(Ui::ROOT, "Level", min, max, step, value), None);
+        }
+        assert_eq!(ui.len(), 1, "a refused slider adds nothing");
+    }
+
+    #[test]
+    fn a_slider_refuses_a_range_it_cannot_count_or_draw() {
+        let mut ui = Ui::new("Slider", Theme::default(), false);
+        // The span overflows, and the steps do not fit comfortably.
+        assert_eq!(ui.slider(Ui::ROOT, "L", -1e308, 1e308, 1.0, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 100.0, 1e-300, 0.0), None);
+        assert_eq!(ui.slider(Ui::ROOT, "L", 0.0, 1e12, 1.0, 0.0), None);
+        assert_eq!(ui.len(), 1);
+        // The most steps is still a slider, and its keys cannot overflow.
+        let id = ui.slider(Ui::ROOT, "L", 0.0, 2e9, 1.0, 2e9);
+        assert!(id.is_some());
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.step_value(id, i64::MAX), None);
+        assert_eq!(ui.step_value(id, i64::MAX).or(ui.step_value(id, -1)), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(2e9 - 1.0));
+    }
+
+    #[test]
+    fn a_slider_ends_on_max() {
+        let (mut ui, id) = slider(0.0, 10.0, 3.0, 0.0, false);
+        assert_eq!(ui.key(Key::End), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.key(Key::Left), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(9.0));
+        assert_eq!(ui.key(Key::Right), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+        assert_eq!(ui.set_value(id, 5.0), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(6.0));
+        assert_eq!(ui.set_value(id, 9.6), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(10.0));
+    }
+
+    #[test]
+    fn a_slider_stays_on_its_steps_within_its_range() {
+        let (mut ui, id) = slider(0.0, 10.0, 2.0, 0.0, false);
+        for (set, value) in [(11.0, 10.0), (-3.0, 0.0), (3.1, 4.0), (f64::INFINITY, 10.0)] {
+            ui.set_value(id, set);
+            assert_eq!(ui.value(id), Some(value), "set to {set}");
+        }
+        ui.set_value(id, 4.0);
+        assert_eq!(ui.set_value(id, f64::NAN), None);
+        assert_eq!(ui.value(id), Some(4.0));
+        // A value that rounds to where it is moves nothing.
+        assert_eq!(ui.set_value(id, 4.2), None);
+
+        for (key, moved, value) in [
+            (Key::Right, true, 6.0),
+            (Key::Up, true, 8.0),
+            (Key::Left, true, 6.0),
+            (Key::Down, true, 4.0),
+            (Key::PageUp, true, 10.0),
+            (Key::PageUp, false, 10.0),
+            (Key::PageDown, true, 0.0),
+            (Key::PageDown, false, 0.0),
+            (Key::Left, false, 0.0),
+            (Key::End, true, 10.0),
+            (Key::End, false, 10.0),
+            (Key::Home, true, 0.0),
+            (Key::Home, false, 0.0),
+        ] {
+            let event = ui.key(key.clone());
+            let expected = moved.then_some(Event::Changed(id));
+            assert_eq!(event, expected, "{key:?}");
+            assert_eq!(ui.value(id), Some(value), "{key:?}");
+        }
+        // Only a slider has a value.
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        assert_eq!((ui.value(label), ui.set_value(label, 1.0)), (None, None));
+    }
+
+    #[test]
+    fn a_level_holds_its_range_and_takes_no_focus() {
+        let mut ui = Ui::new("Level", Theme::default(), false);
+        for (value, full, max) in [
+            (1.0, 0.0, 100.0),
+            (1.0, 101.0, 100.0),
+            (1.0, -1.0, 100.0),
+            (f64::NAN, 100.0, 100.0),
+            (1.0, 100.0, f64::INFINITY),
+        ] {
+            let id = ui.level(Ui::ROOT, "Volume", value, full, max);
+            assert_eq!(id, None, "{value} {full} {max}");
+        }
+        let id = ui.level(Ui::ROOT, "Volume", 200.0, 100.0, 150.0);
+        let id = id.unwrap_or(Ui::ROOT);
+        assert_eq!(ui.value(id), Some(150.0), "held to its maximum");
+        for (set, now) in [(-5.0, 0.0), (120.0, 120.0), (f64::INFINITY, 150.0)] {
+            assert!(ui.set_level(id, set));
+            assert_eq!(ui.value(id), Some(now), "{set}");
+        }
+        assert!(!ui.set_level(id, f64::NAN));
+        assert_eq!(ui.value(id), Some(150.0));
+        let label = ui.add(Ui::ROOT, Kind::Label("Label".into()));
+        assert!(!ui.set_level(label, 1.0));
+        assert!(!ui.widget(id).is_focusable());
+        // It fills its column, as a slider does.
+        ui.layout();
+        let (root, r) = (ui.widget(Ui::ROOT).rect, ui.widget(id).rect);
+        assert_eq!(r.w, root.w - 2.0 * ui.theme.margin);
+    }
+
+    #[test]
+    fn a_label_takes_its_style_at_the_next_layout_and_refuses_a_bad_scale() {
+        let mut ui = Ui::new("Style", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("45".into()));
+        ui.layout();
+        let body = ui.widget(label).rect;
+        let display = TextStyle {
+            scale: 5.0,
+            weight: 300,
+            features: vec![*b"tnum"],
+        };
+        assert!(ui.set_text_style(label, display.clone()));
+        ui.layout();
+        let large = ui.widget(label).rect;
+        assert!(
+            large.h > 4.0 * body.h && large.w > 4.0 * body.w,
+            "{large:?} from {body:?}"
+        );
+        for scale in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let bad = TextStyle {
+                scale,
+                ..TextStyle::default()
+            };
+            assert!(!ui.set_text_style(label, bad), "{scale}");
+        }
+        assert_eq!(
+            ui.widget(label).style,
+            display,
+            "a refused style changes nothing"
+        );
+    }
+
+    #[test]
+    fn a_mirrored_slider_follows_what_is_seen() {
+        let seen = |rtl| {
+            let (mut ui, id) = slider(0.0, 10.0, 1.0, 5.0, rtl);
+            let r = ui.widget(id).rect;
+            let font = ui.theme.font_size;
+            let min = slider_knob_x(r, rtl, font, 0.0);
+            let max = slider_knob_x(r, rtl, font, 1.0);
+            assert_eq!(min < max, !rtl, "rtl {rtl}: min is at the start edge");
+            // The pointer at the min end gives min, at the max end gives max.
+            ui.click(min, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(0.0));
+            ui.click(max, r.y + r.h / 2.0);
+            assert_eq!(ui.value(id), Some(10.0));
+            ui.set_value(id, 5.0);
+            ui.key(Key::Right);
+            ui.value(id)
+        };
+        assert_eq!(seen(false), Some(6.0));
+        assert_eq!(seen(true), Some(4.0));
+    }
+
+    #[test]
+    fn a_slider_follows_a_press_and_a_drag() {
+        let (mut ui, id) = slider(0.0, 100.0, 1.0, 0.0, false);
+        let r = ui.widget(id).rect;
+        let (y, font) = (r.y + r.h / 2.0, ui.theme.font_size);
+        let at = |f| slider_knob_x(r, false, font, f);
+        let press = ui.pointer_press(at(0.5), y, PointerButton::Primary);
+        assert_eq!(press, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(50.0));
+        // A drag keeps moving the knob, past the drag threshold and outside the widget, and
+        // never starts a drag of its own.
+        let moved = ui.pointer_motion(at(0.75), y + 40.0);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(75.0));
+        let moved = ui.pointer_motion(r.x + r.w + 50.0, y);
+        assert_eq!(moved, Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(100.0));
+        assert_eq!(ui.pointer_release(at(1.0), y, PointerButton::Primary), None);
+        assert_eq!(ui.pointer_motion(at(0.1), y), None, "the button is up");
+        assert_eq!(ui.value(id), Some(100.0));
+    }
+
+    /// A button, a list of `rows` rows in a scroll `height` logical pixels high, and a button.
+    fn long_list(rows: usize, height: f32, rtl: bool) -> (Ui, [WidgetId; 4], Vec<WidgetId>) {
+        let mut ui = Ui::new("List", Theme::default(), rtl);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let scroll = ui.scroll(Ui::ROOT, height);
+        let list = ui.list(scroll, "Rows");
+        let rows = (1..=rows)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        (ui, [before, scroll, list, after], rows)
+    }
+
+    /// Whether `row` lies wholly inside the viewport of `scroll`.
+    fn in_view(ui: &Ui, scroll: WidgetId, row: WidgetId) -> bool {
+        let (view, r) = (ui.widget(scroll).rect, ui.widget(row).rect);
+        r.y >= view.y && r.bottom() <= view.bottom()
+    }
+
+    #[test]
+    fn the_focused_row_stays_in_view() {
+        let (mut ui, [before, scroll, list, after], rows) = long_list(1000, 200.0, false);
+        assert_eq!(ui.widget(scroll).rect.h, 200.0);
+        let last = rows[999];
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[0]));
+        assert!(!in_view(&ui, scroll, last));
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(last)));
+        assert_eq!((ui.focus(), ui.selected(list)), (Some(last), Some(last)));
+        assert!(in_view(&ui, scroll, last), "End scrolls to the last row");
+        ui.layout();
+        assert!(in_view(&ui, scroll, last), "a layout keeps the scroll");
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert!(in_view(&ui, scroll, rows[0]), "Home scrolls back");
+
+        // Tab out, scroll the selected row away, and Tab back in: it is in view again.
+        ui.key(Key::End);
+        assert_eq!((ui.key(Key::Tab), ui.focus()), (None, Some(after)));
+        let view = ui.widget(scroll).rect;
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, last) && in_view(&ui, scroll, rows[0]));
+        ui.key(Key::BackTab);
+        assert_eq!(ui.focus(), Some(last));
+        assert!(
+            in_view(&ui, scroll, last),
+            "Tab back in scrolls to the selected row"
+        );
+    }
+
+    #[test]
+    fn a_list_is_one_tab_stop_walked_by_arrows() {
+        let (mut ui, [before, scroll, list, after], rows) = long_list(50, 200.0, false);
+        assert_eq!(crate::focus::chain(&ui), [before, rows[0], after]);
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[0]), "Tab enters on the first row");
+        assert_eq!(ui.selected(list), None, "focus alone selects nothing");
+        assert_eq!(ui.key(Key::Down), Some(Event::Selected(rows[1])));
+        assert_eq!(ui.key(Key::Down), Some(Event::Selected(rows[2])));
+        assert_eq!(ui.key(Key::Up), Some(Event::Selected(rows[1])));
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[1]), Some(rows[1]))
+        );
+
+        // Page Down moves by a viewport: to the row a viewport below the selected row's middle.
+        let r = ui.widget(rows[1]).rect;
+        let below = r.y + r.h / 2.0 + ui.widget(scroll).rect.h;
+        let paged = rows.iter().position(|&row| {
+            let c = ui.widget(row).rect;
+            c.y <= below && below < c.bottom()
+        });
+        let paged = paged.map_or(Ui::ROOT, |i| rows[i]);
+        assert!(paged != rows[1] && paged != Ui::ROOT);
+        assert_eq!(ui.key(Key::PageDown), Some(Event::Selected(paged)));
+        assert!(in_view(&ui, scroll, paged));
+        assert_eq!(ui.key(Key::PageUp), Some(Event::Selected(rows[1])));
+        assert_eq!(ui.key(Key::PageUp), Some(Event::Selected(rows[0])));
+        assert_eq!(ui.key(Key::PageUp), None, "nothing above the first row");
+
+        // Tab leaves the list, and comes back to its selected row.
+        ui.key(Key::Down);
+        assert_eq!(crate::focus::chain(&ui), [before, rows[1], after]);
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(after));
+        ui.key(Key::BackTab);
+        assert_eq!(ui.focus(), Some(rows[1]));
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.focus(), Some(rows[1]), "Tab enters on the selected row");
+
+        // At the ends, Up and Down leave the list as Shift+Tab and Tab, as GTK's ListBox does.
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[49])));
+        assert_eq!(ui.key(Key::End), None);
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+        ui.key(Key::BackTab);
+        ui.key(Key::Home);
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+        assert_eq!(ui.selected(list), Some(rows[0]));
+
+        // Enter and Space choose the focused row, as a click does.
+        ui.key(Key::Tab);
+        assert_eq!(ui.key(Key::Enter), Some(Event::Selected(rows[0])));
+        let r = ui.widget(rows[2]).rect;
+        assert_eq!(
+            ui.click(r.x + 1.0, r.y + 1.0),
+            Some(Event::Selected(rows[2]))
+        );
+        assert_eq!(
+            (ui.focus(), ui.selected(list)),
+            (Some(rows[2]), Some(rows[2]))
+        );
+    }
+
+    #[test]
+    fn up_and_down_leave_a_list_only_toward_a_widget() {
+        // The list is the window's last widget: Down on its last row stays there, as GTK's
+        // directional focus does not wrap round to the first widget.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let before = ui.add(Ui::ROOT, Kind::Button("Before".into()));
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let rows: Vec<WidgetId> = (1..=20)
+            .map(|n| ui.list_row(list, &format!("Row {n}")))
+            .collect();
+        ui.layout();
+        ui.set_focus(Some(before));
+        ui.key(Key::Tab);
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[19])));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(rows[19])));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+
+        // The list is the first widget: Up on its first row stays there.
+        let mut ui = Ui::new("List", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 200.0);
+        let list = ui.list(scroll, "Rows");
+        let first = ui.list_row(list, "Row 1");
+        ui.list_row(list, "Row 2");
+        let after = ui.add(Ui::ROOT, Kind::Button("After".into()));
+        ui.layout();
+        ui.set_focus(Some(first));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(first)));
+        ui.key(Key::End);
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+    }
+
+    #[test]
+    fn the_arrows_reach_a_list_whose_selected_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        assert_eq!(ui.activate(rows[39]), Some(Event::Selected(rows[39])));
+        let view = ui.widget(scroll).rect;
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[39]));
+        ui.set_focus(Some(before));
+        ui.key(Key::Down);
+        assert_eq!(ui.focus(), Some(rows[39]), "Down from above enters the list");
+        assert!(in_view(&ui, scroll, rows[39]));
+
+        // And from below, with the first row selected and the list scrolled to its end.
+        ui.activate(rows[0]);
+        ui.set_focus(Some(after));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        ui.key(Key::Up);
+        assert_eq!(ui.focus(), Some(rows[0]), "Up from below enters the list");
+        assert!(in_view(&ui, scroll, rows[0]));
+    }
+
+    #[test]
+    fn the_arrows_leave_a_list_whose_focused_row_is_scrolled_away() {
+        let (mut ui, [before, scroll, _, after], rows) = long_list(50, 200.0, false);
+        let view = ui.widget(scroll).rect;
+        ui.set_focus(Some(rows[0]));
+        assert_eq!(ui.key(Key::End), Some(Event::Selected(rows[49])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1e6));
+        assert!(!in_view(&ui, scroll, rows[49]));
+        assert_eq!((ui.key(Key::Down), ui.focus()), (None, Some(after)));
+
+        ui.set_focus(Some(rows[49]));
+        assert_eq!(ui.key(Key::Home), Some(Event::Selected(rows[0])));
+        assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+        assert!(!in_view(&ui, scroll, rows[0]));
+        assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(before)));
+    }
+
+    #[test]
+    fn a_scroll_clips_its_content_and_follows_the_wheel() {
+        for rtl in [false, true] {
+            let (mut ui, [_, scroll, list, after], rows) = long_list(50, 200.0, rtl);
+            let view = ui.widget(scroll).rect;
+            let a = ui.widget(after).rect;
+            assert!(
+                a.y >= view.bottom(),
+                "rtl {rtl}: the next widget is under the viewport"
+            );
+            // Rows run on under the viewport, where the pointer finds none of them.
+            let hidden = rows
+                .iter()
+                .copied()
+                .find(|&r| ui.widget(r).rect.y > view.bottom());
+            assert!(hidden.is_some(), "rtl {rtl}: a row lies under the viewport");
+            let h = ui.widget(hidden.unwrap_or(Ui::ROOT)).rect;
+            assert!(!rows.contains(&ui.hit(h.x + 1.0, h.y + 1.0).unwrap_or(Ui::ROOT)));
+
+            // The wheel scrolls the list under the pointer, and only there.
+            assert!(!ui.pointer_axis(a.x + 1.0, a.y + 1.0, 40.0), "rtl {rtl}");
+            assert!(
+                ui.pointer_axis(view.x + 1.0, view.y + 1.0, 40.0),
+                "rtl {rtl}"
+            );
+            assert_eq!(ui.widget(rows[0]).rect.y, view.y - 40.0, "rtl {rtl}");
+            assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, -100.0), "rtl {rtl}");
+            assert_eq!(
+                ui.widget(rows[0]).rect.y,
+                view.y,
+                "rtl {rtl}: not above the top"
+            );
+            assert!(!ui.pointer_axis(view.x + 1.0, view.y + 1.0, -1.0), "rtl {rtl}");
+            assert!(ui.pointer_axis(view.x + 1.0, view.y + 1.0, 1e6));
+            let last = ui.widget(rows[49]).rect;
+            assert_eq!(
+                last.bottom(),
+                view.bottom(),
+                "rtl {rtl}: not past the bottom"
+            );
+            assert!(!ui.pointer_axis(view.x + 1.0, view.y + 1.0, 10.0));
+            ui.layout();
+            assert_eq!(
+                ui.widget(rows[49]).rect.bottom(),
+                view.bottom(),
+                "rtl {rtl}"
+            );
+
+            // A visible row takes a click; its list fills the width, its text at the start edge.
+            let at = (last.x + 1.0, last.y + 1.0);
+            assert_eq!(ui.click(at.0, at.1), Some(Event::Selected(rows[49])));
+            assert_eq!(ui.selected(list), Some(rows[49]));
+            let margin = ui.theme.margin;
+            assert_eq!((view.x, view.w), (margin, ui.size().0 - 2.0 * margin));
+        }
+    }
+
+    /// Whether the caret of the text area `id` lies inside the part of its text it shows, and
+    /// the line the caret is on, counted from 0.
+    fn caret_line(ui: &mut Ui, id: WidgetId) -> (bool, i32) {
+        let Kind::TextArea(area) = &mut ui.widgets[id].kind else {
+            return (false, -1);
+        };
+        let (view, line) = (area.view_height(&mut ui.text), area.line_height(&mut ui.text));
+        let offset = area.offset;
+        let Some(c) = area.caret(&mut ui.text, 1.5) else {
+            return (false, -1);
+        };
+        let (top, bottom) = (c.y0 as f32 - offset, c.y1 as f32 - offset);
+        let shown = top >= -0.5 && bottom <= view + 0.5;
+        (shown, (c.y0 as f32 / line).round() as i32)
+    }
+
+    #[test]
+    fn composing_scrolls_a_text_area_to_its_caret() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "1\n2\n3\n4\n5\n6", 3);
+        ui.layout();
+        ui.set_focus(Some(area));
+        assert_eq!(caret_line(&mut ui, area), (false, 5));
+        ui.compose("x", Some((1, 1)));
+        assert_eq!(caret_line(&mut ui, area), (true, 5));
+    }
+
+    #[test]
+    fn composing_with_a_hidden_caret_scrolls_to_the_preedit_end() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "1\n2\n3\n4\n5\n6", 3);
+        ui.layout();
+        ui.set_focus(Some(area));
+        ui.compose(&"word ".repeat(40), None);
+        let Kind::TextArea(field) = &mut ui.widgets[area].kind else {
+            panic!("not a text area");
+        };
+        let most = field.layout(&mut ui.text).height() - field.view_height(&mut ui.text);
+        let offset = field.offset;
+        assert!(most > 0.0 && (offset - most).abs() < 0.5, "offset {offset} of {most}");
+    }
+
+    #[test]
+    fn a_text_area_that_ends_a_composition_scrolls_back_into_its_text() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let notes = ui.text_area(Ui::ROOT, "Notes", "a", 3);
+        ui.layout();
+        let offset = |ui: &Ui| match &ui.widgets[notes].kind {
+            Kind::TextArea(area) => area.offset,
+            _ => f32::NAN,
+        };
+        let preedit = "word ".repeat(60);
+        // The area loses the focus, then its window loses the text input.
+        for leave in [false, true] {
+            ui.set_focus(Some(notes));
+            ui.compose(&preedit, None);
+            assert!(offset(&ui) > 0.0, "the preedit did not scroll");
+            if leave {
+                assert!(ui.end_composition());
+            } else {
+                ui.set_focus(Some(name));
+            }
+            assert_eq!(offset(&ui), 0.0, "leave {leave}");
+        }
+    }
+
+    #[test]
+    fn hiding_a_composing_field_ends_its_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        let other = ui.field(Ui::ROOT, "Other", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        ui.set_visible(name, false);
+        assert_eq!(ui.focus(), Some(other));
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
+    }
+
+    #[test]
+    fn a_field_that_loses_the_focus_ends_its_composition() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        let notes = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        ui.set_focus(Some(notes));
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(!field.is_composing());
+        assert_eq!(field.shown(), "ab");
+    }
+
+    #[test]
+    fn a_text_area_keeps_its_newlines_only() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 4);
+        let field = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        let text = |ui: &Ui, id| ui.field_text(id).unwrap_or_default();
+
+        // SetValue drops the controls but the newline, and the bidirectional formats.
+        ui.set_field_text(area, "a\nb\u{202E}c\u{7}");
+        assert_eq!(text(&ui, area), "a\nbc");
+        ui.set_field_text(field, "a\nb\u{202E}c\u{7}");
+        assert_eq!(text(&ui, field), "abc");
+
+        // The input method's text keeps the newline, and the RLM as a typed one is kept;
+        // Parley's other line breaks and the other controls go.
+        ui.set_field_text(area, "");
+        ui.set_focus(Some(area));
+        assert_eq!(ui.commit("x\ny"), Some(Event::Edited(area)));
+        ui.commit("\u{200F}x");
+        ui.commit("a\u{2028}b\u{2029}c\t");
+        assert_eq!(text(&ui, area), "x\ny\u{200F}xabc");
+        ui.set_focus(Some(field));
+        ui.set_field_text(field, "");
+        ui.commit("x\ny\u{2028}z");
+        assert_eq!(text(&ui, field), "xyz");
+    }
+
+    #[test]
+    fn a_text_area_scrolls_to_its_caret() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Text", Theme::default(), rtl);
+            let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+            let after = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(area));
+            assert_eq!(caret_line(&mut ui, area), (true, 0), "rtl {rtl}");
+
+            // Enter breaks the line; the field follows the caret past its third line.
+            for line in 1..=5 {
+                assert_eq!(ui.key(Key::Enter), Some(Event::Edited(area)));
+                assert_eq!(caret_line(&mut ui, area), (true, line), "rtl {rtl}");
+            }
+            assert_eq!(ui.field_text(area).as_deref(), Some("\n\n\n\n\n"));
+
+            // Up and Down move a line at a time, and do not leave the field at its ends.
+            for line in (0..5).rev() {
+                assert_eq!(ui.key(Key::Up), None);
+                assert_eq!(caret_line(&mut ui, area), (true, line), "rtl {rtl}");
+            }
+            assert_eq!((ui.key(Key::Up), ui.focus()), (None, Some(area)));
+            assert_eq!(ui.key(Key::Down), None);
+            assert_eq!(caret_line(&mut ui, area), (true, 1), "rtl {rtl}");
+
+            // The wheel scrolls the text under the pointer, within it.
+            let r = ui.widget(area).rect;
+            assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, 1e6), "rtl {rtl}");
+            assert!(!ui.pointer_axis(r.x + 1.0, r.y + 1.0, 1.0), "rtl {rtl}");
+            assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, -1e6), "rtl {rtl}");
+
+            // Text wraps at the field's width, and the field keeps its size.
+            ui.set_field_text(area, &"word ".repeat(40));
+            ui.layout();
+            assert_eq!(ui.widget(area).rect, r, "rtl {rtl}");
+
+            // Tab leaves, as a GTK TextView that does not take Tab.
+            assert_eq!(ui.key(Key::Tab), None);
+            assert_eq!(ui.focus(), Some(after), "rtl {rtl}");
+        }
+    }
+
+    /// The selected text of field `id`, if any.
+    fn selected(ui: &Ui, id: WidgetId) -> Option<String> {
+        ui.field_selection(id)
+    }
+
+    #[test]
+    fn a_fields_range_is_read_and_put_back_with_its_direction() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Column);
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abcd");
+        ui.key(Key::Left);
+        assert_eq!(ui.field_range(name), Some((3, 3)), "the caret");
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.field_range(name), Some((3, 2)), "anchor, then focus");
+        ui.set_field_range(name, (1, 3));
+        assert_eq!(ui.field_range(name), Some((1, 3)), "forwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("bc"));
+        ui.set_field_range(name, (3, 2));
+        assert_eq!(ui.field_range(name), Some((3, 2)), "backwards");
+        assert_eq!(selected(&ui, name).as_deref(), Some("c"));
+        // What is typed goes where the range put the caret.
+        ui.set_field_range(name, (2, 2));
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abxcd"));
+        ui.set_field_range(name, (1, 99));
+        assert_eq!(ui.field_range(name), Some((1, 5)), "clamped to the text");
+        assert_eq!(ui.field_range(other), None, "not a field");
+        ui.set_field_range(other, (0, 1));
+    }
+
+    #[test]
+    fn enter_activates_a_single_line_field_and_breaks_a_text_areas_line() {
+        let mut ui = Ui::new("Join", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        let secret = ui.password(Ui::ROOT, "Password");
+        let area = ui.text_area(Ui::ROOT, "Notes", "", 3);
+        ui.layout();
+        ui.set_focus(Some(name));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"), "Enter types nothing");
+        ui.set_focus(Some(secret));
+        ui.commit("hunter2");
+        assert_eq!(ui.key(Key::Enter), Some(Event::Activated(secret)));
+        assert_eq!(ui.password_text(secret), Some("hunter2"));
+        ui.set_focus(Some(area));
+        assert_eq!(ui.key(Key::Enter), Some(Event::Edited(area)));
+        assert_eq!(ui.field_text(area).as_deref(), Some("\n"));
+        // A press activates nothing: only Enter submits, as in GTK's entries.
+        let r = ui.widget(name).rect;
+        ui.pointer_press(r.x + 1.0, r.y + 1.0, PointerButton::Primary);
+        assert_eq!(ui.pointer_release(r.x + 1.0, r.y + 1.0, PointerButton::Primary), None);
+    }
+
+    #[test]
+    fn a_field_selects_with_shift_and_the_arrows_and_with_select_all() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        assert_eq!(ui.key(Key::SelectLeft), None, "a selection edits nothing");
+        ui.key(Key::SelectLeft);
+        assert_eq!(selected(&ui, name).as_deref(), Some("bc"));
+        ui.key(Key::SelectRight);
+        assert_eq!(selected(&ui, name).as_deref(), Some("c"));
+        ui.key(Key::SelectAll);
+        assert_eq!(selected(&ui, name).as_deref(), Some("abc"));
+        // What is typed replaces the selection, as in GTK's entries.
+        assert_eq!(ui.key(Key::Text("x".into())), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("x"));
+        assert_eq!(selected(&ui, name), None);
+
+        // Outside a field, Shift and an arrow are the arrow.
+        let (mut ui, id) = slider(0.0, 10.0, 1.0, 5.0, false);
+        assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
+        assert_eq!(ui.key(Key::SelectRight), Some(Event::Changed(id)));
+        assert_eq!(ui.key(Key::SelectLeft), Some(Event::Changed(id)));
+        assert_eq!(ui.value(id), Some(6.0));
+        // Only a field has a selection.
+        assert_eq!(ui.field_selection(id), None);
+    }
+
+    #[test]
+    fn a_press_and_a_drag_in_a_field_select_its_text() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Text", Theme::default(), rtl);
+            let name = ui.field(Ui::ROOT, "Name", "abcdef");
+            let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(other));
+            let r = ui.widget(name).rect;
+            let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+            // From one edge to the other: the whole text, and the field is not dragged.
+            assert_eq!(ui.pointer_press(start, y, PointerButton::Primary), None);
+            assert_eq!(ui.focus(), Some(name), "rtl {rtl}");
+            assert!(ui.selecting());
+            assert_eq!(ui.pointer_motion(end, y), None, "rtl {rtl}");
+            assert_eq!(ui.pointer_release(end, y, PointerButton::Primary), None);
+            assert!(!ui.selecting());
+            assert_eq!(selected(&ui, name).as_deref(), Some("abcdef"), "rtl {rtl}");
+            // A click puts the caret where it is: nothing is selected, and the text stays.
+            ui.click(start, y);
+            assert_eq!(selected(&ui, name), None, "rtl {rtl}");
+            assert_eq!(ui.field_text(name).as_deref(), Some("abcdef"));
+        }
+    }
+
+    #[test]
+    fn a_press_on_the_root_outside_its_children_is_reported_and_one_inside_is_not() {
+        let mut ui = Ui::new("t", Theme::default(), false);
+        ui.min_width = 400.0;
+        ui.min_height = 300.0;
+        let panel = ui.add(Ui::ROOT, Kind::Group("Panel".into()));
+        ui.add(panel, Kind::Label("Wi-Fi".into()));
+        let button = ui.add(panel, Kind::Button("Settings".into()));
+        ui.layout();
+        let p = ui.widget(panel).rect;
+        let (inside, outside) = ((p.x + 1.0, p.y + 1.0), (p.x + 1.0, p.y + p.h + 10.0));
+        assert!(ui.hit(inside.0, inside.1).is_none(), "on the group, not on a widget");
+        assert!(outside.1 < 300.0 && !p.contains(outside.0, outside.1));
+        for (at, raised) in [(inside, None), (outside, Some(Event::PressedOutside))] {
+            assert_eq!(ui.pointer_press(at.0, at.1, PointerButton::Primary), raised);
+            ui.pointer_release(at.0, at.1, PointerButton::Primary);
+        }
+        assert_eq!(
+            ui.pointer_press(outside.0, outside.1, PointerButton::Secondary),
+            None,
+            "only the primary button"
+        );
+        ui.pointer_release(outside.0, outside.1, PointerButton::Secondary);
+        let r = ui.widget(button).rect;
+        assert_eq!(ui.click(r.x + 1.0, r.y + 1.0), Some(Event::Clicked(button)));
+        // A popup raises none: popup.rs, where the driver's path marks it.
+    }
+
+    /// The control center's panel is an island on the root, at the end of the line: a press on
+    /// the island's transparent margin is outside it, as GTK's pick passes over a margin, and one
+    /// on its fill is not, in either direction. A hidden child of the root covers nothing.
+    #[test]
+    fn a_press_on_an_islands_margin_or_where_a_hidden_child_was_is_outside() {
+        let press = |ui: &mut Ui, (x, y): (f32, f32)| {
+            let event = ui.pointer_press(x, y, PointerButton::Primary);
+            ui.pointer_release(x, y, PointerButton::Primary);
+            event
+        };
+        for rtl in [false, true] {
+            let mut ui = Ui::new("t", Theme::default(), rtl);
+            ui.min_width = 400.0;
+            ui.min_height = 300.0;
+            let island = ui.island(Ui::ROOT, true, [8.0; 4]);
+            assert!(ui.set_align(island, [crate::Align::End, crate::Align::Start]).is_some());
+            ui.add(island, Kind::Label("Wi-Fi".into()));
+            let old = ui.add(Ui::ROOT, Kind::Group("Old".into()));
+            ui.add(old, Kind::Label("Gone".into()));
+            ui.layout();
+            let (outer, fill) = (ui.widget(island).rect, ui.island_fill(island));
+            let Some(fill) = fill else {
+                unreachable!("an island with a label shown fills");
+            };
+            assert_eq!(fill.x > 200.0, !rtl, "the end of the line, rtl {rtl}");
+            let margin = (fill.x - 4.0, fill.y + 1.0);
+            assert!(outer.contains(margin.0, margin.1) && !fill.contains(margin.0, margin.1));
+            let on_fill = (fill.x + 1.0, fill.y + 1.0);
+            assert_eq!(press(&mut ui, on_fill), None, "rtl {rtl}");
+            assert_eq!(press(&mut ui, margin), Some(Event::PressedOutside), "rtl {rtl}");
+            let o = ui.widget(old).rect;
+            let was = (o.x + 1.0, o.y + 1.0);
+            assert!(!fill.contains(was.0, was.1));
+            assert_eq!(press(&mut ui, was), None, "on a shown group, rtl {rtl}");
+            ui.set_visible(old, false);
+            assert_eq!(ui.widget(old).rect, o, "the hidden group keeps its rectangle");
+            assert_eq!(press(&mut ui, was), Some(Event::PressedOutside), "rtl {rtl}");
+        }
+    }
+
+    /// A drag across a password field selects its masks and offers no primary selection, in
+    /// either direction: nothing of it leaves by the mouse either (doc_accessibility.md, AX4).
+    #[test]
+    fn a_drag_across_a_password_field_offers_no_primary_selection() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Wi-Fi", Theme::default(), rtl);
+            let field = ui.password(Ui::ROOT, "Password");
+            let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(field));
+            ui.commit("Zq7#é");
+            ui.set_focus(Some(other));
+            ui.take_clips();
+            let r = ui.widget(field).rect;
+            let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+            assert_eq!(ui.pointer_press(start, y, PointerButton::Primary), None);
+            assert!(ui.selecting(), "rtl {rtl}");
+            assert_eq!(ui.pointer_motion(end, y), None);
+            assert_eq!(ui.pointer_release(end, y, PointerButton::Primary), None);
+            let Kind::Field(text) = &ui.widget(field).kind else {
+                unreachable!("a password field is a field");
+            };
+            assert!(text.has_selection(), "the drag selected the masks, rtl {rtl}");
+            assert_eq!(ui.offered, None, "rtl {rtl}");
+            assert!(ui.take_clips().is_empty(), "rtl {rtl}");
+            assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        }
+    }
+
+    /// A password field (doc_accessibility.md, AX4) keeps what is typed, and gives out only its
+    /// masks: the field's text, its selection, the clipboards and the input method's preedit
+    /// never hold a character of it. Text is pasted in.
+    #[test]
+    fn a_password_field_keeps_its_text_and_gives_out_only_masks() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        let plain = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.password_text(plain), None, "a plain field is not one");
+
+        ui.key(Key::Text("Zq".into()));
+        ui.commit("7#é");
+        assert_eq!(ui.password_text(field), Some("Zq7#é"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●●●"));
+
+        // Edits in the middle follow the masks: Backspace, Delete, and typing over a selection.
+        ui.key(Key::Left);
+        ui.key(Key::Left);
+        ui.key(Key::Backspace);
+        assert_eq!(ui.password_text(field), Some("Zq#é"));
+        ui.key(Key::Delete);
+        assert_eq!(ui.password_text(field), Some("Zqé"));
+        ui.key(Key::SelectLeft);
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.password_text(field), Some("Zxé"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // A selection gives no clipboard anything: no primary selection, Copy or Cut.
+        ui.take_clips();
+        ui.key(Key::SelectAll);
+        assert_eq!((ui.key(Key::Copy), ui.key(Key::Cut)), (None, None));
+        assert!(ui.take_clips().is_empty(), "nothing leaves the field");
+        assert_eq!(
+            ui.cut(field, "●●●"),
+            None,
+            "a cut of the masks deletes nothing"
+        );
+        let (menu, items) = ui.field_menu(field, true).expect("a field's menu");
+        for (item, key) in items {
+            let enabled = menu.is_sensitive(item);
+            match key {
+                Key::Copy | Key::Cut => assert!(!enabled, "{key:?} is refused"),
+                Key::Paste | Key::Delete => assert!(enabled, "{key:?} is allowed"),
+                _ => {}
+            }
+        }
+
+        // Paste in replaces the selection.
+        assert_eq!(ui.key(Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(field)]);
+        assert_eq!(ui.paste(field, "pä§\u{7}"), Some(Event::Edited(field)));
+        assert_eq!(ui.password_text(field), Some("pä§"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+
+        // The input method's preedit is never drawn; what it commits is kept.
+        ui.compose("secret", Some((6, 6)));
+        let Kind::Field(text) = &ui.widget(field).kind else {
+            unreachable!("a password field is a field");
+        };
+        assert_eq!(text.shown(), "●●●", "no preedit");
+        ui.commit("ß");
+        assert_eq!(ui.password_text(field), Some("pä§ß"));
+
+        // An assistive technology's SetValue sets it, and clearing it empties both.
+        ui.set_field_text(field, "new");
+        assert_eq!(ui.password_text(field), Some("new"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("●●●"));
+        ui.set_field_text(field, "");
+        assert_eq!(ui.password_text(field), Some(""));
+        assert_eq!(ui.field_text(field).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn copy_cut_and_paste_go_through_the_clipboard() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        // With nothing selected, Copy and Cut give the clipboard nothing.
+        assert_eq!((ui.key(Key::Copy), ui.key(Key::Cut)), (None, None));
+        assert!(ui.take_clips().is_empty());
+
+        // A selection made with the keyboard is the primary selection.
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        let selected = ui.take_clips();
+        assert_eq!(selected.last(), Some(&Clip::Select("bc".into())));
+        assert_eq!(ui.key(Key::Copy), None, "a copy edits nothing");
+        assert_eq!(ui.take_clips(), [Clip::Copy("bc".into())]);
+        // A cut leaves the text until the clipboard took it.
+        assert_eq!(ui.key(Key::Cut), None);
+        assert_eq!(ui.take_clips(), [Clip::Cut(name, "bc".into())]);
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        assert_eq!(ui.cut(name, "b"), None, "a text that is not the selection stays");
+        assert_eq!(ui.cut(Ui::ROOT, "bc"), None);
+        assert_eq!(ui.cut(name, "bc"), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("a"));
+
+        // Paste asks the driver for the clipboard's text, which comes back through paste and
+        // is taken as typed text is.
+        assert_eq!(ui.key(Key::Paste), None);
+        // The cut ended the selection, and with it its offer.
+        assert_eq!(ui.take_clips(), [Clip::Paste(name), Clip::Unselect]);
+        assert_eq!(ui.paste(name, "x\ny\u{7}"), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("axy"));
+
+        // A paste replaces the selection, and is cut at the longest text from outside.
+        ui.key(Key::SelectAll);
+        ui.paste(name, &"é".repeat(Ui::FIELD_MAX_CHARS + 5));
+        let count = ui.field_text(name).map(|t| t.chars().count());
+        assert_eq!(count, Some(Ui::FIELD_MAX_CHARS));
+
+        // A composing field, and a widget that is no field, take no paste.
+        ui.compose("x", None);
+        assert_eq!(ui.paste(name, "y"), None);
+        assert_eq!(ui.paste(Ui::ROOT, "y"), None);
+        assert_eq!(ui.paste(WidgetId(u32::MAX, 0), "y"), None);
+    }
+
+    #[test]
+    fn a_paste_with_nothing_left_to_take_leaves_the_field_as_it_was() {
+        // An owner that sends nothing, or only what a field drops, deletes no selection.
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.take_clips();
+        for text in ["", "\u{202E}\u{7}"] {
+            assert_eq!(ui.paste(name, text), None, "{text:?}");
+            assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+            ui.key(Key::Copy);
+            assert_eq!(ui.take_clips(), [Clip::Copy("c".into())], "the selection stays");
+        }
+    }
+
+    #[test]
+    fn the_primary_selection_ends_with_the_fields_selection() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.field(Ui::ROOT, "Other", "");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.take_clips().last(), Some(&Clip::Select("bc".into())));
+        // The caret moving collapses the selection: its offer ends, once.
+        ui.key(Key::Right);
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
+        assert!(ui.take_clips().is_empty());
+        // An edit that replaces the selection ends it too, as a cut does.
+        ui.key(Key::SelectAll);
+        assert_eq!(ui.take_clips(), [Clip::Select("abc".into())]);
+        ui.key(Key::Text("x".into()));
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
+        // Another field's selection replaces the offer: the first field's end ends nothing.
+        ui.key(Key::SelectAll);
+        ui.set_focus(Some(other));
+        ui.commit("de");
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.take_clips().last(), Some(&Clip::Select("e".into())));
+        ui.set_focus(Some(name));
+        ui.key(Key::Right);
+        assert!(ui.take_clips().is_empty());
+    }
+
+    #[test]
+    fn a_paste_drops_the_bidirectional_formats() {
+        // As text set from outside: "invoice<RLO>gpj.exe" would read "invoiceexe.jpg".
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        let pasted = ui.paste(name, "invoice\u{202E}gpj.exe\u{2066}\u{200F}");
+        assert_eq!(pasted, Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("invoicegpj.exe"));
+    }
+
+    #[test]
+    fn a_drag_offers_the_primary_selection_and_the_middle_button_pastes_it() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        ui.layout();
+        let r = ui.widget(name).rect;
+        let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+        ui.pointer_press(start, y, PointerButton::Primary);
+        ui.pointer_motion(end, y);
+        assert!(ui.take_clips().is_empty(), "the selection is offered at the release");
+        ui.pointer_release(end, y, PointerButton::Primary);
+        assert_eq!(ui.take_clips(), [Clip::Select("abc".into())]);
+        // A click selects nothing, and ends the offer of the selection it collapses.
+        ui.click(start, y);
+        assert_eq!(ui.take_clips(), [Clip::Unselect]);
+
+        // The middle button focuses the field and pastes the primary selection where it is
+        // pressed, as in GTK's entries.
+        ui.set_focus(Some(other));
+        assert_eq!(ui.pointer_press(end, y, PointerButton::Middle), None);
+        assert_eq!(ui.focus(), Some(name));
+        assert_eq!(ui.take_clips(), [Clip::PastePrimary(name)]);
+        ui.paste(name, "x");
+        assert_eq!(ui.field_text(name).as_deref(), Some("abcx"));
+        // Elsewhere it pastes nothing, and raises the widget's own middle click.
+        let o = ui.widget(other).rect;
+        let pressed = ui.pointer_press(o.x + 1.0, o.y + 1.0, PointerButton::Middle);
+        assert_eq!(pressed, Some(Event::MiddleClick(other)));
+        assert_eq!(ui.focus(), Some(name));
+        assert!(ui.take_clips().is_empty());
+    }
+
+    #[test]
+    fn a_composing_field_keeps_its_caret_under_the_pointer() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "ab");
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.compose("x", Some((1, 1)));
+        let r = ui.widget(name).rect;
+        ui.pointer_press(r.x + r.w - 1.0, r.y + r.h / 2.0, PointerButton::Primary);
+        ui.pointer_motion(r.x + 1.0, r.y + r.h / 2.0);
+        let Kind::Field(field) = &ui.widgets[name].kind else {
+            panic!("not a field");
+        };
+        assert!(field.is_composing());
+        assert_eq!(field.shown(), "xab");
+    }
+
+    /// The items of field `id`'s context menu: its label, whether it applies, and its key.
+    fn menu_items(ui: &Ui, id: WidgetId, can_paste: bool) -> Vec<(String, bool, Key)> {
+        let (menu, items) = ui
+            .field_menu(id, can_paste)
+            .expect("a field has a context menu");
+        let item = |(item, key): (WidgetId, Key)| match &menu.widget(item).kind {
+            Kind::MenuItem(label) => (label.clone(), menu.widget(item).is_focusable(), key),
+            _ => panic!("widget {item:?} is no menu item"),
+        };
+        items.into_iter().map(item).collect()
+    }
+
+    #[test]
+    fn a_fields_context_menu_holds_gtks_items_and_disables_those_that_do_not_apply() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        ui.layout();
+        assert!(
+            ui.field_menu(other, true).is_none(),
+            "a button has no edit menu"
+        );
+        let applies = |ui: &Ui, can_paste| -> Vec<bool> {
+            let items = menu_items(ui, name, can_paste).into_iter();
+            items.map(|(_, applies, _)| applies).collect()
+        };
+        let labels: Vec<(String, Key)> = menu_items(&ui, name, true)
+            .into_iter()
+            .map(|(label, _, key)| (label, key))
+            .collect();
+        let gtk = [
+            ("Cut", Key::Cut),
+            ("Copy", Key::Copy),
+            ("Paste", Key::Paste),
+            ("Delete", Key::Delete),
+            ("Select All", Key::SelectAll),
+        ];
+        assert_eq!(labels, gtk.map(|(label, key)| (label.to_owned(), key)));
+        // An empty field: Paste only, and only with text on the clipboard.
+        assert_eq!(applies(&ui, false), [false; 5]);
+        assert_eq!(applies(&ui, true), [false, false, true, false, false]);
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        assert_eq!(applies(&ui, false), [false, false, false, false, true]);
+        ui.key(Key::SelectLeft);
+        assert_eq!(applies(&ui, true), [true; 5]);
+        assert_eq!(applies(&ui, false), [true, true, false, true, true]);
+        // While the input method composes, the field takes no edit but the composition's.
+        ui.compose("x", None);
+        assert_eq!(applies(&ui, true), [false; 5]);
+        // A separator comes before Select All, as in GTK's menu.
+        let (menu, items) = ui
+            .field_menu(name, true)
+            .expect("a field has a context menu");
+        let list = menu
+            .widget(items[0].0)
+            .parent
+            .expect("the items are in a menu");
+        let kinds: Vec<bool> = menu
+            .widget(list)
+            .children
+            .iter()
+            .map(|&c| matches!(menu.widget(c).kind, Kind::Separator))
+            .collect();
+        assert_eq!(kinds, [false, false, false, false, true, false]);
+    }
+
+    #[test]
+    fn a_field_asks_for_its_context_menu_with_the_menu_key_and_the_secondary_button() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        ui.layout();
+        ui.set_focus(Some(name));
+        assert_eq!(ui.key(Key::Menu), Some(Event::ContextMenu(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        let r = ui.widget(name).rect;
+        let press = ui.pointer_press(r.x + 1.0, r.y + 1.0, PointerButton::Secondary);
+        assert_eq!(press, Some(Event::ContextMenu(name)));
+    }
+
+    #[test]
+    fn the_items_of_a_fields_context_menu_edit_it_as_their_keys_do() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let other = ui.add(Ui::ROOT, Kind::Button("OK".into()));
+        ui.layout();
+        ui.set_focus(Some(name));
+        ui.commit("abc");
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        ui.take_clips();
+        // The focus was the menu's: an item gives it back to the field.
+        ui.set_focus(Some(other));
+        assert_eq!(ui.field_edit(name, Key::Copy), None);
+        assert_eq!(ui.focus(), Some(name));
+        assert_eq!(ui.take_clips(), [Clip::Copy("bc".into())]);
+        assert_eq!(ui.field_edit(name, Key::Cut), None);
+        assert_eq!(ui.take_clips(), [Clip::Cut(name, "bc".into())]);
+        assert_eq!(ui.field_edit(name, Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(name)]);
+        // Delete deletes the selection, and without one never the character after the caret.
+        assert_eq!(ui.field_edit(name, Key::Delete), Some(Event::Edited(name)));
+        assert_eq!(ui.field_text(name).as_deref(), Some("a"));
+        ui.key(Key::Left);
+        assert_eq!(ui.field_edit(name, Key::Delete), None);
+        assert_eq!(ui.field_text(name).as_deref(), Some("a"));
+        assert_eq!(ui.field_edit(name, Key::SelectAll), None);
+        assert_eq!(selected(&ui, name).as_deref(), Some("a"));
+        assert_eq!(
+            ui.field_edit(other, Key::SelectAll),
+            None,
+            "a button is no field"
+        );
+        assert_eq!(ui.field_edit(WidgetId(u32::MAX, 0), Key::SelectAll), None);
+    }
+
+    #[test]
+    fn an_insensitive_widget_takes_neither_the_focus_nor_the_pointer_nor_an_activation() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let list = ui.add(Ui::ROOT, Kind::Menu);
+        let cut = ui.add(list, Kind::MenuItem("Cut".into()));
+        let paste = ui.add(list, Kind::MenuItem("Paste".into()));
+        ui.layout();
+        ui.set_focus(Some(cut));
+        ui.set_sensitive(cut, false);
+        assert!(!ui.is_sensitive(cut));
+        assert_eq!(
+            ui.focus(),
+            Some(paste),
+            "the focus moves on, as from a widget hidden"
+        );
+        assert!(!ui.widget(cut).is_focusable());
+        ui.set_focus(Some(cut));
+        assert_eq!(ui.focus(), Some(paste));
+        let r = ui.widget(cut).rect;
+        assert_eq!(ui.hit(r.x + 1.0, r.y + 1.0), None);
+        assert_eq!(ui.activate(cut), None);
+        assert_eq!(ui.activate(paste), Some(Event::Clicked(paste)));
+        ui.set_sensitive(cut, true);
+        assert!(ui.is_sensitive(cut));
+        assert_eq!(ui.activate(cut), Some(Event::Clicked(cut)));
+    }
+
+    #[test]
+    fn an_insensitive_group_makes_everything_under_it_insensitive() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("First".into()));
+        let group = ui.add(Ui::ROOT, Kind::Group("Group".into()));
+        let inside = ui.add(group, Kind::Button("Inside".into()));
+        let slider = ui
+            .slider(group, "Volume", 0.0, 10.0, 1.0, 5.0)
+            .expect("a valid range");
+        let last = ui.add(Ui::ROOT, Kind::Button("Last".into()));
+        ui.layout();
+        let centre = |ui: &Ui, id| {
+            let r = ui.widget(id).rect;
+            (r.x + r.w / 2.0, r.y + r.h / 2.0)
+        };
+        let (sx, sy) = centre(&ui, slider);
+        ui.pointer_press(sx, sy, PointerButton::Primary);
+        let (ix, iy) = centre(&ui, inside);
+        ui.set_focus(Some(inside));
+        ui.pointer_motion(ix, iy);
+        assert_eq!(ui.hovered(), Some(inside));
+        let held = ui.value(slider);
+
+        ui.set_sensitive(group, false);
+        assert!(!ui.is_sensitive(group) && !ui.is_sensitive(inside) && !ui.is_sensitive(slider));
+        assert!(
+            ui.is_sensitive(first) && ui.widget(inside).is_focusable(),
+            "each keeps its own state"
+        );
+        assert_eq!(
+            ui.focus(),
+            Some(last),
+            "the focus moves to the next widget that takes it"
+        );
+        assert_eq!(ui.hovered(), None);
+        assert_eq!(focus::chain(&ui), vec![first, last]);
+        assert_eq!(ui.hit(ix, iy), None);
+        assert_eq!(ui.click(ix, iy), None);
+        assert_eq!(ui.activate(inside), None);
+        ui.set_focus(Some(inside));
+        assert_eq!(ui.focus(), Some(last));
+        // A press made before moves the slider no more.
+        assert_eq!(ui.pointer_motion(ui.widget(slider).rect.x, sy), None);
+        assert_eq!(
+            ui.pointer_release(ui.widget(slider).rect.x, sy, PointerButton::Primary),
+            None
+        );
+        assert_eq!(ui.value(slider), held);
+        // The application still sets it, as GTK's setters do.
+        assert_eq!(ui.set_value(slider, 7.0), Some(Event::Changed(slider)));
+
+        ui.set_sensitive(Ui::ROOT, false);
+        assert!(
+            ui.is_sensitive(Ui::ROOT),
+            "the root cannot be made insensitive"
+        );
+        ui.set_sensitive(group, true);
+        assert!(ui.is_sensitive(inside) && ui.is_sensitive(slider));
+        assert_eq!(focus::chain(&ui), vec![first, inside, slider, last]);
+    }
+
+    #[test]
+    fn an_insensitive_row_is_skipped_by_the_keyboard() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let rows: Vec<WidgetId> = ["A", "B", "C"]
+            .iter()
+            .map(|t| ui.list_row(list, t))
+            .collect();
+        ui.layout();
+        ui.set_sensitive(rows[0], false);
+        assert_eq!(
+            focus::chain(&ui),
+            vec![rows[1]],
+            "the first sensitive row is the list's stop"
+        );
+        ui.set_sensitive(rows[0], true);
+        ui.set_focus(Some(rows[0]));
+        ui.set_sensitive(rows[1], false);
+        assert_eq!(
+            ui.key(Key::Down),
+            Some(Event::Selected(rows[2])),
+            "Down skips the row"
+        );
+        assert_eq!(ui.focus(), Some(rows[2]));
+    }
+
+    #[test]
+    fn the_focus_moves_to_another_row_when_its_row_goes() {
+        for hide in [false, true] {
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let (a, b) = (ui.list_row(list, "A"), ui.list_row(list, "B"));
+            ui.layout();
+            let set = |ui: &mut Ui, row, on| {
+                if hide {
+                    ui.set_visible(row, on);
+                } else {
+                    ui.set_sensitive(row, on);
+                }
+            };
+            ui.set_focus(Some(a));
+            set(&mut ui, a, false);
+            assert_eq!(ui.focus(), Some(b), "the next row, hidden: {hide}");
+            set(&mut ui, a, true);
+            set(&mut ui, b, false);
+            assert_eq!(ui.focus(), Some(a), "the previous row, hidden: {hide}");
+
+            // The list's stop takes the focus, though it comes before the row that went and a
+            // button comes after the list.
+            let mut ui = Ui::new("Test", Theme::default(), false);
+            let list = ui.list(Ui::ROOT, "Rows");
+            let a = ui.list_row(list, "A");
+            ui.list_row(list, "B");
+            let c = ui.list_row(list, "C");
+            ui.add(Ui::ROOT, Kind::Button("OK".into()));
+            ui.layout();
+            ui.set_focus(Some(a));
+            assert_eq!(ui.key(Key::End), Some(Event::Selected(c)));
+            set(&mut ui, c, false);
+            assert_eq!(ui.focus(), Some(a), "the list's stop, hidden: {hide}");
+        }
+    }
+
+    #[test]
+    fn an_insensitive_field_takes_no_input_that_arrives_after() {
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "abc");
+        ui.layout();
+        let r = ui.widget(name).rect;
+        let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+        ui.pointer_press(start, y, PointerButton::Primary);
+        ui.pointer_motion(end, y);
+        ui.set_sensitive(name, false);
+        ui.pointer_release(end, y, PointerButton::Primary);
+        assert!(ui.take_clips().is_empty(), "no selection is offered");
+        assert_eq!(ui.paste(name, "x"), None, "a queued paste");
+        assert_eq!(ui.cut(name, "abc"), None, "a queued cut");
+        assert_eq!(ui.field_text(name).as_deref(), Some("abc"));
+        ui.set_sensitive(name, true);
+        assert_eq!(ui.cut(name, "abc"), Some(Event::Edited(name)));
+    }
+
+    #[test]
+    fn a_list_rows_last_column_takes_the_rest_of_the_row() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let column = ui.add(Ui::ROOT, Kind::Column);
+        let list = ui.list(column, "Rows");
+        let wide = ui.add(column, Kind::Label("x".repeat(80)));
+        let row = ui.list_row(list, "CC Window, Application");
+        let icon = ui.add(row, Kind::Label("Icon".into()));
+        let text = ui.add(row, Kind::Column);
+        let title = ui.add(text, Kind::Label("CC Window".into()));
+        let wrap = Wrap {
+            lines: std::num::NonZeroU32::new(1),
+            ..Wrap::default()
+        };
+        ui.set_wrap(title, Some(wrap));
+        let button_row = ui.list_row(list, "Other");
+        let button = ui.add(button_row, Kind::Button("Go".into()));
+        ui.layout();
+        let t = Theme::default();
+        let (r, i, c) = (ui.widget(row).rect, ui.widget(icon).rect, ui.widget(text).rect);
+        assert!(ui.widget(wide).rect.w > 200.0, "the list is wide");
+        assert_eq!(c.x + c.w, r.x + r.w - t.padding, "the column reaches the end padding");
+        assert_eq!(c.x, i.x + i.w + t.gap);
+        assert_eq!(ui.widget(title).rect.w, c.w, "its label is given the whole column");
+        let full = ui.widget(title).text.as_ref().map(|l| l.width());
+        let one_line = ui.text.layout("CC Window", t.font_size, false, &TextStyle::default());
+        assert_eq!(full, Some(one_line.width()), "and shows its whole text");
+        let b = ui.widget(button).rect;
+        assert!(b.w < 100.0, "a button keeps its own width: {}", b.w);
+    }
+
+    #[test]
+    fn an_insensitive_scroll_does_not_follow_the_wheel() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let scroll = ui.scroll(Ui::ROOT, 40.0);
+        let list = ui.list(scroll, "Rows");
+        for n in 0..20 {
+            ui.list_row(list, &n.to_string());
+        }
+        ui.layout();
+        let r = ui.widget(scroll).rect;
+        ui.set_sensitive(scroll, false);
+        assert!(!ui.pointer_axis(r.x + 1.0, r.y + 1.0, 30.0));
+        ui.set_sensitive(scroll, true);
+        assert!(ui.pointer_axis(r.x + 1.0, r.y + 1.0, 30.0));
+    }
+
+    #[test]
+    fn set_active_turns_a_check_or_a_switch_and_selects_a_toggle_as_activating_does() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let row = ui.add(Ui::ROOT, Kind::Row);
+        let (a, b) = (ui.toggle(row, "A", true), ui.toggle(row, "B", false));
+        let check = ui.check(Ui::ROOT, "C", false);
+        let switch = ui.switch(Ui::ROOT, "D", true);
+        let label = ui.add(Ui::ROOT, Kind::Label("E".into()));
+        ui.layout();
+
+        assert_eq!(ui.set_active(check, true), Some(Event::Toggled(check)));
+        assert_eq!(
+            ui.set_active(check, true),
+            None,
+            "a check already on stays as it is"
+        );
+        assert_eq!(ui.set_active(switch, false), Some(Event::Toggled(switch)));
+        assert_eq!([check, switch].map(|id| ui.is_active(id)), [true, false]);
+        // A toggle becomes the active one of its group and releases the others; only another
+        // toggle of the group releases it, as a click does.
+        assert_eq!(ui.set_active(b, true), Some(Event::Selected(b)));
+        assert_eq!([a, b].map(|id| ui.is_active(id)), [false, true]);
+        assert_eq!(ui.set_active(b, true), None);
+        assert_eq!(ui.set_active(b, false), None);
+        assert!(ui.is_active(b));
+        assert_eq!(ui.set_active(label, true), None, "a label has no state");
+        // Unlike an activation, a setter leaves the focus where it is, and reaches an
+        // insensitive widget.
+        assert_eq!(ui.focus(), None);
+        ui.set_sensitive(check, false);
+        assert_eq!(ui.set_active(check, false), Some(Event::Toggled(check)));
+        assert!(!ui.is_active(check));
+    }
+
+    #[test]
+    fn set_text_replaces_what_a_widget_shows_or_is_named_by() {
+        let mut ui = Ui::new("Test", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("Idle".into()));
+        let button = ui.add(Ui::ROOT, Kind::Button("Go".into()));
+        let check = ui.check(Ui::ROOT, "On", false);
+        let list = ui.list(Ui::ROOT, "Rows");
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.add_title_bar();
+        ui.layout();
+        let narrow = ui.widget(label).rect.w;
+
+        let text = "Downloading the update";
+        assert_eq!(ui.set_text(label, text), Some(Event::Edited(label)));
+        assert_eq!(
+            ui.set_text(label, text),
+            None,
+            "the same text changes nothing"
+        );
+        ui.layout();
+        assert!(
+            ui.widget(label).rect.w > narrow,
+            "the next layout shapes the new text"
+        );
+        assert_eq!(ui.set_text(button, "Stop"), Some(Event::Edited(button)));
+        assert_eq!(ui.set_text(check, "Off"), Some(Event::Edited(check)));
+        assert_eq!(ui.set_text(list, "Others"), Some(Event::Edited(list)));
+        assert!(matches!(&ui.widget(button).kind, Kind::Button(t) if t == "Stop"));
+        assert!(matches!(&ui.widget(check).kind, Kind::Check { label, .. } if label == "Off"));
+        assert!(matches!(&ui.widget(list).kind, Kind::List { name, .. } if name == "Others"));
+        // A field's text is set_field_text's, the title bar's is the window's title, and a
+        // column has none.
+        assert_eq!(ui.set_text(field, "b"), None);
+        assert_eq!(ui.field_text(field).as_deref(), Some("a"));
+        let title = ui.widget(ui.widget(Ui::ROOT).children[0]).children[0];
+        assert_eq!(ui.set_text(title, "Other"), None);
+        assert!(matches!(&ui.widget(title).kind, Kind::Label(t) if t == "Test"));
+        assert_eq!(ui.set_text(Ui::ROOT, "Root"), None);
+    }
+
+    #[test]
+    fn a_text_area_starts_at_the_end_of_its_text() {
+        // As a GTK text view after gtk_text_buffer_set_text: the caret follows the text, where a
+        // single-line field's stays at its start.
+        let mut ui = Ui::new("Text", Theme::default(), false);
+        let area = ui.text_area(Ui::ROOT, "Notes", "a\nb", 4);
+        let field = ui.field(Ui::ROOT, "Name", "a");
+        ui.layout();
+        let text = |ui: &Ui, id| ui.field_text(id).unwrap_or_default();
+        ui.set_focus(Some(area));
+        ui.commit("c");
+        assert_eq!(text(&ui, area), "a\nbc");
+        ui.set_field_text(area, "x");
+        ui.commit("y");
+        assert_eq!(text(&ui, area), "xy");
+        ui.set_focus(Some(field));
+        ui.commit("b");
+        assert_eq!(text(&ui, field), "ba");
+    }
+
+    #[test]
+    fn a_control_outline_and_minimum_height_grow_buttons_and_toggles_only() {
+        let sizes = |theme: Theme| {
+            let mut ui = Ui::new("Sizes", theme, false);
+            let row = ui.add(Ui::ROOT, Kind::Row);
+            let toggle = ui.toggle(row, "Top", true);
+            let button = ui.add(Ui::ROOT, Kind::Button("Save".into()));
+            let menu = ui.add(Ui::ROOT, Kind::Menu);
+            let item = ui.add(menu, Kind::MenuItem("Open".into()));
+            // What each asks for: a placed control takes the width of its row or column.
+            [toggle, button, item].map(|id| ui.measure(id))
+        };
+        let plain = sizes(Theme::default());
+        let theme = Theme {
+            control_border: 1.0,
+            control_min_height: 34.0,
+            ..Theme::default()
+        };
+        let outlined = sizes(theme);
+        for i in 0..2 {
+            assert_eq!(outlined[i].0, plain[i].0 + 2.0, "control {i}");
+            assert_eq!(outlined[i].1, plain[i].1.max(34.0) + 2.0, "control {i}");
+        }
+        assert_eq!(outlined[2], plain[2], "a menu's item keeps its size");
+    }
+
+    #[test]
+    fn a_bare_title_bar_sets_its_title_bold() {
+        for (style, weight) in [(TitleBarStyle::Round, 400), (TitleBarStyle::Bare, 700)] {
+            let theme = Theme {
+                title_bar_style: style,
+                ..Theme::default()
+            };
+            let mut ui = Ui::new("Layout", theme, false);
+            ui.add_title_bar();
+            let bar = ui.title_bar.expect("a title bar");
+            let title = ui.widget(bar).children[0];
+            assert!(matches!(ui.widget(title).kind, Kind::Label(_)));
+            assert_eq!(ui.widget(title).style.weight, weight, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn a_theme_sets_the_title_bar_height_but_never_below_its_buttons() {
+        let bar_height = |title_bar_height| {
+            let theme = Theme {
+                title_bar_height,
+                ..Theme::default()
+            };
+            let mut ui = Ui::new("Layout", theme, false);
+            ui.add_title_bar();
+            ui.layout();
+            ui.widget(ui.title_bar.expect("a title bar")).rect.h
+        };
+        let natural = bar_height(None);
+        assert_eq!(bar_height(Some(natural + 7.0)), natural + 7.0);
+        // The buttons' height: the natural bar less the padding.
+        assert_eq!(bar_height(Some(1.0)), natural - Theme::default().padding);
+    }
+
+    #[test]
+    fn the_title_bar_takes_no_alignment_and_the_column_aligns_under_it() {
+        let theme = Theme {
+            title_bar_height: Some(39.0),
+            title_bar_style: crate::theme::TitleBarStyle::Bare,
+            ..Theme::default()
+        };
+        let margin = theme.margin;
+        let mut ui = Ui::new("Layout", theme, false);
+        ui.min_height = 300.0;
+        ui.resizable = false;
+        ui.add_title_bar();
+        let bar = ui.title_bar.expect("a title bar");
+        let title = ui.widget(bar).children[0];
+        let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
+        let done = ui.add(Ui::ROOT, Kind::Button("Done".into()));
+        let end = [crate::Align::Fill, crate::Align::End];
+        assert_eq!(ui.set_align(bar, end), None);
+        assert_eq!(ui.set_align(title, end), None);
+        assert_eq!(ui.set_align(done, end), Some(true));
+        ui.layout();
+        let (root, b, l, d) = (
+            ui.widget(Ui::ROOT).rect,
+            ui.widget(bar).rect,
+            ui.widget(label).rect,
+            ui.widget(done).rect,
+        );
+        assert_eq!((b.y, b.h, root.h), (0.0, 39.0, 300.0));
+        assert_eq!(l.y, b.h + margin, "the flow starts under the bar");
+        assert_eq!(d.y + d.h, root.h - margin, "the bottom is the window's");
+        assert_eq!(ui.widget(title).style.weight, 700, "a bare bar's title stays bold");
+    }
+
+    #[test]
+    fn only_a_label_takes_an_ink() {
+        let mut ui = Ui::new("Ink", Theme::default(), false);
+        let label = ui.add(Ui::ROOT, Kind::Label("Style".into()));
+        let button = ui.add(Ui::ROOT, Kind::Button("Save".into()));
+        let red = Some(Rgba::rgb(255, 0, 0));
+        assert!(ui.set_ink(label, red));
+        assert_eq!(ui.widget(label).ink, red);
+        assert!(!ui.set_ink(button, red));
+        assert_eq!(ui.widget(button).ink, None);
+        assert!(ui.set_ink(label, None));
+        assert_eq!(ui.widget(label).ink, None);
+    }
+
+    #[test]
+    fn the_application_copies_text_to_the_clipboard() {
+        let mut ui = Ui::new("Copy", Theme::default(), false);
+        ui.copy("42");
+        assert_eq!(ui.take_clips(), [Clip::Copy("42".into())]);
+        assert!(ui.take_clips().is_empty(), "offered once");
+    }
+
+    /// The column is placed again, shorter than its widgets, as a row cell can make it.
+    #[test]
+    fn a_column_too_short_pushes_the_widgets_at_the_bottom_past_its_end() {
+        let gapped = Theme {
+            gap: 6.0,
+            ..Theme::default()
+        };
+        let mut ui = Ui::new("Align", gapped, false);
+        let group = ui.add(Ui::ROOT, Kind::Group("Short".into()));
+        let first = ui.add(group, Kind::Button("First".into()));
+        let second = ui.add(group, Kind::Button("Second".into()));
+        let done = ui.add(group, Kind::Button("Done".into()));
+        assert_eq!(ui.set_align(done, [crate::Align::Fill, crate::Align::End]), Some(true));
+        ui.layout();
+        let r = ui.widget(group).rect;
+        ui.widgets[group].rect.h = r.h / 3.0;
+        ui.place(group, r.x, r.y);
+        let (f, s, d) = (ui.widget(first).rect, ui.widget(second).rect, ui.widget(done).rect);
+        assert_eq!(s.y, f.y + f.h + 6.0);
+        assert_eq!(d.y, s.y + s.h + 6.0, "after the flow, not over it");
+    }
+
+    /// The column is placed again, narrower than its widget, as a row cell can make it.
+    #[test]
+    fn a_widget_wider_than_its_column_starts_at_the_start_edge() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let wide = ui.add(group, Kind::Button("A button wider than the group".into()));
+            assert_eq!(ui.set_align(wide, [crate::Align::End, crate::Align::Fill]), Some(true));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            let w = ui.widget(wide).rect.w;
+            ui.widgets[group].rect.w = w / 2.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            let b = ui.widget(wide).rect;
+            if rtl {
+                assert_eq!(b.x + b.w, c.x + c.w, "{rtl}: from the right edge");
+            } else {
+                assert_eq!(b.x, c.x, "{rtl}: from the left edge");
+            }
+        }
+    }
+
+    /// A wrapping label aligned across keeps its own width only up to its column's: placed in a
+    /// column narrower than that, as a row cell can make it, it breaks into more lines inside it,
+    /// and never narrower than its longest word.
+    #[test]
+    fn an_aligned_wrapping_label_wraps_inside_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            let wrap = Wrap {
+                max_width_chars: std::num::NonZeroU32::new(40),
+                lines: None,
+            };
+            assert!(ui.set_wrap(label, Some(wrap)));
+            assert_eq!(ui.set_align(label, [crate::Align::Start, crate::Align::Fill]), Some(true));
+            ui.layout();
+            let lines = |ui: &Ui| ui.widget(label).text.as_ref().map_or(0, |l| l.len());
+            let (r, wide, before) = (ui.widget(group).rect, ui.widget(label).rect, lines(&ui));
+            // Narrower than the label, wider than its longest word, "sentence".
+            ui.widgets[group].rect.w = wide.w * 0.6;
+            ui.place(group, r.x, r.y);
+            assert!(ui.rewrap(), "{rtl}: the narrower width is recorded");
+            ui.measure(label);
+            ui.place(group, r.x, r.y);
+            let (c, l) = (ui.widget(group).rect, ui.widget(label).rect);
+            assert!(l.w <= c.w && l.x >= c.x && l.x + l.w <= c.x + c.w, "{rtl}: {l:?} in {c:?}");
+            assert!(lines(&ui) > before, "{rtl}: {} lines, from {before}", lines(&ui));
+            assert!(l.h > wide.h, "{rtl}: the height follows");
+            // Narrower than its longest word, it keeps that width and overflows at the end.
+            ui.widgets[group].rect.w = 1.0;
+            ui.place(group, r.x, r.y);
+            let least = ui.widget(label).wrap.as_ref().map_or(0.0, |w| w.2);
+            assert!(least > 1.0);
+            assert_eq!(ui.widget(label).rect.w, least, "{rtl}: its longest word");
+        }
+    }
+
+    /// A wrapping label aligned across in a column narrower than its least width
+    /// (Ui::set_min_width), as a row cell can make it, keeps that width, as GTK's width-request.
+    #[test]
+    fn an_aligned_wrapping_label_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Start, crate::Align::Fill]), Some(true));
+            assert!(ui.set_min_width(label, 400.0));
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            assert_eq!(ui.widget(label).rect.w, 400.0, "{rtl}: its least width");
+        }
+    }
+
+    /// A widget that fills a column narrower than its least width (Ui::set_min_width), as a row
+    /// cell can make it, keeps that width too, and overflows at the end edge only.
+    #[test]
+    fn a_filling_widget_keeps_its_least_width_in_a_narrower_column() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Align", Theme::default(), rtl);
+            let group = ui.add(Ui::ROOT, Kind::Group("Narrow".into()));
+            let label = ui.add(group, Kind::Label("A sentence long enough to wrap".into()));
+            let Some(slider) = ui.slider(group, "Volume", 0.0, 100.0, 1.0, 50.0) else {
+                panic!("{rtl}: a slider");
+            };
+            assert!(ui.set_wrap(label, Some(Wrap::default())));
+            assert_eq!(ui.set_align(label, [crate::Align::Fill, crate::Align::Fill]), Some(false));
+            for id in [label, slider] {
+                assert!(ui.set_min_width(id, 400.0));
+            }
+            ui.layout();
+            let r = ui.widget(group).rect;
+            ui.widgets[group].rect.w = 200.0;
+            ui.place(group, r.x, r.y);
+            let c = ui.widget(group).rect;
+            for id in [label, slider] {
+                let w = ui.widget(id).rect;
+                assert_eq!(w.w, 400.0, "{rtl}: {id:?} keeps its least width");
+                if rtl {
+                    assert_eq!(w.x + w.w, c.x + c.w, "{rtl}: from the right edge");
+                } else {
+                    assert_eq!(w.x, c.x, "{rtl}: from the left edge");
+                }
+            }
+        }
+    }
+}
