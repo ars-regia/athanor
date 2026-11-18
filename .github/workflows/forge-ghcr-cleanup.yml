@@ -4,7 +4,7 @@ name: 🧹 Forge GHCR Cleanup
 # packages azoth* are excluded: their only pruner is forge/specs/azoth/retention.sh
 # (docs/architecture/doc_build_ordering.md, O6). It runs only by hand until clean_ghcr.sh keeps
 # the tier digests that the forge-tier<N>.digest labels of a kept system image name
-# (doc_build_system.md, PLAT-N01): a scheduled run would delete them (#1275).
+# (doc_build_system.md, PLAT-N01): any run, by hand too, would delete them (#1275).
 
 on:
   workflow_dispatch:
