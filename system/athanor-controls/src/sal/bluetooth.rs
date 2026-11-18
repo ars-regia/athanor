@@ -260,6 +260,11 @@ pub struct Page {
     pairing: bool,
     /// The state and the failure the page shows last.
     seen: (u64, u64),
+    /// A failure's note is on screen: a page built again, while the old one is, shows it too.
+    noted: bool,
+    /// A failure came with a rebuild: the surface drops the old page's [`Ui`] unannounced, so
+    /// the page built again announces it.
+    unheard: bool,
     ids: Option<Ids>,
     /// Whether the page is on screen: built, and not closed since.
     shown: bool,
@@ -287,6 +292,8 @@ impl Page {
             service,
             pairing,
             seen: (0, 0),
+            noted: false,
+            unheard: false,
             ids: None,
             shown: false,
             close: false,
@@ -368,6 +375,11 @@ impl Page {
         ui.set_visible(prompt, false);
 
         let failure = Failure::new(ui, page, look);
+        if std::mem::take(&mut self.unheard) {
+            self.noted |= failure.show(ui);
+        } else if self.noted {
+            failure.restore(ui);
+        }
         self.ids = Some(Ids {
             list,
             power,
@@ -413,13 +425,14 @@ impl Page {
                     .map(|(_, d)| d)
                     .eq(paired.iter().chain(nearby))
         });
+        let failed = now.1 != self.seen.1;
         if rebuild {
+            self.unheard |= failed && self.shown;
             return Turn::Rebuild;
         }
-        let failed = now.1 != self.seen.1;
         self.show(ui);
         if let (true, Some(ids)) = (failed, &self.ids) {
-            ids.failure.show(ui);
+            self.noted |= ids.failure.show(ui);
         }
         Turn::Updated
     }
@@ -427,6 +440,8 @@ impl Page {
     /// The page left the screen: a note says nothing of the actions to come, a confirmation it
     /// showed is declined and discovery stops with the last pairing page.
     pub fn closed(&mut self, ui: &mut Ui) {
+        self.noted = false;
+        self.unheard = false;
         if let Some(ids) = &self.ids {
             ids.failure.hide(ui);
         }
@@ -437,6 +452,8 @@ impl Page {
     /// The surface dropped the [`Ui`] that held the page, as a popover that closed: the page
     /// leaves the screen as [`Page::closed`] says, with no widgets left to set.
     pub fn dropped(&mut self) {
+        self.noted = false;
+        self.unheard = false;
         self.ids = None;
         self.left();
     }
@@ -675,6 +692,127 @@ mod tests {
             .replace(Some(state(vec![device("Keyboard", true)])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+    }
+
+    #[test]
+    fn a_note_shown_stays_in_the_page_built_again_until_its_surface_closes() {
+        let note = |page: &Page, ui: &Ui| ui.is_visible(ids(page).failure.note);
+        let (mut page, _received) = page(state(vec![device("Keyboard", false)]));
+        let mut ui = Ui::new("t", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+
+        // A refusal that comes with a device that changed: the page built again shows it.
+        page.service.failed();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Keyboard", true)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+        let mut again = Ui::new("t", Theme::default(), false);
+        page.build(&mut again, Ui::ROOT, &mut Look::plain());
+        assert!(
+            note(&page, &again),
+            "the refusal that came with the rebuild"
+        );
+        assert_eq!(
+            again.announcement().map(|(text, _)| text.to_owned()),
+            Some(tr("The action did not complete.")),
+            "announced on the Ui the surface keeps"
+        );
+
+        // Another device comes while the note is on screen: the page built again keeps it.
+        page.service.state.replace(Some(state(vec![
+            device("Keyboard", true),
+            device("Headphones", false),
+        ])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut again), Turn::Rebuild);
+        let mut third = Ui::new("t", Theme::default(), false);
+        page.build(&mut third, Ui::ROOT, &mut Look::plain());
+        assert!(note(&page, &third));
+        assert_eq!(
+            third.announcement(),
+            None,
+            "a note already announced is not again"
+        );
+
+        // The popover closed: the next one starts without the note.
+        page.dropped();
+        let mut next = Ui::new("t", Theme::default(), false);
+        page.build(&mut next, Ui::ROOT, &mut Look::plain());
+        assert!(!note(&page, &next));
+
+        // A refusal in place, then a rebuild: the page built again keeps the note, silent.
+        page.service.failed();
+        assert_eq!(page.turn(&mut next), Turn::Updated);
+        assert!(note(&page, &next));
+        page.service
+            .state
+            .replace(Some(state(vec![device("Keyboard", false)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        let mut fourth = Ui::new("t", Theme::default(), false);
+        page.build(&mut fourth, Ui::ROOT, &mut Look::plain());
+        assert!(note(&page, &fourth));
+        assert_eq!(fourth.announcement(), None);
+
+        // A refusal with a rebuild the popover closed before: nothing shown, nothing said.
+        page.service.failed();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Keyboard", true)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
+        page.dropped();
+        let mut last = Ui::new("t", Theme::default(), false);
+        page.build(&mut last, Ui::ROOT, &mut Look::plain());
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
+    }
+
+    #[test]
+    fn a_page_closed_with_its_ui_kept_forgets_its_note_and_says_nothing() {
+        let note = |page: &Page, ui: &Ui| ui.is_visible(ids(page).failure.note);
+        let (mut page, _received) = page(state(vec![device("Keyboard", false)]));
+        let fresh = |page: &mut Page| {
+            let mut ui = Ui::new("t", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+            ui
+        };
+        let mut ui = fresh(&mut page);
+
+        // A note shown in place, then the page closes: the page built again has none.
+        page.service.failed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated);
+        assert!(note(&page, &ui));
+        page.closed(&mut ui);
+        let mut next = fresh(&mut page);
+        assert!(!note(&page, &next));
+
+        // A refusal with a rebuild, then the page closes before it is built again.
+        page.service.failed();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Keyboard", true)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut next), Turn::Rebuild);
+        page.closed(&mut next);
+        let mut later = fresh(&mut page);
+        assert!(!note(&page, &later));
+        assert_eq!(later.announcement(), None);
+
+        // A refusal with a rebuild while the page is closed, as another surface's action
+        // fails: the hidden page says nothing, and shows no note when it is built again.
+        page.closed(&mut later);
+        page.service.failed();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Keyboard", false)])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut later), Turn::Rebuild);
+        let last = fresh(&mut page);
+        assert!(!note(&page, &last));
+        assert_eq!(last.announcement(), None);
     }
 
     #[test]
