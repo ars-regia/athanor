@@ -53,11 +53,13 @@ COMMIT = re.compile(r"-> wl_surface#(\d+)\.commit\(\)")
 
 
 def lock_surfaces(lines):
-    """Every lock surface the client created: {lock surface id: [wl_surface id, output id, live]}."""
+    """Every lock surface the client created: {lock surface id: [wl_surface id, output id, live,
+    index of the line that created it]}. Wayland reuses the id of a destroyed object, so an id
+    names its last surface."""
     seen = {}
-    for line in lines:
+    for i, line in enumerate(lines):
         if m := GET.search(line):
-            seen[m[2]] = [m[3], m[4], True]
+            seen[m[2]] = [m[3], m[4], True, i]
         elif (m := DESTROY.search(line)) and m[1] in seen:
             seen[m[1]][2] = False
     return seen
@@ -65,20 +67,23 @@ def lock_surfaces(lines):
 
 def live(lines):
     """The lock surfaces created and not destroyed: {lock surface id: output id}."""
-    return {s: o for s, (_, o, alive) in lock_surfaces(lines).items() if alive}
+    return {s: o for s, (_, o, alive, _) in lock_surfaces(lines).items() if alive}
 
 
 def committed_as_the_protocol_asks(lines, surface):
     """Whether the lock surface `surface`'s wl_surface was first committed after its first
     ack_configure, with a buffer attached in between, and every commit after had, through its
     viewport, the size of the configure last acknowledged, which is the one a commit answers:
-    None when it holds, else what does not."""
-    wl = lock_surfaces(lines)[surface][0]
+    None when it holds, else what does not. Only the lines from its creation to its destruction
+    count, since a later object can take a destroyed one's id."""
+    wl, _, _, start = lock_surfaces(lines)[surface]
     viewport = None
     acked = attached = False
     sizes = {}
     configured = destination = None
-    for line in lines:
+    for line in lines[start:]:
+        if (m := DESTROY.search(line)) and m[1] == surface:
+            break
         if (m := VIEWPORT.search(line)) and m[2] == wl:
             viewport = m[1]
         elif (m := CONFIGURE.search(line)) and m[1] == surface:
@@ -103,7 +108,7 @@ def committed_as_the_protocol_asks(lines, surface):
 def drawn_at(lines, scale):
     """Whether a lock surface's buffer was drawn at `scale`: a commit of a buffer of the
     physical size of the set_destination that maps it, as wp_fractional_scale_v1 rounds it."""
-    wls = {wl for wl, _, _ in lock_surfaces(lines).values()}
+    wls = {wl for wl, _, _, _ in lock_surfaces(lines).values()}
     viewports = {}
     buffers = {}
     attached = {}
