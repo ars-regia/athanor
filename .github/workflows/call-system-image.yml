@@ -3,8 +3,8 @@ name: Call System Image (Reusable Workflow)
 on:
   workflow_call:
     inputs:
-      builder_content_hash:
-        description: "Content hash of the builder container image"
+      builder_image:
+        description: "The builder image by digest, as call-build-builder.yml verified it signed"
         required: true
         type: string
 
@@ -52,7 +52,7 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
           GITHUB_REF: ${{ github.ref }}
           KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
-          BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
+          BUILDER_IMAGE: ${{ inputs.builder_image }}
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
@@ -65,7 +65,7 @@ jobs:
             -e GITHUB_REF="${GITHUB_REF}" \
             -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL -e KERNEL_REGISTRY \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
+            "${BUILDER_IMAGE}" \
             bash scripts/aggregate_tier_repos.sh
 
       - name: Hand the tier digests to the image build

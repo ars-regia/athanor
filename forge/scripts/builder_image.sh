@@ -4,13 +4,14 @@
 #   builder_image.sh build ARCHIVE
 #       Builds the builder image of this checkout with Nix (flake output builderImage, as
 #       call-build-builder.yml does) into the image archive ARCHIVE. Publishes nothing.
-#   builder_image.sh resolve ARCHIVE IMAGE
+#   builder_image.sh resolve ARCHIVE [IMAGE]
 #       Prints the image to run: ARCHIVE loaded into podman when it exists (the caller built
-#       the builder of the checkout), else IMAGE, a published builder, pulled from its registry;
-#       IMAGE is needed only without ARCHIVE.
+#       the builder of the checkout), else IMAGE, a published builder, pulled from its registry.
+#       IMAGE is needed only without ARCHIVE; a caller passes it by the digest it verified
+#       (forge/scripts/check_idempotency.sh), never by a tag.
 set -euo pipefail
 
-usage="usage: builder_image.sh build ARCHIVE | resolve ARCHIVE IMAGE"
+usage="usage: builder_image.sh build ARCHIVE | resolve ARCHIVE [IMAGE]"
 command=${1:?$usage}
 archive=${2:?$usage}
 
@@ -30,7 +31,7 @@ resolve)
         }
         echo "$loaded"
     else
-        published=${3:?$usage}
+        published=${3:?no builder archive at $archive and no published image: $usage}
         bash "$(dirname "${BASH_SOURCE[0]}")/retry.sh" podman pull "$published" >&2
         echo "$published"
     fi

@@ -1,6 +1,7 @@
-"""The builder image is published labelled with its content hash and signed, and promoted only
-by a digest a trusted run of call-build-builder.yml signed (issue #1205): publish_builder.sh
-and promote_builder_latest.sh (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
+"""The builder image is published labelled with its content hash and signed, and run and
+promoted only by a digest a trusted run of call-build-builder.yml signed (issue #1205):
+publish_builder.sh, resolve_builder_image.sh and promote_builder_latest.sh
+(python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
 import pathlib
 import subprocess
@@ -114,6 +115,39 @@ class BuilderTrustTest(unittest.TestCase):
             "does not verify as signed by a trusted run of call-build-builder.yml",
             result.stderr,
         )
+
+    def test_resolve_names_the_signed_digest_of_the_tag(self):
+        result = self.run_script("resolve_builder_image.sh", "ghcr.io/owner", "latest")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(f"ghcr.io/owner/athanor-builder@{DIGEST}", result.stdout.strip())
+
+    def test_resolve_binds_latest_by_its_signature_alone(self):
+        # :latest names no hash, so no label is asked of it; promote_builder_latest.sh moves it
+        # only to a digest the label check passed.
+        (self.state / "label").write_text("none")
+        result = self.run_script("resolve_builder_image.sh", "ghcr.io/owner", "latest")
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertNotIn("--config", self.log("skopeo"))
+
+    def test_resolve_refuses_a_builder_no_trusted_run_signed(self):
+        for signer in UNTRUSTED:
+            with self.subTest(signer=signer):
+                result = self.run_script("resolve_builder_image.sh", "ghcr.io/owner", "latest", signer=signer)
+                self.assertNotEqual(0, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertIn("is not a builder a trusted run of call-build-builder.yml signed", result.stderr)
+
+    def test_resolve_fails_when_the_tag_is_absent_or_the_check_cannot_answer(self):
+        (self.state / "cosign_error").write_text("")
+        result = self.run_script("resolve_builder_image.sh", "ghcr.io/owner", "latest")
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("", result.stdout)
+        (self.state / "cosign_error").unlink()
+        (self.state / "status").write_text("1")
+        (self.state / "answer").write_text("manifest unknown")
+        result = self.run_script("resolve_builder_image.sh", "ghcr.io/owner", "latest")
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("is not published", result.stderr)
 
     def promote(
         self,

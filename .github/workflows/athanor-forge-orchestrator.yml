@@ -340,7 +340,7 @@ jobs:
     uses: ./.github/workflows/call-dag-compile.yml
     with:
       dag_packages: ${{ needs.orchestrator-brain.outputs.dag_packages }}
-      builder_hash: ${{ needs.build-builder.outputs.content_hash }}
+      builder_image: ${{ needs.build-builder.outputs.image }}
 
   system-image:
     # The images build on every run (push, dispatch, schedule), whatever the package matrix
@@ -357,7 +357,7 @@ jobs:
       id-token: write
     uses: ./.github/workflows/call-system-image.yml
     with:
-      builder_content_hash: ${{ needs.build-builder.outputs.content_hash }}
+      builder_image: ${{ needs.build-builder.outputs.image }}
 
   request-release:
     # The last job of the build (doc_pipeline.md PL54, PL55): writes release-request.json, what
