@@ -149,9 +149,16 @@ class Own(unittest.TestCase):
                 self.assertEqual(verify.toolkit_crates(self.root)[0].get("athanor-style"), {sub})
 
     def test_a_crate_that_only_shares_a_prefix_does_not_count(self):
-        self.write("Cargo.lock", LOCK.replace('name = "gtk4"', 'name = "gtk4ish"')
-                   .replace('dependencies = ["gtk4"]', 'dependencies = ["gtk4ish"]'))
-        self.assertNotIn("athanor-style", verify.toolkit_crates(self.root)[0])
+        for other in ("gtk4ish", "iced-x86"):
+            with self.subTest(other=other):
+                self.write("Cargo.lock", LOCK.replace('name = "gtk4"', f'name = "{other}"')
+                           .replace('dependencies = ["gtk4"]', f'dependencies = ["{other}"]'))
+                self.assertNotIn("athanor-style", verify.toolkit_crates(self.root)[0])
+
+    def test_a_crate_no_lockfile_holds_counts_when_it_names_a_subcrate(self):
+        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n'
+                   '[target.\'cfg(unix)\'.build_dependencies]\ngtk4-sys = "0.10"\n')
+        self.assertEqual(verify.toolkit_crates(self.root)[0].get("athanor-kiosk"), {"gtk4-sys"})
 
     def test_an_entry_that_no_longer_applies_fails(self):
         self.write(

@@ -6594,8 +6594,9 @@ OWN_REFUSED_CRATES = {"gtk4", "libadwaita", "libcosmic", "iced"}
 
 
 def own_refused(name):
-    """NAME is a refused toolkit or one of its subcrates (gtk4-sys, libadwaita-sys, iced_core)."""
-    return name in OWN_REFUSED_CRATES or re.match(r"(gtk4|libadwaita|iced)[-_]", name) is not None
+    """NAME is a refused toolkit or one of its subcrates (gtk4-sys, libadwaita-sys, iced_core).
+    iced's subcrates take an underscore, so iced-x86, an unrelated disassembler, is not one."""
+    return name in OWN_REFUSED_CRATES or re.match(r"gtk4[-_]|libadwaita[-_]|iced_", name) is not None
 
 
 def third_party_cargo(path):
@@ -6710,7 +6711,7 @@ def own_problems(root=None, base=None):
                 "read; add its lockfile (ADR-0141 decision 7)" for name in unlocked]
     problems += [f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
                 "(ADR-0141 decision 7)" for name in sorted(set(hits) - crates)]
-    problems += [f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))}; "
+    problems += [f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))} or their subcrates; "
                  "remove its entry" for name in sorted(crates - set(hits))]
     if base is not None:
         try:
