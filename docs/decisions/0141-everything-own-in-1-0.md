@@ -93,7 +93,7 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
    | Base system: kernel source, systemd, glibc, mesa, PipeWire, NetworkManager, polkitd, bootc, SELinux, firmware | Upstream. Athanor's part is the build, the integration, the hardening and the signature, already its own. |
    | Session: everything the user sees, and everything that mediates input, output, authentication or privilege in the session. That is the compositor, greeter (UI and authentication path), lock, polkit agent and prompter, bar, dock, launcher and application library, overview and window switcher, OSD, notifications, control center, layout chooser, idle, wallpaper, the settings daemon's roles, output management, portal backend and recovery console | **Own.** |
    | First-party applications: the file manager with the file chooser (`athanor-files-view`), and Settings | **Own.** |
-   | Other applications: terminal, text editor, disk utility, viewers | Third party: the RPM defaults of `doc_software.md` decision 7, or Flatpak. Athanor's disk utility (`doc_disks.md`) is outside this record's 1.0 scope, and GNOME Disks stays the default until it ships. Nautilus leaves in 1.0, replaced by Athanor's file manager, which amends `doc_software.md` section 9.2. |
+   | Other applications: terminal, text editor, disk utility, viewers | Third party: the RPM defaults of `doc_software.md` decision 7, or Flatpak. Athanor writes no disk utility of its own (`doc_software.md` section 9.1, `doc_disks.md` section 7): GNOME Disks stays the disk utility. Nautilus leaves in 1.0, replaced by Athanor's file manager, which amends `doc_software.md` section 9.2. |
    | The store | Third party: Bazaar for applications (`doc_software.md` section 9.4, option (b)), from the Fedora 45 base. Its Athanor page is own. `cosmic-store` leaves with decision 3. |
    | Compatibility bridges: xwayland-satellite | Upstream, as a library is. |
    | Assets: fonts, icon and cursor themes, and the GTK and Qt themes that third-party applications read | Upstream where their licence allows, but no COSMIC package (decision 3). |
@@ -158,7 +158,7 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
 - **cosmic-comp at the greeter as a fallback until 1.1.** The maintainer answered no. The image
   would not be entirely own while it ships.
 - **Every application own, the terminal, the viewers and the store included.** The maintainer
-  answered no. Those stay third party through Flatpak in 1.0.
+  answered no. Those stay third party in 1.0.
 
 ## Consequences
 
