@@ -244,7 +244,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
   - cosmic-randr's line in the compositor's allow-list, its entry in `UPSTREAM` of `verify.py` and `keeps_main_socket` in `athanor-sulphur-client` leave, with the sentences of `doc_bar.md` BR2 and `doc_own_stack.md` OS4 that name them (amended on 2026-10-30, #880).
   - The bar's favourites replace `com.system76.CosmicSettings.desktop` with `os.athanor.Settings.desktop` (`forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`).
   - The control center's footer and tiles call `Show` (CC4); the notification center's links do the same (NC11).
-  - The scripts that use cosmic-settings as a test window move to Settings: `scripts/devvm/shield-acceptance.sh:140-144` and the preview scenes of `forge/test/shell/rig.sh:334-336`.
+  - The scripts that use cosmic-settings as a test window move to Settings: `scripts/devvm/shield-acceptance.sh:140-144` and the preview scenes of `forge/test/shell/rig.sh:381-383`.
   - The text of `athanor-system-config.spec:208` that names cosmic-settings as the settings application is updated.
   - `athanor-layout-chooser` and `os.athanor.Layout` leave in the same change (decision 6).
 - This step answers `doc_shell.md:267`: no COSMIC Settings page is hidden or patched, because the whole application leaves.
@@ -329,7 +329,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08.** Revision 2 set
 - `doc_shell.md:267` (open doubt 5): answered by SE23; no COSMIC page is hidden or patched.
 - `docs/decisions/0010-wave2-settings.md` decision 7 still names `os.athanor.Lvfs`, which decision 7 here replaced with fwupd; a record that supersedes that point is due with step 4.
 - `shell-features.md` (`:345-384`): F-settings-24, 25, 26, 27, 28, 29, 30, 33, 34 marked `excluded` with SE24's reasons (decision 8); F-settings-01 to 21 and 31, 32 point to this document, and those `have` through cosmic-settings say "replaced by `doc_settings.md` at stage 6".
-- Code changes at the retirement step, listed in SE23: `forge/config/packages.json:128-129`, `forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`, `scripts/devvm/shield-acceptance.sh:140-144`, `forge/test/shell/rig.sh:334-336`, `forge/specs/athanor-system-config/athanor-system-config.spec:208`; and at step 1 the workspace `exclude` entry of the root `Cargo.toml` (line 60 then; removed with the crate by #121).
+- Code changes at the retirement step, listed in SE23: `forge/config/packages.json:128-129`, `forge/specs/athanor-bar/athanor-bar-1.0.0/data/favorites.toml:8`, `scripts/devvm/shield-acceptance.sh:140-144`, `forge/test/shell/rig.sh:381-383`, `forge/specs/athanor-system-config/athanor-system-config.spec:208`; and at step 1 the workspace `exclude` entry of the root `Cargo.toml` (line 60 then; removed with the crate by #121).
 - Amendments received, from the maintainer's rulings of 2026-10-05: SE11 and SE13 name the schemas of `doc_session_daemons.md` SD3; the USB devices text is the section of SD13; the startup-applications exclusion of SE24 ends (SD10); SE14 gains the hot-corner switch and the workspace settings the overview reads (`doc_overview.md` OV14, OV3).
 
 ## 4. Open doubts
