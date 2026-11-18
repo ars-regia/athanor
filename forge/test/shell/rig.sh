@@ -207,7 +207,7 @@ build_spec_rig() {
     else
         # No signed builder for this checkout's inputs: build it here, for this test only.
         if ! command -v nix > /dev/null; then
-            echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml," \
+            echo "rig.sh: the builder of this checkout (content hash $(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp") in $registry) is not published, or not signed by a trusted run of call-build-builder.yml," \
                 "and nix, which builds it here, is not on PATH: install nix, or land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
             exit 1
         fi
