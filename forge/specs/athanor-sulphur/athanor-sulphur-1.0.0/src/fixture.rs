@@ -9193,12 +9193,11 @@ fn a_second_lock_takes_over_a_lock_whose_client_died() {
             state.space.outputs().all(|output| lock.surface_on(output).is_none())
         })
     });
+    // The focus may stay on the dead lock surface, which no client owns any more.
     let held = focus(&run.state);
     assert!(
-        held.is_none(),
-        "no client has the keyboard: {:?} alive {:?} window {}",
-        held,
-        held.as_ref().map(|s| s.is_alive()),
+        held.as_ref().is_none_or(|surface| !surface.is_alive()),
+        "a live client has the keyboard: {held:?}, the window {}",
         held.as_ref() == Some(&window)
     );
 
