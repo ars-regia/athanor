@@ -92,7 +92,7 @@ class Own(unittest.TestCase):
         self.assertEqual(self.problems("HEAD"), [])
 
     def test_a_dev_dependency_does_not_count(self):
-        self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root))
+        self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 
     def test_a_runtime_dependency_counts(self):
         self.write(
@@ -111,7 +111,7 @@ class Own(unittest.TestCase):
             'athanor-style = { path = "../style" }\n\n[build-dependencies]\n'
             'athanor-style = { path = "../style" }\n',
         )
-        self.assertIn("athanor-bar", verify.toolkit_crates(self.root))
+        self.assertIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 
     def test_a_workspace_dev_dependency_under_another_key_does_not_count(self):
         self.write(
@@ -124,7 +124,7 @@ class Own(unittest.TestCase):
             '[package]\nname = "athanor-bar"\n\n[dependencies]\nzbus = "5"\n'
             "\n[dev-dependencies]\nstyle = { workspace = true }\n",
         )
-        self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root))
+        self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 
     def test_an_entry_that_no_longer_applies_fails(self):
         self.write(
@@ -156,7 +156,32 @@ class Own(unittest.TestCase):
         self.write(
             "x/vendor/y/Cargo.lock", LOCK.replace("athanor-style", "athanor-other")
         )
-        self.assertNotIn("athanor-other", verify.toolkit_crates(self.root))
+        self.assertNotIn("athanor-other", verify.toolkit_crates(self.root)[0])
+
+    def test_a_crate_no_lockfile_holds_counts_when_it_names_a_toolkit(self):
+        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
+                   'gtk4 = { workspace = true }\n')
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("athanor-kiosk: reaches gtk4", problems[0])
+
+    def test_a_crate_no_lockfile_holds_fails_when_its_toolkits_cannot_be_read(self):
+        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
+                   'relm4 = "0.9"\n')
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("athanor-kiosk: no tracked Cargo.lock holds it", problems[0])
+
+    def test_an_unknown_base_fails(self):
+        problems = self.problems("deadbeef")
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("deadbeef is not a commit", problems[0])
+
+    def test_a_base_without_the_list_adopts_it(self):
+        self.git("rm", "-q", verify.OWN_ALLOW)
+        self.commit()
+        self.write(verify.OWN_ALLOW, "crate athanor-style #1292\n")
+        self.assertEqual(self.problems("HEAD"), [])
 
     def test_a_malformed_list_fails(self):
         self.write(verify.OWN_ALLOW, "crate athanor-style\n")

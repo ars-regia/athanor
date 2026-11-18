@@ -67,6 +67,11 @@ class RpmProblems(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("gtk4-layer-shell: listed", problems[0])
 
+    def test_an_image_without_rpms_fails(self):
+        problems = own.rpm_problems(set(), [])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("lists no RPM", problems[0])
+
     def test_main_reads_names_from_stdin(self):
         with tempfile.NamedTemporaryFile("w", suffix=".txt") as f:
             f.write("rpm cosmic-comp #1\n")

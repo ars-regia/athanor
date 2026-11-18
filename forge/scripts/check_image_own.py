@@ -41,7 +41,10 @@ def parse_allow_list(text):
 
 
 def rpm_problems(installed, entries):
-    """What is wrong between the RPM names INSTALLED in the image and the rpm ENTRIES."""
+    """What is wrong between the RPM names INSTALLED in the image and the rpm ENTRIES. No name
+    at all is a failure: an rpm database the query cannot read must not pass as a clean image."""
+    if not installed:
+        return ["the image lists no RPM: rpm -qa read no database"]
     listed = {name for kind, name, _ in entries if kind == "rpm"}
     refused = {name for name in installed if REFUSED_RPM.fullmatch(name)}
     return [

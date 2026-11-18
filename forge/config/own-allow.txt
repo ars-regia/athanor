@@ -33,6 +33,7 @@ crate athanor-launcher #1292
 crate athanor-layout-chooser #1292
 crate athanor-osd #1292
 crate athanor-preview-render #1292
+crate athanor-recovery #1292
 crate athanor-style #1292
 crate athanor-sulphur-client #1292
 crate athanor-wallpaper #1292

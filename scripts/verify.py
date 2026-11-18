@@ -6598,30 +6598,32 @@ def third_party_cargo(path):
     return "/vendor/" in path or "/SOURCES/" in path
 
 
-def dev_only_dependencies(manifest, renames):
-    """The package names MANIFEST takes as dev-dependencies only, in any target table.
-    RENAMES maps a [workspace.dependencies] key to its package, for `workspace = true`."""
-    def names(tables):
-        out = set()
-        for table in tables:
-            for key, dep in table.items():
-                dep = dep if isinstance(dep, dict) else {}
-                out.add(dep.get("package") or (renames.get(key, key) if dep.get("workspace") else key))
-        return out
-
+def manifest_dependencies(manifest, renames, kinds):
+    """The package names of the KINDS tables of MANIFEST (e.g. "dependencies"), in any target
+    table. RENAMES maps a [workspace.dependencies] key to its package, for `workspace = true`."""
     targets = list(manifest.get("target", {}).values())
-    dev = names([manifest.get("dev-dependencies", {})] + [t.get("dev-dependencies", {}) for t in targets])
-    run = names([manifest.get(k, {}) for k in ("dependencies", "build-dependencies")]
-                + [t.get(k, {}) for t in targets for k in ("dependencies", "build-dependencies")])
-    return dev - run
+    out = set()
+    for table in [manifest.get(k, {}) for k in kinds] + [t.get(k, {}) for t in targets for k in kinds]:
+        for key, dep in table.items():
+            dep = dep if isinstance(dep, dict) else {}
+            out.add(dep.get("package") or (renames.get(key, key) if dep.get("workspace") else key))
+    return out
+
+
+def dev_only_dependencies(manifest, renames):
+    """The package names MANIFEST takes as dev-dependencies only."""
+    return (manifest_dependencies(manifest, renames, ("dev-dependencies",))
+            - manifest_dependencies(manifest, renames, ("dependencies", "build-dependencies")))
 
 
 def toolkit_crates(root=None):
-    """{athanor-* crate: the refused toolkits it reaches}, over every lockfile of the repository
-    but the vendored and packaged ones. A lockfile holds the optional dependencies of every
-    feature, so a crate counts while any feature reaches a toolkit; the dev-dependencies of a
-    member are left out, as they are not shipped (toolkit-boundary does the same), and a
-    registry crate's never reach the lockfile."""
+    """({athanor-* crate: the refused toolkits it reaches}, [athanor-* crates no lockfile holds]),
+    over every manifest and lockfile of the repository but the vendored and packaged ones. A
+    lockfile holds the optional dependencies of every feature, so a crate counts while any
+    feature reaches a toolkit; the dev-dependencies of a member are left out, as they are not
+    shipped (toolkit-boundary does the same), and a registry crate's never reach the lockfile.
+    A crate no lockfile holds counts when it names a toolkit directly, and is returned in the
+    second list otherwise, as its transitive dependencies cannot be read."""
     root = Path(root or ROOT)
     listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
                             capture_output=True, text=True, check=True).stdout.split("\0")
@@ -6634,9 +6636,10 @@ def toolkit_crates(root=None):
                 renames[key] = dep["package"]
         if "package" in data:
             manifests[data["package"]["name"]] = data
-    hits = {}
+    hits, locked = {}, set()
     for lock in (p for p in paths if p.endswith("Cargo.lock")):
         packages = tomllib.loads(read(root / lock)).get("package", [])
+        locked.update(p["name"] for p in packages if "source" not in p)
         by_name = {}
         for package in packages:
             by_name.setdefault(package["name"], []).append(package)
@@ -6661,7 +6664,30 @@ def toolkit_crates(root=None):
                         stack.append(dep)
                         if dep["name"] in OWN_REFUSED_CRATES:
                             hits.setdefault(package["name"], set()).add(dep["name"])
-    return hits
+    unlocked = []
+    for name in sorted(n for n in manifests if re.match(r"athanor[-_]", n) and n not in locked):
+        direct = OWN_REFUSED_CRATES & manifest_dependencies(manifests[name], renames,
+                                                            ("dependencies", "build-dependencies"))
+        if direct:
+            hits[name] = direct
+        else:
+            unlocked.append(name)
+    return hits, unlocked
+
+
+def own_base_entries(root, base, parse):
+    """The (kind, name) entries of OWN_ALLOW at revision BASE, None when BASE has no such file
+    (the adoption); ValueError when BASE is not a commit, as load_known_red_base."""
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+    commit = git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")
+    if commit.returncode != 0:
+        raise ValueError(f"{base} is not a commit of {root}")
+    blob = f"{commit.stdout.strip()}:{OWN_ALLOW}"
+    if git("cat-file", "-e", blob).returncode != 0:
+        return None
+    return {(kind, name) for kind, name, _ in parse(git("show", blob).stdout)}
 
 
 def own_problems(root=None, base=None):
@@ -6675,19 +6701,19 @@ def own_problems(root=None, base=None):
     except (OSError, ValueError) as err:
         return [f"{OWN_ALLOW}: {err}"]
     crates = {name for kind, name, _ in entries if kind == "crate"}
-    hits = toolkit_crates(root)
-    problems = [f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
+    hits, unlocked = toolkit_crates(root)
+    problems = [f"{name}: no tracked Cargo.lock holds it, so the toolkits it reaches cannot be "
+                "read; add its lockfile (ADR-0141 decision 7)" for name in unlocked]
+    problems += [f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
                 "(ADR-0141 decision 7)" for name in sorted(set(hits) - crates)]
     problems += [f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))}; "
                  "remove its entry" for name in sorted(crates - set(hits))]
     if base is not None:
-        shown = subprocess.run(["git", "-C", str(root), "show", f"{base}:{OWN_ALLOW}"],
-                               capture_output=True, text=True)
-        if shown.returncode == 0:
-            try:
-                before = {(kind, name) for kind, name, _ in parse(shown.stdout)}
-            except ValueError as err:
-                return problems + [f"{OWN_ALLOW} at {base}: {err}"]
+        try:
+            before = own_base_entries(root, base, parse)
+        except ValueError as err:
+            return problems + [f"{OWN_ALLOW} at {base}: {err}"]
+        if before is not None:
             problems += [f"{OWN_ALLOW}: {kind} {name} is not listed at {base}; the list only shrinks"
                          for kind, name, _ in entries if (kind, name) not in before]
     return problems
@@ -6698,6 +6724,8 @@ def check_own():
     r = Result()
     for problem in own_problems(base=BASE_REF):
         r.fail(problem)
+    if BASE_REF is None:
+        r.note(f"no base revision (--known-red-base REF): entries added to {OWN_ALLOW} were not checked")
     return r
 
 
