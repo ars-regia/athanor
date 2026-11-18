@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-16 in decision 33's wave 2c, the X11 keyboard grab, which adds the satellite class to OS17, its one exception to OS4's confinement of xwayland-satellite, and a line to `doc_threat_model.md` TM2; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-16 by decision 37, night light, reduced motion and the toplevel drag, which adds versions 2 and 3 of `athanor_a11y_manager_v1` to OS5 and a standard global to OS17, both amended with it, answers the control center's spike S1 for the own compositor, and settles the two protocols decision 36 left for a later decision; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-17 in decision 33's wave 2c, libei input for the RemoteDesktop portal, with `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md` AX4 and AX11; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-16 in decision 33's wave 2c, the X11 keyboard grab, which adds the satellite class to OS17, its one exception to OS4's confinement of xwayland-satellite, and a line to `doc_threat_model.md` TM2; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-16 by decision 37, night light, reduced motion and the toplevel drag, which adds versions 2 and 3 of `athanor_a11y_manager_v1` to OS5 and a standard global to OS17, both amended with it, answers the control center's spike S1 for the own compositor, and settles the two protocols decision 36 left for a later decision; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-17 in decision 33's wave 2c, libei input for the RemoteDesktop portal, with `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md` AX4 and AX11; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-17 in decision 33's wave 2c: the compositor admits the portal backend, and the backend the compositor, as `athanor_unit::bus_caller` admits a caller, reading nothing under `/proc`, and an injected key cancels a pending tap of Super; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-17 and 2026-11-18 in decision 33's held input, per context: an injected press of a key or button the seat or another context holds is dropped, and a press of the seat, physical or virtual, of a key or button a context holds first releases the context's, while touch points never collide; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-17 in decision 30, the keyboard's return when a popup that holds it is destroyed, decided by the maintainer on 2026-11-17 (#1217, #1231); the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -71,6 +71,14 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-17: decision 33's libei input for the RemoteDesktop portal, with
   `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md`
   AX4 and AX11.
+- Amended on 2026-11-17: decision 33's EIS admission by unit through `athanor_unit::bus_caller`,
+  in both directions, and the injected key that reaches a client and cancels a pending tap
+  of Super, with
+  `doc_portal.md` PT15 and `doc_portal.md` section 6, decision 13.
+- Amended on 2026-11-17: decision 30, the keyboard's return when a popup that holds it is
+  destroyed (#1217, #1231).
+- Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
+  directions, for keys and buttons; touch points never collide.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1073,6 +1081,23 @@ compositor and that the own compositor did not yet offer:
       decoration: the compositor draws no title bar, and a client that asks for one draws its
       own, as under GNOME.
 
+    *Amended on 2026-11-17 (maintainer decision, 2026-11-17; #1217, a layer surface's popup
+    grab, and #1231, the dock menu's focus):* when a popup that holds the keyboard is destroyed,
+    the keyboard returns at once to its parent when the parent is a popup that still holds a
+    grab, and otherwise to the popups' root surface, and not at the next key or click. When the
+    root is gone or can no longer take the keyboard (unmapped, not shown, a layer surface without
+    keyboard interactivity, or while another surface holds the keyboard exclusively), Sulphur
+    does not give it the keyboard and chooses the focus again by the rule it applies when the
+    focused window closes. The client sees `wl_keyboard.enter` on the surface that takes the
+    keyboard as the popup closes, so that a toolkit can give the focus back to the control that
+    opened the popup with nothing pressed. A fixture test of Sulphur covers each case: a parent
+    popup that holds a grab, a parent popup already destroyed, a parent popup that holds no
+    grab, a parent that is the root, and a root that is gone, unmapped, not shown, without
+    keyboard interactivity, or under a surface that holds the keyboard exclusively; the test
+    compares the focus with the one that rule chooses. AX7 of `doc_accessibility.md` says that
+    Escape closes the innermost popover; where the keyboard goes after any destroy of a popup,
+    Escape included, is this decision.
+
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
     MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
     notice in full for anvil; names the project, the revision and the licence, and the
@@ -1455,14 +1480,18 @@ compositor and that the own compositor did not yet offer:
           compositor claims `os.athanor.Eis` at its start; who owns the name is checked by the
           backend, not by the compositor. A failure to claim the name is logged once and the
           compositor starts without EIS, never with a fatal start error, and the backend then
-          refuses `Start` through its owner check. The owner's process must lie in the cgroup of
-          `athanor-sulphur.service` and run `/usr/bin/athanor-sulphur` (`doc_portal.md` PT15);
-        - the admission, at every call, as the keyboard monitor's (OS4,
-          `keyboard_monitor.rs`): the caller is the current owner of
-          `org.freedesktop.impl.portal.desktop.athanor`; its process, read through the pidfd
-          the bus returns as `ProcessFD`, or through one opened on its `ProcessID` with the
-          monitor's reuse check, lies in the cgroup of `xdg-desktop-portal-athanor.service`;
-          and it runs `/usr/libexec/xdg-desktop-portal-athanor`, the very file at that path.
+          refuses `Start` through its owner check. The owner must be the main process of
+          `athanor-sulphur.service`, whose one `ExecStart` runs `/usr/bin/athanor-sulphur`, as
+          `athanor_unit::bus_caller::admit` checks it (`doc_portal.md` PT15, amended on
+          2026-11-17);
+        - the admission, at every call, as `athanor_unit::bus_caller::admit` checks a caller
+          (`doc_session_daemons.md` SD5; amended on 2026-11-17): the caller is the current
+          owner of `org.freedesktop.impl.portal.desktop.athanor`; through the pidfd the bus
+          returns as `ProcessFD`, the verified user systemd places it by `GetUnitByPIDFD` in
+          exactly `xdg-desktop-portal-athanor.service`, as that unit's main process, whose one
+          `ExecStart` runs `/usr/libexec/xdg-desktop-portal-athanor` and whose unit files lie
+          beneath `/usr/lib/systemd/user`. A bus that returns no `ProcessFD` is refused, there
+          is no fallback through the `ProcessID`, and nothing is read under `/proc` (#1047).
           Any other caller is answered `AccessDenied`, receives no file descriptor and changes
           nothing; the journal names it, at most once a minute. As the monitor's, this is an
           integrity check against mistakes and against tier 2, which owns no bus name outside
@@ -1483,10 +1512,23 @@ compositor and that the own compositor did not yet offer:
           of its slot, never with `wl_touch.cancel`, which the seat applies to every touch,
           the user's own touches included. Only the lock and the paused session cancel
           touches (below);
-        - held input, per context. The keys, buttons and touches held through EIS are
-          tracked for each EIS context, by context and device, since Smithay's device id is
-          unique only within one connection. Releasing the held input of one context touches
-          no other context's, and none of the seat's physical keys, buttons and touches;
+        - held input, per context. The keys, buttons and touches held through EIS are tracked
+          for each EIS context, by context and device, since Smithay's device id is unique only
+          within one connection. Releasing the held input of one context touches no other
+          context's, and none of the seat's keys, buttons and touches. An injected
+          press of a key or button the seat or another context holds is dropped with its
+          release, since the client keeps one set of held keys and buttons: it never sees a
+          second press without a release between, and one source's release never lets go for
+          the other. The seat's input wins the other way: a press of the seat, physical or
+          through a virtual keyboard or pointer, of a key or button a context holds first sends
+          the client the release of the held one, to the keyboard or pointer focus as a release
+          of the seat would reach it; the context then counts that input as let go, its xkb
+          state and modifiers included, and drops its own first release of it after that,
+          delivered or not, unless a press of it by the context, or the context's end, has
+          cleared that mark first. That release starts and cancels no Super tap: the seat's
+          press after it decides. Touch points never collide: each touch point of a context, as
+          each of the seat's, takes a slot of the seat no other touch holds, so no source holds
+          a touch point another holds (maintainer decisions, 2026-11-17 and 2026-11-18);
         - the lock and the paused session. From the lock request on (decision 36) until the
           unlock, and while the session is paused on another virtual terminal until its
           resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
@@ -1502,7 +1544,14 @@ compositor and that the own compositor did not yet offer:
           or pointer binding of the compositor (OS13), and Orca's keyboard monitor (AX4) and
           the keyboard aids (AX11) never see it. An injected protected key of decision 30,
           Super+Escape, the reveal key Super+Alt+T and Ctrl+Alt+Tab among them, is dropped,
-          its press and its release: it reaches neither the compositor nor any client;
+          its press and its release: it reaches neither the compositor nor any client. An
+          injected key that reaches a client cancels a pending tap of Super, as a hardware key
+          and an injected button or touch do, so a physical Super released after it opens no
+          launcher; the injected key still reaches only the client. A key this decision drops,
+          a protected key, one the seat or another context holds or one aimed at the backend's
+          own dialogs, and any key while the session is locked or paused reach no client and
+          cancel nothing (maintainer
+          decisions, 2026-11-17);
         - its own state. Injected keys take their own path to the focused client, not the
           virtual keyboard's path through `aided` and `typed`, and each EIS context keeps its
           own modifier and xkb state, separate from the seat's physical state. An injected
@@ -1514,13 +1563,19 @@ compositor and that the own compositor did not yet offer:
           keyboard path's `with_keymap_of` does, so that an injected Ctrl+C reaches the client
           as Ctrl+C;
         - the backend's own dialogs. Injected input never reaches a surface of
-          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by its unit
-          and its executable as the `os.athanor.Eis1` admission is, the privileged-clients list
-          having no line for it. An injected key is dropped, its release included, while the
-          keyboard focus is such a surface; an injected button, scroll or touch aimed at such a
-          surface is dropped; and an injected motion never gives it the pointer focus. So a
-          session cannot Tab through the consent dialog of a second session and widen its own
-          grant. The hardware's input is not affected;
+          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by the
+          identity OS4 reads for every Wayland client when it connects (`identify` in
+          `identity.rs`: the peer's pidfd from `SO_PEERPIDFD`, then, through its pid, the
+          executable `/usr/libexec/xdg-desktop-portal-athanor` and the unit of its cgroup,
+          `xdg-desktop-portal-athanor.service`; amended on 2026-11-17), the privileged-clients
+          list having no line for it. A client outside a security context whose identity cannot
+          be read, and a surface whose client is gone, count as the backend's and receive no
+          injected input; a client in a security context never counts as the backend's. An
+          injected key is dropped, its release included, while the keyboard focus is such a
+          surface; an injected button, scroll or touch aimed at such a surface is dropped; and
+          an injected motion never gives it the pointer focus. So a session cannot Tab through
+          the consent dialog of a second session and widen its own grant. The seat's input
+          is not affected;
         - the indicator. While a session's EIS context is open, the bar shows the indicator
           of `doc_bar.md` BR3, fed by `InputSessions` of `os.athanor.Portal1`
           (`doc_portal.md` PT10), which lists a session from the compositor's answer to
@@ -1532,12 +1587,12 @@ compositor and that the own compositor did not yet offer:
         - the code's pull request enables `backend_libei` and adds fixture tests with an EIS
           client, one case each, and each gate has an assertion that fails when the gate is
           removed:
-          - the admission: a caller in another unit, a caller in the backend's unit that runs
-            another executable, and a caller that does not own the backend's bus name are each
-            answered `AccessDenied` and receive no file descriptor, a caller admitted through
-            its pid, with no `ProcessFD`, whose pid is reused between the check and the use is
-            refused as the keyboard monitor's is, a second `ConnectToEIS` for one session is
-            refused, and a context that announces itself as a receiver is disconnected and
+          - the admission: a caller in another unit, a caller in the backend's unit that is
+            not its main process or whose unit runs another executable, a caller whose unit
+            file or drop-in lies outside `/usr/lib/systemd/user`, a caller with no `ProcessFD`,
+            and a caller that does not own the backend's bus name are each answered
+            `AccessDenied` and receive no file descriptor (amended on 2026-11-17), a second
+            `ConnectToEIS` for one session is refused, and a context that announces itself as a receiver is disconnected and
             serves nothing;
           - the revocation: a session's context ends on `CloseSession`, when the backend's
             bus name changes owner, and when the backend exits, and its file descriptor then
@@ -1554,7 +1609,16 @@ compositor and that the own compositor did not yet offer:
             and the rig's does not;
           - held input: a key, a pointer button and a touch held through EIS at the lock
             request, and at a pause, are released, the touch with `wl_touch.cancel`; two
-            contexts that hold input with the same device id are tracked apart;
+            contexts that hold input with the same device id are tracked apart; an injected
+            press of a key or button the seat or another context holds reaches no client, nor
+            does its release, and the other source's release still reaches it; a press of the
+            seat, physical or through a virtual keyboard or pointer, of a key or button a
+            context holds reaches the client after the release of the held one, that context's
+            next release reaches no client, its modifiers no longer count the key, and a press
+            of the context after the seat's release reaches the client with its own release; a
+            physical Super pressed over a Super a context holds still opens the launcher on its
+            release; an injected touch point and a physical one with the same slot number reach
+            the client as two touch points;
           - the device types: a context granted the keyboard alone is offered no pointer or
             touch device and is refused one it asks for, and likewise for each other granted
             set; each portal type yields the capabilities of the mapping above and no text
@@ -1563,7 +1627,9 @@ compositor and that the own compositor did not yet offer:
           - clients only: an injected key of a binding triggers no action of the compositor
             and reaches the focused client, an injected pointer binding triggers none, each
             injected protected key reaches neither the compositor nor any client, and neither
-            the keyboard monitor nor the keyboard aids see an injected key;
+            the keyboard monitor nor the keyboard aids see an injected key, and an injected
+            key between the press and the release of a physical Super opens no launcher and
+            reaches the focused client (amended on 2026-11-17);
           - mixed sources: an injected Super with a physical Escape, and a physical Super
             with an injected Escape, each reach the focused client as the plain Escape and
             trigger no binding and no protected chord, an injected Ctrl+C reaches it as Ctrl+C
@@ -1571,8 +1637,10 @@ compositor and that the own compositor did not yet offer:
             while an injected modifier is held;
           - the backend's dialogs: an injected key, button, scroll and touch each reach no
             surface of `xdg-desktop-portal-athanor`, the consent dialog included, and an
-            injected motion gives it no pointer focus, while the hardware's input reaches it
-            and the same input reaches another client;
+            injected motion gives it no pointer focus, while the seat's input reaches it
+            and the same input reaches another client; a client outside a security context
+            whose identity cannot be read gets no injected key, while a confined client gets
+            it;
           - the name: with the name owned by another process at the compositor's start, the
             compositor runs, serves no EIS and logs the failure once;
           - where the tests run: CI runs the admission with a fixture and the backend's owner

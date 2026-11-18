@@ -383,6 +383,8 @@ struct Client {
     released: Vec<u32>,
     /// The evdev codes of the keys held, as the last `enter` told them.
     entered_keys: Vec<u32>,
+    /// The protocol id of the surface of each `wl_keyboard.enter`, in order.
+    keyboard_entered: Vec<u32>,
     /// The keymaps the client was sent.
     keymaps: usize,
     /// The size of the last keymap the client was sent, which tells two keymaps apart.
@@ -816,7 +818,8 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
                 client.released.push(key);
                 client.input.push((key, false));
             }
-            wl_keyboard::Event::Enter { keys, .. } => {
+            wl_keyboard::Event::Enter { surface, keys, .. } => {
+                client.keyboard_entered.push(surface.id().protocol_id());
                 let (keys, _) = keys.as_chunks::<4>();
                 client.entered_keys = keys.iter().copied().map(u32::from_ne_bytes).collect();
             }
@@ -11533,6 +11536,23 @@ fn top_surface_on(
     keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
     output: Option<usize>,
 ) -> (Local, WlSurface, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1) {
+    let (local, server, layer, _) = top_surface_parts(run, namespace, anchor, keyboard, output);
+    (local, server, layer)
+}
+
+/// `top_surface_on`, with the client's `wl_surface` as well.
+fn top_surface_parts(
+    run: &mut Running,
+    namespace: &str,
+    anchor: zwlr_layer_surface_v1::Anchor,
+    keyboard: zwlr_layer_surface_v1::KeyboardInteractivity,
+    output: Option<usize>,
+) -> (
+    Local,
+    WlSurface,
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
+) {
     let mut local = Local::connect(run, None);
     let compositor: wl_compositor::WlCompositor = local.bind(4);
     let shm: wl_shm::WlShm = local.bind(1);
@@ -11580,7 +11600,7 @@ fn top_surface_on(
             Some(layer.wl_surface().clone())
         })
         .expect("the layer surface");
-    (local, server, layer)
+    (local, server, layer, surface)
 }
 
 /// Ctrl+Alt+Tab gives the keyboard to the bar, then the dock, then the window (AX7): the
@@ -11758,6 +11778,790 @@ fn ctrl_alt_tab_from_a_popup_continues_after_its_parent() {
     assert!(
         !run.state.seat.get_pointer().expect("a pointer").is_grabbed(),
         "its grab ends with it"
+    );
+    run.stop();
+}
+
+/// The error lines Smithay and the compositor log on the thread that runs the compositor, the
+/// test's, while the guard `capture` returns lives.
+#[derive(Clone, Default)]
+struct Errors(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Errors {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().expect("the log").extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Errors {
+    fn capture(&self) -> tracing::subscriber::DefaultGuard {
+        let writer = self.clone();
+        tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .with_max_level(tracing::Level::ERROR)
+                .with_ansi(false)
+                .finish(),
+        )
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("the log")).into_owned()
+    }
+}
+
+/// A window with the keyboard, then a dock that takes it on demand, given it by Ctrl+Alt+Tab
+/// (AX7), with a `wl_keyboard`: the window's client and surface, the dock's client, its surface
+/// on the compositor's side, and its layer surface and surface on the client's side.
+fn keyboard_dock(
+    run: &mut Running,
+) -> (
+    (Local, WlSurface),
+    Local,
+    WlSurface,
+    zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    wl_surface::WlSurface,
+) {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::OnDemand};
+    let (window_client, window) = focused_window(run);
+    let bottom = Anchor::Bottom | Anchor::Left | Anchor::Right;
+    let (dock, dock_surface, dock_layer, dock_wl) =
+        top_surface_parts(run, "dock", bottom, OnDemand, None);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    seat.get_keyboard(&dock.queue.handle(), ());
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(run).as_ref(),
+        Some(&dock_surface),
+        "the dock"
+    );
+    (
+        (window_client, surface_of(&window)),
+        dock,
+        dock_surface,
+        dock_layer,
+        dock_wl,
+    )
+}
+
+/// A key the dock was sent, whose serial a popup grab names.
+fn dock_key(run: &mut Running, dock_surface: &WlSurface) -> smithay::utils::Serial {
+    let serial = SERIAL_COUNTER.next_serial();
+    let dock_client = dock_surface.client().expect("the dock's client").id();
+    run.state.grab_serials.key_press = Some((serial, dock_client));
+    serial
+}
+
+/// What a popup `open_popup` opens is parented to.
+enum PopupParent<'a> {
+    Layer(&'a zwlr_layer_surface_v1::ZwlrLayerSurfaceV1),
+    Popup(&'a xdg_surface::XdgSurface),
+}
+
+/// A 40 by 40 popup of `parent`, opened and drawn by `dock`'s client, grabbed on `grab` when
+/// given: its xdg_popup, xdg_surface and surface on the client's side. As GTK and the toolkit
+/// open a layer surface's popup, it is created without a parent, which the layer surface then
+/// gives it, and the grab is asked before the first commit.
+fn open_popup(
+    run: &mut Running,
+    dock: &mut Local,
+    parent: PopupParent,
+    grab: Option<smithay::utils::Serial>,
+) -> (
+    xdg_popup::XdgPopup,
+    xdg_surface::XdgSurface,
+    wl_surface::WlSurface,
+) {
+    let compositor: wl_compositor::WlCompositor = dock.bind(4);
+    let shm: wl_shm::WlShm = dock.bind(1);
+    let wm_base: xdg_wm_base::XdgWmBase = dock.bind(1);
+    let seat: wl_seat::WlSeat = dock.bind(1);
+    let qh = dock.queue.handle();
+    let positioner = wm_base.create_positioner(&qh, ());
+    positioner.set_size(40, 40);
+    positioner.set_anchor_rect(0, 0, 1, 1);
+    let surface = compositor.create_surface(&qh, ());
+    let xdg = wm_base.get_xdg_surface(&surface, &qh, ());
+    let popup = match parent {
+        PopupParent::Layer(layer) => {
+            let popup = xdg.get_popup(None, &positioner, &qh, ());
+            layer.get_popup(&popup);
+            popup
+        }
+        PopupParent::Popup(parent) => xdg.get_popup(Some(parent), &positioner, &qh, ()),
+    };
+    if let Some(serial) = grab {
+        popup.grab(&seat, serial.into());
+    }
+    dock.client.configure = None;
+    surface.commit();
+    dock.pump(run, "the popup is configured", |client, _| {
+        client.configure.is_some()
+    });
+    xdg.ack_configure(dock.client.configure.expect("a configure"));
+    let (buffer, _) = dock.buffer(&shm, 40, 40, [0, 0, 0, 255]);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    dock.roundtrip(run);
+    (popup, xdg, surface)
+}
+
+/// `keyboard_dock` with a popup it opens, as a dock's menu opens, on a key the dock was sent:
+/// the window's client and surface, the dock's client and surface, and the popup's xdg_popup,
+/// xdg_surface and surface on the client's side.
+fn dock_popup(
+    run: &mut Running,
+) -> (
+    (Local, WlSurface),
+    Local,
+    WlSurface,
+    (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    let (window, mut dock, dock_surface, dock_layer, _) = keyboard_dock(run);
+    let serial = dock_key(run, &dock_surface);
+    let popup = open_popup(
+        run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    (window, dock, dock_surface, popup)
+}
+
+/// A layer surface's popup, which xdg-shell creates without a parent and the layer surface
+/// parents, is known to the popup manager with the layer surface as its root, and its grab, on
+/// a key the layer surface was sent, takes the keyboard and the pointer; Smithay logs no
+/// "surface missing from known popups" (#1217, T9-7 of the C1 spike).
+#[test]
+fn a_layer_surfaces_popup_is_known_and_grabs_the_seat() {
+    let errors = Errors::default();
+    let _capture = errors.capture();
+    let mut run = Running::start(None);
+    let (_window, _dock, dock_surface, _popup) = dock_popup(&mut run);
+
+    let held = keyboard_focus(&run).expect("a focus");
+    let popup = run.state.popups.find_popup(&held).expect("a known popup");
+    assert_eq!(
+        smithay::desktop::find_popup_root_surface(&popup).ok(),
+        Some(dock_surface),
+        "the dock is its root"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the grab takes the keyboard"
+    );
+    assert!(
+        run.state
+            .seat
+            .get_pointer()
+            .is_some_and(|pointer| pointer.is_grabbed()),
+        "and the pointer"
+    );
+    let logged = errors.text();
+    assert!(
+        !logged.contains("missing from known popups"),
+        "Smithay logged: {logged}"
+    );
+    run.stop();
+}
+
+/// A popup of a layer surface that takes the keyboard on demand, grabbed on a key and closed by
+/// its client, as GTK hides a popover, hands the keyboard back to the layer surface, not to the
+/// window that had it before. It is back at once, with no key pressed, as the popup's role is
+/// destroyed (decision 30, amended on 2026-11-17 by the maintainer; #1217, #614).
+#[test]
+fn a_closed_layer_popup_hands_the_keyboard_back_to_its_surface() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, (popup, xdg, surface)) =
+        dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the dock has it back at once"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A chain of a layer surface, a popup without a grab and a grabbed popup of that one: the
+/// grabbed popup, closed, hands the keyboard at once to the grab's root, the layer surface, since
+/// the popup between them holds no grab (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_over_one_without_a_grab_hands_the_keyboard_to_the_root() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let (_menu, menu_xdg, _menu_surface) =
+        open_popup(&mut run, &mut dock, PopupParent::Layer(&dock_layer), None);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "a popup without a grab leaves the keyboard on the dock"
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the grabbed popup has the keyboard"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the root has it at once, not the popup without a grab"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A grabbed popup whose root, the layer surface, its client destroyed first, hands the
+/// keyboard as it closes to where a destroyed window's goes, the window, and not to a dead
+/// surface (#1217).
+#[test]
+fn a_closed_popup_of_a_dead_root_hands_the_keyboard_to_the_window() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, dock_wl) =
+        keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the popup has the keyboard"
+    );
+    dock_layer.destroy();
+    dock_wl.destroy();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps it while it lives"
+    );
+
+    popup.destroy();
+    xdg.destroy();
+    surface.destroy();
+    dock.roundtrip(&mut run);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_refocused(&mut run);
+    assert_eq!(keyboard_focus(&run), Some(window), "here, the window");
+    run.stop();
+}
+
+/// Closes a popup as a toolkit hides it: its role, its xdg_surface and its buffer go.
+fn close_popup(
+    run: &mut Running,
+    dock: &mut Local,
+    (popup, xdg, surface): (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(run);
+}
+
+/// Asserts that the keyboard is where `refocus` puts a destroyed window's: on a live surface,
+/// or nothing, that `focus_top`, run again, does not move it from.
+fn assert_refocused(run: &mut Running) {
+    let focus = keyboard_focus(run);
+    assert!(
+        focus.as_ref().is_none_or(|surface| surface.is_alive()),
+        "the keyboard is on a live surface"
+    );
+    run.state.focus_top();
+    assert_eq!(keyboard_focus(run), focus, "where refocus puts it");
+}
+
+/// Puts the keyboard straight on `popup`, with no grab, as after something that took it from
+/// the popup and ended its grab, so that the popup's destruction reaches `popup_destroyed` with
+/// the keyboard on it.
+fn give_back_to_popup(run: &mut Running, popup: Option<WlSurface>) {
+    let keyboard = run.state.seat.get_keyboard().expect("a keyboard");
+    keyboard.set_focus(&mut run.state, popup.clone(), SERIAL_COUNTER.next_serial());
+    assert_eq!(
+        keyboard_focus(run),
+        popup,
+        "the popup has the keyboard again"
+    );
+}
+
+/// Two nested popups of a layer surface, each grabbed: the inner one, closed, hands the keyboard
+/// at once to the outer one, the popup grab's current popup, and not to the layer surface
+/// (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_nested_popup_hands_the_keyboard_to_its_grabbed_parent() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (_menu, menu_xdg, menu_wl) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let menu = keyboard_focus(&run);
+    assert!(
+        menu.is_some() && menu.as_ref() != Some(&dock_surface),
+        "the outer popup has the keyboard"
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let submenu = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held != menu && held.as_ref() != Some(&dock_surface),
+        "the inner popup has the keyboard"
+    );
+
+    close_popup(&mut run, &mut dock, submenu);
+
+    assert_eq!(keyboard_focus(&run), menu, "the outer popup has it at once");
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&menu_wl.id().protocol_id()),
+        "the dock's client is told"
+    );
+    run.stop();
+}
+
+/// Two nested popups of a layer surface, each grabbed, whose client destroys the outer one and
+/// then the inner one, which holds the keyboard: the inner one hands the keyboard at once to the
+/// root, the layer surface, past its destroyed parent (decision 30, amended on 2026-11-17;
+/// #1217). Destroying a popup before its child is a protocol error that Smithay posts at the
+/// next `PopupManager::cleanup`, which the backends run at each frame and the fixture does not,
+/// so this case lives only until then.
+#[test]
+fn a_closed_popup_past_its_destroyed_parent_hands_the_keyboard_to_the_root() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, _) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let (menu, menu_xdg, menu_wl) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let serial = dock_key(&mut run, &dock_surface);
+    let (popup, xdg, surface) = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Popup(&menu_xdg),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&dock_surface),
+        "the inner popup has the keyboard"
+    );
+
+    menu.destroy();
+    menu_xdg.destroy();
+    menu_wl.attach(None, 0, 0);
+    menu_wl.commit();
+    popup.destroy();
+    xdg.destroy();
+    surface.attach(None, 0, 0);
+    surface.commit();
+    dock.roundtrip(&mut run);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the root has it at once"
+    );
+    assert_eq!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock's client is told"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A popup the keyboard has left, by Ctrl+Alt+Tab, which dismisses it, and that its client
+/// destroys after: the keyboard stays where it went, and is not taken back to the popup's root
+/// (#1217).
+#[test]
+fn a_closed_popup_without_the_keyboard_leaves_the_keyboard_alone() {
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, popup) = dock_popup(&mut run);
+    chord(&mut run.state, &[KEY_LEFTCTRL, KEY_LEFTALT, KEY_TAB]);
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&window),
+        "Ctrl+Alt+Tab takes the keyboard to the window"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(keyboard_focus(&run), Some(window), "the window keeps it");
+    assert_ne!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock is not given it back"
+    );
+    run.stop();
+}
+
+/// A popup whose grab the compositor ended, sending `popup_done` to it as a click on another
+/// client's surface does, but that still has the keyboard, which Smithay moves only at the next
+/// key: closed by its client, it hands the keyboard at once to its root (#1217).
+#[test]
+fn a_closed_popup_whose_grab_ended_hands_the_keyboard_to_the_root() {
+    use smithay::desktop::PopupUngrabStrategy;
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    let mut grab = run.state.popup_grab.clone().expect("a popup grab");
+    grab.ungrab(PopupUngrabStrategy::All);
+    assert!(grab.has_ended(), "the grab has ended");
+    assert_eq!(keyboard_focus(&run), held, "the popup keeps the keyboard");
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "the dock has it at once"
+    );
+    assert_ne!(keyboard_focus(&run), Some(window), "not the window");
+    run.stop();
+}
+
+/// A dock that takes the keyboard on demand, and commits an interactivity of `none` while its
+/// popup holds the keyboard: the popup, closed, hands the keyboard to where a destroyed window's
+/// goes, the window, since the dock cannot keep it, and the popup's grab ends (#1217).
+#[test]
+fn a_closed_popup_of_a_root_that_takes_no_keyboard_hands_it_to_the_window() {
+    use zwlr_layer_surface_v1::KeyboardInteractivity;
+    let mut run = Running::start(None);
+    let ((_window_client, window), mut dock, dock_surface, dock_layer, dock_wl) =
+        keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let popup = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    dock_layer.set_keyboard_interactivity(KeyboardInteractivity::None);
+    dock_wl.commit();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "not the dock"
+    );
+    assert_refocused(&mut run);
+    assert_eq!(keyboard_focus(&run), Some(window), "here, the window");
+    assert!(
+        !run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the popup's grab has ended"
+    );
+    run.stop();
+}
+
+/// A dock that unmaps, committing a null buffer, while its popup holds the keyboard: the popup,
+/// closed, does not hand the keyboard to the dock, which shows nothing, but to where `refocus`
+/// puts a destroyed window's, and the popup's grab ends (decision 30, amended on 2026-11-17;
+/// #1217).
+#[test]
+fn a_closed_popup_of_an_unmapped_root_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, dock_layer, dock_wl) = keyboard_dock(&mut run);
+    let serial = dock_key(&mut run, &dock_surface);
+    let popup = open_popup(
+        &mut run,
+        &mut dock,
+        PopupParent::Layer(&dock_layer),
+        Some(serial),
+    );
+    let held = keyboard_focus(&run);
+    dock_wl.attach(None, 0, 0);
+    dock_wl.commit();
+    dock.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run).as_ref(),
+        Some(&dock_surface),
+        "not the dock"
+    );
+    assert_refocused(&mut run);
+    assert!(
+        !run.state
+            .seat
+            .get_keyboard()
+            .is_some_and(|keyboard| keyboard.is_grabbed()),
+        "the popup's grab has ended"
+    );
+    run.stop();
+}
+
+/// A placed window with the keyboard, over another of its client's, and a popup of it grabbed
+/// on a key it was sent: the client, the window, its surface on the compositor's side, its
+/// objects on the client's side, and the popup's.
+fn window_popup(
+    run: &mut Running,
+) -> (
+    Local,
+    smithay::desktop::Window,
+    WlSurface,
+    Other,
+    (
+        xdg_popup::XdgPopup,
+        xdg_surface::XdgSurface,
+        wl_surface::WlSurface,
+    ),
+) {
+    let (mut local, first) = focused_window(run);
+    local.pump(run, "the first window is placed", |_, state| {
+        state.workspace_of(&first).is_some()
+    });
+    let menu = local.another(run, "menu");
+    let window = local.server_window(run, &menu.surface);
+    local.pump(run, "the window is placed", |_, state| {
+        state.workspace_of(&window).is_some()
+    });
+    run.state.focus(&window);
+    let window_surface = surface_of(&window);
+    let serial = dock_key(run, &window_surface);
+    let popup = open_popup(run, &mut local, PopupParent::Popup(&menu.xdg), Some(serial));
+    let held = keyboard_focus(run);
+    assert!(
+        held.is_some() && held.as_ref() != Some(&window_surface),
+        "the popup has the keyboard"
+    );
+    (local, window, window_surface, menu, popup)
+}
+
+/// A window minimised while its popup holds the keyboard, which dismisses the popup and ends its
+/// grab, the keyboard put back on the popup, and the popup then destroyed by its client: the
+/// keyboard is where `refocus` puts a destroyed window's, not on the window the user cannot see,
+/// which minimising took out of the space (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_not_shown_leaves_it_the_keyboard() {
+    let mut run = Running::start(None);
+    let (mut local, window, window_surface, _menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    assert!(run.state.minimise(&window), "the window is minimised");
+    give_back_to_popup(&mut run, held.clone());
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the window the user cannot see"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A window that draws nothing, committing a null buffer while its popup holds the keyboard:
+/// the popup, closed, does not hand the keyboard to it but to where `refocus` puts a destroyed
+/// window's (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_drawing_nothing_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (mut local, _window, window_surface, menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    menu.surface.attach(None, 0, 0);
+    menu.surface.commit();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the window drawing nothing"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A window whose client destroys its xdg_toplevel, keeping its surface and buffer, while its
+/// popup holds the keyboard: the window leaves the space, and the popup, closed, does not hand
+/// the keyboard to the bare surface but to where `refocus` puts a destroyed window's (decision
+/// 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_of_a_window_out_of_the_space_hands_the_keyboard_on() {
+    let mut run = Running::start(None);
+    let (mut local, _window, window_surface, menu, popup) = window_popup(&mut run);
+    let held = keyboard_focus(&run);
+    menu.toplevel.destroy();
+    local.roundtrip(&mut run);
+    assert_eq!(
+        keyboard_focus(&run),
+        held,
+        "the popup keeps the keyboard while it lives"
+    );
+
+    close_popup(&mut run, &mut local, popup);
+
+    assert_ne!(keyboard_focus(&run), held, "not the closed popup");
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(window_surface),
+        "not the surface that left the space"
+    );
+    assert_refocused(&mut run);
+    run.stop();
+}
+
+/// A surface that holds the keyboard exclusively, mapped while a dock's popup holds it, takes
+/// the keyboard and ends the popup's grab; with the keyboard put back on the popup, the popup,
+/// closed by its client, leaves the keyboard on that surface and does not hand it to the dock
+/// (decision 30, amended on 2026-11-17; #1217).
+#[test]
+fn a_closed_popup_leaves_the_keyboard_on_a_surface_that_holds_it_exclusively() {
+    use zwlr_layer_surface_v1::{Anchor, KeyboardInteractivity::Exclusive};
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let held = keyboard_focus(&run);
+    let (_launcher, launcher_surface, _) = top_surface_on(
+        &mut run,
+        "launcher",
+        Anchor::Top | Anchor::Left | Anchor::Right,
+        Exclusive,
+        None,
+    );
+    assert_eq!(
+        keyboard_focus(&run).as_ref(),
+        Some(&launcher_surface),
+        "the exclusive surface takes the keyboard"
+    );
+    give_back_to_popup(&mut run, held);
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(
+        keyboard_focus(&run),
+        Some(launcher_surface),
+        "the exclusive surface keeps it"
+    );
+    assert_refocused(&mut run);
+    assert_ne!(
+        dock.client.keyboard_entered.last(),
+        Some(&dock_surface.id().protocol_id()),
+        "the dock is not given it back"
+    );
+    run.stop();
+}
+
+/// The session locked while a dock's popup holds the keyboard, and the popup closed by its
+/// client while locked: the keyboard stays on the lock surface (decision 30; #1217).
+#[test]
+fn a_popup_closed_while_locked_leaves_the_keyboard_on_the_lock_surface() {
+    let mut run = Running::start(None);
+    let (_window, mut dock, dock_surface, popup) = dock_popup(&mut run);
+    let (locker, _lock) = lock_session(&mut run);
+    let locked = keyboard_focus(&run);
+    assert_eq!(
+        locked
+            .as_ref()
+            .and_then(|surface| surface.client())
+            .map(|client| client.id()),
+        locker.id.clone(),
+        "the lock surface has the keyboard"
+    );
+
+    close_popup(&mut run, &mut dock, popup);
+
+    assert_eq!(keyboard_focus(&run), locked, "the lock surface keeps it");
+    assert_refocused(&mut run);
+    assert_ne!(
+        keyboard_focus(&run),
+        Some(dock_surface),
+        "not the popup's root"
     );
     run.stop();
 }

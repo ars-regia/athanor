@@ -1,0 +1,8 @@
+Screen reader on.
+cc-window-1
+tab
+tab
+tab
+F10
+escape
+Screen reader off.

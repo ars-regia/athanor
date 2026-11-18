@@ -88,6 +88,15 @@ impl Dialogs {
         }
     }
 
+    /// The surface the dialog `dialog`, open or closed and not yet forgotten, was opened on.
+    pub(super) fn parent_of(&self, dialog: SurfaceId) -> Option<SurfaceId> {
+        self.open
+            .iter()
+            .chain(&self.closed)
+            .find(|&&(open, _)| open == dialog)
+            .map(|&(_, parent)| parent)
+    }
+
     /// The surface the closed dialog `dialog` was opened on, once: the driver forgets it.
     pub(super) fn take_parent(&mut self, dialog: SurfaceId) -> Option<SurfaceId> {
         let at = self

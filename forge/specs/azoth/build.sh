@@ -134,8 +134,8 @@ verify_gpg() { # verify_gpg KEYDIR SIGNATURE DATA: a good signature from one of 
   local home
   home=$(mktemp -d)
   gpg --homedir "$home" --batch --quiet --import "$HERE/SOURCES/keys/$1"/*.asc
-  gpg --homedir "$home" --batch --status-fd 1 --verify "$2" "$3" 2>/dev/null \
-    | grep '^\[GNUPG:\] GOODSIG ' > /dev/null
+  gpg --homedir "$home" --batch --status-fd 1 --verify "$2" "$3" 2> "$home/verify.log" \
+    | grep '^\[GNUPG:\] GOODSIG ' > /dev/null || { cat "$home/verify.log" >&2; return 1; }
 }
 
 step "signatures"

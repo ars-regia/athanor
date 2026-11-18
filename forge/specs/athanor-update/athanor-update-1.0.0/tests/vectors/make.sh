@@ -17,7 +17,7 @@ rm -rf "$out"
 mkdir -p "$out"
 for key in a b; do
   openssl ecparam -name prime256v1 -genkey -noout -out "$secrets/$key.pem"
-  openssl ec -in "$secrets/$key.pem" -pubout -out "$out/$key.pub" 2> /dev/null
+  openssl ec -in "$secrets/$key.pem" -pubout -out "$out/$key.pub"
 done
 
 DIGEST=sha256:$(printf 'the image manifest' | sha256sum | cut -d' ' -f1)

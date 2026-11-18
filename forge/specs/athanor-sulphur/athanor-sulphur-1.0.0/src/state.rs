@@ -36,7 +36,7 @@ use smithay::desktop::utils::{
     with_surfaces_surface_tree, OutputPresentationFeedback,
 };
 use smithay::desktop::{
-    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+    layer_map_for_output, LayerSurface, PopupGrab, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
 use smithay::input::pointer::CursorImageStatus;
@@ -133,6 +133,9 @@ pub struct State {
 
     pub space: Space<Window>,
     pub popups: PopupManager,
+    /// The last popup grab that took the keyboard: a popup destroyed under it hands the keyboard
+    /// to the grab's current popup (`popup_destroyed`).
+    pub popup_grab: Option<PopupGrab<Self>>,
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
@@ -451,6 +454,7 @@ impl State {
             clock,
             space: Space::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),

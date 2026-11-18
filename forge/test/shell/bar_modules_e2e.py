@@ -27,6 +27,7 @@ from bar_e2e import (  # noqa: E402
     PID_FILE,
     PSS_LIMIT_KB,
     READY_FILE,
+    afresh,
     alive,
     buttons,
     check,
@@ -46,9 +47,22 @@ PASSWORDS = ["correct horse battery", "staple-9-orbit"]
 SECTIONS = []
 
 
+def serves_agent(bus, name):
+    """Whether the connection `name` serves the secret agent: the bar's other connection to
+    the system bus, GIO's for logind and the shield, serves no object there."""
+    try:
+        (xml,) = fx.call(
+            bus, name, SECRET_AGENT, "org.freedesktop.DBus.Introspectable", "Introspect", reply="(s)"
+        )
+    except GLib.Error:
+        return False
+    return "org.freedesktop.NetworkManager.SecretAgent" in xml
+
+
 def bar_name(bus, pid, seconds=10):
     """The bar's unique name on the private system bus: the connection whose process is
-    the bar. The modules connect after READY=1, so the name is waited for."""
+    the bar and that serves the models' agents. The modules connect after READY=1, so the
+    name is waited for."""
     deadline = time.monotonic() + seconds
     while True:
         (names,) = fx.call(
@@ -62,7 +76,7 @@ def bar_name(bus, pid, seconds=10):
                 bus, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
                 "GetConnectionUnixProcessID", "(s)", (name,), "(u)",
             )
-            if owner_pid == pid:
+            if owner_pid == pid and serves_agent(bus, name):
                 return name
         if time.monotonic() > deadline:
             return None
@@ -132,8 +146,12 @@ def showing_role(app, Atspi, role):
         for child in children(accessible):
             visit(child)
 
-    visit(app)
-    return found
+    def walk_once():
+        found.clear()
+        visit(app)
+        return found
+
+    return afresh(walk_once)
 
 
 def type_password(app, Atspi, password):
@@ -142,17 +160,11 @@ def type_password(app, Atspi, password):
     return bool(entries) and entries[0].set_text_contents(password)
 
 
-def described_by(accessible, Atspi):
-    """The names of the accessibles a DescribedBy relation of `accessible` points to."""
-    if accessible is None:
-        return []
-    names = []
-    for relation in accessible.get_relation_set():
-        if relation.get_relation_type() == Atspi.RelationType.DESCRIBED_BY:
-            for index in range(relation.get_n_targets()):
-                target = relation.get_target(index)
-                names.append(target.get_name() if target is not None else None)
-    return names
+def description(accessible):
+    """The accessible description of `accessible`. The bar's Pair carries the device, the
+    digits and the note in it, where GTK's pointed at the three labels with DescribedBy, a
+    relation AccessKit's AT-SPI bridge does not send."""
+    return None if accessible is None else accessible.get_description()
 
 
 def press_confirm(app, Atspi, name):
@@ -208,6 +220,15 @@ def property_of(bus, name, path, interface, prop):
     return value
 
 
+def press_again(lookup):
+    """Presses the first widget `lookup` finds. A Sal page reopens its popover when its rows
+    change, so the widget is looked up again, once the new popover shows it."""
+    wait_for(lambda: bool(lookup()), 5)
+    found = lookup()
+    if found:
+        found[0].do_action(0)
+
+
 def open_popover(app, Atspi, button, content):
     """Opens the module's popover unless `content` already shows."""
     if not content():
@@ -238,6 +259,21 @@ def network(ctx):
 
     check("the network module shows", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
     check("the bar registered its secret agent once", wait_for(lambda: registrations() == 1, 5))
+    # NetworkManager keeps one agent per ID and user: a second registrant is refused, and the
+    # bar's agent keeps answering the prompts below.
+    try:
+        fx.call(
+            bus, fx.NM, fx.NM_AGENT_MANAGER, "org.freedesktop.NetworkManager.AgentManager",
+            "RegisterWithCapabilities", "(su)", ("os.athanor.Bar", 0),
+        )
+        second, message = "", ""
+    except GLib.Error as err:
+        second = Gio.DBusError.get_remote_error(err) or ""
+        # PyGObject hands a copy of the error, so strip_remote_error cannot strip it.
+        message = err.message.removeprefix(f"GDBus.Error:{second}: ")
+    check("a second registration of the agent ID is refused", second == fx.NM_AGENT_HELD, second)
+    check("with NetworkManager's message", message == fx.NM_AGENT_HELD_MESSAGE, message)
+    check("and the bar's registration stands", registrations() == 1)
     check(
         "the network list opens with the connected network",
         open_popover(app, Atspi, "Network", lambda: buttons(app, Atspi, "Athanor Lab, connected")),
@@ -328,35 +364,60 @@ def network(ctx):
     check("a GetSecrets from another process is refused", refused)
     check("and opens no prompt", not prompt_open())
 
-    # Airplane mode is NetworkManager's two radio switches.
+    # Airplane mode is NetworkManager's two radio switches. A Sal switch is a toggle button,
+    # pressed when on.
     def airplane():
-        return labelled(app, Atspi, "check box", "Airplane mode")
+        return labelled(app, Atspi, "toggle button", "Airplane mode")
+
+    def airplane_on():
+        found = airplane()
+        return bool(found) and found[0].get_state_set().contains(Atspi.StateType.PRESSED)
 
     open_popover(app, Atspi, "Network", airplane)
     airplane()[0].do_action(0)
     check("airplane mode turns Wi-Fi and mobile broadband off", wait_for(
         lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is False
         and property_of(bus, fx.NM, NM_PATH, fx.NM, "WwanEnabled") is False, 5))
-    wait_for(lambda: airplane() and airplane()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
-    airplane()[0].do_action(0)
+    check("the airplane switch shows it on", wait_for(airplane_on, 5))
+    press_again(airplane)
     check("and back on", wait_for(lambda: property_of(bus, fx.NM, NM_PATH, fx.NM, "WirelessEnabled") is True, 5))
 
-    # The VPN switch activates the saved VPN profile.
-    vpn = labelled(app, Atspi, "check box", "Office VPN")
-    check("the VPN is listed", bool(vpn))
-    if vpn:
-        vpn[0].do_action(0)
+    # The VPN switch activates the saved VPN profile. Wi-Fi back on brings its networks back,
+    # and the page reopens its popover with them.
+    def vpn():
+        return labelled(app, Atspi, "toggle button", "Office VPN")
+
+    wait_for(lambda: bool(buttons(app, Atspi, "Home Network, secured")), 5)
+    check("the VPN is listed", wait_for(lambda: bool(vpn()), 5))
+    press_again(vpn)
     check("the VPN switch asks NetworkManager to activate the VPN", wait_for(
         lambda: any(str(args[0]).startswith(fx.NM_SETTINGS) and args[1] == "/"
                     for args in mock_calls(bus, fx.NM, NM_PATH, "ActivateConnection")), 5))
     press(app, Atspi, "Network")
 
-    # NetworkManager restarts: the module hides, comes back, and the agent registers again.
-    for pid in mock_pids(fx.NM_TEMPLATE):
-        os.kill(pid, signal.SIGTERM)
-    check("without NetworkManager the module hides", wait_for(lambda: not buttons(app, Atspi, "Network"), 10))
-    ctx.spawned.append(fx.networkmanager(bus))
-    check("NetworkManager back: the module shows again", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+    def restart(held=None):
+        for pid in mock_pids(fx.NM_TEMPLATE):
+            os.kill(pid, signal.SIGTERM)
+        check("without NetworkManager the module hides", wait_for(lambda: not buttons(app, Atspi, "Network"), 10))
+        ctx.spawned.append(fx.networkmanager(bus, held))
+        check("NetworkManager back: the module shows again", wait_for(lambda: buttons(app, Atspi, "Network"), 10))
+
+    # NetworkManager restarts with the agent ID held by another process of this user: the bar
+    # is refused, says so once and does not ask again.
+    client_log = Path("/out") / f"{os.environ['RIG_TAG']}-client.log"
+
+    def held_lines():
+        text = client_log.read_text(encoding="utf-8", errors="replace") if client_log.exists() else ""
+        return text.count("another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets")
+
+    before = held_lines()
+    restart(held=bus.get_unique_name())
+    check("the bar says once that another process holds its agent ID", wait_for(lambda: held_lines() == before + 1, 10))
+    time.sleep(3)  # longer than the first wait before another registration
+    check("and does not register again", registrations() == 0 and held_lines() == before + 1)
+
+    # NetworkManager restarts with the ID free: the module comes back and the agent registers.
+    restart()
     check("the agent registered with the new NetworkManager", wait_for(lambda: registrations() == 1, 10))
 
 
@@ -419,12 +480,17 @@ def bluetooth(ctx):
     check("an open popover discovers", wait_for(lambda: adapter("Discovering") is True, 5))
 
     def power():
-        return labelled(app, Atspi, "check box", "Bluetooth")
+        return labelled(app, Atspi, "toggle button", "Bluetooth")
+
+    def power_off():
+        # Read once: the page rebuilds its rows when the adapter turns off.
+        found = power()
+        return bool(found) and not found[0].get_state_set().contains(Atspi.StateType.PRESSED)
 
     power()[0].do_action(0)
     check("the switch turns the adapter off", wait_for(lambda: adapter("Powered") is False, 5))
-    wait_for(lambda: power() and not power()[0].get_state_set().contains(Atspi.StateType.CHECKED), 5)
-    power()[0].do_action(0)
+    check("the switch shows it off", wait_for(power_off, 5))
+    press_again(power)
     check("and on again", wait_for(lambda: adapter("Powered") is True, 5))
 
     # Requests the person did not start from the bar (maintainer decision D8): rejected by the
@@ -459,8 +525,8 @@ def bluetooth(ctx):
     check("another device's request during the pairing shows nothing", not labelled(app, Atspi, "label", str(fx.OTHER_PASSKEY)))
     check(
         "the Pair button is described by the device, the digits and the note",
-        described_by(confirm_button(app, Atspi, "Pair")[1], Atspi)
-        == ["Pair with Phone?", fx.PAIRING_CODE, "Pair only if Phone shows the same number."],
+        description(confirm_button(app, Atspi, "Pair")[1])
+        == f"Pair with Phone? {fx.PAIRING_CODE} Pair only if Phone shows the same number.",
     )
     check("Pair confirms", press_when_ready(app, Atspi, "Pair"))
     phone = device_path("Phone")
@@ -521,7 +587,7 @@ def audio(ctx):
         return found is not None and abs(found.get_current_value() - percent) < 1.0
 
     def switch(name):
-        found = labelled(app, Atspi, "check box", name)
+        found = labelled(app, Atspi, "toggle button", name)
         return found[0] if found else None
 
     def default_sink():
@@ -539,7 +605,7 @@ def audio(ctx):
 
     switch("Mute output").do_action(0)
     check("the mute switch mutes the sink", wait_for(lambda: "yes" in fx.pactl("get-sink-mute", "headphones"), 5))
-    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.CHECKED), 5)
+    wait_for(lambda: switch("Mute output").get_state_set().contains(Atspi.StateType.PRESSED), 5)
     switch("Mute output").do_action(0)
     check("and unmutes it", wait_for(lambda: "no" in fx.pactl("get-sink-mute", "headphones"), 5))
 
@@ -587,6 +653,11 @@ def battery(ctx):
         found = labelled(app, Atspi, "slider", "Screen brightness")
         return found[0] if found else None
 
+    def brightness_is(percent):
+        # One query of the accessibility tree: the slider can leave it between two.
+        slider = brightness()
+        return slider is not None and abs(slider.get_current_value() - percent) < 1.0
+
     def display_device(state, percent, to_empty, to_full, present):
         fx.call(
             bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
@@ -618,7 +689,7 @@ def battery(ctx):
 
     check(
         "the brightness slider shows the backlight's 60 %",
-        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+        brightness_is(60.0),
     )
     brightness().set_current_value(30.0)
     check(
@@ -631,7 +702,7 @@ def battery(ctx):
     brightness().set_current_value(5.0)
     check(
         "a refused brightness puts the slider back",
-        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+        wait_for(lambda: brightness_is(30.0), 5),
     )
     check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
 
