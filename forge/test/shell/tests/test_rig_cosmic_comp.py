@@ -4,11 +4,14 @@ another. rig.sh and the forge's scripts run in a copy of the tree, against a pod
 that record their arguments and answer as the test says
 (python3 -B -m unittest discover -s forge/test/shell/tests -v)."""
 
+import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 import textwrap
 import unittest
 from pathlib import Path
@@ -23,6 +26,7 @@ COPIED = (
     "forge/scripts/check_idempotency.sh",
     "forge/scripts/registry_probe.sh",
     "forge/scripts/verify_image.sh",
+    "forge/scripts/builder_image.sh",
     "system/tier-digests.sh",
     "system/Containerfile",
 )
@@ -42,6 +46,10 @@ RUNNER_ENV = (
 )
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
+# The config file of the builder archive the nix of the tests builds; podman takes its digest for
+# the image ID of a docker archive.
+BUILDER_CONFIG = b'{"architecture":"amd64"}'
+LOCAL_BUILDER_ID = hashlib.sha256(BUILDER_CONFIG).hexdigest()
 
 # The podman of the tests: `run ... rpm -q` answers the Version-Release of the image it names,
 # `run ... build_spec.sh build` leaves the RPM the test names in the checkout's forge/RPMS, and
@@ -59,6 +67,14 @@ PODMAN = textwrap.dedent(
         log.write(json.dumps(args) + "\\n")
     if args[0] == "volume" and args[1] == "create":
         print("home")
+    elif args[0] == "load":
+        if (tmp / "load-hangs").exists():
+            import time
+            time.sleep(60)
+        if (tmp / "load-fails").exists():
+            print("Error: payload does not match", file=sys.stderr)
+            sys.exit(125)
+        print("Loaded image: localhost/athanor-builder:latest")
     elif args[:2] == ["image", "exists"]:
         sys.exit(1 if args[2] in conf["absent"] else 0)
     elif args[:2] == ["image", "inspect"]:
@@ -90,6 +106,7 @@ SKOPEO = textwrap.dedent(
     """\
     #!/bin/sh
     here=$(dirname "$0")/..
+    echo "$*" >> "$here/skopeo.log"
     if [ ! -e "$here/builder-absent" ]; then
         case " $* " in
         *" --config "*) printf '{"config":{"Labels":{"tier.content.sha256":"%s"}}}\\n' "$(cat "$here/builder-hash")" ;;
@@ -107,12 +124,39 @@ SKOPEO = textwrap.dedent(
 COSIGN = textwrap.dedent(
     """\
     #!/bin/sh
+    echo "$*" >> "$(dirname "$0")/../cosign.log"
     if [ -e "$(dirname "$0")/../builder-unsigned" ]; then
         echo "Error: no signatures found" >&2
         exit 1
     fi
     """
 )
+
+
+# The nix of the tests: `nix build ... --print-out-paths <root>#builderImage` answers the path of
+# an image archive. Every call is logged as a JSON list.
+NIX = textwrap.dedent(
+    """\
+    #!/usr/bin/env python3
+    import io, json, pathlib, sys, tarfile
+    tmp = pathlib.Path(__file__).resolve().parents[1]
+    with open(tmp / "nix.log", "a") as log:
+        log.write(json.dumps(sys.argv[1:]) + "\\n")
+    if (tmp / "nix-fails").exists():
+        print("error: builderImage does not build", file=sys.stderr)
+        sys.exit(1)
+    # A docker archive: manifest.json names the config file, whose digest is the image ID.
+    config = __CONFIG__
+    archive = tmp / "builder-image.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        for name, body in (("manifest.json", json.dumps([{"Config": "config.json"}]).encode()),
+                           ("config.json", config)):
+            info = tarfile.TarInfo(name)
+            info.size = len(body)
+            tar.addfile(info, io.BytesIO(body))
+    print(archive)
+    """
+).replace("__CONFIG__", repr(BUILDER_CONFIG))
 
 
 def spec(release):
@@ -137,6 +181,7 @@ class Rig:
         derived_nevr=SPEC,
         builder=True,
         signed=True,
+        nix=True,
     ):
         self.tmp = tmp
         self.tree = tmp / "tree"
@@ -153,9 +198,13 @@ class Rig:
         )
         bin_dir = tmp / "bin"
         bin_dir.mkdir()
-        for name, body in (("podman", PODMAN), ("skopeo", SKOPEO), ("cosign", COSIGN)):
+        tools = [("podman", PODMAN), ("skopeo", SKOPEO), ("cosign", COSIGN)]
+        if nix:
+            tools.append(("nix", NIX))
+        for name, body in tools:
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
+        self.nix = nix
         if not builder:
             (tmp / "builder-absent").write_text("")
         if not signed:
@@ -173,7 +222,7 @@ class Rig:
             json.dumps(
                 {
                     "derived_id": DERIVED_ID,
-                    "ids": {self.base: BASE_ID},
+                    "ids": {self.base: BASE_ID, LOCAL_BUILDER_ID: LOCAL_BUILDER_ID},
                     "absent": [],
                     "rpm": rpm,
                     "nevr": {
@@ -196,7 +245,7 @@ class Rig:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(spec(release))
 
-    def run(self, *args):
+    def environment(self):
         # A pull request into a rebase/* branch sets GITHUB_BASE_REF, which makes tier-digests.sh
         # read that branch's rules over the network: the tests answer the registry through their
         # own skopeo and cosign, so nothing of the runner's environment may reach them.
@@ -205,22 +254,42 @@ class Rig:
             for k, v in os.environ.items()
             if not k.startswith("ATHANOR_") and k not in RUNNER_ENV
         }
+        path = env["PATH"]
+        if not self.nix:
+            # The host's PATH without any nix: a symlink to every other tool it offers.
+            host = self.tmp / "host-bin"
+            if not host.exists():
+                host.mkdir()
+                for directory in path.split(":"):
+                    for tool in Path(directory).glob("*") if Path(directory).is_dir() else ():
+                        if tool.name != "nix" and not os.path.lexists(host / tool.name):
+                            (host / tool.name).symlink_to(tool)
+            path = str(host)
         env.update(
-            PATH=f"{self.tmp / 'bin'}:{env['PATH']}",
+            PATH=f"{self.tmp / 'bin'}:{path}",
             ATHANOR_RIG_OUT=str(self.out),
             HOME=str(self.tmp),
             RETRY_ATTEMPTS="1",
         )
+        return env
+
+    def run(self, *args):
         return subprocess.run(
             ["bash", str(self.tree / "forge/test/shell/rig.sh"), *args],
             capture_output=True,
             text=True,
-            env=env,
+            env=self.environment(),
             check=False,
         )
 
     def calls(self):
         log = self.tmp / "podman.log"
+        if not log.exists():
+            return []
+        return [json.loads(line) for line in log.read_text().splitlines()]
+
+    def nix_calls(self):
+        log = self.tmp / "nix.log"
         if not log.exists():
             return []
         return [json.loads(line) for line in log.read_text().splitlines()]
@@ -369,26 +438,113 @@ class CosmicCompVersion(unittest.TestCase):
             result.stderr,
         )
 
-    def test_an_unpublished_builder_fails_before_any_build(self):
+    def assert_built_in_local_builder(self, rig, result):
+        """The miss path: the checkout's builder is built and loaded here, and nothing leaves."""
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("unsigned, for this test only", result.stderr)
+        calls = rig.calls()
+        self.assertEqual(len(rig.nix_calls()), 1)
+        self.assertIn("builderImage", rig.nix_calls()[0][-1])
+        self.assertIn(["load", "-i", str(rig.out / "builder-local/athanor-builder.tar.gz")], calls)
+        stages = [call for call in calls if "scripts/build_spec.sh" in call]
+        self.assertEqual([call[-2] for call in stages], ["fetch", "build"])
+        # The spec builds in the image podman loaded; nothing is pulled, tagged or pushed, and the
+        # builder is never signed or copied.
+        # The spec builds in the image by its ID, not by the name load applied.
+        self.assertEqual(stages[0][-5], LOCAL_BUILDER_ID)
+        self.assertIn(
+            ["image", "inspect", "--format", "{{.Id}}", LOCAL_BUILDER_ID], calls
+        )
+        # No podman call of any form pushes, tags, logs in or touches a manifest.
+        self.assertFalse(
+            [c for c in calls if {"push", "tag", "login", "manifest"} & set(c)]
+        )
+        self.assertFalse([c for c in calls if c[0] == "pull" and "athanor-builder" in c[-1]])
+        # Nor does skopeo copy the builder, or cosign sign or attest it.
+        for log, forbidden in (("skopeo.log", "copy"), ("cosign.log", "sign"), ("cosign.log", "attest")):
+            path = rig.tmp / log
+            lines = path.read_text().splitlines() if path.exists() else []
+            words = {w for line in lines for w in line.split()}
+            self.assertNotIn(forbidden, words, log)
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_an_unpublished_builder_is_built_here_and_used_unpushed(self):
         rig = Rig(self.tmp, builder=False)
-        result = rig.run("cosmic-comp-version")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("is not published", result.stderr)
-        self.assertFalse(rig.built())
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
 
-    def test_an_unsigned_builder_fails_before_any_build(self):
+    def test_an_unsigned_builder_is_built_here_and_used_unpushed(self):
         rig = Rig(self.tmp, signed=False)
-        result = rig.run("cosmic-comp-version")
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
-        self.assertFalse(rig.built())
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
 
-    def test_a_builder_labelled_with_another_hash_fails_before_any_build(self):
+    def test_a_builder_labelled_with_another_hash_is_built_here(self):
         rig = Rig(self.tmp)
         (self.tmp / "builder-hash").write_text("0" * 64)
+        self.assert_built_in_local_builder(rig, rig.run("cosmic-comp-version"))
+
+    def test_a_signed_builder_is_pulled_by_digest_and_nix_never_runs(self):
+        rig = Rig(self.tmp)
+        self.assertEqual(rig.run("cosmic-comp-version").returncode, 0)
+        self.assertEqual(rig.nix_calls(), [])
+        self.assertFalse([c for c in rig.calls() if c[0] == "load"])
+
+    def test_a_builder_that_does_not_build_fails_before_any_spec_build(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "nix-fails").write_text("")
         result = rig.run("cosmic-comp-version")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("not signed by a trusted run of call-build-builder.yml", result.stderr)
+        self.assertIn("builderImage does not build", result.stderr)
+        self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_builder_that_does_not_load_fails_before_any_spec_build(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "nix-fails").unlink(missing_ok=True)
+        (self.tmp / "load-fails").write_text("")
+        result = rig.run("cosmic-comp-version")
+        # podman's own exit status, not a flattened 1.
+        self.assertEqual(result.returncode, 125)
+        self.assertIn("payload does not match", result.stderr)
+        self.assertIn("could not be built or loaded", result.stderr)
+        self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_load_that_leaves_no_image_of_the_archives_id_fails(self):
+        rig = Rig(self.tmp, signed=False)
+        # The load answers, but the image of the archive's config digest is not there.
+        rig.configure(ids={rig.base: BASE_ID})
+        result = rig.run("cosmic-comp-version")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("could not be built or loaded", result.stderr)
+        self.assertFalse(rig.built())
+        self.assertFalse((rig.out / "builder-local/athanor-builder.tar.gz").exists())
+
+    def test_a_signal_during_the_load_removes_the_archive(self):
+        rig = Rig(self.tmp, signed=False)
+        (self.tmp / "load-hangs").write_text("")
+        proc = subprocess.Popen(
+            ["bash", str(rig.tree / "forge/test/shell/rig.sh"), "cosmic-comp-version"],
+            env=rig.environment(),
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        archive = rig.out / "builder-local/athanor-builder.tar.gz"
+        for _ in range(100):
+            if any(call[0] == "load" for call in rig.calls()):
+                break
+            time.sleep(0.1)
+        self.assertTrue(archive.exists())
+        os.killpg(proc.pid, signal.SIGTERM)
+        _, stderr = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 143, stderr)
+        self.assertFalse(archive.exists())
+
+    def test_a_miss_without_nix_refuses_with_a_message(self):
+        rig = Rig(self.tmp, signed=False, nix=False)
+        result = rig.run("cosmic-comp-version")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nix, which builds it here, is not on PATH", result.stderr)
         self.assertFalse(rig.built())
 
     def test_an_unreadable_spec_fails_before_the_rig_runs(self):
