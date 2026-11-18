@@ -5,6 +5,7 @@
 use super::*;
 use crate::bindings::Action;
 use crate::look::holds_pass;
+use super::marks::{belled, hidden, outlined, ring, settled, widened};
 use crate::screen_filter::{filter_text, parse_filter, Movement, ScreenFilter};
 use athanor_a11y::athanor_a11y_manager_v1::{self, ActiveState, AthanorA11yManagerV1, Filter};
 use smithay::backend::renderer::gles::GlesRenderer;
@@ -59,6 +60,11 @@ const AT_BIND: [Seen; 3] = [
 
 /// `local`'s manager, and its events once the first roundtrip has brought them.
 fn manager(local: &mut Local, run: &mut Running) -> (AthanorA11yManagerV1, Log) {
+    manager_at(local, run, 1)
+}
+
+/// The same, bound at `version`.
+fn manager_at(local: &mut Local, run: &mut Running, version: u32) -> (AthanorA11yManagerV1, Log) {
     let name = local
         .client
         .globals
@@ -69,7 +75,7 @@ fn manager(local: &mut Local, run: &mut Running) -> (AthanorA11yManagerV1, Log) 
     let log = Log::default();
     let manager = local
         .registry
-        .bind(name, 1, &local.queue.handle(), log.clone());
+        .bind(name, version, &local.queue.handle(), log.clone());
     local.roundtrip(run);
     (manager, log)
 }
@@ -1089,5 +1095,49 @@ fn no_modifiers_are_sent_while_locked() {
         AT_BIND[..2],
         "the magnifier and the filter only"
     );
+    run.stop();
+}
+
+/// The reduced-motion request of version 2 (AX9) is the only source of the bell's state: a bar
+/// that sends it makes the next bell widen the outline instead of hiding it, and one that
+/// sends it disabled makes the bell blink again.
+#[test]
+fn the_reduced_motion_request_stops_the_bell_blinking() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let (manager, _log) = manager_at(&mut local, &mut run, 2);
+    assert!(!run.state.bell.reduced_motion, "false until a client sends it");
+    manager.set_reduced_motion(ActiveState::Enabled);
+    local.roundtrip(&mut run);
+    assert!(run.state.bell.reduced_motion);
+    ring(&mut run, &mut local, true);
+    let shown = super::marks::frame(&mut run);
+    assert!(outlined(&shown) && widened(&shown), "twice as wide, never hidden");
+    settled(&mut run, "back to its width", |shown| {
+        assert!(outlined(shown), "never hidden");
+        !widened(shown)
+    });
+    manager.set_reduced_motion(ActiveState::Disabled);
+    local.roundtrip(&mut run);
+    let rung = run.state.bell.rung.expect("an honoured bell");
+    run.state.bell.rung = Some(rung.checked_sub(crate::bell::GAP).expect("an earlier instant"));
+    ring(&mut run, &mut local, true);
+    assert!(hidden(&super::marks::frame(&mut run)), "blinks again");
+    run.stop();
+}
+
+/// A client bound at version 1 works as before and leaves the state false, so the bell blinks.
+#[test]
+fn a_version_1_client_leaves_the_bell_blinking() {
+    let mut run = Running::start(None);
+    let (mut local, _toplevel) = belled(&mut run);
+    let (manager, log) = manager_at(&mut local, &mut run, 1);
+    assert_eq!(manager.version(), 1);
+    assert_eq!(taken(&log), AT_BIND.to_vec(), "the events of version 1");
+    manager.set_magnifier(ActiveState::Enabled);
+    local.roundtrip(&mut run);
+    assert!(!run.state.bell.reduced_motion);
+    ring(&mut run, &mut local, true);
+    assert!(hidden(&super::marks::frame(&mut run)), "hidden: it blinks");
     run.stop();
 }
