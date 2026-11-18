@@ -1515,7 +1515,7 @@ compositor and that the own compositor did not yet offer:
         - held input, per context. The keys, buttons and touches held through EIS are tracked
           for each EIS context, by context and device, since Smithay's device id is unique only
           within one connection. Releasing the held input of one context touches no other
-          context's, and none of the seat's physical keys, buttons and touches. An injected
+          context's, and none of the seat's keys, buttons and touches. An injected
           press of a key or button the seat or another context holds is dropped with its
           release, since the client keeps one set of held keys and buttons: it never sees a
           second press without a release between, and one source's release never lets go for
@@ -1574,7 +1574,7 @@ compositor and that the own compositor did not yet offer:
           injected key is dropped, its release included, while the keyboard focus is such a
           surface; an injected button, scroll or touch aimed at such a surface is dropped; and
           an injected motion never gives it the pointer focus. So a session cannot Tab through
-          the consent dialog of a second session and widen its own grant. The hardware's input
+          the consent dialog of a second session and widen its own grant. The seat's input
           is not affected;
         - the indicator. While a session's EIS context is open, the bar shows the indicator
           of `doc_bar.md` BR3, fed by `InputSessions` of `os.athanor.Portal1`
@@ -1637,7 +1637,7 @@ compositor and that the own compositor did not yet offer:
             while an injected modifier is held;
           - the backend's dialogs: an injected key, button, scroll and touch each reach no
             surface of `xdg-desktop-portal-athanor`, the consent dialog included, and an
-            injected motion gives it no pointer focus, while the hardware's input reaches it
+            injected motion gives it no pointer focus, while the seat's input reaches it
             and the same input reaches another client; a client outside a security context
             whose identity cannot be read gets no injected key, while a confined client gets
             it;
