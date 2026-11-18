@@ -30,7 +30,7 @@ from pathlib import Path
 from atspi_check import INTERACTIVE
 from cases import GALLERY_PAGES
 from golden_report import exemptions
-from orca_compare import switch_labels
+from orca_compare import GTK_ARROWS, GTK_ARROWS_NOTE, switch_labels, toolkit_arrows
 
 # States that tell when the tree was read, not what the widget is: which widget holds the focus
 # and whether the window is the active one depend on the compositor's timing.
@@ -114,7 +114,9 @@ INDICATOR_PAGES = {"lists"}
 # same position: the k-th unnamed button of the reference, the k-th named button of the
 # transcript that no element of the reference names. The rule holds only for the references it
 # names, and for the gallery's calendar page, which shows the same two calendars, so that an
-# unnamed button anywhere else still fails as missing.
+# unnamed button anywhere else still fails as missing. On the same references and pages, a button
+# that GTK 4.24 names in English (orca_compare.py's GTK_ARROWS) matches the toolkit's same arrow,
+# by its text in the gallery's strings.tsv (maintainer, 2026-11-18, #1210).
 ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
 ARROWS_REFERENCES = {"atspi-bar-calendar", "atspi-bar-calendar-it"}
 ARROWS_PAGES = {"calendar"}
@@ -230,12 +232,24 @@ def same_role(a, b):
 
 def arrow_counterparts(reference, candidates):
     """The ARROWS rule: the id of each unnamed button of the reference, mapped to the named
-    button of `candidates` at its position among those no element of the reference names."""
+    button of `candidates` at its position among those no element of the reference names, and of
+    each button GTK 4.24 names in English, mapped to the toolkit's same arrow."""
     names = {ref["name"] for ref in reference}
     unnamed = [ref for ref in reference if same_role(ref["role"], "button") and not ref["name"]]
     named = [node for node in candidates
              if same_role(node["role"], "button") and node["name"] and node["name"] not in names]
-    return {id(ref): node for ref, node in zip(unnamed, named)}
+    counterparts = {id(ref): node for ref, node in zip(unnamed, named)}
+    # GTK 4.24's English arrows, each the toolkit's same arrow, in order, one node for one arrow.
+    taken = {id(node) for node in counterparts.values()}
+    for ref in reference:
+        if same_role(ref["role"], "button") and ref["name"] in GTK_ARROWS:
+            texts = toolkit_arrows(ref["name"])
+            arrow = next((node for node in candidates if id(node) not in taken
+                          and same_role(node["role"], "button") and node["name"] in texts), None)
+            if arrow is not None:
+                counterparts[id(ref)] = arrow
+                taken.add(id(arrow))
+    return counterparts
 
 
 def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
@@ -293,7 +307,7 @@ def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
         candidates.remove(match)
         problems, notes = [], []
         if id(ref) in counterparts:
-            notes.append(f"named {match['name']!r}: {ARROWS}")
+            notes.append(f"named {match['name']!r}: {GTK_ARROWS_NOTE if ref['name'] else ARROWS}")
         if not (
             same_role(match["role"], ref["role"])
             or gallery_switch(ref["role"], match["role"], ref["name"])

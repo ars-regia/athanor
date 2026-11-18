@@ -205,6 +205,50 @@ class CompareTest(unittest.TestCase):
             ["'button.': missing"],
         )
 
+    def test_gtk_4_24s_english_arrows_are_heard_by_the_toolkits_same_arrow(self):
+        # GTK 4.24 names its arrows in English in every walk; the toolkit in the walk's language.
+        for lang, reference, transcript in (
+            (
+                "en",
+                ["Previous Month button", "tab", "Next Year button"],
+                ["Calendar panel", "Previous month button", "tab", "Next year button"],
+            ),
+            (
+                "it",
+                ["Previous Month pulsante", "tabulazione", "Next Year pulsante"],
+                ["Calendario pannello", "Mese precedente pulsante", "tabulazione",
+                 "Anno successivo pulsante"],
+            ),
+        ):
+            with self.subTest(lang=lang):
+                # main() names the language only for the own compositor's walks, so the rule
+                # reads the role word of the line itself.
+                for named in (lang, "en"):
+                    lines, failures = compare.compare(reference, transcript, lang=named, arrows=True)
+                    self.assertEqual(failures, [])
+                    self.assertIn(f"as {transcript[1]!r}; note: {compare.GTK_ARROWS_NOTE}", lines[0])
+                # Outside the calendar's references the English name must be said as it is.
+                self.assertEqual(
+                    compare.compare(reference, transcript, lang=lang)[1],
+                    [f"{reference[0]!r}: missing", f"{reference[2]!r}: missing"],
+                )
+        # Another arrow's name, another button's, or no arrow, still fails.
+        for transcript in (
+            ["Next month button"],
+            ["OK button"],
+            ["Calendar panel"],
+        ):
+            with self.subTest(transcript=transcript):
+                self.assertEqual(
+                    compare.compare(["Previous Month button"], transcript, arrows=True)[1],
+                    ["'Previous Month button': missing"],
+                )
+        # A name GTK does not give an arrow is not one.
+        self.assertEqual(
+            compare.compare(["Previous Week button"], ["Previous month button"], arrows=True)[1],
+            ["'Previous Week button': missing"],
+        )
+
     def test_the_switches_of_the_bar_are_heard_as_switches_in_both_languages(self):
         for reference, heard in (
             ("Tile windows off switch", "Tile windows toggle button not pressed"),

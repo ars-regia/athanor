@@ -167,6 +167,28 @@ KEY_ECHOES = {"space", "tab", "spazio", "tabulazione"}
 ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
 ARROWS_REFERENCES = {"orca-bar-calendar", "orca-bar-calendar-it", "orca-gallery", "orca-gallery-it"}
 UNNAMED_BUTTON = "button."
+# GTK 4.24's calendar names its arrows in English, untranslated in every language's walk, where the
+# toolkit says its own CalendarText, the gallery's strings.tsv. The maintainer extended the ARROWS
+# rule on 2026-11-18 (#1210), next to #1122's: in the same references, and on the same pages of
+# atspi_compare.py, a GTK arrow of one of these names is spoken by the toolkit's same arrow, by its
+# text in the strings' languages. Another name, another arrow's or none, still fails.
+GTK_ARROWS = {
+    "Previous Month": "calendar.previous-month",
+    "Next Month": "calendar.next-month",
+    "Previous Year": "calendar.previous-year",
+    "Next Year": "calendar.next-year",
+}
+GTK_ARROWS_NOTE = (
+    "GTK 4.24 names the calendar's arrows in English, the toolkit in the session's language"
+    " (maintainer, 2026-11-18, #1210)"
+)
+
+
+def toolkit_arrows(name):
+    """The toolkit's texts, every language, of the calendar arrow that GTK 4.24 names `name`;
+    none for any other name."""
+    key = GTK_ARROWS.get(name)
+    return gallery_labels(key) if key else []
 
 
 def heard_as(utterance):
@@ -249,6 +271,15 @@ def compare(reference, transcript, exempt=None, lang="en", arrows=False):
             said = next((line for line in named if line not in reference), None)
             if said is not None:
                 lines.append(f"{utterance!r}: spoken as {said!r}; note: {ARROWS}")
+                continue
+        # The arrow's line ends in the button's role word of the walk's language.
+        word = next((word for word in BUTTON.values() if utterance.endswith(f" {word}")), None)
+        if said is None and arrows and word is not None:
+            name = utterance.removesuffix(f" {word}")
+            heard = (f"{text} {word}" for text in toolkit_arrows(name))
+            said = next((line for line in heard if line in spoken), None)
+            if said is not None:
+                lines.append(f"{utterance!r}: spoken as {said!r}; note: {GTK_ARROWS_NOTE}")
                 continue
         if said is None and returns.get(utterance) in follows:
             said = returns[utterance][1]
