@@ -54,6 +54,7 @@ pub fn start(
     }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
+    crate::eis::start(&event_loop.handle());
     state.map_output(&output);
     state.dmabuf_state.create_global::<State>(&dh, formats);
     report_frame_times(event_loop, &mut state)?;

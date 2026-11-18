@@ -412,8 +412,13 @@ struct Client {
     /// The serial of the last `wl_pointer.enter` the client was sent.
     pointer_enter: Option<u32>,
     pointer_motions: u32,
+    /// The `wl_pointer.axis` events the client was sent.
+    axes: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
+    /// Each key and button event the client was sent, in order: its code, and whether it was a
+    /// press.
+    input: Vec<(u32, bool)>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
     toplevel_states: Vec<(ObjectId, StateEvent)>,
     /// The token of the last xdg_activation_v1 token done.
@@ -803,12 +808,16 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             } => {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
+                client.input.push((key, true));
             }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
-            } => client.released.push(key),
+            } => {
+                client.released.push(key);
+                client.input.push((key, false));
+            }
             wl_keyboard::Event::Enter { surface, keys, .. } => {
                 client.keyboard_entered.push(surface.id().protocol_id());
                 let (keys, _) = keys.as_chunks::<4>();
@@ -847,11 +856,21 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         match event {
             wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
             wl_pointer::Event::Motion { .. } => client.pointer_motions += 1,
+            wl_pointer::Event::Axis { .. } => client.axes += 1,
             wl_pointer::Event::Button {
                 serial,
+                button,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
                 ..
-            } => client.button = Some(serial),
+            } => {
+                client.button = Some(serial);
+                client.input.push((button, true));
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: WEnum::Value(wl_pointer::ButtonState::Released),
+                ..
+            } => client.input.push((button, false)),
             _ => {}
         }
     }
@@ -1384,8 +1403,12 @@ struct Fake(
 );
 
 impl Process for Fake {
+    /// An empty executable cannot be read, as a process that exits while it is read.
     fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.0.lock().expect("identity").0.into())
+        match self.0.lock().expect("identity").0 {
+            "" => Err(std::io::ErrorKind::NotFound.into()),
+            executable => Ok(executable.into()),
+        }
     }
     fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
         self.2.fetch_add(1, Ordering::SeqCst);
@@ -13662,6 +13685,9 @@ mod touch;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod eis;
 
 #[cfg(test)]
 mod aids;
