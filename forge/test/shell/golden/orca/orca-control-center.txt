@@ -108,16 +108,16 @@ Control center 3 h 25 min left panel
 Back button
 Power mode panel
 Power mode
-Power saver not selected radio button
-tab
-Power mode
 Balanced selected radio button
-tab
-Power mode
-Performance not selected radio button
 tab
 Screen brightness horizontal slider 60 59 percent.
 tab
 Back button
+tab
+Power mode panel
+Power mode
+Balanced selected radio button
+tab
+Screen brightness horizontal slider 60 59 percent.
 tab
 Screen reader off.

@@ -108,16 +108,16 @@ Centro di controllo 3 h 25 min rimanenti Luminosità dello schermo pannello
 Indietro pulsante
 Modalità di alimentazione pannello
 Modalità di alimentazione
-Risparmio energetico non selezionato pulsante radio
-tabulazione
-Modalità di alimentazione
 Bilanciato selezionato pulsante radio
-tabulazione
-Modalità di alimentazione
-Prestazioni non selezionato pulsante radio
 tabulazione
 Luminosità dello schermo controllo scorrevole orizzontale 60 59 percento.
 tabulazione
 Indietro pulsante
+tabulazione
+Modalità di alimentazione pannello
+Modalità di alimentazione
+Bilanciato selezionato pulsante radio
+tabulazione
+Luminosità dello schermo controllo scorrevole orizzontale 60 59 percento.
 tabulazione
 Lettore schermo disattivato.
