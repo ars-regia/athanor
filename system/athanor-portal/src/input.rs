@@ -21,7 +21,7 @@ use zbus::object_server::{ObjectServer, SignalEmitter};
 use zbus::{ObjectPath, OwnedFd};
 use zbus::{OwnedVariant as OwnedValue, Variant as Value};
 
-use crate::eis::{Eis, Identity};
+use crate::eis::{Eis, Identity, Refused};
 use crate::remote_desktop::{self, display_name, holds_context, Answer, Sessions, Stage, Ticket};
 
 /// The private interface's name and object (PT10).
@@ -322,9 +322,11 @@ impl<H: Host> RemoteDesktop<H> {
             types,
         };
         let given = tokio::select! {
-            given = self.0.host.consent(ask) => given,
-            // A sender dropped with its session also dismisses the dialog.
+            // Polled first, so that a session closed during the owner check never maps a
+            // dialog. A sender dropped with its session also dismisses the dialog.
+            biased;
             _ = dismissed.wait_for(|dismissed| *dismissed) => Answer::Refused,
+            given = self.0.host.consent(ask) => given,
         };
         if let Err(error) = server.remove::<Request<H>, _>(&handle).await {
             tracing::error!(%error, %handle, "the request's object was not removed");
@@ -381,6 +383,18 @@ impl<H: Host> RemoteDesktop<H> {
             }
             Err(why) => {
                 tracing::warn!(%why, %session_handle, "no EIS file descriptor");
+                // A compositor that gave no answer may hold a context all the same. It is closed
+                // while this spent session still holds the handle, so that no later session's
+                // context is revoked; a session ended meanwhile had its close send it.
+                let spent = matches!(
+                    self.0.sessions().current(&session_handle),
+                    Some((Stage::Spent, now)) if now == ticket
+                );
+                if spent && matches!(why, Refused::Unanswered(_)) {
+                    if let Err(why) = self.0.eis.close(&session_handle).await {
+                        tracing::error!(%why, %session_handle, "the compositor was not asked to close the context of an unanswered ConnectToEIS");
+                    }
+                }
                 Err(fdo::Error::Failed(why.to_string()))
             }
         }
@@ -1039,6 +1053,52 @@ mod tests {
             [Call::Connect(session(1).to_string(), POINTER)],
             "nothing to close"
         );
+    }
+
+    /// A compositor that does not answer `ConnectToEIS` in time may still open the context: the
+    /// spent session asks it to close that context, once.
+    #[tokio::test]
+    async fn input_an_unanswered_connect_to_eis_closes_the_context_it_may_have_opened() {
+        let rd = rd("unanswered", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        rd.create(1).await;
+        rd.start(1).await;
+        rd.hold.store(true, Ordering::SeqCst);
+        assert!(rd.connect(1).await.is_err(), "no fd after the timeout");
+        rd.release.notify_one();
+        assert!(rd.connect(1).await.is_err(), "no second attempt");
+        assert!(rd.listed().await.is_empty());
+        rd.close(1).await.expect("Close");
+        assert_eq!(
+            rd.calls(),
+            [
+                Call::Connect(session(1).to_string(), KEYBOARD),
+                Call::Close(session(1).to_string())
+            ],
+            "one CloseSession, from the unanswered ConnectToEIS"
+        );
+    }
+
+    /// The owner of `os.athanor.Eis` changes between `Start` and `ConnectToEIS`: nothing is sent,
+    /// the session is spent (PT15), and the compositor's return does not revive it.
+    #[tokio::test]
+    async fn input_a_connect_to_eis_whose_owner_check_fails_spends_the_session() {
+        let rd = rd("ownerlost", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        rd.create(1).await;
+        assert_eq!(rd.start(1).await.0, 0, "granted");
+        assert!(rd
+            .compositor
+            .release_name(crate::eis::NAME)
+            .await
+            .expect("release"));
+        assert!(rd.connect(1).await.is_err(), "no owner");
+        rd.compositor
+            .request_name(crate::eis::NAME)
+            .await
+            .expect("the compositor again");
+        assert!(rd.connect(1).await.is_err(), "spent");
+        assert!(rd.listed().await.is_empty());
+        rd.close(1).await.expect("Close");
+        assert!(rd.calls().is_empty(), "nothing is sent to a stranger");
     }
 
     #[tokio::test]

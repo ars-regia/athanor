@@ -144,8 +144,11 @@ impl Identity for OnBus {
 pub enum Refused {
     /// The owner of [`NAME`] is not the compositor: nothing was sent.
     NotCompositor(String),
-    /// The compositor answered with an error, or did not answer in time.
+    /// The compositor answered with an error: it holds no context for the call.
     Compositor(String),
+    /// The compositor gave no answer in time, the call failed on the way, or the answer held
+    /// no file descriptor: it may hold a context for the session all the same.
+    Unanswered(String),
 }
 
 impl std::fmt::Display for Refused {
@@ -153,7 +156,24 @@ impl std::fmt::Display for Refused {
         match self {
             Refused::NotCompositor(why) => write!(f, "{NAME} is not the compositor's: {why}"),
             Refused::Compositor(why) => write!(f, "the compositor refused: {why}"),
+            Refused::Unanswered(why) => write!(f, "the compositor gave no answer: {why}"),
         }
+    }
+}
+
+/// Whether `e` is the compositor's own error answer, after which it holds no context for the
+/// call, rather than the bus's word that no answer came.
+fn answered(e: &zbus::Error) -> bool {
+    match e {
+        zbus::Error::MethodError(..) => true,
+        zbus::Error::FDO(e) => !matches!(
+            **e,
+            zbus::fdo::Error::NoReply(_)
+                | zbus::fdo::Error::Timeout(_)
+                | zbus::fdo::Error::TimedOut(_)
+                | zbus::fdo::Error::Disconnected(_)
+        ),
+        _ => false,
     }
 }
 
@@ -186,8 +206,9 @@ impl<I: Identity> Eis<I> {
             .call_method(Some(owner.as_str()), PATH, Some(INTERFACE), member, body);
         match tokio::time::timeout(ASK, call).await {
             Ok(Ok(reply)) => Ok(reply),
-            Ok(Err(e)) => Err(Refused::Compositor(e.to_string())),
-            Err(_) => Err(Refused::Compositor(format!(
+            Ok(Err(e)) if answered(&e) => Err(Refused::Compositor(e.to_string())),
+            Ok(Err(e)) => Err(Refused::Unanswered(e.to_string())),
+            Err(_) => Err(Refused::Unanswered(format!(
                 "{member} was not answered in time"
             ))),
         }
@@ -199,7 +220,7 @@ impl<I: Identity> Eis<I> {
         let fd: zbus::OwnedFd = reply
             .body()
             .deserialize()
-            .map_err(|e| Refused::Compositor(format!("ConnectToEIS answered no fd: {e}")))?;
+            .map_err(|e| Refused::Unanswered(format!("ConnectToEIS answered no fd: {e}")))?;
         Ok(fd.into())
     }
 
