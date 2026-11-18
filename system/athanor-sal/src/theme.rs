@@ -26,9 +26,11 @@ pub struct Theme {
     pub text: Rgba,
     /// The colour of the active toggle and of the primary marks.
     pub accent: Rgba,
-    /// Text and marks drawn on the accent, and the sheet of what holds content: text fields,
-    /// lists and the rows they fill, a slider's knob.
+    /// Text and marks drawn on the accent, and a slider's knob.
     pub on_accent: Rgba,
+    /// The sheet of what holds content: text fields, lists and the rows they fill, as GTK's
+    /// `view_bg_color`. A dark variant sets it dark, under its light text.
+    pub view: Rgba,
     /// The outline of controls.
     pub border: Rgba,
     /// The title bar the window draws itself: Calmo's `bar` token, light variant.
@@ -57,10 +59,43 @@ pub struct Theme {
     pub island_radius: f32,
     /// Between an island's fill and its children.
     pub island_padding: f32,
+    /// The width of the line around an island's fill, in the border colour, inside the fill as
+    /// the outline of GTK's popover. 0, the default, draws none.
+    pub island_border: f32,
+    /// How far the arrow of an island marked by [`crate::Ui::set_arrow`] stands out of its
+    /// fill, its base twice as wide, as the arrow of GTK's popover. 0, the default, draws none.
+    pub island_arrow: f32,
     /// The smallest width and height of an icon button.
     pub button_min: f32,
     /// The part of a level beyond its full mark: Calmo's `warn` token, light variant.
     pub warning: Rgba,
+    /// The font family text is set in, ahead of the system's sans-serif, as GTK's
+    /// `font-family`. `None`, the default, keeps the system's sans-serif; a family the system
+    /// lacks is skipped.
+    pub font_family: Option<String>,
+    /// The width of the outline of buttons and toggles, drawn in the border colour and in the
+    /// accent for the active toggle, as GTK's `border` on a button. 0, the default, draws none.
+    pub control_border: f32,
+    /// The smallest height of a button or a toggle inside its outline, as GTK's `min-height`.
+    /// 0, the default, lets its text and padding set it.
+    pub control_min_height: f32,
+    /// How the title bar draws its title and its buttons.
+    pub title_bar_style: TitleBarStyle,
+    /// The title bar's height in logical pixels, never less than its buttons', as GTK's header
+    /// bar has a height of its own. `None`, the default, sizes it from its buttons and the
+    /// padding.
+    pub title_bar_height: Option<f32>,
+}
+
+/// How the title bar the window draws itself shows its title and its buttons.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TitleBarStyle {
+    /// A regular title and round, filled buttons: the toolkit's own look.
+    #[default]
+    Round,
+    /// A bold title and bare marks, filled only under the pointer: GTK's header bar.
+    Bare,
 }
 
 impl Default for Theme {
@@ -71,6 +106,7 @@ impl Default for Theme {
             text: Rgba::rgb(0x24, 0x1f, 0x31),
             accent: Rgba::rgb(0x81, 0x3d, 0x9c),
             on_accent: Rgba::rgb(0xff, 0xff, 0xff),
+            view: Rgba::rgb(0xff, 0xff, 0xff),
             border: Rgba::rgb(0xc0, 0xbf, 0xbc),
             title_bar: Rgba::rgb(0xfb, 0xfc, 0xfd),
             focus: Rgba::rgb(0x81, 0x3d, 0x9c),
@@ -85,8 +121,15 @@ impl Default for Theme {
             island: Rgba::rgb(0xfb, 0xfc, 0xfd),
             island_radius: 10.0,
             island_padding: 4.0,
+            island_border: 0.0,
+            island_arrow: 0.0,
             button_min: 32.0,
             warning: Rgba::rgb(0xa3, 0x6a, 0x00),
+            font_family: None,
+            control_border: 0.0,
+            control_min_height: 0.0,
+            title_bar_style: TitleBarStyle::Round,
+            title_bar_height: None,
         }
     }
 }

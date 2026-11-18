@@ -56,6 +56,13 @@
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
   root `Cargo.toml` or `Cargo.lock` that only adds workspace members does not select `shell`.
+  Also amended 2026-11-15 (#1174), approved by the maintainer with the pull request that makes
+  the change, a correction of the current state and no new target decision: PL10 no longer
+  records restored caches on the release path as debt, since `call-dag-compile.yml` restores
+  none and `verify.py workflows` checks the release path for them (section 15).
+  Also amended 2026-11-16 (#1191), approved by the maintainer with the pull request that makes
+  the change: PL10 and PQ3 say that the self-hosted guest keeps no cache volume across jobs,
+  in place of a cache volume per trust level (section 15).
 - **Depends on:** [doc_update_delivery.md](doc_update_delivery.md) (UD1-UD44: channels,
   promotion, retention, pinning), [doc_update_trust.md](doc_update_trust.md) (UT1-UT13),
   [doc_build_ordering.md](doc_build_ordering.md) (O1-O9), [doc_build_system.md](doc_build_system.md),
@@ -185,7 +192,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 | `promote.yml`    | hourly `schedule`, `workflow_dispatch`         | selects the candidate with complete evidence after the dwell (UD5), runs the policy check, promotes by digest after the `release` approval (PL60), publishes the evidence bundle; checks out `RELEASE_BRANCH` (VAR4), not the default branch the schedule runs on |
 | `bots.yml`       | daily `schedule`, `workflow_dispatch`          | one matrix over the bump scripts (kernel, system image, cosmic-comp, nixpkgs registry, specs, NVIDIA locks; *amended on 2026-11-11 by the maintainer:* and Smithay, weekly); each opens or updates one pull request through one shared script; the signer image and the shell rig build image, each built by the content hash of its inputs, with the bump of its pin as one of those pull requests (PL19); the pin pull requests are never merged by `bot-merge.yml` and wait for the code owner's review (ADR-0107, CI30)  |
 | `bot-merge.yml`  | `workflow_run`, after the checks of a bot pull request | merges two kinds of bot pull request through `forge/scripts/bot_merge.py` (CI32): the spec bot's (`chore/update-specs-zero-trust`) and the system bump's (`bump/system-*`), once the checks of the pull request end green. The kernel bump uses `gh pr merge --auto` when its preparation is green, no NVIDIA lock moves and the kernel closes no Fedora security advisory (PL55), and otherwise waits for a person (ADR-0108), and the pin pull requests of the signer and rig build images are not merged by it. It stays apart from `bots.yml` because it runs on `workflow_run`, the verdict of the checks of the pull request, and so from the default branch's file (ADR-0108 item 2): one file opens bot pull requests, another merges two kinds of them |
-| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard |
+| `maintenance.yml`| daily and weekly `schedule`, `workflow_dispatch` | vulnerability rescan, settings drift check, run statistics; weekly: janitor, reproducibility and benchmark, fuzzing of the parsers that read untrusted input, patch rebase drill, two-output layout, Scorecard, CodeQL, cargo-mutants (its own `alert-mutants` job) |
 
 ### 3.2 Reusable stages and composite actions
 
@@ -278,7 +285,7 @@ flowchart LR
   PR2 --> M["machines verify signature<br/>(+ signed release attestation from 1.0)"]
 ```
 
-### 3.5 Today's 33 workflows
+### 3.5 Today's 32 workflows
 
 | Workflow                         | Target                                                                                             |
 | -------------------------------- | -------------------------------------------------------------------------------------------------- |
@@ -302,7 +309,6 @@ flowchart LR
 | `kernel-weekly.yml`              | merged into `maintenance.yml` (weekly)                                                             |
 | `maintenance.yml`                | kept (PR #264, the daily settings drift check of PL52); gains the scheduled jobs merged into it (PB12) |
 | `nix-registry-bump.yml`          | merged into `bots.yml`                                                                             |
-| `nix-vanguard.yml`               | deleted: its triggers name a branch without a release role and `just check` covers the flake      |
 | `nvidia-build.yml`               | merged into `call-kernel.yml`                                                                      |
 | `nvidia-kmod.yml`                | since PR #265 the boot and publication of the signed modules and `azoth-boot`: becomes `call-kernel-publish.yml`, whose identity `system/kernel-artifacts.sh` then trusts (PL12, D43) |
 | `pr.yml`                         | kept (PR #266); gains the image check and the shell surfaces (PB11, PB12)                         |
@@ -410,13 +416,41 @@ live repository.
 
 **PL10. Jobs of different trust levels never share writable state.** Pull-request jobs
 and release jobs never read a cache, volume or runner state the other wrote. On the
-self-hosted runner each job runs in an ephemeral guest (`scripts/runner/`) whose cache
-volumes are separate per trust level; a pull request from a fork never runs on it (PQ3).
+self-hosted runner each job runs in an ephemeral guest (`scripts/runner/`) that keeps no
+volume across jobs: `scripts/runner/vm.sh` recreates its cache and scratch disks empty for
+every job (#1191). Any guest may take a pull request's job or a release's, and a pull request's
+kernel build is the one the push may publish (ADR-0110), so a volume kept for pull requests
+alone would still reach a release. A pull request from a fork never runs on it (PQ3).
 Release-path builds restore no cache: a cache is an input the provenance does not name
 (PL20), and any job of the default branch can write one; the kernel made the same choice
 (PR #250). Pull-request builds may restore caches by prefix. `verify.py workflows` rejects a
-cache step in a release-path job. Today `call-dag-compile.yml` restores a Rust and an
-sccache cache on the release path; they go with PB11.
+cache step in a release-path job. *Amended on 2026-11-15 (#1174):* `call-dag-compile.yml`
+no longer restores the Rust and sccache caches this paragraph recorded as debt, and the check
+takes as the release path every workflow with a job in a signing environment or in `release`
+(PL11, PL60) or a job whose token has `id-token: write` (a keyless signature, attestation or
+provenance) or `packages: write` (a push to the registry with the job's token), from the job or
+from the workflow, and every reusable workflow of the repository such a workflow calls. The
+whole workflow counts, since its other jobs build what that job signs or pushes. A push to
+another registry with a credential of its own is not seen. A release-path job uses only the
+actions of an allow-list, `RELEASE_PATH_ACTIONS` in `verify.py`, each checked to restore and save
+no cache and matched without regard to case or ref, and gives no build sccache on the Actions
+cache (`SCCACHE_GHA_*`, `ACTIONS_CACHE_URL`, `type=gha`) or a `cache-from` or `cache-to` of any
+type in a run step or an `env`; both hold for its steps and for those of a local composite
+action they use. An action joins the list once it is checked to cache nothing. A job-level
+`uses:` on the release path names a workflow of this repository as
+`./.github/workflows/<file>`: a call to another repository, to this one by its qualified name
+and a ref, or through `..` fails the check, which could not follow it. One store is mounted
+from outside the build and the check does not see it: the self-hosted `build` job of `kernel-build.yml` mounts
+`$HOME/.cache/azoth`, where the kernel sources are downloaded, on the guest's cache disk, which
+starts every job empty (#1191). It holds verified inputs, not build outputs: `forge/specs/azoth/build.sh` checks every file listed in
+`SOURCES/sources.sha256` against it, and the CachyOS and kernel.org tarballs and the Fedora SRPM
+against their signatures, before it uses any. The `prep` job of
+`kernel-bump.yml`, which writes that list for a new version, mounts an empty store made for the
+run, `$RUNNER_TEMP/azoth`, so no file another build left on the cache disk enters a
+manifest (#1181). The mount is a `-v`
+in a shell step, and telling a host path that outlives the job from one that does not would
+need to know each runner's disks, so the check does not try; `scripts/runner/tests/test_vm.py`
+fails if a guest boots with a disk an earlier guest wrote.
 
 **PL11. A job that holds a signing key builds nothing and runs no third-party action but the pinned cosign installer**
 (D43). It runs the pinned signer image on the exact digests a build job handed over, and
@@ -437,7 +471,11 @@ of the stage that produced it, and used only by that digest. An identity is matc
 exact string, not a pattern. This extends UD44 from tier repositories to every hop. One
 named exception: the shell rig image `athanor-shell-rig@<rig-image.digest>` that `rig.sh`
 pulls is published by hand with `rig.sh publish-image`, no workflow publishes it, and so it
-is not yet a verified hop (#505).
+is not yet a verified hop (#505). A second named exception: on a builder miss, a builder built
+from the checkout, unsigned and never published, serves a pull request's own test. Spec Build
+Check hands it to its build jobs as a one-day artifact, and the shell rig's spec build
+(`rig.sh cosmic-comp-version`) loads it into the local podman for a test-only RPM
+(`doc_build_system.md`, section 5).
 
 **PL13. Tags inside the build chain are names, not inputs.** `hash-<h>` and `<run_id>` tags
 are written once, after the signature of the digest they name verified (PR #248, UD25);
@@ -549,7 +587,15 @@ alert of PL51; findings without a fix are listed in the weekly statistics.
 
 **PL28. Static analysis runs on every pull request** through `just check` (clippy, ruff,
 shellcheck, actionlint, cargo deny) and CodeQL runs weekly for Rust, Python and the
-workflows. (SSDF PW.7, PW.8; Scorecard SAST.)
+workflows; a weekly cargo-mutants job in `maintenance.yml` (`scripts/ci/mutants.sh`) reports
+the mutants that the tests of `athanor-sal` and the platform crates under `system/` do not
+catch, and fails only when the run itself fails. cargo-machete fails a pull request that declares a dependency no source uses.
+`just check` also runs zizmor offline over the workflows and local actions, for
+template injection, broad token permissions, persisted checkout credentials, unpinned actions
+and dangerous triggers.
+Semgrep CE runs in the same gate on the repository's own rules of `.semgrep/`, each
+with its test, for invariants no `verify.py` check enforces, and with no registry, metrics or
+network. (SSDF PW.7, PW.8; Scorecard SAST.)
 
 ### 4.8 Acceptance, VSA and promotion
 
@@ -937,8 +983,8 @@ Today the `dag-system-image` job of `call-system-image.yml` pushes the system im
 `:<run_id>` only, and `tag-latest` of `release.yml` moves their `:latest` after
 `verify-images` verified the key-based signature; on `main`, `main`'s own copy of the
 Orchestrator moves the ISO's `:latest` in its `tag-system-images` job; `call-build-builder.yml` moves the builder's `:latest` on default-branch runs
-(`forge/scripts/promote_builder_latest.sh`, PR #228), which the pull-request spec check
-reads until it consumes the builder by digest (PL13).
+(`forge/scripts/promote_builder_latest.sh`, PR #228), only to a digest it verified signed by a
+trusted run of `call-build-builder.yml` (PL12, issue #1205); no build stage reads it (PL13).
 
 Retention, by ADR-0081 (this amends the 90-day figure of UT10 and UD8):
 
@@ -1142,8 +1188,9 @@ no job restores is removed, and the
 ## 8. Observability
 
 **PL51. A scheduled run that fails is seen.** Every scheduled workflow ends with a job that
-runs the `alert` composite action on a GitHub-hosted runner once every other job has ended,
-whatever its result, so that a job whose runner was lost or that timed out is seen as well.
+runs the `alert` composite action on a GitHub-hosted runner once the jobs it reports have ended,
+whatever their result (every other job; the hours-long `mutants` job of `maintenance.yml` has an
+`alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
 it on the next success. No scheduled failure stays silent. Today `kernel-weekly.yml` and
 `maintenance.yml` end with that job; the other scheduled workflows gain it with PB2 (section
@@ -1267,7 +1314,7 @@ The maintainer answered PQ13-PQ18, the questions of revision 3, on 2026-10-09
 | ---- | -------- | -------------- |
 | PQ1  | Does `main` keep a release role, now that `iso-v0` is the default branch? | Keep it protected by the same ruleset and frozen, since D43 allows it to deploy; decide its future with the 1.0 branch model. |
 | PQ2  | How is the ISO signed? | Keylessly, by the stage that builds it, `call-iso.yml` (PL32): the ISO is built after the images are signed, so signing it with the cosign key would need a second `signing-images` job and a third approval. A key-based signature for offline verification is reconsidered if users ask for it. |
-| PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest with a pull-request-only cache volume; forks never on self-hosted. |
+| PQ3  | Where do kernel builds of pull requests run? | Same-repository pull requests on the ephemeral self-hosted guest, which keeps no cache volume across jobs (amended 2026-11-16, #1191: a pull request's build may be published, ADR-0110); forks never on self-hosted. |
 | PQ4  | Who signs the security class of a release? Today a security-class promotion goes through `promote.sh` in a signing environment (doc_update_delivery.md, decision 3), which can make three approvals in a cycle. | Set the class, with its advisory ids, when the release is signed, since the class is never taken from a dispatch input (PL55; ADR-0088, rationale updated by ADR-0104 item 11), and sign it in `signing-images` with the images; `promote.yml` then holds no key. |
 | PQ5  | Review on the maintainer's own pull requests | The repository Admin role, held by the maintainer alone, is the recorded bypass actor of the review ruleset only, in the "for pull requests only" mode; the integrity ruleset has none (PL1, PL4, ADR-0088). Agent and bot pull requests require a code-owner review, except on the unowned paths of ADR-0107 (PL4); agents push with their own App identity (PL5). `prevent_self_review` is switched on when a second human reviewer is listed in both signing environments (PL5). |
 | PQ6  | Length of the postpone (ADR-0082) | One postpone per update, up to seven days, then the update applies at the next shutdown. |
@@ -1603,3 +1650,29 @@ updateinfo source of the Fedora half; section 3.3 adds the release statements to
 `release-candidate`; PL11 and PL56 let `sign-images` install cosign and run `cosign attest`
 beside the image key (D43). The markers, `mark-current`, the janitor's marker rule and the
 re-run rule stay with the rest of PB4b.
+
+**Amended on 2026-11-15 (#1174),** approved by the maintainer with the pull request that makes
+the change, a correction of the current state and not a new target decision.
+`call-dag-compile.yml`, which builds, signs, attests and publishes the forge packages, no longer
+restores a Rust cache (`Swatinem/rust-cache`) or an sccache cache (`actions/cache`), so PL10
+drops the sentence that recorded them as debt left to PB11. `verify.py workflows` gains the
+check PL10 and section 10 already named, on the release path: every workflow with a job in a
+signing environment or in `release`, or with a job whose token has `id-token: write` or
+`packages: write`, and every reusable workflow of the repository that such a workflow calls,
+which so includes `azoth-signer.yml` and `kernel-build.yml`. A job there fails it when it uses
+an action outside the allow-list `RELEASE_PATH_ACTIONS`, in its own steps or in a local
+composite action; when a run step or an `env` gives a build sccache on the Actions cache or a
+`cache-from` or `cache-to`; or when its job-level `uses:` is not `./.github/workflows/<file>`.
+PL10 records the one store the check does not see, `$HOME/.cache/azoth`, mounted by the `build`
+job of `kernel-build.yml`, which checks the sources in it before use. It also records that the
+runner's cache volumes are not yet separate per trust level (issue #1191).
+
+**Amended on 2026-11-16 (#1191),** approved by the maintainer with the pull request that makes
+the change. PL10 asked for the self-hosted runner's cache volumes to be separate per trust
+level, and PQ3 for a pull-request-only cache volume. Every guest is registered with the same
+labels and takes whichever self-hosted job comes first, so a guest cannot know its trust level
+when its disks are attached; and a pull request's kernel build is the one the push to `iso-v0`
+may publish (ADR-0110), so a volume kept for pull requests alone would still reach a release.
+`scripts/runner/vm.sh` now recreates the cache disk empty for every job, as it already did the
+scratch disk, and PL10 and PQ3 say that the guest keeps no cache volume across jobs.
+`scripts/runner/tests/test_vm.py` fails if a guest boots with a disk an earlier guest wrote.

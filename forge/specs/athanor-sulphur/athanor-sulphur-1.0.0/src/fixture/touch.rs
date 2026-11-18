@@ -18,13 +18,13 @@ type TouchStart = smithay::input::touch::GrabStartData<State>;
 #[derive(Default)]
 pub(super) struct Seen {
     /// Each down: the surface, the touch point, where on the surface, and its serial.
-    downs: Vec<(ObjectId, i32, (f64, f64), u32)>,
+    pub(super) downs: Vec<(ObjectId, i32, (f64, f64), u32)>,
     /// Each motion: the touch point and where on its surface.
-    motions: Vec<(i32, (f64, f64))>,
+    pub(super) motions: Vec<(i32, (f64, f64))>,
     /// The touch point of each up.
-    ups: Vec<i32>,
-    frames: usize,
-    cancels: usize,
+    pub(super) ups: Vec<i32>,
+    pub(super) frames: usize,
+    pub(super) cancels: usize,
 }
 
 impl Dispatch<wl_touch::WlTouch, ()> for Client {
@@ -199,6 +199,22 @@ fn a_release_and_a_touch_in_one_frame_each_get_their_frame() {
         y.client.touch.downs[0].1, x_id,
         "on a touch point of its own"
     );
+    run.stop();
+}
+
+/// A finger down after a click, on the bar, supersedes the click: the bar gets no token.
+#[test]
+fn a_touch_after_a_click_grants_no_token() {
+    let mut run = Running::start(None);
+    let mut bar = Local::connect(&mut run, None);
+    bar.bar(&mut run, 30);
+    let serial = click_bar(&mut run, &bar);
+    let focus = keyboard_focus(&run);
+    down(&mut run, 0, (100.0, 10.0).into());
+    up(&mut run, 0);
+    assert_eq!(keyboard_focus(&run), focus, "the touch moves no keyboard");
+    let token = run.activation_token(&mut bar, serial);
+    assert!(!granted(&run, &token));
     run.stop();
 }
 

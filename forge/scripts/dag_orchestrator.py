@@ -370,18 +370,25 @@ def content_hash(pkg):
 
 
 def image_exists(ref):
-    """Whether the registry has ref. registry_probe.sh answers present or absent and fails
-    on anything else; retry.sh repeats those failures, and one that outlasts the retries
-    raises with the probe's own message, so a registry that cannot be asked stops the run
-    instead of reading as clean."""
+    """Whether the registry has ref as an image a trusted run of call-dag-compile.yml built.
+    verify_image.sh resolves the tag to a digest, verifies the digest's signature and checks
+    that its config is labelled with the tag's hash (issue #1176): a tag alone proves only that
+    some job with packages: write pushed it. An image that fails either is not built, and is
+    rebuilt; verify_image.sh reports it as
+    an error, which is passed on. A lookup or verification that cannot be answered, once
+    retry.sh has repeated it, raises with the script's own message, so the run stops instead
+    of reading it as clean or as dirty."""
     result = subprocess.run(
-        ["bash", os.path.join(SCRIPTS_DIR, "retry.sh"), "bash",
-         os.path.join(SCRIPTS_DIR, "registry_probe.sh"), ref],
+        ["bash", os.path.join(SCRIPTS_DIR, "verify_image.sh"), ref, "call-dag-compile.yml"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
         raise RuntimeError(f"registry lookup of {ref} failed (exit {result.returncode}):\n{result.stderr.strip()}")
-    return result.stdout.strip() == "present"
+    sys.stderr.write(result.stderr)
+    verdict = result.stdout.split()
+    if not verdict or verdict[0] not in ("signed", "unsigned", "absent"):
+        raise RuntimeError(f"registry lookup of {ref} gave no verdict: {result.stdout.strip()!r}")
+    return verdict[0] == "signed"
 
 
 def custom_hashes(all_nodes, node_types, hash_of=content_hash):
@@ -399,15 +406,16 @@ def image_ref(node, hash_):
     return f"{registry}/{owner}/athanor-forge-{node}:hash-{hash_}"
 
 
-# Registry lookups in flight at once. Each is one skopeo inspect under retry.sh, which may
-# hold one for ~6 minutes (see the brain's timeout-minutes), so sequential lookups of the
-# 35 custom packages could not fit a job.
+# Registry lookups in flight at once. Each is one skopeo inspect and one cosign verify, each
+# under retry.sh, which may hold one for minutes (see the brain's timeout-minutes), so
+# sequential lookups of the 35 custom packages could not fit a job.
 PROBE_WORKERS = 8
 
 
 def evaluate_dirty_nodes(hashes, exists=image_exists):
     """
-    A custom package is dirty when the registry has no image for its hash. Builds run with
+    A custom package is dirty when the registry has no image for its hash that a trusted
+    run signed (image_exists). Builds run with
     rpmbuild --nodeps and never consume another package's output, so a dirty package does
     not dirty its dependents. Upstream packages are never built here and flatpaks publish
     nothing: neither is ever dirty.

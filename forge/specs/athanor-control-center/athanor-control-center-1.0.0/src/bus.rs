@@ -6,9 +6,8 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gtk4::gio;
-use gtk4::glib;
-use gtk4::prelude::*;
+use gio::glib;
+use gio::prelude::*;
 
 pub const NAME: &str = "os.athanor.ControlCenter1";
 pub const PATH: &str = "/os/athanor/ControlCenter1";

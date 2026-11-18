@@ -3,8 +3,8 @@
 labelled `ci-alert` per workflow and job, opened when the job fails or is cancelled, commented
 on when it fails again, closed when it next succeeds. A skipped job changes nothing.
 
-It runs in the workflow's last job, on a GitHub-hosted runner, after every other job whatever
-their result (`.github/actions/alert`): a job whose runner was lost never runs a last step.
+It runs in an alert job, on a GitHub-hosted runner, after the jobs it reports whatever their
+result (`.github/actions/alert`): a job whose runner was lost never runs a last step.
 
 Usage: ci_alert.py
 Environment: NEEDS, the workflow's `needs` context as JSON (toJSON(needs)); GITHUB_REPOSITORY,

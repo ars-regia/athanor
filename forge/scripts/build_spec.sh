@@ -10,8 +10,9 @@
 # Usage: build_spec.sh fetch|build SPEC_DIR   (SPEC_DIR relative to forge/, e.g. specs/athanor-tetragon)
 #
 # The DAG (call-dag-compile.yml) and Spec Build Check (build_changed_specs.sh) both run it through
-# run_spec_build.sh, so a green check is the build the DAG does. Rust compiles through sccache:
-# the DAG mounts its per-package cache at ~/.cache/sccache.
+# run_spec_build.sh, so a green check is the build the DAG does. Rust compiles through sccache,
+# whose cache is ~/.cache/sccache in the shared HOME volume: it lives for this build alone, and
+# neither caller restores one (docs/architecture/doc_pipeline.md, PL10).
 set -euo pipefail
 
 usage="usage: build_spec.sh fetch|build SPEC_DIR"

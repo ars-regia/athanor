@@ -25,8 +25,6 @@ Restart=on-failure
 # StartLimitBurst above end a crash loop.
 RestartSec=100ms
 Slice=session.slice
-# SH4: always-on surfaces are drawn with Cairo, on every GPU.
-Environment=GSK_RENDERER=cairo
 Environment=XDG_CACHE_HOME=%C/athanor-launcher
 CacheDirectory=athanor-launcher
 # Budget 80 MB PSS at rest (doc_launcher.md, open doubt 4). MemoryHigh throttles well above

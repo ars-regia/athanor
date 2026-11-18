@@ -130,7 +130,7 @@ impl Ui {
         id: WidgetId,
         max_height: Option<f32>,
     ) -> Option<(Ui, Vec<(WidgetId, usize)>)> {
-        let Kind::DropDown(drop) = &self.widgets.get(id.index())?.kind else {
+        let Kind::DropDown(drop) = &self.widgets.get(id)?.kind else {
             return None;
         };
         if drop.items.is_empty() {
@@ -163,10 +163,7 @@ impl Ui {
     /// Chooses the item at `index` of drop-down `id`, as its menu does: [`Event::Changed`] when
     /// the choice changed, `None` when it did not or `index` is past the end.
     pub(crate) fn choose(&mut self, id: WidgetId, index: usize) -> Option<Event> {
-        if id.index() >= self.widgets.len() {
-            return None;
-        }
-        let Kind::DropDown(drop) = &mut self.widgets[id].kind else {
+        let Kind::DropDown(drop) = &mut self.widgets.get_mut(id)?.kind else {
             return None;
         };
         if index >= drop.items.len() || index == drop.selected {

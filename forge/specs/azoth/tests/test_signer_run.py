@@ -471,7 +471,7 @@ class SignerImageInputs(unittest.TestCase):
 
     def test_the_tag_hashes_every_input_and_the_workflow_watches_them(self):
         azoth = REPO / "forge/specs/azoth"
-        (line,) = [l for l in (azoth / "signer/publish.sh").read_text().splitlines() if l.startswith("INPUTS=(")]
+        (line,) = [ln for ln in (azoth / "signer/publish.sh").read_text().splitlines() if ln.startswith("INPUTS=(")]
         inputs = set(line[len("INPUTS=(") : -1].split())
         copied = set(re.findall(r"^COPY (\S+) ", (azoth / "signer/Containerfile").read_text(), re.M))
         self.assertEqual(copied, {"lock.sh", "signer/toolchain.lock", "sign-kernel.sh"})

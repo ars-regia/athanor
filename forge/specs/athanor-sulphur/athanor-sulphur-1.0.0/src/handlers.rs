@@ -2,13 +2,14 @@
 //! opens a popup, imports a dmabuf or asks for activation.
 
 use crate::grabs::{kept_reachable, MoveGrab, ResizeGrab};
-use crate::state::{is_full_screen, ClientState, State};
+use crate::layer::mapped;
+use crate::state::{is_full_screen, unconfined, ClientState, State};
 use crate::workspace::WorkspaceId;
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::renderer::utils::on_commit_buffer_handler;
 use smithay::desktop::{
-    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupKeyboardGrab,
-    PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
+    find_popup_root_surface, get_popup_toplevel_coords, layer_map_for_output, PopupGrab,
+    PopupKeyboardGrab, PopupKind, PopupPointerGrab, PopupUngrabStrategy, Window, WindowSurfaceType,
 };
 use smithay::input::pointer::{CursorImageStatus, Focus, GrabStartData, PointerHandle};
 use smithay::input::touch::{GrabStartData as TouchGrabStartData, TouchGrab, TouchHandle};
@@ -23,7 +24,7 @@ use smithay::reexports::wayland_server::protocol::{
     wl_buffer, wl_output::WlOutput, wl_seat, wl_surface::WlSurface,
 };
 use smithay::reexports::wayland_server::{Client, DisplayHandle, Resource};
-use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size};
+use smithay::utils::{IsAlive, Logical, Point, Rectangle, Serial, Size, SERIAL_COUNTER};
 use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::compositor::{
     add_blocker, add_destruction_hook, add_pre_commit_hook, get_parent, is_sync_subsurface,
@@ -1146,6 +1147,19 @@ impl State {
             Some((map.layer_geometry(layer)?.loc + area.loc, area))
         })
     }
+
+    /// Whether `root`, a popup's root, can keep the keyboard a closing popup hands back: its
+    /// interactivity takes it, it shows a buffer, it has a place in the space, and no other
+    /// surface holds the keyboard exclusively. A window drawing nothing shows no buffer; a
+    /// minimised or parked window, which leaves the space, has no place.
+    fn keeps_keyboard(&self, root: &WlSurface) -> bool {
+        self.takes_keyboard(root)
+            && mapped(root)
+            && self.popup_root_place(root).is_some()
+            && self
+                .exclusive_layer()
+                .is_none_or(|surface| &surface == root)
+    }
 }
 
 impl BufferHandler for State {
@@ -1348,6 +1362,48 @@ impl XdgShellHandler for State {
         surface.send_repositioned(token);
     }
 
+    /// A popup that holds the keyboard hands it back as it is destroyed, at once (decision 30,
+    /// amended on 2026-11-17): to its parent when the parent is a popup that still holds a grab,
+    /// the popup grab's current popup, and otherwise to the popups' root surface. A parent
+    /// destroyed first resets its popup data, which cuts the chain `find_popup_root_surface`
+    /// walks, so the root is then the grab's. A root that is gone or can no longer keep the
+    /// keyboard (`keeps_keyboard`) is not given it: the popup's grab, which would hold the
+    /// keyboard on the popup, ends, and the focus is chosen again as when the focused window
+    /// closes. Smithay's grab moves the keyboard only at the next key, which leaves it on the
+    /// popup's bare surface until then, so that a toolkit waiting for an `enter` to give the
+    /// focus back to the control that opened the popup would have none (#1217). The grab lets
+    /// the change through: its current popup, or anything once it has ended.
+    fn popup_destroyed(&mut self, surface: PopupSurface) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        if keyboard.current_focus().as_ref() != Some(surface.wl_surface()) {
+            return;
+        }
+        let grabbed =
+            keyboard.with_grab(|_, current| current.is::<PopupKeyboardGrab<State>>()) == Some(true);
+        let grab = self.popup_grab.as_ref().filter(|_| grabbed);
+        let root = find_popup_root_surface(&PopupKind::Xdg(surface.clone()))
+            .ok()
+            .or_else(|| grab.and_then(|grab| grab.keyboard_grab_start_data().focus.clone()));
+        let current = grab
+            .filter(|grab| !grab.has_ended())
+            .and_then(PopupGrab::current_grab);
+        let parent = surface
+            .get_parent_surface()
+            .filter(|parent| Some(parent) != root.as_ref() && Some(parent) == current.as_ref());
+        let target = parent.or_else(|| root.filter(|root| self.keeps_keyboard(root)));
+        match target.filter(|target| target.is_alive()) {
+            Some(target) => self.set_keyboard_focus(Some(target)),
+            None => {
+                if grabbed {
+                    keyboard.unset_grab(self);
+                }
+                self.refocus(surface.wl_surface());
+            }
+        }
+    }
+
     /// A popup grab takes the keyboard and the pointer until the popups close, as anvil's
     /// does. Only a client the user is with gets one, and only for an input event the user
     /// made: it names the serial of the last button press sent to it, while it holds the
@@ -1419,8 +1475,10 @@ impl XdgShellHandler for State {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
             }
+            self.eis_focusing(grab.current_grab().as_ref());
             keyboard.set_focus(self, grab.current_grab(), serial);
             keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+            self.popup_grab = Some(grab.clone());
         }
         if let Some(pointer) = pointer {
             let previous = grab.previous_serial().unwrap_or_else(|| grab.serial());
@@ -1469,6 +1527,8 @@ impl SeatHandler for State {
     /// The text inputs follow the keyboard too, except while the session is locked
     /// (`input_method.rs`).
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // Smithay calls this for every new focus but none; `set_keyboard_focus` marks that.
+        self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
         // The focus outline moves.
         self.request_redraw();
         let client = focused.and_then(|surface| surface.client());
@@ -1614,17 +1674,44 @@ impl XdgActivationHandler for State {
         &mut self.xdg_activation_state
     }
 
-    /// A token is good only when the client that asks for it holds the keyboard focus of this
-    /// seat, which it gets from the user's click or from mapping a window while nothing else
-    /// holds it (`place`). The serial must also be one this compositor sent since that focus;
-    /// the focused client always holds its own enter serial, so the range only keeps out serials
-    /// never sent, and the focus check is what keeps other clients out.
+    /// A token is good when its serial is the user's input to the client that asks for it, on
+    /// this seat, in one of two ways.
+    ///
+    /// The serial is the last button press, and this compositor delivered it to a surface of
+    /// that client: a bar, or a notification's popup, that never takes the keyboard gets its
+    /// token from the click (doc_bar.md, BR4), as KWin and mutter take a recent input serial.
+    /// The press must be the latest input: a later press of any kind, a key, a button, a finger
+    /// or a pen, to whichever client, or a later change of the keyboard focus, to a surface or
+    /// to none, supersedes it; its release does not. A client behind a security context gets no
+    /// token this way.
+    ///
+    /// Otherwise the client holds the keyboard focus of this seat, which it gets from the
+    /// user's click or from mapping a window while nothing else holds it (`place`), and the
+    /// serial is one this compositor sent since that focus; the focused client always holds its
+    /// own enter serial, so the range only keeps out serials never sent, and the focus check is
+    /// what keeps other clients out.
+    ///
+    /// No client gets a token while the session is locked: the lock surfaces hold the input
+    /// (L14).
     fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
         self.xdg_activation_state
             .retain_tokens(|_, token| token.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME);
+        if self.lock.is_some() {
+            return false;
+        }
         let (Some((serial, seat)), Some(client)) = (data.serial, data.client_id) else {
             return false;
         };
+        if Seat::from_resource(&seat).as_ref() != Some(&self.seat) {
+            return false;
+        }
+        // The seat named is a resource of the client that asks.
+        let outside = seat.client().is_some_and(|asking| unconfined(&asking));
+        let latest = self.grab_serials.press == Some(serial)
+            && self.grab_serials.focus.is_none_or(|focus| serial.is_no_older_than(&focus));
+        if outside && latest && self.grab_serials.clicked(serial, &client) {
+            return true;
+        }
         let Some(keyboard) = self.seat.get_keyboard() else {
             return false;
         };
@@ -1635,9 +1722,7 @@ impl XdgActivationHandler for State {
             .current_focus()
             .and_then(|surface| surface.client())
             .map(|focused| focused.id());
-        Seat::from_resource(&seat).as_ref() == Some(&self.seat)
-            && focused == Some(client)
-            && serial_since_focus(serial, enter, self.last_input_serial)
+        focused == Some(client) && serial_since_focus(serial, enter, self.last_input_serial)
     }
 
     fn request_activation(
@@ -1649,19 +1734,20 @@ impl XdgActivationHandler for State {
         // A token activates once.
         self.xdg_activation_state.remove_token(&token);
         if data.timestamp.elapsed() < ACTIVATION_TOKEN_LIFETIME {
-            // While the session is locked a token restores nothing (L14).
+            // While the session is locked a token restores, raises and focuses nothing (L14),
+            // as a popup grab takes nothing: the unlock gives the keyboard to the window on top
+            // before the lock.
             if self.lock.is_none() {
-                // A focused client can make a token at any time: it switches no workspace, and a
-                // window on an inactive one stays there.
+                // A token switches no workspace: a window on an inactive one stays there.
                 if let Some(window) = self
                     .window_or_minimised(&surface)
                     .filter(|window| self.on_active_workspace(window))
                 {
                     self.unminimise(&window);
                 }
-            }
-            if let Some(window) = self.window_for(&surface) {
-                self.focus(&window);
+                if let Some(window) = self.window_for(&surface) {
+                    self.focus(&window);
+                }
             }
         }
     }
@@ -1730,7 +1816,54 @@ fn serial_since_focus(serial: Serial, enter: Serial, last_input: Option<Serial>)
 /// need this handler.
 impl smithay::wayland::xdg_toplevel_icon::XdgToplevelIconHandler for State {}
 
-smithay::delegate_dispatch2!(State);
+/// What `smithay::delegate_dispatch2!(State)` writes, with one step before Smithay's handler: a
+/// request `crate::layer::refused` refuses ends its client and never reaches that handler.
+impl<I, U> smithay::reexports::wayland_server::Dispatch<I, U> for State
+where
+    I: Resource,
+    I::Request: 'static,
+    U: smithay::wayland::Dispatch2<I, State>,
+{
+    fn request(
+        state: &mut Self,
+        client: &Client,
+        resource: &I,
+        request: I::Request,
+        data: &U,
+        dhandle: &DisplayHandle,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        if crate::layer::refused(resource, &request) {
+            return;
+        }
+        data.request(state, client, resource, request, dhandle, data_init);
+    }
+
+    fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &U) {
+        data.destroyed(state, client, resource);
+    }
+}
+
+impl<I, U> smithay::reexports::wayland_server::GlobalDispatch<I, U> for State
+where
+    I: Resource,
+    U: smithay::wayland::GlobalDispatch2<I, State>,
+{
+    fn bind(
+        state: &mut Self,
+        dhandle: &DisplayHandle,
+        client: &Client,
+        resource: smithay::reexports::wayland_server::New<I>,
+        data: &U,
+        data_init: &mut smithay::reexports::wayland_server::DataInit<'_, Self>,
+    ) {
+        data.bind(state, dhandle, client, resource, data_init);
+    }
+
+    fn can_view(client: Client, data: &U) -> bool {
+        data.can_view(&client)
+    }
+}
 
 #[cfg(test)]
 mod tests {

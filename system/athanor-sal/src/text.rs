@@ -1,6 +1,8 @@
 //! Text on Parley: the shaped layout of a label, and the editable text of a field.
 
+use crate::password::{mask, Secret, MASK};
 use crate::widget::Rect;
+use parley::fontique::FamilyId;
 use parley::setting::{FontFeature, Tag};
 use parley::{
     Alignment, AlignmentOptions, BaseDirection, FontContext, FontFeatures, FontWeight,
@@ -44,8 +46,12 @@ pub struct TextContext {
     /// The scratch space shaping uses.
     pub layouts: LayoutContext<Brush>,
     /// The approximate character width of a wrapping label's `max_width_chars`, by font size and
-    /// style: each pair is shaped once.
+    /// style: each pair is shaped once, for the family set.
     pub(crate) char_widths: Vec<(f32, TextStyle, f32)>,
+    /// The Latin font that leads the sans-serif family: see [`TextContext::new`].
+    latin: Option<FamilyId>,
+    /// The family set ahead of it: see [`TextContext::set_family`].
+    family: Option<String>,
 }
 
 impl Default for TextContext {
@@ -84,7 +90,31 @@ impl TextContext {
             fonts,
             layouts: LayoutContext::new(),
             char_widths: Vec::new(),
+            latin,
+            family: None,
         }
+    }
+
+    /// Puts `family` ahead of the Latin font in the sans-serif family every layout is set in, as
+    /// a theme's [`crate::Theme::font_family`]; `None` leaves the Latin font first again. A family
+    /// the system lacks is skipped, with a message.
+    pub(crate) fn set_family(&mut self, family: Option<&str>) {
+        if self.family.as_deref() == family {
+            return;
+        }
+        self.family = family.map(str::to_owned);
+        // The character widths were measured in the family before.
+        self.char_widths.clear();
+        let collection = &mut self.fonts.collection;
+        let first = family.and_then(|name| {
+            let id = collection.family_id(name);
+            if id.is_none() {
+                eprintln!("athanor-sal: no font family {name:?}; text keeps the system's sans-serif");
+            }
+            id
+        });
+        let families: Vec<FamilyId> = first.into_iter().chain(self.latin).collect();
+        collection.set_generic_families(GenericFamily::SansSerif, families.into_iter());
     }
 
     /// Shapes one paragraph of `text` in the system's sans-serif font, aligned to its start, at
@@ -142,9 +172,10 @@ pub(crate) fn keeps(c: char, multiline: bool) -> bool {
     (!c.is_control() || (multiline && c == '\n')) && !matches!(c, '\u{2028}' | '\u{2029}')
 }
 
-/// `text` with only the characters a field [`keeps`].
-pub(crate) fn printable(text: &str, multiline: bool) -> String {
-    text.chars().filter(|&c| keeps(c, multiline)).collect()
+/// `text` with only the characters a field [`keeps`], in a buffer overwritten when dropped: it
+/// may be a password field's text.
+pub(crate) fn printable(text: &str, multiline: bool) -> zeroize::Zeroizing<String> {
+    crate::password::kept(text, usize::MAX, |c| keeps(c, multiline))
 }
 
 /// A text field: Parley's editor, with the input method's preedit kept apart from the committed
@@ -162,6 +193,9 @@ pub struct TextField {
     column: Option<f32>,
     /// Whether the text keeps its newlines, as a text area's does.
     multiline: bool,
+    /// A password field's text, while the editor holds one mask for each of its characters
+    /// (`crate::password`); none for any other field.
+    hidden: Option<Secret>,
 }
 
 impl TextField {
@@ -179,6 +213,56 @@ impl TextField {
             offset: 0.0,
             column: None,
             multiline: false,
+            hidden: None,
+        }
+    }
+
+    /// An empty password field named `name` (doc_accessibility.md, AX4): it shows, and gives
+    /// out, one mask for each character typed, and keeps the characters apart.
+    pub(crate) fn password(name: &str, size: f32, rtl: bool) -> Self {
+        let mut field = Self::new(name, "", size, rtl);
+        field.hidden = Some(Secret::default());
+        field
+    }
+
+    /// Whether this is a password field.
+    pub fn is_password(&self) -> bool {
+        self.hidden.is_some()
+    }
+
+    /// A password field's text; none for any other field.
+    pub(crate) fn password_text(&self) -> Option<&str> {
+        self.hidden.as_ref().map(Secret::as_str)
+    }
+
+    /// Applies `edit` to a password field's masks, given one mask for each character of `text`
+    /// the field keeps, and the same change to its hidden text: the characters inserted end at
+    /// the caret, where every edit of a single-line field leaves it. A change the masks and the
+    /// hidden text cannot agree on empties both.
+    fn edit_password(
+        &mut self,
+        cx: &mut TextContext,
+        text: &str,
+        edit: impl FnOnce(&mut parley::PlainEditorDriver<'_, Brush>, &str),
+    ) {
+        let kept = printable(text, false);
+        let inserted = kept.chars().count();
+        let before = self.editor.text().chars().count();
+        edit(&mut self.driver(cx), &mask(inserted));
+        let after = self.editor.text().chars().count();
+        let caret = self.editor.raw_selection().focus().index() / MASK.len_utf8();
+        let Some(hidden) = self.hidden.as_mut() else {
+            return;
+        };
+        let start = caret.checked_sub(inserted);
+        let removed = (before + inserted).checked_sub(after);
+        let agreed = match (start, removed) {
+            (Some(start), Some(removed)) => hidden.splice(start, removed, &kept),
+            _ => false,
+        };
+        if !agreed || hidden.chars() != after {
+            hidden.set("");
+            self.editor.set_text("");
         }
     }
 
@@ -285,6 +369,11 @@ impl TextField {
         (!self.is_composing()).then_some(ends)
     }
 
+    /// Whether the selection is more than the caret; never while the input method composes.
+    pub(crate) fn has_selection(&self) -> bool {
+        self.selection().is_some_and(|(anchor, focus)| anchor != focus)
+    }
+
     /// Whether an input method's composition is in progress.
     pub fn is_composing(&self) -> bool {
         self.editor.is_composing()
@@ -294,6 +383,12 @@ impl TextField {
     /// of `text` the field keeps: a `\r` of a `\r\n` goes, so the text's only newline is `\n`.
     pub fn set_text(&mut self, text: &str) {
         self.column = None;
+        if let Some(hidden) = self.hidden.as_mut() {
+            let kept = printable(text, false);
+            self.editor.set_text(&mask(kept.chars().count()));
+            hidden.set(&kept);
+            return;
+        }
         self.editor.set_text(&printable(text, self.multiline));
     }
 
@@ -304,16 +399,30 @@ impl TextField {
 
     /// Types `text` at the caret, replacing the selection.
     pub fn insert(&mut self, cx: &mut TextContext, text: &str) {
+        if self.is_password() {
+            self.edit_password(cx, text, |driver, masks| {
+                driver.insert_or_replace_selection(masks)
+            });
+            return;
+        }
         self.driver(cx).insert_or_replace_selection(text);
     }
 
     /// Deletes the selection, or the cluster before the caret.
     pub fn backspace(&mut self, cx: &mut TextContext) {
+        if self.is_password() {
+            self.edit_password(cx, "", |driver, _| driver.backdelete());
+            return;
+        }
         self.driver(cx).backdelete();
     }
 
     /// Deletes the selection, or the cluster after the caret.
     pub fn delete(&mut self, cx: &mut TextContext) {
+        if self.is_password() {
+            self.edit_password(cx, "", |driver, _| driver.delete());
+            return;
+        }
         self.driver(cx).delete();
     }
 
@@ -419,8 +528,10 @@ impl TextField {
         let cursor = cursor.filter(|&(start, end)| {
             start <= end && preedit.is_char_boundary(start) && preedit.is_char_boundary(end)
         });
+        let password = self.is_password();
         let mut driver = self.driver(cx);
-        if preedit.is_empty() {
+        // A password field shows no preedit: it would draw the characters it hides.
+        if preedit.is_empty() || password {
             driver.clear_compose();
         } else {
             driver.set_compose(preedit, cursor);
@@ -429,6 +540,10 @@ impl TextField {
 
     /// Commits `text` from the input method, replacing the preedit.
     pub fn commit(&mut self, cx: &mut TextContext, text: &str) {
+        if self.is_password() {
+            self.insert(cx, text);
+            return;
+        }
         let mut driver = self.driver(cx);
         driver.clear_compose();
         driver.insert_or_replace_selection(text);
@@ -436,7 +551,12 @@ impl TextField {
 
     /// The selected text, if the selection is not the caret; none while the input method
     /// composes.
+    /// A password field's selection gives none: nothing is copied, cut, offered as the primary
+    /// selection or dragged out of it, as GTK's password entry refuses them.
     pub(crate) fn selected_text(&self) -> Option<String> {
+        if self.is_password() {
+            return None;
+        }
         self.editor.selected_text().map(str::to_owned)
     }
 
@@ -453,6 +573,15 @@ impl TextField {
     /// Selects the whole text.
     pub(crate) fn select_all(&mut self, cx: &mut TextContext) {
         self.driver(cx).select_all();
+    }
+
+    /// Puts the selection's anchor and focus at byte offsets `anchor` and `focus` of the text,
+    /// each clamped to it; an offset inside a character leaves that end where it was.
+    pub(crate) fn select_bytes(&mut self, cx: &mut TextContext, anchor: usize, focus: usize) {
+        let len = self.text().len();
+        let mut driver = self.driver(cx);
+        driver.move_to_byte(anchor.min(len));
+        driver.extend_selection_to_byte(focus.min(len));
     }
 
     /// Puts the caret at the point of the layout nearest `(x, y)`, as a press does.
@@ -535,6 +664,26 @@ impl TextField {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An edit the masks and the hidden text cannot agree on, here one that leaves the caret
+    /// before what it inserted, empties both, in either direction: the field never keeps a
+    /// secret its masks do not count, nor one the person did not type.
+    #[test]
+    fn a_password_edit_the_masks_cannot_follow_empties_the_field() {
+        for rtl in [false, true] {
+            let mut cx = TextContext::default();
+            let mut field = TextField::password("Password", 15.0, rtl);
+            field.insert(&mut cx, "abc");
+            assert_eq!(field.password_text(), Some("abc"), "rtl {rtl}");
+            field.select_all(&mut cx);
+            field.edit_password(&mut cx, "xyz", |driver, masks| {
+                driver.insert_or_replace_selection(masks);
+                driver.move_to_text_start();
+            });
+            assert_eq!(field.password_text(), Some(""), "rtl {rtl}");
+            assert_eq!(field.editor.text().chars().count(), 0, "rtl {rtl}");
+        }
+    }
 
     /// The caret's byte offset, its line, and its horizontal position.
     fn caret_at(cx: &mut TextContext, field: &mut TextField) -> (usize, usize, f64) {
@@ -780,5 +929,34 @@ mod tests {
 
         field.set_text("שלום");
         assert_eq!(field.text(), "שלום");
+    }
+
+    /// The first family of the sans-serif family layouts are set in.
+    fn first_sans(cx: &mut TextContext) -> Option<String> {
+        let collection = &mut cx.fonts.collection;
+        let first = collection.generic_families(GenericFamily::SansSerif).next();
+        first.and_then(|id| collection.family_name(id)).map(str::to_owned)
+    }
+
+    #[test]
+    fn a_family_leads_the_sans_serif_until_it_is_taken_away() {
+        let mut cx = TextContext::default();
+        let latin = first_sans(&mut cx);
+        // Any family of the system other than the Latin one, by the name its id gives back: a
+        // name such as "Noto Sans Arabic SemCond ExtLt" finds the id of "Noto Sans Arabic".
+        let collection = &mut cx.fonts.collection;
+        let names: Vec<String> = collection.family_names().map(str::to_owned).collect();
+        let ids: Vec<_> = names.iter().filter_map(|name| collection.family_id(name)).collect();
+        let other = ids
+            .into_iter()
+            .filter_map(|id| collection.family_name(id).map(str::to_owned))
+            .find(|name| Some(name) != latin.as_ref())
+            .expect("a second font family");
+        cx.set_family(Some(&other));
+        assert_eq!(first_sans(&mut cx), Some(other));
+        cx.set_family(None);
+        assert_eq!(first_sans(&mut cx), latin);
+        cx.set_family(Some("No Such Family Anywhere"));
+        assert_eq!(first_sans(&mut cx), latin, "a missing family is skipped");
     }
 }

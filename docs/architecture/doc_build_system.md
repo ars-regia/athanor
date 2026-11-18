@@ -44,12 +44,22 @@ own the rest:
 Every package builds inside `athanor-builder`, an OCI image produced by Nix alone:
 `builderImage` in `flake.nix` (`dockerTools.buildLayeredImage`), with no Containerfile.
 `call-build-builder.yml` hashes `forge/builder`, the forge configuration, `flake.nix` and
-`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists it is reused, otherwise
-the job runs `nix build .#builderImage`, loads it and pushes it as `:<hash>`. On the default
-branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points `:latest` at
-that `:<hash>`: `:latest` is the default branch's builder, which the pull request spec check
-(`spec-build-check.yml`) uses when a change leaves the builder's inputs alone.
-The hash is handed to the package and image jobs, so a run builds with exactly one builder.
+`flake.lock` with `forge/scripts/check_idempotency.sh --package builder` (not `packages.json`, which the image does not read); when `athanor-builder:<hash>` already exists and
+`forge/scripts/verify_image.sh` finds the digest it names signed by a trusted run of
+`call-build-builder.yml` (the identity and issuer of `system/tier-digests.sh`, issue #1205) and
+labelled `tier.content.sha256=<hash>`, it is reused; otherwise
+`forge/scripts/publish_builder.sh` runs `nix build .#builderImage`, loads it, adds that label,
+pushes it as `:<hash>` and signs the pushed digest keyless with the job's identity, as the
+package images are signed, with no key and no signing environment. An unsigned or foreign
+builder is a miss and is built again; a verification that cannot be answered fails the run. On
+the default branch, built or reused, `forge/scripts/promote_builder_latest.sh` then points
+`:latest` at that digest, after verifying it again: `:latest` is the default branch's builder,
+which `rust-security-audit.yml` runs. The job outputs the verified digest,
+`athanor-builder@sha256:<hex>`; the hash is handed to the package and image jobs, so a run
+builds with exactly one builder, and they still pull it by its `:<hash>` tag until a follow-up
+of issue #1205 moves every consumer to that digest. The builders published before issue #1205
+are unsigned: the first Orchestrator run after it rebuilds and signs the builder, and until
+then the pull request spec check builds its own.
 
 ## 4. The DAG
 
@@ -63,11 +73,23 @@ package jobs of one run:
   adds an edge too.
 - **Dirty nodes**: a custom package is dirty when the registry has no
   `athanor-forge-<package>:hash-<hash>`, the hash being the one
-  `check_idempotency.sh --hash-only` computes. The lookups run eight at a time, each `registry_probe.sh` under
-  `retry.sh`: "manifest unknown" (and ghcr's 403 for a never-published package) means
-  absent; any other failure is retried and then stops the run, because reading an
+  `check_idempotency.sh --hash-only` computes, or when no trusted run of
+  `call-dag-compile.yml` signed the digest that tag names, or when that digest's config is not
+  labelled `tier.content.sha256=<hash>` (issue #1176). The lookups run eight at a time, each
+  `verify_image.sh`: `registry_probe.sh` under `retry.sh` reads the tag's digest, and
+  `system/tier-digests.sh signed` verifies the digest with cosign against the identity and
+  issuer the tiers use, then reads the label from the config of that digest, so that a
+  trusted digest of an older build or of another package copied to the tag does not count.
+  "manifest unknown" (and ghcr's 403 for a never-published package) means
+  absent; an image without that signature or label is rebuilt and reported as an error; any other failure is retried and then stops the run, because reading an
   unanswered question as "clean" would ship stale images and reading it as "dirty" would
-  silently rebuild the whole graph. A dirty package does not dirty its dependents: builds
+  silently rebuild the whole graph. The tier assembly (`fetch_repo_rpms.sh`) takes a package's RPMs only from the
+  digest `resolve_node_image.sh` verified the same way, and restores a published tier only
+  when `call-system-image.yml` signed it. The tier's manifest records, for each package,
+  the hash and the image digest (`tier_cache.sh`); a restored package directory stands in
+  for the pull only when both equal those of the image verified in the run, so RPMs that an
+  earlier, unverified image put under the same hash are replaced, and a manifest written
+  without a digest is never reused. A dirty package does not dirty its dependents: builds
   never consume another package's output. Upstream nodes and flatpaks are never dirty, so a
   commit that changes no package schedules no matrix job.
 - **Cycle check**: `graphlib.TopologicalSorter.prepare()` on the graph; a cycle (a tier
@@ -94,8 +116,10 @@ not the builds.
    `cargo -p <crate>` names a crate outside every input), the workspace
    `Cargo.toml`, `Cargo.lock` and `.cargo/config.toml` for an in-place cargo build, the
    build scripts and the builder identity (`flake.nix`, `flake.lock`, `forge/builder/`). It
-   asks the registry whether `athanor-forge-<package>:hash-<hash>` exists. If it does, the
-   job stops there.
+   asks `verify_image.sh` whether `athanor-forge-<package>:hash-<hash>` names a digest a
+   trusted run of `call-dag-compile.yml` signed and labelled with that hash, as the brain
+   does (section 4, dirty nodes). If it does, the job stops there; an image that fails either
+   check is rebuilt and reported as an error.
 
    The declared-input check is a tripwire for literal paths, not a proof of completeness.
    It reads the spec text (outside comments and `%description`) and fails when a repo-rooted
@@ -114,8 +138,9 @@ not the builds.
    in-place builds, or unpacks the sources and fetches what their `Cargo.lock` and
    `go.mod` pin. The `build` stage runs `rpmbuild` with `--network=none`,
    `CARGO_NET_OFFLINE=true` and `GOPROXY=off`. Specs without `Source` build the checkout
-   in place (`rpmbuild --build-in-place`). Rust compiles through sccache, cached per
-   package.
+   in place (`rpmbuild --build-in-place`). Rust compiles through sccache, whose cache lives
+   in the build's home volume and goes with it: the DAG restores no cache
+   ([doc_pipeline.md](doc_pipeline.md), PL10).
 
    The spec of each of the forge's own packages, except the four that follow an upstream or
    kernel release (`RELEASE_BY_HAND` in `scripts/verify.py`: `cosmic-comp`, `greenboot-rs`,
@@ -149,18 +174,31 @@ rebuilds every spec of the DAG (`dag_orchestrator.py --list-spec-dirs`). Only th
 are built: any other changed directory (the kernel, Nix-built packages, unlisted or deleted
 specs) is named in the log and skipped. The specs build in the builder of the checkout,
 named by its content hash (`check_idempotency.sh --package builder`): the published
-`athanor-builder:<hash>` when the registry has it, else a builder image built from the pull
+`athanor-builder:<hash>` when the registry has it signed by a trusted run of
+`call-build-builder.yml`, pulled by the digest that lookup verified, never by the tag again
+(the shell rig's spec build, `rig.sh`, does the same), else a builder image built from the pull
 request (`forge/scripts/builder_image.sh`), handed to the build jobs as a one-day workflow
-artifact and never pushed. Never `athanor-builder:latest`, the default branch's builder: a
-pull request into another branch would build against the default branch's libraries.
+artifact and never pushed. The shell rig's spec build (`rig.sh cosmic-comp-version`) on such a
+miss builds the checkout's builder with `builder_image.sh` itself and loads it into the local
+podman under the archive's own local tag: unsigned, never pushed, signed or cached under its
+hash, run by the image ID read from the archive, and used only to build the RPM that the job
+installs in the test rig, which nothing publishes; a host without `nix` refuses with a message.
+Like the one-day artifact, this builder never leaves the job; it differs in being loaded into the
+local podman, and its RPM goes only into the test rig. PL12 (`doc_pipeline.md`) names both. Never
+the registry's `athanor-builder:latest`, the default branch's builder: a pull request into
+another branch would build against the default branch's libraries. The local tag that
+`podman load` applies is not that image and is never pulled or pushed.
 
 ## 6. Tier repositories and the system image
 
 `call-system-image.yml` turns the package images into tier repositories and images:
 
 - **Tier repositories.** In the builder, `forge/scripts/fetch_repo_rpms.sh` pulls the
-  package images of each tier by `:hash-<hash>`, from the map `dag-hashes` (`hashes.json`) the
-  brain wrote for this run and the job downloads; nothing in the pipeline reads a package's
+  package images of each tier by digest: `resolve_node_image.sh` reads the digest of
+  `:hash-<hash>`, the hash coming from the map `dag-hashes` (`hashes.json`) the brain wrote
+  for this run and the job downloads, and passes it on only when `verify_image.sh` finds it
+  signed by a trusted run of `call-dag-compile.yml` and labelled with that hash; any other
+  answer stops the job (issue #1176); nothing in the pipeline reads a package's
   `:latest`, which stays for people (tier 0 also takes the kernel, `azoth@<digest>` from the
   verified kernel artifacts). `forge/scripts/publish_tiers.sh` then runs `createrepo_c` for
   each tier whose content hash changed and publishes `athanor-forge-tier<N>-repo:latest` from

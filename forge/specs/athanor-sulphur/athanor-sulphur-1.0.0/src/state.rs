@@ -9,6 +9,7 @@ use crate::a11y::Look;
 use crate::keyboard_group::protocol::athanor_keyboard_group_v1::AthanorKeyboardGroupV1;
 use crate::look::{FilterElement, Filters};
 use crate::background_effect::Blurs;
+use crate::cursor::Cursor;
 use crate::marks::{Marks, Stacked};
 use crate::lock::Lock;
 use crate::output_management::OutputManagement;
@@ -35,7 +36,7 @@ use smithay::desktop::utils::{
     with_surfaces_surface_tree, OutputPresentationFeedback,
 };
 use smithay::desktop::{
-    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+    layer_map_for_output, LayerSurface, PopupGrab, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
 use smithay::input::pointer::CursorImageStatus;
@@ -132,6 +133,9 @@ pub struct State {
 
     pub space: Space<Window>,
     pub popups: PopupManager,
+    /// The last popup grab that took the keyboard: a popup destroyed under it hands the keyboard
+    /// to the grab's current popup (`popup_destroyed`).
+    pub popup_grab: Option<PopupGrab<Self>>,
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
@@ -167,6 +171,8 @@ pub struct State {
     pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
     pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The EIS contexts of the portal backend's sessions (`eis.rs`).
+    pub(crate) eis: crate::eis::Eis,
     /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
     pub aids: crate::aids::Aids,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
@@ -198,6 +204,8 @@ pub struct State {
     /// The cursor a client set last and that client, or the default and no client: shown only
     /// while that client holds the pointer's focus (`shown_cursor`).
     pub cursor_status: (CursorImageStatus, Option<ClientId>),
+    /// The cursor theme the pointer is drawn with, on a monitor and in a capture that asks for it.
+    pub cursor: Cursor,
     pub grab_serials: GrabSerials,
     pub backend: Backend,
 
@@ -235,6 +243,8 @@ pub struct State {
     pub lock_state: SessionLockManagerState,
     /// The session's lock, while it is locked.
     pub lock: Option<Lock>,
+    /// The DRM leases granted (decision 36); only the udev backend grants one.
+    pub leases: crate::drm_lease::Leases<crate::drm_lease::Lease>,
     pub idle_notifier_state: IdleNotifierState<Self>,
     /// The surfaces that hold idle inhibitors, with how many each holds (`idle_inhibit`).
     pub inhibitors: HashMap<WlSurface, usize>,
@@ -302,6 +312,12 @@ pub struct GrabSerials {
     pub touch: Option<(Serial, ClientId)>,
     pub key_press: Option<(Serial, ClientId)>,
     pub key_release: Option<(Serial, ClientId)>,
+    /// The last press of any kind, a key, a button, a finger or a pen, whether a client or the
+    /// compositor took it: a click grants a token only while it is the last (`token_created`).
+    pub press: Option<Serial>,
+    /// A serial taken at the last change of the keyboard focus, to a surface or to none: a
+    /// click older than it grants no token (`token_created`).
+    pub focus: Option<Serial>,
 }
 
 impl GrabSerials {
@@ -408,6 +424,13 @@ impl State {
         crate::bell::global(&dh);
         // Decision 35.
         crate::background_effect::global(&dh);
+        // Decision 36. A surface's content type and a toplevel's tag are kept, applied with the
+        // commit; nothing reads the type at 1.0, and the tag grants nothing.
+        smithay::wayland::content_type::ContentTypeState::new::<Self>(&dh);
+        crate::toplevel_tag::global(&dh);
+        // Decision 33, wave 2b. A surface's presentation hint is kept, applied with the commit;
+        // the DRM backend presents every frame with vsync (`tearing.rs`).
+        crate::tearing::global(&dh);
         // A client inside a security context cannot make another (spike Q4), as Smithay asks.
         SecurityContextState::new::<Self, _>(&dh, unconfined);
         let idle_notifier_state = IdleNotifierState::new(&dh, event_loop.handle());
@@ -431,6 +454,7 @@ impl State {
             clock,
             space: Space::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
@@ -447,6 +471,7 @@ impl State {
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            eis: Default::default(),
             aids: Default::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
@@ -457,6 +482,7 @@ impl State {
             lock_requests: 0,
             fatal: None,
             cursor_status: (CursorImageStatus::default_named(), None),
+            cursor: Cursor::from_env(),
             grab_serials: GrabSerials::default(),
             backend,
             compositor_state,
@@ -482,6 +508,7 @@ impl State {
             captures: Vec::new(),
             lock_state,
             lock: None,
+            leases: Default::default(),
             idle_notifier_state,
             inhibitors: HashMap::new(),
             input_hold,
@@ -1461,14 +1488,16 @@ impl<'a> View<'a> {
     }
 }
 
-/// Draws `view` on `output` into `framebuffer`, `age` frames after its previous contents, as
-/// `look` says of the magnifier and the colour filters.
+/// Draws `view` on `output` into `framebuffer`, with `pointer` above it, `age` frames after its
+/// previous contents, as `look` says of the magnifier and the colour filters.
+#[allow(clippy::too_many_arguments)]
 pub fn draw_view<'d, R>(
     renderer: &mut R,
     framebuffer: &mut R::Framebuffer<'_>,
     output: &Output,
     age: usize,
     view: View<'_>,
+    pointer: Vec<Stacked<R>>,
     damage_tracker: &'d mut OutputDamageTracker,
     look: Look,
 ) -> Result<RenderOutputResult<'d>, DamageError<R::Error>>
@@ -1488,8 +1517,9 @@ where
             Kind::Unspecified,
         )
     };
-    // The popups and the lock surface are surfaces as the space's are, above them.
-    let mut elements: Vec<Stacked<R>> = Vec::new();
+    // The pointer above all; the popups and the lock surface are surfaces as the space's are,
+    // above them.
+    let mut elements: Vec<Stacked<R>> = pointer;
     // No region is blurred on the lock screen.
     let mut blurred = None;
     match view {
@@ -1709,6 +1739,15 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `client` has no identity though it could have one: it connected outside a security
+/// context and its process could not be read, or it has no client state. A confined client has
+/// none by design.
+pub fn unidentified(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_none_or(|data| !data.confined && data.identity.is_none())
 }
 
 /// Whether `a` and `b` connected through security contexts that name one application instance:
@@ -2217,6 +2256,8 @@ mod tests {
             key_press: Some((s(8), b.clone())),
             key_release: Some((s(9), m.clone())),
             touch: Some((s(10), b.clone())),
+            press: Some(s(10)),
+            focus: None,
         };
         assert!(serials.clicked(s(7), &b));
         assert!(!serials.clicked(s(7), &m), "B's press named by M");

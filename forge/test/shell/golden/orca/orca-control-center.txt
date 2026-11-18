@@ -1,0 +1,106 @@
+Screen reader on.
+Control center grouping
+Wi-Fi toggle button pressed.
+On.
+Open the Wi-Fi page button.
+tab
+Bluetooth toggle button pressed.
+On.
+tab
+Open the Bluetooth page button.
+tab
+Dark mode toggle button not pressed.
+Off.
+tab
+Power mode toggle button not pressed.
+Balanced.
+tab
+Open the Power mode page button.
+tab
+Mute output toggle button not pressed.
+tab
+Output volume horizontal slider 40 39 percent.
+tab
+Open the Sound page button.
+tab
+Mute microphone toggle button not pressed.
+tab
+Input volume horizontal slider 55 54 percent.
+tab
+Open the Sound page button.
+tab
+Brightness horizontal slider 60 60 percent.
+tab
+Media grouping
+Previous track button.
+tab
+Pause button.
+tab
+Next track button.
+tab
+Settings button.
+tab
+Wi-Fi toggle button pressed.
+On.
+tab
+Screen reader off.
+Screen reader on.
+Back button.
+tab
+Wi-Fi check box checked.
+tab
+Athanor Lab, connected button.
+tab
+Corner Café button.
+tab
+Home Network, secured button.
+tab
+Office VPN check box not checked.
+tab
+Back button.
+tab
+Screen reader off.
+Screen reader on.
+Back button.
+tab
+Bluetooth check box checked.
+tab
+Headphones, connected button.
+tab
+Keyboard button.
+tab
+Screen reader off.
+Screen reader on.
+Back button.
+tab
+Output volume horizontal slider 40 39 percent.
+tab
+Mute output check box not checked.
+tab
+Speakers, in use button.
+tab
+Headphones button.
+tab
+Input volume horizontal slider 55 54 percent.
+tab
+Mute microphone check box not checked.
+tab
+Previous track button.
+tab
+Pause button.
+tab
+Next track button.
+tab
+Screen reader off.
+Screen reader on.
+Back button.
+tab
+Balanced selected radio button.
+tab
+Screen brightness horizontal slider 60 60 percent.
+tab
+Back button.
+tab
+Balanced selected radio button.
+tab
+Screen reader off.

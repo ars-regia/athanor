@@ -5,8 +5,9 @@ Release:        10%{?athanor_content}%{?dist}
 Summary:        The Athanor control center
 License:        GPL-3.0-or-later
 
-BuildRequires:  rust cargo gcc pkgconf-pkg-config gtk4-devel glib2-devel gtk4-layer-shell-devel pulseaudio-libs-devel binutils python3 gettext
-Requires:       gtk4 gtk4-layer-shell athanor-calmo
+BuildRequires:  rust cargo gcc pkgconf-pkg-config glib2-devel fontconfig-devel libxkbcommon-devel pulseaudio-libs-devel gettext
+# Inter, the interface font, and the symbolic icons the panel draws.
+Requires:       athanor-calmo adwaita-icon-theme
 
 %description
 One resident layer-shell panel for quick settings, opened by the bar's button and by Super+C
@@ -43,10 +44,6 @@ install -D -m 0644 forge/specs/athanor-control-center/athanor-control-center-1.0
 mkdir -p %{buildroot}/usr/share/locale
 cp -a locale-build/. %{buildroot}/usr/share/locale/
 rm -rf locale-build
-
-%check
-# doc_shell.md, SH4: the layer-shell shim must load before libwayland-client and GTK.
-python3 -B forge/scripts/check_shim_link_order.py target/release/athanor-control-center
 
 %files
 /usr/bin/athanor-control-center

@@ -15,7 +15,6 @@ gtk = [
     "dep:gtk4-layer-shell",
     "dep:glib",
     "dep:serde",
-    "dep:serde_json",
     "dep:toml",
     "dep:zbus",
     "dep:tokio",
@@ -27,7 +26,6 @@ gtk4 = { workspace = true, optional = true }
 gtk4-layer-shell = { workspace = true, optional = true }
 glib = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"], optional = true }
-serde_json = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 zbus = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["full"], optional = true }

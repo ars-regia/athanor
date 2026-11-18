@@ -79,6 +79,17 @@ class CompareTest(unittest.TestCase):
         transcript = [node("panel", "Style", ["showing"]), node("label", "Style")]
         self.assertEqual(compare.compare(reference, transcript)[1], [])
 
+    def test_a_frame_and_a_panel_of_one_name_match_the_grouping_by_its_alike_role(self):
+        # The toolkit names its window after its root group, which GTK leaves unnamed.
+        reference = [node("grouping", "Control center", ["showing", "vertical"])]
+        transcript = [
+            node("frame", "Control center", ["showing"]),
+            node("panel", "Control center", ["showing", "vertical"]),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("note: role 'panel'", lines[0])
+
     # The two rules the maintainer accepted on 2026-10-17.
     def test_a_label_that_repeats_its_buttons_name_is_the_button(self):
         reference = [node("toggle button", "Bar"), dict(node("label", "Bar"), depth=1)]
@@ -91,10 +102,77 @@ class CompareTest(unittest.TestCase):
         lines, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual((len(lines), failures), (1, []))
 
+    def test_a_label_that_repeats_its_radio_buttons_name_is_the_radio_button(self):
+        # The maintainer extended the rule to radio buttons on 2026-11-14.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Balanced"), depth=1)]
+        lines, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual((len(lines), failures), (1, []))
+        # A label inside the radio button that repeats no name of it stays its own element.
+        reference = [node("radio button", "Balanced"), dict(node("label", "Default"), depth=1)]
+        _, failures = compare.compare(reference, [node("radio button", "Balanced")])
+        self.assertEqual(failures, ["label 'Default': missing"])
+
+    def test_a_dark_variant_of_the_matrix_expects_the_dark_mode_tile_on(self):
+        # The maintainer decided on 2026-11-14 that the Dark mode tile alone follows the
+        # variant's scheme; the reference is the light one.
+        reference = [
+            node("panel", "Control center"),
+            dict(node("toggle button", "Dark mode"), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Dark mode"), depth=3),
+            dict(node("label", "Off"), depth=3),
+            dict(node("label", "Off"), depth=1),
+        ]
+
+        def read(tile, second):
+            return [
+                node("panel", "Control center"),
+                dict(node("toggle button", "Dark mode", tile), depth=1),
+                dict(node("label", second), depth=2),
+                dict(node("label", "Off"), depth=1),
+            ]
+
+        on, off = read(["pressed"], "On"), read([], "Off")
+        for variant in ("dark@1.0", "hc-dark@1.5"):
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertEqual(failures, [], variant)
+            # A dark variant whose tile says it is off fails.
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(
+                failures,
+                ["toggle button 'Dark mode': state 'pressed' missing", "label 'On': missing"],
+                variant,
+            )
+        # A light variant, or a walk outside the matrix, whose tile says it is on fails.
+        for variant in ("light@1.0", "hc-light@1.25", ""):
+            _, failures = compare.compare(compare.for_variant(reference, variant), off)
+            self.assertEqual(failures, [], variant)
+            _, failures = compare.compare(compare.for_variant(reference, variant), on)
+            self.assertIn("label 'Off': missing", failures, variant)
+
     def test_an_image_that_repeats_its_buttons_name_is_its_own_element(self):
         reference = [node("button", "Close"), dict(node("image", "Close"), depth=1)]
         lines, failures = compare.compare(reference, [node("button", "Close")])
         self.assertEqual((len(lines), failures), (2, ["image 'Close': missing"]))
+
+    def test_a_label_deep_inside_its_button_that_repeats_its_name_is_the_button(self):
+        # The GTK panel's tile: its title and status in a box in a box inside the toggle button.
+        tile = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("panel", ""), depth=1),
+            dict(node("panel", ""), depth=2),
+            dict(node("label", "Wi-Fi"), depth=3),
+            dict(node("label", "On"), depth=3),
+        ]
+        flat = [
+            node("toggle button", "Wi-Fi", ["pressed"]),
+            dict(node("label", "On"), depth=1),
+        ]
+        lines, failures = compare.compare(tile, flat)
+        self.assertEqual((len(lines), failures), (2, []))
+        # The status, which repeats no button's name, stays its own element.
+        _, failures = compare.compare(tile, flat[:1])
+        self.assertEqual(failures, ["label 'On': missing"])
 
     def test_a_label_that_repeats_another_parents_name_is_its_own_element(self):
         reference = [node("frame", "Layout"), dict(node("label", "Layout"), depth=1)]
@@ -181,6 +259,44 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, [node("check box", "Option one")])
         self.assertEqual(failures, ["label 'Option one': missing"])
 
+    def test_a_control_center_switch_and_the_label_beside_it_are_a_toggle_button(self):
+        # Core-AAM 1.2 maps ARIA's switch to AT-SPI's toggle button (maintainer, 2026-11-14).
+        for name in ("Mute microphone", "Silenzia il microfono"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable", "checked"]), depth=1),
+            ]
+            lines, failures = compare.compare(
+                reference, [node("toggle button", name, ["pressed"])]
+            )
+            self.assertEqual((len(lines), failures), (1, []))
+        _, failures = compare.compare(
+            [node("check box", "Speakers")], [node("toggle button", "Speakers")]
+        )
+        self.assertEqual(failures, ["check box 'Speakers': role 'toggle button'"])
+
+    def test_a_popover_frame_named_as_its_switch_leaves_the_switch_its_toggle_button(self):
+        # The bar's Bluetooth popover is a frame named Bluetooth that holds the Bluetooth switch.
+        reference = [node("check box", "Bluetooth", ["checkable", "checked"])]
+        transcript = [
+            node("frame", "Bluetooth", ["active"]),
+            dict(node("toggle button", "Bluetooth", ["pressed"]), depth=1),
+        ]
+        lines, failures = compare.compare(reference, transcript)
+        self.assertEqual(failures, [])
+        self.assertIn("transcript 'toggle button'", lines[0])
+
+    def test_the_airplane_switch_of_the_bar_network_page_is_a_toggle_button(self):
+        for name in ("Airplane mode", "Modalità aereo"):
+            reference = [
+                node("panel", ""),
+                dict(node("label", name), depth=1),
+                dict(node("check box", name, ["checkable"]), depth=1),
+            ]
+            lines, failures = compare.compare(reference, [node("toggle button", name)])
+            self.assertEqual((len(lines), failures), (1, []))
+
     def test_a_list_box_is_a_list(self):
         reference = [node("list", "A list", ["focusable", "showing"])]
         lines, failures = compare.compare(reference, [node("list box", "A list", ["focusable", "showing"])])
@@ -189,6 +305,46 @@ class CompareTest(unittest.TestCase):
         # A list is not another role.
         _, failures = compare.compare(reference, [node("menu", "A list", ["focusable", "showing"])])
         self.assertEqual(failures, ["list 'A list': role 'menu'"])
+
+    def test_a_checkable_menu_item_is_a_check_or_radio_menu_item(self):
+        for role in ("check menu item", "radio menu item"):
+            reference = [node("menu item", "Sort by name", ["checkable", "checked", "showing"])]
+            transcript = [node(role, "Sort by name", ["checkable", "checked", "showing"])]
+            lines, failures = compare.compare(reference, transcript)
+            self.assertEqual(failures, [])
+            self.assertIn(f"note: role '{role}'", lines[0])
+
+    def test_a_menu_item_that_is_not_checkable_is_not_a_check_menu_item(self):
+        reference = [node("menu item", "New window", ["showing"])]
+        _, failures = compare.compare(reference, [node("check menu item", "New window", ["showing"])])
+        self.assertEqual(failures, ["menu item 'New window': role 'check menu item'"])
+
+    def test_the_states_of_a_row_with_no_name_are_compared(self):
+        def at(depth, role, name, states):
+            return {**node(role, name, states), "depth": depth}
+
+        row = ["focusable", "selectable", "showing"]
+        reference = [at(0, "list item", "", row), at(1, "label", "Rows 26", ["showing"])]
+        same = [at(0, "list item", "", row), at(1, "label", "Rows 26", ["showing"])]
+        self.assertEqual(compare.compare(reference, same)[1], [])
+        lost = [at(0, "list item", "", ["focusable", "showing"]), same[1]]
+        self.assertEqual(
+            compare.compare(reference, lost)[1], ["list item '': state 'selectable' missing"]
+        )
+
+    def test_a_heading_row_with_no_name_is_no_element(self):
+        # The states of the recorded references' only nameless row (atspi-gallery-lists.json and
+        # atspi-launcher.json): GTK's heading row, not selectable, not focusable.
+        def at(depth, role, name, states):
+            return {**node(role, name, states), "depth": depth}
+
+        heading = ["sensitive", "showing", "visible"]
+        reference = [at(0, "list item", "", heading), at(1, "label", "Rows 26", heading)]
+        for transcript in (
+            [at(0, "label", "Rows 26", heading)],
+            [at(0, "list item", "", heading), at(0, "list item", "", heading), reference[1]],
+        ):
+            self.assertEqual(compare.compare(reference, transcript)[1], [])
 
     def test_a_scroll_bar_and_its_subtree_have_no_counterpart_in_a_tree_without_one(self):
         def at(depth, role, name, value=""):
@@ -219,6 +375,41 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, published, indicator=True)
         self.assertEqual(failures, ["scroll bar '': value '5.0', expected '0.0'"])
         self.assertEqual(compare.INDICATOR_PAGES, {"lists"})
+
+    def test_the_calendars_unnamed_arrows_match_the_named_buttons_at_their_place(self):
+        reference = [node("button", "Today", ["showing"])] + [
+            node("button", "", ["focusable", "sensitive", "showing"]) for _ in range(4)
+        ] + [node("label", "2026", ["showing"])]
+        names = ["Previous month", "Next month", "Previous year", "Next year"]
+        transcript = [node("button", "Today", ["showing"]), node("label", "2026", ["showing"])] + [
+            node("button", name, ["focusable", "sensitive", "showing"]) for name in names
+        ]
+        lines, failures = compare.compare(reference, transcript, arrows=True)
+        self.assertEqual(failures, [])
+        self.assertEqual(
+            [line.split("; ")[-1] for line in lines if "named" in line],
+            [f"note: named {name!r}: {compare.ARROWS}" for name in names],
+        )
+        # A named button too few: the last arrow is missing.
+        _, failures = compare.compare(reference, transcript[:-1], arrows=True)
+        self.assertEqual(failures, ["button '': missing"])
+        # Its states are compared as any element's.
+        bare = transcript[:2] + [node("button", name, ["sensitive", "showing"]) for name in names]
+        _, failures = compare.compare(reference, bare, arrows=True)
+        self.assertEqual(failures, ["button '': state 'focusable' missing"] * 4)
+
+    def test_the_arrow_rule_holds_only_for_the_calendars_references(self):
+        reference = [node("button", "", ["showing"])]
+        transcript = [node("button", "Next month", ["showing"])]
+        self.assertEqual(compare.ARROWS_REFERENCES, {"atspi-bar-calendar", "atspi-bar-calendar-it"})
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = {}
+            for name, tree in [("atspi-bar", reference), ("atspi-bar-calendar", reference), ("t", transcript)]:
+                paths[name] = Path(tmp) / f"{name}.json"
+                paths[name].write_text(json.dumps(tree), encoding="utf-8")
+            with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                self.assertEqual(compare.main([str(paths["atspi-bar"]), str(paths["t"])]), 1)
+                self.assertEqual(compare.main([str(paths["atspi-bar-calendar"]), str(paths["t"])]), 0)
 
     def test_an_empty_reference_fails(self):
         empty = ["the reference holds no element"]
@@ -266,6 +457,20 @@ class GalleryTest(unittest.TestCase):
             _, failures = compare.gallery_problems(references, transcripts, "en")
             self.assertEqual(failures, ["lists: no difference left; remove its expected difference (#1)"])
 
+    def test_the_arrow_rule_holds_for_the_gallerys_calendar_page_only(self):
+        self.assertEqual(compare.ARROWS_PAGES, {"calendar"})
+        with tempfile.TemporaryDirectory() as references, tempfile.TemporaryDirectory() as transcripts:
+            for page in compare.GALLERY_PAGES:
+                (Path(references) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "")])
+                )
+                (Path(transcripts) / f"atspi-gallery-{page}.json").write_text(
+                    json.dumps([node("button", page), node("button", "Next month")])
+                )
+            _, failures = compare.gallery_problems(references, transcripts, "en")
+            pages = [page for page in compare.GALLERY_PAGES if page != "calendar"]
+            self.assertEqual(failures, [f"{page}: button '': missing" for page in pages])
+
     def test_an_expected_difference_of_no_page_fails(self):
         stale = {"tables": 1, **compare.EXPECTED_DIFFERENCES}
         with mock.patch.object(compare, "EXPECTED_DIFFERENCES", stale):
@@ -288,7 +493,10 @@ class GalleryTest(unittest.TestCase):
             self.assertTrue(failures[0].startswith("choices: no reference "))
             self.assertTrue(failures[1].startswith("states: no transcript "))
             # The English trees are other files.
-            self.assertEqual(len(compare.gallery_problems(references, transcripts, "en")[1]), 12)
+            self.assertEqual(
+                len(compare.gallery_problems(references, transcripts, "en")[1]),
+                2 * len(compare.GALLERY_PAGES),
+            )
 
 
 class HiddenTest(unittest.TestCase):

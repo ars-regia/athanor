@@ -9,7 +9,7 @@ import subprocess
 import unittest
 
 from test_kernel_artifacts import Tool
-from test_sign_images import BUILDER, PODMAN
+from test_sign_images import BUILDER, BUILDER_DIGEST, BUILDER_SIGNER, PODMAN
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMOTE = ROOT / "system" / "promote.sh"
@@ -59,7 +59,9 @@ class Promote(Tool):
         self.artifacts.mkdir(parents=True, exist_ok=True)
         request = {"builder_content_hash": builder} if builder else {}
         (self.artifacts / "release-request.json").write_text(json.dumps(request))
-        fx = {"tags": {}, "configs": {}, "raw": {}, "sigstore_keys": {}, "moves": moves}
+        fx = {"tags": {}, "configs": {}, "raw": {}, "sigstore_keys": {}, "signatures": {}, "moves": moves}
+        if builder:
+            self.builder_fixture(fx, builder)
         lines = []
         for i, name in enumerate(NAMES):
             new, old = digest(i + 1), digest(i + 4)
@@ -93,6 +95,13 @@ class Promote(Tool):
             f"{REG}/athanor-iso {ISO}\n{REG}/athanor-system {digest(1)}\n"
         )
         self.registry(fx)
+
+    @staticmethod
+    def builder_fixture(fx, builder):
+        """athanor-builder:BUILDER as call-build-builder.yml publishes it: signed and labelled."""
+        fx["tags"][f"{REG}/athanor-builder:{builder}"] = BUILDER_DIGEST
+        fx["signatures"][f"{REG}/athanor-builder@{BUILDER_DIGEST}"] = BUILDER_SIGNER
+        fx["configs"][f"{REG}/athanor-builder@{BUILDER_DIGEST}"] = {"tier.content.sha256": builder}
 
     def evidence(self, gate, name, digest_, run_id=412, verdict="pass", finished=OLD):
         (self.artifacts / "evidence").mkdir(parents=True, exist_ok=True)
@@ -182,7 +191,9 @@ class Promote(Tool):
         for name, between in (("at plan", None), ("at apply", True)):
             with self.subTest(name=name):
                 self.published()
-                other = lambda: self.set_tag(f"{base}:promoted-412", digest(9))
+                def other():
+                    self.set_tag(f"{base}:promoted-412", digest(9))
+
                 if between is None:
                     other()
                 r, copies = self.promote(between=other if between else None)
@@ -836,7 +847,7 @@ class Promote(Tool):
         self.assertEqual(r.returncode, 0, r.stderr)
         runs = [json.loads(line) for line in (self.dir / "podman.log").read_text().splitlines()]
         # athanor-system alone, verified by the plan and again by the apply.
-        self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder:{BUILDER}"] * 2)
+        self.assertEqual([run["image"] for run in runs], [f"{REG}/athanor-builder@{BUILDER_DIGEST}"] * 2)
         self.assertIn((f"{REG}/athanor-system@{digest(1)}", f"{REG}/athanor-system:stable"), copies)
         self.assertEqual(self.record()["builder_content_hash"], BUILDER)
 
@@ -847,11 +858,26 @@ class Promote(Tool):
             (self.artifacts / "release-request.json").write_text(
                 json.dumps({"builder_content_hash": "cd" * 32})
             )
+            fx = json.loads((self.dir / "registry.json").read_text())
+            self.builder_fixture(fx, "cd" * 32)
+            self.registry(fx)
 
         r, copies = self.promote(between=rebuild)
         self.assertEqual(r.returncode, 1)
         self.assertIn("differs from the plan", r.stderr)
         self.assertEqual(copies, [])
+
+    def test_an_unsigned_builder_fails_the_plan_before_any_pull(self):
+        """Issue #1220: the policy pull runs only in a builder a trusted run signed."""
+        self.published()
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["signatures"] = {}
+        self.registry(fx)
+        r, copies = self.promote()
+        self.assertEqual(r.returncode, 1)
+        self.assertIn(f"the builder {REG}/athanor-builder:{BUILDER} is not one a trusted run", r.stderr)
+        self.assertEqual(copies, [])
+        self.assertFalse((self.dir / "podman.log").exists())
 
     def test_a_release_request_without_a_builder_image_fails_the_plan(self):
         self.published(builder=None)

@@ -14,6 +14,7 @@ pub mod favorites;
 pub mod idle;
 #[cfg(feature = "calloop")]
 pub mod glib_loop;
+pub mod keyboard;
 mod keyboard_group;
 mod keymap;
 mod launch;

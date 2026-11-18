@@ -1,0 +1,36 @@
+# AGENTS.md, "Least privilege for services": never `chmod 777`. A mode that lets every user
+# write, in shell (`chmod 777`, `chmod 0666`, `chmod u+x,o+w`, `install -m 666`, `mkdir -m 777`, in a script, a recipe, a spec or a
+# workflow) or in code (`from_mode(0o777)`, `.mode(0o666)`, `os.chmod(path, 0o777)`). The sticky
+# directory modes (1777) count too: a world-writable directory is one only with its reason.
+# No verify.py check reads modes.
+rules:
+  - id: world-writable
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      This mode lets every user write (AGENTS.md, "never chmod 777"): grant the owner, or a group
+      the file's readers belong to.
+    paths:
+      exclude:
+        - /docs/
+        - '*.md'
+        # The shared permissions deny these commands, and name them to do so.
+        - /.claude/
+    patterns:
+      - pattern-either:
+          - pattern-regex: '\bchmod\s+(?:--?[a-zA-Z][\w-]*\s+)*(?:0?[0-7]?[0-7][0-7][2367]|(?:[ugoa]*[-+=][rwxXstugo]*,)*[ugo]*[ao][ugo]*[+=][rwxXst]*w[rwxXst]*)(?!\w)'
+          - pattern-regex: '\b(?:install|mkdir)\b[^\n;|&#]*?\s(?:-[a-zA-Z]*m\s*|--mode[=\s]\s*)["'']?(?:0?[0-7]?[0-7][0-7][2367]|(?:[ugoa]*[-+=][rwxXstugo]*,)*[ugo]*[ao][ugo]*[+=][rwxXst]*w[rwxXst]*)(?!\w)'
+          - pattern-regex: '\b(?:from_mode|set_mode|mode|chmod|fchmod|lchmod|mkdir|makedirs)\(\s*(?:[^,()]*,\s*)?0o?[0-7]?[0-7][0-7][2367]\b'
+      # A comment that names a mode sets none (shell, Python, Nix).
+      - pattern-not-regex: '(?m)(?:^|\s)#.*$'
+      # Deliberate. /tmp and /var/tmp of the rpmbuild image of flake.nix, which a layered image
+      # lacks unless something makes them.
+      - pattern-not-regex: 'mkdir -m 1777 -p tmp var/tmp'
+      # Deliberate. The /tmp of a build container (forge/scripts/build_spec.sh), and the X11
+      # socket directory of athanor-sulphur's Xwayland, made as tmpfiles.d/x11.conf makes it:
+      # sticky directories every user writes in, as on any Linux system.
+      - pattern-not-regex: '(?m)^chmod 1777 /tmp$'
+      - pattern-not-regex: 'set_permissions\(&sockets, std::fs::Permissions::from_mode\(0o1777\)\)'
+      # Deliberate. Tests of athanor-update (serve.rs) and athanor-trust-state make a file
+      # writable by others to show that it is refused.
+      - pattern-not-regex: 'set_permissions\(&(?:path|file), std::fs::Permissions::from_mode\(0o666\)\)\.expect\("chmod"\)'

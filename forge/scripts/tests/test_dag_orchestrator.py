@@ -3,7 +3,9 @@ dependencies a package builds from, the registry decides what is dirty, and ever
 package builds in one matrix
 (python3 -B -m unittest discover -s forge/scripts/tests -v)."""
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -14,7 +16,10 @@ import time
 import unittest
 from unittest import mock
 
+from signed_registry import DIGEST, TRUSTED, TRUST_ENV, WORKFLOWS, stub_cosign, stub_skopeo
+
 SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "dag_orchestrator.py"
+
 spec = importlib.util.spec_from_file_location("dag_orchestrator", SCRIPT)
 dag = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dag)
@@ -93,9 +98,10 @@ class ContentHashTest(unittest.TestCase):
 
 
 class RegistryStateTest(unittest.TestCase):
-    """UD41: a custom package is dirty when the registry lacks its hash tag. The registry is
-    a stub skopeo on PATH, so the whole chain runs: check_idempotency.sh --hash-only,
-    retry.sh and registry_probe.sh."""
+    """UD41: a custom package is dirty when the registry lacks its hash tag, or when no trusted
+    run signed the digest the tag names (issue #1176). The registry is a stub skopeo on PATH and
+    the signatures a stub cosign, so the whole chain runs: check_idempotency.sh --hash-only,
+    verify_image.sh, retry.sh, registry_probe.sh and system/tier-digests.sh."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -104,12 +110,9 @@ class RegistryStateTest(unittest.TestCase):
         (root / "forge/specs/athanor-dock").mkdir(parents=True)
         (root / "forge/specs/athanor-dock/dock.spec").write_text("Name: athanor-dock\n")
         (root / "bin").mkdir()
-        stub = root / "bin/skopeo"
-        stub.write_text(
-            '#!/usr/bin/env bash\ncat "$ANSWER_DIR/answer" >&2\n'
-            '[[ $(cat "$ANSWER_DIR/status") == 0 ]] && echo sha256:00\nexit "$(cat "$ANSWER_DIR/status")"\n'
-        )
-        stub.chmod(0o755)
+        stub_skopeo(root / "bin")
+        stub_cosign(root / "bin")
+        (root / "signer").write_text(TRUSTED)
         self.root = root
         env = {
             "PATH": f"{root / 'bin'}:{os.environ['PATH']}",
@@ -120,6 +123,8 @@ class RegistryStateTest(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, env)
         patcher.start()
         self.addCleanup(patcher.stop)
+        for name in TRUST_ENV:
+            os.environ.pop(name, None)  # restored by the patcher
         patcher = mock.patch.object(dag, "FORGE_DIR", str(root / "forge"))
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -135,6 +140,51 @@ class RegistryStateTest(unittest.TestCase):
     def test_tag_present_is_clean(self):
         self.answer(0)
         self.assertEqual(set(), self.dirty())
+
+    def test_the_signature_is_verified_by_digest_against_the_trusted_identity(self):
+        self.answer(0)
+        self.dirty()
+        call = (self.root / "cosign.log").read_text().split()
+        owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+        self.assertEqual(f"ghcr.io/{owner}/athanor-forge-dock@{DIGEST}", call[-1])
+        self.assertEqual("https://token.actions.githubusercontent.com",
+                         call[call.index("--certificate-oidc-issuer") + 1])
+        self.assertRegex(TRUSTED, call[call.index("--certificate-identity-regexp") + 1])
+
+    def test_a_present_image_without_a_trusted_signature_is_rebuilt_and_reported(self):
+        self.answer(0)
+        for signer in (None, WORKFLOWS + "call-dag-compile.yml@refs/heads/feature",
+                       WORKFLOWS + "kernel-bump.yml@refs/heads/iso-v0",
+                       WORKFLOWS + "call-system-image.yml@refs/heads/iso-v0"):
+            with self.subTest(signer=signer):
+                if signer is None:
+                    (self.root / "signer").unlink(missing_ok=True)
+                else:
+                    (self.root / "signer").write_text(signer)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    self.assertEqual({"dock"}, self.dirty())
+                self.assertIn("athanor-forge-dock:hash-", err.getvalue())
+                self.assertIn("no trusted run of call-dag-compile.yml signed", err.getvalue())
+
+    def test_a_signed_image_labelled_with_another_hash_or_none_is_rebuilt_and_reported(self):
+        # A trusted digest of an older build or of another package, copied with its signature
+        # to this hash tag, verifies: its content label does not.
+        self.answer(0)
+        for label in ("f" * 64, "none"):
+            with self.subTest(label=label):
+                (self.root / "label").write_text(label)
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    self.assertEqual({"dock"}, self.dirty())
+                self.assertIn("athanor-forge-dock:hash-", err.getvalue())
+                self.assertIn("not the tag's hash", err.getvalue())
+
+    def test_a_verification_that_cannot_be_answered_stops_the_run(self):
+        self.answer(0)
+        (self.root / "cosign_error").write_text("")
+        with self.assertRaisesRegex(RuntimeError, "502 Bad Gateway"):
+            self.dirty()
 
     def test_tag_missing_is_dirty_and_only_for_custom_packages(self):
         self.answer(1, "manifest unknown: manifest unknown")

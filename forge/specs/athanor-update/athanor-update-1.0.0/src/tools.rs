@@ -81,7 +81,7 @@ pub trait Tools {
 /// Seconds since the epoch of an RFC 3339 time, as the image labels carry it.
 #[must_use]
 pub fn unix_time(rfc3339: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(rfc3339).ok().map(|time| time.timestamp())
+    rfc3339.parse::<jiff::Timestamp>().ok().map(jiff::Timestamp::as_second)
 }
 
 /// The registry host of `registry/path[:tag]`.

@@ -108,8 +108,11 @@ that is neither the last nor the active one is removed. A window maps on the fir
 active workspace; the windows of an inactive one leave the space, keeping their place, and come
 back there when it is activated, at once, with no animation. A window on an inactive workspace
 can still be captured, and activating it from the dock, or restoring it, activates its workspace
-first; an xdg-activation token, which a focused client can make at any time, switches no
-workspace; leaving a workspace or minimising a window dismisses its popups, and a popup of a
+first; an xdg-activation token switches no workspace. A client gets one for a serial of its
+own input since it took the keyboard, or, outside a security context, for a button press
+delivered to its own surface while that press is the latest input, with no later key, button,
+finger or pen press and no keyboard focus change; no client gets one while the session is locked,
+when a token restores, raises and focuses nothing; leaving a workspace or minimising a window dismisses its popups, and a popup of a
 window on an inactive workspace, minimised or drawing nothing grabs nothing. A window
 a move drops with its centre on another output joins that output's active workspace, and a
 window its output no longer shows after the outputs change is centred on that output, on the
@@ -163,6 +166,55 @@ dropped wherever decision 31 draws no outline: from any other client, without a 
 maximised or full-screen window, with `active_hint` off or at a theme width of 0. Version 2
 of `athanor_a11y_manager_v1` sets reduced motion with `set_reduced_motion`, and the flag
 (`Bell::reduced_motion`) is read from it (`src/bell.rs`, `src/a11y.rs`, `src/fixture/marks.rs`).
+
+Decision 33, wave 2b, adds `wl_drm`, standard, for the older Mesa clients that look for it
+before linux-dmabuf (`src/wl_drm.rs`, `src/fixture/wave2b.rs`). It is offered on a render node
+only, and its `device` names the node that linux-dmabuf's feedback names. A buffer comes only
+from `create_prime_buffer`, checked as linux-dmabuf checks its parameters and imported by the
+renderer as a dmabuf; a flink name is the `invalid_name` error, and `authenticate` is answered
+without authenticating anything, as a render node needs no DRM authentication. The bindings
+are generated from Mesa's description, `protocols/wayland-drm.xml`, copied unchanged from
+[`mesa/mesa`](https://gitlab.freedesktop.org/mesa/mesa) at commit
+`e74c9473592dafce4fb0005555ce9406b4200012` (2019-09-20, the last to change it, as on `main`
+on 2026-11-15), path `src/egl/wayland/wayland-drm/wayland-drm.xml`, SHA-256
+`15ca83d05ceae54b9b4c0e7fe0ceeeb3345b71cd3cb457811a55580ea182036f`. Its licence is in its
+`<copyright>` element: HPND-sell-variant, 2008-2011 Kristian Høgsberg and 2010-2011 Intel
+Corporation. No compositor's code was read for it (`doc_own_stack.md` OS3).
+
+Decision 33, wave 2b, also adds `wp_tearing_control_manager_v1`, standard (`src/tearing.rs`,
+`src/fixture/wave2b.rs`). A surface's presentation hint is applied with its next commit, and
+destroying its object takes it back to vsync; a second object for a surface is the
+`tearing_control_exists` error. The DRM backend reads decision 33's conditions from each frame
+it draws (`tearing::conditions`): the surface is full-screen and alone on its output, with no
+popup there, the input method's included, no layer surface drawn above it is mapped there (the
+overlay layer, and the top layer unless the window is lifted above it), the session is not
+locked, counting from the moment the lock is requested, and for a confined client every line of OS4's
+border is in the frame and inside the output. A flip in flight when a condition stops holding
+completes, and the next frame is vsync (amendment of 2026-11-16). Smithay's DRM backend has no asynchronous
+page flip at the pinned revision, so every frame is presented with vsync, which the protocol
+allows; the backend logs when the conditions change.
+
+Decision 36 of `doc_own_stack.md` adds `wp_content_type_manager_v1`, standard: each surface keeps
+the content type its client sets, applied with the surface's commit, and no behaviour reads it at
+1.0 (`src/fixture/decision36.rs`). `xdg_toplevel_tag_manager_v1`, standard, keeps each toplevel's tag
+and description, applied with the commit; a tag grants nothing, since no privilege, class,
+allow-list line, border or trusted-prompt mark reads it (`src/toplevel_tag.rs`).
+`wp_drm_lease_device_v1`, unconfined, exists on the udev backend only, for the GPU it draws on:
+it offers the connectors the kernel marks `non-desktop`, such as a headset's, which never become
+outputs. No lease is granted from the lock request to the unlock, from a switch of virtual
+terminal the compositor starts or a pause to the resume, nor while a lease waits to end; a switch
+that paused nothing, its session still active and its own terminal still shown, is over after two
+seconds, and a lease granted since that is held into a late pause is logged as an error. A lease
+ends at the lock request, before a switch the compositor makes, at the resume, on a GPU removal, an
+unplug and a connector that stops being `non-desktop`: it is revoked, counted ended only once the
+GPU's list of lessees no longer has it, and its CRTCs disabled. The types of `src/drm_lease.rs`
+ensure only that `locked` needs a `Revoked`, which `Leases::proof` makes once every lease has been
+handed to the closure the caller passes and that closure has reported it ended; the read of the
+list of lessees is in that closure, `finish` in `src/udev.rs`, which every call there passes.
+When a lease cannot be ended before a switch the compositor makes, the compositor keeps its
+terminal and logs the lease's connectors as an error.
+Until then the lock is shown and the leases tried again once a second, at each scan and at the
+resume. While the session is paused the GPU is not touched.
 
 Task 5 grants the privileged globals of OS4 by identity (`src/identity.rs`). When a client
 connects, the compositor reads the peer's pidfd through `SO_PEERPIDFD` (Linux 6.5, older than
@@ -654,16 +706,18 @@ echo "$sock"
 
 If the last message appears, stop here and send the log.
 
-The bar and the dock are unique applications on the user's D-Bus (`os.athanor.Bar`,
-`os.athanor.Dock`): a second copy would only wake the one running in the COSMIC session on VT 1
-and exit, and nothing would be drawn here. Stop those two units first; the graphical session
-loses its bar and dock until step 6 or the end of the run:
+The dock is a unique application on the user's D-Bus (`os.athanor.Dock`): a second copy would
+only wake the one running in the COSMIC session on VT 1 and exit, and nothing would be drawn
+here. The bar, drawn with Sal, has no such name and a second copy would run, but it would share
+the user's services with the first: NetworkManager keeps the secret agent `os.athanor.Bar` of
+the first bar and refuses the second's. Stop those two units first; the graphical session loses
+its bar and dock until step 6 or the end of the run:
 
 ```
 systemctl --user stop athanor-bar.service athanor-dock.service
 ```
 
-`--drm` takes no other option (`src/main.rs`). Then the clients: the bar and the dock as user
+`--drm` takes no other option (`options` in `src/lib.rs`). Then the clients: the bar and the dock as user
 units, so that the allow-list's unit names hold. Each keeps a crash record in the runtime
 directory its unit names (`RUNTIME_DIRECTORY`, an entry named `athanor-bar` or `athanor-dock`;
 `system/athanor-unit/src/dirs.rs`); the record is shared with the real units, and five failed
@@ -674,7 +728,7 @@ here: if it opens a window on VT 1 instead, close every Ptyxis window there firs
 
 ```
 mkdir -p ~/c1/run/athanor-bar ~/c1/run/athanor-dock
-systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
+systemd-run --user --collect --unit=c1-bar  --setenv=WAYLAND_DISPLAY="$sock" --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-bar" /usr/bin/athanor-bar
 systemd-run --user --collect --unit=c1-dock --setenv=WAYLAND_DISPLAY="$sock" --setenv=GSK_RENDERER=cairo --setenv=RUNTIME_DIRECTORY="$HOME/c1/run/athanor-dock" /usr/bin/athanor-dock
 WAYLAND_DISPLAY="$sock" ptyxis --standalone &> terminal.log &
 ```

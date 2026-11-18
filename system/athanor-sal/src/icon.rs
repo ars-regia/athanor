@@ -13,6 +13,8 @@ use std::sync::Arc;
 use vello_cpu::peniko::ImageAlphaType;
 use vello_cpu::{PixelMetadata, Pixmap};
 
+mod premultiplied;
+
 /// The icon an entry gets when the theme has none of its name.
 pub const FALLBACK_ICON: &str = "application-x-executable-symbolic";
 
@@ -36,8 +38,8 @@ const SCALES: RangeInclusive<i64> = 1..=16;
 const THRESHOLDS: RangeInclusive<i64> = 0..=4096;
 
 /// The most directories read from an `index.theme`, which bounds the parse and the files each
-/// lookup stats. hicolor lists about a hundred.
-const MAX_DIRECTORIES: usize = 256;
+/// lookup stats. Fedora's hicolor lists about 660, its `scalable` ones last.
+const MAX_DIRECTORIES: usize = 1024;
 
 /// `O_NONBLOCK` of Linux on x86_64 and aarch64; libc is not a dependency of the toolkit.
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
@@ -111,6 +113,34 @@ fn is_subdirectory(dir: &str) -> bool {
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
+/// The colours a symbolic icon is drawn in, as GTK recolours one: its shapes in `ink`, and those
+/// of the classes `success`, `warning` and `error` in theirs, as the badge of a seal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Symbolic {
+    /// The shapes of no class.
+    pub ink: crate::Rgba,
+    /// The shapes of the class `success`.
+    pub success: crate::Rgba,
+    /// The shapes of the class `warning`.
+    pub warning: crate::Rgba,
+    /// The shapes of the class `error`.
+    pub error: crate::Rgba,
+}
+
+impl Symbolic {
+    /// GTK's style sheet for a symbolic SVG: the classes come after the shapes, so they win.
+    fn style_sheet(&self) -> String {
+        let hex = |c: crate::Rgba| format!("#{:02x}{:02x}{:02x}", c.0[0], c.0[1], c.0[2]);
+        format!(
+            "rect,circle,path{{fill:{}}} .success{{fill:{}}} .warning{{fill:{}}} .error{{fill:{}}}",
+            hex(self.ink),
+            hex(self.success),
+            hex(self.warning),
+            hex(self.error)
+        )
+    }
+}
+
 /// A decoded image, cheap to clone.
 #[derive(Clone, Debug)]
 pub struct Image {
@@ -126,7 +156,7 @@ impl Image {
         let pixmap = match icon_extension(path) {
             Some("png") => read_capped(path, MAX_IMAGE_FILE).and_then(|bytes| decode_png(&bytes)),
             Some("svg") => {
-                read_capped(path, MAX_IMAGE_FILE).and_then(|bytes| rasterise(&bytes, px))
+                read_capped(path, MAX_IMAGE_FILE).and_then(|bytes| rasterise(&bytes, px, None))
             }
             _ => Err("not a PNG or an SVG".into()),
         }
@@ -136,13 +166,32 @@ impl Image {
         })
     }
 
+    /// Decodes a PNG already read, as [`Image::from_file`] decodes a file's: where the caller
+    /// reads the file under rules of its own. Refused for a PNG larger than [`MAX_IMAGE_SIDE`]
+    /// on a side.
+    pub fn from_png(bytes: &[u8]) -> Result<Self, Error> {
+        Ok(Self {
+            pixmap: Arc::new(decode_png(bytes)?),
+        })
+    }
+
     /// Takes pixels already decoded: `width` by `height` pixels of straight-alpha sRGB RGBA8, row
     /// by row from the top left, which are premultiplied in place. Refused when `pixels` does not
     /// hold exactly that many, or when a side is 0 or over 65535, the largest a buffer holds.
     /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output. The `gpu`
     /// renderer draws no image larger than its atlas (4096 by 4096, or the device's limit when
     /// smaller): it logs one line and leaves that part of the surface empty.
-    pub fn from_rgba8(width: u32, height: u32, mut pixels: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, Error> {
+        Self::from_pixels(width, height, pixels, ImageAlphaType::Alpha)
+    }
+
+    /// [`Image::from_rgba8`] for pixels whose alpha is `alpha`.
+    fn from_pixels(
+        width: u32,
+        height: u32,
+        mut pixels: Vec<u8>,
+        alpha: ImageAlphaType,
+    ) -> Result<Self, Error> {
         let (w, h) = (u16::try_from(width), u16::try_from(height));
         let (Ok(w @ 1..), Ok(h @ 1..)) = (w, h) else {
             return Err(
@@ -162,7 +211,7 @@ impl Image {
         if !pixels.capacity().is_multiple_of(4) {
             pixels = pixels.as_slice().to_vec();
         }
-        let metadata = PixelMetadata::new(ImageAlphaType::Alpha, true);
+        let metadata = PixelMetadata::new(alpha, true);
         Ok(Self {
             pixmap: Arc::new(Pixmap::from_parts(pixels, w, h, metadata)),
         })
@@ -199,7 +248,9 @@ impl Image {
     }
 }
 
-fn rasterise(svg: &[u8], px: u16) -> Result<Pixmap, Error> {
+/// Rasterises `svg` so that its longer side is `px` pixels, with `style_sheet` injected before
+/// the file's own.
+fn rasterise(svg: &[u8], px: u16, style_sheet: Option<&str>) -> Result<Pixmap, Error> {
     use resvg::{tiny_skia, usvg};
     let options = usvg::Options {
         // An icon is drawn from its own file alone. usvg's default resolver reads any path an
@@ -209,6 +260,7 @@ fn rasterise(svg: &[u8], px: u16) -> Result<Pixmap, Error> {
             resolve_data: Box::new(|_, _, _| None),
             resolve_string: Box::new(|_, _| None),
         },
+        style_sheet: style_sheet.map(str::to_owned),
         ..usvg::Options::default()
     };
     let tree = usvg::Tree::from_data(svg, &options)?;
@@ -428,6 +480,32 @@ impl IconTheme {
         Image::from_file(&path, px)
     }
 
+    /// [`IconTheme::image`] of a symbolic icon drawn in `colours`, as GTK recolours one: an
+    /// SVG's shapes in the ink and its `success`, `warning` and `error` classes in theirs, a PNG
+    /// in the ink alone.
+    pub fn symbolic(
+        &self,
+        icon: &str,
+        size: u16,
+        scale: u16,
+        colours: &Symbolic,
+    ) -> Result<Image, Error> {
+        let px = size.saturating_mul(scale);
+        let path = self
+            .resolve(icon, size, scale)
+            .ok_or_else(|| format!("no icon {icon:?}, nor {FALLBACK_ICON:?}, in the theme"))?;
+        if icon_extension(&path) != Some("svg") {
+            return Ok(Image::from_file(&path, px)?.tinted(colours.ink));
+        }
+        let style_sheet = colours.style_sheet();
+        let pixmap = read_capped(&path, MAX_IMAGE_FILE)
+            .and_then(|bytes| rasterise(&bytes, px, Some(&style_sheet)))
+            .map_err(|error| format!("{path:?}: {error}"))?;
+        Ok(Image {
+            pixmap: Arc::new(pixmap),
+        })
+    }
+
     /// The file of `name` by the specification's lookup: the theme, then what it inherits and
     /// `hicolor`, each by the directory that matches `size` or else the closest; then an icon
     /// that belongs to no theme.
@@ -538,6 +616,28 @@ mod tests {
     }
 
     #[test]
+    fn a_symbolic_icon_draws_its_classes_in_their_colours_and_the_rest_in_the_ink() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><path d="M0 0h1v1h-1z"/><path class="success" d="M1 0h1v1h-1z"/></svg>"#;
+        let colours = Symbolic {
+            ink: crate::Rgba([10, 20, 30, 255]),
+            success: crate::Rgba([0, 200, 0, 255]),
+            warning: crate::Rgba([200, 200, 0, 255]),
+            error: crate::Rgba([200, 0, 0, 255]),
+        };
+        let pixmap = rasterise(svg, 2, Some(&colours.style_sheet())).expect("the SVG rasterises");
+        let rgba = |x| {
+            let p = pixmap.sample(x, 0);
+            (p.r, p.g, p.b, p.a)
+        };
+        assert_eq!(rgba(0), (10, 20, 30, 255));
+        assert_eq!(rgba(1), (0, 200, 0, 255));
+        // Without colours, the file's own: black.
+        let plain = rasterise(svg, 2, None).expect("the SVG rasterises");
+        let p = plain.sample(1, 0);
+        assert_eq!((p.r, p.g, p.b, p.a), (0, 0, 0, 255));
+    }
+
+    #[test]
     fn a_themed_name_takes_the_directory_that_matches_the_size() {
         let theme = fixture();
         assert_eq!(
@@ -643,6 +743,14 @@ mod tests {
         assert!(error.to_string().contains("more than"), "{error}");
         // An index.theme over 1 MiB is not read: the theme has no directories.
         assert_eq!(IconTheme::new(vec![dir], "t").resolve("icon", 16, 1), None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_png_read_by_the_caller_is_decoded_and_anything_else_refused() -> Result<(), Error> {
+        let image = Image::from_png(PNG)?;
+        assert_eq!((image.width(), image.height()), (16, 16));
+        assert!(Image::from_png(b"<svg/>").is_err());
         Ok(())
     }
 
@@ -875,22 +983,26 @@ mod tests {
     }
 
     #[test]
-    fn at_most_256_directories_are_read() -> Result<(), Error> {
-        let names: Vec<String> = (0..300).map(|n| format!("d{n}")).collect();
+    fn at_most_max_directories_are_read() -> Result<(), Error> {
+        // Fedora's hicolor lists its `scalable` directories after about 660 others.
+        const { assert!(MAX_DIRECTORIES > 700) };
+        let names: Vec<String> = (0..MAX_DIRECTORIES + 44).map(|n| format!("d{n}")).collect();
         let mut index = format!("[Icon Theme]\nDirectories={}\n", names.join(","));
         for name in &names {
             index.push_str(&format!("[{name}]\nSize=16\nType=Fixed\n"));
         }
+        let last = format!("t/d{}/last.png", MAX_DIRECTORIES - 1);
+        let beyond = format!("t/d{MAX_DIRECTORIES}/beyond.png");
         let dir = scratch(
             "many",
             &[
                 ("t/index.theme", index.as_bytes()),
-                ("t/d255/last.png", PNG),
-                ("t/d256/beyond.png", PNG),
+                (&last, PNG),
+                (&beyond, PNG),
             ],
         )?;
         let theme = IconTheme::new(vec![dir], "t");
-        assert_eq!(tail(theme.resolve("last", 16, 1)), "t/d255/last.png");
+        assert_eq!(tail(theme.resolve("last", 16, 1)), last);
         assert_eq!(theme.resolve("beyond", 16, 1), None);
         Ok(())
     }

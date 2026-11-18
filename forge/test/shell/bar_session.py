@@ -38,7 +38,7 @@ registered. --respawn starts the bar again when it is killed with SIGKILL, and r
 
 --fixtures starts system_fixtures.py's services before the bar (NetworkManager, BlueZ, UPower
 and the power profiles on the private system bus, PipeWire, an MPRIS player, a backlight)
-and points the bar at the fake backlight. Session.SetBrightness is logged like the other
+and points the bar and the control center at the fake backlight. Session.SetBrightness is logged like the other
 acting calls, "SetBrightness backlight intel_backlight 300", and writes the fake sysfs file.
 A level under 100 is refused as logind refuses a session that is not in the foreground, so
 that a test can see the bar put its slider back.
@@ -456,6 +456,7 @@ def main():
         env = {k: v for k, v in env.items() if k != "LD_PRELOAD" and not k.startswith("FAKETIME")}
     if args.fixtures:
         env["ATHANOR_BAR_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
+        env["ATHANOR_CONTROL_CENTER_BACKLIGHT_DIR"] = str(system_fixtures.BACKLIGHT_DIR)
     running = {"bar": start_bar(args.client, env, args.log, args.unit), "shelld": shelld}
     status = {"code": None}
     loop = GLib.MainLoop()

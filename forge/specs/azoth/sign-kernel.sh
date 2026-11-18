@@ -81,9 +81,9 @@ one() { # one GLOB: the single path the glob names
 }
 
 cert_field() { # cert_field FILE OPTION: openssl x509 -OPTION of the certificate, PEM or DER
-    local value
-    value=$(openssl x509 -in "$1" -noout "-$2" -nameopt RFC2253 2> /dev/null ||
-        openssl x509 -in "$1" -inform DER -noout "-$2" -nameopt RFC2253)
+    local value form=DER
+    if grep -q -e '-----BEGIN ' "$1"; then form=PEM; fi
+    value=$(openssl x509 -in "$1" -inform "$form" -noout "-$2" -nameopt RFC2253)
     echo "${value#"$2"=}"
 }
 

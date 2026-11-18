@@ -26,6 +26,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Kernel artifacts verified by the Orchestrator
         # fetch_repo_rpms.sh pulls azoth by the digest in this file (doc_build_ordering.md, O4).
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -49,6 +51,7 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
           GITHUB_REF: ${{ github.ref }}
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
           BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
         run: |
           set -euo pipefail
@@ -60,7 +63,7 @@ jobs:
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
             -e GITHUB_REF="${GITHUB_REF}" \
-            -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
+            -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL -e KERNEL_REGISTRY \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
             bash scripts/aggregate_tier_repos.sh
@@ -110,6 +113,8 @@ jobs:
           echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Kernel artifacts verified by the Orchestrator
         # build-image.sh builds from the kernel and module digests in this file (O4).
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333

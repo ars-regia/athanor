@@ -5,7 +5,7 @@ the maintainer on 2026-10-17 and amended on 2026-10-19 (ADR-0126), the amendment
 maintainer on 2026-10-19 (#629). Revision 2 was amended on 2026-10-28 by decision 27, the keyboard
 layouts under the own compositor, the amendment approved by the maintainer with #806, and on
 2026-10-28 by decision 28, the default session before the full acceptance, which amends
-decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
+decision 10 and ADR-0122 decision 1, the amendment approved by the maintainer with #810, and on 2026-10-28 by decision 29, the close keys and the session keys through cosmic-settings-daemon, which amends OS13, the amendment approved by the maintainer with #819. Decision 28 was amended on 2026-10-29, the amendment approved by the maintainer with #840: under the own compositor the magnifier, inversion and filter rows of Settings stay shown and switched off, and the clipboard history's switch, not built yet, is recorded as hidden there once it is built, with no test. Revision 2 was amended on 2026-10-29 by decision 30, the first wave of protocols and the code ported from niri and anvil, which amends OS3, OS13, OS17 and ADR-0121 decision 2, the amendment approved by the maintainer with #848. Revision 2 was amended on 2026-10-30 by revision 3 of `doc_accessibility.md` (#862), the amendment approved by the maintainer with it on 2026-10-30 (#867, ADR-0133): OS5 names the description of `athanor_a11y_v1`, decision 28's reader of cosmic-comp's colour filter becomes its writer and the reader of `accessibility_zoom`, and decision 28's sentence on gaps 3 and 4 of `doc_session.md` SN16 is amended: Orca's keyboard monitor and the keyboard aids, recorded as closed at the switch by revision 4 of `doc_session.md` (#811) in error, are open, gap 3 accepted by the maintainer by number on 2026-10-30, and close with #863 and #865. Revision 2 was amended on 2026-10-30 with #865, on the maintainer's decision of that day: Super+A opens the launcher until `athanor-library` exists, which amends OS13 and the switch's item on the application library, and OS5 says that no shipped line of the allow-list carries the mark of a trusted prompt yet. Decision 31, the focus outline and the border of confined windows, amended OS4, OS17 and OS19 on 2026-10-31, the amendment approved by the maintainer with #892. OS5 names the manager of `athanor_workspace_tiling_v1` since 2026-10-31, the amendment approved by the maintainer with #902. Revision 2 was amended on 2026-10-31 by decision 32, the private protocol of the overview, which amends OS5, the amendment approved by the maintainer with #903. Decision 31 was amended on 2026-11-04: under the own compositor a divider ring of 1 px lies just inside the geometry of every window neither maximised nor full screen, and the focus outline takes cosmic-comp's shape, the amendment approved by the maintainer with #957. Decision 31 was amended on 2026-11-05 in the cause of the 18 entries of #918 at scale 1.5 only, after a measurement: both compositors place those windows at the same logical position and round it to physical pixels differently; the entries stay accepted, the amendment approved by the maintainer with the pull request that makes it. Revision 2 was amended on 2026-11-04 in OS7, the text field's clipboard and primary selection, the amendment approved by the maintainer with #958. Revision 2 was amended on 2026-11-04 in OS7, the text field's context menu, the amendment approved by the maintainer with #961. Revision 2 was amended on 2026-11-04 by a name-only revision under ADR-0134, approved by the maintainer with #970, which renames the compositor to `athanor-sulphur`, its client crate to `athanor-sulphur-client` (`athanor_sulphur_client` in Rust paths) and its session script to `athanor-sulphur-session`. Only identifiers are renamed; the specified behaviour does not change. Revision 2 was amended on 2026-11-05 by a second name-only revision under ADR-0134, approved by the maintainer with #977, which renames the toolkit to `athanor-sal` (`athanor_sal` in Rust paths), its directory to `system/athanor-sal`, its gallery to `athanor-sal-gallery` and its example binaries to `athanor-sal-<name>`. Only identifiers are renamed; the specified behaviour does not change. Revision 3 was amended on 2026-11-11 by decision 33, the second wave of protocols, which adds to OS17's globals, and by decision 34, the surfaces moved to the toolkit in parallel, which amends section 6, step 5 and section 8, and by decision 35, what the dock takes from the own compositor, which answers OS20; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-15 by decision 36, the protocols KWin, Mutter, Hyprland and Sway offer past the second wave, which adds to OS17's globals and takes the DRM lease out of wave 2c; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended on 2026-11-15 in the DRM lease, the device that offers it, what a session switch and a paused session can revoke, and when `locked` of `ext_session_lock_v1` is sent; the amendment is approved by the maintainer with the pull request that records it. Decision 36 was amended again on 2026-11-15: a switch the compositor makes goes ahead only once every lease has ended, and the compositor keeps its terminal while one cannot be ended; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-16 in decision 33's wave 2c, the X11 keyboard grab, which adds the satellite class to OS17, its one exception to OS4's confinement of xwayland-satellite, and a line to `doc_threat_model.md` TM2; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-16 by decision 37, night light, reduced motion and the toplevel drag, which adds versions 2 and 3 of `athanor_a11y_manager_v1` to OS5 and a standard global to OS17, both amended with it, answers the control center's spike S1 for the own compositor, and settles the two protocols decision 36 left for a later decision; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-17 in decision 33's wave 2c, libei input for the RemoteDesktop portal, with `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md` AX4 and AX11; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-17 in decision 33's wave 2c: the compositor admits the portal backend, and the backend the compositor, as `athanor_unit::bus_caller` admits a caller, reading nothing under `/proc`, and an injected key cancels a pending tap of Super; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended on 2026-11-17 and 2026-11-18 in decision 33's held input, per context: an injected press of a key or button the seat or another context holds is dropped, and a press of the seat, physical or virtual, of a key or button a context holds first releases the context's, while touch points never collide; the amendment is approved by the maintainer with the pull request that records it. Revision 3 was amended again on 2026-11-17 in decision 30, the keyboard's return when a popup that holds it is destroyed, decided by the maintainer on 2026-11-17 (#1217, #1231); the amendment is approved by the maintainer with the pull request that records it. The document sets out the direction ADR-0121 records: a compositor
 of Athanor's own on Smithay, for which release 1.0 waits, and a toolkit of its own in Rust. The code
 started at once (ADR-0121 decision 1). The amendment added OS10 and OS11, a toolkit developers
 outside Athanor can build on, with decisions 12 to 15. Revision 2 adds the measurements of the first
@@ -62,8 +62,23 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
 - Amended on 2026-11-11: decision 35, its tier measurement and its client-side M1 under
   cosmic-comp, and the pending tier measurement of OS20, with revision 4 of
   `doc_visual_language.md` (VL13), proposed with #1077.
-- Amended on 2026-11-13: OS5, the reduced-motion request of `athanor_a11y_v1` version 2, with
-  `doc_accessibility.md` AX9 (maintainer decision, #1104).
+- Amended on 2026-11-15: decision 36, with OS17 and decision 33's wave 2c.
+- Amended on 2026-11-15: decision 36's DRM lease, its device, the session switch, the
+  paused session and when `locked` is sent.
+- Amended on 2026-11-15: decision 36's switch when a lease cannot be ended.
+- Amended on 2026-11-16: decision 33's X11 keyboard grab, with OS4, OS17 and
+  `doc_threat_model.md` TM2.
+- Amended on 2026-11-17: decision 33's libei input for the RemoteDesktop portal, with
+  `doc_portal.md` PT1, PT4, PT10, PT15 and PT18, `doc_bar.md` BR3 and `doc_accessibility.md`
+  AX4 and AX11.
+- Amended on 2026-11-17: decision 33's EIS admission by unit through `athanor_unit::bus_caller`,
+  in both directions, and the injected key that reaches a client and cancels a pending tap
+  of Super, with
+  `doc_portal.md` PT15 and `doc_portal.md` section 6, decision 13.
+- Amended on 2026-11-17: decision 30, the keyboard's return when a popup that holds it is
+  destroyed (#1217, #1231).
+- Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
+  directions, for keys and buttons; touch points never collide.
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -263,7 +278,28 @@ own compositor, and what stays is the imitation inside a bordered window that de
   with every other X11 application. The satellite connects through a security context in a unit
   of its own, so its windows receive the standard globals only and carry the border of confined
   clients; inside the X server, X11 applications are not isolated from one another, and the
-  documents that present X11 applications say so.
+  documents that present X11 applications say so. *Amended on 2026-11-16 (decision 33, wave
+  2c):* once xwayland-satellite forwards Xwayland's keyboard grab to its compositor, which
+  version 0.8.3 does not do, the satellite's socket also receives
+  `zwp_xwayland_keyboard_grab_manager_v1`, of OS17's satellite class, and that one global
+  beyond the standard ones; until then it receives the standard globals only. The satellite stays
+  confined for everything else, its border included. A client is the satellite's when it
+  connected through that socket: the grant follows the socket, not an identity, and a string
+  the client supplies grants nothing. The compositor keeps the satellite's clients as a
+  security context's clients are kept, with one mark more that tells them apart, so that the
+  class reaches no client of a security context. Tier 2 is kept off the socket,
+  `$XDG_RUNTIME_DIR/athanor-x11-<N>`, as `doc_threat_model.md` TM2 lists: the broker's
+  `confined` class replaces the runtime directory with a private tmpfs that does not bind it
+  and makes `/tmp/.X11-unix` inaccessible (`doc_session_daemons.md` SD8), and Flatpak's
+  sandbox gives an application a runtime directory of its own, into which the host's
+  paths come only through the permissions the application names (`xdg-run/<path>`;
+  Flatpak's documentation, "Sandbox Permissions", docs.flatpak.org). Any other process
+  that can connect to the socket is
+  tier 1 and is treated as the satellite. A confined application's own Wayland connection,
+  through a security context, never receives the global. An X11 application reaches the X
+  server, a Flatpak one included when it is given the X11 socket, and through it the
+  satellite's grab, which then holds only under the rules of decision 33, wave 2c, and
+  gives it no more than decision 30's inhibitor gives any client.
 
 The register of CO3 under the own compositor: rows 5, 6, 7 and 10 become the requirements above
 and leave with cosmic-comp. Row 1 (layer-surface keyboard focus follows `keyboard_interactivity`)
@@ -321,7 +357,9 @@ own compositor provides what the shell and the components 1.0 keeps take from co
   carries it yet, so for a real prompt this silence does not hold until one does: cosmic-osd's
   polkit prompt and gcr-prompter's keyring prompt have no mark, and `athanor-polkit-agent`, which
   gets its own with its line, is not built (proposed with revision 3 of `doc_accessibility.md` and
-  approved with it, AX11; amended on 2026-10-30, #865). *Amended on 2026-11-13, maintainer decision:* version 2 of `athanor_a11y_v1` adds the request `set_reduced_motion(active_state)`, which the bar sends from GNOME's `enable-animations` (`doc_accessibility.md` AX9) after it binds and at each change; the compositor sets the bell's reduced-motion state from it and reads no setting of its own. It keeps the value in memory only, false until a bar has sent it, so without a bar the bell blinks, and the last value sent stands after the bar exits. A client that bound version 1 has no such request and leaves the state as it is;
+  approved with it, AX11; amended on 2026-10-30, #865). *Amended on 2026-11-16 by decision 37:*
+  version 2 adds the reduced-motion request, and version 3 the night-light temperature, its
+  request and its event, granted to the same lines;
 - the magnifier and the colour filters, the compositor's since #864 (`doc_accessibility.md` AX10)
   (amended on 2026-10-30, #864);
 - for cosmic-idle, cosmic-bg and cosmic-settings, which ADR-0103 D13 keeps in 1.0, either the
@@ -420,7 +458,9 @@ neither dmabuf capture nor damage (C1 results, section 10, item 11).
 **OS17. Every global has a class.** The compositor's `data/globals` gives each global it offers one
 class: standard, offered to every client; unconfined, offered only outside a security context;
 layer-gated, offered outside a security context, with top and overlay layers the allow-list
-grants (decision 31); or privileged (OS4). The fixture
+grants (decision 31); privileged (OS4); or satellite, offered only to the clients of
+xwayland-satellite's socket, once the satellite forwards the X11 keyboard grab (OS4; decision
+33, wave 2c, amended on 2026-11-16; #1136). The fixture
 fails on an offered global without a row. Settled: `zwp_text_input_manager_v3` is unconfined (OS9
 plan, question 13), and `ext_workspace_manager_v1` and `zwlr_output_manager_v1` are privileged
 (questions 7 and 10). The protocols milestone C1 does not offer take these classes when they are
@@ -432,8 +472,12 @@ pointer gestures and xdg-foreign, standard, and answers every request of xdg-dec
 client-side decoration.
 `ext_idle_notifier_v1` stays standard, a security context included, because Smithay has no
 per-client filter for it (C1 results, section 4). Decision 33 gives the classes of the second
-wave: standard for all but the DRM lease, unconfined; the X11 keyboard grab waits for an
-amendment of OS4. Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+wave: standard for all but the DRM lease, unconfined, whose class and design decision 36 now
+gives; the X11 keyboard grab is of the satellite class, offered once xwayland-satellite forwards
+the grab (amended on 2026-11-16; #1136). Decision 35 adds `athanor_dock_overlap_v1` and `athanor_material_v1`, privileged.
+Decision 36 adds `wp_content_type_manager_v1` and `xdg_toplevel_tag_manager_v1`, standard, and
+`wp_drm_lease_device_v1`, unconfined. Decision 37 adds `xdg_toplevel_drag_manager_v1`, standard
+(amended on 2026-11-16).
 
 **OS18. The compositor is not restarted.** Its unit has no `Restart=`: Wayland clients do not
 survive their compositor, so its end ends the session and greetd shows the greeter (`doc_session.md`
@@ -1037,6 +1081,23 @@ compositor and that the own compositor did not yet offer:
       decoration: the compositor draws no title bar, and a client that asks for one draws its
       own, as under GNOME.
 
+    *Amended on 2026-11-17 (maintainer decision, 2026-11-17; #1217, a layer surface's popup
+    grab, and #1231, the dock menu's focus):* when a popup that holds the keyboard is destroyed,
+    the keyboard returns at once to its parent when the parent is a popup that still holds a
+    grab, and otherwise to the popups' root surface, and not at the next key or click. When the
+    root is gone or can no longer take the keyboard (unmapped, not shown, a layer surface without
+    keyboard interactivity, or while another surface holds the keyboard exclusively), Sulphur
+    does not give it the keyboard and chooses the focus again by the rule it applies when the
+    focused window closes. The client sees `wl_keyboard.enter` on the surface that takes the
+    keyboard as the popup closes, so that a toolkit can give the focus back to the control that
+    opened the popup with nothing pressed. A fixture test of Sulphur covers each case: a parent
+    popup that holds a grab, a parent popup already destroyed, a parent popup that holds no
+    grab, a parent that is the root, and a root that is gone, unmapped, not shown, without
+    keyboard interactivity, or under a surface that holds the keyboard exclusively; the test
+    compares the focus with the one that rule chooses. AX7 of `doc_accessibility.md` says that
+    Escape closes the innermost popover; where the keyboard goes after any destroy of a popup,
+    Escape included, is this decision.
+
     Code is ported from niri, `GPL-3.0-or-later`, and from anvil, Smithay's reference compositor,
     MIT. Each ported file keeps its source's copyright and licence notices, the MIT permission
     notice in full for anvil; names the project, the revision and the licence, and the
@@ -1272,17 +1333,325 @@ compositor and that the own compositor did not yet offer:
         - no layer surface is mapped on that output;
         - the session is not locked;
         - for a confined client, OS4's border is drawn in the same frame.
+
+        *Amended 2026-11-16 (maintainer decision, 2026-11-16):* only a layer surface drawn
+        above the full-screen window refuses the hint: one on the overlay layer, and one on the
+        top layer while the compositor draws the top layer above the window, which it does
+        unless the window holds the keyboard, has the output whole and is the topmost window
+        there. Background and bottom layers are ignored. The conditions are read for each
+        frame: when the lock or such a layer arrives while a torn flip is in flight, that flip
+        completes and every frame from the next one on is presented with vsync; nothing is held
+        back for it. "Alone" also excludes a popup on that output, the input method's included;
+        the lock counts from the moment it is requested, not from its confirmation; and for a
+        confined client every line of OS4's border lies in the frame and inside the output, so a
+        window whose border runs past the output's edge is presented with vsync (*amended on
+        2026-11-16*).
     - **Wave 2c, the protocols that need a design of their own.** Each is written as an amendment
       of this decision before its code:
-      - `zwp_xwayland_keyboard_grab_manager_v1`. OS4 confines xwayland-satellite to the standard
-        globals, and Smithay has no filter for this one, so its class needs an amendment of OS4
-        first. That amendment keeps decision 30's protected keys, the Ctrl+Alt+Tab suspension and
-        the keyboard aids (AX4, AX11) with the compositor during a grab;
+      - `zwp_xwayland_keyboard_grab_manager_v1`, satellite (OS17). *Amended on 2026-11-16:*
+        OS4 confines xwayland-satellite to the standard globals. Smithay's module for this
+        protocol is built only with its `xwayland` feature, which the own compositor does not
+        enable, and its global is visible only to an Xwayland that Smithay starts itself
+        (`XWaylandClientData`). The compositor implements the protocol itself: the manager and
+        grab objects and its own keyboard grab. No X11 code runs in the compositor or is linked
+        into it (section 3). It offers the global only to the clients of the satellite's
+        socket (OS4). The class and the grab apply once xwayland-satellite forwards the grab
+        to its compositor: Xwayland asks its own compositor, the satellite, for the grab, and
+        xwayland-satellite 0.8.3 never uses this protocol, so the global would serve no
+        client. The compositor's code is written when a release of xwayland-satellite
+        forwards the grab (#1136). The rules:
+        - a grab is accepted only from a client of the satellite's socket, for a surface of
+          that client. The compositor refuses the request of any other client, confined or
+          not, allow-listed or not, although such a client is not offered the global, so that
+          a mistake in one gate grants nothing. A refused grab's object stays inert;
+        - an accepted grab is active only while its surface has the keyboard focus, as
+          decision 30's inhibitor is. It is inactive from the lock request on (decision 36)
+          until the unlock, during Ctrl+Alt+Tab's suspension, and whenever the keyboard focus
+          leaves its surface. It is active again when the focus returns to that surface, as
+          decision 30's persistent constraints and inhibitors are. A grab requested under the
+          lock, during the suspension or for a surface without the focus is accepted and
+          waits;
+        - the compositor owns the grab. It ends the active keyboard grab before any move of the
+          keyboard focus off the grab's surface, whether a click on another surface, a
+          workspace switched, the cycle of Ctrl+Alt+Tab or a focus a client gives, and arms it
+          again when the focus returns to that surface: by a click or a key, or because
+          another window that held the focus closed and the focus came back to it. A popup's
+          keyboard grab or the input method's replaces it: the X11 grab is inactive while that
+          grab lasts and is armed again when it ends, as the input method's grab is resumed
+          after a popup's. When more than one is waiting, a popup's grab comes first, then the
+          input method's, then the X11 grab, which is armed only when the keyboard has no
+          other grab and the input method has none waiting. An input method that holds its
+          grab therefore leaves the X11 grab inactive while it runs, and the compositor's
+          other bindings then act in an X11 window;
+        - the grab ends for good when its object or its surface is destroyed, and when the
+          surface is unmapped. A surface mapped again does not arm it, and this rule takes
+          precedence over the one that keeps a grab inactive while the focus is away: the
+          protocol makes only the destruction of the grab's object the ungrab, and the X
+          side releases its grab when the window is unmapped, so a grab armed again would be
+          one nobody holds;
+        - during a grab the compositor reads each key before the grab: decision 30's protected
+          keys act and do not reach the X11 surface, the keyboard monitor (AX4) observes the
+          keys as it does without a grab, and the keyboard aids (AX11) act on them. The
+          compositor's other bindings reach the X11 surface, as under decision 30's
+          inhibitor;
+        - Ctrl+Alt+Tab suspends the grab, also when the cycle has no surface of the shell to
+          move the keyboard to, by decision 30's rule for the satellite's client: the
+          suspension lasts until the user clicks one of its surfaces or moves the keyboard to
+          one by a key, and a focus the client gives does not lift it. Every X11 application
+          is that one client, so the suspension covers them all;
+        - the code's pull request adds fixture tests, one case each, and each gate has an
+          assertion that fails when the gate is removed:
+          - the offer: the global reaches a client of the satellite's socket and no other
+            client, unconfined, confined or allow-listed (`os9_every_global_is_classified`,
+            with the satellite's row in `data/globals`, and
+            `x11_keyboard_grab_follows_the_socket_not_the_identity`, in which an allow-listed
+            client whose executable and unit are the satellite's, connected to the main
+            socket, is not offered it). The pull request changes
+            `x11_the_satellite_gets_the_standard_globals`, which then expects this global
+            too, and adds `satellite` to `CLASSES` in `scripts/verify.py`;
+          - the refusal: over the wire no other client can bind the global, so
+            `x11_keyboard_grab_handler_refuses_another_client` calls the request handler with
+            a client not of the satellite's socket and finds the grab inert;
+          - the build: `verify.py sulphur-no-xwayland` fails when the compositor's
+            `Cargo.toml` enables Smithay's `xwayland` feature, or when its default features
+            are turned back on;
+          - the activation: a grab for the focused surface is active, and one for a surface
+            without the focus waits and is active when the focus arrives;
+          - the lock: the grab is inactive from the lock request on, one requested under the
+            lock waits, and both are active again after the unlock once their surface has the
+            focus;
+          - each focus move: a click on another surface, a workspace switch, the cycle of
+            Ctrl+Alt+Tab and a focus a client gives leave the grab inactive, and the focus's
+            return by a click, by a key and by the close of another window that held it arms
+            it again;
+          - the suspension: Ctrl+Alt+Tab leaves the grab inactive, a grab requested meanwhile
+            waits, a focus the client gives does not lift it, a click and a key each arm it
+            again, and a second X11 surface's grab stays inactive under the same suspension;
+          - another grab: a popup's keyboard grab and the input method's each leave the X11
+            grab inactive, it is armed again when they end, and with both waiting the order
+            above holds;
+          - the end: the grab ends with its object destroyed and with its surface destroyed
+            or unmapped, and a surface unmapped and mapped again with the focus does not arm
+            it;
+          - the keys: during a grab a protected key acts and does not reach the surface, the
+            keyboard monitor (AX4) observes the keys, the keyboard aids act, and another
+            binding reaches the surface;
+        - notes for the code. Smithay's `KeyboardHandle::set_focus` holds the keyboard's
+          lock across `focus_changed`, so the grab is armed again later, from an idle
+          callback or before the next key, as the focus's idle work and the input method's
+          resume before a key already are. `focus_changed` does not run for an unchanged
+          focus or for none, so the check before each key covers those cases. Whether a
+          grab is accepted, active or waiting is kept by the compositor, not in the keyboard
+          grab, because the lock, the layer surfaces and the workspace switch end the
+          keyboard's grab whatever it is. The input method's `grab_keyboard` and
+          `resume_input_method_grab` change, and so does the popup's grab check in
+          `handlers.rs`, which today installs a popup's grab only over the input method's,
+          so that the order above holds;
       - `wp_drm_lease_device_v1`, unconfined. It leases only a connector the kernel marks
-        `non-desktop`, such as a headset's;
+        `non-desktop`, such as a headset's. *Amended on 2026-11-15:* decision 36 gives its
+        design, and it leaves this wave;
       - libei through an EIS socket, given only to the portal backend for the RemoteDesktop and
         InputCapture portals, behind the portal's consent. It delivers no input while the
-        session is locked, which is stricter than OS4's rule for the virtual keyboard;
+        session is locked, which is stricter than OS4's rule for the virtual keyboard.
+        *Amended on 2026-11-17 (maintainer decisions, 2026-11-17):* the first portal is
+        RemoteDesktop, served through libei sender contexts. InputCapture, which needs a
+        receiver context, stays excluded by `doc_portal.md` PT15 and gets an amendment of its
+        own before its code. The compositor serves EIS through Smithay's `backend_libei`
+        feature, which the pinned revision has and the compositor's `Cargo.toml` does not
+        enable (#1131). The file descriptor is handed over the session bus, not through a
+        Wayland global: the code's pull request adds no row to `data/globals`, no class to
+        OS17 and nothing to `CLASSES` in `scripts/verify.py`, since this design needs none.
+        The rules:
+        - the interface. The compositor owns `os.athanor.Eis` on the session bus and serves
+          `os.athanor.Eis1` at `/os/athanor/Eis1`, with two methods. `ConnectToEIS(o
+          session_handle, u device_types) -> h` creates a socket pair, serves one end as an
+          EIS context and returns the other; `session_handle` is the portal session's object
+          path, `device_types` the types the user granted in the backend's dialog, with the
+          portal's values (1 keyboard, 2 pointer, 4 touch screen), and a
+          second call for a handle that holds a file descriptor is refused, so a portal
+          session has one file descriptor. `CloseSession(o session_handle)` ends that
+          session's context. A context that announces itself as a receiver is disconnected:
+          only sender contexts are served. The context's seat offers the granted device
+          types only, mapped to EI capabilities: keyboard (1) to the keyboard; pointer (2) to
+          the pointer, the absolute pointer, the button and the scroll; touch screen (4) to
+          touch. A text device is never offered, and a device of a capability not granted is
+          refused. A `device_types` of 0, or with a bit other than 1, 2 and 4, makes
+          `ConnectToEIS` fail with `InvalidArgs`, and nothing is created for it. The
+          compositor claims `os.athanor.Eis` at its start; who owns the name is checked by the
+          backend, not by the compositor. A failure to claim the name is logged once and the
+          compositor starts without EIS, never with a fatal start error, and the backend then
+          refuses `Start` through its owner check. The owner must be the main process of
+          `athanor-sulphur.service`, whose one `ExecStart` runs `/usr/bin/athanor-sulphur`, as
+          `athanor_unit::bus_caller::admit` checks it (`doc_portal.md` PT15, amended on
+          2026-11-17);
+        - the admission, at every call, as `athanor_unit::bus_caller::admit` checks a caller
+          (`doc_session_daemons.md` SD5; amended on 2026-11-17): the caller is the current
+          owner of `org.freedesktop.impl.portal.desktop.athanor`; through the pidfd the bus
+          returns as `ProcessFD`, the verified user systemd places it by `GetUnitByPIDFD` in
+          exactly `xdg-desktop-portal-athanor.service`, as that unit's main process, whose one
+          `ExecStart` runs `/usr/libexec/xdg-desktop-portal-athanor` and whose unit files lie
+          beneath `/usr/lib/systemd/user`. A bus that returns no `ProcessFD` is refused, there
+          is no fallback through the `ProcessID`, and nothing is read under `/proc` (#1047).
+          Any other caller is answered `AccessDenied`, receives no file descriptor and changes
+          nothing; the journal names it, at most once a minute. As the monitor's, this is an
+          integrity check against mistakes and against tier 2, which owns no bus name outside
+          its filter and has no unit manager, not a barrier against unconfined code
+          (`doc_threat_model.md` TM1, TM2);
+        - consent stays in the portal backend: its dialog asks the user for each portal
+          session, and the backend calls `ConnectToEIS` only for a session the user has
+          granted (`doc_portal.md` PT15), and its grant button stays insensitive until a device
+          type is ticked, so that granting nothing is the refusal and `ConnectToEIS` never
+          receives 0 from it. The compositor shows no dialog of its own;
+        - the revocation. The compositor ends a session's EIS context when the backend calls
+          `CloseSession` for it, when `org.freedesktop.impl.portal.desktop.athanor` changes
+          owner, and when the backend's connection or process ends. It removes the context's
+          calloop source and shuts down the server end of its socket, which it created
+          close-on-exec, so that the file descriptor the application holds reads end of
+          stream and delivers nothing. What the context holds at that moment is released:
+          its keys and buttons with a release, and each of its touches with a `wl_touch.up`
+          of its slot, never with `wl_touch.cancel`, which the seat applies to every touch,
+          the user's own touches included. Only the lock and the paused session cancel
+          touches (below);
+        - held input, per context. The keys, buttons and touches held through EIS are tracked
+          for each EIS context, by context and device, since Smithay's device id is unique only
+          within one connection. Releasing the held input of one context touches no other
+          context's, and none of the seat's keys, buttons and touches. An injected
+          press of a key or button the seat or another context holds is dropped with its
+          release, since the client keeps one set of held keys and buttons: it never sees a
+          second press without a release between, and one source's release never lets go for
+          the other. The seat's input wins the other way: a press of the seat, physical or
+          through a virtual keyboard or pointer, of a key or button a context holds first sends
+          the client the release of the held one, to the keyboard or pointer focus as a release
+          of the seat would reach it; the context then counts that input as let go, its xkb
+          state and modifiers included, and drops its own first release of it after that,
+          delivered or not, unless a press of it by the context, or the context's end, has
+          cleared that mark first. That release starts and cancels no Super tap: the seat's
+          press after it decides. Touch points never collide: each touch point of a context, as
+          each of the seat's, takes a slot of the seat no other touch holds, so no source holds
+          a touch point another holds (maintainer decisions, 2026-11-17 and 2026-11-18);
+        - the lock and the paused session. From the lock request on (decision 36) until the
+          unlock, and while the session is paused on another virtual terminal until its
+          resume, as `drops_virtual_input` drops the virtual keyboard's input, the compositor
+          drops every event of every EIS context: an event a context sends then is dropped,
+          not queued. The compositor may also send `ei_device.paused` and
+          `ei_device.resumed` where Smithay's `EiInputSeat` supports it; that is not
+          required, since the drop is the rule. The keys, buttons and touches held through EIS
+          when the lock is requested or the session is paused are released, so that no client
+          sees them held afterwards, and each such touch is cancelled with `wl_touch.cancel`,
+          as wave 2a's touch rule cancels the hardware's. Events are delivered again once
+          the session is neither locked nor paused;
+        - clients only. Injected input reaches Wayland clients only. It never triggers a key
+          or pointer binding of the compositor (OS13), and Orca's keyboard monitor (AX4) and
+          the keyboard aids (AX11) never see it. An injected protected key of decision 30,
+          Super+Escape, the reveal key Super+Alt+T and Ctrl+Alt+Tab among them, is dropped,
+          its press and its release: it reaches neither the compositor nor any client. An
+          injected key that reaches a client cancels a pending tap of Super, as a hardware key
+          and an injected button or touch do, so a physical Super released after it opens no
+          launcher; the injected key still reaches only the client. A key this decision drops,
+          a protected key, one the seat or another context holds or one aimed at the backend's
+          own dialogs, and any key while the session is locked or paused reach no client and
+          cancel nothing (maintainer
+          decisions, 2026-11-17);
+        - its own state. Injected keys take their own path to the focused client, not the
+          virtual keyboard's path through `aided` and `typed`, and each EIS context keeps its
+          own modifier and xkb state, separate from the seat's physical state. An injected
+          modifier never changes what a physical key means, and a physical modifier never
+          makes an injected key a binding or a protected chord: an injected Escape is judged
+          against the modifiers injected by the same context alone. Before each injected key
+          the compositor sends the client the context's modifier state with
+          `wl_keyboard.modifiers`, and after it restores the physical state, as the virtual
+          keyboard path's `with_keymap_of` does, so that an injected Ctrl+C reaches the client
+          as Ctrl+C;
+        - the backend's own dialogs. Injected input never reaches a surface of
+          `xdg-desktop-portal-athanor`, the consent dialog or any other, identified by the
+          identity OS4 reads for every Wayland client when it connects (`identify` in
+          `identity.rs`: the peer's pidfd from `SO_PEERPIDFD`, then, through its pid, the
+          executable `/usr/libexec/xdg-desktop-portal-athanor` and the unit of its cgroup,
+          `xdg-desktop-portal-athanor.service`; amended on 2026-11-17), the privileged-clients
+          list having no line for it. A client outside a security context whose identity cannot
+          be read, and a surface whose client is gone, count as the backend's and receive no
+          injected input; a client in a security context never counts as the backend's. An
+          injected key is dropped, its release included, while the keyboard focus is such a
+          surface; an injected button, scroll or touch aimed at such a surface is dropped; and
+          an injected motion never gives it the pointer focus. So a session cannot Tab through
+          the consent dialog of a second session and widen its own grant. The seat's input
+          is not affected;
+        - the indicator. While a session's EIS context is open, the bar shows the indicator
+          of `doc_bar.md` BR3, fed by `InputSessions` of `os.athanor.Portal1`
+          (`doc_portal.md` PT10), which lists a session from the compositor's answer to
+          `ConnectToEIS` until the context is closed. Its Stop closes the portal session, so
+          that the backend calls `CloseSession` and the context ends. A frontend that dies
+          without calling `Close` leaves its session listed until Stop or the backend's own end
+          of the session, which is the safe direction: the indicator stays shown while the
+          context is open;
+        - the code's pull request enables `backend_libei` and adds fixture tests with an EIS
+          client, one case each, and each gate has an assertion that fails when the gate is
+          removed:
+          - the admission: a caller in another unit, a caller in the backend's unit that is
+            not its main process or whose unit runs another executable, a caller whose unit
+            file or drop-in lies outside `/usr/lib/systemd/user`, a caller with no `ProcessFD`,
+            and a caller that does not own the backend's bus name are each answered
+            `AccessDenied` and receive no file descriptor (amended on 2026-11-17), a second
+            `ConnectToEIS` for one session is refused, and a context that announces itself as a receiver is disconnected and
+            serves nothing;
+          - the revocation: a session's context ends on `CloseSession`, when the backend's
+            bus name changes owner, and when the backend exits, and its file descriptor then
+            reads end of stream and delivers nothing; the touches the context holds end with
+            `wl_touch.up` of their slots and never `wl_touch.cancel`, and a hardware touch held
+            at that moment goes on; the receiver context's disconnect leaves no state behind;
+            with two sessions, revoking one leaves the other's context and its held keys,
+            buttons and touches untouched;
+          - the lock: an event injected from the lock request on reaches no client, while the
+            session is locked or after the unlock;
+          - the paused session: an event injected while the session is paused on another
+            virtual terminal reaches no client, while it is paused or after the resume; since
+            `session_paused()` is DRM-only, unit tests of the pause predicate cover this case
+            and the rig's does not;
+          - held input: a key, a pointer button and a touch held through EIS at the lock
+            request, and at a pause, are released, the touch with `wl_touch.cancel`; two
+            contexts that hold input with the same device id are tracked apart; an injected
+            press of a key or button the seat or another context holds reaches no client, nor
+            does its release, and the other source's release still reaches it; a press of the
+            seat, physical or through a virtual keyboard or pointer, of a key or button a
+            context holds reaches the client after the release of the held one, that context's
+            next release reaches no client, its modifiers no longer count the key, and a press
+            of the context after the seat's release reaches the client with its own release; a
+            physical Super pressed over a Super a context holds still opens the launcher on its
+            release; an injected touch point and a physical one with the same slot number reach
+            the client as two touch points;
+          - the device types: a context granted the keyboard alone is offered no pointer or
+            touch device and is refused one it asks for, and likewise for each other granted
+            set; each portal type yields the capabilities of the mapping above and no text
+            device; a `device_types` of 0 and one with an unknown bit make `ConnectToEIS`
+            fail and create no context;
+          - clients only: an injected key of a binding triggers no action of the compositor
+            and reaches the focused client, an injected pointer binding triggers none, each
+            injected protected key reaches neither the compositor nor any client, and neither
+            the keyboard monitor nor the keyboard aids see an injected key, and an injected
+            key between the press and the release of a physical Super opens no launcher and
+            reaches the focused client (amended on 2026-11-17);
+          - mixed sources: an injected Super with a physical Escape, and a physical Super
+            with an injected Escape, each reach the focused client as the plain Escape and
+            trigger no binding and no protected chord, an injected Ctrl+C reaches it as Ctrl+C
+            with the physical modifiers restored afterwards, and a physical key keeps its meaning
+            while an injected modifier is held;
+          - the backend's dialogs: an injected key, button, scroll and touch each reach no
+            surface of `xdg-desktop-portal-athanor`, the consent dialog included, and an
+            injected motion gives it no pointer focus, while the seat's input reaches it
+            and the same input reaches another client; a client outside a security context
+            whose identity cannot be read gets no injected key, while a confined client gets
+            it;
+          - the name: with the name owned by another process at the compositor's start, the
+            compositor runs, serves no EIS and logs the failure once;
+          - where the tests run: CI runs the admission with a fixture and the backend's owner
+            check through an identity seam; the end-to-end positive path, which needs the
+            installed unit and path, and the indicator test below run on athanor-ref. On the
+            shell rig, in a dev build and with a compositor started outside
+            `athanor-sulphur.service` the backend's owner check refuses `Start` by design;
+          - the indicator: on athanor-ref with the backend, an open session is listed in
+            `InputSessions` and the bar shows the indicator; its Stop ends the session's
+            context, and the indicator hides once no session is open; a session whose
+            frontend died without `Close` stays listed until Stop;
       - the capture of a workspace for the overview's thumbnails, through
         `ext-image-copy-capture-v1` and a source of `athanor_workspace_manager_v1` (decision 32),
         for release 1.1.
@@ -1371,6 +1740,167 @@ compositor and that the own compositor did not yet offer:
     (`doc_visual_language.md`). Until then the toolkit draws M0 there. *Amended on 2026-11-11,
     with revision 4 of `doc_visual_language.md` (VL13):* under cosmic-comp the toolkit may offer
     M1 on its own measurement, as VL13 says, and never M2.
+36. **The protocols KWin, Mutter, Hyprland and Sway offer past the second wave** (OS17;
+    amends decision 33's wave 2c; taken by the maintainer on 2026-11-15, with the pull request
+    that records it). On 2026-11-15 the globals of the own compositor at `origin/iso-v0`
+    8794c120 were compared with the snapshots of Wayland Explorer at f406667b (2026-11-14) for
+    cosmic-comp 1.11.0, niri 26.04, KWin 6.7, Mutter 51, Hyprland 0.52.1 and Sway 1.11, and with
+    Sway 1.12's release notes. Among the globals Smithay implements at the pinned revision,
+    and outside decision 21's colour management and wave 2b, three that at least three of
+    them offer are missing. Each comes with its row in `data/globals` and its fixture test
+    (OS17; OS19, item 2):
+    - `wp_content_type_manager_v1`, standard. The compositor keeps each surface's type, `none`,
+      `photo`, `video` or `game`, applied with the surface's commit. At 1.0 no behaviour reads
+      it: scheduling, tearing (wave 2b) and adaptive sync stay as they are. A rule that reads
+      it is written as an amendment of the decision that owns that behaviour;
+    - `xdg_toplevel_tag_manager_v1`, standard. The compositor keeps each toplevel's tag and
+      its description, applied with the toplevel's commit. A tag is the client's own word: it
+      never selects a privilege, a class of OS17, an allow-list line, OS4's border or the mark
+      of a trusted prompt. Those still come from the security context and the allow-list
+      alone. At 1.0 no window rule reads it;
+    - `wp_drm_lease_device_v1`, unconfined. The DRM device the compositor renders and scans
+      out on offers one global; a device the compositor does not drive offers none, so a
+      headset wired to another GPU is not leased until the compositor drives that GPU
+      (*amended on 2026-11-15*). A connector is
+      offered for lease only when the kernel marks it `non-desktop`, such as a headset's, and
+      such a connector is never an output of the session: no workspace, layer surface, cursor or
+      lock surface is placed on it. A lease is granted only while the session is unlocked:
+      from the moment a lock is requested, every new request is refused. Before the lock is
+      confirmed (`locked` of `ext_session_lock_v1`), every lease is revoked and the compositor
+      disables the leased connector and its CRTC, so a headset never shows a client's frame
+      over a locked session. After the unlock a client asks again. A lease is also revoked,
+      and its connector disabled, when its device is lost on a session switch or removed,
+      when its connector is disconnected, or when the connector stops being `non-desktop`.
+      *Amended on 2026-11-15:* revoking needs the device's DRM master, so the order is kept
+      by what the compositor waits for:
+      - `locked` is sent only once every lease has been revoked and its connector and CRTC
+        disabled, each step having succeeded. While the session is paused, or while a
+        revocation fails, `locked` waits; the outputs stay covered from the lock request on
+        as before, and only the confirmation waits. The compositor tries again at the
+        resume, before any output is drawn, and sends `locked` once the revocation succeeds;
+      - a lease counts as revoked only once the device no longer lists its lessee, read from
+        the device's list of lessees and not from the compositor's or Smithay's records, so a
+        lease a client destroyed while keeping its file descriptor, or one whose connector
+        is gone, is revoked like any other. Until the device confirms it, the lease is not
+        counted as ended: new requests stay refused, and the revocation is tried again at
+        the next scan of the device, at the resume, and, while the session is active and a
+        lock waits on it, once a second. A failure is logged as an error naming the
+        connector the first time and whenever its cause changes;
+      - new requests are also refused from the moment the compositor starts a session
+        switch on its own keys, or the session is paused, until the resume, or until the
+        switch fails or names the session already shown. A switch the compositor makes
+        revokes every lease and disables its connector before the switch. When a lease
+        cannot be ended, the compositor does not switch: it keeps its terminal and logs
+        the lease's connectors as an error (*amended on 2026-11-15*). Smithay's
+        `DrmLeaseHandler::drm_lease_state` returns no `Option` at the pinned revision, so
+        its arm with no lease state ends the compositor; no request reaches it, and its
+        removal is tracked by #1186;
+      - a switch logind makes on another request is acknowledged to logind before the
+        compositor is told, and libseat's contract forbids using the device after that, so
+        the compositor does not touch the device at the pause: it revokes at the resume,
+        before any output is drawn. Until then the client holding the lease can go on
+        driving the headset with new frames, while another session has the seat;
+      - fixture tests drive the real `ext_session_lock_v1` through the lease rules, with a
+        probe in place of DRM: the refusal from the lock request on, `locked` withheld
+        while the probe's revocation fails or the session is paused and sent once it
+        succeeds, and the grant again after the unlock. Unit tests on the same rules cover
+        the disabled connector, the revocation on a lost device, on a disconnected
+        connector and on a connector that stops being `non-desktop`, and the switch the
+        compositor makes. The DRM calls themselves, the revocation, the disabled CRTC, the
+        list of lessees and the `non-desktop` property, have no automatic test, since the
+        fixture runs without a DRM device: this is an exception to OS19, item 2.
+
+    Not taken:
+    - leaving the lease in wave 2c without a design, which leaves headsets out of 1.0 although
+      Smithay has the protocol;
+    - keeping leases across the lock, which leaves a client's frames on a headset the locked
+      session does not cover;
+    - holding a switch logind makes until the leases are revoked, which Smithay's session
+      cannot do at the pinned revision: it acknowledges the pause to logind before the
+      compositor's callback runs (*amended on 2026-11-15*);
+    - sending `locked` while the session is paused and ending the lease at the resume, which
+      confirms a lock while a client may still drive a headset (*amended on 2026-11-15*);
+    - one global for each DRM device the kernel lists, which offers connectors on a GPU the
+      compositor neither drives nor scans (*amended on 2026-11-15*);
+    - reading the tag for window rules now, which waits for a rule the maintainer decides.
+
+    Left for a later decision: `zwlr_gamma_control_manager_v1`, which Smithay does not
+    implement and which would be privileged, since it changes what every output shows; and
+    `xdg_toplevel_drag_manager_v1`, which Smithay does not implement and which, in the
+    snapshots, only KWin and Mutter offer (*both settled on 2026-11-16 by decision 37*).
+
+37. **Night light, reduced motion and the toplevel drag** (OS5, OS17; `doc_accessibility.md` AX9;
+    `doc_control_center.md` S1; settles decision 36's later decision; taken by the maintainer on
+    2026-11-16, with the pull request that records it). On 2026-11-16 the globals of the own
+    compositor at `origin/iso-v0` (9b54c0d0) were compared with the globals created in the sources
+    of the release tags KWin 6.8.3, Mutter 51.1, Hyprland 0.57.2 and niri 26.04. Past colour management, which decision 21 leaves after 1.0, the
+    protocols at least two of them offer and the own compositor lacks are
+    `zwlr_gamma_control_manager_v1`, `xdg_toplevel_drag_manager_v1`, `xdg_session_manager_v1`,
+    wlr-screencopy and wlr foreign toplevel management, besides `xwayland_shell_v1`, which decision
+    33 keeps out. The wlr pair is out of scope for 1.0: `ext_image_copy_capture_manager_v1` covers
+    screencopy, while `ext_foreign_toplevel_list_v1` is a list only, and activating, minimising and
+    closing another client's window stay with the privileged `athanor_toplevel_manager_v1`, so a
+    taskbar of a third party lists windows and cannot act on them. Each item below comes with its row in
+    `data/globals` where it adds a global, and its fixture test (OS17; OS19, item 2):
+    - **Reduced motion reaches the compositor through version 2 of `athanor_a11y_manager_v1`**
+      (#1104). The bar, which holds the grant, sends `reduced_motion` with the value of
+      `enable-animations` inverted after it binds the global and at each change, as it sends the
+      accessibility keys. The compositor keeps the value it was last given, and false until a client
+      sends one, so without the bar its animations run. A fixture test sends the request and
+      observes the bell's widened outline in place of its blink (AX9). Not taken: an Athanor state
+      file the compositor watches, a second store kept in step with the GNOME key, and reading
+      dconf's database in the compositor, which would bring GLib into it;
+    - **Night light is a colour transform of the compositor, not a gamma ramp a client sets.**
+      The compositor draws every output through the pass of the colour filters of
+      `athanor_a11y_v1` (`doc_accessibility.md` AX10), with a colour temperature from 6500 K, which
+      leaves the image unchanged, down to 2500 K. The temperature's matrix comes first and the
+      accessibility filter's after it, so a colour-blind filter corrects the image the user sees;
+      the inversion stays last. The setting is the Athanor GSettings schema
+      `org.athanor.desktop.night-light`: `enabled`, default false, `temperature`, default 4000, and
+      the manual schedule's `from` and `to` (`doc_settings.md` SE24), written by the control center's
+      Display page (CC5) and by Settings. The schema joins the writable keys of `doc_settings.md`
+      SE7 and the schemas of `doc_session_daemons.md` SD3 by an amendment of those documents,
+      approved before the code that adds it (ADR-0074). The bar reads it at its start and at each change, applies
+      the schedule, and sends the temperature to show through a request of version 3 of
+      `athanor_a11y_manager_v1`, 6500 K when night light is off; the grant is the bar's, so no client
+      gains one. The bar clamps a value outside 2500 to 6500 K before it sends it, and logs it, since
+      the compositor answers one outside them with `invalid_value`, as for the keyboard aids (AX11).
+      When the renderer cannot draw the colour pass, the compositor stores nothing it cannot show
+      and sends 6500 K to every manager, so the bar shows night light as off. The compositor keeps the temperature it was last given, sends it back in an event
+      to every bound manager, and draws a change over 1 s, or at once under reduced motion. The
+      transform stays while the session is locked, so the lock screen does not turn white at night.
+      Screen capture takes the frame before the transform, as it takes it before the accessibility
+      filters (`src/capture.rs`), so a recording keeps its colours. Under cosmic-comp's session the
+      bar sends nothing and night light has no mechanism until spike S1 finds one there; what the
+      control center and Settings show meanwhile is S1's answer (`doc_control_center.md`, section 4);
+    - **`xdg_toplevel_drag_manager_v1`, standard.** A client attaches one of its own toplevels to a
+      drag it started with its own `wl_data_source`, by pointer or by touch; the toplevel follows
+      the drag, placed by the offset the client gives as a hint, and stays where the drop leaves
+      it. The attached window takes no part in choosing the drop target, and a window unmapped
+      during the drag is detached from it. The protocol's errors are raised as it defines them:
+      `invalid_source` for a data source already used for a toplevel drag or not used for a
+      drag and drop, `toplevel_attached` for a second toplevel while one is attached, and
+      `ongoing_drag` for the drag object destroyed before its drag ended. The window keeps its OS4
+      border while it moves. A drag still active when a lock is requested is cancelled, the
+      attached toplevel stays where the drag last placed it, and the client is told of the cancel,
+      after which the protocol leaves the window's place to it. Smithay does not implement the protocol at the
+      pinned revision, so the compositor implements it from `xdg-toplevel-drag-v1.xml` in
+      `wayland-protocols` 0.32.13, on Smithay's `DnDGrab`. Fixture tests drive the attach, the move
+      with the drag, the drop target chosen without the attached window, the detach at an unmap, the
+      cancel at a lock request, and each of the three errors.
+
+    Planned for release 1.1: `xdg_session_manager_v1`, which puts a window back where it was after
+    a restart. It is a staging protocol with few clients, and it would be the compositor's first
+    state kept on disk; its design, and the identifiers it stores, are written as an amendment of
+    this decision before its code.
+
+    Not taken:
+    - `zwlr_gamma_control_manager_v1`, which lets a client change what every output shows, so
+      gammastep and wlsunset do not work under the own compositor: its night light needs no client
+      with that power, and a ramp set beside the transform would act twice on the same pixels;
+    - night light as a gamma ramp on the CRTC, which a frame drawn for capture would not carry and
+      which an HDR output, after decision 21, would not take in the same way;
+    - `xdg_session_manager_v1` in 1.0, which adds state on disk for a protocol few clients use.
 
 ## 8. Risks
 

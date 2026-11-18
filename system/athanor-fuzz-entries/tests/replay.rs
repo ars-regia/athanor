@@ -14,7 +14,7 @@ fn replay(target: &str, entry: fn(&[u8]) -> athanor_fuzz_entries::Setup) {
     assert!(!files.is_empty(), "corpus {target} is empty");
     for file in files {
         eprintln!("replay {}", file.display());
-        entry(&std::fs::read(&file).expect("corpus file")).expect("harness setup");
+        entry(&std::fs::read(&file).expect("corpus file")).expect("fuzz entry");
     }
 }
 
@@ -49,6 +49,7 @@ replay_tests! {
     "layout" layout_document => athanor_fuzz_entries::layout::document;
     "layout" layout_favorites => athanor_fuzz_entries::layout::favorites;
     "layout" trust_state => athanor_fuzz_entries::layout::trust_state;
+    "sulphur" sulphur_protocol => athanor_fuzz_entries::sulphur::protocol;
 }
 
 /// A corpus directory or a `[[bin]]` without a line above is a target nobody replays.

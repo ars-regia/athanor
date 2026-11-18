@@ -15,7 +15,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from toolkit_layer_check import GET, OUTPUT_NAME, live_surfaces, physical, sway, until

@@ -372,7 +372,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
     }
     // UT12 holds a feature update on a metered connection; a security update downloads, unless
     // the opt-out holds it too (UT13).
-    if ctx.tools.metered() && !(security && automatic) {
+    // The link is read once: the gate and the warning below must agree on it.
+    let metered = ctx.tools.metered();
+    if metered && !(security && automatic) {
         return (UpdateState::Available, None);
     }
     // Residual: the class is the candidate's, but `bootc upgrade --download-only` takes what
@@ -396,6 +398,9 @@ fn online_update<T: Tools>(ctx: &Context<'_, T>, policy: &InForce, status: &mut 
                 return (UpdateState::Available, None);
             }
             let staged = status.staged.as_ref().map(|staged| staged.digest.clone()).unwrap_or_default();
+            if metered && staged != candidate.digest {
+                tracing::warn!(%staged, candidate = %candidate.digest, "a tag moved after the candidate was classified: bootc downloaded another digest over a metered connection; it is not unlocked");
+            }
             let failure = downloaded(ctx, status, &staged);
             // The class is the candidate's: a tag that moved during the download staged another
             // digest. A failure left by the download step unlocks nothing: the next check settles it.
@@ -696,6 +701,8 @@ pub(crate) mod tests {
         /// `greenboot-success.target` is active: greenboot's required health checks passed.
         pub boot_healthy: bool,
         pub calls: RefCell<Vec<String>>,
+        /// How many times `metered` was asked, kept out of `calls` so their exact-match assertions hold.
+        pub metered_asked: Cell<usize>,
     }
 
     impl Fake {
@@ -716,6 +723,7 @@ pub(crate) mod tests {
                 served: Cell::new(None),
                 boot_healthy: true,
                 calls: RefCell::new(Vec::new()),
+                metered_asked: Cell::new(0),
             }
         }
 
@@ -834,6 +842,7 @@ pub(crate) mod tests {
             Ok(())
         }
         fn metered(&self) -> bool {
+            self.metered_asked.set(self.metered_asked.get() + 1);
             self.metered
         }
         fn boot_healthy(&self) -> bool {
@@ -1428,6 +1437,65 @@ pub(crate) mod tests {
         tools.metered = true;
         assert_eq!(run(&machine.ctx(&tools, NOW), false).expect("check").update, UpdateState::WillApplyAtNextShutdown);
         assert!(tools.called("download") && tools.called("apply_downloaded"));
+    }
+
+    /// What `tracing` logs while `run` runs, as text.
+    fn logged<V>(run: impl FnOnce() -> V) -> (V, String) {
+        #[derive(Clone, Default)]
+        struct Sink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().expect("sink").extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Sink {
+            type Writer = Sink;
+            fn make_writer(&'a self) -> Sink {
+                self.clone()
+            }
+        }
+        let sink = Sink::default();
+        let subscriber = tracing_subscriber::fmt().with_writer(sink.clone()).with_ansi(false).finish();
+        let value = tracing::subscriber::with_default(subscriber, run);
+        let text = String::from_utf8_lossy(&sink.0.lock().expect("sink")).into_owned();
+        (value, text)
+    }
+
+    const MOVED: &str = "bootc downloaded another digest";
+
+    #[test]
+    fn a_moved_tag_on_a_metered_link_is_reported() {
+        // The candidate is a security digest; the tag moved before `bootc upgrade --download-only`
+        // ran, so it staged another digest, over a metered link.
+        let (machine, mut tools) = offered_attested("moved-tag-metered", Some(security()));
+        tools.metered = true;
+        let moved = digest(7);
+        tools.download = Ok(Deployed { download_only: true, ..in_att_repo(deployed(&moved, 3000)) });
+        let (state, log) = logged(|| run(&machine.ctx(&tools, NOW), false).expect("check"));
+        assert!(log.contains(MOVED) && log.contains(&moved) && log.contains(&attested()), "{log}");
+        assert_eq!(state.update, UpdateState::Downloaded);
+        assert!(!tools.called("apply_downloaded"), "the staged digest is not unlocked: {:?}", tools.calls.borrow());
+        // On an unmetered link the same move is no spend worth a warning.
+        let (machine, mut tools) = offered_attested("moved-tag-unmetered", Some(security()));
+        tools.download = Ok(Deployed { download_only: true, ..in_att_repo(deployed(&moved, 3000)) });
+        let (_, log) = logged(|| run(&machine.ctx(&tools, NOW), false).expect("check"));
+        assert!(!log.contains(MOVED), "{log}");
+    }
+
+    #[test]
+    fn the_metered_link_is_read_once_per_check() {
+        // The gate before the download and the warning after it share one reading, so a link
+        // that changes in between cannot let one pass and the other disagree.
+        let (machine, mut tools) = offered_attested("metered-read-once", Some(security()));
+        tools.metered = true;
+        tools.download = Ok(Deployed { download_only: true, ..in_att_repo(deployed(&digest(7), 3000)) });
+        run(&machine.ctx(&tools, NOW), false).expect("check");
+        assert!(tools.called("download"), "{:?}", tools.calls.borrow());
+        assert_eq!(tools.metered_asked.get(), 1);
     }
 
     #[test]

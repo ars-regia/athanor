@@ -3,7 +3,7 @@
 case "$1" in
     lock)
         # Block any newly inserted USB devices during screen lock / greeter
-        usbguard set-parameter InsertedDevicePolicy block 2>/dev/null || true
+        usbguard set-parameter InsertedDevicePolicy block
         ;;
     unlock)
         # Restore normal policy evaluation for authenticated active session

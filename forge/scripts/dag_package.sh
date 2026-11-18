@@ -6,8 +6,9 @@
 # Usage: dag_package.sh check|build|publish|sbom|tag
 #
 # Environment (all steps):  PKG_NAME REGISTRY GITHUB_REPOSITORY_OWNER RUNNER_TEMP
-#   check:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE GITHUB_OUTPUT
-#   build:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE SCCACHE_CACHE_SIZE CONTENT_HASH
+#   check:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE GITHUB_OUTPUT, and
+#             GITHUB_REPOSITORY GITHUB_SERVER_URL GITHUB_REF for the trusted signer
+#   build:    BUILDER_IMAGE GITHUB_TOKEN GITHUB_ACTOR GITHUB_WORKSPACE CONTENT_HASH
 #   publish:  GITHUB_TOKEN GITHUB_ACTOR CONTENT_HASH
 #   tag:      CONTENT_HASH (the registry login of the caller, see tag_signed_image.sh)
 # $RUNNER_TEMP/image.digest is written by publish and read by sbom and tag.
@@ -43,8 +44,11 @@ step_check() {
   # new user namespace: on the 334k files of the builder that cost between 108 and
   # 535 seconds per job, in every one of the 47 jobs, for a check that takes a
   # second. It was also what made HOME=/root unwritable and broke the probe.
+  # The run's repository, server and ref decide which signatures the check trusts
+  # (system/tier-digests.sh); GITHUB_ACTIONS turns an untrusted image into an annotation.
   podman run -i --rm --security-opt label=disable --security-opt seccomp=unconfined \
-    -e GITHUB_TOKEN="${GITHUB_TOKEN}" -v "${GITHUB_WORKSPACE}:/workspace" -w /workspace/forge \
+    -e GITHUB_TOKEN="${GITHUB_TOKEN}" -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL -e GITHUB_REF -e GITHUB_ACTIONS \
+    -v "${GITHUB_WORKSPACE}:/workspace" -w /workspace/forge \
     "${BUILDER_IMAGE,,}" bash scripts/check_idempotency.sh --package "${PKG_NAME}" \
     --registry "${REGISTRY}" --owner "${GITHUB_REPOSITORY_OWNER}" --image-name "$(image_prefix)-${PKG_NAME}" > idemp.out
   # shellcheck source=/dev/null
@@ -55,7 +59,6 @@ step_check() {
 
 step_build() {
   mkdir -p RPMS
-  mkdir -p "${GITHUB_WORKSPACE}/.sccache"
   login_and_pull_builder
 
   local pkg_clean spec_dir=""
@@ -70,11 +73,11 @@ step_build() {
       exit 1
     fi
     echo "📦 Compiling Custom Spec: $spec_dir"
-    # Fetch with network, then build with --network=none (forge golden rule 4).
+    # Fetch with network, then build with --network=none (forge golden rule 4). No cache is
+    # mounted: a signed package is built only from inputs its provenance names, and sccache
+    # keeps its cache in the build's own volume, which run_spec_build.sh removes (PL10).
     bash "$here/run_spec_build.sh" "${BUILDER_IMAGE,,}" "$spec_dir" \
-      -e ATHANOR_CONTENT=".h${CONTENT_HASH:0:10}" \
-      -e SCCACHE_CACHE_SIZE="${SCCACHE_CACHE_SIZE}" \
-      -v "${GITHUB_WORKSPACE}/.sccache:/root/.cache/sccache"
+      -e ATHANOR_CONTENT=".h${CONTENT_HASH:0:10}"
   else
     echo "❌ [MARTIAL LAW FATAL] Attempted to build upstream package ${PKG_NAME} without local spec! Dynamic downloads are strictly forbidden!"
     exit 1

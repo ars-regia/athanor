@@ -4,7 +4,7 @@
 //! wait on a syncobj; without one, Pixman draws them on the CPU, which needs no device at all.
 
 use crate::background_effect::Blurs;
-use crate::capture::Target;
+use crate::capture::{Pointer, Target};
 use crate::lock::Lock;
 use crate::input_method::PlacedPopup;
 use crate::a11y::Look;
@@ -79,6 +79,14 @@ pub struct Headless {
     /// may refuse what its backend took to be possible.
     #[cfg(test)]
     pub refused: Option<Output>,
+    /// Why the fixture fails to end a lease, as a GPU whose master the compositor is not
+    /// (decision 36): until it is cleared, no lease ends.
+    #[cfg(test)]
+    pub lease_refused: Option<String>,
+    /// The output the fixture keeps from being drawn, as a monitor plugged in and not yet
+    /// presented.
+    #[cfg(test)]
+    pub undrawn: Option<Output>,
 }
 
 struct Virtual {
@@ -123,6 +131,10 @@ pub fn start(
         outputs: Vec::new(),
         #[cfg(test)]
         refused: None,
+        #[cfg(test)]
+        lease_refused: None,
+        #[cfg(test)]
+        undrawn: None,
     };
     let mut state = State::new(event_loop, display, Backend::Headless(Box::new(headless)))?;
     for (index, spec) in outputs.iter().enumerate() {
@@ -140,6 +152,7 @@ pub fn start(
             let renderer = gles(manager, node)?;
             let formats = renderer.dmabuf_formats();
             let pass = crate::look::prepare(renderer);
+            crate::wl_drm::global(&dh, *node, &formats);
             let feedback = DmabufFeedbackBuilder::new(node.dev_id(), formats).build()?;
             if !pass {
                 state.no_filter_pass();
@@ -308,7 +321,7 @@ impl State {
     }
 
     /// Draws every output, then sends presentation feedback and frame callbacks.
-    fn tick(&mut self, period: Duration) {
+    pub(crate) fn tick(&mut self, period: Duration) {
         let marks = self.marks();
         let Backend::Headless(headless) = &mut self.backend else {
             return;
@@ -323,6 +336,10 @@ impl State {
                 continue;
             }
             shown += 1;
+            #[cfg(test)]
+            if headless.undrawn.as_ref() == Some(&output) {
+                continue;
+            }
             let popups = self.composing.popups_on(&self.space, &output);
             let pointer = self.seat.get_pointer().map(|p| p.current_location());
             let look = self
@@ -393,13 +410,18 @@ impl Headless {
         what: &Target,
         space: &Space<Window>,
         marks: &Marks,
+        pointer: Option<Pointer<'_>>,
     ) -> Result<Vec<u8>, Error> {
         match &mut self.gpu {
-            Gpu::Gbm { manager, node, .. } => {
-                crate::capture::read_back::<_, GlesTexture>(gles(manager, node)?, what, space, marks)
-            }
+            Gpu::Gbm { manager, node, .. } => crate::capture::read_back::<_, GlesTexture>(
+                gles(manager, node)?,
+                what,
+                space,
+                marks,
+                pointer,
+            ),
             Gpu::Pixman { renderer, .. } => {
-                crate::capture::read_back::<_, Image>(renderer, what, space, marks)
+                crate::capture::read_back::<_, Image>(renderer, what, space, marks, pointer)
             }
         }
     }
@@ -470,6 +492,7 @@ where
         &virt.output,
         age,
         view,
+        Vec::new(),
         &mut virt.damage_tracker,
         look,
     )

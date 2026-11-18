@@ -21,11 +21,14 @@ use std::time::Duration;
 use athanor_unit::text::{line, NAME_CHARS};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, oneshot, watch};
-use tokio::time::timeout;
+use tokio::time::{sleep_until, timeout, Instant};
 use zbus::message::Header;
 use zbus::proxy::MethodFlags;
-use zbus::{Array, ObjectPath, Variant};
+use zbus::{Array, ObjectPath, OwnedObjectPath, Variant};
 use zbus::{Connection, DBusError, Message, Proxy};
+/// The password a page sends, from its field up to the D-Bus call that carries it: overwritten
+/// as it drops, wherever it drops.
+pub use zeroize::Zeroizing;
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
 use crate::props::{self, Objects, Props};
@@ -46,6 +49,16 @@ pub const AGENT_IFACE: &str = "org.freedesktop.NetworkManager.SecretAgent";
 /// Fixed by NetworkManager: it calls every agent at this path.
 pub const AGENT_PATH: &str = "/org/freedesktop/NetworkManager/SecretAgent";
 pub const AGENT_ID: &str = "os.athanor.Bar";
+/// NetworkManager's error and message when an agent with the same ID is already registered
+/// for the same user, by any process of it (`nm-agent-manager.c`, 1.58.1, lines 474-480):
+/// another bar of this user holds it. NetworkManager answers the same error, with other
+/// messages, for a caller whose uid it cannot read.
+const PERMISSION_DENIED: &str = "org.freedesktop.NetworkManager.AgentManager.PermissionDenied";
+const ALREADY_REGISTERED: &str = "An agent with this ID is already registered for this user.";
+/// The first wait before registering again with a NetworkManager that did not answer, doubled
+/// at each attempt up to the cap.
+const REGISTER_RETRY: Duration = Duration::from_secs(1);
+const REGISTER_RETRY_CAP: Duration = Duration::from_secs(30);
 pub const SECURITY_SETTING: &str = "802-11-wireless-security";
 pub const MAX_NETWORKS: usize = 24;
 /// How long a password request waits for the person. The bar's agent had no limit of its own
@@ -542,7 +555,7 @@ pub enum NetworkCommand {
     /// device of the last state.
     Join {
         network: Network,
-        password: Option<String>,
+        password: Option<Zeroizing<String>>,
     },
     Activate {
         connection: String,
@@ -589,7 +602,7 @@ pub struct PasswordPrompt {
     pub request: SecretsRequest,
     /// The password the person typed, or `None` when they cancelled. Dropping the sender
     /// answers `NoSecrets`.
-    pub reply: oneshot::Sender<Option<String>>,
+    pub reply: oneshot::Sender<Option<Zeroizing<String>>>,
     /// Completes with `()` when the agent no longer waits (NetworkManager cancelled the
     /// request or left, or no one answered in time): close the page. Beyond the plan's
     /// fields; without it the page would outlive a cancelled request. Completes with an
@@ -859,8 +872,8 @@ fn start(
 /// One step of the queue.
 enum Job {
     Command(NetworkCommand),
-    /// `RegisterWithCapabilities`, to this unique name.
-    Register(String),
+    /// `RegisterWithCapabilities`, to this unique name, for this generation of the mirror.
+    Register(String, u64),
 }
 
 impl Job {
@@ -872,6 +885,36 @@ impl Job {
 
 /// A job being carried out.
 type Running = Pin<Box<dyn Future<Output = zbus::Result<()>> + Send>>;
+
+/// Whether NetworkManager refused the registration because the agent ID is held: the one
+/// final answer. Any other failure, an unexported agent manager of a NetworkManager still
+/// starting included, is tried again.
+fn held(err: &zbus::Error) -> bool {
+    matches!(
+        err,
+        zbus::Error::MethodError(name, Some(message), _)
+            if name.as_str() == PERMISSION_DENIED && message == ALREADY_REGISTERED
+    )
+}
+
+/// Whether a failed registration may still have reached NetworkManager: a call of ours that
+/// timed out, a connection that broke, a NoReply. A held ID after one of these may be ours.
+fn may_have_landed(err: &zbus::Error) -> bool {
+    const NO_REPLY: &str = "org.freedesktop.DBus.Error.NoReply";
+    match err {
+        zbus::Error::InputOutput(_) => true,
+        zbus::Error::MethodError(name, ..) => name.as_str() == NO_REPLY,
+        zbus::Error::FDO(err) => err.name().as_str() == NO_REPLY,
+        _ => false,
+    }
+}
+
+/// The wait before the next registration after `attempts` unanswered ones.
+fn register_backoff(attempts: u32) -> Duration {
+    REGISTER_RETRY
+        .saturating_mul(1 << attempts.min(5))
+        .min(REGISTER_RETRY_CAP)
+}
 
 /// What the profile of a path says, read once per owner of NetworkManager.
 type Info = (u64, String, Option<ConnectionInfo>);
@@ -915,12 +958,19 @@ async fn run(
     let mut connections: BTreeMap<String, ConnectionInfo> = BTreeMap::new();
     let mut asked: BTreeSet<String> = BTreeSet::new();
     let mut waiting: VecDeque<Job> = VecDeque::new();
-    let mut running: Option<(bool, Running)> = None;
+    // Whether a failure counts as refused, the generation a registration was for, the call.
+    let mut running: Option<(bool, Option<u64>, Running)> = None;
     let mut refused = 0;
     let mut seen = 0;
     // Whether `RegisterAgent` came, and the generation of the owner the agent was queued for.
     let mut registering = false;
     let mut registered_for: Option<u64> = None;
+    // When to register again with a NetworkManager that did not take the agent, how many
+    // times it did not, and whether one of those calls may have reached it: all start over
+    // with a new owner of NetworkManager.
+    let mut retry: Option<Instant> = None;
+    let mut attempts: u32 = 0;
+    let mut unanswered = false;
     loop {
         // The mirror ends only after it has emptied itself, so its last state is published too.
         let mut alive = true;
@@ -938,17 +988,55 @@ async fn run(
                     }
                 }
             }
+            () = async {
+                match retry {
+                    Some(at) => sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            }, if retry.is_some() => {
+                // Queued again below.
+                retry = None;
+                registered_for = None;
+            }
             result = async {
                 match running.as_mut() {
-                    Some((_, call)) => call.await,
+                    Some((_, _, call)) => call.await,
                     None => std::future::pending().await,
                 }
             }, if running.is_some() => {
-                let counts = running.take().is_some_and(|(counts, _)| counts);
-                if let Err(err) = result {
-                    tracing::warn!(error = %err, "NetworkManager refused or did not answer");
-                    if counts {
-                        refused += 1;
+                let (counts, register) = running
+                    .take()
+                    .map_or((false, None), |(counts, register, _)| (counts, register));
+                match (register, result) {
+                    // A registration with an owner that has gone: the new one has its own.
+                    (Some(generation), _) if generation != seen => {}
+                    (_, Ok(())) => {}
+                    // NetworkManager took a call of ours that went unanswered: the ID it holds
+                    // is this bar's.
+                    (Some(_), Err(err)) if held(&err) && unanswered => tracing::info!(
+                        error = %err,
+                        "NetworkManager took an earlier registration of the secret agent that went unanswered"
+                    ),
+                    (Some(_), Err(err)) if held(&err) => tracing::warn!(
+                        error = %err,
+                        "another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets"
+                    ),
+                    (Some(_), Err(err)) => {
+                        unanswered |= may_have_landed(&err);
+                        let wait = register_backoff(attempts);
+                        if attempts == 0 {
+                            tracing::warn!(error = %err, ?wait, "NetworkManager did not take the secret agent; trying again");
+                        } else {
+                            tracing::debug!(error = %err, ?wait, "NetworkManager did not take the secret agent; trying again");
+                        }
+                        attempts = attempts.saturating_add(1);
+                        retry = Some(Instant::now() + wait);
+                    }
+                    (None, Err(err)) => {
+                        tracing::warn!(error = %err, "NetworkManager refused or did not answer");
+                        if counts {
+                            refused += 1;
+                        }
                     }
                 }
             }
@@ -974,13 +1062,16 @@ async fn run(
             shared.withdraw();
             connections.clear();
             asked.clear();
-            waiting.retain(|job| !matches!(job, Job::Register(_)));
+            waiting.retain(|job| !matches!(job, Job::Register(..)));
             registered_for = None;
+            retry = None;
+            attempts = 0;
+            unanswered = false;
         }
         if registering && registered_for != Some(seen) {
             if let Some(owner) = &owner {
                 registered_for = Some(seen);
-                waiting.push_back(Job::Register(owner.clone()));
+                waiting.push_back(Job::Register(owner.clone(), seen));
             }
         }
         connections.retain(|path, _| profiles.contains(path));
@@ -1019,7 +1110,11 @@ async fn run(
                         .and_then(|state| state.wifi.as_ref())
                         .map(|wifi| wifi.device.clone()),
                 };
-                running = Some((job.counts(), Box::pin(execute(context, job))));
+                let register = match &job {
+                    Job::Register(_, generation) => Some(*generation),
+                    Job::Command(_) => None,
+                };
+                running = Some((job.counts(), register, Box::pin(execute(context, job))));
             }
         }
         let next = current.map(|state| NetworkState { refused, ..state });
@@ -1117,7 +1212,7 @@ impl Context {
 async fn execute(context: Context, job: Job) -> zbus::Result<()> {
     match job {
         Job::Command(command) => command_of(&context, command).await,
-        Job::Register(owner) => register(&context.connection, &owner).await,
+        Job::Register(owner, _) => register(&context.connection, &owner).await,
     }
 }
 
@@ -1136,12 +1231,12 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
                 .device
                 .as_deref()
                 .ok_or_else(|| failure("no Wi-Fi device"))?;
-            let args = add_and_activate(&network, password.as_deref(), device)
+            let args = add_and_activate(&network, password.as_ref().map(|p| p.as_str()), device)
                 .ok_or_else(|| failure("not an object path"))?;
             let call = async {
                 Proxy::new(&context.connection, NM, NM_PATH, NM)
                     .await?
-                    .call_with_flags::<_, _, ()>(
+                    .call_with_flags::<_, _, (OwnedObjectPath, OwnedObjectPath)>(
                         "AddAndActivateConnection",
                         MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
@@ -1160,7 +1255,7 @@ async fn command_of(context: &Context, command: NetworkCommand) -> zbus::Result<
             let call = async {
                 Proxy::new(&context.connection, NM, NM_PATH, NM)
                     .await?
-                    .call_with_flags::<_, _, ()>(
+                    .call_with_flags::<_, _, OwnedObjectPath>(
                         "ActivateConnection",
                         MethodFlags::ALLOW_INTERACTIVE_AUTH,
                         &args,
@@ -1204,11 +1299,18 @@ async fn register(connection: &Connection, owner: &str) -> zbus::Result<()> {
         "RegisterWithCapabilities",
         &(AGENT_ID, 0u32),
     );
-    no_answer(timeout(TIMEOUT, call).await).map(|_| ())
+    match timeout(TIMEOUT, call).await {
+        Ok(reply) => reply.map(|_| ()),
+        // Unanswered, as a NoReply is: worth another attempt.
+        Err(_) => Err(zbus::Error::InputOutput(Arc::new(
+            std::io::ErrorKind::TimedOut.into(),
+        ))),
+    }
 }
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -1669,6 +1771,11 @@ mod tests {
         calls: Vec<String>,
         /// The unique name, id and capabilities of each agent registration.
         registered: Vec<(String, String, u32)>,
+        /// When each registration came.
+        registered_at: Vec<Instant>,
+        /// The delay and refusal of the next registrations, in order; each one after them is
+        /// accepted at once.
+        answers: VecDeque<(Duration, Option<RegisterError>)>,
         unregistered: u32,
         get_settings: HashMap<String, u32>,
         /// Ssid, key-mgmt and psk of each `AddAndActivateConnection`.
@@ -1897,20 +2004,36 @@ mod tests {
         log: Shared,
     }
 
+    #[derive(Debug, zbus::DBusError)]
+    #[zbus(prefix = "org.freedesktop")]
+    enum RegisterError {
+        #[zbus(error)]
+        ZBus(zbus::Error),
+        /// NetworkManager's answer when another process of the user holds the ID, or when it
+        /// cannot read the caller's uid.
+        #[zbus(name = "NetworkManager.AgentManager.PermissionDenied")]
+        Denied(String),
+        #[zbus(name = "DBus.Error.NoReply")]
+        NoReply(String),
+    }
+
     #[zbus::interface(name = "org.freedesktop.NetworkManager.AgentManager")]
     impl FakeAgentManager {
-        fn register_with_capabilities(
+        async fn register_with_capabilities(
             &self,
             identifier: String,
             capabilities: u32,
             #[zbus(header)] header: Header<'_>,
-        ) {
+        ) -> Result<(), RegisterError> {
             let sender = header.sender().map(ToString::to_string).unwrap_or_default();
-            self.log
-                .lock()
-                .unwrap()
-                .registered
-                .push((sender, identifier, capabilities));
+            let (delay, refusal) = {
+                let mut log = self.log.lock().unwrap();
+                log.registered.push((sender, identifier, capabilities));
+                log.registered_at.push(Instant::now());
+                log.answers.pop_front().unwrap_or_default()
+            };
+            tokio::time::sleep(delay).await;
+            refusal.map_or(Ok(()), Err)
         }
         fn unregister(&self) {
             self.log.lock().unwrap().unregistered += 1;
@@ -2175,6 +2298,292 @@ mod tests {
         drop(nm);
     }
 
+    /// Counts the warnings whose message is `text`, while it is this thread's subscriber: the
+    /// model runs on the test's current-thread runtime.
+    struct Warnings {
+        text: &'static str,
+        seen: Arc<AtomicUsize>,
+    }
+
+    impl tracing::Subscriber for Warnings {
+        fn enabled(&self, _: &tracing::Metadata<'_>) -> bool {
+            true
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            struct Message(String);
+            impl tracing::field::Visit for Message {
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "message" {
+                        self.0 = format!("{value:?}");
+                    }
+                }
+            }
+            let mut message = Message(String::new());
+            event.record(&mut message);
+            if *event.metadata().level() == tracing::Level::WARN && message.0 == self.text {
+                self.seen.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// The warnings that another process holds the agent ID, counted from now.
+    fn held_warnings() -> (tracing::subscriber::DefaultGuard, Arc<AtomicUsize>) {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let warnings = Warnings {
+            text: "another process of this user already holds the NetworkManager secret agent; this bar will not prompt for Wi-Fi secrets",
+            seen: seen.clone(),
+        };
+        (tracing::subscriber::set_default(warnings), seen)
+    }
+
+    /// A new owner of NetworkManager, after the old one has left, answering the registrations
+    /// as `answers` say.
+    async fn new_owner(rig: &mut Rig, answers: Vec<(Duration, Option<RegisterError>)>) -> Shared {
+        // Shut down by value: a clone left behind keeps the old owner on the bus.
+        let old = std::mem::replace(&mut rig.nm, rig.client.clone());
+        old.graceful_shutdown().await;
+        wait_for(&mut rig.states, |_| true).await;
+        replacement(rig, answers).await
+    }
+
+    /// A new owner of NetworkManager, the old one having left or released the name.
+    async fn replacement(rig: &mut Rig, answers: Vec<(Duration, Option<RegisterError>)>) -> Shared {
+        let log = Shared::default();
+        log.lock().unwrap().answers = answers.into();
+        rig.nm = serve(&rig.bus, &log).await;
+        log
+    }
+
+    fn refused(refusals: Vec<RegisterError>) -> Vec<(Duration, Option<RegisterError>)> {
+        refusals
+            .into_iter()
+            .map(|err| (Duration::ZERO, Some(err)))
+            .collect()
+    }
+
+    fn no_reply() -> RegisterError {
+        RegisterError::NoReply("no reply".into())
+    }
+
+    fn registered_at(log: &Shared) -> Vec<Instant> {
+        log.lock().unwrap().registered_at.clone()
+    }
+
+    /// The registrations a new owner of NetworkManager sees, each answered by `answers` first.
+    async fn registrations_with_new_owner(answers: Vec<RegisterError>, seen: usize) -> usize {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let log = new_owner(&mut rig, refused(answers)).await;
+        until(&log, |log| log.registered.len() >= seen).await;
+        // Longer than the first wait before another attempt.
+        tokio::time::sleep(REGISTER_RETRY * 2).await;
+        let count = log.lock().unwrap().registered.len();
+        count
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_wait_between_unanswered_registrations_doubles() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let log = new_owner(&mut rig, refused(vec![no_reply(), no_reply(), no_reply()])).await;
+        until(&log, |log| log.registered.len() == 4).await;
+        let at = registered_at(&log);
+        let waits: Vec<Duration> = at.windows(2).map(|pair| pair[1] - pair[0]).collect();
+        // Real time: the model talks to a real bus, and tokio's paused clock would jump past
+        // its reply timeout while a call is on the wire. The bound below each wait is exact; the
+        // one above is the next step's wait, so a back-off one step off still fails while a
+        // loaded host's scheduling delay of less than a whole step does not.
+        for (wait, expected) in waits.iter().zip([1, 2, 4]) {
+            let expected = REGISTER_RETRY * expected;
+            assert!(*wait >= expected && *wait < expected * 2, "waits {waits:?}");
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_new_owner_of_networkmanager_starts_the_wait_over() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let log = new_owner(&mut rig, refused(vec![no_reply(), no_reply()])).await;
+        until(&log, |log| log.registered.len() == 3).await;
+        // Two unanswered calls with the old owner: its next wait would have been 4 s.
+        let log = new_owner(&mut rig, refused(vec![no_reply()])).await;
+        until(&log, |log| log.registered.len() == 2).await;
+        let at = registered_at(&log);
+        assert!(
+            at[1] - at[0] < REGISTER_RETRY * 2,
+            "waited {:?}",
+            at[1] - at[0]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_new_owner_of_networkmanager_cancels_a_pending_retry_and_registers_at_once() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let log = new_owner(&mut rig, refused(vec![no_reply(), no_reply()])).await;
+        until(&log, |log| log.registered.len() == 2).await;
+        // The model has the refusal, and a retry due in 2 s.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let served = Instant::now();
+        let log = new_owner(&mut rig, Vec::new()).await;
+        until(&log, |log| !log.registered.is_empty()).await;
+        assert!(
+            registered_at(&log)[0] - served < REGISTER_RETRY,
+            "registered at once"
+        );
+        // Past the retry the old owner left pending.
+        tokio::time::sleep(REGISTER_RETRY * 3).await;
+        assert_eq!(log.lock().unwrap().registered.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_refusal_from_an_owner_that_has_gone_is_ignored() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        // The old owner answers its registration late, after it has given up the name.
+        let late = REGISTER_RETRY * 3 / 2;
+        let old_log = new_owner(&mut rig, vec![(late, Some(no_reply()))]).await;
+        until(&old_log, |log| !log.registered.is_empty()).await;
+        let old = rig.nm.clone();
+        old.release_name(NM).await.unwrap();
+        let log = replacement(&mut rig, Vec::new()).await;
+        until(&log, |log| !log.registered.is_empty()).await;
+        // Past the late refusal and the retry it would have asked for.
+        tokio::time::sleep(late + REGISTER_RETRY * 2).await;
+        assert_eq!(log.lock().unwrap().registered.len(), 1);
+        drop(old);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_held_id_after_an_unanswered_registration_is_this_bars() {
+        let (_guard, warned) = held_warnings();
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        // NetworkManager answers the first call after the bar gave up on it, and so holds the
+        // ID for the bar when the second comes.
+        let log = new_owner(
+            &mut rig,
+            vec![
+                (TIMEOUT + REGISTER_RETRY / 2, None),
+                (
+                    Duration::ZERO,
+                    Some(RegisterError::Denied(ALREADY_REGISTERED.into())),
+                ),
+            ],
+        )
+        .await;
+        until(&log, |log| log.registered.len() == 2).await;
+        tokio::time::sleep(REGISTER_RETRY * 2).await;
+        assert_eq!(log.lock().unwrap().registered.len(), 2, "not asked again");
+        assert_eq!(
+            warned.load(Ordering::SeqCst),
+            0,
+            "no claim that another process holds it"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_agent_id_held_by_another_process_is_not_asked_for_again() {
+        let (_guard, warned) = held_warnings();
+        let held = RegisterError::Denied(ALREADY_REGISTERED.into());
+        assert_eq!(registrations_with_new_owner(vec![held], 1).await, 1);
+        assert_eq!(
+            warned.load(Ordering::SeqCst),
+            1,
+            "one warning names the cause"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_registration_denied_for_another_reason_is_tried_again() {
+        let (_guard, warned) = held_warnings();
+        let denied = RegisterError::Denied("Unable to determine UID of request.".into());
+        assert_eq!(registrations_with_new_owner(vec![denied], 2).await, 2);
+        assert_eq!(
+            warned.load(Ordering::SeqCst),
+            0,
+            "no claim that another process holds the ID"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_unanswered_registration_is_tried_again_until_it_is_taken() {
+        let no_reply = RegisterError::NoReply("no reply".into());
+        assert_eq!(registrations_with_new_owner(vec![no_reply], 2).await, 2);
+    }
+
+    #[test]
+    fn only_a_held_agent_id_is_final() {
+        // NetworkManager's text, from nm-agent-manager.c; the rig's mock answers the same.
+        assert_eq!(
+            ALREADY_REGISTERED,
+            "An agent with this ID is already registered for this user."
+        );
+        let reply = zbus::Message::method_call("/", "RegisterWithCapabilities")
+            .build(&())
+            .unwrap();
+        let error = |name: &str, message: Option<&str>| {
+            zbus::Error::MethodError(
+                zbus::names::OwnedErrorName::try_from(name).unwrap(),
+                message.map(str::to_owned),
+                reply.clone(),
+            )
+        };
+        assert!(held(&error(PERMISSION_DENIED, Some(ALREADY_REGISTERED))));
+        for (name, message) in [
+            (PERMISSION_DENIED, None),
+            (
+                PERMISSION_DENIED,
+                Some("Unable to determine UID of request."),
+            ),
+            (
+                "org.freedesktop.NetworkManager.AgentManager.InvalidIdentifier",
+                None,
+            ),
+            ("org.freedesktop.DBus.Error.UnknownObject", None),
+            ("org.freedesktop.DBus.Error.UnknownMethod", None),
+            (
+                "org.freedesktop.DBus.Error.ServiceUnknown",
+                Some(ALREADY_REGISTERED),
+            ),
+        ] {
+            assert!(!held(&error(name, message)), "{name} {message:?}");
+        }
+        assert!(!held(&zbus::Error::Failure(ALREADY_REGISTERED.into())));
+
+        let timed_out = zbus::Error::InputOutput(Arc::new(std::io::ErrorKind::TimedOut.into()));
+        assert!(may_have_landed(&timed_out));
+        assert!(may_have_landed(&error(
+            "org.freedesktop.DBus.Error.NoReply",
+            None
+        )));
+        let fdo = |err| zbus::Error::FDO(Box::new(err));
+        assert!(may_have_landed(&fdo(zbus::fdo::Error::NoReply(
+            String::new()
+        ))));
+        assert!(!may_have_landed(&fdo(zbus::fdo::Error::ServiceUnknown(
+            String::new()
+        ))));
+        assert!(!may_have_landed(&error(
+            "org.freedesktop.DBus.Error.UnknownObject",
+            None
+        )));
+    }
+
+    #[test]
+    fn the_wait_before_another_registration_doubles_up_to_its_cap() {
+        assert_eq!(register_backoff(0), REGISTER_RETRY);
+        assert_eq!(register_backoff(1), REGISTER_RETRY * 2);
+        assert_eq!(register_backoff(4), REGISTER_RETRY * 16);
+        assert_eq!(register_backoff(5), REGISTER_RETRY_CAP);
+        assert_eq!(register_backoff(u32::MAX), REGISTER_RETRY_CAP);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_profile_that_cannot_be_read_is_asked_once_not_in_a_loop() {
         let mut rig = rig(REPLY_TIMEOUT).await;
@@ -2221,7 +2630,7 @@ mod tests {
         rig.commands
             .send(NetworkCommand::Join {
                 network: lab,
-                password: Some("correct horse".into()),
+                password: Some(Zeroizing::new("correct horse".into())),
             })
             .unwrap();
         rig.commands
@@ -2252,6 +2661,33 @@ mod tests {
                 format!("DeactivateConnection {ACTIVE_PATH}"),
             ]
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_join_and_an_activation_that_succeed_are_not_counted_as_refused() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let state = wait_for(&mut rig.states, |state| state.wifi.is_some()).await;
+        let lab = state.wifi.unwrap().networks[0].clone();
+        rig.commands
+            .send(NetworkCommand::Join {
+                network: lab,
+                password: None,
+            })
+            .unwrap();
+        rig.commands
+            .send(NetworkCommand::Activate {
+                connection: SAVED.into(),
+                device: WLAN.into(),
+                specific: AP_HOME.into(),
+            })
+            .unwrap();
+        // Jobs run in order: once this one is done, the two before it have answered.
+        rig.commands.send(NetworkCommand::Wireless(false)).unwrap();
+        let state = wait_for(&mut rig.states, |state| {
+            state.wifi.as_ref().is_some_and(|wifi| !wifi.enabled)
+        })
+        .await;
+        assert_eq!(state.refused, 0);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2304,11 +2740,18 @@ mod tests {
         };
         let command = NetworkCommand::Join {
             network,
-            password: Some("hunter2".into()),
+            password: Some(Zeroizing::new("hunter2".into())),
         };
         let shown = format!("{command:?}");
         assert!(!shown.contains("hunter2"), "{shown}");
         assert!(shown.contains("Lab"));
+        // A join's and an answer's password are overwritten as they drop, wherever they drop.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &Option<T>) {}
+        if let NetworkCommand::Join { password, .. } = &command {
+            overwritten(password);
+        }
+        fn answered<T: zeroize::ZeroizeOnDrop>(_: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>) {}
+        answered(|prompt| prompt.reply);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -2321,7 +2764,7 @@ mod tests {
         rig.commands
             .send(NetworkCommand::Join {
                 network: lab,
-                password: Some("correct horse".into()),
+                password: Some(Zeroizing::new("correct horse".into())),
             })
             .unwrap();
         rig.commands.send(NetworkCommand::Wireless(false)).unwrap();
@@ -2368,7 +2811,7 @@ mod tests {
         let refused = get_secrets(&stranger, &rig.client, 0x1).await.unwrap();
         assert_eq!(outcome(&refused), DENIED);
         // The first request is still open: the stranger's cancel did not withdraw it.
-        prompt.reply.send(Some("hunter2hunter2".into())).unwrap();
+        prompt.reply.send(Some(Zeroizing::new("hunter2hunter2".into()))).unwrap();
         let reply = asked.await.unwrap().unwrap();
         let answer: BTreeMap<String, Props> = reply.body().deserialize().unwrap();
         assert_eq!(

@@ -4,7 +4,7 @@
 # Firecracker exits). Every check prints `K6 ok` or `K6 FAIL`, the final line `K6 RESULT ok|FAIL`.
 mount -t proc proc /proc
 mount -t sysfs sys /sys
-mount -t devtmpfs dev /dev 2> /dev/null
+grep -q ' /dev devtmpfs ' /proc/mounts || mount -t devtmpfs dev /dev
 exec > /dev/console 2>&1
 
 fail=0

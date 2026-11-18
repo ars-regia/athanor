@@ -4,8 +4,18 @@
 # retained release; everything else is deleted.
 #
 # Release: a manifest carrying a tag that does not start with `sha256-` (the NVR,
-# `latest`). The KEEP most recent ones survive: all of them for kernel and devel, two
-# for the debuginfo. Reachable from a release with digest sha256:<hex>:
+# `latest`) and, in the three packages of Kernel Build, is not a kernel tag. The KEEP most
+# recent ones survive: all of them for kernel and devel, two for the debuginfo.
+#
+# Kernel tag: `<nvr>-k<12 hex of the kernel digest>`, `-microvm` after it for the guest
+# kernel (publish.sh, `system/kernel-artifacts.sh tag`). A repeated push of an NVR moves
+# `<nvr>` and leaves the old manifest under its kernel tag alone, because a running
+# Orchestrator may have pinned that digest (#1208). Such a manifest survives for
+# KERNEL_TAG_DAYS after `<nvr>` last moved, then it is deleted, kernel tag and all. It never
+# counts as a release, so a republish does not push the previous NVR out of the debuginfo's
+# two.
+#
+# Reachable from a surviving manifest with digest sha256:<hex>:
 #   - the manifests tagged `sha256-<hex>*`: the referrers index that cosign v3 updates
 #     under the fallback tag `sha256-<hex>` (ghcr has no referrers API: GET
 #     /v2/<repo>/referrers/<digest> answers 404) and the legacy `.sig`, `.att`, `.sbom`
@@ -14,8 +24,9 @@
 #     attestations, which are untagged manifests: their list comes from the registry,
 #     not from the packages API.
 # Deleted, therefore: the releases beyond KEEP together with their referrers, the
-# indexes superseded by every later `cosign sign|attest`, and the manifests left by a
-# repeated push of the same tag. The workflow gate verifies the signature AFTER the
+# indexes superseded by every later `cosign sign|attest`, the manifests under a kernel tag
+# alone that `<nvr>` left more than KERNEL_TAG_DAYS ago, with their referrers, and the
+# manifests a push left without any tag. The workflow gate verifies the signature AFTER the
 # retention: should this model stop holding (ghcr with a referrers API, cosign without
 # the fallback tag) the run would fail.
 #
@@ -35,8 +46,18 @@ case $owner_type in
   *) echo "${0##*/}: ${OWNER} is neither a user nor an organisation (${owner_type})" >&2; exit 1 ;;
 esac
 
-prune() { # prune PACKAGE KEEP
-  local pkg=$1 keep=$2 api versions digest hex member err
+# How long a manifest left under its kernel tag alone outlives the move of `<nvr>`. An
+# Orchestrator run pins the digest when it starts and pulls it within its own timeouts, a
+# matter of hours; fourteen days is far above the longest run, so the prune never takes a
+# digest a run still holds. A release whose signing is approved more than fourteen days after a
+# republish of its NVR re-runs the Orchestrator: the digest it pinned is pruned by then, and
+# cosign fails loudly on it.
+KERNEL_TAG_DAYS=14
+KERNEL_TAG='-k[0-9a-f]{12}(-microvm)?$'
+SINCE=$(($(date -u +%s) - KERNEL_TAG_DAYS * 86400))
+
+prune() { # prune PACKAGE KEEP [KERNEL_TAG]: the third argument where Kernel Build tags the kernel
+  local pkg=$1 keep=$2 ktag=${3:-} api versions digest hex member err
   local -A live=()
   # A package that has never been published (azoth-nvidia before its first NVIDIA
   # build, every package on the first run of a renamed project) has nothing to prune.
@@ -51,29 +72,48 @@ prune() { # prune PACKAGE KEEP
   api="${PACKAGES_API}/container/${pkg}/versions"
   versions=$(gh api --paginate "${api}?per_page=100" | jq -s 'add // []')
 
+  # Every list that decides what survives is read into a variable first: an error of jq or
+  # skopeo then ends the run before any deletion, where a process substitution would hand
+  # the loop a partial list and delete what it left out.
+  local roots members indexed listing
+  roots=$(jq -r --argjson keep "$keep" --arg ktag "$ktag" --argjson since "$SINCE" '
+    def release: (startswith("sha256-") or ($ktag != "" and test($ktag))) | not;
+    # When each tag last moved: the newer of created_at and updated_at of the version it names,
+    # without the fraction of a second fromdateiso8601 does not read.
+    ([.[] | ([.created_at, .updated_at] | max) as $at | .metadata.container.tags[] | {key: ., value: $at}]
+      | from_entries) as $moved
+    | ([.[] | select(.metadata.container.tags | any(release))] | sort_by(.created_at) | reverse | .[:$keep][].name),
+      (if $ktag == "" then empty else
+        .[] | select(.metadata.container.tags | any(release) | not)
+        | select(any(.metadata.container.tags[] | select(test($ktag)) | sub("-k[0-9a-f]{12}"; "");
+            ($moved[.] // "1970-01-01T00:00:00Z" | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) > $since))
+        | .name end)' <<<"$versions")
   while read -r digest; do
+    [[ $digest ]] || continue
     live[$digest]=1
     hex=${digest#sha256:}
-    while read -r member; do live[$member]=1; done < <(jq -r --arg hex "$hex" '
+    members=$(jq -r --arg hex "$hex" '
       .[] | select(.metadata.container.tags | any(startswith("sha256-" + $hex))) | .name' <<<"$versions")
-    if jq -e --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<<"$versions" > /dev/null; then
-      while read -r member; do live[$member]=1; done < <(
-        skopeo inspect --raw "docker://ghcr.io/${OWNER}/${pkg}:sha256-${hex}" | jq -r '.manifests[].digest')
+    indexed=$(jq --arg tag "sha256-${hex}" 'any(.[]; .metadata.container.tags | index($tag))' <<<"$versions")
+    if [[ $indexed == true ]]; then
+      members+=$'\n'$(skopeo inspect --raw "docker://ghcr.io/${OWNER}/${pkg}:sha256-${hex}" | jq -r '.manifests[].digest')
     fi
-  done < <(jq -r --argjson keep "$keep" '
-    [.[] | select(.metadata.container.tags | any(startswith("sha256-") | not))]
-    | sort_by(.created_at) | reverse | .[:$keep][].name' <<<"$versions")
+    while read -r member; do
+      [[ -z $member ]] || live[$member]=1
+    done <<<"$members"
+  done <<<"$roots"
 
   echo "${pkg}: ${#live[@]} manifests reachable from a retained release"
+  listing=$(jq -r '.[] | "\(.id) \(.name) \(.metadata.container.tags | join(","))"' <<<"$versions")
   while read -r id digest tags; do
-    [[ ${live[$digest]:-} ]] && continue
+    [[ $digest && -z ${live[$digest]:-} ]] || continue
     echo "${DRY:+[dry-run] }${pkg}: deleting ${id} ${digest} ${tags:-(untagged)}"
     [[ $DRY ]] || gh api --method DELETE "${api}/${id}" > /dev/null
-  done < <(jq -r '.[] | "\(.id) \(.name) \(.metadata.container.tags | join(","))"' <<<"$versions")
+  done <<<"$listing"
 }
 
-prune azoth 1000000
-prune azoth-devel 1000000
-prune azoth-debuginfo 2
+prune azoth 1000000 "$KERNEL_TAG"
+prune azoth-devel 1000000 "$KERNEL_TAG"
+prune azoth-debuginfo 2 "$KERNEL_TAG"
 prune azoth-nvidia 1000000
 prune azoth-boot 1000000

@@ -3,6 +3,7 @@
 
 import importlib.util
 import pathlib
+import tempfile
 import unittest
 from unittest import mock
 
@@ -236,6 +237,43 @@ class ExemptTest(unittest.TestCase):
         self.assertEqual(
             verify.session_exempt_problems(verify.session_unit_problems(units, enabled)), []
         )
+
+
+
+class StateLinkTest(unittest.TestCase):
+    STATE = "[Service]\nStateDirectory=athanor/search cosmic:link\n"
+
+    def test_a_state_directory_without_a_tmpfiles_line_fails(self):
+        found = verify.state_link_problems({"a.service": self.STATE, "b.service": self.STATE}, set())
+        self.assertEqual(len(found), 2)
+        self.assertIn("'athanor' is StateDirectory= of a.service, b.service", found[0])
+        self.assertIn("'cosmic'", found[1])
+
+    def test_a_tmpfiles_line_covers_its_own_name_only(self):
+        found = verify.state_link_problems({"a.service": self.STATE}, {"athanor"})
+        self.assertEqual(len(found), 1)
+        self.assertIn("'cosmic'", found[0])
+
+    def test_an_emptied_list_names_nothing(self):
+        units = {"a.service": "[Service]\nStateDirectory=one\nStateDirectory=\n"}
+        self.assertEqual(verify.state_link_problems(units, set()), [])
+
+    def test_a_tmpfiles_file_counts_only_when_a_spec_lists_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            conf = root / "forge/specs/p/SOURCES/usr/share/user-tmpfiles.d/x.conf"
+            conf.parent.mkdir(parents=True)
+            conf.write_text("d %S/athanor - - - -\n")
+            spec = root / "forge/specs/p/p.spec"
+            spec.write_text("%files\n%changelog\n")
+            self.assertEqual(verify.shipped_user_state_directories(root), set())
+            spec.write_text("%files\n/usr/share/user-tmpfiles.d/x.conf\n%changelog\n")
+            self.assertEqual(verify.shipped_user_state_directories(root), {"athanor"})
+
+    def test_the_tree_creates_every_state_directory(self):
+        units, _ = verify.shipped_user_units(verify.ROOT)
+        created = verify.shipped_user_state_directories(verify.ROOT)
+        self.assertEqual(verify.state_link_problems(units, created), [])
 
 
 class TimeSpanTest(unittest.TestCase):

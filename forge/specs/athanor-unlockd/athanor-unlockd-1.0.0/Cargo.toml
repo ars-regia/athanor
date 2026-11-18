@@ -14,4 +14,3 @@ libc = { workspace = true }
 nix = { workspace = true, features = ["socket", "user", "process", "resource"] }
 tracing = { workspace = true }
 zbus = { workspace = true }
-zeroize = { workspace = true }
