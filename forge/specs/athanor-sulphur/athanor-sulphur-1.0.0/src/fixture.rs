@@ -8614,6 +8614,45 @@ fn lock_session(run: &mut Running) -> (Local, ext_session_lock_v1::ExtSessionLoc
     (locker, lock)
 }
 
+/// A lock whose client goes without unlocking leaves the session locked, its outputs blank and
+/// the keyboard with no client; a second lock takes it over and unlocks it, and the window has
+/// the keyboard back (doc_lock_and_prompts.md LP17, a locker that crashes).
+#[test]
+fn a_second_lock_takes_over_a_lock_whose_client_died() {
+    let mut run = Running::start(None);
+    let (window, _) = window_under_pointer(&run);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+    let (locker, lock) = lock_session(&mut run);
+    drop(lock);
+    drop(locker);
+    run.until("the dead lock shows no surface", |state| {
+        state.lock.as_ref().is_some_and(|lock| {
+            state.space.outputs().all(|output| lock.surface_on(output).is_none())
+        })
+    });
+    let held = focus(&run.state);
+    assert!(
+        held.is_none(),
+        "no client has the keyboard: {:?} alive {:?} window {}",
+        held,
+        held.as_ref().map(|s| s.is_alive()),
+        held.as_ref() == Some(&window)
+    );
+
+    let (mut second, lock) = lock_session(&mut run);
+    assert!(second.client.locked, "the second lock is confirmed");
+    lock.unlock_and_destroy();
+    second.roundtrip(&mut run);
+    run.until("the session is unlocked", |state| state.lock.is_none());
+    run.until("the window has the keyboard back", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+    run.stop();
+}
+
 /// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
 /// lock surface focused, a granted client's virtual key reaches neither the lock surface nor any
 /// other client; a hardware key reaches it; after unlock the same virtual key reaches the window
