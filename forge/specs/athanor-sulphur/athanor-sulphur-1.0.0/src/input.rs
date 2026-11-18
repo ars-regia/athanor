@@ -87,9 +87,9 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
-        // A press of the seat's, physical or virtual, wins over an EIS context's hold of the key
-        // (decision 33), as a button's does.
-        if key_state == KeyState::Pressed {
+        // A physical press wins over an EIS context's hold of the key (decision 33); a virtual
+        // keyboard's yields before its keymap is loaded (`process_virtual_keyboard_event`).
+        if key_state == KeyState::Pressed && source == KeyboardSource::Physical {
             self.eis_yield_key(code, time);
         }
         self.end_finished_popup_grab();
@@ -649,6 +649,12 @@ impl VirtualKeyboardHandler for State {
                 // The input method's forwarded keys went through the keyboard aids as the
                 // hardware's.
                 let past_grab = forwarded || self.holds_keyboard_grab(device.client());
+                // The seat wins, physical or virtual (decision 33): an EIS context lets go of the
+                // key under the seat's keymap and its own modifiers before this keyboard's keymap
+                // and modifiers are loaded for the press, so that the press is read under them.
+                if key_state == KeyState::Pressed {
+                    self.eis_yield_key(code, time);
+                }
                 self.with_keymap_of(&device, |state| {
                     if past_grab {
                         state.typed(code, key_state, time, device.source(), true)

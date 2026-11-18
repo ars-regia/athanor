@@ -550,6 +550,60 @@ fn eis_yields_a_key_to_a_virtual_press() {
     run.stop();
 }
 
+/// A virtual keyboard with a keymap of its own, a wtype, wins over a key a context holds and
+/// still types under its own keymap and modifiers: the context lets go of the key before the
+/// virtual keymap is loaded, and the client is sent that keymap once, not the seat's again.
+#[test]
+fn eis_yields_a_key_to_a_virtual_press_under_its_own_keymap() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let seat_size = window.client.keymap_size;
+    let typist = VirtualKeyboard::new(&mut window, &mut run, Some(SWAPPED_KEYMAP));
+    // The virtual keyboard holds Shift, as `zwp_virtual_keyboard_v1.modifiers` sets it.
+    typist.send(
+        2,
+        [
+            Argument::Uint(SHIFT),
+            Argument::Uint(0),
+            Argument::Uint(0),
+            Argument::Uint(0),
+        ],
+    );
+    window.roundtrip(&mut run);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+
+    // A, under the seat's keymap, held by the context.
+    ei.key(&mut run, KEY_A, true);
+    window.roundtrip(&mut run);
+    let (from, keymaps) = (window.client.input.len(), window.client.keymaps);
+    // Escape, at the same code in the virtual keyboard's keymap.
+    typist.key(&mut window, &mut run, KEY_A, true);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(KEY_A, false), (KEY_A, true)],
+        "the context's A is released before the virtual press"
+    );
+    let own_size = window.client.keymap_size;
+    assert_ne!(own_size, seat_size, "the client has the virtual keymap");
+    assert_eq!(
+        window.client.keys_under.last(),
+        Some(&own_size),
+        "the virtual press is read under the virtual keymap"
+    );
+    assert_eq!(
+        window.client.modifiers.last(),
+        Some(&SHIFT),
+        "the virtual keyboard's Shift is in force at its press"
+    );
+    assert_eq!(
+        window.client.keymaps,
+        keymaps + 1,
+        "the virtual keymap is sent once, with no round trip through the seat's"
+    );
+    run.stop();
+}
+
 /// The physical input wins for a button as for a key (decision 33), and a button one context
 /// holds is neither pressed again nor released by another.
 #[test]
