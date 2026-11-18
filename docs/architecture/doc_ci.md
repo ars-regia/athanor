@@ -122,7 +122,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI4 Reusable DAG Compile Workflow
 
 - **File:** `call-dag-compile.yml`. **Purpose:** builds every changed forge package in the builder image (fetch with network, build without), publishes it as a micro-container, SBOM, keyless signature.
-- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_packages`, `builder_hash`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
+- **Triggers:** `workflow_call` (CI1). **Inputs:** `dag_packages`, `builder_image`. **Outputs:** package images; artifact `crash-logs-<package>` on failure.
 - **Secrets, variables:** `GITHUB_TOKEN`, `REGISTRY_HOST`. **Environment:** none. **Runner:** hosted, up to 20 parallel jobs in one matrix. **Concurrency:** caller's.
 - **Scripts:** `forge/scripts/check_idempotency.sh`, `run_spec_build.sh`, `retry.sh`, `sign_attest.sh`.
 - **Health:** `gh run list --workflow call-dag-compile.yml --branch iso-v0 --limit 5`.
@@ -130,7 +130,7 @@ Health is not recorded here: a list of run ids is out of date as soon as it is w
 ### CI5 Call System Image
 
 - **File:** `call-system-image.yml`. **Purpose:** aggregates the tier repositories, builds the three system images and the ISO, signs them keyless; CI33 `sign-images` signs them with the update key after the build.
-- **Triggers:** `workflow_call` (CI1). **Input:** `builder_content_hash`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests`, `iso-digest` (the ISO digest and the system image digest it was built from, read by CI12) and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
+- **Triggers:** `workflow_call` (CI1). **Input:** `builder_image`. **Outputs:** tier repository images, system images, ISO image; artifacts `image-digests`, `iso-digest` (the ISO digest and the system image digest it was built from, read by CI12) and `upgrade-bytes` (`artifacts/metrics/upgrade-bytes.json`, UD34).
 - **Secrets, variables:** `GITHUB_TOKEN`.
 - **Environment:** none. `dag-system-image` holds no key; the vmlinuz arrives signed, from `azoth-boot` by digest, and the key-based signature of the images is CI33 `sign-images`, one maintainer approval per release (D43), none once the job is in `signing-images` at the end of the key rotation, 1.0 included (ADR-0098 item 6, ADR-0104 item 8).
 - **Runner:** hosted. **Concurrency:** caller's.
