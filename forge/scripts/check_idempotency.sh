@@ -155,15 +155,28 @@ echo ">>> Verifica esistenza su GHCR: ${IMAGE_URL_LOWER}..." >&2
 # absent (including ghcr's 403 for a never-published package) and fails on anything else,
 # which stops here rather than reading as a hit or a miss. Anonymous: the forge images are
 # public, and credentials a registry rejects fail even a public read.
-if ! PROBE=$(bash "$(dirname "${BASH_SOURCE[0]}")/registry_probe.sh" "${IMAGE_URL_LOWER#docker://}"); then
+# An image is a hit only when verify_image.sh finds the digest of its tag signed by a trusted
+# run of the workflow that builds it: call-build-builder.yml for the builder (issue #1205),
+# call-dag-compile.yml for a package image, whose digest must also be labelled with the tag's
+# hash (issue #1176). Any other image is a miss, reported as an error, so the build replaces
+# it; an answer that is neither stops here. A hit prints IMAGE, the verified digest, which is
+# what a caller uses: never the tag again.
+SIGNER=call-dag-compile.yml
+[[ "$PACKAGE" == "builder" ]] && SIGNER=call-build-builder.yml
+if ! PROBE=$(bash "$(dirname "${BASH_SOURCE[0]}")/verify_image.sh" "${IMAGE_URL_LOWER#docker://}" "$SIGNER"); then
   echo "check_idempotency.sh: il registro non ha risposto per ${IMAGE_URL_LOWER}" >&2
   exit 1
 fi
-[[ "$PROBE" == "present" ]] && CACHE_HIT="true" || CACHE_HIT="false"
+case $PROBE in
+  "signed "*) CACHE_HIT="true" ;;
+  absent | "unsigned "*) CACHE_HIT="false" ;;
+  *) echo "check_idempotency.sh: unexpected answer '${PROBE}' from verify_image.sh" >&2; exit 1 ;;
+esac
 
 echo "CACHE_HIT=${CACHE_HIT}"
 echo "CONTENT_HASH=${CONTENT_HASH}"
 if [[ "$CACHE_HIT" == "true" ]]; then
+  echo "IMAGE=${PROBE#signed }"
   echo ">>> Cache Hit! L'immagine esiste già su GHCR." >&2
 else
   echo ">>> Cache Miss. Procedo con la build." >&2

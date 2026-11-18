@@ -1,12 +1,16 @@
 //! The logic of athanor-bar, with no GTK type (doc_bar.md, section 2, "Shared code"): what
 //! each preset holds, what logind offers, the time zone, and the state of NetworkManager,
-//! BlueZ and UPower, and the trust shield. The binary draws it.
+//! BlueZ and UPower, and the trust shield; the start every bar makes and its translations.
+//! The binaries draw it.
 
+pub mod bus;
 pub mod clock;
 pub mod control_center;
 pub mod dbusmenu;
+pub mod i18n;
 pub mod keyboard;
 pub mod keyboard_aids;
+pub mod logind;
 pub mod magnifier;
 pub mod notices;
 pub mod order;
@@ -15,6 +19,7 @@ pub mod power;
 pub mod props;
 pub mod screen_reader;
 pub mod shield;
+pub mod start;
 pub mod tiling;
 pub mod tray;
 
@@ -36,7 +41,7 @@ mod tests {
             .filter_map(|line| line.strip_prefix("ConfigurationDirectory="))
             .flat_map(str::split_whitespace)
             .collect();
-        for dir in athanor_compositor_client::theme::theme_dirs_in(Path::new("cosmic")) {
+        for dir in athanor_sulphur_client::theme::theme_dirs_in(Path::new("cosmic")) {
             assert!(
                 declared.iter().any(|name| Path::new(name) == dir),
                 "{declared:?} lacks {dir:?}"

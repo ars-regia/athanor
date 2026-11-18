@@ -1,0 +1,45 @@
+[package]
+name = "athanor-sal"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+edition = "2021"
+description = "Athanor's own widget toolkit: Wayland driver, widgets, text on Parley, accessibility on AccessKit"
+
+[dependencies]
+accesskit = "0.25"
+accesskit_unix = "0.24"
+parley = "0.12"
+# Asks fontconfig for the font GTK draws Latin text with (text/fontconfig.rs). The version fontique
+# already links, so no crate enters the tree.
+yeslogic-fontconfig-sys = "6.0.1"
+vello_cpu = "0.3"
+# Rasterises the SVG icons of the icon theme; no text, fonts or embedded raster images.
+resvg = { version = "0.49.0", default-features = false }
+vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"], optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"], optional = true }
+wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], optional = true }
+smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
+wayland-client = "0.31"
+# Overwrites the text of a password field when it changes or goes (password.rs).
+zeroize = "1.8.1"
+
+[features]
+# ATHANOR_SAL_RENDERER=gpu: vello_gpu draws through wgpu on the window's wl_surface, which
+# wgpu reaches through libwayland-client's pointers (wayland-backend's system backend). Off by
+# default: vello_cpu drew the chooser faster and in less memory on every machine T1 measured,
+# and the path adds 4.3 MiB to the binary (docs/spikes/t1-own-toolkit.md).
+gpu = ["dep:vello_gpu", "dep:wgpu", "dep:wayland-backend"]
+
+[dev-dependencies]
+# The chooser example reads the GTK chooser's catalogue, as the GTK chooser does.
+athanor-i18n = { path = "../athanor-i18n" }
+# The AT-SPI bridge accesskit_unix runs, read in-process: a node's states as Orca gets them.
+accesskit_atspi_common = "0.21"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo-machete]
+# wayland-backend: no code names it; the `gpu` feature turns on its client_system backend for wgpu.
+# yeslogic-fontconfig-sys: the code uses it as `fontconfig_sys`.
+ignored = ["wayland-backend", "yeslogic-fontconfig-sys"]

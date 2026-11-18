@@ -3,15 +3,15 @@
 use athanor_shelld::hints::Hints;
 use athanor_shelld::image::{self, Raw};
 use athanor_shelld::{icon, notifications};
-use zbus::zvariant::serialized::{Context, Data};
-use zbus::zvariant::LE;
+use zbus::wire::LE;
+use zbus::wire::{serialized::Context, serialized::Data};
 
 use crate::Setup;
 
 /// `hints::Hints`, deserialised from the D-Bus bytes of an `a{sv}`; `notifications::content`
 /// then runs over what was accepted, with the text fields taken from the input too.
 pub fn hints(data: &[u8]) -> Setup {
-    let ctxt = Context::new_dbus(LE, 0);
+    let ctxt = Context::new(LE, 0);
     let Ok((hints, _)) = Data::new(data.to_vec(), ctxt).deserialize::<Hints>() else {
         return Ok(());
     };

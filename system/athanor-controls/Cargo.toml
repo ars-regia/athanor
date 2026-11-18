@@ -6,9 +6,24 @@ license = "GPL-3.0-or-later"
 description = "The detail pages of the network, Bluetooth, audio and battery services, which the bar's popovers and the control center share"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
+[features]
+default = ["gtk"]
+# The GTK pages the bar's popovers show, until the bar is drawn with athanor-sal.
+gtk = ["dep:gtk4"]
+# The pages drawn with Athanor's own toolkit (doc_own_stack.md, OS7), in `sal`: no GTK crate in
+# their tree. GLib's main context, which the models' bridge runs on, turns in the toolkit's loop.
+sal = ["dep:athanor-sal"]
+
 [dependencies]
 athanor-i18n = { path = "../athanor-i18n" }
+athanor-sal = { path = "../athanor-sal", optional = true }
 athanor-services = { path = "../athanor-services" }
-gtk4 = { workspace = true }
+glib = { workspace = true }
+gtk4 = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing = { workspace = true }
+
+# The GTK pages on a display: GTK is in their tree only with the gtk feature.
+[[test]]
+name = "pages"
+required-features = ["gtk"]

@@ -33,7 +33,7 @@ jobs:
       # A bots App installation token, not the GITHUB_TOKEN: PRs opened with the
       # GITHUB_TOKEN start no checks. Minted per job from the key of the `bots` environment.
       - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.BOT_APP_CLIENT_ID }}
           private-key: ${{ secrets.BOT_APP_PRIVATE_KEY }}
@@ -42,7 +42,8 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The bots App token stays in the checkout: the job pushes its bump branch with it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # zizmor: ignore[artipacked]
         with:
           token: ${{ steps.app-token.outputs.token }}
 

@@ -1,0 +1,18 @@
+Lettore schermo attivo.
+Accessibilità
+Contrasto elevato pulsante di commutazione non premuto
+Lettore dello schermo pulsante di commutazione non premuto
+tabulazione
+Lente d'ingrandimento pulsante di commutazione non premuto
+tabulazione
+Inverti i colori pulsante di commutazione non premuto
+tabulazione
+Nessun filtro colore selezionato pulsante radio
+tabulazione
+Scala di grigi selezionato pulsante radio
+Rosso-verde (protanopia) selezionato pulsante radio
+Verde-rosso (deuteranopia) selezionato pulsante radio
+Blu-giallo (tritanopia) selezionato pulsante radio
+Contrasto elevato pulsante di commutazione non premuto
+tabulazione
+Lettore schermo disattivato.

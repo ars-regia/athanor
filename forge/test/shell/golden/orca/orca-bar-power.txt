@@ -1,0 +1,15 @@
+Screen reader on.
+Power
+menu
+Lock button
+Log Out button
+tab
+Suspend button
+tab
+Restart button
+tab
+Shut Down button
+tab
+Lock button
+tab
+Screen reader off.

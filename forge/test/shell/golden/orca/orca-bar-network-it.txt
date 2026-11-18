@@ -1,0 +1,16 @@
+Lettore schermo attivo.
+Rete
+Wi-Fi pulsante di commutazione premuto
+Athanor Lab, connessa pulsante
+tabulazione
+Corner Café pulsante
+tabulazione
+Home Network, protetta pulsante
+tabulazione
+Office VPN pulsante di commutazione non premuto
+tabulazione
+Modalità aereo pulsante di commutazione non premuto
+tabulazione
+Wi-Fi pulsante di commutazione premuto
+tabulazione
+Lettore schermo disattivato.

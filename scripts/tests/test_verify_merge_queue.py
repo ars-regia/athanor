@@ -17,11 +17,11 @@ REQUIRED = {"type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": "gate"}]}}
 
 
-def tree(rules, protection, workflows):
+def tree(rules, protection, workflows, rulesets=None):
     root = pathlib.Path(tempfile.mkdtemp())
     (root / ".github/settings").mkdir(parents=True)
     (root / ".github/workflows").mkdir()
-    (root / verify.RULESETS_JSON).write_text(json.dumps({"product": {"rules": rules}}))
+    (root / verify.RULESETS_JSON).write_text(json.dumps(rulesets or {"product": {"rules": rules}}))
     (root / verify.BRANCH_PROTECTION_JSON).write_text(json.dumps(protection))
     for name, text in workflows.items():
         (root / ".github/workflows" / name).write_text(text)
@@ -69,6 +69,24 @@ class MergeQueueTest(unittest.TestCase):
             {p.name: p.read_text() for p in (root / ".github/workflows").glob("*.y*ml")}))
         self.assertTrue(problems)
         self.assertFalse(any("'gate'" in p for p in problems))
+
+    def test_a_queue_on_one_branch_ignores_the_contexts_of_another(self):
+        def on(*refs, rules):
+            return {"conditions": {"ref_name": {"exclude": [], "include": list(refs)}}, "rules": rules}
+        both = {"iso-v0": None, "main": LEGACY["iso-v0"]}
+        rulesets = {"integrity": on("refs/heads/iso-v0", "refs/heads/main", rules=[REQUIRED]),
+                    "queue": on("refs/heads/iso-v0", rules=[QUEUE])}
+        workflows = {"pr.yml": PR, "k.yml": KERNEL}
+        self.assertEqual([], verify.merge_queue_problems(tree([], both, workflows, rulesets)))
+        rulesets["queue"] = on("refs/heads/iso-v0", "refs/heads/main", rules=[QUEUE])
+        problems = verify.merge_queue_problems(tree([], both, workflows, rulesets))
+        self.assertEqual(1, len(problems))
+        self.assertIn("'Kernel gate'", problems[0])
+        rulesets["queue"] = on("refs/heads/rebase/*", rules=[QUEUE])
+        rulesets["rebase"] = on("refs/heads/rebase/*", rules=[
+            {"type": "required_status_checks",
+             "parameters": {"required_status_checks": [{"context": "Kernel gate"}]}}])
+        self.assertEqual(1, len(verify.merge_queue_problems(tree([], both, workflows, rulesets))))
 
     def test_the_committed_settings_pass(self):
         self.assertEqual([], verify.merge_queue_problems(SCRIPT.parents[1]))

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# The iso job of promote-stable.yml (ADR-0114, doc_pipeline.md PL35): moves athanor-iso:stable
-# to the ISO the promotion record names, after promote.sh moved the system images. It refuses
-# unless athanor-system:stable still names the run's athanor-system digest, so a late re-run
-# of an older promotion's iso job cannot put the ISO behind the system images it installs.
+# The last step of the promote job of promote-stable.yml (ADR-0114, ADR-0136, doc_pipeline.md
+# PL35): moves athanor-iso:stable to the ISO the promotion record names, after promote.sh moved
+# the system images. It refuses unless athanor-system:stable still names the run's
+# athanor-system digest, so a late re-run of an older promotion's promote job cannot put the
+# ISO behind the system images it installs.
 # Usage: promote-iso.sh RUN_ID PLAN
 #        (PLAN is the promotion.json system/evidence-bundle.sh verify checked against the copy
 #        off GitHub; promotion-record.sh wrote the athanor-system digest the ISO was built from

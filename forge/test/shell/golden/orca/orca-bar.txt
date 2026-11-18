@@ -1,15 +1,24 @@
 Screen reader on.
+Bar
 Workspaces button
 Applications button
+tab
 Friday 18 September 2026, 10:00 collapsed button
 opens popup
+tab
+Input source: English (US) collapsed button
+opens popup
+tab
 Accessibility collapsed button
 opens popup
+tab
 Tiling collapsed button
 opens popup
+tab
 Power collapsed button
 opens popup
+tab
 System image verified collapsed button
 opens popup
-Workspaces button
+tab
 Screen reader off.

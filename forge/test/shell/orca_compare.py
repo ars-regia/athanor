@@ -10,14 +10,15 @@ Prints a verdict per utterance and exits 1 when one is missing.
 
 --own-compositor names the scene's bar preset and dock setting, as rig.sh seeds them: the line
 of each button decision 28 of doc_own_stack.md hides there is exempt, naming the decision and
-the control's issue (golden_report.exemptions), and so is the bar's tiling button, which waits
-on a protocol rather than a decision (own_exemptions). An exempt line the transcript speaks
-fails, and so does an exemption that names no utterance of the reference.
+the control's issue (golden_report.exemptions). An exempt line the transcript speaks fails, and
+so does an exemption that names no utterance of the reference.
 
 --walks checks the gallery's transcript, one walk per page, on its own (walk_problems).
 """
 
+import json
 import sys
+from functools import cache
 from itertools import pairwise
 from pathlib import Path
 
@@ -42,28 +43,92 @@ from golden_report import exemptions
 # heard together, as an entry's line that ends in that utterance; neither alone, nor a line after
 # anything else, a single-line field's line included.
 #
+# But for the query the launcher's Orca recipe types itself (rig.sh, `orca launcher`): a field
+# holding it is an entry, and Orca says an entry's text in the same utterance as its role, where
+# GTK's GtkText is a text whose line Orca says after it (maintainer decision, 2026-11-13, a
+# Core-AAM role). So a field's line followed by that query, and only by it, may be heard as one
+# entry utterance that ends in it.
+#
 # And a switch: GTK 4.24's GtkSwitch reaches AT-SPI as a switch, AccessKit's Role::Switch as a
-# toggle button (maintainer, 2026-10-21). Only a line that names a switch of the gallery (the
-# `switch` key of its strings.tsv) with the state and the role words together is rewritten: a
-# check box, whatever its label, spoken as a toggle button still fails.
+# toggle button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a
+# line that names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of
+# the control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of
+# its fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) or of the bar
+# (BAR_SWITCHES, in its catalogs, under the rule the maintainer widened to later ports on
+# 2026-11-14) with the state and the role words together is rewritten: a check box, whatever its
+# label, spoken as a toggle button still fails.
 
 
-def gallery_labels(key):
-    """The texts of `key` in the gallery's strings.tsv, one per language."""
-    return [
-        line.split("\t")[1:]
-        for line in (
-            Path(__file__).resolve().parents[3] / "system/athanor-toolkit/gallery/strings.tsv"
-        )
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.startswith(f"{key}\t")
-    ][0]
+STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
 
 
-SWITCH_LABELS = gallery_labels("switch")
-AREA_LABELS = gallery_labels("notes")
-FIELD_LABELS = gallery_labels("field") + AREA_LABELS
+@cache
+def gallery_labels(*keys):
+    """The texts of `keys` in the gallery's strings.tsv, every language. Read on first use, by
+    a reference that holds a gallery's switch, text area or frame title, so that the walk of
+    another surface does not need the file; a missing key is an error that names it."""
+    rows = {
+        row[0]: row[1:]
+        for row in (line.split("\t") for line in STRINGS.read_text(encoding="utf-8").splitlines())
+    }
+    missing = [key for key in keys if key not in rows]
+    if missing:
+        raise LookupError(f"{STRINGS} has no key {', '.join(missing)}")
+    return [text for key in keys for text in rows[key]]
+
+
+# The switches of the control center's pages (system/athanor-controls): Wi-Fi on the network page,
+# the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids
+# (maintainer decision, 2026-11-14).
+# Airplane mode is the switch of the same athanor-controls network page in the bar's popover;
+# the control center's catalog holds it too.
+CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone", "Airplane mode")
+CONTROL_CENTER_PO = (
+    Path(__file__).resolve().parents[3]
+    / "forge/specs/athanor-control-center/athanor-control-center-1.0.0/po"
+)
+# The switches of the bar's popovers: tiling's, and the accessibility popover's four.
+BAR_SWITCHES = ("Tile windows", "High contrast", "Screen reader", "Magnifier", "Invert colours")
+BAR_PO = Path(__file__).resolve().parents[3] / "forge/specs/athanor-bar/athanor-bar-1.0.0/po"
+
+
+@cache
+def control_center_labels(*msgids, po=CONTROL_CENTER_PO):
+    """The texts of `msgids` in the en.po and it.po of `po`, the control center's unless named.
+    Read on first use, as the gallery's strings are; a msgid a catalog lacks or leaves
+    untranslated is an error that names it."""
+    texts = []
+    for lang in ("en", "it"):
+        path = po / f"{lang}.po"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        # The single-line entries the switches have: a msgid line, then its msgstr line.
+        catalog = {
+            json.loads(key.removeprefix("msgid ")): json.loads(text.removeprefix("msgstr "))
+            for key, text in pairwise(lines)
+            if key.startswith('msgid "') and text.startswith('msgstr "')
+        }
+        missing = [msgid for msgid in msgids if not catalog.get(msgid)]
+        if missing:
+            raise LookupError(f"{path} has no translation of {', '.join(missing)}")
+        texts += [catalog[msgid] for msgid in msgids]
+    return texts
+
+
+# A VPN's switch is named by its NetworkManager connection, not by a catalog: the fixture's
+# (forge/test/shell/system_fixtures.py), the same in every language (maintainer decision,
+# 2026-11-14).
+CONTROL_CENTER_FIXTURE_SWITCHES = ("Office VPN",)
+
+
+def switch_labels():
+    return (
+        gallery_labels("switch", "enable")
+        + control_center_labels(*CONTROL_CENTER_SWITCHES)
+        + control_center_labels(*BAR_SWITCHES, po=BAR_PO)
+        + list(CONTROL_CENTER_FIXTURE_SWITCHES)
+    )
+
+
 # Orca 51's words, from its catalogue: the state, then the role.
 SWITCH_SPEECH = {
     "on switch": "toggle button pressed",
@@ -73,6 +138,57 @@ SWITCH_SPEECH = {
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
+TYPED = "cc window"
+
+# Focus that returns from a dialog. When a dialog closes, GTK moves the focus to the window's
+# control, then makes the window active, then sends window:activate, and Orca says the window's
+# title with the frame's role ("Galleria cornice"; in English it says the title alone). AccessKit
+# reports the window's activation before the focus (focus_moved of accesskit_atspi_common), so
+# Orca hears the title without the role. The maintainer decided on 2026-11-13 that GTK's
+# "<window title> <frame role word>" is matched by "<window title>" in the transcript, until
+# AccessKit can emit the focus before the activation (#1123). The rule holds only for a line of
+# the reference that says the gallery's `title` with the frame's role word of the same language,
+# and that directly follows, past Orca's key echoes, the line of the gallery dialog's `dialog.close`
+# button in that language; every occurrence of the line must follow it. The transcript must say
+# the title at the same place, right after that close button past the key echoes: the gallery
+# says its title at the start of every walk too. Any other missing frame role, the same line
+# outside a dialog's return included, still fails.
+FOCUS_RETURN = "AccessKit activates the window before it moves the focus (maintainer, 2026-11-13, #1123)"
+# The frame's role word in the columns of the gallery's strings.tsv: English, Italian.
+FRAME_ROLE = ("frame", "cornice")
+# Orca's echo of the keys a gallery walk presses (rig.sh: space, then Tab), in English and in
+# Italian. An echo is not speech about the focused object, and it may land before or after the
+# focus's last utterance (#999), so walk_problems drops it.
+KEY_ECHOES = {"space", "tab", "spazio", "tabulazione"}
+# GTK 4.20's calendar leaves its arrow buttons unnamed, and Orca says each as "button.", in Italian
+# too; the toolkit's calendar names them. atspi_compare.py's ARROWS rule (maintainer, 2026-11-13,
+# #1122) heard: in the references it names, the calendar's, an unnamed button's line is spoken by
+# a named button's line that the reference does not say. Anywhere else "button." still fails.
+ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
+ARROWS_REFERENCES = {"orca-bar-calendar", "orca-bar-calendar-it", "orca-gallery", "orca-gallery-it"}
+UNNAMED_BUTTON = "button."
+# GTK 4.24's calendar names its arrows in English, untranslated in every language's walk, where the
+# toolkit says its own CalendarText, the gallery's strings.tsv. The maintainer extended the ARROWS
+# rule on 2026-11-18 (#1210), next to #1122's: in the same references, and on the same pages of
+# atspi_compare.py, a GTK arrow of one of these names is spoken by the toolkit's same arrow, by its
+# text in the strings' languages. Another name, another arrow's or none, still fails.
+GTK_ARROWS = {
+    "Previous Month": "calendar.previous-month",
+    "Next Month": "calendar.next-month",
+    "Previous Year": "calendar.previous-year",
+    "Next Year": "calendar.next-year",
+}
+GTK_ARROWS_NOTE = (
+    "GTK 4.24 names the calendar's arrows in English, the toolkit in the session's language"
+    " (maintainer, 2026-11-18, #1210)"
+)
+
+
+def toolkit_arrows(name):
+    """The toolkit's texts, every language, of the calendar arrow that GTK 4.24 names `name`;
+    none for any other name."""
+    key = GTK_ARROWS.get(name)
+    return gallery_labels(key) if key else []
 
 
 def heard_as(utterance):
@@ -82,36 +198,48 @@ def heard_as(utterance):
     for role, said in SAME_ROLE.items():
         if utterance.endswith(f" {role}"):
             yield f"{utterance[: -len(role)]}{said}"
-    for label in FIELD_LABELS:
-        for role, said in SAME_FIELD_ROLE.items():
-            if utterance == f"{label} {role}":
-                yield f"{label} {said}"
-    for label in SWITCH_LABELS:
-        for gtk, said in SWITCH_SPEECH.items():
-            if utterance == f"{label} {gtk}":
-                yield f"{label} {said}"
+    for role, said in SAME_FIELD_ROLE.items():
+        label = utterance.removesuffix(f" {role}")
+        if label != utterance and label in gallery_labels("field", "notes"):
+            yield f"{label} {said}"
+    for gtk, said in SWITCH_SPEECH.items():
+        label = utterance.removesuffix(f" {gtk}")
+        if label != utterance and label in switch_labels():
+            yield f"{label} {said}"
 
 
-# The bar's tiling button under athanor-compositor: not a choice of decision 28 but a protocol to
-# come, so atspi_compare.py, which reads the whole tree, still reports it. Orca says it collapsed.
-TILING = {"en": "Tiling collapsed", "it": "Affiancamento contratto"}
 # Orca 51 says the role in the language of the session.
 BUTTON = {"en": "button", "it": "pulsante"}
-NO_TILING = ("the bar lacks the tiling button, which needs athanor_workspace_tiling_v1", 739)
 
 
-def own_exemptions(preset, dock, lang):
-    """golden_report.exemptions, and the tiling button a bar running `preset` lacks."""
-    exempt = exemptions(preset, dock, lang)
-    if preset is not None:
-        exempt[TILING[lang]] = NO_TILING
-    return exempt
+def dialog_returns(reference):
+    """The lines of the reference that FOCUS_RETURN covers, each mapped to the close button's
+    line the transcript must say first and the window title it may say in the line's place."""
+    if not any(line.endswith(f" {word}") for line in reference for word in FRAME_ROLE):
+        return {}
+    forms = {
+        f"{title} {word}": (f"{close} {button}", title)
+        for title, close, word, button in zip(
+            gallery_labels("title"), gallery_labels("dialog.close"), FRAME_ROLE, BUTTON.values(),
+            strict=True,
+        )
+    }
+    lines = [line for line in reference if line not in KEY_ECHOES]
+    returns, elsewhere = {}, set()
+    for before, line in zip([None, *lines], lines):
+        if line not in forms:
+            continue
+        if before == forms[line][0]:
+            returns[line] = forms[line]
+        else:
+            elsewhere.add(line)
+    return {line: heard for line, heard in returns.items() if line not in elsewhere}
 
 
-def compare(reference, transcript, exempt=None, lang="en"):
+def compare(reference, transcript, exempt=None, lang="en", arrows=False):
     """Returns (lines, failures) for two lists of utterances. `exempt` maps the name of a button
     decision 28 hides to its (cause, issue); Orca 51 says such a button as "<name> <role>", the
-    role in `lang`."""
+    role in `lang`. `arrows` applies the ARROWS rule."""
     exempt = {f"{name} {BUTTON[lang]}": why for name, why in (exempt or {}).items()}
     spoken = set(transcript)
     lines, failures = [], []
@@ -124,17 +252,39 @@ def compare(reference, transcript, exempt=None, lang="en"):
     ]
     together = {}
     for field, after in pairwise(reference):
-        for label in AREA_LABELS:
-            for role, said in SAME_FIELD_ROLE.items():
-                if field != f"{label} {role}":
-                    continue
-                joined = f"{label} {said} {after}"
-                if joined in spoken:
-                    together.setdefault(field, joined)
-                    together.setdefault(after, joined)
+        for role, said in SAME_FIELD_ROLE.items():
+            label = field.removesuffix(f" {role}")
+            if label == field or not (after == TYPED or label in gallery_labels("notes")):
+                continue
+            joined = f"{label} {said} {after}"
+            if joined in spoken:
+                together.setdefault(field, joined)
+                together.setdefault(after, joined)
+    returns = dialog_returns(reference)
+    # Each line the transcript says with the line before it, past the key echoes.
+    follows = set(pairwise(line for line in transcript if line not in KEY_ECHOES))
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
         said = said or together.get(utterance)
+        if said is None and arrows and utterance == UNNAMED_BUTTON:
+            named = (line for line in transcript if line.endswith(f" {UNNAMED_BUTTON}"))
+            said = next((line for line in named if line not in reference), None)
+            if said is not None:
+                lines.append(f"{utterance!r}: spoken as {said!r}; note: {ARROWS}")
+                continue
+        # The arrow's line ends in the button's role word of the walk's language.
+        word = next((word for word in BUTTON.values() if utterance.endswith(f" {word}")), None)
+        if said is None and arrows and word is not None:
+            name = utterance.removesuffix(f" {word}")
+            heard = (f"{text} {word}" for text in toolkit_arrows(name))
+            said = next((line for line in heard if line in spoken), None)
+            if said is not None:
+                lines.append(f"{utterance!r}: spoken as {said!r}; note: {GTK_ARROWS_NOTE}")
+                continue
+        if said is None and returns.get(utterance) in follows:
+            said = returns[utterance][1]
+            lines.append(f"{utterance!r}: spoken as {said!r}; note: {FOCUS_RETURN}")
+            continue
         if utterance in exempt:
             cause, issue = exempt[utterance]
             if said is None:
@@ -158,12 +308,14 @@ def walk_problems(transcript):
     first utterance and closed by its last ("Screen reader on." and "Screen reader off." in
     English). Each walk ends with one Tab past the page's controls, which leaves the page for
     the stop after it, the same for every page (cases.gallery_walks); a walk that ends anywhere
-    else tabbed a number of times its page does not have."""
+    else tabbed a number of times its page does not have. Orca's key echoes are dropped first."""
     if len(transcript) < 2:
         return ["the transcript holds no walk"]
     on, off = transcript[0], transcript[-1]
     walks, walk = [], None
     for line in transcript:
+        if line in KEY_ECHOES:
+            continue
         if line == on:
             walk = []
         elif line == off and walk is not None:
@@ -195,8 +347,9 @@ def main(argv):
     exempt, lang = {}, "en"
     if own:
         preset, dock, lang = (None if v == "-" else v for v in own[1:])
-        exempt = own_exemptions(preset, dock, lang)
-    lines, failures = compare(reference, transcript, exempt, lang)
+        exempt = exemptions(preset, dock, lang)
+    arrows = Path(argv[0]).stem in ARROWS_REFERENCES
+    lines, failures = compare(reference, transcript, exempt, lang, arrows=arrows)
     print("\n".join(lines))
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)

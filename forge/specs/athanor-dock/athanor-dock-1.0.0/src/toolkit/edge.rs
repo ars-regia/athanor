@@ -4,7 +4,7 @@
 
 use athanor_dock::placement::{Anchor, Placement};
 use athanor_style::dock;
-use athanor_toolkit::driver::{Anchor as Edges, KeyboardInteractivity, Layer, LayerOptions, Side};
+use athanor_sal::driver::{Anchor as Edges, KeyboardInteractivity, Layer, LayerOptions, Side};
 
 /// The layer shell namespace cosmic-comp and the rig know the dock by.
 pub const NAMESPACE: &str = "athanor-dock";
@@ -13,15 +13,11 @@ pub const NAMESPACE: &str = "athanor-dock";
 /// without a dock keeps an empty surface that takes no input: cosmic-comp closes the
 /// connection of a client that unmaps a layer surface and maps it again (`ui/surface.rs`).
 pub fn layer(placement: Option<Placement>, depth: i32) -> LayerOptions {
-    let mut options = LayerOptions {
-        layer: Layer::Top,
-        namespace: NAMESPACE.to_owned(),
-        anchor: Edges::BOTTOM,
-        margin: [0; 4],
-        exclusive_zone: 0,
-        keyboard: KeyboardInteractivity::OnDemand,
-        input_region: Some(Vec::new()),
-    };
+    let mut options = LayerOptions::new(Layer::Top);
+    options.namespace = NAMESPACE.to_owned();
+    options.anchor = Edges::BOTTOM;
+    options.keyboard = KeyboardInteractivity::OnDemand;
+    options.input_region = Some(Vec::new());
     let Some(placement) = placement else {
         return options;
     };

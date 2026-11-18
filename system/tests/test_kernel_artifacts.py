@@ -1,6 +1,7 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import datetime
 import hashlib
 import json
 import os
@@ -970,6 +971,82 @@ class Cycle(Repo):
         self.assertEqual(self.run_script("get", "cycle").stdout.strip(), "defer")
 
 
+class CheckTier(Repo):
+    """check-tier: the kernel of the tier 0 the build installs against the pinned NVR."""
+
+    TIER0 = "sha256:" + "7" * 64
+    REF = f"{REG}/athanor-forge-tier0-repo@{TIER0}"
+
+    def prepare(self, rpms, gpus="none nvidia nvidia-legacy", **fx):
+        self.state("ready", check_gpus=gpus, check_delta="true")
+        self.tiers = self.dir / "tiers"
+        self.tiers.mkdir()
+        (self.tiers / "tier-digests.json").write_text(json.dumps({"registry": REG, "tier0": self.TIER0}))
+        self.env.update(TIER_DIGESTS_DIR=str(self.tiers), GITHUB_BASE_REF="rebase/fedora-45")
+        self.registry({"tier_rpms": {self.REF: rpms}, **fx})
+
+    def check(self, files):
+        self.commit(files)
+        return self.run_script("check-tier", "--base", "HEAD^1", "--head", "HEAD", cwd=self.work)
+
+    def plan(self):
+        state = self.state_file()
+        return state["check_gpus"], state["check_delta"]
+
+    def test_a_stale_tier_with_a_pin_move_skips_the_build_and_warns(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm", "./repodata/repomd.xml"])
+        r = self.check({**self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"), "system/Containerfile": "FROM x\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("", "false"))
+        for text in (OTHER_NVR, NVR, "branch-rebase-fedora-45", self.TIER0, "after the merge", "warning"):
+            self.assertIn(text, r.stdout)
+
+    def test_a_stale_tier_without_a_pin_move_fails(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check({"system/Containerfile": "FROM x\n"})
+        self.assertEqual(r.returncode, 1)
+        for text in (OTHER_NVR, NVR, "rebuilt first"):
+            self.assertIn(text, r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_stale_tier_with_only_an_nvidia_pin_move_fails(self):
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP))
+        self.assertEqual(r.returncode, 1)
+
+    def test_a_stale_tier_with_only_a_cachyos_pin_move_fails(self):
+        # Only FEDORA_KERNEL_NVR moves the NVR: a CachyOS move cannot explain a tier that
+        # carries another kernel.
+        self.prepare([f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check(self.pin_change(CACHYOS_RELEASE="99"))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("rebuilt first", r.stderr)
+
+    def test_a_tier_with_the_pinned_kernel_leaves_the_plan(self):
+        self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm", f"./kernel-core-{OTHER_NVR}.x86_64.rpm"])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_that_cannot_be_read_fails(self):
+        self.prepare([f"./kernel-core-{NVR}.x86_64.rpm"], errors=[self.REF])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("copy failed", r.stderr)
+        self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
+
+    def test_a_tier_without_a_kernel_fails(self):
+        self.prepare(["./repodata/repomd.xml"])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no kernel-core RPM", r.stderr)
+
+    def test_a_plan_without_images_reads_no_tier(self):
+        self.prepare([], gpus="", errors=[self.REF])
+        r = self.check({"system/x": "1\n"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+
 class CheckPlan(Repo):
     def plan(self, files):
         self.commit(files)
@@ -991,6 +1068,28 @@ class CheckPlan(Repo):
     def test_kernel_pin_bump_mixed_with_other_changes_fails(self):
         self.state("kernel-missing")
         r = self.plan({**self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"), "system/Containerfile": "FROM x\n"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_kernel_pin_bump_with_its_patches_and_configuration_skips_every_build(self):
+        self.state("kernel-missing")
+        r = self.plan({
+            **self.pin_change(FEDORA_KERNEL_NVR="7.2.6-100.fc43"),
+            "forge/specs/azoth/patches/0002-module.patch": "p\n",
+            "forge/specs/azoth/patches/refreshed/sched/0001-bore.patch": "r\n",
+            "forge/specs/azoth/patches.list": "l\n",
+            "forge/specs/azoth/kernel-local": "# CONFIG_X is not set\n",
+            "forge/specs/azoth/microvm/kernel-local": "# CONFIG_X is not set\n",
+            "forge/specs/azoth/derived.config": "CONFIG_Y=y\n",
+            "forge/specs/azoth/cachyos-protected.sha256": "000000 deleted  mm/x.c\n",
+            "forge/specs/azoth/cachyos-files.list": "D  mm/x.c\n",
+        })
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("", "false"))
+
+    def test_kernel_patches_without_a_kernel_pin_bump_fail(self):
+        self.state("kernel-missing")
+        r = self.plan({"forge/specs/azoth/kernel-local": "# CONFIG_X is not set\n"})
         self.assertEqual(r.returncode, 1)
         self.assertIn("own pull request", r.stderr)
 
@@ -1374,6 +1473,297 @@ class ProjectKey(Tool):
         self.assertEqual(r.returncode, 1)
         self.assertIn(f"signed with a project key: {REG}/azoth:{NVR}@{KERNEL}", r.stdout)
         self.assertIn("azoth-devel", r.stderr)
+
+
+# buildah for forge/specs/azoth/publish.sh: commit names a local image whose digest depends on
+# its name and on GENERATION (one build), push --digestfile publishes it under its own name and
+# push SRC docker://DEST under DEST, both into the tags of the fake registry.
+FAKE_BUILDAH = """#!/usr/bin/env python3
+import hashlib, json, os, pathlib, sys
+args = sys.argv[1:]
+local = pathlib.Path(os.environ["FAKE_LOCAL"])
+local.mkdir(exist_ok=True)
+def image(name):
+    return local / hashlib.sha256(name.encode()).hexdigest()
+def tag(dest, digest):
+    with open(os.environ["FAKE_REGISTRY"]) as f:
+        fx = json.load(f)
+    fx.setdefault("tags", {})[dest] = digest
+    with open(os.environ["FAKE_REGISTRY"], "w") as f:
+        json.dump(fx, f)
+if args[0] == "login":
+    sys.stdin.read()
+elif args[0] == "from":
+    print("ctr")
+elif args[0] == "commit":
+    name = args[-1]
+    image(name).write_text("sha256:" + hashlib.sha256(f"{name}:{os.environ['GENERATION']}".encode()).hexdigest())
+elif args[0] == "push":
+    rest = args[1:]
+    if rest[0] == "--digestfile":
+        digestfile, rest = rest[1], rest[2:]
+        pathlib.Path(digestfile).write_text(image(rest[0]).read_text())
+    tag(rest[-1].removeprefix("docker://"), image(rest[0]).read_text())
+"""
+
+
+class DigestRace(Tool):
+    """Kernel Build republishes the NVR while an Orchestrator run holds its digest (#1208)."""
+
+    def setUp(self):
+        super().setUp()
+        (self.dir / "bin/buildah").write_text(FAKE_BUILDAH)
+        (self.dir / "bin/buildah").chmod(0o755)
+        self.env["FAKE_LOCAL"] = str(self.dir / "local")
+
+    def test_the_aggregation_ends_at_once_when_the_tag_moved(self):
+        self.registry(published())
+        self.assertEqual(
+            self.run_script("resolve").returncode, 0
+        )  # the Orchestrator pins KERNEL
+        fx = published()
+        fx["tags"][f"{REG}/azoth:{NVR}"] = OTHER_KERNEL
+        self.registry(fx)
+        r = self.aggregate("ars-regia")
+        self.assertEqual(r.returncode, 1, r.stderr)
+        self.assertIn(
+            f"azoth:{NVR} is {OTHER_KERNEL}, the caller resolved {KERNEL}", r.stderr
+        )
+        self.assertIn("a race with Kernel Build", r.stderr)
+        self.assertIn(f"azoth:{boot_tag()}", r.stderr)
+        self.assertNotIn("Image not found", r.stderr)
+        self.assertEqual(
+            self.state_file()["kernel_digest"],
+            KERNEL,
+            "the verified file stays as it was",
+        )
+
+    def test_the_aggregation_pulls_the_kernel_from_the_registry_it_resolved_against(self):
+        self.registry(published())
+        self.assertEqual(self.run_script("resolve").returncode, 0)
+        self.env["KERNEL_REGISTRY"] = REG
+        self.aggregate("another-owner")
+        pulls = [
+            call[-1]
+            for call in map(json.loads, (self.dir / "calls.log").read_text().splitlines())
+            if call[:3] == ["skopeo", "inspect", "--config"] and "/azoth@" in call[-1]
+        ]
+        self.assertEqual(pulls, [f"docker://{REG}/azoth@{KERNEL}"])
+
+    def aggregate(self, owner):
+        forge = self.dir / "forge"
+        (forge / "config").mkdir(parents=True)
+        lists = (
+            "custom_tier0",
+            "custom_tier1",
+            "custom_tier2",
+            "custom_tier3",
+            "upstream_core",
+            "upstream_desktop",
+            "upstream_media",
+            "upstream_cli",
+        )
+        (forge / "config/packages.json").write_text(
+            json.dumps({name: [] for name in lists})
+        )
+        return self.run_script(
+            owner, cwd=forge, script=ROOT / "forge/scripts/fetch_repo_rpms.sh"
+        )
+
+    def publish(self, generation, rc=0, **env):
+        out = self.dir / "out"
+        for group in ("kernel", "devel", "debuginfo", "microvm"):
+            (out / group).mkdir(parents=True, exist_ok=True)
+        (out / "nvr").write_text(NVR + "\n")
+        run = dict(
+            self.env,
+            GENERATION=str(generation),
+            IMAGE=f"{REG}/azoth",
+            NVR_EXPECTED=NVR,
+            DEFAULT_BRANCH="iso-v0",
+            GH_TOKEN="token",
+            GITHUB_ACTOR="actor",
+            GITHUB_SHA="0" * 40,
+            GITHUB_REF="refs/heads/feature",
+            **env,
+        )
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge/specs/azoth/publish.sh"), str(out)],
+            capture_output=True,
+            text=True,
+            env=run,
+            cwd=self.dir,
+        )
+        self.assertEqual(r.returncode, rc, r.stderr)
+        return (self.dir / "digests/kernel").read_text()
+
+    def test_a_publish_cut_before_the_nvr_moves_leaves_its_digest_tagged(self):
+        self.registry({"moves": True, "tags": {}, "errors": []})
+        pinned = self.publish(1)
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["errors"] = [f"{REG}/azoth:{NVR}"]  # the run is cancelled at this copy
+        self.registry(fx)
+        cut = self.publish(2, rc=1, RETRY_ATTEMPTS="1")
+        tags = json.loads((self.dir / "registry.json").read_text())["tags"]
+        self.assertEqual(tags[f"{REG}/azoth:{NVR}"], pinned)
+        self.assertEqual(tags[f"{REG}/azoth:{boot_tag(cut)}"], cut)
+
+    def test_a_republished_nvr_leaves_the_pinned_digest_under_its_kernel_tag(self):
+        self.registry({"moves": True, "tags": {}, "errors": []})
+        pinned = self.publish(1)
+        latest = self.publish(2)
+        self.assertNotEqual(pinned, latest)
+        tags = json.loads((self.dir / "registry.json").read_text())["tags"]
+        self.assertEqual(tags[f"{REG}/azoth:{NVR}"], latest)
+        for digest in (pinned, latest):
+            r = self.run_script("digest", f"{REG}/azoth:{boot_tag(digest)}")
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, digest), r.stderr)
+        self.assertIn(f"{REG}/azoth:{boot_tag(pinned)}-microvm", tags)
+        self.assertIn(f"{REG}/azoth-devel:{boot_tag(pinned)}", tags)
+
+        # GHCR lists one version per manifest with its tags, and retention.sh deletes every
+        # version no retained release reaches: on 2026-11-15 that was the pinned kernel.
+        packages, stray = {}, "sha256:" + "8" * 64
+        for ref, digest in sorted(tags.items()):
+            repo, name = ref.removeprefix(f"{REG}/").split(":", 1)
+            packages.setdefault(repo, {}).setdefault(digest, []).append(name)
+        packages["azoth"][stray] = []
+        fx = json.loads((self.dir / "registry.json").read_text())
+        fx["packages"] = {
+            repo: [
+                {
+                    "id": i,
+                    "name": digest,
+                    "created_at": KernelTagRetention.ago(minutes=100 - i),
+                    "metadata": {"container": {"tags": names}},
+                }
+                for i, (digest, names) in enumerate(versions.items())
+            ]
+            for repo, versions in packages.items()
+        }
+        self.registry(fx)
+        r = subprocess.run(
+            ["bash", str(ROOT / "forge/specs/azoth/retention.sh")],
+            capture_output=True,
+            text=True,
+            env=self.env,
+            cwd=self.dir,
+        )
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(
+            f"{stray} (untagged)",
+            r.stdout,
+            "an untagged manifest goes",
+        )
+        self.assertNotIn(pinned, r.stdout)
+
+
+class KernelTagRetention(Tool):
+    """retention.sh and the manifests a republished NVR leaves under their kernel tag (#1208)."""
+
+    NVR2 = "9.9.9-1.azoth.fc45"
+
+    @staticmethod
+    def ago(**delta):
+        at = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(**delta)
+        return at.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def prune(self, packages, rc=0):
+        """Runs retention.sh on PACKAGES {package: [(digest, tags, created_at[, updated_at])]}.
+
+        Returns the digests it deleted, from the DELETE calls of the fake gh."""
+        self.registry(
+            {
+                "packages": {
+                    pkg: [
+                        {
+                            "id": i,
+                            "name": digest,
+                            "created_at": at,
+                            "updated_at": (updated or [at])[0],
+                            "metadata": {"container": {"tags": tags}},
+                        }
+                        for i, (digest, tags, at, *updated) in enumerate(versions)
+                    ]
+                    for pkg, versions in packages.items()
+                }
+            }
+        )
+        r = self.run_script(script=ROOT / "forge/specs/azoth/retention.sh")
+        self.assertEqual(r.returncode != 0, rc != 0, r.stderr)
+        ids = {
+            call[-1].rsplit("/", 1)[1]
+            for call in map(json.loads, (self.dir / "calls.log").read_text().splitlines())
+            if call[:4] == ["gh", "api", "--method", "DELETE"]
+        }
+        return {
+            v[0]
+            for versions in packages.values()
+            for i, v in enumerate(versions)
+            if str(i) in ids
+        }
+
+    def test_an_error_of_jq_deletes_nothing(self):
+        cur, held, stray = ("sha256:" + c * 64 for c in "abc")
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    # A timestamp jq cannot read: the list of what survives stops short.
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], self.ago(hours=1), "yesterday"),
+                    (stray, [], self.ago(days=1)),
+                ]
+            },
+            rc=1,
+        )
+        self.assertEqual(deleted, set())
+
+    def test_a_kernel_tag_left_by_a_republish_goes_fourteen_days_after_the_nvr_moved(self):
+        old, old_vm, cur, cur_vm, held, cur2 = ("sha256:" + c * 64 for c in "abcdef")
+        index = "sha256:" + "9" * 64
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (old, [boot_tag(old)], self.ago(days=30)),
+                    (index, ["sha256-" + old[7:]], self.ago(days=30)),
+                    (old_vm, [boot_tag(old_vm) + "-microvm"], self.ago(days=30)),
+                    (cur, [NVR, boot_tag(cur)], self.ago(days=20)),
+                    (cur_vm, [NVR + "-microvm", boot_tag(cur_vm) + "-microvm"], self.ago(days=20)),
+                    # Published a month ago and superseded an hour ago: a run may hold it.
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    (cur2, [self.NVR2, f"{self.NVR2}-k{cur2[7:19]}"], self.ago(hours=1)),
+                ]
+            }
+        )
+        self.assertEqual(deleted, {old, index, old_vm})
+
+    def test_a_timestamp_with_a_fraction_of_a_second_keeps_the_held_digest(self):
+        cur, held = ("sha256:" + c * 64 for c in "ab")
+        moved = self.ago(hours=1).replace("Z", ".5Z")
+        deleted = self.prune(
+            {
+                "azoth": [
+                    (held, [f"{self.NVR2}-k{held[7:19]}"], self.ago(days=30)),
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], moved),
+                ]
+            }
+        )
+        self.assertEqual(deleted, set())
+
+    def test_a_republish_does_not_push_the_previous_nvr_out_of_the_debuginfo(self):
+        oldest, prev, republished, cur = ("sha256:" + c * 64 for c in "1234")
+        nvr0 = "0.0.1-1.azoth.fc45"
+        deleted = self.prune(
+            {
+                "azoth-debuginfo": [
+                    (oldest, [nvr0, f"{nvr0}-k{oldest[7:19]}"], self.ago(days=10)),
+                    (prev, [NVR, boot_tag(prev)], self.ago(days=3)),
+                    (republished, [f"{self.NVR2}-k{republished[7:19]}"], self.ago(hours=2)),
+                    (cur, [self.NVR2, f"{self.NVR2}-k{cur[7:19]}"], self.ago(hours=1)),
+                ]
+            }
+        )
+        self.assertEqual(deleted, {oldest})
 
 
 if __name__ == "__main__":

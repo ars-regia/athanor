@@ -1,0 +1,6 @@
+# Files `just check-semgrep` does not scan. This file replaces semgrep's default list, which
+# skips every test directory: the rules read the scripts and code of tests too, and a rule that
+# must not apply to tests excludes them itself. What .gitignore ignores stays ignored.
+#
+# The rule tests plant findings on purpose; `semgrep --test .semgrep/` runs them.
+/.semgrep/

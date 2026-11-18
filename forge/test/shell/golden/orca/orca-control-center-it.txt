@@ -1,0 +1,123 @@
+Lettore schermo attivo.
+Centro di controllo
+Centro di controllo pannello
+Wi-Fi pulsante di commutazione premuto
+Attivato
+Apri la pagina Wi-Fi pulsante
+tabulazione
+Bluetooth pulsante di commutazione premuto
+Attivato
+tabulazione
+Apri la pagina Bluetooth pulsante
+tabulazione
+Modalità scura pulsante di commutazione non premuto
+Disattivato
+tabulazione
+Modalità di alimentazione pulsante di commutazione non premuto
+Bilanciato
+tabulazione
+Apri la pagina Modalità di alimentazione pulsante
+tabulazione
+Silenzia l'uscita pulsante di commutazione non premuto
+tabulazione
+Volume di uscita controllo scorrevole orizzontale 39.9993896484375 39 percento.
+tabulazione
+Apri la pagina Audio pulsante
+tabulazione
+Silenzia il microfono pulsante di commutazione non premuto
+tabulazione
+Volume di ingresso controllo scorrevole orizzontale 54.998779296875 54 percento.
+tabulazione
+Apri la pagina Audio pulsante
+tabulazione
+Luminosità controllo scorrevole orizzontale 60 60 percento.
+tabulazione
+Contenuti multimediali pannello
+Brano precedente pulsante
+tabulazione
+Pausa pulsante
+tabulazione
+Brano successivo pulsante
+tabulazione
+Impostazioni pulsante
+tabulazione
+Wi-Fi pulsante di commutazione premuto
+Attivato
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Centro di controllo
+Centro di controllo pannello
+Indietro pulsante
+Wi-Fi pulsante di commutazione premuto
+tabulazione
+Athanor Lab, connessa pulsante
+tabulazione
+Corner Café pulsante
+tabulazione
+Home Network, protetta pulsante
+tabulazione
+Office VPN pulsante di commutazione non premuto
+tabulazione
+Indietro pulsante
+tabulazione
+Wi-Fi pulsante di commutazione premuto
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Centro di controllo
+Centro di controllo pannello
+Indietro pulsante
+Bluetooth pulsante di commutazione premuto
+tabulazione
+Headphones, connesso pulsante
+tabulazione
+Keyboard pulsante
+tabulazione
+Indietro pulsante
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Centro di controllo
+Centro di controllo pannello
+Indietro pulsante
+Volume di uscita controllo scorrevole orizzontale 39.9993896484375 39 percento.
+tabulazione
+Silenzia l'uscita pulsante di commutazione non premuto
+tabulazione
+Speakers, in uso pulsante
+tabulazione
+Headphones pulsante
+tabulazione
+Volume di ingresso controllo scorrevole orizzontale 54.998779296875 54 percento.
+tabulazione
+Silenzia il microfono pulsante di commutazione non premuto
+tabulazione
+Brano precedente pulsante
+tabulazione
+Pausa pulsante
+tabulazione
+Brano successivo pulsante
+tabulazione
+Indietro pulsante
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Centro di controllo
+Centro di controllo 3 h 25 min rimanenti Luminosità dello schermo pannello
+Indietro pulsante
+Modalità di alimentazione pannello
+Modalità di alimentazione
+Bilanciato selezionato pulsante radio
+tabulazione
+Luminosità dello schermo controllo scorrevole orizzontale 60 59 percento.
+tabulazione
+Indietro pulsante
+tabulazione
+Modalità di alimentazione pannello
+Modalità di alimentazione
+Bilanciato selezionato pulsante radio
+tabulazione
+Luminosità dello schermo controllo scorrevole orizzontale 60 59 percento.
+tabulazione
+Lettore schermo disattivato.

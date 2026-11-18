@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# in-unit.sh <unit> <binary> [args...]: runs <binary> as the rig's athanor-compositor sees a
+# in-unit.sh <unit> <binary> [args...]: runs <binary> as the rig's athanor-sulphur sees a
 # client of <unit>, the shell form of bar_session.py's as_unit. A binary outside /usr is copied
 # to /usr/bin/<its name> first, under a temporary name renamed over the old one, so a respawn
 # never writes a file a dying client still executes (ETXTBSY). The shell then joins the cgroup

@@ -1,0 +1,406 @@
+//! ext-session-lock-v1 (doc_own_stack.md, C1 task 4): while the session is locked the outputs
+//! show only the lock surfaces, the keyboard goes only to a lock surface, and no window can be
+//! captured (spike Q7). Locking ends any keyboard grab, an input method's included, and takes
+//! the text inputs' focus away (OS9 item 3, `input_method.rs`). The lock is confirmed once every
+//! output has been drawn locked, and every DRM lease revoked (decision 36, `drm_lease.rs`).
+
+use crate::drm_lease::Confirmation;
+use crate::state::{Backend, State};
+use smithay::backend::input::InputTime;
+use smithay::desktop::{find_popup_root_surface, Window};
+use smithay::input::keyboard::KeyboardSource;
+use smithay::input::pointer::MotionEvent;
+use smithay::output::Output;
+use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1;
+use smithay::reexports::wayland_server::protocol::{wl_output::WlOutput, wl_surface::WlSurface};
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::SERIAL_COUNTER;
+use smithay::wayland::compositor::get_parent;
+use smithay::wayland::session_lock::{
+    LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker,
+};
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
+
+/// How often the DRM leases a lock waits on are tried again (decision 36).
+const LEASE_RETRY: Duration = Duration::from_secs(1);
+
+/// A locked session: the client's lock, its confirmation until the outputs have been drawn
+/// locked and every DRM lease has ended (decision 36), whether the leases are tried again once
+/// a second, and the lock surface of each output.
+pub struct Lock {
+    lock: ExtSessionLockV1,
+    locker: Option<Confirmation>,
+    retrying: bool,
+    surfaces: Vec<(Output, LockSurface)>,
+}
+
+impl Lock {
+    /// The lock surface shown on `output`, if the locker has given it one.
+    pub fn surface_on(&self, output: &Output) -> Option<&WlSurface> {
+        self.surfaces
+            .iter()
+            .find(|(on, surface)| on == output && surface.alive())
+            .map(|(_, surface)| surface.wl_surface())
+    }
+}
+
+impl Lock {
+    /// `output` is gone or disabled: the surface the locker gave it is no longer shown there.
+    pub fn forget_output(&mut self, output: &Output) {
+        self.surfaces.retain(|(on, _)| on != output);
+    }
+
+    /// Each lock surface takes the size of its output, after the outputs were laid out again.
+    pub fn resize(&self, space: &smithay::desktop::Space<smithay::desktop::Window>) {
+        for (output, surface) in self.surfaces.iter().filter(|(_, surface)| surface.alive()) {
+            let Some(area) = space.output_geometry(output) else {
+                continue;
+            };
+            let size = (area.size.w.max(1) as u32, area.size.h.max(1) as u32);
+            surface.with_pending_state(|state| state.size = Some(size.into()));
+            surface.send_configure();
+        }
+    }
+}
+
+impl SessionLockHandler for State {
+    fn lock_state(&mut self) -> &mut SessionLockManagerState {
+        &mut self.lock_state
+    }
+
+    /// Locks the session, unless a live lock holds it: dropping the locker answers `finished`.
+    /// A lock whose client has gone leaves the session locked, and a new lock takes it over, as
+    /// the protocol allows.
+    fn lock(&mut self, locker: SessionLocker) {
+        if self.lock.as_ref().is_some_and(|lock| lock.lock.is_alive()) {
+            return;
+        }
+        // A call a key asked for before the lock is not made after it (`session_calls`), and a
+        // Super held into the lock does not open the launcher after it.
+        self.lock_epoch
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.super_tap = None;
+        self.aids_drop_pending();
+        // Capture stops here: the sessions are dropped, which stops them, and no new one starts
+        // while locked (`capture_constraints`).
+        self.capture_sessions.clear();
+        if let Some(keyboard) = self.seat.get_keyboard() {
+            keyboard.unset_grab(self);
+        }
+        self.drop_input_method_grab();
+        if let Some(pointer) = self.seat.get_pointer() {
+            pointer.unset_grab(self, SERIAL_COUNTER.next_serial(), InputTime::now());
+        }
+        // A finger held on a window goes on reaching it no more: its surface is told the touch
+        // is cancelled, and its release is no event (`touch.rs`).
+        self.cancel_touches();
+        // Decision 36: from the lock request on no lease is granted, and every one ends now.
+        self.leases_locked();
+        // A token made before the lock activates nothing after it (L14): every one pending is
+        // dropped, and none is made while locked (`token_created`).
+        self.xdg_activation_state.retain_tokens(|_, _| false);
+        self.lock = Some(Lock {
+            lock: locker.ext_session_lock().clone(),
+            locker: Some(Confirmation::new(locker)),
+            retrying: false,
+            surfaces: Vec::new(),
+        });
+        self.aids_quiet_changed();
+        self.text_input_focus(None);
+        self.set_keyboard_focus(None);
+        self.refresh_pointer();
+        self.refresh_tools();
+        self.lock_taken();
+    }
+
+    fn unlock(&mut self) {
+        self.lock = None;
+        self.leases.unlocked();
+        // Decision 35: nothing was sent while locked; the current answer is sent now.
+        self.resend_dock_overlaps();
+        self.aids_drop_pending();
+        self.aids_quiet_changed();
+        self.focus_top();
+        self.refresh_pointer();
+        self.refresh_tools();
+    }
+
+    /// Sized to the output, before Smithay sends the first configure; the first lock surface
+    /// takes the keyboard. One for an output no longer shown is never configured nor focused.
+    fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
+        let Some(output) = self.shown_output(&output) else {
+            return;
+        };
+        // Only the surfaces of the lock in force: a refused lock's are never shown.
+        let Some(lock) = self
+            .lock
+            .as_mut()
+            .filter(|lock| surface.ext_session_lock() == &lock.lock)
+        else {
+            return;
+        };
+        if let Some(area) = self.space.output_geometry(&output) {
+            let size = (area.size.w.max(1) as u32, area.size.h.max(1) as u32);
+            surface.with_pending_state(|state| state.size = Some(size.into()));
+        }
+        lock.surfaces.push((output, surface));
+        self.set_keyboard_focus(None);
+        self.refresh_pointer();
+        self.refresh_tools();
+    }
+}
+
+impl State {
+    /// Whether a virtual keyboard's key presses and a virtual pointer's motion, button presses
+    /// and scrolling reach no client: while the session is locked (open question 12 of the OS9
+    /// plan, and the maintainer's decision of 2026-10-23 for the pointer), so that no script
+    /// types into the lock surface, probes its password or clicks on it; and while the session
+    /// is paused on another virtual terminal, where the user cannot see what it would do, nor a
+    /// virtual Ctrl+Alt+F`n` switch the terminal (OS9 task 6 audit). A release of what the seat
+    /// holds still goes on, and the hardware's input is unaffected.
+    pub fn drops_virtual_input(&self) -> bool {
+        self.lock.is_some() || self.session_paused()
+    }
+
+    /// Whether a key pressed on `source` reaches no client: a virtual keyboard's while
+    /// `drops_virtual_input`.
+    pub fn drops_key(&self, source: KeyboardSource) -> bool {
+        source != KeyboardSource::Physical && self.drops_virtual_input()
+    }
+
+    /// Gives the keyboard to `surface`; while the session is locked, to the first lock surface
+    /// whatever `surface` is. Every change of the keyboard focus but a popup grab's goes
+    /// through here, and `grab` refuses grabs while locked.
+    pub fn set_keyboard_focus(&mut self, surface: Option<WlSurface>) {
+        let Some(keyboard) = self.seat.get_keyboard() else {
+            return;
+        };
+        let surface = match &self.lock {
+            Some(lock) => lock
+                .surfaces
+                .iter()
+                .find(|(_, surface)| surface.alive())
+                .map(|(_, surface)| surface.wl_surface().clone()),
+            None => surface,
+        };
+        // Smithay does not call `focus_changed` when the focus is unset, and a lock or a
+        // confinement follows the keyboard (decision 30, `constraints.rs`).
+        if surface.is_none() {
+            // A click before the focus left grants no token (`GrabSerials::focus`).
+            if keyboard.current_focus().is_some() {
+                self.grab_serials.focus = Some(SERIAL_COUNTER.next_serial());
+            }
+            self.aids_focus_changed(None);
+            self.loop_handle.insert_idle(|state| state.refresh_constraint());
+        }
+        keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
+    }
+
+    /// Gives the pointer to what is under it now, or to a confinement's surface
+    /// (`State::pointer_target`). Locking and unlocking change that without a motion, and a
+    /// button goes to the pointer's focus: without this, a click on the lock would reach the
+    /// window under it.
+    pub(crate) fn refresh_pointer(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let location = pointer.current_location();
+        let under = self.pointer_target(location);
+        let motion = MotionEvent {
+            location,
+            serial: SERIAL_COUNTER.next_serial(),
+            time: InputTime::now(),
+        };
+        pointer.motion(self, under, &motion);
+        pointer.frame(self);
+    }
+
+    /// `refresh_pointer` for a change of what stands above what, in which nothing under the
+    /// pointer moves: a client that stays there hears nothing.
+    pub(crate) fn repoint(&mut self) {
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let under = self.pointer_target(pointer.current_location());
+        if under.map(|(surface, _)| surface) != pointer.current_focus() {
+            self.refresh_pointer();
+        }
+    }
+
+    /// `repoint` for `window`, which moved: its own client hears of it under the pointer, as
+    /// no other does while what is under the pointer stays.
+    pub(crate) fn repoint_moved(&mut self, window: &Window) {
+        let focus = self.seat.get_pointer().and_then(|pointer| pointer.current_focus());
+        let root = focus.map(|mut surface| {
+            while let Some(parent) = get_parent(&surface) {
+                surface = parent;
+            }
+            match self.popups.find_popup(&surface) {
+                Some(popup) => find_popup_root_surface(&popup).unwrap_or(surface),
+                None => surface,
+            }
+        });
+        if root.as_ref() == window.toplevel().map(|toplevel| toplevel.wl_surface()) {
+            self.refresh_pointer();
+        } else {
+            self.repoint();
+        }
+    }
+
+    /// The backend found every output showing the lock, now: `locked` is sent once every DRM
+    /// lease has ended as well (decision 36). Until then the leases are tried again once a
+    /// second, and after each attempt the backend looks at its outputs again (`confirm_lock`),
+    /// so that an output plugged in or turned on meanwhile must show the lock first; the
+    /// outputs show the lock from the request on, and only the confirmation waits.
+    pub fn locked_drawn(&mut self) {
+        let Some(lock) = &mut self.lock else {
+            return;
+        };
+        if lock.locker.is_none() {
+            return;
+        }
+        if let Some(revoked) = self.leases.proof() {
+            if let Some(locker) = lock.locker.take() {
+                locker.confirm(revoked);
+            }
+            return;
+        }
+        if lock.retrying {
+            return;
+        }
+        let epoch = self.lock_epoch.load(std::sync::atomic::Ordering::SeqCst);
+        let timer = Timer::from_duration(LEASE_RETRY);
+        let retrying = self.loop_handle.insert_source(timer, move |_, _, state| {
+            // A lock confirmed, unlocked or replaced since needs this timer no more.
+            let waits = |state: &State| {
+                state.lock_epoch.load(std::sync::atomic::Ordering::SeqCst) == epoch
+                    && state
+                        .lock
+                        .as_ref()
+                        .is_some_and(|lock| lock.locker.is_some())
+            };
+            if !waits(state) {
+                return TimeoutAction::Drop;
+            }
+            state.retry_leases();
+            state.confirm_lock();
+            if waits(state) {
+                TimeoutAction::ToDuration(LEASE_RETRY)
+            } else {
+                TimeoutAction::Drop
+            }
+        });
+        match retrying {
+            Ok(_) => lock.retrying = true,
+            Err(error) => {
+                tracing::error!(%error, "the leases have no timer: they are tried again at the next scan")
+            }
+        }
+    }
+}
+
+/// When the request to logind in flight started: a press meanwhile escapes locally and asks no
+/// more. The method timeout bounds the call but not the connection or its handshake, so a
+/// request older than twice `LOCK_TIMEOUT` counts as gone.
+static REQUEST_STARTED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Marks a request as started at `now`, unless one is in flight; whether it was.
+fn begin_request(slot: &Mutex<Option<Instant>>, now: Instant) -> bool {
+    let mut started = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if started.is_some_and(|at| now.duration_since(at) < LOCK_TIMEOUT * 2) {
+        return false;
+    }
+    *started = Some(now);
+    true
+}
+
+/// Ends the request started at `now`, unless a newer one replaced it.
+fn end_request(slot: &Mutex<Option<Instant>>, now: Instant) {
+    let mut started = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    if *started == Some(now) {
+        *started = None;
+    }
+}
+
+/// How long logind has to answer `Lock`.
+const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl State {
+    /// Super+Escape: the keyboard leaves an exclusive surface at the press (`escape_exclusive`),
+    /// whether or not a lock client ever takes the lock, and the user asks to lock the session.
+    /// On a console the compositor asks logind to lock its session, as `loginctl lock-session`
+    /// does, and the session's lock client reacts to logind's `Lock` signal and nothing else
+    /// (doc_lock_and_prompts.md LP4); the lock itself reaches `SessionLockHandler::lock`.
+    /// Nested or headless there is no logind session of the compositor's own, and the request is
+    /// only counted. A lock the user asks for is never refused.
+    pub fn request_lock(&mut self) {
+        self.lock_requests += 1;
+        self.escape_exclusive();
+        if !matches!(self.backend, Backend::Drm(_)) {
+            tracing::info!("a lock was asked for; only a console session has a logind to ask");
+            return;
+        }
+        let now = Instant::now();
+        if !begin_request(&REQUEST_STARTED, now) {
+            tracing::debug!("a lock request is in flight; not asked again");
+            return;
+        }
+        // On its own thread: the call waits for logind, and the loop draws meanwhile.
+        let spawned = std::thread::Builder::new()
+            .name("lock-request".into())
+            .spawn(move || {
+                if let Err(error) = lock_session() {
+                    tracing::error!(%error, "logind did not lock the session");
+                }
+                end_request(&REQUEST_STARTED, now);
+            });
+        if let Err(error) = spawned {
+            end_request(&REQUEST_STARTED, now);
+            tracing::error!(%error, "the lock request could not be started");
+        }
+    }
+}
+
+/// `org.freedesktop.login1.Session.Lock` on the compositor's own session (`session/auto` is the
+/// session of the caller), which is what `loginctl lock-session` calls.
+fn lock_session() -> Result<(), zbus::Error> {
+    zbus::block_on(async {
+        zbus::connection::Builder::system()
+            .method_timeout(LOCK_TIMEOUT)
+            .build()
+            .await?
+            .call_method(
+                Some("org.freedesktop.login1"),
+                "/org/freedesktop/login1/session/auto",
+                Some("org.freedesktop.login1.Session"),
+                "Lock",
+                &(),
+            )
+            .await?;
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_that_never_ends_is_given_up_after_twice_the_timeout() {
+        let slot = Mutex::new(None);
+        let t0 = Instant::now();
+        assert!(begin_request(&slot, t0));
+        assert!(!begin_request(&slot, t0 + LOCK_TIMEOUT));
+        let later = t0 + LOCK_TIMEOUT * 2;
+        assert!(begin_request(&slot, later));
+        end_request(&slot, t0);
+        assert!(
+            !begin_request(&slot, later),
+            "the old request does not end the new one"
+        );
+        end_request(&slot, later);
+        assert!(begin_request(&slot, later));
+    }
+}

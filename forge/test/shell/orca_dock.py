@@ -13,6 +13,9 @@ After the walk it drops from the transcript the test window's own announcement: 
 last popup of a grab closes, cosmic-comp 1.10 hands the keyboard to the workspace's window,
 not to the dock that opened the menu (`refresh_focus`, #614), and Orca names the window,
 with or without its role depending on timing. That line is the compositor's, not the dock's.
+
+The transcript is compared with golden/orca/ under its own name, but for the toolkit dock's,
+orca-toolkit-dock[-it].txt, which holds the GTK dock's, orca-dock[-it].txt.
 """
 
 import re
@@ -43,7 +46,7 @@ def is_echo(line, reference):
 
 
 def answered_a_command(lines, reference, size=3):
-    """Whether Orca spoke a command's answer: under athanor-compositor the walk presses KP_Enter,
+    """Whether Orca spoke a command's answer: under athanor-sulphur the walk presses KP_Enter,
     "where am I", on a button, and Orca says again what it said when the last Tab gave the button
     the focus, between the echoes of the two keys. Without the keyboard monitor (AX4) the key
     goes to the button instead, which opens its menu and says nothing of the kind. `reference`
@@ -133,7 +136,7 @@ def main(argv):
     transcript = Path(walk[0])
     if transcript.exists():
         spoken = transcript.read_text(encoding="utf-8").splitlines()
-        golden = GOLDEN / transcript.name
+        golden = GOLDEN / transcript.name.replace("orca-toolkit-", "orca-", 1)
         if not golden.is_file():
             print(f"FAIL no golden transcript {golden} to compare {transcript.name} with",
                   file=sys.stderr)

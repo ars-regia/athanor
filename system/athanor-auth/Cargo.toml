@@ -1,0 +1,11 @@
+[package]
+name = "athanor-auth"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The authentication conversation shared by the session lock, the polkit agent and their PAM helpers: the line protocol, its parser and zeroising buffers (doc_lock_and_prompts.md, LP2, LP8)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+[dependencies]
+thiserror = { workspace = true }
+zeroize = { workspace = true }

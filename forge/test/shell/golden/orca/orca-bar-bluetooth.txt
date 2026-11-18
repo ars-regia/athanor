@@ -1,0 +1,14 @@
+Screen reader on.
+Bluetooth
+Bluetooth toggle button pressed
+Headphones, connected button
+tab
+Keyboard button
+tab
+Phone button
+tab
+Speaker button
+tab
+Bluetooth toggle button pressed
+tab
+Screen reader off.

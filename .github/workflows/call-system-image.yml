@@ -26,15 +26,17 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Kernel artifacts verified by the Orchestrator
         # fetch_repo_rpms.sh pulls azoth by the digest in this file (doc_build_ordering.md, O4).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-artifacts
           path: kernel-artifacts
       - name: Package hashes verified by the Orchestrator
         # fetch_repo_rpms.sh pulls every package image by its hash tag from this file.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: dag-hashes
           path: forge/dag-state
@@ -49,6 +51,7 @@ jobs:
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_WORKSPACE: ${{ github.workspace }}
           GITHUB_REF: ${{ github.ref }}
+          KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
           BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
         run: |
           set -euo pipefail
@@ -60,7 +63,7 @@ jobs:
             -e GITHUB_ACTOR="${GITHUB_ACTOR}" \
             -e GITHUB_REPOSITORY_OWNER="${GITHUB_REPOSITORY_OWNER}" \
             -e GITHUB_REF="${GITHUB_REF}" \
-            -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL \
+            -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL -e KERNEL_REGISTRY \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
             bash scripts/aggregate_tier_repos.sh
@@ -110,15 +113,17 @@ jobs:
           echo "IMAGE_REGISTRY=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "${GITHUB_ENV}"
       - name: 📥 Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Kernel artifacts verified by the Orchestrator
         # build-image.sh builds from the kernel and module digests in this file (O4).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-artifacts
           path: kernel-artifacts
       - name: Tier digests published earlier in this run
         # build-image.sh installs the tier repositories by these digests, never by tag (UD28).
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: tier-digests
           path: tier-digests
@@ -135,9 +140,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-          echo "${GITHUB_TOKEN}" | nix run nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
+          echo "${GITHUB_TOKEN}" | nix run --inputs-from . nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       - name: Tier repositories signed by a trusted run (UD44)
-        run: nix shell nixpkgs#cosign -c bash system/tier-digests.sh verify
+        run: nix shell --inputs-from . nixpkgs#cosign -c bash system/tier-digests.sh verify
       - name: 🧱 Build the system stage
         # The Containerfile pulls its base and the tier repository images by digest and installs
         # Fedora packages with dnf5, so the build needs the network; the build context
@@ -164,7 +169,7 @@ jobs:
         run: bash system/check-image-contacts.sh "$(<artifacts/system-image.iid)"
 
       - name: 🔐 Check the desktop session
-        # Release 0.9 ships cosmic-greeter's locker, cosmic-idle and cosmic-osd's agent on polkit
+        # Release 0.9 ships cosmic-greeter's locker, athanor-idle and cosmic-osd's agent on polkit
         # 127's socket helper (ADR-0115, docs/spikes/lock-and-polkit-agent-0-9.md); an image that
         # lost one of them builds but never locks or never authenticates. cosmic-settings-daemon
         # must be able to bind its socket in the runtime directory, or the volume keys are dead;
@@ -178,7 +183,7 @@ jobs:
         # ships: exactly one Authenticode signature, by the project certificate. An image signed
         # only by pesign's test certificate fails under Secure Boot with "bad shim signature".
         # It also fails when the boot content of the image carries a UKI (none ships before 1.1).
-        run: nix shell nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
+        run: nix shell --inputs-from . nixpkgs#sbsigntool -c bash system/check-image-kernel.sh "$(<artifacts/system-image.iid)"
 
       - name: 🐳 Build OS Images
         # build-variants.sh builds the default, NVIDIA and NVIDIA-legacy images in turn FROM the
@@ -288,15 +293,15 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
-          nix run nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
+          nix run --inputs-from . nixpkgs#cosign -- login ghcr.io -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
           mapfile -t names < artifacts/variants.txt
           for name in "${names[@]}"; do
             image="${IMAGE_REGISTRY}/${name}:${RUN_ID}"
             # The SBOM comes from the mounted root filesystem of the local image, not from
             # syft's image source: with about 120 layers and 270k files that source needs
             # more than 20 GiB and took the runner down (sbom_rootfs.sh).
-            nix shell nixpkgs#syft -c bash forge/scripts/sbom_rootfs.sh "${image}" "${name}-sbom.spdx.json"
-            nix shell nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
+            nix shell --inputs-from . nixpkgs#syft -c bash forge/scripts/sbom_rootfs.sh "${image}" "${name}-sbom.spdx.json"
+            nix shell --inputs-from . nixpkgs#cosign -c bash forge/scripts/sign_attest.sh "${image}" "${name}-sbom.spdx.json"
           done
 
       - name: 🧹 Free the NVIDIA images before the ISO

@@ -63,7 +63,7 @@ protected paths last, as in PR #170.
 
 # shell: compositor, greeter, bar, dock, launcher, rig, dev VM
 /system/athanor-layout/                        @hr-mes
-/system/athanor-compositor-client/             @hr-mes
+/system/athanor-sulphur-client/             @hr-mes
 /system/athanor-style/                         @hr-mes
 /system/athanor-unit/                          @hr-mes
 /system/athanor-i18n/                          @hr-mes

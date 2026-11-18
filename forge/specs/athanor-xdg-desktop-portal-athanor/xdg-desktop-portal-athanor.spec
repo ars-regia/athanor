@@ -2,7 +2,7 @@
 %global crate_dir forge/specs/athanor-%{name}/%{name}-%{version}
 Name:           xdg-desktop-portal-athanor
 Version:        1.0.0
-Release:        7%{?dist}
+Release:        8%{?athanor_content}%{?dist}
 Summary:        Athanor backend for xdg-desktop-portal, and the session's choice of backends
 
 License:        GPL-3.0-or-later
@@ -49,6 +49,11 @@ install -D -m 0644 %{crate_dir}/athanor-portals.conf %{buildroot}%{_datadir}/xdg
 %{_datadir}/xdg-desktop-portal/athanor-portals.conf
 
 %changelog
+* Sat Nov 07 2026 Athanor Forge <forge@athanor.os> - 1.0.0-8
+- Landlock grants $XDG_RUNTIME_DIR/dconf by the descriptor athanor_unit::dirs::private_dir
+  opened and checked (#1052): the user's, of mode 0700, and not a link. The unit sets
+  RuntimeDirectoryMode=0700, the mode the shell's units and dconf give the directory.
+
 * Tue Oct 06 2026 Athanor Forge <forge@athanor.os> - 1.0.0-7
 - The backend is rewritten to serve Settings (doc_portal.md, PT5): the appearance from the
   GNOME colour-scheme, accent-color and high-contrast keys, or the computed accent of the

@@ -19,6 +19,17 @@
 # greeter.txt with the verdict. The screenshots are there to be looked at by a person,
 # not only asserted on.
 #
+# ISO_REPOSITORY=<registry/owner/athanor-system> is required: the repository the ISO was built
+# from. The console's origin probe answers WRONG for a system that follows the signed :stable
+# of any other repository (issue 462).
+#
+# ISO_DIGEST=<digest> is the athanor-system digest the ISO was built from, required except in
+# the upgrade case, whose ISO is the previous :stable's (the two are refused together). The
+# registry config of ISO_REPOSITORY@ISO_DIGEST gives the image's layers, and the verdict fails
+# unless the installed system booted an image with those layers (issue 402). Layers, not the
+# manifest digest: the ISO build re-serialises the manifest, so the digest bootc reports is
+# in no registry.
+#
 # UPDATE_TO=<digest> UPDATE_REPOSITORY=<repository> runs the upgrade case of
 # doc_update_delivery.md UD18 on top, on Secure Boot firmware only: the candidate is served
 # as :stable from a registry on the runner (serve_candidate.sh), and once the first boot is
@@ -30,14 +41,41 @@ set -euo pipefail
 iso=$1 output=$2
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+# The rule of REPOSITORY in console.py, checked here too so a bad name stops the run before QEMU.
+# Under the C locale: in a UTF-8 one a range such as [a-z] follows collation and lets non-ASCII
+# letters and digits through.
+is_repository() {
+    local LC_ALL=C
+    [[ $1 =~ ^[a-z0-9][a-z0-9._-]*(:[0-9]+)?(/[a-z0-9][a-z0-9._-]*)+$ ]]
+}
+is_repository "${ISO_REPOSITORY:-}" || { echo "ISO_REPOSITORY is not a repository name: ${ISO_REPOSITORY:-unset}" >&2; exit 2; }
+
 if [[ -n ${UPDATE_TO:-} || -n ${UPDATE_REPOSITORY:-} ]]; then
     [[ -n ${UPDATE_TO:-} && -n ${UPDATE_REPOSITORY:-} ]] || { echo "UPDATE_TO and UPDATE_REPOSITORY go together" >&2; exit 2; }
     [[ $UPDATE_TO =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "UPDATE_TO is not a digest: ${UPDATE_TO}" >&2; exit 2; }
     [[ ${SECURE_BOOT:-0} == 1 ]] || { echo "the upgrade case runs on Secure Boot firmware: set SECURE_BOOT=1" >&2; exit 2; }
 fi
 
+iso_digest=''
+iso_layers=''
+if [[ -n ${UPDATE_TO:-} ]]; then
+    [[ -z ${ISO_DIGEST:-} ]] || { echo "ISO_DIGEST and UPDATE_TO exclude each other: the upgrade case installs the previous :stable ISO, whose image is not ISO_DIGEST" >&2; exit 2; }
+else
+    [[ ${ISO_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "ISO_DIGEST is not a digest: ${ISO_DIGEST:-unset}" >&2; exit 2; }
+    iso_digest=$ISO_DIGEST
+fi
+
 [[ -f $iso ]] || { echo "ISO not found: $iso" >&2; exit 2; }
 [[ -f "${here}/collaudo.ks" ]] || { echo "collaudo.ks missing next to this script" >&2; exit 2; }
+
+if [[ -n $iso_digest ]]; then
+    # The layer ids of the image the ISO was built from, one per line, in order: the registry
+    # answers for the digest, so a pushed image is what is compared, not a tag.
+    config=$(bash "${here}/../../scripts/retry.sh" skopeo inspect --config "docker://${ISO_REPOSITORY}@${iso_digest}")
+    ids=$(jq -r '.rootfs.diff_ids[]' <<< "$config")
+    [[ -n $ids ]] || { echo "the config of ${ISO_REPOSITORY}@${iso_digest} lists no layers" >&2; exit 2; }
+    iso_layers=sha256:$(sha256sum <<< "$ids" | cut -d' ' -f1)
+fi
 
 # Space for the installed system plus room for btrfs to breathe. The image is ~6 GiB.
 DISK_GIB=${DISK_GIB:-30}
@@ -198,7 +236,7 @@ rm -f "$serial" "$monitor"
 unset ATHANOR_CONSOLE_PACE
 hold=0
 if [[ -n ${UPDATE_TO:-} ]]; then hold=1; fi
-ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
+ATHANOR_ISO_REPOSITORY=$ISO_REPOSITORY ATHANOR_CONSOLE_HOLD=$hold python3 "${here}/console.py" "$serial" "${output}/serial.log" "${output}/phases.txt" "$monitor" &
 console_pid=$!
 
 # Screenshots on a timer: the installer and the greeter are graphical and say nothing on
@@ -310,7 +348,7 @@ kill "$shots_pid" 2> /dev/null || true
 # Both run whatever the first answers, so a failed install still gets its memory report and
 # a session over budget still gets its verdict; the script exits with the worse of the two.
 status=0
-python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
+ATHANOR_ISO_DIGEST=$iso_digest ATHANOR_ISO_LAYERS=$iso_layers python3 "${here}/verdict.py" "$output" "$GREETER_WAIT" "$qemu_status" "${verdict_case[@]}" || status=$?
 python3 "${here}/../../../scripts/session-memory/report.py" "${output}/serial.log" "${output}/memory.json" || status=$?
 # REMOVE_DISK=1 frees the disk image once the verdict is written; logs and screenshots stay.
 if [[ ${REMOVE_DISK:-0} == 1 ]]; then rm -f "$disk"; fi

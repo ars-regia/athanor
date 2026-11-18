@@ -1,0 +1,14 @@
+Screen reader on.
+Calendar
+Previous month button
+Next month button
+tab
+Previous year button
+tab
+Next year button
+tab
+18
+tab
+Previous month button
+tab
+Screen reader off.

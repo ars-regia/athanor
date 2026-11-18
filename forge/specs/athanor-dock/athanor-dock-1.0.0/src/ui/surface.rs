@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use athanor_apps::openers;
 use athanor_apps::row::Row;
-use athanor_compositor_client::Opener;
+use athanor_sulphur_client::Opener;
 use athanor_dock::autohide::{input_region, AutoHide, Event, Rect, Timer, STRIP_PX};
 use athanor_dock::placement::{Anchor, Placement};
 use gtk4::accessible::Property;

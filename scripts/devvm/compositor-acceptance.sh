@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # compositor-acceptance.sh [stage...]
 # Package 2a of docs/architecture/doc_shell.md in the dev VM's real session, where the rig
-# has no user manager: an application launched by athanor-compositor-client runs in its own
+# has no user manager: an application launched by athanor-sulphur-client runs in its own
 # transient unit behind a security context (doc_bar.md, BR2), a Terminal=true entry runs in
 # the default terminal, and the openers of cosmic-launcher, cosmic-app-library and
 # cosmic-workspaces start and show them. Deploys cc-probe from .scratch/shell-rig/bin (build

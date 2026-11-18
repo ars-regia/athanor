@@ -30,8 +30,8 @@ class BoundaryTest(unittest.TestCase):
         self.assertEqual(
             problems(
                 {
-                    "system/athanor-compositor-client/Cargo.toml": '[dependencies]\ncosmic-config = "1"\n',
-                    "system/athanor-compositor-client/src/theme.rs": COSMIC_CONFIG,
+                    "system/athanor-sulphur-client/Cargo.toml": '[dependencies]\ncosmic-config = "1"\n',
+                    "system/athanor-sulphur-client/src/theme.rs": COSMIC_CONFIG,
                 }
             ),
             [],
@@ -50,7 +50,7 @@ class BoundaryTest(unittest.TestCase):
         )
         self.assertEqual(len(found), 3, found)
         self.assertTrue(
-            all("only athanor-compositor-client" in problem for problem in found)
+            all("only athanor-sulphur-client" in problem for problem in found)
         )
 
     def test_a_renamed_dependency_is_found_by_its_crate_name(self):
@@ -96,18 +96,18 @@ class BoundaryTest(unittest.TestCase):
 
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):
         allowed = [
-            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/xkb_config.rs",
-            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/cosmic.rs",
+            "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/xkb_config.rs",
+            "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings/cosmic.rs",
             "forge/tools/calmo-cosmic-theme/src/main.rs",
-            "system/athanor-compositor-client/src/theme.rs",
+            "system/athanor-sulphur-client/src/theme.rs",
         ]
         for path in allowed:
             with self.subTest(path):
                 self.assertEqual(problems({path: COSMIC_CONFIG}), [])
         refused = [
-            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/state.rs",
-            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings.rs",
-            "forge/specs/athanor-compositor/athanor-compositor-1.0.0/src/bindings/other.rs",
+            "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/state.rs",
+            "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings.rs",
+            "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings/other.rs",
             "forge/specs/athanor-layout-translator/athanor-layout-translator-1.0.0/src/main.rs",
             "system/athanor-layout/src/cosmic.rs",
             "system/athanor-layout/src/apply.rs",

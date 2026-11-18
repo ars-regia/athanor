@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use athanor_compositor_client::{Client, Opener, WindowId};
+use athanor_sulphur_client::{Client, Opener, WindowId};
 use athanor_unit::text;
 use gio::glib;
 use gio::prelude::*;

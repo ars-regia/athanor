@@ -25,8 +25,8 @@ FEDORA = "registry.fedoraproject.org/fedora:43"
 def patch(removed, added):
     return "\n".join(
         ["@@ -1,3 +1,3 @@", " Name: x"]
-        + [f"-{l}" for l in removed]
-        + [f"+{l}" for l in added]
+        + [f"-{ln}" for ln in removed]
+        + [f"+{ln}" for ln in added]
     )
 
 
@@ -39,8 +39,8 @@ def modified(name, removed, added, **kw):
 SPEC_FILES = [
     modified(
         "forge/specs/athanor-demo/athanor-demo.spec",
-        ["Version:        1.6.0", "Release:        2%{?dist}"],
-        ["Version:        1.7.1", "Release:        1%{?dist}"],
+        ["Version:        1.6.0", "Release:        2%{?athanor_content}%{?dist}"],
+        ["Version:        1.7.1", "Release:        1%{?athanor_content}%{?dist}"],
     ),
     modified(
         "forge/specs/athanor-demo/SOURCES/sources.sha256",
@@ -74,6 +74,7 @@ class BotMergeTest(unittest.TestCase):
         (root / ".github/settings").mkdir(parents=True)
         os.chdir(root)
         self.protect({"iso-v0": ["Kernel gate", "gate"]})
+        self.codeowners("* @hr-mes\n/docs/spikes/\n")
         self.root = root
         self.runs = [{"id": 1, "status": "completed"}]
         # The Pull Request workflow's gate, whose own build jobs carry the caller's prefix.
@@ -94,6 +95,9 @@ class BotMergeTest(unittest.TestCase):
         }
         pathlib.Path(bot.BRANCH_PROTECTION).write_text(json.dumps(data))
 
+    def codeowners(self, text):
+        pathlib.Path(bot.CODEOWNERS).write_text(text)
+
     def wait(self, **kw):
         bot.wait_for_required_checks(SHA, bot.required_checks("iso-v0"), self.gh_actions, **kw)
 
@@ -107,8 +111,10 @@ class BotMergeTest(unittest.TestCase):
             headRefName=branch,
             headRefOid=SHA,
             isCrossRepository=False,
-            labels=[{"name": l} for l in labels],
+            labels=[{"name": ln} for ln in labels],
             changedFiles=len(files),
+            reviewDecision="APPROVED",
+            reviews=[],
         )
         data.update(view)
         self.calls = []
@@ -191,6 +197,8 @@ class BotMergeTest(unittest.TestCase):
     def test_spec_macro_in_version_or_release_stays(self):
         for bad in (
             "+Release:        1%(id>/tmp/x)",
+            "+Release:        1%{?athanor_content}%(id>/tmp/x)%{?dist}",
+            "+Release:        1%{?dist}",
             '+Version:        1.7.1%{lua:os.execute("id")}',
         ):
             self.assertEqual(self.spec(files=self.with_line(SPEC_FILES, 0, bad)), [])
@@ -252,6 +260,82 @@ class BotMergeTest(unittest.TestCase):
     def test_pull_request_of_another_author_stays(self):
         self.assertEqual(self.spec(author={"login": "hr-mes"}), [])
         self.assertEqual(self.system(author={"login": "app/athanor-agent"}), [])
+
+    def review(self, state="APPROVED", login="hr-mes", oid=SHA, at="2026-11-17T10:00:00Z"):
+        return {
+            "author": {"login": login},
+            "state": state,
+            "commit": {"oid": oid},
+            "submittedAt": at,
+        }
+
+    def test_an_unapproved_owned_pull_request_with_no_decision_stays(self):
+        # GitHub reads "" for it while the approving count is 0 (#1246).
+        self.assertEqual(self.system(reviewDecision=""), [])
+        self.assertEqual(self.spec(reviewDecision=""), [])
+
+    def test_an_owner_approval_at_the_head_merges_with_no_decision(self):
+        self.assertEqual(len(self.system(reviewDecision="", reviews=[self.review()])), 1)
+        self.assertEqual(len(self.system(reviewDecision="APPROVED")), 1)
+
+    def test_an_approval_at_an_older_sha_or_by_a_non_owner_stays(self):
+        old = [self.review(oid="b" * 40)]
+        self.assertEqual(self.system(reviewDecision="", reviews=old), [])
+        self.assertEqual(self.system(reviewDecision="", reviews=[self.review(login="other")]), [])
+
+    def test_a_later_rejection_by_the_owner_voids_the_approval(self):
+        late = "2026-11-17T11:00:00Z"
+        for state in ("CHANGES_REQUESTED", "DISMISSED"):
+            reviews = [self.review(), self.review(state, at=late)]
+            self.assertEqual(self.system(reviewDecision="", reviews=reviews), [])
+        reviews = [self.review(), self.review("COMMENTED", at=late)]
+        self.assertEqual(len(self.system(reviewDecision="", reviews=reviews)), 1)
+
+    def test_the_latest_review_is_by_submitted_at_not_by_list_order(self):
+        late = "2026-11-17T11:00:00Z"
+        rejected = [self.review("CHANGES_REQUESTED", at=late), self.review()]
+        self.assertEqual(self.system(reviewDecision="", reviews=rejected), [])
+        approved = [self.review(), self.review("CHANGES_REQUESTED", at="2026-11-17T09:00:00Z")]
+        self.assertEqual(len(self.system(reviewDecision="", reviews=approved)), 1)
+
+    def test_a_pending_review_without_a_time_is_ignored_and_a_deciding_one_stays(self):
+        pending = [self.review(), self.review("PENDING", at=None)]
+        self.assertEqual(len(self.system(reviewDecision="", reviews=pending)), 1)
+        untimed = [self.review(at=None)]
+        self.assertEqual(self.system(reviewDecision="", reviews=untimed), [])
+
+    def test_the_owner_login_is_compared_case_insensitively(self):
+        self.assertEqual(len(self.system(reviewDecision="", reviews=[self.review(login="HR-Mes")])), 1)
+
+    def test_any_other_decision_stays(self):
+        for decision in ("CHANGES_REQUESTED", "REVIEW_REQUIRED", "SOMETHING_NEW"):
+            self.assertEqual(self.system(reviewDecision=decision, reviews=[self.review()]), [])
+
+    def test_unowned_paths_merge_with_no_decision(self):
+        self.codeowners("* @hr-mes\n/system/\n")
+        self.assertEqual(len(self.system(reviewDecision="")), 1)
+
+    def test_codeowners_semantics(self):
+        pairs = [("*", ["@a"]), ("/forge/", ["@b"]), ("/forge/x/", []), ("*.md", ["@c"])]
+        rules = [(bot.codeowners_regex(p), o) for p, o in pairs]
+        self.assertEqual(bot.owners_of("system/Containerfile", rules), ["@a"])
+        self.assertEqual(bot.owners_of("forge/y/z.spec", rules), ["@b"])
+        self.assertEqual(bot.owners_of("forge/x/z.spec", rules), [])
+        self.assertEqual(bot.owners_of("docs/a/b.md", rules), ["@c"])
+
+    def test_codeowners_globs_do_not_cross_directories(self):
+        def owner(pattern, path):
+            return bool(bot.owners_of(path, [(bot.codeowners_regex(pattern), ["@a"])]))
+
+        self.assertTrue(owner("docs/*", "docs/f"))
+        self.assertFalse(owner("docs/*", "docs/sub/f"))
+        self.assertTrue(owner("/docs/", "docs/sub/f"))
+        self.assertTrue(owner("/docs", "docs/sub/f"))
+        self.assertTrue(owner("docs/**", "docs/sub/f"))
+        self.assertTrue(owner("/a/**/f", "a/x/y/f"))
+        self.assertTrue(owner("/a/?", "a/b"))
+        self.assertFalse(owner("/a/?", "a/bc"))
+        self.assertFalse(owner("/a/?", "a/b/c"))
 
     def test_missing_pull_request_number_fails(self):
         for pr in ("", "null"):

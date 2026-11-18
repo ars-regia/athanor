@@ -6,10 +6,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Signature, Value};
 use zbus::Message;
+use zbus::{OwnedObjectPath, OwnedVariant, Signature, Variant};
 
-pub type Props = BTreeMap<String, OwnedValue>;
+pub type Props = BTreeMap<String, OwnedVariant>;
 pub type Interfaces = BTreeMap<String, Props>;
 pub type Objects = BTreeMap<String, Interfaces>;
 
@@ -124,70 +124,70 @@ pub fn lookup<'a>(objects: &'a Objects, path: &str, interface: &str) -> Option<&
     objects.get(path)?.get(interface)
 }
 
-fn value<'a>(props: &'a Props, name: &str) -> Option<&'a Value<'static>> {
+fn value<'a>(props: &'a Props, name: &str) -> Option<&'a Variant<'static>> {
     props.get(name).map(|value| &**value)
 }
 
 /// The elements of an array property whose elements are of type `element`.
-fn array<'a>(props: &'a Props, name: &str, element: &Signature) -> Option<&'a [Value<'static>]> {
+fn array<'a>(props: &'a Props, name: &str, element: &Signature) -> Option<&'a [Variant<'static>]> {
     match value(props, name)? {
-        Value::Array(array) if array.element_signature() == element => Some(array),
+        Variant::Array(array) if array.element_signature() == element => Some(array),
         _ => None,
     }
 }
 
 pub fn get_str<'a>(props: &'a Props, name: &str) -> Option<&'a str> {
     match value(props, name)? {
-        Value::Str(text) => Some(text.as_str()),
+        Variant::Str(text) => Some(text.as_str()),
         _ => None,
     }
 }
 
 pub fn get_u8(props: &Props, name: &str) -> Option<u8> {
     match value(props, name)? {
-        Value::U8(number) => Some(*number),
+        Variant::U8(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_u32(props: &Props, name: &str) -> Option<u32> {
     match value(props, name)? {
-        Value::U32(number) => Some(*number),
+        Variant::U32(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_i32(props: &Props, name: &str) -> Option<i32> {
     match value(props, name)? {
-        Value::I32(number) => Some(*number),
+        Variant::I32(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_i64(props: &Props, name: &str) -> Option<i64> {
     match value(props, name)? {
-        Value::I64(number) => Some(*number),
+        Variant::I64(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_u64(props: &Props, name: &str) -> Option<u64> {
     match value(props, name)? {
-        Value::U64(number) => Some(*number),
+        Variant::U64(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_f64(props: &Props, name: &str) -> Option<f64> {
     match value(props, name)? {
-        Value::F64(number) => Some(*number),
+        Variant::F64(number) => Some(*number),
         _ => None,
     }
 }
 
 pub fn get_bool(props: &Props, name: &str) -> Option<bool> {
     match value(props, name)? {
-        Value::Bool(flag) => Some(*flag),
+        Variant::Bool(flag) => Some(*flag),
         _ => None,
     }
 }
@@ -197,7 +197,7 @@ pub fn get_bytes(props: &Props, name: &str) -> Option<Vec<u8>> {
     array(props, name, &Signature::U8)?
         .iter()
         .map(|byte| match byte {
-            Value::U8(byte) => Some(*byte),
+            Variant::U8(byte) => Some(*byte),
             _ => None,
         })
         .collect()
@@ -206,7 +206,7 @@ pub fn get_bytes(props: &Props, name: &str) -> Option<Vec<u8>> {
 /// An `o` property; `None` for `/`, which D-Bus services use for "none".
 pub fn get_path(props: &Props, name: &str) -> Option<String> {
     match value(props, name)? {
-        Value::ObjectPath(path) if path.as_str() != "/" => Some(path.as_str().to_owned()),
+        Variant::ObjectPath(path) if path.as_str() != "/" => Some(path.as_str().to_owned()),
         _ => None,
     }
 }
@@ -216,7 +216,7 @@ pub fn get_paths(props: &Props, name: &str) -> Option<Vec<String>> {
     array(props, name, &Signature::ObjectPath)?
         .iter()
         .map(|path| match path {
-            Value::ObjectPath(path) => Some(path.as_str().to_owned()),
+            Variant::ObjectPath(path) => Some(path.as_str().to_owned()),
             _ => None,
         })
         .collect()
@@ -227,7 +227,7 @@ pub fn get_strs(props: &Props, name: &str) -> Option<Vec<String>> {
     array(props, name, &Signature::Str)?
         .iter()
         .map(|text| match text {
-            Value::Str(text) => Some(text.as_str().to_owned()),
+            Variant::Str(text) => Some(text.as_str().to_owned()),
             _ => None,
         })
         .collect()
@@ -237,16 +237,16 @@ pub fn get_strs(props: &Props, name: &str) -> Option<Vec<String>> {
 mod tests {
     use std::collections::BTreeMap;
 
-    use zbus::zvariant::{ObjectPath, OwnedValue, Value};
     use zbus::Message;
+    use zbus::{ObjectPath, OwnedVariant, Variant};
 
     use super::*;
 
-    fn owned(value: Value<'_>) -> OwnedValue {
+    fn owned(value: Variant<'_>) -> OwnedVariant {
         value.try_to_owned().expect("owned")
     }
 
-    fn props(entries: &[(&str, Value<'_>)]) -> Props {
+    fn props(entries: &[(&str, Variant<'_>)]) -> Props {
         entries
             .iter()
             .map(|(name, value)| ((*name).to_owned(), owned(value.clone())))
@@ -256,30 +256,30 @@ mod tests {
     /// Every type a getter reads, once, under the name of its type.
     fn typed() -> Props {
         props(&[
-            ("s", Value::from("text")),
-            ("u", Value::from(7u32)),
-            ("i", Value::from(-7i32)),
-            ("t", Value::from(7u64)),
-            ("d", Value::from(0.5f64)),
-            ("b", Value::from(true)),
-            ("ay", Value::from(vec![1u8, 2])),
+            ("s", Variant::from("text")),
+            ("u", Variant::from(7u32)),
+            ("i", Variant::from(-7i32)),
+            ("t", Variant::from(7u64)),
+            ("d", Variant::from(0.5f64)),
+            ("b", Variant::from(true)),
+            ("ay", Variant::from(vec![1u8, 2])),
             (
                 "o",
-                Value::from(ObjectPath::from_static_str_unchecked("/x")),
+                Variant::from(ObjectPath::from_static_str_unchecked("/x")),
             ),
             (
                 "root",
-                Value::from(ObjectPath::from_static_str_unchecked("/")),
+                Variant::from(ObjectPath::from_static_str_unchecked("/")),
             ),
             (
                 "ao",
-                Value::from(vec![
+                Variant::from(vec![
                     ObjectPath::from_static_str_unchecked("/x"),
                     ObjectPath::from_static_str_unchecked("/y"),
                 ]),
             ),
-            ("as", Value::from(vec!["a", "b"])),
-            ("v", Value::Value(Box::new(Value::from(7u32)))),
+            ("as", Variant::from(vec!["a", "b"])),
+            ("v", Variant::Variant(Box::new(Variant::from(7u32)))),
         ])
     }
 
@@ -368,10 +368,9 @@ mod tests {
     fn objects() -> Objects {
         let x_y = BTreeMap::from([(
             "x.Y",
-            BTreeMap::from([("On", Value::from(true)), ("Name", Value::from("a"))]),
+            BTreeMap::from([("On", Variant::from(true)), ("Name", Variant::from("a"))]),
         )]);
         let reply = Message::method_call("/", "GetManagedObjects")
-            .expect("header")
             .build(&BTreeMap::from([(
                 ObjectPath::from_static_str_unchecked("/a"),
                 x_y,
@@ -381,7 +380,7 @@ mod tests {
     }
 
     fn signal(interface: &str, member: &str) -> zbus::message::Builder<'static> {
-        Message::signal("/a", interface.to_owned(), member.to_owned()).expect("header")
+        Message::signal("/a", interface.to_owned(), member.to_owned())
     }
 
     #[test]
@@ -392,8 +391,7 @@ mod tests {
             Some(true)
         );
         let wrong = Message::method_call("/", "GetManagedObjects")
-            .expect("header")
-            .build(&BTreeMap::from([("On", Value::from(true))]))
+            .build(&BTreeMap::from([("On", Variant::from(true))]))
             .expect("body");
         assert!(managed_objects(&wrong).is_none());
     }
@@ -401,12 +399,10 @@ mod tests {
     #[test]
     fn get_all_is_read_and_a_wrong_type_is_none() {
         let reply = Message::method_call("/", "GetAll")
-            .expect("header")
-            .build(&BTreeMap::from([("Level", Value::from(3u32))]))
+            .build(&BTreeMap::from([("Level", Variant::from(3u32))]))
             .expect("body");
         assert_eq!(get_u32(&get_all(&reply).expect("props"), "Level"), Some(3));
         let wrong = Message::method_call("/", "GetAll")
-            .expect("header")
             .build(&("x",))
             .expect("body");
         assert!(get_all(&wrong).is_none());
@@ -418,7 +414,7 @@ mod tests {
         let message = signal(PROPERTIES, "PropertiesChanged")
             .build(&(
                 "x.Y",
-                BTreeMap::from([("On", Value::from(false))]),
+                BTreeMap::from([("On", Variant::from(false))]),
                 vec!["Name"],
             ))
             .expect("body");
@@ -432,10 +428,9 @@ mod tests {
     fn a_change_of_an_unknown_object_is_ignored() {
         let mut objects = objects();
         let message = Message::signal("/b", PROPERTIES, "PropertiesChanged")
-            .expect("header")
             .build(&(
                 "x.Y",
-                BTreeMap::from([("On", Value::from(false))]),
+                BTreeMap::from([("On", Variant::from(false))]),
                 Vec::<String>::new(),
             ))
             .expect("body");
@@ -450,7 +445,7 @@ mod tests {
         let added = signal(OBJECT_MANAGER, "InterfacesAdded")
             .build(&(
                 ObjectPath::from_static_str_unchecked("/b"),
-                BTreeMap::from([("x.Z", BTreeMap::<String, Value>::new())]),
+                BTreeMap::from([("x.Z", BTreeMap::<String, Variant>::new())]),
             ))
             .expect("body");
         apply(&mut objects, change(&added).expect("added"));

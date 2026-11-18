@@ -1,0 +1,14 @@
+Lettore schermo attivo.
+Calendario
+Mese precedente pulsante
+Mese successivo pulsante
+tabulazione
+Anno precedente pulsante
+tabulazione
+Anno successivo pulsante
+tabulazione
+18
+tabulazione
+Mese precedente pulsante
+tabulazione
+Lettore schermo disattivato.

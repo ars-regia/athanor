@@ -2,7 +2,7 @@
 id: ADR-0126
 title: "The toolkit stays in this repository and is kept ready to leave it"
 date: 2026-10-19
-status: accepted
+status: amended by ADR-0134
 issues: []
 areas: [shell, process, security]
 ---
@@ -112,3 +112,9 @@ copy lacks.
 - `doc_own_stack.md` is amended: revision 1 gains OS10, OS11 and decisions 12 to 15. Its
   revision 2 still brings the measurements of milestones C1 and T1 and the compositor's
   acceptance, as ADR-0121, ADR-0122, ADR-0123 and `docs/operations/release-1.0.md` say.
+
+## Amendment
+
+On 2026-11-04 [ADR-0134](0134-alchemical-names-for-the-pillars.md) amended decision 4: the
+maintainer chose the toolkit's name, Sal, before any split, and the crate becomes `athanor-sal`
+with the rename pull request of its pillar. The other decisions stand.

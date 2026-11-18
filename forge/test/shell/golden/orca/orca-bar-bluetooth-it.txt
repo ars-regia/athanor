@@ -1,0 +1,14 @@
+Lettore schermo attivo.
+Bluetooth
+Bluetooth pulsante di commutazione premuto
+Headphones, connesso pulsante
+tabulazione
+Keyboard pulsante
+tabulazione
+Phone pulsante
+tabulazione
+Speaker pulsante
+tabulazione
+Bluetooth pulsante di commutazione premuto
+tabulazione
+Lettore schermo disattivato.

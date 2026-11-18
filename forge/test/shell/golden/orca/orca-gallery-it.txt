@@ -1,44 +1,163 @@
 Lettore schermo attivo.
 Galleria
 Pulsanti pulsante di commutazione premuto
+spazio
 Scelte pulsante di commutazione non premuto
+tabulazione
 Valori pulsante di commutazione non premuto
+tabulazione
 Elenchi pulsante di commutazione non premuto
+tabulazione
 Testo pulsante di commutazione non premuto
+tabulazione
+Stati pulsante di commutazione non premuto
+tabulazione
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
 Un pulsante pulsante
+tabulazione
 Uno pulsante di commutazione premuto
+tabulazione
 Due pulsante di commutazione non premuto
+tabulazione
 Tre pulsante di commutazione non premuto
+tabulazione
 Nome testo
 apre un popup
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Scelte pulsante di commutazione premuto
+spazio
 Valori pulsante di commutazione non premuto
+tabulazione
 Elenchi pulsante di commutazione non premuto
+tabulazione
 Testo pulsante di commutazione non premuto
+tabulazione
+Stati pulsante di commutazione non premuto
+tabulazione
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
 Opzione uno casella di spunta spuntata
+tabulazione
 Opzione due casella di spunta non spuntata
+tabulazione
 Un interruttore attivo selettore
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Valori pulsante di commutazione premuto
+spazio
 Elenchi pulsante di commutazione non premuto
+tabulazione
 Testo pulsante di commutazione non premuto
+tabulazione
+Stati pulsante di commutazione non premuto
+tabulazione
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
 Un cursore controllo scorrevole orizzontale 50 50 percento.
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Elenchi pulsante di commutazione premuto
+spazio
 Testo pulsante di commutazione non premuto
-Un elenco Elenco con 50 voci
+tabulazione
+Stati pulsante di commutazione non premuto
+tabulazione
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
+Sostituisci le righe pulsante
+tabulazione
+Un elenco Elenco con 51 voci
 Riga 1
+Una seconda riga
+tabulazione
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
 Testo pulsante di commutazione premuto
+spazio
+Stati pulsante di commutazione non premuto
+tabulazione
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
 Note testo
 Il cursore parte da qui.
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Stati pulsante di commutazione premuto
+spazio
+Calendario pulsante di commutazione non premuto
+tabulazione
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
+Abilita il pulsante non attivo selettore
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Calendario pulsante di commutazione premuto
+spazio
+Dialoghi pulsante di commutazione non premuto
+tabulazione
+Menu pulsante di commutazione non premuto
+tabulazione
+tabulazione
+Previous Month pulsante
+tabulazione
+Next Month pulsante
+tabulazione
+Previous Year pulsante
+tabulazione
+Next Year pulsante
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Una finestra di dialogo Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
+Chiudi pulsante
+spazio
+Galleria cornice
+Dialoghi pulsante di commutazione premuto
+Menu pulsante di commutazione non premuto
+tabulazione
+Apri una finestra di dialogo pulsante
+tabulazione
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+menù
+Nuova finestra
+spazio
+Apri un menu contratto pulsante
+apre un popup
 Lettore schermo disattivato.

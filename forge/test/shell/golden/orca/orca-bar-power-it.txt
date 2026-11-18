@@ -1,0 +1,15 @@
+Lettore schermo attivo.
+Alimentazione
+menù
+Blocca pulsante
+Termina sessione pulsante
+tabulazione
+Sospendi pulsante
+tabulazione
+Riavvia pulsante
+tabulazione
+Spegni pulsante
+tabulazione
+Blocca pulsante
+tabulazione
+Lettore schermo disattivato.

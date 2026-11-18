@@ -1,5 +1,9 @@
 Screen reader on.
-Search text
-cc window
+Search entry cc window
 opens popup
+Results List with 3 items
+cc window, Web search
+cc window
+CC Window, Application
+CC Window
 Screen reader off.

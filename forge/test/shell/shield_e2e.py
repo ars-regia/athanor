@@ -16,10 +16,8 @@ import sys
 import time
 from pathlib import Path
 
-from gi.repository import GLib
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, walk  # noqa: E402
+from atspi_check import children, find_application, walk  # noqa: E402
 from bar_e2e import (  # noqa: E402
     buttons,
     buttons_matching,
@@ -117,19 +115,12 @@ def confirm(app, Atspi, name):
 
 
 def shows(app, Atspi, summary):
-    return summary in (alerts(app, Atspi) or [])
+    return summary in alerts(app, Atspi)
 
 
 def labels(app, Atspi):
-    """The showing labels' names, or None when a rebuild removed a node mid-walk."""
-    try:
-        return [
-            name
-            for role, name, shown, _ in walk(app, Atspi)
-            if shown and role == "label"
-        ]
-    except GLib.Error:
-        return None
+    """The showing labels' names."""
+    return [name for role, name, shown, _ in walk(app, Atspi) if shown and role == "label"]
 
 
 def switch_node(app, Atspi):
@@ -137,22 +128,14 @@ def switch_node(app, Atspi):
     found = []
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() in ("switch", "toggle button", "check box")
-                and accessible.get_name() == "Automatic security updates"
-                and showing(accessible, Atspi)
-            ):
-                found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if (
+            accessible.get_role_name() in ("switch", "toggle button", "check box")
+            and accessible.get_name() == "Automatic security updates"
+            and showing(accessible, Atspi)
+        ):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found[0] if found else None
@@ -162,8 +145,11 @@ def switch_on(app, Atspi):
     node = switch_node(app, Atspi)
     if node is None:
         return None
+    # GTK's switch is a checked check box; AccessKit's Role::Switch a pressed toggle button.
     states = node.get_state_set()
-    return states.contains(Atspi.StateType.CHECKED)
+    return states.contains(Atspi.StateType.CHECKED) or states.contains(
+        Atspi.StateType.PRESSED
+    )
 
 
 def press_switch(app, Atspi):
@@ -172,7 +158,7 @@ def press_switch(app, Atspi):
 
 
 def shows_label(app, Atspi, prefix):
-    return any(text.startswith(prefix) for text in labels(app, Atspi) or ())
+    return any(text.startswith(prefix) for text in labels(app, Atspi))
 
 
 def main():
@@ -414,7 +400,7 @@ def main():
     trust_state.write("hostile")
     toggle_sheet(app, Atspi, True)
     shown = [
-        text for text in labels(app, Atspi) or () if text.startswith("Version 43.")
+        text for text in labels(app, Atspi) if text.startswith("Version 43.")
     ]
     check("the hostile version is shown", len(shown) == 1, repr(shown))
     check(
@@ -448,7 +434,7 @@ def main():
         wait_for(
             lambda: any(
                 text.startswith("The security update is postponed, at most until ")
-                for text in labels(app, Atspi) or ()
+                for text in labels(app, Atspi)
             ),
             3,
         ),

@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        45.0.0
-Release:        3%{?dist}
+Release:        3%{?athanor_content}%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -62,6 +62,7 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /etc/yum.repos.d/*
 /etc/firewalld/zones/public.xml
 /etc/systemd/system/rpm-ostree-countme.timer
+/etc/systemd/system/debug-shell.service
 /etc/ssh/sshd_config.d/*
 /etc/systemd/coredump.conf.d/*
 /usr/lib/systemd/system/*
@@ -90,6 +91,11 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 * Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 45.0.0-1
 - Fedora 45 base: os-release names release 45 (VERSION, VERSION_ID, PRETTY_NAME, CPE_NAME,
   PLATFORM_ID), and the fedora-release, system-release and logos provides follow it
+
+* Thu Nov 05 2026 Athanor Forge <forge@athanor.os> - 43.0.0-20
+- Mask debug-shell.service (/etc/systemd/system/debug-shell.service -> /dev/null): systemd ships
+  a root shell on tty9 without a password, and no route, systemd's own included, may start it on
+  a production image (doc_software.md, decision 1). A debug build can unmask it
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 43.0.0-19
 - Ship athanor-firewall-zone-migrate.service, a oneshot that runs once before firewalld and

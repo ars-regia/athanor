@@ -7,20 +7,22 @@ description = "The Athanor bar: one layer-shell surface per output with the modu
 authors = ["Athanor Forge <forge@athanor.os>"]
 
 [dependencies]
-athanor-apps = { path = "../../../../system/athanor-apps" }
-athanor-compositor-client = { path = "../../../../system/athanor-compositor-client" }
-athanor-controls = { path = "../../../../system/athanor-controls" }
+# The shared libraries without their GTK halves: no GTK crate in the bar's tree (OS8).
+athanor-apps = { path = "../../../../system/athanor-apps", default-features = false, features = ["sal"] }
+athanor-sulphur-client = { path = "../../../../system/athanor-sulphur-client", default-features = false, features = ["calloop"] }
+athanor-controls = { path = "../../../../system/athanor-controls", default-features = false, features = ["sal"] }
 athanor-i18n = { path = "../../../../system/athanor-i18n" }
 athanor-layout = { path = "../../../../system/athanor-layout" }
+athanor-sal = { path = "../../../../system/athanor-sal" }
 athanor-services = { path = "../../../../system/athanor-services" }
-athanor-style = { path = "../../../../system/athanor-style" }
+athanor-style = { path = "../../../../system/athanor-style", default-features = false }
 athanor-trust-state = { path = "../../../../system/athanor-trust-state" }
 athanor-unit = { path = "../../../../system/athanor-unit" }
+gio = { workspace = true }
 gio-unix = { workspace = true }
 # TimeZone::from_identifier, which reports an unknown zone instead of silently giving UTC.
 glib = { workspace = true, features = ["v2_68"] }
-gtk4 = { workspace = true }
-gtk4-layer-shell = { workspace = true }
+wayland-client = { workspace = true }
 # O_NONBLOCK for picture files a peer names: a FIFO must not hang the bar.
 libc = { workspace = true }
 tracing = { workspace = true }

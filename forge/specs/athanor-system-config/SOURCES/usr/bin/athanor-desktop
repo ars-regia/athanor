@@ -14,9 +14,8 @@
 # `systemctl --user stop athanor-session.target` is the logout: the wait returns, this
 # process exits, cosmic-comp exits, greetd shows the greeter again.
 #
-# The screen locker and the idle daemon run as children of the session's supervisor,
-# each in its own scope, shared with the own compositor's session
-# (/usr/libexec/athanor/session-components; doc_session.md, SN15).
+# The screen locker runs as a child of the session's supervisor, in its own scope, shared
+# with the own compositor's session (/usr/libexec/athanor/session-components; doc_session.md, SN15).
 set -eu
 # localsearch's unit starts only with XDG_SESSION_CLASS=user (ConditionEnvironment=), and
 # greetd hands the session no class: read it from logind and publish it with the rest.
@@ -37,7 +36,7 @@ names=$(session_import_names /usr/share/athanor-system-config/session-import)
 # shellcheck disable=SC2086 # one word per name, each one validated by the reader
 systemctl --user import-environment $names
 
-# The locker and the idle daemon, at once: cosmic-comp already serves. The anchor is this
+# The locker, at once: cosmic-comp already serves. The anchor is this
 # process, whose PID stays the same once it execs systemctl below.
 # shellcheck source=SCRIPTDIR/../libexec/athanor/session-components
 . /usr/libexec/athanor/session-components

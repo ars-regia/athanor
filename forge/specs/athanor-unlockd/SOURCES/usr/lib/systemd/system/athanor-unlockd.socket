@@ -1,0 +1,15 @@
+[Unit]
+Description=Athanor lock screen unlock helper socket
+
+[Socket]
+ListenStream=/run/athanor/unlockd.socket
+Accept=yes
+RemoveOnStop=yes
+MaxConnections=16
+MaxConnectionsPerSource=4
+# Unlike polkit's socket: with the default limit, 200 activations in 2 s would put the
+# socket in failed, and no lock could unlock until root restarted it (LP8).
+TriggerLimitIntervalSec=0
+
+[Install]
+WantedBy=sockets.target

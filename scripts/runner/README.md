@@ -25,6 +25,17 @@ host itself.
   unreachable across many polls, `vm.sh` only logs a warning and leaves the guest
   running — its own `RuntimeMaxSec` (8 h in the unit) is the backstop, since killing a
   running job over a network blip is worse than a late shutdown.
+- `RuntimeMaxSec` counts from the guest's boot, the time it waits for a job included: on
+  2026-11-01 a guest that had waited seven hours took the Kernel Weekly repro and was
+  stopped seven minutes into it. A guest that has taken no job within an hour is recycled:
+  `vm.sh` removes its registration first, and only once GitHub has removed it powers the
+  guest off. GitHub refuses, with HTTP 422, to remove a runner that is running a job, and
+  `vm.sh` then leaves the guest alone; once the registration is gone no new job is
+  assigned to it. A job assigned but not yet reported busy when the registration is
+  removed is a window GitHub does not document: that job may be lost. The service boots
+  a fresh guest, and a job starts with about seven of the eight hours (one poll later at
+  most), more than the six `kernel-build.yml` allows. No guest is recycled while the API
+  cannot be read, so an outage longer than the hour can still leave a job less time.
 - The guest's memory is lent, not reserved. An image build fills the guest with page
   cache, and QEMU does not give those pages back by itself: on 2026-09-28 the host ran
   out of memory twice and its OOM killer ended the job by killing QEMU. The guest now has
@@ -35,8 +46,11 @@ host itself.
   `BALLOON_FLOOR` nor above `VM_MEMORY`. Under pressure the guest drops its cache first;
   once the host has room it grows back. The regulator is not part of the job: if it
   fails, the job goes on and the reason is in the journal (lines start with `balloon:`).
-- Two extra disks: `cache.raw` persists across jobs (podman storage, `~/.cache/azoth`),
-  `scratch.raw` is recreated empty before every job (the work directory).
+- Two extra disks, both recreated empty before every job: `cache.raw` (podman storage,
+  `~/.cache/azoth`) and `scratch.raw` (the work directory). No job reads what an earlier one
+  wrote: every guest takes whichever self-hosted job comes first, a pull request's or a
+  release's, and a pull request's kernel build is the one the push may publish (ADR-0110), so
+  a cache kept for pull requests alone would still reach a release (doc_pipeline.md PL10).
 - The GitHub token is a service credential encrypted with the host key and the TPM2
   (`/etc/credstore.encrypted/athanor-runner.github-token`), used only to create and
   remove runner registrations.

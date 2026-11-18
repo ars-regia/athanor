@@ -179,6 +179,36 @@ class TierDigests(unittest.TestCase):
             with self.subTest(args=args):
                 self.assertEqual(self.resolve(*args).returncode, 2)
 
+    def test_signed_asks_for_the_workflow_it_is_given(self):
+        # forge/scripts/verify_image.sh asks for a package image built by call-dag-compile.yml
+        # (issue #1176): the same branches and issuer, another workflow, and no third one.
+        # The builder image is signed by call-build-builder.yml (issue #1205), under the same rules.
+        dag = WORKFLOW.replace("call-system-image.yml", "call-dag-compile.yml")
+        builder = WORKFLOW.replace("call-system-image.yml", "call-build-builder.yml")
+        for signer, workflow, verdict in (
+            (f"{dag}@refs/heads/iso-v0", "call-dag-compile.yml", "signed"),
+            (f"{WORKFLOW}@refs/heads/iso-v0", "call-dag-compile.yml", "unsigned"),
+            (f"{dag}@refs/heads/feature", "call-dag-compile.yml", "unsigned"),
+            (f"{dag}@refs/heads/iso-v0", "call-system-image.yml", "unsigned"),
+            (f"{builder}@refs/heads/iso-v0", "call-build-builder.yml", "signed"),
+            (f"{builder}@refs/heads/main", "call-build-builder.yml", "signed"),
+            (f"{dag}@refs/heads/iso-v0", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/feature", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/pull/7/merge", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/rebase/fedora-45", "call-build-builder.yml", "unsigned"),
+            (f"{builder}@refs/heads/iso-v0", "call-dag-compile.yml", "unsigned"),
+        ):
+            with self.subTest(signer=signer, workflow=workflow):
+                self.publish("ghcr.io/ars-regia", signers={"tier0": signer}, **DIGESTS)
+                r = self.resolve(
+                    "signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}",
+                    workflow,
+                )
+                self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+        r = self.resolve("signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}",
+                         "release.yml")
+        self.assertEqual(r.returncode, 2)
+
     def cosign_stub(self, body):
         """Replace the fake cosign with a bash script of BODY."""
         stub = self.dir / "bin" / "cosign"
@@ -370,7 +400,7 @@ class TierDigests(unittest.TestCase):
                 self.assertEqual(r.returncode, 1, r.stderr)
                 self.assertIn(f"the base branch '{base}' is not a branch name", r.stderr)
                 log = self.dir / "calls.log"
-                tools = [json.loads(l)[0] for l in log.read_text().splitlines()] if log.exists() else []
+                tools = [json.loads(ln)[0] for ln in log.read_text().splitlines()] if log.exists() else []
                 self.assertEqual(tools, [])
                 self.assertFalse(self.out.exists())
 
@@ -382,7 +412,7 @@ class TierDigests(unittest.TestCase):
                 self.publish("ghcr.io/ars-regia", **DIGESTS)
                 r = self.resolve("resolve")
                 self.assertEqual(r.returncode, 0, r.stderr)
-                calls = [json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines()]
+                calls = [json.loads(ln) for ln in (self.dir / "calls.log").read_text().splitlines()]
                 self.assertNotIn("gh", [c[0] for c in calls])
 
     def test_a_pull_request_into_iso_v0_reads_latest_and_trusts_no_other_branch_signed(self):

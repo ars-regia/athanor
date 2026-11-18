@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="athanor_dock_overlap_v1">
+  <copyright>
+    Copyright © 2026 Athanor Forge
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <description summary="whether windows cover the dock">
+    Whether a window covers the rectangle the dock shows itself in, for the dock's
+    intellihide. The client names its layer surface and the rectangle it occupies when it is
+    not hidden; the compositor says whether a window covers that rectangle, and when that
+    changes, and nothing else about windows. The compositor offers the manager only to the
+    clients it trusts with it; it is Athanor's own protocol (doc_own_stack.md decision 35).
+
+    A new version adds interfaces, requests, events or enum entries; a client binds the
+    version it knows.
+  </description>
+
+  <interface name="athanor_dock_overlap_manager_v1" version="1">
+    <description summary="the overlap of the dock">
+      Makes the overlap object of a layer surface.
+    </description>
+
+    <enum name="error">
+      <entry name="not_layer_surface" value="0"
+        summary="the surface has no zwlr_layer_surface_v1 role"/>
+    </enum>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        The overlap objects made from the manager stay valid.
+      </description>
+    </request>
+
+    <request name="get_overlap">
+      <description summary="the overlap of a layer surface">
+        Makes the overlap object of a surface that has the zwlr_layer_surface_v1 role; any
+        other surface is the not_layer_surface error. The object sends nothing until its
+        first set_rectangle.
+      </description>
+      <arg name="id" type="new_id" interface="athanor_dock_overlap_v1"/>
+      <arg name="surface" type="object" interface="wl_surface"/>
+    </request>
+  </interface>
+
+  <interface name="athanor_dock_overlap_v1" version="1">
+    <description summary="whether windows cover the dock's rectangle">
+      The answer for the rectangle last set: whether a mapped window, not minimised, of the
+      current workspace of the layer surface's output intersects it. The answer depends on
+      that rectangle only, not on where the surface is drawn, so that hiding the surface does
+      not change it.
+    </description>
+
+    <event name="overlapped">
+      <description summary="whether a window covers the rectangle">
+        1 when such a window intersects the rectangle, 0 when none does. Sent after the first
+        set_rectangle and then at each change of the answer. While the session is locked
+        nothing is sent; at unlock the current answer is sent, changed or not.
+      </description>
+      <arg name="overlapped" type="uint"/>
+    </event>
+
+    <request name="set_rectangle">
+      <description summary="the rectangle the dock occupies when shown">
+        The rectangle the surface occupies when it is not hidden, in the logical coordinates
+        of its output, its origin at the output's top left corner. The client sends it again
+        when its size, its position or the output's scale changes. A rectangle without area
+        intersects nothing.
+      </description>
+      <arg name="x" type="int"/>
+      <arg name="y" type="int"/>
+      <arg name="width" type="int"/>
+      <arg name="height" type="int"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the overlap object">
+      </description>
+    </request>
+  </interface>
+</protocol>

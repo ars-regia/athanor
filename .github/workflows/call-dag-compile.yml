@@ -19,7 +19,6 @@ env:
   # the repository's: the same knob forge-ghcr-cleanup.yml and promote-stable.yml read.
   REGISTRY: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}
   BUILDER_IMAGE: ${{ vars.REGISTRY_HOST || 'ghcr.io' }}/${{ github.repository_owner }}/athanor-builder:${{ inputs.builder_hash }}
-  SCCACHE_CACHE_SIZE: 10G
 
 permissions:
   contents: read
@@ -51,6 +50,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: ❄️ Install Nix (Bedrock Cache)
         uses: cachix/install-nix-action@ba0dd844c9180cbf77aa72a116d6fbc515d0e87b # v27
         with:
@@ -63,29 +64,13 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: bash scripts/dag_package.sh check
 
-      - name: Extreme Rust Cache (LLVM & Dependencies)
-        if: steps.check.outputs.skip != 'true'
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          shared-key: "sccache-${{ matrix.package }}"
-          cache-on-failure: "true"
-
-      - name: Cache sccache
-        if: steps.check.outputs.skip != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: .sccache
-          key: sccache-${{ matrix.package }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            sccache-${{ matrix.package }}-
-
       - name: Build Package (Custom Spec or Upstream SRPM)
         if: steps.check.outputs.skip != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
           PKG_NAME: ${{ matrix.package }}
-          SCCACHE_CACHE_SIZE: 10G
+          CONTENT_HASH: ${{ steps.check.outputs.hash }}
         run: bash scripts/dag_package.sh build
 
       - name: Publish Micro-Container OCI
@@ -110,15 +95,15 @@ jobs:
           PKG_NAME: ${{ matrix.package }}
         run: |
           set -euo pipefail
-          nix run nixpkgs#cosign -- login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+          nix run --inputs-from .. nixpkgs#cosign -- login "${REGISTRY}" -u "${GITHUB_ACTOR}" -p "${GITHUB_TOKEN}"
           img_prefix="athanor-forge"
           if [ ! -d "specs/athanor-${PKG_NAME}" ] && [ ! -d "specs/${PKG_NAME}" ]; then
             img_prefix="athanor-forge-rolling"
           fi
-          IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ github.repository_owner }}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
+          IMAGE_LOWER=$(echo "${REGISTRY}/${GITHUB_REPOSITORY_OWNER}/${img_prefix}-${PKG_NAME}" | tr '[:upper:]' '[:lower:]')@$(cat "$RUNNER_TEMP/image.digest")
           # Keyless signing talks to Fulcio, Rekor and the timestamp authority: the script
           # retries their transient failures, a persistent one still fails the job.
-          nix shell nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
+          nix shell --inputs-from .. nixpkgs#cosign -c bash scripts/sign_attest.sh "$IMAGE_LOWER" "sbom-${PKG_NAME}.spdx.json"
 
       - name: Publish the hash tag, last (the brain reads it as built, signed and attested)
         if: steps.check.outputs.skip != 'true'
@@ -127,9 +112,9 @@ jobs:
           CONTENT_HASH: ${{ steps.check.outputs.hash }}
         run: bash scripts/dag_package.sh tag
 
-      - name: 🛟 Upload Crash Artifacts (Nix/SCCache)
+      - name: 🛟 Upload Crash Artifacts (Nix/RPM)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: crash-logs-${{ matrix.package }}
           path: |

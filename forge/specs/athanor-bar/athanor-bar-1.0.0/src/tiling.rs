@@ -1,7 +1,7 @@
 //! The tiling switch (doc_bar.md, BR3). It acts on the active workspace of the output its
 //! surface is on.
 
-pub use athanor_compositor_client::Tiling;
+pub use athanor_sulphur_client::Tiling;
 
 pub struct WorkspaceView<K> {
     pub id: K,

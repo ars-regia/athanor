@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """bar_e2e.py - athanor-bar end to end in the rig, as scene.sh's RIG_HOLD, with the bar
-started by bar_session.py --hang CanReboot --window --pinnable and no favourites file:
+started by bar_session.py --hang CanReboot --window --pinnable --respawn and no favourites file:
 
 - READY=1 reaches NOTIFY_SOCKET (Type=notify);
 - the first start imports the favourites and saves the file (BR7);
@@ -24,7 +24,6 @@ started by bar_session.py --hang CanReboot --window --pinnable and no favourites
 
 import os
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -34,7 +33,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import find_application, walk  # noqa: E402
+from atspi_check import afresh, children, find_application, walk  # noqa: E402
 
 READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
@@ -66,12 +65,24 @@ def check(name, ok, detail=""):
 
 
 def wait_for(check_now, seconds):
+    """Poll `check_now` until it is true. A GLib.Error from it, an AT-SPI node destroyed
+    mid-read, means the state has not settled: poll again, and if it never does, fail with the
+    last error on stderr."""
     deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if check_now():
-            return True
+    error = None
+    while True:
+        try:
+            if check_now():
+                return True
+            error = None
+        except GLib.Error as err:
+            error = err
+        if time.monotonic() >= deadline:
+            break
         time.sleep(0.2)
-    return check_now()
+    if error is not None:
+        print(f"wait_for: {error}", file=sys.stderr)
+    return False
 
 
 def alive(pid):
@@ -89,27 +100,22 @@ def showing(accessible, Atspi):
 def buttons_matching(app, Atspi, regex):
     """Every showing push button whose name matches `regex`, found afresh: a rebuild
     replaces them."""
+    return afresh(lambda: matching_buttons(app, Atspi, regex))
+
+
+def matching_buttons(app, Atspi, regex):
+    """buttons_matching in one walk, which a node destroyed mid-walk ends with its error."""
     found = []
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() == "button"
-                and regex.search(accessible.get_name())
-                and showing(accessible, Atspi)
-            ):
-                found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            # A window event rebuilt the row mid-walk and this node is gone: it is not
-            # there to be found. The callers poll, so the next walk sees the new row.
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if (
+            accessible.get_role_name() == "button"
+            and regex.search(accessible.get_name())
+            and showing(accessible, Atspi)
+        ):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
     visit(app)
     return found
@@ -170,34 +176,36 @@ def labelled(app, Atspi, role, label):
         return name
 
     def visit(accessible):
-        try:
-            if (
-                accessible.get_role_name() in roles
-                and showing(accessible, Atspi)
-                and name_of(accessible) == label
-            ):
-                found.append(accessible)
-            children = [
-                accessible.get_child_at_index(index)
-                for index in range(accessible.get_child_count())
-            ]
-        except GLib.Error:
-            # As in `buttons`: a node destroyed mid-walk is not there to be found.
-            return
-        for child in children:
-            if child:
-                visit(child)
+        if (
+            accessible.get_role_name() in roles
+            and showing(accessible, Atspi)
+            and name_of(accessible) == label
+        ):
+            found.append(accessible)
+        for child in children(accessible):
+            visit(child)
 
-    visit(app)
-    return found
+    def walk_once():
+        found.clear()
+        visit(app)
+        return found
+
+    return afresh(walk_once)
+
+
+def print_tree(app, Atspi):
+    for role, label, _, depth in walk(app, Atspi):
+        print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
 
 
 def press(app, Atspi, name):
+    """Presses the first showing button called `name`. Only the lookup walks again: an error
+    of the press itself is raised, since the application may have acted on it already, and a
+    second press would undo a toggle."""
     found = buttons(app, Atspi, name)
     if not found:
         print(f"no showing button named {name!r}; tree:", file=sys.stderr)
-        for role, label, _, depth in walk(app, Atspi):
-            print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
+        print_tree(app, Atspi)
         return False
     found[0].do_action(0)
     return True
@@ -206,13 +214,16 @@ def press(app, Atspi, name):
 def confirm_button(app, Atspi, name):
     """The confirmation's button: the sibling of Cancel called `name`. The row of the
     same name sits on the hidden page of the stack."""
-    for cancel in buttons(app, Atspi, "Cancel"):
-        parent = cancel.get_parent()
-        for index in range(parent.get_child_count()):
-            child = parent.get_child_at_index(index)
-            if child and child.get_role_name() == "button" and child.get_name() == name:
-                return cancel, child
-    return None, None
+
+    def find():
+        for cancel in matching_buttons(app, Atspi, re.compile("^Cancel$")):
+            parent = cancel.get_parent()
+            for child in children(parent):
+                if child.get_role_name() == "button" and child.get_name() == name:
+                    return cancel, child
+        return None, None
+
+    return afresh(find)
 
 
 def pss_kb(pid):
@@ -261,6 +272,27 @@ def high_contrast_is(value):
     return check_now
 
 
+def switch_until(app, Atspi, label, reached):
+    """Presses the switch called `label` until `reached` holds, up to three times. A change of
+    the appearance rebuilds the open popover, and a press that lands on a switch the rebuild
+    has just removed is lost; a press that lands shows within 2 s, because the bar writes the
+    keys and the built themes before it returns. Each press after the first is reported on
+    stderr, so a switch that loses presses shows in the log even when the check passes."""
+    for attempt in range(1, 4):
+        if attempt > 1:
+            print(f"switch_until: pressing {label!r} again, press {attempt}", file=sys.stderr)
+        try:
+            found = labelled(app, Atspi, "toggle button", label)
+            if found:
+                found[0].do_action(0)
+        except GLib.Error as err:
+            # The switch the lookup found was removed before the press reached it.
+            print(f"switch_until: {err}", file=sys.stderr)
+        if wait_for(reached, 2):
+            return True
+    return False
+
+
 def favorites_file():
     return Path(os.environ["XDG_CONFIG_HOME"]) / "athanor" / "favorites.toml"
 
@@ -280,8 +312,7 @@ def menu_row_after(app, Atspi, opener, row):
         if press(app, Atspi, opener) and wait_for(lambda: buttons(app, Atspi, row), 2):
             return buttons(app, Atspi, row)[0]
     print(f"no showing button named {row!r} after {opener!r}; tree:", file=sys.stderr)
-    for role, label, _, depth in walk(app, Atspi):
-        print(f"{'  ' * depth}{role}: {label!r}", file=sys.stderr)
+    print_tree(app, Atspi)
     return None
 
 
@@ -464,64 +495,61 @@ def main():
     )
 
     check("the accessibility popover opens", press(app, Atspi, "Accessibility"))
-    # GtkSwitch is a "switch" on at-spi2-core 2.62 and a "check box" before; `labelled` takes both.
+    # A Sal switch is a toggle button, pressed when on.
     check(
         "High contrast shows",
-        wait_for(lambda: labelled(app, Atspi, "check box", "High contrast"), 5),
+        wait_for(lambda: labelled(app, Atspi, "toggle button", "High contrast"), 5),
     )
-    switches = labelled(app, Atspi, "check box", "High contrast")
-    if switches:
-        switches[0].do_action(0)
     check(
-        "high contrast reaches the GNOME key and both built themes within 2 s",
-        wait_for(high_contrast_is(True), 2),
+        "high contrast reaches the GNOME key and both built themes within 2 s of a press",
+        switch_until(app, Atspi, "High contrast", high_contrast_is(True)),
     )
     check("the bar stays alive with high contrast on", alive(pid))
-    switches = labelled(app, Atspi, "check box", "High contrast")
-    if switches:
-        switches[0].do_action(0)
     # Switched back off so the checks after this one run in the normal, non-high-contrast
     # variant, same as every other capture in the rig.
-    check("high contrast is switched back off", wait_for(high_contrast_is(False), 2))
+    check(
+        "high contrast is switched back off",
+        switch_until(app, Atspi, "High contrast", high_contrast_is(False)),
+    )
 
     # at-spi2-core 2.61 dropped org.a11y.Status.ScreenReaderEnabled; the row reads the key.
     check(
         "Screen reader shows",
-        wait_for(lambda: labelled(app, Atspi, "check box", "Screen reader"), 5),
+        wait_for(lambda: labelled(app, Atspi, "toggle button", "Screen reader"), 5),
     )
     # The loop switches on, then off: it starts from the key's default.
     check("the screen reader key starts off", screen_reader_key() == "false")
+    # High contrast switched off just before rebuilds the open popover, so a press can land
+    # on a switch the rebuild removes: switch_until presses again, as it does above.
     for value in ("true", "false"):
-        switches = labelled(app, Atspi, "check box", "Screen reader")
-        if switches:
-            switches[0].do_action(0)
         check(
             f"the screen reader switch writes {value} to its GNOME key within 2 s",
-            wait_for(lambda value=value: screen_reader_key() == value, 2),
+            switch_until(
+                app, Atspi, "Screen reader", lambda value=value: screen_reader_key() == value
+            ),
         )
 
     # A regular file where Dark's v2 directory belongs makes the compositor's write fail:
-    # create_dir_all meets a file, and the bar's Landlock grant was bound to the old
-    # directory's inode. Dark is written first, so COSMIC's themes keep the old contrast;
-    # the store, which the shell reads, holds the choice (VL4).
+    # create_dir_all meets a file. Dark is written first, so COSMIC's themes keep the old
+    # contrast; the store, which the shell reads, holds the choice (VL4). The directory is
+    # moved aside, not removed: the bar's Landlock grant is bound to its inode, so only the
+    # same directory, moved back, can be written again.
     dark_v2 = high_contrast_files()[0].parent
-    shutil.rmtree(dark_v2)
+    aside = dark_v2.with_name("v2.aside")
+    dark_v2.rename(aside)
     dark_v2.write_text("", encoding="utf-8")
     try:
-        switches = labelled(app, Atspi, "check box", "High contrast")
         check(
-            "the High contrast switch is pressed with a theme directory unwritable",
-            bool(switches) and switches[0].do_action(0),
-        )
-        check(
-            "the GNOME key still turns on",
-            wait_for(lambda: high_contrast_key() == "true", 2),
+            "the GNOME key still turns on with a theme directory unwritable",
+            switch_until(
+                app, Atspi, "High contrast", lambda: high_contrast_key() == "true"
+            ),
         )
 
         def still_on():
-            found = labelled(app, Atspi, "check box", "High contrast")
+            found = labelled(app, Atspi, "toggle button", "High contrast")
             return bool(found) and found[0].get_state_set().contains(
-                Atspi.StateType.CHECKED
+                Atspi.StateType.PRESSED
             )
 
         time.sleep(0.5)
@@ -544,15 +572,25 @@ def main():
         check("the bar stays alive after the failed write", alive(pid))
     finally:
         dark_v2.unlink()
-        dark_v2.mkdir()
-    switches = labelled(app, Atspi, "check box", "High contrast")
-    if switches:
-        switches[0].do_action(0)
+        aside.rename(dark_v2)
     check(
         "high contrast is switched off again, both built themes included",
-        wait_for(high_contrast_is(False), 2),
+        switch_until(app, Atspi, "High contrast", high_contrast_is(False)),
     )
 
+    # The confirmation's focus is the keyboard's: AT-SPI reports FOCUSED only on a surface
+    # that holds the keyboard, and the test window holds it. A user gives it to the bar with a
+    # click, which the rig cannot make; cosmic-comp also gives it to a top-layer surface with
+    # on-demand interactivity when it maps (`Shell::map_layer`), so the bar starts again after
+    # the window, as orca_dock.py starts the dock (bar_session.py --respawn).
+    READY_FILE.unlink(missing_ok=True)
+    os.kill(pid, signal.SIGKILL)
+    if not check("the bar starts again with the keyboard", wait_for(READY_FILE.exists, 10)):
+        return 1
+    pid = int(PID_FILE.read_text(encoding="utf-8"))
+    app = find_application(Atspi, "athanor-bar")
+    if not check("the started bar is on the accessibility bus", app is not None):
+        return 1
     check("the power menu opens", press(app, Atspi, "Power"))
     check(
         "Shut Down is offered on challenge",

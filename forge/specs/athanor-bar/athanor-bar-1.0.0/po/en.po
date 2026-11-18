@@ -8,788 +8,853 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: ../../../../system/athanor-apps/src/openers.rs:19
-msgid "Launcher"
-msgstr "Launcher"
-
-#: ../../../../system/athanor-apps/src/openers.rs:20
-msgid "Applications"
-msgstr "Applications"
-
-#: ../../../../system/athanor-apps/src/openers.rs:21
-msgid "Workspaces"
-msgstr "Workspaces"
-
-#: ../../../../system/athanor-apps/src/row.rs:88
-msgid "Running applications"
-msgstr "Running applications"
-
-#: ../../../../system/athanor-apps/src/row.rs:202
-#: ../../../../system/athanor-apps/src/row.rs:640
-#: ../../../../system/athanor-apps/src/row.rs:642 src/ui/notifications.rs:729
+#: ../../../../system/athanor-apps/src/entries.rs:89
+#: ../../../../system/athanor-apps/src/entries.rs:243
+#: ../../../../system/athanor-apps/src/entries.rs:245
+#: src/ui/modules/notifications.rs:663
 msgid "Unknown application"
 msgstr "Unknown application"
 
-#: ../../../../system/athanor-apps/src/row.rs:218
+#: ../../../../system/athanor-apps/src/entries.rs:105
 #, rust-format
 msgid "{app}: {title}"
 msgstr "{app}: {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:224
+#: ../../../../system/athanor-apps/src/entries.rs:111
 #, rust-format
 msgid "{app} ({count} windows)"
 msgstr "{app} ({count} windows)"
 
-#: ../../../../system/athanor-apps/src/row.rs:251
-msgid "Running"
-msgstr "Running"
-
-#: ../../../../system/athanor-apps/src/row.rs:479
+#: ../../../../system/athanor-apps/src/entries.rs:121
+#: ../../../../system/athanor-apps/src/entries.rs:301
 msgid "Untitled window"
 msgstr "Untitled window"
 
-#: ../../../../system/athanor-apps/src/row.rs:487
-#, rust-format
-msgid "Minimise {title}"
-msgstr "Minimise {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:138
+msgid "Launcher"
+msgstr "Launcher"
 
-#: ../../../../system/athanor-apps/src/row.rs:491 src/ui/notifications.rs:855
-#, rust-format
-msgid "Close {title}"
-msgstr "Close {title}"
+#: ../../../../system/athanor-apps/src/entries.rs:139
+msgid "Applications"
+msgstr "Applications"
 
-#: ../../../../system/athanor-apps/src/row.rs:518
-msgid "Open"
-msgstr "Open"
+#: ../../../../system/athanor-apps/src/entries.rs:140
+msgid "Workspaces"
+msgstr "Workspaces"
 
-#: ../../../../system/athanor-apps/src/row.rs:520
-msgid "New Window"
-msgstr "New Window"
-
-#: ../../../../system/athanor-apps/src/row.rs:587
+#: ../../../../system/athanor-apps/src/entries.rs:190
 #, rust-format
 msgid "{name} could not start"
 msgstr "{name} could not start"
 
-#: ../../../../system/athanor-apps/src/row.rs:588
+#: ../../../../system/athanor-apps/src/entries.rs:191
 msgid "The reason is in the system journal."
 msgstr "The reason is in the system journal."
 
-#: ../../../../system/athanor-controls/src/audio.rs:225
+#: ../../../../system/athanor-apps/src/row.rs:58
+msgid "Running applications"
+msgstr "Running applications"
+
+#: ../../../../system/athanor-apps/src/row.rs:160
+#: ../../../../system/athanor-apps/src/sal.rs:163
+msgid "Running"
+msgstr "Running"
+
+#: ../../../../system/athanor-apps/src/row.rs:388
+#: ../../../../system/athanor-apps/src/sal.rs:303
 #, rust-format
-msgid "{device}, in use"
-msgstr "{device}, in use"
+msgid "Minimise {title}"
+msgstr "Minimise {title}"
 
-#: ../../../../system/athanor-controls/src/audio.rs:267
-msgid "Output"
-msgstr "Output"
-
-#: ../../../../system/athanor-controls/src/audio.rs:268
-msgid "Output volume"
-msgstr "Output volume"
-
-#: ../../../../system/athanor-controls/src/audio.rs:269
-msgid "Mute output"
-msgstr "Mute output"
-
-#: ../../../../system/athanor-controls/src/audio.rs:273
-msgid "Input"
-msgstr "Input"
-
-#: ../../../../system/athanor-controls/src/audio.rs:274
-msgid "Input volume"
-msgstr "Input volume"
-
-#: ../../../../system/athanor-controls/src/audio.rs:275
-msgid "Mute microphone"
-msgstr "Mute microphone"
-
-#: ../../../../system/athanor-controls/src/audio.rs:286
-msgid "Previous track"
-msgstr "Previous track"
-
-#: ../../../../system/athanor-controls/src/audio.rs:287
-#: ../../../../system/athanor-controls/src/audio.rs:397
-msgid "Pause"
-msgstr "Pause"
-
-#: ../../../../system/athanor-controls/src/audio.rs:288
-msgid "Next track"
-msgstr "Next track"
-
-#: ../../../../system/athanor-controls/src/audio.rs:399
-msgid "Play"
-msgstr "Play"
-
-#: ../../../../system/athanor-controls/src/battery.rs:126
+#: ../../../../system/athanor-apps/src/row.rs:392
+#: ../../../../system/athanor-apps/src/sal.rs:314
+#: src/ui/modules/notifications.rs:899
 #, rust-format
-msgid "{percent} %"
-msgstr "{percent} %"
+msgid "Close {title}"
+msgstr "Close {title}"
 
-#: ../../../../system/athanor-controls/src/battery.rs:144
-#, rust-format
-msgid "{hours} h {minutes} min left"
-msgstr "{hours} h {minutes} min left"
+#: ../../../../system/athanor-apps/src/row.rs:419
+#: ../../../../system/athanor-apps/src/sal.rs:331
+msgid "Open"
+msgstr "Open"
 
-#: ../../../../system/athanor-controls/src/battery.rs:147
-#, rust-format
-msgid "{hours} h {minutes} min until full"
-msgstr "{hours} h {minutes} min until full"
-
-#: ../../../../system/athanor-controls/src/battery.rs:149
-msgid "Charging"
-msgstr "Charging"
-
-#: ../../../../system/athanor-controls/src/battery.rs:150
-msgid "Fully charged"
-msgstr "Fully charged"
-
-#: ../../../../system/athanor-controls/src/battery.rs:157
-msgid "Power saver"
-msgstr "Power saver"
-
-#: ../../../../system/athanor-controls/src/battery.rs:158
-msgid "Performance"
-msgstr "Performance"
-
-#: ../../../../system/athanor-controls/src/battery.rs:159
-msgid "Balanced"
-msgstr "Balanced"
-
-#: ../../../../system/athanor-controls/src/battery.rs:188
-msgid "Power mode"
-msgstr "Power mode"
-
-#: ../../../../system/athanor-controls/src/battery.rs:206
-msgid "Screen brightness"
-msgstr "Screen brightness"
+#: ../../../../system/athanor-apps/src/row.rs:421
+#: ../../../../system/athanor-apps/src/sal.rs:333
+msgid "New Window"
+msgstr "New Window"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:279
-#: src/ui/bluetooth.rs:42
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:328
+#: src/ui/modules/bluetooth.rs:71 src/ui/modules/bluetooth.rs:80
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:282
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:331
 msgid "Nearby devices"
 msgstr "Nearby devices"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:304
-#: ../../../../system/athanor-controls/src/network.rs:348 src/ui/power.rs:110
-#: src/ui/shield.rs:641
+#: ../../../../system/athanor-controls/src/network.rs:348
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:366
+#: ../../../../system/athanor-controls/src/sal/network.rs:418
+#: src/ui/modules/power.rs:108 src/ui/modules/shield.rs:714
 msgid "Cancel"
 msgstr "Cancel"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:306
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:367
 msgid "Pair"
 msgstr "Pair"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:443
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:226
 #, rust-format
 msgid "{device}, connected"
 msgstr "{device}, connected"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:476
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:520
 #, rust-format
 msgid "Pair with {device}?"
 msgstr "Pair with {device}?"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:479
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:522
 #, rust-format
 msgid "Pair only if {device} shows the same number."
 msgstr "Pair only if {device} shows the same number."
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:492
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:529
 #, rust-format
 msgid "Pairing with {device}"
 msgstr "Pairing with {device}"
 
 #: ../../../../system/athanor-controls/src/bluetooth.rs:495
+#: ../../../../system/athanor-controls/src/sal/bluetooth.rs:531
 #, rust-format
 msgid "Type this code on {device}, then press Enter there."
 msgstr "Type this code on {device}, then press Enter there."
 
-#: ../../../../system/athanor-controls/src/network.rs:307 src/ui/network.rs:42
+#: ../../../../system/athanor-controls/src/labels.rs:11
+#, rust-format
+msgid "{percent} %"
+msgstr "{percent} %"
+
+#: ../../../../system/athanor-controls/src/labels.rs:29
+#, rust-format
+msgid "{hours} h {minutes} min left"
+msgstr "{hours} h {minutes} min left"
+
+#: ../../../../system/athanor-controls/src/labels.rs:32
+#, rust-format
+msgid "{hours} h {minutes} min until full"
+msgstr "{hours} h {minutes} min until full"
+
+#: ../../../../system/athanor-controls/src/labels.rs:34
+msgid "Charging"
+msgstr "Charging"
+
+#: ../../../../system/athanor-controls/src/labels.rs:35
+msgid "Fully charged"
+msgstr "Fully charged"
+
+#: ../../../../system/athanor-controls/src/labels.rs:42
+msgid "Power saver"
+msgstr "Power saver"
+
+#: ../../../../system/athanor-controls/src/labels.rs:43
+msgid "Performance"
+msgstr "Performance"
+
+#: ../../../../system/athanor-controls/src/labels.rs:44
+msgid "Balanced"
+msgstr "Balanced"
+
+#: ../../../../system/athanor-controls/src/network.rs:307
+#: ../../../../system/athanor-controls/src/sal/network.rs:362
+#: src/ui/modules/network.rs:71 src/ui/modules/network.rs:80
 msgid "Network"
 msgstr "Network"
 
 #: ../../../../system/athanor-controls/src/network.rs:313
+#: ../../../../system/athanor-controls/src/sal/network.rs:366
 msgid "Wi-Fi"
 msgstr "Wi-Fi"
 
 #: ../../../../system/athanor-controls/src/network.rs:322
+#: ../../../../system/athanor-controls/src/sal/network.rs:373
 msgid "Airplane mode"
 msgstr "Airplane mode"
 
 #: ../../../../system/athanor-controls/src/network.rs:341
+#: ../../../../system/athanor-controls/src/sal/network.rs:408
 msgid "The password was not accepted. Try again."
 msgstr "The password was not accepted. Try again."
 
 #: ../../../../system/athanor-controls/src/network.rs:350
+#: ../../../../system/athanor-controls/src/sal/network.rs:419
 msgid "Connect"
 msgstr "Connect"
 
 #: ../../../../system/athanor-controls/src/network.rs:467
+#: ../../../../system/athanor-controls/src/sal/network.rs:682
 msgid "Wired: connected"
 msgstr "Wired: connected"
 
 #: ../../../../system/athanor-controls/src/network.rs:468
+#: ../../../../system/athanor-controls/src/sal/network.rs:683
 msgid "Wired: not connected"
 msgstr "Wired: not connected"
 
 #: ../../../../system/athanor-controls/src/network.rs:506
+#: ../../../../system/athanor-controls/src/sal/network.rs:222
 #, rust-format
 msgid "{network}, connected"
 msgstr "{network}, connected"
 
 #: ../../../../system/athanor-controls/src/network.rs:507
+#: ../../../../system/athanor-controls/src/sal/network.rs:223
 #, rust-format
 msgid "{network}, connecting"
 msgstr "{network}, connecting"
 
 #: ../../../../system/athanor-controls/src/network.rs:508
+#: ../../../../system/athanor-controls/src/sal/network.rs:224
 #, rust-format
 msgid "{network}, needs Settings"
 msgstr "{network}, needs Settings"
 
 #: ../../../../system/athanor-controls/src/network.rs:510
+#: ../../../../system/athanor-controls/src/sal/network.rs:225
 #, rust-format
 msgid "{network}, secured"
 msgstr "{network}, secured"
 
 #: ../../../../system/athanor-controls/src/network.rs:541
+#: ../../../../system/athanor-controls/src/sal/network.rs:665
 #, rust-format
 msgid "Password for {network}"
 msgstr "Password for {network}"
 
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Mute output"
+msgstr "Mute output"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output"
+msgstr "Output"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:131
+msgid "Output volume"
+msgstr "Output volume"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input"
+msgstr "Input"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Input volume"
+msgstr "Input volume"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:132
+msgid "Mute microphone"
+msgstr "Mute microphone"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:145
+#, rust-format
+msgid "{device}, in use"
+msgstr "{device}, in use"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:370
+msgid "Next track"
+msgstr "Next track"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:370
+#: ../../../../system/athanor-controls/src/sal/audio.rs:487
+msgid "Pause"
+msgstr "Pause"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:370
+msgid "Previous track"
+msgstr "Previous track"
+
+#: ../../../../system/athanor-controls/src/sal/audio.rs:487
+msgid "Play"
+msgstr "Play"
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:141
+msgid "Power mode"
+msgstr "Power mode"
+
+#: ../../../../system/athanor-controls/src/sal/battery.rs:154
+#: ../../../../system/athanor-controls/src/sal/battery.rs:159
+msgid "Screen brightness"
+msgstr "Screen brightness"
+
+#: ../../../../system/athanor-controls/src/sal/network.rs:411
+msgid "Password"
+msgstr "Password"
+
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:85
+#: ../../../../system/athanor-controls/src/sal/widgets.rs:98
 #: ../../../../system/athanor-controls/src/widgets.rs:51
 msgid "The action did not complete."
 msgstr "The action did not complete."
 
-#: src/ui/accessibility.rs:36
-msgid "Greyscale"
-msgstr "Greyscale"
-
-#: src/ui/accessibility.rs:37
-msgid "Red-green (protanopia)"
-msgstr "Red-green (protanopia)"
-
-#: src/ui/accessibility.rs:38
-msgid "Green-red (deuteranopia)"
-msgstr "Green-red (deuteranopia)"
-
-#: src/ui/accessibility.rs:39
-msgid "Blue-yellow (tritanopia)"
-msgstr "Blue-yellow (tritanopia)"
-
-#: src/ui/accessibility.rs:40
-msgid "No colour filter"
-msgstr "No colour filter"
-
-#: src/ui/accessibility.rs:160
-msgid "Accessibility"
-msgstr "Accessibility"
-
-#: src/ui/accessibility.rs:161
-msgid "High contrast"
-msgstr "High contrast"
-
-#: src/ui/accessibility.rs:162
-msgid "Screen reader"
-msgstr "Screen reader"
-
-#: src/ui/accessibility.rs:163
-msgid "Magnifier"
-msgstr "Magnifier"
-
-#: src/ui/accessibility.rs:164
-msgid "Invert colours"
-msgstr "Invert colours"
-
-#: src/ui/accessibility.rs:168
-msgid "Colour filter"
-msgstr "Colour filter"
-
-#: src/ui/audio.rs:44
-msgid "Sound"
-msgstr "Sound"
-
-#: src/ui/battery.rs:46
-msgid "Battery"
-msgstr "Battery"
-
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar.
-#: src/ui/clock.rs:83
+#: src/clock.rs:186
 msgid "%a %-d %b %H:%M"
 msgstr "%a %-d %b %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers.
-#: src/ui/clock.rs:85
+#: src/clock.rs:188
 msgid "%A %-d %B %Y, %H:%M"
 msgstr "%A %-d %B %Y, %H:%M"
 
 #. TRANSLATORS: a g_date_time_format() pattern for the clock on the bar (12-hour clock).
-#: src/ui/clock.rs:90
+#: src/clock.rs:193
 msgid "%a %-d %b %-I:%M %p"
 msgstr "%a %-d %b %-I:%M %p"
 
 #. TRANSLATORS: a g_date_time_format() pattern, read aloud by screen readers (12-hour clock).
-#: src/ui/clock.rs:92
+#: src/clock.rs:195
 msgid "%A %-d %B %Y, %-I:%M %p"
 msgstr "%A %-d %B %Y, %-I:%M %p"
 
-#: src/ui/clock.rs:127
-msgid "Clock"
-msgstr "Clock"
-
-#: src/ui/control_center.rs:30
+#: src/ui/bar.rs:451
 msgid "Control center"
 msgstr "Control center"
 
-#: src/ui/input.rs:41
-#, rust-format
-msgid "Layout {number}"
-msgstr "Layout {number}"
+#: src/ui/bar.rs:490 src/ui/bar.rs:1087
+msgid "Bar"
+msgstr "Bar"
 
-#: src/ui/input.rs:44
+#: src/ui/bar.rs:1027
+msgid "Unpin from Bar"
+msgstr "Unpin from Bar"
+
+#: src/ui/bar.rs:1029
+msgid "Pin to Bar"
+msgstr "Pin to Bar"
+
+#: src/ui/modules/accessibility.rs:30
+msgid "Greyscale"
+msgstr "Greyscale"
+
+#: src/ui/modules/accessibility.rs:31
+msgid "Red-green (protanopia)"
+msgstr "Red-green (protanopia)"
+
+#: src/ui/modules/accessibility.rs:32
+msgid "Green-red (deuteranopia)"
+msgstr "Green-red (deuteranopia)"
+
+#: src/ui/modules/accessibility.rs:33
+msgid "Blue-yellow (tritanopia)"
+msgstr "Blue-yellow (tritanopia)"
+
+#: src/ui/modules/accessibility.rs:34
+msgid "No colour filter"
+msgstr "No colour filter"
+
+#: src/ui/modules/accessibility.rs:127 src/ui/modules/accessibility.rs:196
+msgid "Accessibility"
+msgstr "Accessibility"
+
+#: src/ui/modules/accessibility.rs:130
+msgid "High contrast"
+msgstr "High contrast"
+
+#: src/ui/modules/accessibility.rs:135
+msgid "Screen reader"
+msgstr "Screen reader"
+
+#: src/ui/modules/accessibility.rs:138
+msgid "Magnifier"
+msgstr "Magnifier"
+
+#: src/ui/modules/accessibility.rs:139
+msgid "Invert colours"
+msgstr "Invert colours"
+
+#: src/ui/modules/accessibility.rs:140
+msgid "Colour filter"
+msgstr "Colour filter"
+
+#: src/ui/modules/accessibility.rs:151
+msgid "Turn on"
+msgstr "Turn on"
+
+#: src/ui/modules/aids.rs:28
+msgid "sticky keys"
+msgstr "sticky keys"
+
+#: src/ui/modules/aids.rs:29
+msgid "slow keys"
+msgstr "slow keys"
+
+#: src/ui/modules/aids.rs:30
+msgid "bounce keys"
+msgstr "bounce keys"
+
+#: src/ui/modules/aids.rs:36
+msgid "Shift"
+msgstr "Shift"
+
+#: src/ui/modules/aids.rs:37
+msgid "Control"
+msgstr "Control"
+
+#: src/ui/modules/aids.rs:38
+msgid "Alt"
+msgstr "Alt"
+
+#: src/ui/modules/aids.rs:39
+msgid "Super"
+msgstr "Super"
+
+#: src/ui/modules/aids.rs:40
+msgid "AltGr"
+msgstr "AltGr"
+
+#: src/ui/modules/aids.rs:51
+#, rust-format
+msgid "{modifier} locked"
+msgstr "{modifier} locked"
+
+#: src/ui/modules/aids.rs:53
+#, rust-format
+msgid "{modifier} latched"
+msgstr "{modifier} latched"
+
+#: src/ui/modules/aids.rs:63
+#, rust-format
+msgid "Key rejected: {aid}"
+msgstr "Key rejected: {aid}"
+
+#: src/ui/modules/aids.rs:67
+#, rust-format
+msgid "Turn on {aid}?"
+msgstr "Turn on {aid}?"
+
+#: src/ui/modules/aids.rs:116
+msgid "No modifier held"
+msgstr "No modifier held"
+
+#: src/ui/modules/audio.rs:44 src/ui/modules/audio.rs:60
+msgid "Sound"
+msgstr "Sound"
+
+#: src/ui/modules/battery.rs:66 src/ui/modules/battery.rs:78
+msgid "Battery"
+msgstr "Battery"
+
+#: src/ui/modules/clock.rs:88
+msgid "Calendar"
+msgstr "Calendar"
+
+#: src/ui/modules/clock.rs:138
+msgid "Previous month"
+msgstr "Previous month"
+
+#: src/ui/modules/clock.rs:139
+msgid "Next month"
+msgstr "Next month"
+
+#: src/ui/modules/clock.rs:140
+msgid "Previous year"
+msgstr "Previous year"
+
+#: src/ui/modules/clock.rs:141
+msgid "Next year"
+msgstr "Next year"
+
+#: src/ui/modules/input.rs:42
 #, rust-format
 msgid "Input source: {name}"
 msgstr "Input source: {name}"
 
-#: src/ui/input.rs:92
+#: src/ui/modules/input.rs:60
 msgid "Input source"
 msgstr "Input source"
 
-#: src/ui/keyboard_aids.rs
-msgid "sticky keys"
-msgstr "sticky keys"
+#: src/ui/modules/input.rs:63
+#, rust-format
+msgid "Layout {number}"
+msgstr "Layout {number}"
 
-#: src/ui/keyboard_aids.rs
-msgid "slow keys"
-msgstr "slow keys"
+#: src/ui/modules/notifications.rs:929 src/ui/modules/notifications.rs:1100
+#: src/ui/modules/notifications.rs:1147
+msgid "Notifications"
+msgstr "Notifications"
 
-#: src/ui/keyboard_aids.rs
-msgid "bounce keys"
-msgstr "bounce keys"
+#: src/ui/modules/notifications.rs:937
+msgid "Clear all"
+msgstr "Clear all"
 
-#: src/ui/keyboard_aids.rs
-msgid "Shift"
-msgstr "Shift"
+#: src/ui/modules/notifications.rs:953
+msgid "No notifications"
+msgstr "No notifications"
 
-#: src/ui/keyboard_aids.rs
-msgid "Control"
-msgstr "Control"
+#: src/ui/modules/notifications.rs:985
+msgid "Do not disturb"
+msgstr "Do not disturb"
 
-#: src/ui/keyboard_aids.rs
-msgid "Alt"
-msgstr "Alt"
-
-#: src/ui/keyboard_aids.rs
-msgid "Super"
-msgstr "Super"
-
-#: src/ui/keyboard_aids.rs
-msgid "AltGr"
-msgstr "AltGr"
-
-#: src/ui/keyboard_aids.rs
-msgid "{modifier} locked"
-msgstr "{modifier} locked"
-
-#: src/ui/keyboard_aids.rs
-msgid "{modifier} latched"
-msgstr "{modifier} latched"
-
-#: src/ui/keyboard_aids.rs
-msgid "Key rejected: {aid}"
-msgstr "Key rejected: {aid}"
-
-#: src/ui/keyboard_aids.rs
-msgid "Turn on {aid}?"
-msgstr "Turn on {aid}?"
-
-#: src/ui/keyboard_aids.rs
-msgid "No modifier held"
-msgstr "No modifier held"
-
-#: src/ui/accessibility.rs
-msgid "Turn on"
-msgstr "Turn on"
-
-#: src/ui/mod.rs:678
-msgid "Unpin from Bar"
-msgstr "Unpin from Bar"
-
-#: src/ui/mod.rs:680
-msgid "Pin to Bar"
-msgstr "Pin to Bar"
-
-#: src/ui/notifications.rs:971
+#: src/ui/modules/notifications.rs:1142
 #, rust-format
 msgid "Notifications, {count} waiting"
 msgstr "Notifications, {count} waiting"
 
-#: src/ui/notifications.rs:976 src/ui/notifications.rs:1009
-#: src/ui/notifications.rs:1012
-msgid "Notifications"
-msgstr "Notifications"
-
-#: src/ui/notifications.rs:1016
-msgid "Clear all"
-msgstr "Clear all"
-
-#: src/ui/notifications.rs:1021
-msgid "No notifications"
-msgstr "No notifications"
-
-#: src/ui/notifications.rs:1031
-msgid "Do not disturb"
-msgstr "Do not disturb"
-
-#: src/ui/power.rs:39
+#: src/ui/modules/power.rs:46
 msgid "Lock"
 msgstr "Lock"
 
-#: src/ui/power.rs:39
+#: src/ui/modules/power.rs:46
 msgid "Lock the screen?"
 msgstr "Lock the screen?"
 
-#: src/ui/power.rs:40
+#: src/ui/modules/power.rs:47
 msgid "Log Out"
 msgstr "Log Out"
 
-#: src/ui/power.rs:40
+#: src/ui/modules/power.rs:47
 msgid "Log out now?"
 msgstr "Log out now?"
 
-#: src/ui/power.rs:41
+#: src/ui/modules/power.rs:48
 msgid "Suspend"
 msgstr "Suspend"
 
-#: src/ui/power.rs:41
+#: src/ui/modules/power.rs:48
 msgid "Suspend now?"
 msgstr "Suspend now?"
 
-#: src/ui/power.rs:42
+#: src/ui/modules/power.rs:49
 msgid "Restart"
 msgstr "Restart"
 
-#: src/ui/power.rs:42
+#: src/ui/modules/power.rs:49
 msgid "Restart now?"
 msgstr "Restart now?"
 
-#: src/ui/power.rs:43
+#: src/ui/modules/power.rs:50
 msgid "Shut Down"
 msgstr "Shut Down"
 
-#: src/ui/power.rs:43
+#: src/ui/modules/power.rs:50
 msgid "Shut down now?"
 msgstr "Shut down now?"
 
-#: src/ui/power.rs:103
-msgid "Power"
-msgstr "Power"
-
-#: src/ui/power.rs:149 src/ui/power.rs:155 src/ui/shield.rs:610
-#: src/ui/shield.rs:721
-msgid "Restart to update"
-msgstr "Restart to update"
-
-#: src/ui/power.rs:154 src/ui/shield.rs:720
+#: src/ui/modules/power.rs:51 src/ui/modules/shield.rs:528
 msgid "Restart and install the update now?"
 msgstr "Restart and install the update now?"
 
-#: src/ui/shield.rs:305
+#: src/ui/modules/power.rs:51 src/ui/modules/shield.rs:528
+#: src/ui/modules/shield.rs:694
+msgid "Restart to update"
+msgstr "Restart to update"
+
+#: src/ui/modules/power.rs:85 src/ui/modules/power.rs:169
+msgid "Power"
+msgstr "Power"
+
+#: src/ui/modules/shield.rs:342
 msgid "System image verified"
 msgstr "System image verified"
 
-#: src/ui/shield.rs:306
+#: src/ui/modules/shield.rs:343
 msgid "Not verified yet"
 msgstr "Not verified yet"
 
-#: src/ui/shield.rs:307
+#: src/ui/modules/shield.rs:344
 msgid "Update refused"
 msgstr "Update refused"
 
-#: src/ui/shield.rs:313
+#: src/ui/modules/shield.rs:350
 msgid "Signed with a key of the policy in force"
 msgstr "Signed with a key of the policy in force"
 
-#: src/ui/shield.rs:314
+#: src/ui/modules/shield.rs:351
 msgid "Not verified: installed from media"
 msgstr "Not verified: installed from media"
 
-#: src/ui/shield.rs:315
+#: src/ui/modules/shield.rs:352
 msgid "Not verified: no signature"
 msgstr "Not verified: no signature"
 
-#: src/ui/shield.rs:316
+#: src/ui/modules/shield.rs:353
 msgid "Not verified: its key is not in the policy"
 msgstr "Not verified: its key is not in the policy"
 
-#: src/ui/shield.rs:317
+#: src/ui/modules/shield.rs:354
 msgid "Not verified: fetched under a permissive policy"
 msgstr "Not verified: fetched under a permissive policy"
 
-#: src/ui/shield.rs:318
+#: src/ui/modules/shield.rs:355
 msgid "Not verified: the image is outside the policy's scope"
 msgstr "Not verified: the image is outside the policy's scope"
 
-#: src/ui/shield.rs:319
+#: src/ui/modules/shield.rs:356
 msgid "Not verified: the system was changed on this machine"
 msgstr "Not verified: the system was changed on this machine"
 
-#: src/ui/shield.rs:320
+#: src/ui/modules/shield.rs:357
 msgid "Not verified: waiting for the stable channel to be published"
 msgstr "Not verified: waiting for the stable channel to be published"
 
-#: src/ui/shield.rs:321
+#: src/ui/modules/shield.rs:358
 msgid "Not verified: this machine does not verify its updates"
 msgstr "Not verified: this machine does not verify its updates"
 
-#: src/ui/shield.rs:322
+#: src/ui/modules/shield.rs:359
 msgid "Signed, but pinned to one build: it receives no updates"
 msgstr "Signed, but pinned to one build: it receives no updates"
 
-#: src/ui/shield.rs:328
+#: src/ui/modules/shield.rs:365
 msgid "Up to date"
 msgstr "Up to date"
 
-#: src/ui/shield.rs:329
+#: src/ui/modules/shield.rs:366
 msgid "An update is available; it downloads at the next check"
 msgstr "An update is available; it downloads at the next check"
 
-#: src/ui/shield.rs:330
+#: src/ui/modules/shield.rs:367
 msgid "An update is ready; it installs when you restart"
 msgstr "An update is ready; it installs when you restart"
 
-#: src/ui/shield.rs:331
+#: src/ui/modules/shield.rs:368
 msgid "The update installs at the next restart"
 msgstr "The update installs at the next restart"
 
-#: src/ui/shield.rs:332
+#: src/ui/modules/shield.rs:369
 msgid "The last update was refused by the policy"
 msgstr "The last update was refused by the policy"
 
-#: src/ui/shield.rs:334
+#: src/ui/modules/shield.rs:371
 msgid "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
 msgstr "The offered version is held back: you went back from it, or it did not start. Only a newer one is offered"
 
-#: src/ui/shield.rs:336
+#: src/ui/modules/shield.rs:373
 msgid "This version is older than one this machine has run"
 msgstr "This version is older than one this machine has run"
 
-#: src/ui/shield.rs:343
+#: src/ui/modules/shield.rs:380
 msgid "The last check failed: network error"
 msgstr "The last check failed: network error"
 
-#: src/ui/shield.rs:344
+#: src/ui/modules/shield.rs:381
 msgid "The last check failed: registry error"
 msgstr "The last check failed: registry error"
 
-#: src/ui/shield.rs:345
+#: src/ui/modules/shield.rs:382
 msgid "The last check failed: refused by the policy"
 msgstr "The last check failed: refused by the policy"
 
-#: src/ui/shield.rs:346
+#: src/ui/modules/shield.rs:383
 msgid "The last check failed: storage error"
 msgstr "The last check failed: storage error"
 
-#: src/ui/shield.rs:347
+#: src/ui/modules/shield.rs:384
 msgid "The last check failed: internal error"
 msgstr "The last check failed: internal error"
 
-#: src/ui/shield.rs:353
+#: src/ui/modules/shield.rs:390
 msgid "No trust state yet: the first check has not run"
 msgstr "No trust state yet: the first check has not run"
 
-#: src/ui/shield.rs:355
+#: src/ui/modules/shield.rs:392
 msgid "The trust state file is not owned by the system and was ignored"
 msgstr "The trust state file is not owned by the system and was ignored"
 
-#: src/ui/shield.rs:357
+#: src/ui/modules/shield.rs:394
 msgid "The trust state file could not be read"
 msgstr "The trust state file could not be read"
 
-#: src/ui/shield.rs:358 src/ui/shield.rs:376
+#: src/ui/modules/shield.rs:395 src/ui/modules/shield.rs:413
 msgid "The update service did not answer"
 msgstr "The update service did not answer"
 
-#: src/ui/shield.rs:364
+#: src/ui/modules/shield.rs:401
 msgid "Not authorised"
 msgstr "Not authorised"
 
-#: src/ui/shield.rs:365
+#: src/ui/modules/shield.rs:402
 msgid "Another update request is running"
 msgstr "Another update request is running"
 
-#: src/ui/shield.rs:367
+#: src/ui/modules/shield.rs:404
 msgid "Nothing is downloaded yet; the update downloads at the next check"
 msgstr "Nothing is downloaded yet; the update downloads at the next check"
 
-#: src/ui/shield.rs:369
+#: src/ui/modules/shield.rs:406
 msgid "There is no previous version to go back to"
 msgstr "There is no previous version to go back to"
 
-#: src/ui/shield.rs:370
+#: src/ui/modules/shield.rs:407
 msgid "A program is blocking the restart; close it and try again"
 msgstr "A program is blocking the restart; close it and try again"
 
-#: src/ui/shield.rs:371
+#: src/ui/modules/shield.rs:408
 msgid "The request failed; the system journal says why"
 msgstr "The request failed; the system journal says why"
 
-#: src/ui/shield.rs:373
+#: src/ui/modules/shield.rs:410
 msgid "This security update was already postponed once, or can no longer be"
 msgstr "This security update was already postponed once, or can no longer be"
 
-#: src/ui/shield.rs:375
+#: src/ui/modules/shield.rs:412
 msgid "Only security updates can be postponed"
 msgstr "Only security updates can be postponed"
 
-#: src/ui/shield.rs:391
+#: src/ui/modules/shield.rs:434
 msgid "January"
 msgstr "January"
 
-#: src/ui/shield.rs:392
+#: src/ui/modules/shield.rs:435
 msgid "February"
 msgstr "February"
 
-#: src/ui/shield.rs:393
+#: src/ui/modules/shield.rs:436
 msgid "March"
 msgstr "March"
 
-#: src/ui/shield.rs:394
+#: src/ui/modules/shield.rs:437
 msgid "April"
 msgstr "April"
 
-#: src/ui/shield.rs:395
+#: src/ui/modules/shield.rs:438
 msgid "May"
 msgstr "May"
 
-#: src/ui/shield.rs:396
+#: src/ui/modules/shield.rs:439
 msgid "June"
 msgstr "June"
 
-#: src/ui/shield.rs:397
+#: src/ui/modules/shield.rs:440
 msgid "July"
 msgstr "July"
 
-#: src/ui/shield.rs:398
+#: src/ui/modules/shield.rs:441
 msgid "August"
 msgstr "August"
 
-#: src/ui/shield.rs:399
+#: src/ui/modules/shield.rs:442
 msgid "September"
 msgstr "September"
 
-#: src/ui/shield.rs:400
+#: src/ui/modules/shield.rs:443
 msgid "October"
 msgstr "October"
 
-#: src/ui/shield.rs:401
+#: src/ui/modules/shield.rs:444
 msgid "November"
 msgstr "November"
 
-#: src/ui/shield.rs:402
+#: src/ui/modules/shield.rs:445
 msgid "December"
 msgstr "December"
 
-#: src/ui/shield.rs:489
+#: src/ui/modules/shield.rs:478
 #, rust-format
 msgid "Version {version}"
 msgstr "Version {version}"
 
-#: src/ui/shield.rs:494
+#: src/ui/modules/shield.rs:479
 #, rust-format
 msgid "Built on {date}"
 msgstr "Built on {date}"
 
-#: src/ui/shield.rs:500
+#: src/ui/modules/shield.rs:482
 #, rust-format
 msgid "Last checked on {date}"
 msgstr "Last checked on {date}"
 
-#: src/ui/shield.rs:501
+#: src/ui/modules/shield.rs:483
 msgid "Never checked"
 msgstr "Never checked"
 
-#: src/ui/shield.rs:507
+#: src/ui/modules/shield.rs:490
 #, rust-format
 msgid "Host: {host}"
 msgstr "Host: {host}"
 
-#: src/ui/shield.rs:511
+#: src/ui/modules/shield.rs:494
 msgid "Signature policy in force"
 msgstr "Signature policy in force"
 
-#: src/ui/shield.rs:513
+#: src/ui/modules/shield.rs:496
 msgid "Signature policy not in force"
 msgstr "Signature policy not in force"
 
-#: src/ui/shield.rs:516
+#: src/ui/modules/shield.rs:499
 msgid "The policy is the one Athanor ships"
 msgstr "The policy is the one Athanor ships"
 
-#: src/ui/shield.rs:518
+#: src/ui/modules/shield.rs:501
 msgid "The policy was changed on this machine"
 msgstr "The policy was changed on this machine"
 
-#: src/ui/shield.rs:521
+#: src/ui/modules/shield.rs:504
 msgid "Secure Boot on"
 msgstr "Secure Boot on"
 
-#: src/ui/shield.rs:523
+#: src/ui/modules/shield.rs:506
 msgid "Secure Boot off: this machine runs in the declared degraded mode"
 msgstr "Secure Boot off: this machine runs in the declared degraded mode"
 
-#: src/ui/shield.rs:527
+#: src/ui/modules/shield.rs:510
 msgid "Automatic security updates are off: security fixes wait until someone installs them."
 msgstr "Automatic security updates are off: security fixes wait until someone installs them."
 
-#: src/ui/shield.rs:532
+#: src/ui/modules/shield.rs:515
 #, rust-format
 msgid "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
 msgstr "The security update is postponed, at most until {time}; then it installs at the next shutdown or restart."
 
-#: src/ui/shield.rs:612
-msgid "Postpone"
-msgstr "Postpone"
-
-#: src/ui/shield.rs:614
-msgid "Go back to the previous version"
-msgstr "Go back to the previous version"
-
-#: src/ui/shield.rs:616
-msgid "Automatic security updates"
-msgstr "Automatic security updates"
-
-#: src/ui/shield.rs:686
-msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
-msgstr "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
-
-#: src/ui/shield.rs:687
-msgid "Turn Off"
-msgstr "Turn Off"
-
-#: src/ui/shield.rs:726
+#: src/ui/modules/shield.rs:530
 msgid "Go back to the previous version and restart? This asks for an administrator's password."
 msgstr "Go back to the previous version and restart? This asks for an administrator's password."
 
-#: src/ui/shield.rs:727
+#: src/ui/modules/shield.rs:531
 msgid "Go back"
 msgstr "Go back"
 
-#: src/ui/tiling.rs:64
+#: src/ui/modules/shield.rs:534
+msgid "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+msgstr "Turn off automatic security updates? Security fixes will then wait until someone installs them, and this computer stays exposed until then. This applies to every user of this computer."
+
+#: src/ui/modules/shield.rs:535
+msgid "Turn Off"
+msgstr "Turn Off"
+
+#: src/ui/modules/shield.rs:689
+msgid "Automatic security updates"
+msgstr "Automatic security updates"
+
+#: src/ui/modules/shield.rs:693
+msgid "Postpone"
+msgstr "Postpone"
+
+#: src/ui/modules/shield.rs:697
+msgid "Go back to the previous version"
+msgstr "Go back to the previous version"
+
+#: src/ui/modules/tiling.rs:63 src/ui/modules/tiling.rs:74
 msgid "Tiling"
 msgstr "Tiling"
 
-#: src/ui/tiling.rs:65
+#: src/ui/modules/tiling.rs:75
 msgid "Tile windows"
 msgstr "Tile windows"
 
-#: src/ui/tray.rs:589
+#: src/ui/modules/tray.rs:750
 msgid "System tray"
 msgstr "System tray"
+
+#~ msgid "Clock"
+#~ msgstr "Clock"
 
 #~ msgid "Not verified: the project moved; this machine is moving with it"
 #~ msgstr "Not verified: the project moved; this machine is moving with it"

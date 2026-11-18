@@ -1,7 +1,7 @@
 # branch container-toolkit
-# version 1.20.1
+# version 1.20.2
 # repository https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/
-77eeec312cd9ed462ad45bf91f810f2f8b6d8d40808d1f6f498fd1e0d3f13966  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/libnvidia-container-tools-1.20.1-1.x86_64.rpm
-687b1954f9d864af079c4f3eb7533f78555154df2d584159b2a74bcbbc02c304  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/libnvidia-container1-1.20.1-1.x86_64.rpm
-6b3e062144a779080a92e9534afea1ff1b6ef1cb35a0fc4ce6147e46b6fdb842  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/nvidia-container-toolkit-1.20.1-1.x86_64.rpm
-1aa930baa3c6e7b8b054608b84e1645f13dd7c0f2f5f0724728780156bf102c3  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/nvidia-container-toolkit-base-1.20.1-1.x86_64.rpm
+af01a75035ada2dd34835f7fb5689724f5ad299095348c5436ef1071a5c16e9a  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/libnvidia-container-tools-1.20.2-1.x86_64.rpm
+0e7cfa7a63e9a4348931015b184104c9594f118c2649904d0341b65ddb0cb482  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/libnvidia-container1-1.20.2-1.x86_64.rpm
+109eb8439d1b25c6588a1cec0daf366a835262069bf15d56420ff125a078a977  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/nvidia-container-toolkit-1.20.2-1.x86_64.rpm
+69e4841173901fe7566a7376b806a262b279003d7d9dcbcbe5ea9ed426cd59f7  https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64/nvidia-container-toolkit-base-1.20.2-1.x86_64.rpm

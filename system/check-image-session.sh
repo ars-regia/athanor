@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run by .github/workflows/call-system-image.yml on the system image. Fails when IMAGE lacks the
-# session lock or the polkit agent of release 0.9 (cosmic-greeter, cosmic-idle and cosmic-osd on
+# session lock or the polkit agent of release 0.9 (cosmic-greeter, athanor-idle and cosmic-osd on
 # polkit 127's socket helper, ADR-0115), when cosmic-settings-daemon's sandbox leaves the runtime
 # directory read-only (the volume keys, #144), when athanor-portals.conf routes an interface to a
 # backend that cannot serve it or gives FileChooser none (Open and Save in Flatpak applications,

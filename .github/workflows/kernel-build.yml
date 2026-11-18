@@ -86,11 +86,13 @@ jobs:
       registry: ${{ steps.artifacts.outputs.registry }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Registry (system/kernel-artifacts.sh)
         run: echo "IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth" >> "$GITHUB_ENV"
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
 
       - id: key
         run: |
@@ -206,6 +208,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Build the kernel builder image
         # Rootless podman on the WSL runner has no systemd session: crun cannot create
@@ -261,8 +265,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         if: ${{ needs.inputs.outputs.reuse != 'true' }}
         with:
           name: kernel-boot
@@ -385,6 +391,8 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
       - name: Publish only from a trusted branch (system/kernel-artifacts.sh)
         # The signer identity the images trust, checked before anything is pushed rather than
@@ -397,16 +405,16 @@ jobs:
       - name: Registry (system/kernel-artifacts.sh)
         run: echo "IMAGE=$(bash system/kernel-artifacts.sh registry)/azoth" >> "$GITHUB_ENV"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: kernel-build
           path: out
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
 
-      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         if: ${{ needs.inputs.outputs.promoted == 'true' }}
         with:
           name: kernel-promotion
@@ -414,43 +422,16 @@ jobs:
 
       - name: Publish the four OCI images
         id: publish
-        # A scratch image holding only the RPMs of each group, digests in digests/; the
-        # guest kernel is an <nvr>-microvm tag of the same package as the kernel. The OCI
-        # labels bind the image to the commit and the NVR; the full pins go into the
-        # attestation (next step).
+        # forge/specs/azoth/publish.sh: a scratch image of the RPMs of each group, digests in
+        # digests/, each also tagged <nvr>-k<12 hex of the kernel digest> so that a digest a
+        # running Orchestrator pinned survives a republish of the NVR. The full pins go into
+        # the attestation (next step).
         env:
           BUILDAH_ISOLATION: chroot
           NVR_EXPECTED: ${{ needs.inputs.outputs.nvr }}
           # `:latest` follows the default branch, whatever it is called (re-audit decision 11).
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          nvr=$(cat out/nvr)
-          [[ $nvr == "$NVR_EXPECTED" ]] || { echo "NVR built ${nvr}, expected from the pins ${NVR_EXPECTED}"; exit 1; }
-          echo "${GH_TOKEN}" | buildah login -u "${GITHUB_ACTOR}" --password-stdin "${IMAGE%%/*}"
-          mkdir -p digests
-          for group in kernel devel debuginfo microvm; do
-            case $group in
-              kernel) repo=$IMAGE tag=$nvr latest=latest ;;
-              microvm) repo=$IMAGE tag="${nvr}-microvm" latest=latest-microvm ;;
-              *) repo="${IMAGE}-${group}" tag=$nvr latest=latest ;;
-            esac
-            ctr=$(buildah from scratch)
-            buildah copy "$ctr" "out/${group}/" /
-            buildah config \
-              --label org.opencontainers.image.title="azoth ${group}" \
-              --label org.opencontainers.image.version="${nvr}" \
-              --label org.opencontainers.image.revision="${GITHUB_SHA}" \
-              --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-              "$ctr"
-            buildah commit --omit-timestamp "$ctr" "${repo}:${tag}"
-            buildah push --digestfile "digests/${group}" "${repo}:${tag}"
-            if [[ $GITHUB_REF == "refs/heads/${DEFAULT_BRANCH}" ]]; then
-              buildah push "${repo}:${tag}" "docker://${repo}:${latest}"
-            fi
-            echo "${repo}@$(cat "digests/${group}")"
-            echo "${group}=$(cat "digests/${group}")" >> "$GITHUB_OUTPUT"
-          done
+        run: bash forge/specs/azoth/publish.sh out
 
       - name: Attest the promotion (ADR-0110)
         # The RPMs come from the merged pull request's run: a predicate of its own type names
@@ -560,8 +541,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
 
       - name: Resolve the kernel artifacts (system/kernel-artifacts.sh)
         # Only when publish did not just succeed: its answer cannot change the dispatch

@@ -1,0 +1,5 @@
+Lettore schermo attivo.
+Affiancamento
+Affianca le finestre pulsante di commutazione non premuto
+tabulazione
+Lettore schermo disattivato.

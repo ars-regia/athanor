@@ -1,0 +1,16 @@
+Screen reader on.
+Network
+Wi-Fi toggle button pressed
+Athanor Lab, connected button
+tab
+Corner Café button
+tab
+Home Network, secured button
+tab
+Office VPN toggle button not pressed
+tab
+Airplane mode toggle button not pressed
+tab
+Wi-Fi toggle button pressed
+tab
+Screen reader off.

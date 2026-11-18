@@ -13,7 +13,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 use zbus::proxy::MethodFlags;
-use zbus::zvariant::Value;
+use zbus::Variant;
 use zbus::{Connection, Proxy};
 
 use crate::mirror::{self, Snapshot, Source, TIMEOUT};
@@ -142,18 +142,18 @@ pub struct Profiles {
 
 /// The `Profile` of each entry of `Profiles`, `aa{sv}`; an entry of another shape is skipped.
 fn offered_profiles(props: &Props) -> Option<Vec<String>> {
-    let Value::Array(entries) = &**props.get("Profiles")? else {
+    let Variant::Array(entries) = &**props.get("Profiles")? else {
         return None;
     };
     Some(
         entries
             .iter()
             .filter_map(|entry| {
-                let Value::Dict(dict) = entry else {
+                let Variant::Dict(dict) = entry else {
                     return None;
                 };
-                match dict.get::<&str, Value>(&"Profile") {
-                    Ok(Some(Value::Str(name))) => Some(name.as_str().to_owned()),
+                match dict.get::<&str, Variant>(&"Profile") {
+                    Ok(Some(Variant::Str(name))) => Some(name.as_str().to_owned()),
                     _ => None,
                 }
             })
@@ -380,7 +380,7 @@ type Running = Pin<Box<dyn Future<Output = zbus::Result<()>> + Send>>;
 
 /// Every call allows interactive authorisation, so polkit can ask.
 async fn execute(connection: Connection, command: BatteryCommand) -> zbus::Result<()> {
-    let interactive = MethodFlags::AllowInteractiveAuth.into();
+    let interactive = MethodFlags::ALLOW_INTERACTIVE_AUTH;
     let call = async {
         match &command {
             BatteryCommand::SetProfile(profile) => {
@@ -389,7 +389,7 @@ async fn execute(connection: Connection, command: BatteryCommand) -> zbus::Resul
                     .call_with_flags::<_, _, ()>(
                         "Set",
                         interactive,
-                        &(PROFILES, "ActiveProfile", Value::from(profile.as_str())),
+                        &(PROFILES, "ActiveProfile", Variant::from(profile.as_str())),
                     )
                     .await
             }
@@ -418,12 +418,12 @@ mod tests {
     use std::time::Duration;
 
     use tokio::runtime::Handle;
-    use zbus::zvariant::{OwnedValue, Value};
+    use zbus::{OwnedVariant, Variant};
 
     use super::*;
     use crate::testbus::{self, TestBus};
 
-    fn device(entries: &[(&str, Value<'_>)]) -> Props {
+    fn device(entries: &[(&str, Variant<'_>)]) -> Props {
         entries
             .iter()
             .map(|(name, value)| {
@@ -435,11 +435,11 @@ mod tests {
             .collect()
     }
 
-    fn profile_list(names: &[&str]) -> Value<'static> {
-        Value::new(
+    fn profile_list(names: &[&str]) -> Variant<'static> {
+        Variant::new(
             names
                 .iter()
-                .map(|name| HashMap::from([("Profile", Value::from(name.to_string()))]))
+                .map(|name| HashMap::from([("Profile", Variant::from(name.to_string()))]))
                 .collect::<Vec<_>>(),
         )
     }
@@ -447,12 +447,12 @@ mod tests {
     #[test]
     fn a_present_battery_is_read_and_anything_else_hides_the_module() {
         let on_battery = device(&[
-            ("Type", Value::from(2u32)),
-            ("IsPresent", Value::from(true)),
-            ("Percentage", Value::from(72.0f64)),
-            ("State", Value::from(2u32)),
-            ("TimeToEmpty", Value::from(12300i64)),
-            ("TimeToFull", Value::from(0i64)),
+            ("Type", Variant::from(2u32)),
+            ("IsPresent", Variant::from(true)),
+            ("Percentage", Variant::from(72.0f64)),
+            ("State", Variant::from(2u32)),
+            ("TimeToEmpty", Variant::from(12300i64)),
+            ("TimeToFull", Variant::from(0i64)),
         ]);
         assert_eq!(
             battery(&on_battery),
@@ -468,23 +468,23 @@ mod tests {
         );
         assert_eq!(hours_minutes(12300), (3, 25));
         let absent = device(&[
-            ("Type", Value::from(2u32)),
-            ("IsPresent", Value::from(false)),
-            ("Percentage", Value::from(0.0f64)),
+            ("Type", Variant::from(2u32)),
+            ("IsPresent", Variant::from(false)),
+            ("Percentage", Variant::from(0.0f64)),
         ]);
         assert_eq!(battery(&absent), None);
         let ups = device(&[
-            ("Type", Value::from(3u32)),
-            ("IsPresent", Value::from(true)),
-            ("Percentage", Value::from(50.0f64)),
+            ("Type", Variant::from(3u32)),
+            ("IsPresent", Variant::from(true)),
+            ("Percentage", Variant::from(50.0f64)),
         ]);
         assert_eq!(battery(&ups), None);
         let charging = device(&[
-            ("Type", Value::from(2u32)),
-            ("IsPresent", Value::from(true)),
-            ("Percentage", Value::from(130.0f64)),
-            ("State", Value::from(1u32)),
-            ("TimeToFull", Value::from(-5i64)),
+            ("Type", Variant::from(2u32)),
+            ("IsPresent", Variant::from(true)),
+            ("Percentage", Variant::from(130.0f64)),
+            ("State", Variant::from(1u32)),
+            ("TimeToFull", Variant::from(-5i64)),
         ]);
         let charging = battery(&charging).unwrap();
         assert_eq!((charging.percent, charging.seconds), (100.0, None));
@@ -494,18 +494,18 @@ mod tests {
     #[test]
     fn a_property_of_the_wrong_type_hides_the_battery_instead_of_panicking() {
         let wrong = device(&[
-            ("Type", Value::from(2u32)),
-            ("IsPresent", Value::from("yes")),
-            ("Percentage", Value::from(50u32)),
+            ("Type", Variant::from(2u32)),
+            ("IsPresent", Variant::from("yes")),
+            ("Percentage", Variant::from(50u32)),
         ]);
         assert_eq!(battery(&wrong), None);
-        assert_eq!(profiles(&device(&[("Profiles", Value::from(3u32))])), None);
+        assert_eq!(profiles(&device(&[("Profiles", Variant::from(3u32))])), None);
     }
 
     #[test]
     fn profiles_keep_the_known_ones_in_order() {
         let props = device(&[
-            ("ActiveProfile", Value::from("balanced")),
+            ("ActiveProfile", Variant::from("balanced")),
             (
                 "Profiles",
                 profile_list(&["performance", "balanced", "turbo"]),
@@ -519,12 +519,12 @@ mod tests {
             })
         );
         let unknown = device(&[
-            ("ActiveProfile", Value::from("turbo")),
+            ("ActiveProfile", Variant::from("turbo")),
             ("Profiles", profile_list(&["turbo"])),
         ]);
         assert_eq!(profiles(&unknown), None);
         assert_eq!(
-            profiles(&device(&[("ActiveProfile", Value::from("balanced"))])),
+            profiles(&device(&[("ActiveProfile", Variant::from("balanced"))])),
             None
         );
     }
@@ -603,13 +603,13 @@ mod tests {
             Ok(())
         }
         #[zbus(property)]
-        fn profiles(&self) -> Vec<HashMap<String, OwnedValue>> {
+        fn profiles(&self) -> Vec<HashMap<String, OwnedVariant>> {
             ["power-saver", "balanced", "performance"]
                 .into_iter()
                 .map(|name| {
                     HashMap::from([(
                         "Profile".to_owned(),
-                        Value::from(name).try_to_owned().expect("owned value"),
+                        Variant::from(name).try_to_owned().expect("owned value"),
                     )])
                 })
                 .collect()
@@ -619,18 +619,14 @@ mod tests {
     async fn serve(bus: &TestBus) -> Connection {
         bus.builder()
             .serve_at(DISPLAY_DEVICE, FakeDevice)
-            .expect("device")
             .serve_at(
                 PROFILES_PATH,
                 FakeProfiles {
                     active: "balanced".into(),
                 },
             )
-            .expect("profiles")
             .name(UPOWER)
-            .expect("name")
             .name(PROFILES)
-            .expect("profiles name")
             .build()
             .await
             .expect("server")
@@ -728,9 +724,7 @@ mod tests {
                     levels: levels.clone(),
                 },
             )
-            .expect("session")
             .name(LOGIN1)
-            .expect("name")
             .build()
             .await
             .expect("logind");
