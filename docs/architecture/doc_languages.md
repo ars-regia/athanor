@@ -56,7 +56,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - The greeter shows a read-only label (`athanor-greeter-ui`, `ui.rs:88-122`).
     - `athanor-greeter-session` exports only `LANG`, `LANGUAGE`, `LC_MESSAGES` and `LC_TIME` from `/etc/locale.conf` and no XKB variable. The greeter cosmic-comp's own `~/.config/cosmic/com.system76.CosmicComp/v1/` under `/var/lib/greetd` is empty. So the greeter's layout follows neither `/etc/vconsole.conf` nor localed (inferred, spike S4).
     - The greeter's client binds the compositor's main socket (`/usr/libexec/athanor-greeter-client`), so it sees the keyboard-layout global.
-- **Input methods on cosmic-comp 1.8.0** (`src/state.rs:711-717`, tag `epoch-1.8.0`).
+- **Input methods on cosmic-comp 1.8.0** (`src/state.rs:708-714`, tag `epoch-1.8.0`).
   - **The globals.**
     - `zwp_input_method_manager_v2`, `zwp_virtual_keyboard_manager_v1` and `zcosmic_keyboard_layout_manager_v1` are offered only to clients that are not behind a security context (`client_not_sandboxed`).
     - `zwp_text_input_manager_v3` is offered to every client.
