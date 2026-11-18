@@ -46,7 +46,10 @@ users:
     uid: 1001
     shell: /bin/bash
     lock_passwd: true
-packages: [podman, git, tar, gzip]
+# openssl3-libs: from Fedora 45 openssl-libs is OpenSSL 4 (libssl.so.4); the runner's .NET
+# loads only libssl.so.3 and otherwise restarts forever with "OpenSSL is required for
+# algorithm 'RSAOpenSsl'", which installdependencies.sh does not catch.
+packages: [podman, git, tar, gzip, openssl3-libs]
 write_files:
   - path: /etc/fstab
     append: true
@@ -120,6 +123,7 @@ runcmd:
     install -d /opt/actions-runner
     tar -C /opt/actions-runner -xzf /tmp/runner.tar.gz
     /opt/actions-runner/bin/installdependencies.sh
+    test -e /usr/lib64/libssl.so.3
     install -d -o runner -g runner /home/runner/.cache
     ln -s /var/lib/runner/cache/azoth /home/runner/.cache/azoth
     chown -R runner:runner /opt/actions-runner /home/runner
