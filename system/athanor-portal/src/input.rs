@@ -94,7 +94,8 @@ impl<H: Host> Shared<H> {
     /// Ends the session `handle`, whatever ends it: dismisses its dialog, removes its object
     /// and updates `InputSessions`. The bar's Stop tells the frontend. A Stop that has closed
     /// the compositor's context already ([`End::StoppedClosed`]) ends only the connected
-    /// session of its ticket, the one whose context it closed. Any other end decides from the
+    /// session of its ticket, the one whose context it closed, and the bar's other Stop
+    /// ([`End::Stopped`]) ends no connected session. Any other end decides from the
     /// stage it removes, under the lock, and asks the compositor to close a context that
     /// stage holds; when that fails, the owner check included, one journal line says so and
     /// the compositor's revocation at the backend's change of owner covers it (PT15). `false`
@@ -106,7 +107,9 @@ impl<H: Host> Shared<H> {
                 (End::StoppedClosed(ticket), Some((Stage::Connected(_), now))) if now == ticket => {
                     sessions.close(handle)
                 }
-                (End::StoppedClosed(_), _) => None,
+                (End::StoppedClosed(_), _) | (End::Stopped, Some((Stage::Connected(_), _))) => {
+                    None
+                }
                 _ => sessions.close(handle),
             }
         };
@@ -146,7 +149,7 @@ impl<H: Host> Shared<H> {
 enum End {
     /// The frontend's `Close`, or the backend's own end.
     Closed,
-    /// The bar's Stop of a session with no open context.
+    /// The bar's Stop of a session that is not connected, which leaves a connected one as it is.
     Stopped,
     /// The bar's Stop, once `CloseSession` closed the open context of the session of this
     /// ticket.
@@ -565,17 +568,14 @@ impl<H: Host> Portal1<H> {
         self.0.bar(&header).await?;
         let handle = ObjectPath::try_from(id)
             .map_err(|_| fdo::Error::InvalidArgs(format!("no session {id}")))?;
-        let (stage, ticket) = self
-            .0
-            .sessions()
-            .current(&handle)
-            .ok_or_else(|| fdo::Error::InvalidArgs(format!("no session {id}")))?;
-        let Stage::Connected(_) = stage else {
-            // No open context to keep listed: the session ends at once, and `end` closes a
-            // context from the stage it removes under the lock, so a `ConnectToEIS` answered
-            // meanwhile finds no session and closes its late context itself.
-            self.0.end(server, &handle, End::Stopped).await;
+        // A session that is not connected has no open context to keep listed: it ends at once,
+        // decided under the lock from the stage removed, so a `ConnectToEIS` answered meanwhile
+        // finds no session and closes its late context itself.
+        if self.0.end(server, &handle, End::Stopped).await {
             return Ok(());
+        }
+        let Some((Stage::Connected(_), ticket)) = self.0.sessions().current(&handle) else {
+            return Err(fdo::Error::InvalidArgs(format!("no session {id}")));
         };
         // A connected session leaves that stage only by its end, so this `CloseSession` closes
         // the context that exists now.
@@ -676,6 +676,7 @@ mod tests {
         stranger: Connection,
         /// The serving connection, kept open for the test.
         _serving: Connection,
+        shared: Arc<Shared<TestHost>>,
         backend: String,
         asks: Arc<Mutex<Vec<Ask>>>,
     }
@@ -737,6 +738,7 @@ mod tests {
             stranger,
             backend: serving.unique_name().expect("name").to_string(),
             _serving: serving,
+            shared: service.0.clone(),
             asks,
         }
     }
@@ -1354,6 +1356,30 @@ mod tests {
             "the compositor holds a context for the stopped session"
         );
         assert!(rd.listed().await.is_empty());
+    }
+
+    /// A session connects between the bar's Stop reading its stage and ending it: the end,
+    /// decided under the lock, leaves a connected session to the `CloseSession` path, so a
+    /// Stop never ends one without the compositor's confirmation.
+    #[tokio::test]
+    async fn input_a_stop_that_finds_the_session_connected_leaves_it_listed() {
+        let rd = rd("stopraced", Some(Answer::Granted(KEYBOARD)), |_| ()).await;
+        rd.create(1).await;
+        rd.start(1).await;
+        let one = rd.connect(1).await.expect("fd");
+        assert!(
+            !rd.shared
+                .end(rd._serving.object_server(), &session(1), End::Stopped)
+                .await,
+            "a Stop ended a connected session"
+        );
+        assert_eq!(rd.listed().await.len(), 1, "stopped, but no longer listed");
+        assert_eq!(
+            rd.calls(),
+            [Call::Connect(session(1).to_string(), KEYBOARD)],
+            "nothing is closed on that path"
+        );
+        assert!(!ended(one));
     }
 
     #[tokio::test]

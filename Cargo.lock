@@ -632,6 +632,7 @@ name = "athanor-portal"
 version = "1.0.0"
 dependencies = [
  "athanor-unit",
+ "futures-util",
  "nix",
  "tokio",
  "tracing",
