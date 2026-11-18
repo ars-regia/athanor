@@ -512,6 +512,44 @@ fn eis_yields_a_key_to_a_physical_press() {
     run.stop();
 }
 
+/// The seat wins, physical or virtual (decision 33): a virtual keyboard's press of a key a
+/// context holds reaches the client after the release of the context's, and the context's next
+/// release reaches no client.
+#[test]
+fn eis_yields_a_key_to_a_virtual_press() {
+    let mut run = Running::start(None);
+    let (mut window, _) = focused_window(&mut run);
+    let typist = VirtualKeyboard::new(&mut window, &mut run, None);
+    let mut ei = Ei::sender(&mut run, "/session/1", 1, 1);
+
+    ei.key(&mut run, KEY_LEFTSHIFT, true);
+    window.roundtrip(&mut run);
+    let from = window.client.input.len();
+    typist.key(&mut window, &mut run, KEY_LEFTSHIFT, true);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input[from..],
+        [(KEY_LEFTSHIFT, false), (KEY_LEFTSHIFT, true)],
+        "the context's Shift is released before the virtual press"
+    );
+    typist.key(&mut window, &mut run, KEY_LEFTSHIFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.last(),
+        Some(&(KEY_LEFTSHIFT, false)),
+        "the virtual release reaches the client"
+    );
+    let from = window.client.input.len();
+    ei.key(&mut run, KEY_LEFTSHIFT, false);
+    window.roundtrip(&mut run);
+    assert_eq!(
+        window.client.input.len(),
+        from,
+        "the context's next release reaches no client"
+    );
+    run.stop();
+}
+
 /// The physical input wins for a button as for a key (decision 33), and a button one context
 /// holds is neither pressed again nor released by another.
 #[test]

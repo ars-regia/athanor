@@ -87,8 +87,9 @@ impl State {
         if key_state == KeyState::Pressed && self.drops_key(source) {
             return;
         }
-        // A physical press wins over an EIS context's hold of the key (decision 33).
-        if key_state == KeyState::Pressed && source == KeyboardSource::Physical {
+        // A press of the seat's, physical or virtual, wins over an EIS context's hold of the key
+        // (decision 33), as a button's does.
+        if key_state == KeyState::Pressed {
             self.eis_yield_key(code, time);
         }
         self.end_finished_popup_grab();
