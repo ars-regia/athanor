@@ -79,6 +79,9 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   destroyed (#1217, #1231).
 - Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
   directions, for keys and buttons; touch points never collide.
+- Proposed on 2026-11-18, awaiting the maintainer's approval: decision 38, the user's bindings
+  and the input and window settings the compositor follows, with OS13, as `doc_settings.md`
+  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -1921,7 +1924,8 @@ compositor and that the own compositor did not yet offer:
       runs the user's command in place of the default's. A binding the compositor refuses (a
       protected key, an action it does not carry out, a combination it cannot parse) is skipped and
       logged, and the others apply; a file it refuses whole (malformed, larger than its limit)
-      changes nothing and is logged. While the session is locked no user binding acts (L14).
+      changes nothing and is logged. While the session is locked no user binding acts: only the actions `Action::while_locked` names
+      act then (`src/bindings.rs`).
       The reader is an exception to SH2's containment outside `athanor-sulphur-client`, as
       decision 27's is: one source file of the compositor, `src/user_bindings.rs`, which reads
       these two files, writes nothing in the user's configuration and names no other COSMIC key,
@@ -1940,8 +1944,8 @@ compositor and that the own compositor did not yet offer:
         drag lock, the tap button map, click and scroll methods and disable while typing; for a
         tablet or a touchscreen the output it maps to and, for a tablet, left-handed
         orientation), and `[keyboard]` with Num Lock at the start of the session (SE15);
-      - `windows.toml`: the workspace and window keys of SE14 (the workspaces' layout and
-        wraparound, the action on typing, automatic tiling and its behaviour, the active window's
+      - `windows.toml`: the workspace and window keys of SE14 (the workspaces' mode, layout
+        and wraparound, the action on typing, automatic tiling and its behaviour, the active window's
         hint, focus follows the pointer and its delay, the pointer follows focus, and the edge
         snap threshold).
       A key that is absent takes the compositor's default, compiled into it: for the touchpad the
@@ -1956,7 +1960,8 @@ compositor and that the own compositor did not yet offer:
       a row only for a key the compositor applies, and a key it does not apply yet is absent
       rather than inert, as SE18 does for the keyboard aids. The files are Athanor's, so they need
       no exception to SH2. The compositor parses them with `toml`, already a dependency of the
-      workspace (`Cargo.toml`, `[workspace.dependencies]`), which it gains. Fixture tests: each
+      workspace (`Cargo.toml`, `[workspace.dependencies]`), which it gains, in place of a hand-written parser such as
+      `xkb_config`'s; that choice is open to the maintainer at the approval. Fixture tests: each
       key reaches the libinput device or the window rule it names in the fixture of OS6, an absent
       key gives the default, a refused file and a refused key leave the rest, and a change is
       followed without a restart.
