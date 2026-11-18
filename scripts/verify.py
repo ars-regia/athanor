@@ -3810,13 +3810,20 @@ AUDITED_LOCKFILES = "scripts/ci/audited-lockfiles.txt"
 
 
 def advisory_lock_problems(root=None):
-    """Every tracked Cargo.lock under forge/specs is listed in AUDITED_LOCKFILES, and every entry is tracked."""
+    """Every tracked Cargo.lock under forge/specs is listed in AUDITED_LOCKFILES, and every entry is tracked.
+    A member of the root workspace, or a crate its [patch] tables point at, is resolved by the root
+    Cargo.lock, which cargo-deny reads, and a lockfile of its own is never used, so it is not asked for."""
     root = root or ROOT
+    manifest = root / "Cargo.toml"
+    data = tomllib.loads(read(manifest)) if manifest.exists() else {}
+    members = set(data.get("workspace", {}).get("members", []))
+    members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
+                if isinstance(d, dict) and "path" in d}
     listed = [l.strip() for l in read(root / AUDITED_LOCKFILES).splitlines()
               if l.strip() and not l.lstrip().startswith("#")]
     tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "forge/specs"],
                              capture_output=True, text=True, check=True).stdout.split("\0")
-    found = {f for f in tracked if f.endswith("Cargo.lock")}
+    found = {f for f in tracked if f.endswith("Cargo.lock") and f.removesuffix("/Cargo.lock") not in members}
     problems = [f"{p}: a lockfile under forge/specs that no advisory check reads; add it to {AUDITED_LOCKFILES}"
                 for p in sorted(found - set(listed))]
     problems += [f"{AUDITED_LOCKFILES}: {p} does not exist" for p in listed if p not in found]

@@ -59,6 +59,18 @@ class AdvisoryLocks(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("does not exist", problems[0])
 
+    def test_a_lockfile_of_a_workspace_member_is_not_asked_for(self):
+        self.write("Cargo.toml", '[workspace]\nmembers = ["forge/specs/a"]\n')
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        self.write(LOCK)
+        self.assertEqual(verify.advisory_lock_problems(self.root), [])
+
+    def test_a_lockfile_of_a_patched_crate_is_not_asked_for(self):
+        self.write("Cargo.toml", '[patch.crates-io]\na = { path = "forge/specs/a" }\n')
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        self.write(LOCK)
+        self.assertEqual(verify.advisory_lock_problems(self.root), [])
+
 
 if __name__ == "__main__":
     unittest.main()
