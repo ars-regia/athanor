@@ -67,6 +67,8 @@ class SulphurWalksRunUnderSulphur(unittest.TestCase):
                     env = step.get("env", {})
                     if "ATHANOR_DOCK_BIN" in env:
                         toolkit.append(match[0])
+                        # rig.sh names the toolkit dock's transcripts from this path only.
+                        self.assertEqual(env["ATHANOR_DOCK_BIN"], "/out/toolkit-dock/athanor-dock")
                     with self.subTest(step=match[0]):
                         self.assertEqual(env.get("RIG_COMPOSITOR"), "athanor")
                         self.assertNotIn("if", step)
