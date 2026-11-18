@@ -54,36 +54,41 @@ msgstr "Il motivo è nel registro di sistema."
 msgid "Running applications"
 msgstr "Applicazioni in esecuzione"
 
-#: ../../../../system/athanor-apps/src/row.rs:160 src/toolkit/dock.rs:391
+#: ../../../../system/athanor-apps/src/row.rs:160
+#: ../../../../system/athanor-apps/src/sal.rs:163
 msgid "Running"
 msgstr "In esecuzione"
 
-#: ../../../../system/athanor-apps/src/row.rs:388 src/toolkit/dock.rs:691
+#: ../../../../system/athanor-apps/src/row.rs:388
+#: ../../../../system/athanor-apps/src/sal.rs:303
 #, rust-format
 msgid "Minimise {title}"
 msgstr "Riduci a icona {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:392 src/toolkit/dock.rs:702
+#: ../../../../system/athanor-apps/src/row.rs:392
+#: ../../../../system/athanor-apps/src/sal.rs:314
 #, rust-format
 msgid "Close {title}"
 msgstr "Chiudi {title}"
 
-#: ../../../../system/athanor-apps/src/row.rs:419 src/toolkit/dock.rs:719
+#: ../../../../system/athanor-apps/src/row.rs:419
+#: ../../../../system/athanor-apps/src/sal.rs:331
 msgid "Open"
 msgstr "Apri"
 
-#: ../../../../system/athanor-apps/src/row.rs:421 src/toolkit/dock.rs:721
+#: ../../../../system/athanor-apps/src/row.rs:421
+#: ../../../../system/athanor-apps/src/sal.rs:333
 msgid "New Window"
 msgstr "Nuova finestra"
 
-#: src/toolkit/dock.rs:407 src/toolkit/dock.rs:799 src/ui/surface.rs:266
+#: src/toolkit/dock.rs:326 src/toolkit/dock.rs:634 src/ui/surface.rs:292
 msgid "Dock"
 msgstr "Dock"
 
-#: src/toolkit/dock.rs:730 src/ui/mod.rs:245
+#: src/toolkit/dock.rs:579 src/ui/mod.rs:256
 msgid "Unpin from Dock"
 msgstr "Rimuovi dal dock"
 
-#: src/toolkit/dock.rs:731 src/ui/mod.rs:247
+#: src/toolkit/dock.rs:581 src/ui/mod.rs:258
 msgid "Pin to Dock"
 msgstr "Aggiungi al dock"

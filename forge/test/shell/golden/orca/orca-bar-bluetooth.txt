@@ -1,0 +1,13 @@
+Screen reader on.
+Bluetooth check box checked.
+tab
+Headphones, connected button.
+tab
+Keyboard button.
+tab
+Phone button.
+tab
+Speaker button.
+tab
+Bluetooth check box checked.
+Screen reader off.

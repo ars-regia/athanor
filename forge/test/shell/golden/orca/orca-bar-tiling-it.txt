@@ -1,0 +1,4 @@
+Lettore schermo attivo.
+Affianca le finestre casella di spunta non spuntata.
+tabulazione
+Lettore schermo disattivato.

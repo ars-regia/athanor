@@ -4,6 +4,9 @@ Applicazioni button.
 venerdì 18 settembre 2026, 10:00 contratto button.
 opens popup
 contratto
+Sorgente di input: English (US) contratto button.
+opens popup
+contratto
 Accessibilità contratto button.
 opens popup
 contratto
@@ -16,5 +19,4 @@ contratto
 Immagine di sistema verificata contratto button.
 opens popup
 contratto
-Spazi di lavoro button.
 Lettore schermo disattivato.

@@ -490,6 +490,7 @@ pub fn start(
     }
     state.session_calls = crate::session_calls::start(state.lock_epoch.clone());
     state.keyboard_monitor.events = crate::keyboard_monitor::start(&event_loop.handle());
+    crate::eis::start(&event_loop.handle());
     tracing::info!(gpu = %path.display(), %render_node, %seat, nvidia, "drawing on the GPU through KMS");
 
     crate::wl_drm::global(&dh, render_node, &dmabuf_formats);
@@ -719,6 +720,7 @@ impl State {
         self.kept_keys.clear();
         self.super_tap = None;
         self.aids_paused();
+        self.eis_suspend();
     }
 
     /// Hands `process_input_event` what libinput queued without its file descriptor turning

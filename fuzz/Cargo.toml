@@ -34,6 +34,8 @@ athanor-fuzz-entries = { path = "../system/athanor-fuzz-entries", default-featur
 # parse the wire as the shipped one does, with the wire parser that rejects a null its
 # signature forbids (its PATCHES.md). The same directory as the root entry, not a copy.
 [patch.crates-io]
+# The bar's accessibility tree goes through Sal's patched AT-SPI bridge (its vendor/README.md).
+accesskit_atspi_common = { path = "../system/athanor-sal/vendor/accesskit_atspi_common" }
 wayland-backend = { path = "../forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/vendor/wayland-backend" }
 
 [[bin]]

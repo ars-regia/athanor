@@ -77,13 +77,20 @@ BUTTONS = {"button", "push button", "toggle button", "check box", "radio button"
 # that label counts as part of the switch. Both rules hold only for a check box that names a
 # switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the control
 # center (orca_compare.CONTROL_CENTER_SWITCHES and CONTROL_CENTER_FIXTURE_SWITCHES; maintainer,
-# 2026-11-14), whose toggle button is the
+# 2026-11-14) or of the bar (orca_compare.BAR_SWITCHES), whose toggle button is the
 # role W3C Core-AAM 1.2 maps ARIA's switch to: a real check box, whatever its label, said as a
 # toggle button still fails. Nor does AccessKit give a toggle button
 # the `checkable` state (accesskit_atspi_common 0.21.0, node.rs:336, which adds it only to a
 # toggled node of another role): for a gallery's switch its absence is a note (maintainer,
 # 2026-11-05, #648; docs/spikes/t1-own-toolkit.md, "AccessKit gaps").
 SWITCH = ("check box", "toggle button")
+# GTK 4.20's PopoverMenu says each entry of its menu a menu item, a check or a radio entry with
+# the `checkable` state, where W3C Core-AAM 1.2 maps ARIA's menuitemcheckbox and menuitemradio to
+# AT-SPI's check menu item and radio menu item. The maintainer decided on 2026-11-15 that a
+# checkable menu item of the reference equals a check menu item and a radio menu item of the
+# transcript, and that the toolkit keeps the roles Core-AAM prescribes; a menu item that is not
+# checkable is still neither.
+CHECKABLE_MENU_ITEM = {"check menu item", "radio menu item"}
 # A disabled control takes no focus (doc_own_stack.md, lines 506-508: "it takes neither the focus
 # nor the pointer"), where GTK keeps an insensitive widget focusable. A control disabled in both
 # trees, neither sensitive in the reference nor enabled or sensitive in the transcript, may lack
@@ -101,6 +108,16 @@ EXPECTED_DIFFERENCES = {}
 # publish elsewhere still fails as missing.
 INDICATOR = "the toolkit draws a scroll indicator, not a scroll bar (maintainer, 2026-11-05, #982)"
 INDICATOR_PAGES = {"lists"}
+# GTK 4.20's calendar leaves its four arrow buttons unnamed, which SH13 fails; the toolkit's
+# calendar names them from its CalendarText. The maintainer decided on 2026-11-13 (#1122) that
+# an unnamed button of the bar's calendar references matches the transcript's named button at the
+# same position: the k-th unnamed button of the reference, the k-th named button of the
+# transcript that no element of the reference names. The rule holds only for the references it
+# names, and for the gallery's calendar page, which shows the same two calendars, so that an
+# unnamed button anywhere else still fails as missing.
+ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
+ARROWS_REFERENCES = {"atspi-bar-calendar", "atspi-bar-calendar-it"}
+ARROWS_PAGES = {"calendar"}
 # A row of a list.
 ROW = "list item"
 # The states that make a row a thing to choose, not a heading.
@@ -198,14 +215,33 @@ def known_absence(state, ref, node):
     return None
 
 
+def checkable_menu_item(ref, node):
+    """A checkable menu item of the reference said as a check or radio menu item."""
+    return (
+        ref["role"] == "menu item"
+        and "checkable" in ref["states"]
+        and node["role"] in CHECKABLE_MENU_ITEM
+    )
+
+
 def same_role(a, b):
     return a == b or any(a in group and b in group for group in SAME_ROLE)
 
 
-def compare(reference, transcript, exempt=None, indicator=False):
+def arrow_counterparts(reference, candidates):
+    """The ARROWS rule: the id of each unnamed button of the reference, mapped to the named
+    button of `candidates` at its position among those no element of the reference names."""
+    names = {ref["name"] for ref in reference}
+    unnamed = [ref for ref in reference if same_role(ref["role"], "button") and not ref["name"]]
+    named = [node for node in candidates
+             if same_role(node["role"], "button") and node["name"] and node["name"] not in names]
+    return {id(ref): node for ref, node in zip(unnamed, named)}
+
+
+def compare(reference, transcript, exempt=None, indicator=False, arrows=False):
     """Returns (lines, failures): a verdict per element of the reference, and the failures.
     `exempt` maps the name of an element decision 28 hides to its (cause, issue); `indicator`
-    applies the scroll-indicator rule of INDICATOR_PAGES."""
+    applies the scroll-indicator rule of INDICATOR_PAGES, `arrows` the ARROWS rule."""
     exempt = exempt or {}
     candidates = spoken(transcript)
     lines, failures = [], []
@@ -216,6 +252,7 @@ def compare(reference, transcript, exempt=None, indicator=False):
         f"exemption {name!r} names no element of the reference"
         for name in sorted(set(exempt) - {ref["name"] for ref in spoken(reference)})
     ]
+    counterparts = arrow_counterparts(spoken(reference), candidates) if arrows else {}
     bars = set()
     if indicator and not any(node["role"] == "scroll bar" for node in transcript):
         bars = in_scroll_bar(reference)
@@ -224,14 +261,20 @@ def compare(reference, transcript, exempt=None, indicator=False):
             lines.append(f"{ref['role']} {ref['name']!r}: no counterpart; note: {INDICATOR}")
             continue
         # Among the nodes of its name, the one of its role, then one of a role said alike (a
-        # toolkit's frame and its panel may share the name of GTK's grouping), then any
-        # (maintainer decision, 2026-11-14).
+        # toolkit's frame and its panel may share the name of GTK's grouping), then a switch's
+        # toggle button (SWITCH), so that a popover's frame named as its switch does not take
+        # its place, then any (maintainer decision, 2026-11-14).
         named = [node for node in candidates if node["name"] == ref["name"]]
         match = (
             next((node for node in named if node["role"] == ref["role"]), None)
             or next((node for node in named if same_role(node["role"], ref["role"])), None)
+            or next(
+                (node for node in named if gallery_switch(ref["role"], node["role"], ref["name"])),
+                None,
+            )
             or next(iter(named), None)
         )
+        match = counterparts.get(id(ref), match)
         label = f"{ref['role']} {ref['name']!r}"
         if ref["name"] in exempt:
             cause, issue = exempt[ref["name"]]
@@ -249,9 +292,12 @@ def compare(reference, transcript, exempt=None, indicator=False):
             continue
         candidates.remove(match)
         problems, notes = [], []
+        if id(ref) in counterparts:
+            notes.append(f"named {match['name']!r}: {ARROWS}")
         if not (
             same_role(match["role"], ref["role"])
             or gallery_switch(ref["role"], match["role"], ref["name"])
+            or checkable_menu_item(ref, match)
         ):
             problems.append(f"role {match['role']!r}")
         elif match["role"] != ref["role"]:
@@ -300,7 +346,9 @@ def gallery_problems(references, transcripts, lang):
         reference, transcript = (
             json.loads(path.read_text(encoding="utf-8")) for path in paths.values()
         )
-        found, failed = compare(reference, transcript, indicator=page in INDICATOR_PAGES)
+        found, failed = compare(
+            reference, transcript, indicator=page in INDICATOR_PAGES, arrows=page in ARROWS_PAGES
+        )
         lines += [f"{page}: {line}" for line in found]
         issue = EXPECTED_DIFFERENCES.get(page)
         if issue is None:
@@ -331,7 +379,8 @@ def main(argv):
         if own:
             preset, dock, lang = (None if v == "-" else v for v in own[1:])
             exempt = exemptions(preset, dock, lang)
-        lines, failures = compare(reference, transcript, exempt)
+        arrows = Path(argv[0]).stem in ARROWS_REFERENCES
+        lines, failures = compare(reference, transcript, exempt, arrows=arrows)
     for line in lines:
         print(line)
     for line in failures:

@@ -36,7 +36,7 @@ use smithay::desktop::utils::{
     with_surfaces_surface_tree, OutputPresentationFeedback,
 };
 use smithay::desktop::{
-    layer_map_for_output, LayerSurface, PopupManager, Space, Window, WindowSurfaceType,
+    layer_map_for_output, LayerSurface, PopupGrab, PopupManager, Space, Window, WindowSurfaceType,
 };
 use smithay::input::keyboard::Keycode;
 use smithay::input::pointer::CursorImageStatus;
@@ -133,6 +133,9 @@ pub struct State {
 
     pub space: Space<Window>,
     pub popups: PopupManager,
+    /// The last popup grab that took the keyboard: a popup destroyed under it hands the keyboard
+    /// to the grab's current popup (`popup_destroyed`).
+    pub popup_grab: Option<PopupGrab<Self>>,
     pub seat: Seat<Self>,
     /// The serial of the newest key or button event sent to a client.
     pub last_input_serial: Option<Serial>,
@@ -168,6 +171,8 @@ pub struct State {
     pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
     pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The EIS contexts of the portal backend's sessions (`eis.rs`).
+    pub(crate) eis: crate::eis::Eis,
     /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
     pub aids: crate::aids::Aids,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
@@ -449,6 +454,7 @@ impl State {
             clock,
             space: Space::default(),
             popups: PopupManager::default(),
+            popup_grab: None,
             seat,
             last_input_serial: None,
             kept_keys: Vec::new(),
@@ -465,6 +471,7 @@ impl State {
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            eis: Default::default(),
             aids: Default::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
@@ -1732,6 +1739,15 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `client` has no identity though it could have one: it connected outside a security
+/// context and its process could not be read, or it has no client state. A confined client has
+/// none by design.
+pub fn unidentified(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_none_or(|data| !data.confined && data.identity.is_none())
 }
 
 /// Whether `a` and `b` connected through security contexts that name one application instance:
