@@ -126,6 +126,33 @@ class Own(unittest.TestCase):
         )
         self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
 
+    def test_an_underscore_dev_dependency_does_not_count(self):
+        self.write(
+            "bar/Cargo.toml",
+            '[package]\nname = "athanor-bar"\n\n[dependencies]\nzbus = "5"\n'
+            '\n[dev_dependencies]\nathanor-style = { path = "../style" }\n',
+        )
+        self.assertNotIn("athanor-bar", verify.toolkit_crates(self.root)[0])
+
+    def test_an_underscore_build_dependency_counts(self):
+        self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[build_dependencies]\n'
+                   'gtk4 = "0.10"\n')
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("athanor-kiosk: reaches gtk4", problems[0])
+
+    def test_a_subcrate_of_a_toolkit_counts(self):
+        for sub in ("gtk4-sys", "libadwaita-sys", "iced_core"):
+            with self.subTest(sub=sub):
+                self.write("Cargo.lock", LOCK.replace('name = "gtk4"', f'name = "{sub}"')
+                           .replace('dependencies = ["gtk4"]', f'dependencies = ["{sub}"]'))
+                self.assertEqual(verify.toolkit_crates(self.root)[0].get("athanor-style"), {sub})
+
+    def test_a_crate_that_only_shares_a_prefix_does_not_count(self):
+        self.write("Cargo.lock", LOCK.replace('name = "gtk4"', 'name = "gtk4ish"')
+                   .replace('dependencies = ["gtk4"]', 'dependencies = ["gtk4ish"]'))
+        self.assertNotIn("athanor-style", verify.toolkit_crates(self.root)[0])
+
     def test_an_entry_that_no_longer_applies_fails(self):
         self.write(
             verify.OWN_ALLOW, "crate athanor-style #1292\ncrate athanor-bar #1292\n"

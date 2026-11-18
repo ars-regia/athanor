@@ -6593,6 +6593,11 @@ OWN_ALLOW = "forge/config/own-allow.txt"
 OWN_REFUSED_CRATES = {"gtk4", "libadwaita", "libcosmic", "iced"}
 
 
+def own_refused(name):
+    """NAME is a refused toolkit or one of its subcrates (gtk4-sys, libadwaita-sys, iced_core)."""
+    return name in OWN_REFUSED_CRATES or re.match(r"(gtk4|libadwaita|iced)[-_]", name) is not None
+
+
 def third_party_cargo(path):
     """A manifest or lockfile of a crate Athanor vendors or packages from upstream."""
     return "/vendor/" in path or "/SOURCES/" in path
@@ -6600,10 +6605,9 @@ def third_party_cargo(path):
 
 def manifest_dependencies(manifest, renames, kinds):
     """The package names of the KINDS tables of MANIFEST (e.g. "dependencies"), in any target
-    table. RENAMES maps a [workspace.dependencies] key to its package, for `workspace = true`."""
-    targets = list(manifest.get("target", {}).values())
+    table and in the underscore spelling. RENAMES maps a [workspace.dependencies] key to its package, for `workspace = true`."""
     out = set()
-    for table in [manifest.get(k, {}) for k in kinds] + [t.get(k, {}) for t in targets for k in kinds]:
+    for _, table in dependency_tables(manifest, kinds):
         for key, dep in table.items():
             dep = dep if isinstance(dep, dict) else {}
             out.add(dep.get("package") or (renames.get(key, key) if dep.get("workspace") else key))
@@ -6662,12 +6666,12 @@ def toolkit_crates(root=None):
                     if key not in seen:
                         seen.add(key)
                         stack.append(dep)
-                        if dep["name"] in OWN_REFUSED_CRATES:
+                        if own_refused(dep["name"]):
                             hits.setdefault(package["name"], set()).add(dep["name"])
     unlocked = []
     for name in sorted(n for n in manifests if re.match(r"athanor[-_]", n) and n not in locked):
-        direct = OWN_REFUSED_CRATES & manifest_dependencies(manifests[name], renames,
-                                                            ("dependencies", "build-dependencies"))
+        direct = set(filter(own_refused, manifest_dependencies(manifests[name], renames,
+                                                               ("dependencies", "build-dependencies"))))
         if direct:
             hits[name] = direct
         else:
