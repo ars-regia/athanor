@@ -3819,8 +3819,8 @@ def advisory_lock_problems(root=None):
     members = set(data.get("workspace", {}).get("members", []))
     members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
                 if isinstance(d, dict) and "path" in d}
-    listed = [l.strip() for l in read(root / AUDITED_LOCKFILES).splitlines()
-              if l.strip() and not l.lstrip().startswith("#")]
+    listed = [line.strip() for line in read(root / AUDITED_LOCKFILES).splitlines()
+              if line.strip() and not line.lstrip().startswith("#")]
     tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "forge/specs"],
                              capture_output=True, text=True, check=True).stdout.split("\0")
     found = {f for f in tracked if f.endswith("Cargo.lock") and f.removesuffix("/Cargo.lock") not in members}
