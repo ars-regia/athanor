@@ -634,6 +634,14 @@ dependencies = [
 [[package]]
 name = "athanor-portal"
 version = "1.0.0"
+dependencies = [
+ "athanor-unit",
+ "futures-util",
+ "nix",
+ "tokio",
+ "tracing",
+ "zbus 6.2.1",
+]
 
 [[package]]
 name = "athanor-preview"
