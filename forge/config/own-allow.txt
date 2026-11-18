@@ -1,7 +1,8 @@
 # What is not yet Athanor's own (ADR-0141 decision 7), one entry per line: `rpm|crate NAME #ISSUE`.
 # rpm: a cosmic-* RPM, pop-launcher, gtk-layer-shell, gtk4-layer-shell or xdg-user-dirs-gtk that
 # the system image may still hold (forge/scripts/check_image_own.py, on every image build).
-# crate: an athanor-* crate whose dependencies, dev-dependencies aside, still reach gtk4,
+# crate: a crate built from the repository, athanor-* or not, whose dependencies,
+# dev-dependencies aside, still reach gtk4,
 # libadwaita, libcosmic or iced, or a subcrate of one such as gtk4-sys or iced_core
 # (scripts/verify.py own, on every pull request).
 # The list only shrinks: an entry that no longer applies leaves it, and a pull request adds none.
@@ -38,3 +39,4 @@ crate athanor-recovery #1292
 crate athanor-style #1292
 crate athanor-sulphur-client #1292
 crate athanor-wallpaper #1292
+crate calmo-cosmic-theme #1292

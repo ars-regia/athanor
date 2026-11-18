@@ -104,6 +104,20 @@ class Own(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("athanor-bar: reaches gtk4", problems[0])
 
+    def test_a_crate_built_here_counts_whatever_its_name(self):
+        self.write(
+            "Cargo.lock",
+            LOCK + '\n[[package]]\nname = "xdg-desktop-portal-athanor"\n'
+            'version = "1.0.0"\ndependencies = ["gtk4"]\n',
+        )
+        self.write(
+            "portal/Cargo.toml",
+            '[package]\nname = "xdg-desktop-portal-athanor"\n\n[dependencies]\ngtk4 = "0.10"\n',
+        )
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("xdg-desktop-portal-athanor: reaches gtk4", problems[0])
+
     def test_a_build_dependency_counts(self):
         self.write(
             "bar/Cargo.toml",

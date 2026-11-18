@@ -6589,7 +6589,7 @@ def check_line_citations():
 
 
 OWN_ALLOW = "forge/config/own-allow.txt"
-# The toolkits an athanor-* crate may not reach (ADR-0141 decision 7).
+# The toolkits a crate built from the repository may not reach (ADR-0141 decision 7).
 OWN_REFUSED_CRATES = {"gtk4", "libadwaita", "libcosmic", "iced"}
 
 
@@ -6622,7 +6622,8 @@ def dev_only_dependencies(manifest, renames):
 
 
 def toolkit_crates(root=None):
-    """({athanor-* crate: the refused toolkits it reaches}, [athanor-* crates no lockfile holds]),
+    """({crate: the refused toolkits it reaches}, [crates no lockfile holds]), for every crate
+    built from the repository, athanor-* or not (xdg-desktop-portal-athanor, calmo-cosmic-theme),
     over every manifest and lockfile of the repository but the vendored and packaged ones. A
     lockfile holds the optional dependencies of every feature, so a crate counts while any
     feature reaches a toolkit; the dev-dependencies of a member are left out, as they are not
@@ -6658,7 +6659,7 @@ def toolkit_crates(root=None):
                     yield from (c for c in by_name.get(name, []) if not version or c["version"] == version[0])
 
         for package in packages:
-            if "source" in package or not re.match(r"athanor[-_]", package["name"]):
+            if "source" in package:
                 continue
             seen, stack = set(), [package]
             while stack:
@@ -6670,7 +6671,7 @@ def toolkit_crates(root=None):
                         if own_refused(dep["name"]):
                             hits.setdefault(package["name"], set()).add(dep["name"])
     unlocked = []
-    for name in sorted(n for n in manifests if re.match(r"athanor[-_]", n) and n not in locked):
+    for name in sorted(n for n in manifests if n not in locked):
         direct = set(filter(own_refused, manifest_dependencies(manifests[name], renames,
                                                                ("dependencies", "build-dependencies"))))
         if direct:
@@ -6696,7 +6697,7 @@ def own_base_entries(root, base, parse):
 
 
 def own_problems(root=None, base=None):
-    """ADR-0141 decision 7 on the crates: every athanor-* crate that reaches a refused toolkit is
+    """ADR-0141 decision 7 on the crates: every crate built from the repository that reaches a refused toolkit is
     listed in OWN_ALLOW, every crate entry still reaches one, and against BASE the list adds no
     entry. The rpm entries are checked on the built image (forge/scripts/check_image_own.py)."""
     root = Path(root or ROOT)
@@ -6724,7 +6725,7 @@ def own_problems(root=None, base=None):
     return problems
 
 
-@check("own", "No athanor-* crate reaches gtk4, libadwaita, libcosmic or iced unless own-allow.txt lists it, and the list only shrinks (ADR-0141 decision 7)")
+@check("own", "No crate built from the repository reaches gtk4, libadwaita, libcosmic or iced unless own-allow.txt lists it, and the list only shrinks (ADR-0141 decision 7)")
 def check_own():
     r = Result()
     for problem in own_problems(base=BASE_REF):
