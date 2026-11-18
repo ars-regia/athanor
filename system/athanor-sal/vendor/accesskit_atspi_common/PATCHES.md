@@ -2,7 +2,7 @@
 
 The published crate `accesskit_atspi_common` 0.21.0 (crates.io, `MIT OR Apache-2.0`, sha256
 `52c182f9c282ac9c5638d876d551d15e5f7d397ec263349a0c6a2b61595dd5e4`, AccessKit commit
-`ce8164ba92995cfa86005b6259115e08c8244253`, `adapters/atspi-common`), with two changes. The
+`ce8164ba92995cfa86005b6259115e08c8244253`, `adapters/atspi-common`), with three changes. The
 licence files come from the AccessKit repository at that commit, as the published crate carries
 none. `[patch.crates-io]` in the repository's root `Cargo.toml` and in
 `system/athanor-sal/gallery/Cargo.toml` puts it in place of the published crate.
@@ -113,8 +113,54 @@ fails without it.
 No AccessKit issue or pull request covers this order as of 2026-11-13; proposing it is the
 maintainer's decision.
 
+## 3. The expanded state with the focus
+
+### Why
+
+GTK 4.20 reports `state-changed:expanded` on a menu button the first time it takes the focus,
+and Orca says "collapsed" after the button then, and not when it takes the focus again: its
+reference walks of the bar, the dock and the gallery hold that line once for each button
+(`forge/test/shell/golden/orca/`). The bridge
+reports the expanded state only when it changes, so Orca never says it for a Sal surface, and
+AX6 of `doc_accessibility.md` asks for a control's state, expanded included, as GTK conveys it.
+Neither 0.21.1 nor AccessKit's main of 2026-11-09 reports it with the focus.
+
+### The change
+
+`src/adapter.rs`, `AdapterChangeHandler::focus_moved`: a node that takes the focus for the first
+time since it was added, and has an expanded state, reports it after the focus. `Adapter` keeps
+the nodes that have taken the focus (`focused_once`), and `remove_node` forgets a removed one.
+The diff below is the focus change; the field, its two helpers and the line in `remove_node`
+go with it.
+
+```diff
+--- a/src/adapter.rs
++++ b/src/adapter.rs
+@@ -325,5 +325,9 @@
+         if let Some(node) = new_node {
+             self.adapter
+                 .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Focused, true));
++            if let Some(expanded) = node.data().is_expanded() {
++                if self.adapter.first_focus(node.id()) {
++                    self.adapter
++                        .emit_object_event(node.id(), ObjectEvent::StateChanged(State::Expanded, expanded));
++                }
++            }
+             self.emit_text_selection_change(None, node);
+         }
+```
+
+`athanor-sal`'s test `a11y::tests::a_menu_button_taking_the_focus_reports_its_expanded_state`
+fails without it.
+
+### Upstream
+
+No AccessKit issue or pull request covers it as of 2026-11-16; proposing it is the maintainer's
+decision.
+
 ## When it goes
 
 With the first release of `accesskit_atspi_common` that maps both the expanded state and
-has-popup and emits the focus before the window activation: remove this directory, both `[patch.crates-io]` entries, the root workspace's
+has-popup, emits the focus before the window activation and reports the expanded state with the
+focus: remove this directory, both `[patch.crates-io]` entries, the root workspace's
 `exclude` entry and `GALLERY_PATCH` in `scripts/verify.py`, and update the lockfiles with cargo.

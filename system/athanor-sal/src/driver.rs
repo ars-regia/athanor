@@ -11,10 +11,14 @@ mod modifiers;
 pub use modifiers::KeyModifiers;
 
 use crate::a11y::{leave, rejoining, tree_update, tree_updates};
+use crate::focus;
 use crate::motion::{Motion, Pose, Running};
 #[cfg(feature = "gpu")]
 use crate::gpu::Gpu;
-use crate::popup::{focused_window, Dismiss, GrabSerial, OpenPopup, Tooltip, TOOLTIP_PADDING};
+use crate::popup::{
+    focused_window, keyboard_after_closed, keyboard_after_leave, Dismiss, GrabSerial, OpenPopup, Tooltip,
+    TOOLTIP_PADDING,
+};
 use crate::render::{layout, render, Error};
 use crate::theme::Theme;
 use crate::widget::{Event, Key, Kind, PointerButton, Rect, Ui, WidgetId, WindowButton};
@@ -47,6 +51,7 @@ pub use smithay_client_toolkit::{
     shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer},
 };
 use smithay_client_toolkit::{
+    activation::{ActivationHandler as TokenHandler, ActivationState, RequestData},
     compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
     delegate_registry,
     dispatch2::Dispatch2,
@@ -253,7 +258,8 @@ pub trait Application {
     /// Page Up, Page Down, Enter, Backspace, Delete, Escape, Menu and Shift+F10, Ctrl+A, Ctrl+C,
     /// Ctrl+X and Ctrl+V, and a key that types text, which comes as [`Key::Text`] whatever the
     /// modifiers held, Alt or Super included. Shift with Left or Right comes as
-    /// [`Key::SelectLeft`] or [`Key::SelectRight`]. The other keys reach neither this call nor
+    /// [`Key::SelectLeft`] or [`Key::SelectRight`], and Ctrl with an arrow as the arrow, with
+    /// `modifiers.ctrl`: only a calendar reads it apart. The other keys reach neither this call nor
     /// the widgets: the function keys but Shift+F10, Ctrl with any other letter, and the other
     /// keys that type nothing, such as Insert.
     fn key(
@@ -287,6 +293,10 @@ pub trait Application {
     /// it (`zwlr_layer_surface_v1.closed`), or the output it was opened on left. It is no longer
     /// open, and the driver opens nothing in its place.
     fn closed(&mut self, _shell: &mut Shell, _surface: SurfaceId) {}
+
+    /// The compositor's token for the request [`Shell::request_activation_token`] numbered
+    /// `request`.
+    fn activation_token(&mut self, _shell: &mut Shell, _request: u64, _token: String) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -398,10 +408,15 @@ fn run_on(
         first_frames: Vec::new(),
         outputs: Vec::new(),
         closing: Vec::new(),
+        closed_popups: Vec::new(),
         reduced_motion: false,
         settled: Vec::new(),
         dialogs: dialog::Dialogs::bind(&globals, &qh),
         blocking: Vec::new(),
+        // Optional: without it, an application this one starts gets no token.
+        activation: ActivationState::bind(&globals, &qh).ok(),
+        next_token: 0,
+        input_surface: None,
     };
     let mut app = App {
         application: Box::new(application),
@@ -569,6 +584,8 @@ pub struct Shell {
     outputs: Vec<(wl_output::WlOutput, OutputInfo)>,
     /// The surfaces [`Shell::close`] closed since the driver last ended what they held.
     closing: Vec<SurfaceId>,
+    /// The popups [`Shell::remove`] closed since the driver last handed their keyboard back.
+    closed_popups: Vec<OpenPopup<SurfaceId>>,
     /// Whether motions only fade ([`Shell::set_reduced_motion`]).
     reduced_motion: bool,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
@@ -578,9 +595,56 @@ pub struct Shell {
     /// The windows a dialog opened on since the driver last ended the pointer's press and hover
     /// on them.
     blocking: Vec<SurfaceId>,
+    /// xdg_activation_v1, and the number of the next token asked for.
+    activation: Option<ActivationState>,
+    next_token: u64,
+    /// The surface of the last press of a button or a key, whose serial `grab` keeps.
+    input_surface: Option<SurfaceId>,
 }
 
 impl Shell {
+    /// The surface and the serial of the last press of a button or a key, after it ended too:
+    /// what [`Shell::request_activation_token`] names for an action the input started. `None`
+    /// before any press, or once its surface closed.
+    pub fn last_input(&self) -> Option<(SurfaceId, u32)> {
+        let surface = self
+            .input_surface
+            .filter(|&id| self.surfaces.iter().any(|s| s.id == id))?;
+        Some((surface, self.grab.last()?))
+    }
+
+    /// Asks the compositor for an xdg-activation-v1 token that lets an application this one
+    /// starts or calls raise its window, naming `surface` and the input's `serial` with the seat,
+    /// either left out when `None`. The token comes to [`Application::activation_token`] with
+    /// the number this returns, once the compositor answers; a compositor that does not grant it
+    /// still answers, and the token then activates nothing. `None` without the global: the
+    /// caller goes on without a token.
+    pub fn request_activation_token(
+        &mut self,
+        surface: Option<SurfaceId>,
+        serial: Option<u32>,
+    ) -> Option<u64> {
+        let activation = self.activation.as_ref()?;
+        let request = self.next_token;
+        self.next_token += 1;
+        let surface = surface.and_then(|id| {
+            self.surfaces
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.wl_surface().clone())
+        });
+        activation.request_token(
+            &self.qh,
+            RequestData {
+                app_id: None,
+                seat_and_serial: self.seat.clone().zip(serial),
+                surface,
+                udata: request,
+            },
+        );
+        Some(request)
+    }
+
     /// The surfaces open, in the order they were opened.
     pub fn surfaces(&self) -> impl Iterator<Item = SurfaceId> + '_ {
         self.surfaces.iter().map(|s| s.id)
@@ -1004,6 +1068,9 @@ impl Shell {
         let from = self
             .get_mut(parent)
             .ok_or_else(|| format!("no open surface {parent:?}"))?;
+        if let Some(arrow) = ui.arrow.as_mut() {
+            arrow.side = Some(side);
+        }
         let open = OpenPopup::opened(parent, anchor, id, &mut from.ui, &mut ui, menu);
         from.dirty = true;
         // A tooltip takes no pointer: it never stands between the pointer and its widget.
@@ -1186,6 +1253,7 @@ impl Shell {
             {
                 self.popup = None;
                 self.surfaces.retain(|s| s.id != popup.surface);
+                self.closed_popups.push(popup);
                 if let Some(from) = self.get_mut(popup.parent) {
                     popup.closed(&mut from.ui);
                     from.dirty = true;
@@ -2185,10 +2253,30 @@ impl App {
 
     /// Closes a surface. Text input on it ends as at a `leave`, which the compositor may not
     /// send for a surface that is gone: the next `enter` then sends `enable` again. The primary
-    /// selection its fields offered ends with it.
+    /// selection its fields offered ends with it, and the popups closed with it hand their
+    /// keyboard back ([`App::popups_closed`]).
     fn close(&mut self, id: SurfaceId) {
         self.shell.remove(id);
+        self.popups_closed();
         self.forget(id);
+    }
+
+    /// Hands the keyboard of the popups [`Shell::remove`] closed, by the driver or by the
+    /// application, back to the nearest open surface they were opened from, a dialog's window
+    /// when the dialog closed with them, without waiting for the compositor's `enter` on it, and
+    /// ends what the popups held.
+    fn popups_closed(&mut self) {
+        let popups = std::mem::take(&mut self.shell.closed_popups);
+        let shell = &self.shell;
+        self.keyboard_focus = keyboard_after_closed(
+            &popups,
+            self.keyboard_focus,
+            |id| shell.ui(id).is_some(),
+            |id| shell.dialogs.parent_of(id),
+        );
+        for popup in popups {
+            self.forget(popup.surface);
+        }
     }
 
     /// Ends the text input and the primary selection of the closed surface `id`; a dialog that
@@ -2205,8 +2293,9 @@ impl App {
     }
 
     /// Ends what the surfaces [`Shell::close`] closed held: their place on their output, their
-    /// text input and their primary selection.
+    /// text input and their primary selection; the popups closed hand their keyboard back first.
     fn closed_by_application(&mut self) {
+        self.popups_closed();
         for id in std::mem::take(&mut self.shell.closing) {
             self.outputs.closed(id);
             self.forget(id);
@@ -2383,6 +2472,7 @@ impl App {
     /// as with GTK's popovers; a press on a window's title bar outside its buttons moves it.
     fn pointer_pressed(&mut self, id: SurfaceId, (x, y): (f32, f32), button: u32, serial: u32) {
         self.shell.grab.pressed(serial);
+        self.shell.input_surface = Some(id);
         self.hide_tooltip();
         if self
             .shell
@@ -2482,6 +2572,10 @@ impl App {
             Keysym::ISO_Left_Tab => Key::BackTab,
             Keysym::Left if self.modifiers.shift => Key::SelectLeft,
             Keysym::Right if self.modifiers.shift => Key::SelectRight,
+            Keysym::Left if self.modifiers.ctrl => Key::ControlLeft,
+            Keysym::Right if self.modifiers.ctrl => Key::ControlRight,
+            Keysym::Up if self.modifiers.ctrl => Key::ControlUp,
+            Keysym::Down if self.modifiers.ctrl => Key::ControlDown,
             Keysym::Left => Key::Left,
             Keysym::Right => Key::Right,
             Keysym::a | Keysym::A if self.modifiers.ctrl => Key::SelectAll,
@@ -2525,9 +2619,16 @@ impl App {
         let Some(id) = target.filter(|&id| !self.shell.dialogs.blocked(id)) else {
             return forget(&mut key);
         };
+        // A key shows the ring, the application's hook's too (AX8's `:focus-visible`).
+        if let Some(ui) = self.shell.ui_mut(id) {
+            ui.quiet_focus = None;
+        }
         let modifiers = KeyModifiers::from(self.modifiers);
+        let arrow = key.control_arrow();
         if self.shell.get_mut(id).is_some()
-            && self.application.key(&mut self.shell, id, &key, modifiers)
+            && self
+                .application
+                .key(&mut self.shell, id, arrow.as_ref().unwrap_or(&key), modifiers)
         {
             self.changed(id, None);
             return forget(&mut key);
@@ -2745,15 +2846,35 @@ impl PopupHandler for App {
         _: &Connection,
         _: &QueueHandle<Self>,
         popup: &Popup,
-        _: PopupConfigure,
+        configure: PopupConfigure,
     ) {
         // ponytail: the popup keeps its widgets' size and the place the compositor gave it; a
         // menu whose items change while it is open would need a reposition.
-        let Some(surface) = self.shell.find(popup.wl_surface()) else {
+        let Some(id) = self.shell.find(popup.wl_surface()).map(|surface| surface.id) else {
+            return;
+        };
+        // The middle of the widget it opened from, in the popup's own coordinates, for the
+        // arrow of its island: the compositor may have slid the popup along the edge.
+        let anchor = self
+            .shell
+            .popup
+            .filter(|open| open.surface == id)
+            .and_then(|open| {
+                let parent = self.shell.ui(open.parent)?;
+                Some(parent.widget(open.anchor_in(parent)?).rect)
+            });
+        let Some(surface) = self.shell.get_mut(id) else {
             return;
         };
         surface.configured = true;
-        let id = surface.id;
+        if let (Some(arrow), Some(r)) = (surface.ui.arrow.as_mut(), anchor) {
+            let (x, y) = configure.position;
+            arrow.at = match arrow.side {
+                Some(Side::Left | Side::Right) => Some(r.y + r.h / 2.0 - y as f32),
+                Some(_) => Some(r.center_x() - x as f32),
+                None => None,
+            };
+        }
         self.changed(id, None);
     }
 
@@ -2859,9 +2980,13 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
         _: &[u32],
-        _: &[Keysym],
+        held: &[Keysym],
     ) {
-        self.keyboard_focus = self.shell.find(wl).map(|surface| surface.id);
+        let entered = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = entered;
+        if let Some(ui) = entered.and_then(|id| self.shell.ui_mut(id)) {
+            enter_focus(ui, !held.is_empty());
+        }
         self.keyboard_moved(wl, true);
     }
 
@@ -2873,7 +2998,10 @@ impl KeyboardHandler for App {
         wl: &wl_surface::WlSurface,
         _: u32,
     ) {
-        self.keyboard_focus = None;
+        // A closed popup's leave, which may come after its keyboard was handed back, leaves the
+        // focus where it is.
+        let left = self.shell.find(wl).map(|surface| surface.id);
+        self.keyboard_focus = keyboard_after_leave(self.keyboard_focus, left);
         self.keyboard_moved(wl, false);
     }
 
@@ -2886,6 +3014,7 @@ impl KeyboardHandler for App {
         event: KeyEvent,
     ) {
         self.shell.grab.key(Some(serial));
+        self.shell.input_surface = self.keyboard_focus;
         self.key(event);
         self.shell.grab.key(None);
     }
@@ -3043,6 +3172,15 @@ impl ProvidesRegistryState for App {
 
 smithay_client_toolkit::delegate_dispatch2!(App);
 
+impl TokenHandler for App {
+    type RequestUdata = u64;
+
+    fn new_token(&mut self, token: String, data: &RequestData<u64>) {
+        self.application
+            .activation_token(&mut self.shell, data.udata, token);
+    }
+}
+
 /// Whether a key held down acts only at its press, not as it repeats: Enter outside a text
 /// area and Space outside a field, which activate, Ctrl+C, Ctrl+X and Ctrl+V, which copy, cut
 /// and paste once per press, the Menu key and F10, which open a context menu, and Escape, which
@@ -3064,6 +3202,19 @@ fn once_per_press(keysym: Keysym, ctrl: bool, in_field: bool, in_area: bool) -> 
 
 /// Forgets the settling of a motion of `id` that a new one replaces, so that the application
 /// is not told of it during the new one, and queues `id` once if the new motion `ended` at once.
+/// Focuses the first control of a surface the keyboard enters (AX7), as GTK's at map. Entered
+/// by a key, as Ctrl+Alt+Tab with its keys still held, it shows the ring at once, as a bar or
+/// dock that holds the keyboard does; entered with no key held, as at map, the ring waits for
+/// the first key (AX8's `:focus-visible`).
+fn enter_focus(ui: &mut Ui, by_key: bool) {
+    if let Some(first) = focus::on_enter(ui) {
+        ui.focus_quietly(first);
+    }
+    if by_key {
+        ui.quiet_focus = None;
+    }
+}
+
 fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
     settled.retain(|s| *s != id);
     if ended {
@@ -3077,6 +3228,42 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use wayland_client::protocol::wl_registry;
+
+    /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
+    /// move with Ctrl+Up and Ctrl+Down: a calendar alone reads Ctrl+arrow apart.
+    /// Entered at map, a surface focuses its first control without its ring; entered by a key,
+    /// as Ctrl+Alt+Tab, the ring shows at once, on the focus it kept too.
+    #[test]
+    fn a_surface_entered_by_a_key_shows_its_ring_at_once() {
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.add(Ui::ROOT, Kind::Button("Clock".into()));
+        ui.layout();
+        enter_focus(&mut ui, false);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), Some(first)));
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+        let mut ui = Ui::new("Bar", Theme::default(), false);
+        let first = ui.add(Ui::ROOT, Kind::Button("Workspaces".into()));
+        ui.layout();
+        enter_focus(&mut ui, true);
+        assert_eq!((ui.focus(), ui.quiet_focus), (Some(first), None));
+    }
+
+    #[test]
+    fn an_application_reads_ctrl_with_an_arrow_as_the_arrow() {
+        let arrows = [
+            (Key::ControlLeft, Key::Left),
+            (Key::ControlRight, Key::Right),
+            (Key::ControlUp, Key::Up),
+            (Key::ControlDown, Key::Down),
+        ];
+        for (held, arrow) in arrows {
+            assert_eq!(held.control_arrow(), Some(arrow));
+        }
+        assert_eq!(Key::Up.control_arrow(), None, "an arrow is itself");
+        assert_eq!(Key::Text("a".into()).control_arrow(), None);
+    }
 
     #[test]
     fn a_turn_no_scroll_takes_reaches_the_widget_as_whole_steps_and_each_axis_apart() {

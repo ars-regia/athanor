@@ -12,8 +12,12 @@
 //! - it is toolkit-agnostic logic (SH4), usable by a surface and by a notifier alike.
 //!
 //! GTK's own strings keep going through the system's gettext, untouched.
+//!
+//! One answer comes from glibc instead: [`first_weekday`], the first day of the week of the
+//! time locale, read through a locale object of its own, never through `setlocale`.
 
 use std::collections::HashMap;
+use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 
 /// Where packages install catalogs.
@@ -28,6 +32,19 @@ const CONTEXT_SEPARATOR: char = '\u{4}';
 /// Languages written right to left. The direction comes from the language of the
 /// catalog in use, never from a process-wide locale.
 const RTL_LANGUAGES: [&str; 4] = ["ar", "he", "fa", "ur"];
+/// glibc's `_NL_TIME_FIRST_WEEKDAY`, `_NL_ITEM(LC_TIME, 104)` in `<langinfo.h>`, which the libc
+/// crate does not export.
+const NL_TIME_FIRST_WEEKDAY: libc::nl_item = (libc::LC_TIME << 16) | 104;
+/// glibc's `_NL_TIME_WEEK_1STDAY`, `_NL_ITEM(LC_TIME, 102)`: the week's origin, a date written
+/// as the number `YYYYMMDD`, from which [`NL_TIME_FIRST_WEEKDAY`] counts.
+const NL_TIME_WEEK_1STDAY: libc::nl_item = (libc::LC_TIME << 16) | 102;
+/// The week origins GTK's calendar knows: 30 November 1997, a Sunday, and 1 December 1997, a
+/// Monday.
+const ORIGIN_SUNDAY: u32 = 19_971_130;
+const ORIGIN_MONDAY: u32 = 19_971_201;
+/// The first weekday when the time locale cannot be read: Sunday, the C locale's, 0 as
+/// [`first_weekday`] counts.
+pub const DEFAULT_FIRST_WEEKDAY: u8 = 0;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
@@ -334,4 +351,188 @@ pub fn languages(
         found.push(primary.to_string());
     }
     found
+}
+
+/// The first day of the week of the time locale the environment names (`LC_ALL`, `LC_TIME`,
+/// `LANG`), 0 for Sunday to 6 for Saturday, as GTK's calendar reads it. A locale glibc cannot
+/// load, or an answer that is not a day, gives [`DEFAULT_FIRST_WEEKDAY`], with the reason on
+/// standard error.
+pub fn first_weekday() -> u8 {
+    match first_weekday_of(c"") {
+        Ok(day) => day,
+        Err(error) => {
+            eprintln!(
+                "athanor-i18n: cannot read the first weekday of the time locale ({error}); Sunday is used"
+            );
+            DEFAULT_FIRST_WEEKDAY
+        }
+    }
+}
+
+/// Makes the calling thread format times in the time locale the environment names (`LC_ALL`,
+/// `LC_TIME`, `LANG`), as a GTK program's start did for its whole process with `setlocale`:
+/// GLib's `g_date_time_format` reads the names of the months and days, `%X` and `%p` through
+/// `nl_langinfo`, which follows the thread's locale. Only the time category changes; the
+/// thread's other categories stay "C", as the process's, and no process-global locale is
+/// touched. Called once, on the thread that formats dates; on an error the thread keeps the
+/// locale it had.
+pub fn use_time_locale() -> std::io::Result<()> {
+    use_time_locale_of(c"")
+}
+
+/// [`use_time_locale`] with the time locale `name`, `""` for the one the environment names.
+fn use_time_locale_of(name: &CStr) -> std::io::Result<()> {
+    // SAFETY: `name` is a NUL-terminated string that outlives the call, and a null base asks
+    // newlocale for a new object whose other categories are "C", so no other object is changed.
+    // A null result returns before any other call, with errno still newlocale's. uselocale
+    // makes the object the calling thread's locale only; it is never freed, as the thread uses
+    // it until the thread ends, and the locale uselocale returns is not freed either, as it may
+    // be the global one. A failed uselocale leaves the thread's locale as it was, and the new
+    // object, used by no thread, is freed. One block for the object's whole life, as in
+    // `first_weekday_of`.
+    #[allow(unsafe_code, clippy::multiple_unsafe_ops_per_block)]
+    let used = unsafe {
+        let locale = libc::newlocale(libc::LC_TIME_MASK, name.as_ptr(), std::ptr::null_mut());
+        if locale.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let used = !libc::uselocale(locale).is_null();
+        if !used {
+            libc::freelocale(locale);
+        }
+        used
+    };
+    if used {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// The first weekday of the time locale `name`, `""` for the one the environment names.
+fn first_weekday_of(name: &CStr) -> std::io::Result<u8> {
+    // SAFETY: `name` is a NUL-terminated string that outlives the call, and a null base asks
+    // newlocale for a new locale object, so no other object is changed or freed. A null result
+    // returns before any other call, with errno still newlocale's. Otherwise the object stays
+    // valid until the freelocale below, the only path out once it exists: nl_langinfo_l only
+    // reads it, and the byte its answer points to, data of that object, is copied before the
+    // object is freed, so no pointer into it outlives it. No process-global locale is touched.
+    // One block for the six operations, by the maintainer's decision of 2026-11-15: the
+    // object's whole life, from newlocale to freelocale, is read in one place. The week's
+    // origin is a number, not a string: glibc returns it in the bits of the pointer, as a
+    // `union { const char *string; unsigned int word; }` that GTK's calendar reads through
+    // `word`, so it is read the same way and never dereferenced.
+    #[allow(unsafe_code, clippy::multiple_unsafe_ops_per_block)]
+    let answer = unsafe {
+        let locale = libc::newlocale(libc::LC_TIME_MASK, name.as_ptr(), std::ptr::null_mut());
+        if locale.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let item = libc::nl_langinfo_l(NL_TIME_FIRST_WEEKDAY, locale);
+        let day = if item.is_null() { None } else { Some(*item as u8) };
+        let origin = LangInfo {
+            string: libc::nl_langinfo_l(NL_TIME_WEEK_1STDAY, locale),
+        }
+        .word;
+        libc::freelocale(locale);
+        day.map(|day| (origin, day))
+    };
+    match answer {
+        Some((origin, day)) => week_start(origin, day),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "glibc gave no first weekday",
+        )),
+    }
+}
+
+/// An answer of `nl_langinfo`, read as a string or as a number, as glibc's own union.
+#[repr(C)]
+union LangInfo {
+    string: *const libc::c_char,
+    word: libc::c_uint,
+}
+
+/// The first day of the week, 0 for Sunday, from glibc's week `origin` and the `day` that
+/// counts from it, 1 for the origin itself, as GTK's calendar computes it.
+fn week_start(origin: u32, day: u8) -> std::io::Result<u8> {
+    let invalid = |what: String| std::io::Error::new(std::io::ErrorKind::InvalidData, what);
+    let origin_day = match origin {
+        ORIGIN_SUNDAY => 0,
+        ORIGIN_MONDAY => 1,
+        other => return Err(invalid(format!("unknown week origin {other}"))),
+    };
+    match day {
+        1..=7 => Ok((origin_day + day - 1) % 7),
+        other => Err(invalid(format!("glibc answered {other}, not a day from 1 to 7"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The first weekday of an installed locale; a locale the system lacks skips its test with a
+    /// line saying so (the rig's build image installs glibc-langpack-en and -it). The line goes
+    /// to standard error directly, which the test harness does not capture, so a skip is seen.
+    fn installed(name: &CStr) -> Option<u8> {
+        match first_weekday_of(name) {
+            Ok(day) => Some(day),
+            Err(error) => {
+                use std::io::Write as _;
+                let line = format!("skipped: the locale {name:?} is not installed ({error})\n");
+                assert!(std::io::stderr().write_all(line.as_bytes()).is_ok());
+                None
+            }
+        }
+    }
+
+    #[test]
+    fn italian_weeks_start_on_monday() {
+        if let Some(day) = installed(c"it_IT.UTF-8") {
+            assert_eq!(day, 1);
+        }
+    }
+
+    #[test]
+    fn american_weeks_start_on_sunday() {
+        if let Some(day) = installed(c"en_US.UTF-8") {
+            assert_eq!(day, 0);
+        }
+    }
+
+    #[test]
+    fn the_first_weekday_counts_from_the_weeks_origin() {
+        // `week 7;19971130` with `first_weekday 2`, as it_IT: Monday.
+        assert_eq!(week_start(ORIGIN_SUNDAY, 2).ok(), Some(1));
+        // `week 7;19971201` with `first_weekday 1`: Monday too, which a Sunday origin read
+        // for every locale would make Sunday.
+        assert_eq!(week_start(ORIGIN_MONDAY, 1).ok(), Some(1));
+        assert_eq!(week_start(ORIGIN_MONDAY, 7).ok(), Some(0));
+        assert!(week_start(19_971_202, 1).is_err());
+        assert!(week_start(ORIGIN_SUNDAY, 8).is_err());
+    }
+
+    #[test]
+    fn the_c_locale_starts_on_sunday() {
+        assert_eq!(first_weekday_of(c"C").ok(), Some(DEFAULT_FIRST_WEEKDAY));
+    }
+
+    #[test]
+    fn a_missing_locale_is_an_error_not_sunday() {
+        assert!(first_weekday_of(c"xx_NOWHERE.UTF-8").is_err());
+    }
+
+    #[test]
+    fn a_thread_takes_a_time_locale_it_can_load() {
+        // On a thread of its own: the locale stays with it.
+        let outcome = std::thread::spawn(|| {
+            (
+                use_time_locale_of(c"xx_NOWHERE.UTF-8").is_err(),
+                use_time_locale_of(c"C").is_ok(),
+            )
+        })
+        .join();
+        assert_eq!(outcome.ok(), Some((true, true)));
+    }
 }

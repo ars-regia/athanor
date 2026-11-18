@@ -94,7 +94,7 @@ impl Application for Osd {
             }
             "Announce" => shell
                 .ui_mut(status)
-                .map(|ui| ui.announce(ANNOUNCED))
+                .map(|ui| ui.announce(ANNOUNCED, athanor_sal::Priority::Polite))
                 .ok_or_else(|| "the status surface is closed".into()),
             _ => Ok(()),
         };

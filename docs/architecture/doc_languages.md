@@ -5,10 +5,10 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 ## 1. Context
 
 - **What binds this document.**
-  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-sulphur-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:43`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:177-184`). "All strings go through gettext from the first commit" (`doc_shell.md:184`).
+  - `doc_shell.md`: of COSMIC only cosmic-comp stays, and `athanor-sulphur-client` is the only crate that may know COSMIC (SH2, SH3, SH4). Internationalisation is a requirement of every surface (`doc_shell.md:47`). The test matrix renders English, German and a right-to-left pseudo-locale, with `LC_ALL` set per case and `TZ=UTC` (SH13, `doc_shell.md:192-195`). "All strings go through gettext from the first commit" (`doc_shell.md:199`).
   - `doc_shell_standard.md`: no text is truncated in German, and the layout mirrors under a right-to-left locale (ST7).
-  - `doc_bar.md`: the input-source module shows the active layout and switches between the configured ones through the compositor client (`doc_bar.md:64`). The clock follows the locale and COSMIC's `military_time` (`doc_bar.md:65`). Right-to-left mirroring is designed in `doc_bar.md:136`. Behind `wp_security_context_v1` a client loses, among other globals, the input-method and virtual-keyboard globals (`doc_bar.md:9`).
-  - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:92`).
+  - `doc_bar.md`: the input-source module shows the active layout and switches between the configured ones through the compositor client (`doc_bar.md:67`). The clock follows the locale and COSMIC's `military_time` (`doc_bar.md:68`). Right-to-left mirroring is designed in `doc_bar.md:143`. Behind `wp_security_context_v1` a client loses, among other globals, the input-method and virtual-keyboard globals (`doc_bar.md:9`).
+  - `doc_visual_language.md` (revision 1): the system font is Adwaita Sans 11, with Adwaita Mono for monospace. The shell names no family (VL, `doc_visual_language.md:115`).
   - `doc_software.md`, SW14: gettext from the first commit, Italian and English shipped, mirrored layout under right-to-left text (`doc_software.md:196`).
 - **The register** (`shell-features.md`, v1, frozen 2026-10-04) holds these entries in this area:
 
@@ -49,10 +49,10 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - It ships a polkit rule that grants `org.freedesktop.locale1.set-keyboard` without authentication to local, active members of `wheel` or `sudo` (`data/polkit-1/rules.d/cosmic-settings-daemon.rules`).
     - cosmic-settings ships a second rule, `/usr/share/polkit-1/rules.d/cosmic-settings.rules`, that grants `org.freedesktop.locale1.set-locale` and `set-keyboard` (and three hostname and modem actions) the same way. localed's own default for both actions is `auth_admin_keep` (`/usr/share/polkit-1/actions/org.freedesktop.locale1.policy`, read 2026-10-05).
     - It also serves `InputSourceSwitch`, bound to Super+Space in COSMIC's default shortcuts (`/usr/share/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults:102`, `system_actions:11`).
-    - `doc_shell.md` (row 8 of the replacement table, `doc_shell.md:69`) has cosmic-settings-daemon leave in stage 8, so all three behaviours must have a replacement by then.
+    - `doc_shell.md` (row 8 of the replacement table, `doc_shell.md:75`) has cosmic-settings-daemon leave in stage 8, so all three behaviours must have a replacement by then.
   - **The live configuration on this machine.** The user's `xkb_config` is `layout:"us", variant:"intl"`. `/etc/vconsole.conf` holds `KEYMAP=us-intl`, `XKBLAYOUT=us` and `XKBVARIANT=intl`. `/etc/locale.conf` holds `LANG=it_IT.utf8`.
   - **What the shell does with layouts today.**
-    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:214-283`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
+    - The bar reads the layout names from the keymap and switches the active group through `zcosmic_keyboard_layout_manager_v1` (`athanor-sulphur-client`, `connection.rs:54-56, 268-274, 320-325`; `athanor-bar`, `ui/input.rs`, `keyboard.rs`).
     - The greeter shows a read-only label (`athanor-greeter-ui`, `ui.rs:88-122`).
     - `athanor-greeter-session` exports only `LANG`, `LANGUAGE`, `LC_MESSAGES` and `LC_TIME` from `/etc/locale.conf` and no XKB variable. The greeter cosmic-comp's own `~/.config/cosmic/com.system76.CosmicComp/v1/` under `/var/lib/greetd` is empty. So the greeter's layout follows neither `/etc/vconsole.conf` nor localed (inferred, spike S4).
     - The greeter's client binds the compositor's main socket (`/usr/libexec/athanor-greeter-client`), so it sees the keyboard-layout global.
@@ -86,7 +86,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     - #2778 and #1968 were found by search on 2026-10-05; their pages were not read.
 - **Locale data on the image** (checked on 2026-10-05, glibc 2.42-16.fc43).
   - `glibc-all-langpacks` is installed with an installed size of 237,950,035 bytes. `localedef --list-archive` lists 887 locales.
-  - `system/Containerfile:255` keeps glibc-all-langpacks deliberately.
+  - `system/Containerfile:408` keeps glibc-all-langpacks deliberately.
   - `forge/config/packages.json:104-105` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
   - `/usr/share/locale` holds 699 language directories (335 MB), because Fedora keeps translations inside the main packages (`%_install_langs` is `all`).
   - composefs is enabled (`/usr/lib/ostree/prepare-root.conf`), so the two identical locale archives (`locale-archive` and `locale-archive.real`, 233,242,544 bytes each, same sha256) are stored once.
@@ -111,7 +111,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
     | my                      | Padauk                          |
     | el / ru / vi            | Noto Sans                       |
 
-  - The shell test rig installs Inter and two Noto families but not `adwaita-sans-fonts` (`forge/test/shell/Containerfile:17`).
+  - The shell test rig installs Inter and two Noto families (`forge/test/shell/Containerfile:23`) and, in a later stage, `adwaita-sans-fonts` and `adwaita-mono-fonts` (`:54`), but not the Hebrew and CJK Noto families.
 - **Accounts and region** (checked on 2026-10-05).
   - AccountsService 23.13.9 stores a user's language as `Language` (one locale) and `Languages` (an ordered list), set through `SetLanguage` and `SetLanguages`. It has no property for formats.
   - GNOME stores the region in the GSettings key `org.gnome.system.locale region`. At login gnome-session sets `LC_NUMERIC`, `LC_TIME`, `LC_MONETARY`, `LC_PAPER`, `LC_ADDRESS`, `LC_TELEPHONE` and `LC_MEASUREMENT` to it, and leaves them unset when the region equals `LANG` (gnome-session `leader-main.c:129-158`, main at d3c610c1, 2026-09-20).
@@ -119,9 +119,9 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
   - GNOME's wall clock looks up its time-format strings in the catalog of the `LC_TIME` locale, not of the messages locale (gnome-desktop `libgnome-desktop/gnome-wall-clock.c:288-306`, master, read 2026-10-05).
   - `org.gnome.desktop.interface clock-format` (`'24h'` or `'12h'`) exists in gsettings-desktop-schemas 49.1.
 - **Where the session starts today.**
-  - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no locale, XKB or input-method variable.
-  - `athanor-desktop` imports only `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS` into the user manager (`athanor-desktop:34`). So the bar and every other user unit run with the user manager's locale, which comes from `/etc/locale.conf`, not the user's own.
-  - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:268-274`).
+  - `athanor-session` exports `XDG_CURRENT_DESKTOP` and `XDG_DATA_DIRS`, then execs cosmic-comp. It sets no XKB variable. It sources `session-environment` (`athanor-session:42-43`), which exports the user's language, region and cursor (SN13, #823).
+  - `athanor-desktop` imports the names of `/usr/share/athanor-system-config/session-import` into the user manager (`athanor-desktop:35-37`): `WAYLAND_DISPLAY`, `DISPLAY`, `XDG_CURRENT_DESKTOP`, `XDG_SESSION_TYPE` and `XDG_SESSION_CLASS`, then `LANG`, `LANGUAGE`, the `LC_*` formats of the region and the cursor variables. So the bar and every other user unit run with the user's own language and region, read by `session-environment`, and with `/etc/locale.conf` only where that script exports nothing.
+  - The greeter's `StartSession` passes only `XDG_SESSION_TYPE` and `XDG_CURRENT_DESKTOP` (`athanor-greeter-ui`, `auth.rs:331-335`).
   - `system/athanor-oobe` is an unpackaged first-run prototype. It maps language names to locales and writes `/etc/locale.conf` and `/etc/vconsole.conf` directly when `localectl` fails (`main.rs:40-95`). It is not a model for this document. ADR-0073 deleted it from the tree.
 
 ## 2. Decisions
@@ -163,7 +163,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 **LN4. Languages and locale data in the image.**
 
 - **Our catalogs** ship for Italian and English (SH13, SW14). The test rig adds German and the right-to-left pseudo-locale, which never ship.
-- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:255`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
+- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:408`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
   - No locale is generated at first boot, and `/etc` holds no locale archive, so every locale a user picks works on the immutable image without a rebuild.
 - **Translations of third-party packages** stay as Fedora ships them: all languages, inside each package.
 - **Spell-checking dictionaries** ship for each shipped language: `hunspell-en` is already installed, and `hunspell-it` (1,441,631 bytes) is added. Other dictionaries come from Software as described in LN15.
@@ -313,7 +313,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 **LN13. Fonts for every script.**
 
-- **The interface font** is the system font, Adwaita Sans 11 (`doc_visual_language.md:92`). No Athanor program names a family.
+- **The interface font** is the system font, Adwaita Sans 11 (`doc_visual_language.md:115`). No Athanor program names a family.
 - **Scripts Adwaita Sans lacks** are drawn by fontconfig's fallback to the fonts `base-atomic:43` installs (section 1). The image adds no font and removes none of the `default-fonts-*` packages.
 - **The test rig** installs `adwaita-sans-fonts` and `adwaita-mono-fonts`, so the goldens use the font the image uses. It also adds `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts`, so a right-to-left case and a CJK fallback case can be rendered.
 - **A new font case** in the rig renders the bar's clock and a launcher result with an Arabic, a Japanese and a Hindi application name. Besides the golden, the case asserts that Pango's `pango_layout_get_unknown_glyphs_count` is zero for each string.
@@ -416,30 +416,30 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 
 ## 3. Changes to other documents
 
-Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into `doc_software.md` are of revision 3 as merged (PR #117), and those into the other desktop specifications are of their text on 2026-10-05.
+Applied with the approval of this document. Line numbers into code are those of the tree as merged with iso-v0 (99a68285), checked on 2026-10-05; those into `doc_software.md` are of revision 3 as merged (PR #117), and those into the other desktop specifications are of their text on 2026-10-05. Line numbers corrected against `iso-v0` at b1f3e0bb on 2026-11-17 (#1089).
 
 - **`doc_shell.md`.**
-  - SH13's "Italian and English are the shipped locales" (`doc_shell.md:177`) stays. Its rig gains the clock cases of LN17 and the font case of LN13.
-  - "All strings go through gettext from the first commit" (`doc_shell.md:184`) gains: "read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md`, LN1)".
-  - The change of the interface family at `doc_shell.md:96` is `doc_visual_language.md`'s, not repeated here.
+  - SH13's "Italian and English are the shipped locales" (`doc_shell.md:192`) stays. Its rig gains the clock cases of LN17 and the font case of LN13.
+  - "All strings go through gettext from the first commit" (`doc_shell.md:199`) gains: "read through `athanor-i18n` in the shell and the greeter, and through `gettext-rs` and glibc's gettext in our libadwaita applications (`doc_languages.md`, LN1)".
+  - The change of the interface family at `doc_shell.md:109` is `doc_visual_language.md`'s, not repeated here.
 - **`doc_bar.md`.**
-  - The clock row (`doc_bar.md:65`): "the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format" becomes "the system clock, in 12 or 24 hours as `org.gnome.desktop.interface clock-format` says, else as the region's time format; date and time patterns from the catalog of the `LC_TIME` locale (`doc_languages.md`, LN8)".
-  - The input-source row (`doc_bar.md:64`) adds: "with an IBus engine enabled, the active engine's short label instead of the layout's, and the engines listed next to the layouts in the popover (LN11)".
+  - The clock row (`doc_bar.md:68`): "the system clock, formatted for the locale, in 12 or 24 hours as COSMIC's clock setting says (`military_time`), else as the locale's time format" becomes "the system clock, in 12 or 24 hours as `org.gnome.desktop.interface clock-format` says, else as the region's time format; date and time patterns from the catalog of the `LC_TIME` locale (`doc_languages.md`, LN8)".
+  - The input-source row (`doc_bar.md:67`) adds: "with an IBus engine enabled, the active engine's short label instead of the layout's, and the engines listed next to the layouts in the popover (LN11)".
 - **`shell-features.md`.**
-  - F-bar-02 (`shell-features.md:31`): the 12- or 24-hour setting is `org.gnome.desktop.interface clock-format` (LN8); the evidence moves to the bar's new clock code at LN19 step 2.
-  - F-bar-03 (`shell-features.md:32`): the clock options are `clock-format` and `show-weekdate` (LN8).
-  - F-bar-13 (`shell-features.md:42`): the indicator also shows and switches IBus engines (LN11).
-  - F-osd-11 (`shell-features.md:296`): the interface is the compositor client's `KeyboardLayout` event (LN9).
-  - F-lock-05 (`shell-features.md:314`) and F-settings-15 (`shell-features.md:362`): from `have` via cosmic-greeter and cosmic-settings to `missing` in the end state, owned by `doc_lock_and_prompts.md` and `doc_settings.md`.
-  - F-greeter-09 (`shell-features.md:423`): `partial` until LN19 step 4, then `have`.
-  - F-greeter-15 (`shell-features.md:429`): owned by `doc_accessibility.md` (`athanor-osk`). No input method runs in the greeter (LN10), so the slot rule of LN12 does not apply there.
+  - F-bar-02 (`shell-features.md:32`): the 12- or 24-hour setting is `org.gnome.desktop.interface clock-format` (LN8); the evidence moves to the bar's new clock code at LN19 step 2.
+  - F-bar-03 (`shell-features.md:33`): the clock options are `clock-format` and `show-weekdate` (LN8).
+  - F-bar-13 (`shell-features.md:43`): the indicator also shows and switches IBus engines (LN11).
+  - F-osd-11 (`shell-features.md:297`): the interface is the compositor client's `KeyboardLayout` event (LN9).
+  - F-lock-05 (`shell-features.md:315`) and F-settings-15 (`shell-features.md:363`): from `have` via cosmic-greeter and cosmic-settings to `missing` in the end state, owned by `doc_lock_and_prompts.md` and `doc_settings.md`.
+  - F-greeter-09 (`shell-features.md:424`): `partial` until LN19 step 4, then `have`.
+  - F-greeter-15 (`shell-features.md:430`): owned by `doc_accessibility.md` (`athanor-osk`). No input method runs in the greeter (LN10), so the slot rule of LN12 does not apply there.
   - The exclusions of LN18 are added as rows with their reasons.
-- **`doc_osd.md`** (the keyboard-layout row at `doc_osd.md:91`): subscribes to the compositor client's `KeyboardLayout` event and shows the layout's short and full name (LN9).
+- **`doc_osd.md`** (the keyboard-layout row at `doc_osd.md:218`): subscribes to the compositor client's `KeyboardLayout` event and shows the layout's short and full name (LN9).
 - **`doc_lock_and_prompts.md`**:
   - shows and switches the layout through the compositor client (LN9), and restores at unlock the group that was active when the session locked (LP14, D14);
   - its acceptance (section 5, item 11 of `doc_lock_and_prompts.md`) adds the case of cosmic-comp#2702: "with an IBus engine enabled and holding the keyboard grab, the lock screen receives every key, the password included, and the input method none" (LN12). Its spike L2 and S2 here run the same check, and its spike L14 (switching while locked, LP14) runs with S6 here;
   - the lock screen, like the greeter, offers no input method.
-- **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:168-176`, decision 5 at `doc_accessibility.md:340`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
+- **`doc_accessibility.md`** (AX12 at `doc_accessibility.md:183-191`, decision 5 at `doc_accessibility.md:369`): states the slot rule of LN12. `athanor-osk` and IBus compete for the single input-method slot per seat (cosmic-osk#44); while an engine is enabled, IBus holds the slot and `athanor-osk` types through `zwp_virtual_keyboard_v1` only. The accessibility spike on the on-screen keyboard and S9 here cover it together.
 - **`doc_portal.md`**: the Settings backend serves `org.gnome.desktop.interface clock-format` (LN15).
 - **`doc_settings.md`**:
   - the Language and Region, Keyboard and Input-method pages use only the stores and interfaces of LN15, and say that a language or region change takes effect at the next login;
@@ -454,8 +454,8 @@ Applied with the approval of this document. Line numbers into code are those of 
   - Software applies the Chromium input-method override (LN11);
   - Software extends Flatpak's `extra-languages` if spike S3 requires it (LN14).
 - **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules` and its `%files` line in `athanor-base-config.spec` (LN5, LN19 step 3).
-- **`forge/test/shell/Containerfile:17`:** adds `adwaita-sans-fonts`, `adwaita-mono-fonts`, `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13).
-- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:104-105`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
+- **`forge/test/shell/Containerfile:23`:** adds `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13); `adwaita-sans-fonts` and `adwaita-mono-fonts` are there already, at `:54` (#532).
+- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:96-97`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
 - Amendments received, from the maintainer's rulings of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.
 
 ## 4. Open doubts

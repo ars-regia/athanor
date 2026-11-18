@@ -471,7 +471,11 @@ of the stage that produced it, and used only by that digest. An identity is matc
 exact string, not a pattern. This extends UD44 from tier repositories to every hop. One
 named exception: the shell rig image `athanor-shell-rig@<rig-image.digest>` that `rig.sh`
 pulls is published by hand with `rig.sh publish-image`, no workflow publishes it, and so it
-is not yet a verified hop (#505).
+is not yet a verified hop (#505). A second named exception: on a builder miss, a builder built
+from the checkout, unsigned and never published, serves a pull request's own test. Spec Build
+Check hands it to its build jobs as a one-day artifact, and the shell rig's spec build
+(`rig.sh cosmic-comp-version`) loads it into the local podman for a test-only RPM
+(`doc_build_system.md`, section 5).
 
 **PL13. Tags inside the build chain are names, not inputs.** `hash-<h>` and `<run_id>` tags
 are written once, after the signature of the digest they name verified (PR #248, UD25);

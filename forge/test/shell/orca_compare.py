@@ -53,9 +53,10 @@ from golden_report import exemptions
 # toggle button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a
 # line that names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of
 # the control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of
-# its fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) with the state and the role
-# words together is rewritten: a check box, whatever its label, spoken as a toggle button still
-# fails.
+# its fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) or of the bar
+# (BAR_SWITCHES, in its catalogs, under the rule the maintainer widened to later ports on
+# 2026-11-14) with the state and the role words together is rewritten: a check box, whatever its
+# label, spoken as a toggle button still fails.
 
 
 STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
@@ -79,21 +80,26 @@ def gallery_labels(*keys):
 # The switches of the control center's pages (system/athanor-controls): Wi-Fi on the network page,
 # the adapter's power on the Bluetooth page and the two mutes on the sound page, by their msgids
 # (maintainer decision, 2026-11-14).
-CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone")
+# Airplane mode is the switch of the same athanor-controls network page in the bar's popover;
+# the control center's catalog holds it too.
+CONTROL_CENTER_SWITCHES = ("Wi-Fi", "Bluetooth", "Mute output", "Mute microphone", "Airplane mode")
 CONTROL_CENTER_PO = (
     Path(__file__).resolve().parents[3]
     / "forge/specs/athanor-control-center/athanor-control-center-1.0.0/po"
 )
+# The switches of the bar's popovers: tiling's, and the accessibility popover's four.
+BAR_SWITCHES = ("Tile windows", "High contrast", "Screen reader", "Magnifier", "Invert colours")
+BAR_PO = Path(__file__).resolve().parents[3] / "forge/specs/athanor-bar/athanor-bar-1.0.0/po"
 
 
 @cache
-def control_center_labels(*msgids):
-    """The texts of `msgids` in the control center's en.po and it.po. Read on first use, as the
-    gallery's strings are; a msgid a catalog lacks or leaves untranslated is an error that names
-    it."""
+def control_center_labels(*msgids, po=CONTROL_CENTER_PO):
+    """The texts of `msgids` in the en.po and it.po of `po`, the control center's unless named.
+    Read on first use, as the gallery's strings are; a msgid a catalog lacks or leaves
+    untranslated is an error that names it."""
     texts = []
     for lang in ("en", "it"):
-        path = CONTROL_CENTER_PO / f"{lang}.po"
+        path = po / f"{lang}.po"
         lines = path.read_text(encoding="utf-8").splitlines()
         # The single-line entries the switches have: a msgid line, then its msgstr line.
         catalog = {
@@ -118,6 +124,7 @@ def switch_labels():
     return (
         gallery_labels("switch", "enable")
         + control_center_labels(*CONTROL_CENTER_SWITCHES)
+        + control_center_labels(*BAR_SWITCHES, po=BAR_PO)
         + list(CONTROL_CENTER_FIXTURE_SWITCHES)
     )
 
@@ -153,6 +160,13 @@ FRAME_ROLE = ("frame", "cornice")
 # Italian. An echo is not speech about the focused object, and it may land before or after the
 # focus's last utterance (#999), so walk_problems drops it.
 KEY_ECHOES = {"space", "tab", "spazio", "tabulazione"}
+# GTK 4.20's calendar leaves its arrow buttons unnamed, and Orca says each as "button.", in Italian
+# too; the toolkit's calendar names them. atspi_compare.py's ARROWS rule (maintainer, 2026-11-13,
+# #1122) heard: in the references it names, the calendar's, an unnamed button's line is spoken by
+# a named button's line that the reference does not say. Anywhere else "button." still fails.
+ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
+ARROWS_REFERENCES = {"orca-bar-calendar", "orca-bar-calendar-it", "orca-gallery", "orca-gallery-it"}
+UNNAMED_BUTTON = "button."
 
 
 def heard_as(utterance):
@@ -200,10 +214,10 @@ def dialog_returns(reference):
     return {line: heard for line, heard in returns.items() if line not in elsewhere}
 
 
-def compare(reference, transcript, exempt=None, lang="en"):
+def compare(reference, transcript, exempt=None, lang="en", arrows=False):
     """Returns (lines, failures) for two lists of utterances. `exempt` maps the name of a button
     decision 28 hides to its (cause, issue); Orca 51 says such a button as "<name> <role>", the
-    role in `lang`."""
+    role in `lang`. `arrows` applies the ARROWS rule."""
     exempt = {f"{name} {BUTTON[lang]}": why for name, why in (exempt or {}).items()}
     spoken = set(transcript)
     lines, failures = [], []
@@ -230,6 +244,12 @@ def compare(reference, transcript, exempt=None, lang="en"):
     for utterance in dict.fromkeys(reference):
         said = next((form for form in heard_as(utterance) if form in spoken), None)
         said = said or together.get(utterance)
+        if said is None and arrows and utterance == UNNAMED_BUTTON:
+            named = (line for line in transcript if line.endswith(f" {UNNAMED_BUTTON}"))
+            said = next((line for line in named if line not in reference), None)
+            if said is not None:
+                lines.append(f"{utterance!r}: spoken as {said!r}; note: {ARROWS}")
+                continue
         if said is None and returns.get(utterance) in follows:
             said = returns[utterance][1]
             lines.append(f"{utterance!r}: spoken as {said!r}; note: {FOCUS_RETURN}")
@@ -297,7 +317,8 @@ def main(argv):
     if own:
         preset, dock, lang = (None if v == "-" else v for v in own[1:])
         exempt = exemptions(preset, dock, lang)
-    lines, failures = compare(reference, transcript, exempt, lang)
+    arrows = Path(argv[0]).stem in ARROWS_REFERENCES
+    lines, failures = compare(reference, transcript, exempt, lang, arrows=arrows)
     print("\n".join(lines))
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)

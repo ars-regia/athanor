@@ -168,6 +168,24 @@ pub fn same_shape<K: PartialEq>(a: &[Entry<K>], b: &[Entry<K>]) -> bool {
         })
 }
 
+/// The index among `entries` of the entry `old` became: the one with one of its windows, else
+/// the one of its application, as a window's title or focus changes.
+pub fn same_entry<'a, K: PartialEq + 'a>(
+    old: &Entry<K>,
+    entries: impl Iterator<Item = &'a Entry<K>> + Clone,
+) -> Option<usize> {
+    let has_window = |entry: &Entry<K>| {
+        entry
+            .windows
+            .iter()
+            .any(|window| old.windows.iter().any(|was| was.id == window.id))
+    };
+    entries
+        .clone()
+        .position(has_window)
+        .or_else(|| entries.clone().position(|entry| entry.app_id == old.app_id))
+}
+
 pub fn primary<K: Copy>(entry: &Entry<K>) -> Primary<K> {
     match entry.windows.as_slice() {
         [] => Primary::Launch,
@@ -394,6 +412,25 @@ mod tests {
         assert!(!same_shape(&before, &more));
         let pinned = entries(&["a.desktop".to_owned()], &[titled(1, "a", "one")], &apps);
         assert!(!same_shape(&before, &pinned));
+    }
+
+    #[test]
+    fn an_entry_is_found_again_by_its_window_then_by_its_application() {
+        let apps = index(&[("a.desktop", None), ("b.desktop", None)]);
+        let before = entries(&[], &[titled(1, "a", "one"), titled(2, "b", "one")], &apps);
+        // A new window before them moves both entries.
+        let after = entries(
+            &[],
+            &[titled(3, "c", "new"), titled(1, "a", "two"), titled(2, "b", "one")],
+            &apps,
+        );
+        assert_eq!(same_entry(&before[0], after.iter()), Some(1));
+        assert_eq!(same_entry(&before[1], after.iter()), Some(2));
+        // Its window gone, the entry is its application's.
+        let pinned = entries(&["a.desktop".to_owned()], &[titled(2, "b", "one")], &apps);
+        assert_eq!(same_entry(&before[0], pinned.iter()), Some(0));
+        let gone = entries(&[], &[titled(2, "b", "one")], &apps);
+        assert_eq!(same_entry(&before[0], gone.iter()), None);
     }
 
     #[test]

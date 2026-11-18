@@ -1,5 +1,7 @@
 Lettore schermo attivo.
-Cerca testo
-cc window
-apre un popup
+Cerca testo.
+cc window.
+Risultati Elenco con 3 voci
+cc window, Ricerca sul web.
+CC Window, Applicazione.
 Lettore schermo disattivato.

@@ -79,6 +79,10 @@ class MainTest(unittest.TestCase):
         spoken = ["Launcher button.", "tab", "Workspaces button."]
         self.assertEqual(self.run_main("orca-dock.txt", spoken, ["Tab"]), 0)
 
+    def test_the_toolkit_docks_transcript_holds_the_gtk_docks_golden(self):
+        spoken = ["Launcher button.", "tab", "Workspaces button."]
+        self.assertEqual(self.run_main("orca-toolkit-dock.txt", spoken, ["Tab"]), 0)
+
     def test_a_transcript_with_no_golden_fails_with_a_message(self):
         self.assertEqual(self.run_main("orca-nothing.txt", ["x"], ["Tab"]), 1)
 

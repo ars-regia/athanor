@@ -10,7 +10,7 @@
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp (a build of the spec needs cosign on PATH, which verifies the builder)
-#                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
+#                           (when the published rig holds another, the spec is built as the forge builds it, in the signed builder or else in one built here from the checkout, never pushed, and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -26,7 +26,7 @@
 #   rig.sh compositor-soak  athanor-sulphur headless on Pixman, a GTK4 client and eglgears_wayland on llvmpipe, for RIG_SOAK seconds (600; run build-compositor first)
 #   rig.sh seal-bin <name>...  record the sha256 of <out>/bin/<name> and the checked-out commit in <out>/bin/SEALED, for another job to consume
 #   rig.sh verify-bin <name>...  refuse <out>/bin/<name> unless SEALED names this commit and the sha256 matches; the build recipes' stand-in
-#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose tests need a display) into <out>/bin, with the DT_NEEDED check
+#   rig.sh build-bar        clippy, tests and release build of athanor-bar (and athanor-apps; athanor-controls, whose GTK tests need a display) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh build-control-center   clippy, tests and release build of athanor-control-center (with athanor-services and the Sal pages of athanor-controls) into <out>/bin, with the check that no GTK library is in its DT_NEEDED
 #   rig.sh toolkit-gpu      the toolkit's GPU tests on llvmpipe; fails when no adapter is found or no test ran
 #   rig.sh cargo <args>     any cargo command in the build stage (read-only checkout); passes ATHANOR_REQUIRE_QALC through;
@@ -42,21 +42,22 @@
 #   rig.sh dock-e2e         athanor-dock in a scene: READY, openers, running windows, pinning, the favourites followed live, the knob and presets live, memory
 #   rig.sh notifications-e2e  athanor-bar against a fake of athanor-shelld's private interface: popups, list, actions, do not disturb, hostile input, restart, memory
 #   rig.sh shield-e2e       athanor-bar's trust shield against trust_state.py's files and a fake os.athanor.Update1: seal, sheet, Restart to update, Go back, refusals, hostile strings
-#   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory
+#   rig.sh tray-e2e         athanor-bar as the tray host of athanor-shelld (run build-shelld first): items, dbusmenu menu, activation, the refused List, the watcher's restart, memory;
+#                           RIG_COMPOSITOR=athanor runs it under athanor-sulphur, the bar as its unit (run build-compositor first)
 #   rig.sh compositor-e2e   the compositor client against cosmic-comp, and against sway without the COSMIC globals
 #                           RIG_COMPOSITOR=athanor runs it against athanor-sulphur, the probe as its unit (run build-compositor first)
-#   rig.sh layer-guard <greeter|bar|dock>   the surface must refuse to run when the shim loads late
+#   rig.sh layer-guard <greeter|dock>   the surface must refuse to run when the shim loads late
 #   rig.sh greeter-preview  one capture of the greeter per variant, for the eye
 #   rig.sh bar-preview      one capture of the bar per factory layout, for the eye
-#   rig.sh atspi <greeter|chooser|bar|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
-#   rig.sh atspi <greeter|chooser|bar|dock|launcher|control-center> it   the same in Italian, with the shipped catalog
-#   rig.sh atspi <bar|bar-modules|dock|launcher|control-center> --matrix   AX17: the walk in light, dark and both high-contrast
+#   rig.sh atspi <greeter|chooser|bar|bar-<popover>|bar-modules|dock|launcher|control-center|toolkit-chooser|gallery>   every interactive widget has a role and a name
+#   rig.sh atspi <greeter|chooser|bar|bar-<popover>|dock|launcher|control-center> it   the same in Italian, with the shipped catalog
+#   rig.sh atspi <bar|bar-<popover>|bar-modules|dock|launcher|control-center> --matrix   AX17: the walk in light, dark and both high-contrast
 #                           appearances at text scales 1.0, 1.25 and 1.5 (twelve runs), stopping at the first
 #                           problem with the variant's name; extents, password text and ring contrast included
 #                           bar: RIG_COMPOSITOR=athanor runs it under athanor-sulphur, as its unit (run build-compositor first)
 #   rig.sh atspi gallery [it]   each page's tree holds all of golden/atspi's, the GTK twin's; ATHANOR_GALLERY_BIN runs another gallery
 #                           chooser: the transcript must hold all of golden/atspi's; ATHANOR_CHOOSER_BIN runs another chooser
-#   rig.sh orca <chooser|dock|gallery|bar|launcher|greeter|control-center> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
+#   rig.sh orca <chooser|dock|gallery|bar|bar-<popover>|launcher|greeter|control-center> [it]   Orca's speech for a scripted walk holds the GTK surface's (OS8; RIG_COMPOSITOR=athanor runs it under athanor-sulphur)
 #                           gallery: one walk per page, ATHANOR_GALLERY_BIN runs another gallery
 #                           control-center: the panel's walk, then one walk per detail page, against system_fixtures.py
 #                           ATHANOR_DOCK_BIN runs another dock in `atspi dock`, `orca dock`, `dock-e2e`, `dock-roundtrip`
@@ -162,27 +163,74 @@ image_id() {
     echo "${id#sha256:}"
 }
 
+# Builds the builder of this checkout into the archive $1 with builder_image.sh, loads it into the
+# local podman and leaves its image ID in $builder. The ID is the digest of the config file the
+# archive's manifest.json names, which is what podman takes for the ID of a docker archive; it is
+# read from the archive before the load, and the load must leave an image of that ID, so another
+# load that moves the local tag meanwhile cannot change which builder the spec builds in. Nothing
+# is retagged.
+load_local_builder() {
+    local archive=$1 manifest config
+    bash "$root/forge/scripts/builder_image.sh" build "$archive" || return $?
+    manifest=$(tar -xOf "$archive" manifest.json) || return $?
+    config=$(jq -er '.[0].Config' <<< "$manifest") || return $?
+    builder=$(tar -xOf "$archive" "$config" | sha256sum | cut -d' ' -f1) || return $?
+    bash "$root/forge/scripts/builder_image.sh" resolve "$archive" > /dev/null || return $?
+    if ! podman image inspect --format '{{.Id}}' "$builder" > /dev/null; then
+        echo "rig.sh: the load left no image of ID $builder, the config digest of the builder archive" >&2
+        return 1
+    fi
+}
+
 # Builds forge/specs/cosmic-comp the way the forge does and derives from the pinned rig an image
 # with that RPM installed, recorded in $spec_rig: build_spec_rig <pinned rig> <Version-Release>.
 # run_spec_build.sh is the DAG's and Spec Build Check's path: the sources checked against
 # SOURCES/sources.sha256, rpmbuild without network, sccache in a volume removed at the end, so
 # no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
-# content hash, as Spec Build Check takes it, never latest. The RPM is a pull-request test
-# artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
+# content hash, as Spec Build Check takes it, never latest: the published one when a trusted run
+# of call-build-builder.yml signed it, else the one forge/scripts/builder_image.sh builds from this
+# checkout (doc_build_system.md, section 5). That one is unsigned (the exception to PL12 of
+# doc_pipeline.md, for this recipe), loaded into the local podman only, under the archive's own
+# local tag and run by its image ID, never pushed, signed or cached under its hash, and used for
+# the RPM installed in the test rig. The RPM is a
+# pull-request test artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
 build_spec_rig() {
-    local base=$1 want=$2 idemp builder rpm ctx id
+    local base=$1 want=$2 idemp builder rpm ctx id archive status
     # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
     # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
     idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
     # The digest check_idempotency.sh verified, never the tag again: the tag can move after it.
     builder=$(sed -n 's/^IMAGE=//p' <<< "$idemp")
-    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp" || [ -z "$builder" ]; then
-        echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
-            "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
-        exit 1
+    if grep -qx 'CACHE_HIT=true' <<< "$idemp" && [ -n "$builder" ]; then
+        bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
+    else
+        # No signed builder for this checkout's inputs: build it here, for this test only.
+        if ! command -v nix > /dev/null; then
+            echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml," \
+                "and nix, which builds it here, is not on PATH: install nix, or land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
+            exit 1
+        fi
+        echo "rig.sh: no signed builder for this checkout: building it with builder_image.sh, unsigned, for this test only" >&2
+        # Outside $out/cosmic-comp-spec, which is the build context of the derived image.
+        mkdir -p "$out/builder-local"
+        archive=$out/builder-local/athanor-builder.tar.gz
+        # A run killed outright leaves the archive read-only, as the nix store copies it.
+        rm -f "$archive"
+        # The archive goes on every way out of this step, a signal included (bash runs the trap
+        # once the foreground nix build or podman load returns); the errors of the build and the
+        # load stay on stderr, and so does their exit status.
+        trap 'rm -f "$archive"; exit 130' INT
+        trap 'rm -f "$archive"; exit 143' TERM
+        status=0
+        load_local_builder "$archive" || status=$?
+        rm -f "$archive"
+        trap - INT TERM
+        if [ "$status" -ne 0 ]; then
+            echo "rig.sh: the builder of this checkout could not be built or loaded" >&2
+            exit "$status"
+        fi
     fi
-    bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
     rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
     rm -f "$rpm"
     bash "$root/forge/scripts/run_spec_build.sh" "$builder" specs/cosmic-comp
@@ -515,40 +563,49 @@ require() { # require <binary> <recipe>: a scene that runs one of our binaries
     fi
 }
 
+# bar_scene <surface> sets the scene of a bar surface for capture_bar, `atspi` and `orca`: the
+# popover to open (open, an id of ATHANOR_BAR_OPEN), the seeded preset, panel edge and dock, the
+# settle, and bar_session.py's flags (scene_args). The caller declares them, with their defaults.
+# bar-running is the bar preset with one running window, whose entry's menu `orca` opens.
+bar_scene() {
+    case "$1" in
+    bar | bar-running) preset=bar panel=bottom dock=- scene_args+=(--window) ;;
+    bar-power) open=power ;;
+    bar-input) open=input-source ;;
+    bar-calendar) open=clock ;;
+    bar-accessibility) open=accessibility ;;
+    bar-tiling) open=tiling ;;
+    bar-popups) scene_args+=(--notifications) ;;
+    bar-notifications) open=notifications scene_args+=(--notifications) ;;
+    bar-tray)
+        require athanor-shelld build-shelld
+        open=tray scene_args+=(--tray)
+        ;;
+    # The system modules against the fixtures, which start before the bar: a longer settle.
+    bar-network) open=network settle=12 scene_args+=(--fixtures) ;;
+    # The adapter already discovers, so the popover opens at its final size: cosmic-comp
+    # at a fractional scale leaves the edge column of a popover drawn before it grew. Its
+    # bottom edge was still settling at 1.5 right-to-left (#545): capture until it is stable.
+    bar-bluetooth) open=bluetooth settle=12 stable=10 scene_args+=(--fixtures --discovering) ;;
+    bar-audio) open=audio settle=12 scene_args+=(--fixtures) ;;
+    bar-battery) open=battery settle=12 scene_args+=(--fixtures) ;;
+    # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
+    # update so Restart to update and every row of the sheet show.
+    bar-shield) preset=bar panel=bottom dock=- open=shield scene_args+=(--trust-state downloaded) ;;
+    *) echo "rig.sh: '$1' is no surface of the bar" >&2; exit 2 ;;
+    esac
+}
+
 # doc_bar.md, BR9: the bar under its own preset with one running window, the five
 # popovers the bar owns in 2b.2, opened by ATHANOR_BAR_OPEN over the float preset,
 # 2b.3's notification popups (four waiting notifications: three show), the notification
 # list and a tray menu, the popovers of the four system modules against
 # system_fixtures.py, and the shield's sheet over a downloaded update.
 capture_bar() { # capture_bar <surface>
-    local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable=""
-    local session=(python3 /repo/forge/test/shell/bar_session.py)
-    case "$surface" in
-    bar) preset=bar panel=bottom dock=- session+=(--window) ;;
-    bar-power) open=power ;;
-    bar-input) open=input-source ;;
-    bar-calendar) open=clock ;;
-    bar-accessibility) open=accessibility ;;
-    bar-tiling) open=tiling ;;
-    bar-popups) session+=(--notifications) ;;
-    bar-notifications) open=notifications session+=(--notifications) ;;
-    bar-tray)
-        require athanor-shelld build-shelld
-        open=tray session+=(--tray)
-        ;;
-    # The system modules against the fixtures, which start before the bar: a longer settle.
-    bar-network) open=network settle=12 session+=(--fixtures) ;;
-    # The adapter already discovers, so the popover opens at its final size: cosmic-comp
-    # at a fractional scale leaves the edge column of a popover drawn before it grew. Its
-    # bottom edge was still settling at 1.5 right-to-left (#545): capture until it is stable.
-    bar-bluetooth) open=bluetooth settle=12 stable=10 session+=(--fixtures --discovering) ;;
-    bar-audio) open=audio settle=12 session+=(--fixtures) ;;
-    bar-battery) open=battery settle=12 session+=(--fixtures) ;;
-    # The shield's sheet above a bottom panel (item 13's third condition), with a downloaded
-    # update so Restart to update and every row of the sheet show.
-    bar-shield) preset=bar panel=bottom dock=- open=shield session+=(--trust-state downloaded) ;;
-    esac
-    session+=("${session_unit[@]}")
+    local surface=$1 open="" preset=float panel=top dock=visible settle=8 stable="" scene_args=()
+    local session=(python3 /repo/forge/test/shell/bar_session.py --client /out/bin/athanor-bar)
+    bar_scene "$surface"
+    session+=("${scene_args[@]}" "${session_unit[@]}")
     in_rig "$(rig_image)" bash -c '
         set -euo pipefail
         mkdir -p /out/locale/bar
@@ -914,7 +971,7 @@ build-toolkit)
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
         bash -c 'cargo clippy --locked -p athanor-sal --all-targets -- -D warnings \
                  && cargo clippy --locked -p athanor-sal --all-targets --features gpu -- -D warnings \
-                 && cargo rustdoc --locked -p athanor-sal -- -D warnings \
+                 && cargo rustdoc --locked -p athanor-sal --all-features -- --document-private-items -D warnings \
                  && cargo test --locked -p athanor-sal \
                  && cargo test --locked -p athanor-sal --features gpu \
                  && cargo build --release --locked -p athanor-sal --features gpu --example chooser --example field --example input_method --example layer --example popup --example pointer --example a11y \
@@ -1055,12 +1112,17 @@ build-bar)
     podman run --rm --memory 6g --security-opt label=disable \
         -v "$root:/repo:ro" -v "$out:/out" -v athanor-cargo-registry:/root/.cargo/registry "${cargo_cache[@]}" \
         -e CARGO_TARGET_DIR=/out/target -w /repo "$(build_image)" \
-        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls -p athanor-bar --all-targets -- -D warnings \
-                 && cargo test --locked -p athanor-apps -p athanor-bar \
+        bash -c 'cargo clippy --locked -p athanor-apps -p athanor-controls --all-targets -- -D warnings \
+                 && cargo clippy --locked -p athanor-bar --all-targets -- -D warnings \
+                 && cargo test --locked -p athanor-apps \
                  && forge/test/shell/with-display.sh cargo test --locked -p athanor-controls \
+                 && cargo test --locked -p athanor-bar \
                  && cargo build --release --locked -p athanor-bar \
                  && install -m 0755 /out/target/release/athanor-bar /out/bin/ \
-                 && python3 -B forge/scripts/check_shim_link_order.py /out/bin/athanor-bar'
+                 && needed=$(readelf -d /out/bin/athanor-bar) \
+                 && if grep -E "\(NEEDED\).*lib(gtk|gdk|adwaita)" <<<"$needed"; then \
+                        echo "rig.sh: athanor-bar links GTK (doc_own_stack.md OS8)" >&2; exit 1; \
+                    fi'
     ;;
 build-control-center)
     mkdir -p "$out/bin" "$out/target"
@@ -1146,7 +1208,7 @@ bar-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/bar_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 bar-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable"
+                 && exec python3 /repo/forge/test/shell/bar_session.py --hang CanReboot --window --pinnable --respawn"
     ;;
 bar-modules-e2e)
     stage_greeter_icons
@@ -1194,6 +1256,12 @@ shield-e2e)
     ;;
 tray-e2e)
     require athanor-shelld build-shelld
+    # Under athanor-sulphur the bar runs as its unit, whose layer surface the allow-list admits.
+    unit=""
+    if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+        require athanor-sulphur build-compositor
+        unit=--unit
+    fi
     stage_greeter_icons
     seed_bar "$out/seed-tray-e2e" float top visible light
     rm -f "$out/tray-e2e-tray.log" "$out/tray-e2e-shelld.log"
@@ -1203,7 +1271,7 @@ tray-e2e)
         RIG_HOLD="python3 /repo/forge/test/shell/tray_e2e.py" \
         dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 tray-e2e -- \
         bash -c "busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true \
-                 && exec python3 /repo/forge/test/shell/bar_session.py --tray --respawn"
+                 && exec python3 /repo/forge/test/shell/bar_session.py $unit --tray --respawn"
     ;;
 compositor-e2e)
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
@@ -1266,10 +1334,9 @@ launcher-window-preview)
         /repo/forge/test/shell/golden/launcher-window-preview /out launcher-window-preview
     ;;
 layer-guard)
-    surface=${2:?usage: rig.sh layer-guard <greeter|bar|dock>}
+    surface=${2:?usage: rig.sh layer-guard <greeter|dock>}
     case "$surface" in
     greeter) binary=athanor-greeter-ui ;;
-    bar) binary=athanor-bar ;;
     dock) binary=athanor-dock ;;
     *)
         echo "rig.sh layer-guard: unknown surface '$surface'" >&2
@@ -1318,8 +1385,8 @@ EOF
 atspi)
     if [ "${3:-}" = --matrix ]; then
         case ${2:-} in
-        bar | bar-modules | dock | launcher | control-center) ;;
-        *) echo "rig.sh atspi: --matrix runs on bar, bar-modules, dock, launcher or control-center, not '${2:-}'" >&2; exit 2 ;;
+        bar | bar-* | dock | launcher | control-center) ;;
+        *) echo "rig.sh atspi: --matrix runs on bar, bar-<popover>, bar-modules, dock, launcher or control-center, not '${2:-}'" >&2; exit 2 ;;
         esac
         for appearance in light dark hc-light hc-dark; do
             for scale in 1.0 1.25 1.5; do
@@ -1354,10 +1421,15 @@ atspi)
     elif [ "${3:-}" = it ]; then
         declare -A italian=([greeter]="athanor-greeter-ui Immagine di sistema verificata"
             [chooser]="athanor-layout-chooser Isola" [bar]="athanor-bar Alimentazione"
+            [bar-audio]="athanor-bar Audio" [bar-battery]="athanor-bar Batteria"
+            [bar-network]="athanor-bar Modalità aereo" [bar-bluetooth]="athanor-bar Dispositivi vicini"
             [dock]="athanor-dock Avvio applicazioni" [launcher]="athanor-launcher Cerca"
             [control-center]="athanor-control-center Centro di controllo")
-        [ -n "${italian[${2:-}]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
-        read -r component required <<< "${italian[$2]}"
+        key=${2:-}
+        # A popover's own name where it has one, else the bar's, which its tree holds too.
+        case "$key" in bar-*) [ -n "${italian[$key]:-}" ] || key=bar ;; esac
+        [ -n "${italian[$key]:-}" ] || { echo "atspi ${2:-} has no Italian check" >&2; exit 2; }
+        read -r component required <<< "${italian[$key]}"
         in_rig "$(rig_image)" bash -c "mkdir -p /out/locale/it &&
             msgfmt --check -o /out/locale/it/$component.mo /repo/forge/specs/$component/$component-1.0.0/po/it.po"
         lang=(RIG_LOCALE=it_IT.UTF-8 ATHANOR_I18N_CATALOG="/out/locale/it/$component.mo")
@@ -1435,32 +1507,6 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-toolkit-chooser -- \
             bash -c "$enable && exec /out/bin/athanor-sal-chooser"
         ;;
-    bar)
-        # 8 interactive widgets under float: workspaces, applications, clock, input source,
-        # accessibility, tiling, power, the shield. Under athanor-sulphur the bar runs as its
-        # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
-        # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
-        # hides workspaces (#835) and applications (#836).
-        unit='' widgets=8 own=()
-        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
-            require athanor-sulphur build-compositor
-            unit=--unit widgets=6 own=(--own-compositor float - "${3:-en}")
-        fi
-        stage_greeter_icons
-        seed_bar "$out/seed-atspi-bar" float top visible light
-        atspi_variant "$out/seed-atspi-bar"
-        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-atspi-bar \
-            RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" \
-            ATSPI_TRANSCRIPT="/out/atspi-bar${3:+-$3}.json" \
-            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
-            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar -- \
-            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit"
-        surface_not_closed atspi bar atspi-bar
-        # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
-        # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
-        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
-            "/repo/forge/test/shell/golden/atspi/atspi-bar${3:+-$3}.json" "/out/atspi-bar${3:+-$3}.json" "${own[@]}"
-        ;;
     bar-modules)
         # 12 interactive widgets under float with every fixture: the 8 of `bar`, and audio,
         # Bluetooth, network and battery. The fixtures start first, so the settle is longer.
@@ -1476,6 +1522,44 @@ atspi)
             dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 atspi-bar-modules -- \
             bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py --fixtures ${session_unit[*]}"
         surface_not_closed atspi bar-modules atspi-bar-modules
+        ;;
+    bar | bar-*)
+        # 8 interactive widgets under float: workspaces, applications, clock, input source,
+        # accessibility, tiling, power, the shield. Under athanor-sulphur the bar runs as its
+        # unit, or the compositor closes its surface on the top layer (OS4, C1 task 7), and shows
+        # 6: tiling through athanor_workspace_tiling_v1, and decision 28 of doc_own_stack.md
+        # hides workspaces (#835) and applications (#836). bar-<popover>, any bar surface of
+        # capture_bar's but bar-popups, opens that popover in bar_scene's scene, whose tree the
+        # Orca walk of `bar` never reaches; at least the same widgets, and the popover's. The
+        # clock's is bar-calendar.
+        # To record it again, copy <out>/atspi-<surface>[-it].json of a GTK run into golden/atspi/.
+        unit='' widgets=8 own=() open='' preset=float panel=top dock=visible settle=8 stable='' scene_args=()
+        if [ "$2" != bar ]; then bar_scene "$2"; fi
+        # A popover whose tree holds a name of its own requires it, as the Italian check does.
+        case "$2" in
+        bar-network) required=${required:-Airplane mode} ;;
+        bar-bluetooth) required=${required:-Nearby devices} ;;
+        esac
+        if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
+            require athanor-sulphur build-compositor
+            unit=--unit widgets=6 own=(--own-compositor "$preset" - "${3:-en}")
+        fi
+        opened=()
+        if [ -n "$open" ]; then opened=(ATHANOR_BAR_OPEN="$open"); fi
+        stage_greeter_icons
+        seed_bar "$out/seed-atspi-$2" "$preset" "$panel" "$dock" light
+        atspi_variant "$out/seed-atspi-$2"
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${variant_env[@]}" "${lang[@]}" RIG_SETTLE="$settle" RIG_STABLE="$stable" \
+            RIG_CONFIG_SEED="/out/seed-atspi-$2" RIG_DATA_OVERLAY="$bar_overlay" ATSPI_REQUIRED_NAME="$required" "${opened[@]}" \
+            ATSPI_TRANSCRIPT="/out/atspi-$2${3:+-$3}.json" \
+            RIG_HOLD="python3 /repo/forge/test/shell/atspi_check.py athanor-bar $widgets" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "atspi-$2" -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client /out/bin/athanor-bar ${scene_args[*]}"
+        surface_not_closed atspi "$2" "atspi-$2"
+        # The tree must hold all the reference holds, the cosmic-comp bar's, recorded; under
+        # athanor-sulphur the buttons decision 28 hides are exempt under its float preset (`own`).
+        in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/atspi_compare.py \
+            "/repo/forge/test/shell/golden/atspi/atspi-$2${3:+-$3}.json" "/out/atspi-$2${3:+-$3}.json" "${own[@]}"
         ;;
     dock)
         # 4 interactive widgets under float: launcher, workspaces, the pinned COSMIC
@@ -1579,11 +1663,11 @@ orca)
     chooser) component=athanor-layout-chooser ;;
     dock) component=athanor-dock ;;
     gallery) component= ;;
-    bar) component=athanor-bar ;;
+    bar | bar-*) component=athanor-bar ;;
     launcher) component=athanor-launcher ;;
     greeter) component=athanor-greeter-ui ;;
     control-center) component=athanor-control-center ;;
-    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'launcher', 'greeter' or 'control-center', not '${2:-}'" >&2; exit 2 ;;
+    *) echo "rig.sh orca: the surface is 'chooser', 'dock', 'gallery', 'bar', 'bar-<popover>', 'launcher', 'greeter' or 'control-center', not '${2:-}'" >&2; exit 2 ;;
     esac
     unit=
     if [ "${RIG_COMPOSITOR:-}" = athanor ]; then
@@ -1609,7 +1693,8 @@ orca)
         exit 1
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
-    transcript=orca-$2${3:+-$3}.txt own=()
+    reference=orca-$2${3:+-$3}.txt own=()
+    transcript=$reference
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1660,6 +1745,9 @@ orca)
         # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
         # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
         # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
+        # The toolkit dock's transcript sits beside the GTK dock's under its own name, in the
+        # same artifact, and holds the GTK dock's reference.
+        transcript=orca-${dock_tag}dock${3:+-$3}.txt
         seed_bar "$out/seed-orca-dock" float top visible light
         walk=(Tab*9 shift+F10 Down*4 Escape)
         if [ -n "$unit" ]; then
@@ -1676,9 +1764,9 @@ orca)
         # Eight modules under float, one button each: Workspaces, Applications, Clock, Input
         # source, Accessibility, Tiling, Power, the Shield (as `atspi bar`; under athanor-sulphur
         # decision 28 hides Workspaces and Applications, exempt through `own`). Under cosmic-comp
-        # Tab skips Input source (#751), so the seventh Tab comes back round to the first; the
-        # eighth once Tab reaches it. Under athanor-sulphur Ctrl+Alt+Tab reaches the Clock and
-        # the seven Tabs go round the six buttons left, Input source among them.
+        # the seven Tabs go from the first to the eighth. Under athanor-sulphur Ctrl+Alt+Tab
+        # reaches the Clock and the seven Tabs go round the six buttons left, Input source among
+        # them.
         stage_greeter_icons
         seed_bar "$out/seed-orca-bar" float top visible light
         walk=(Tab*7)
@@ -1695,12 +1783,62 @@ orca)
         # the walk alone would read a bar that is not on screen.
         surface_not_closed orca bar orca-bar
         ;;
+    bar-*)
+        # bar-<popover>: the popover of `atspi bar-<popover>`, open in bar_scene's scene, holds
+        # the keyboard on its first control; the walk takes one Tab for each control, the last
+        # coming back round to the first, and the arrows within a group of radios (the GTK
+        # references' controls: the calendar's four arrows and its grid, the input sources'
+        # two radios, four switches and the five colour filters, five actions). bar-running:
+        # the bar preset's running window; Tab reaches its entry after the openers, Shift+F10
+        # opens the entry's menu, the arrows walk it and Escape closes it, back on the entry
+        # (AX7). A module's walk is one line here; under athanor-sulphur the surface takes the
+        # keyboard on Ctrl+Alt+Tab (AX7), which the walk starts with.
+        open='' preset=float panel=top dock=visible settle=8 stable='' scene_args=()
+        bar_scene "$2"
+        case "$2" in
+        bar-calendar) walk=(Tab*5) ;;
+        bar-input) walk=(Down*2) ;;
+        bar-accessibility) walk=(Tab*4 Down*4 Tab) ;;
+        bar-tiling) walk=(Tab) ;;
+        bar-power) walk=(Tab*5) ;;
+        # The output's slider, mute switch and two devices, the input's slider and mute
+        # switch, and the three media buttons.
+        bar-audio) walk=(Tab*9) ;;
+        # The power modes, one stop as a group of radios, and the brightness.
+        bar-battery) walk=(Tab*2) ;;
+        # Wi-Fi, the three access points it joins (Campus needs Settings and takes no focus),
+        # Office VPN and Airplane mode.
+        bar-network) walk=(Tab*6) ;;
+        # Its switch, the paired Headphones and Keyboard, and the nearby Phone and Speaker.
+        bar-bluetooth) walk=(Tab*5) ;;
+        bar-running) walk=(Tab*3 shift+F10 Down*4 Escape) ;;
+        *) echo "rig.sh orca: $2 has no walk; name its keys here" >&2; exit 2 ;;
+        esac
+        # No exemption of decision 28: a popover's walk, and bar-running's, which starts on the
+        # launcher, reach none of the buttons it hides, and orca_compare refuses an exemption
+        # that names no utterance of the reference.
+        if [ -n "$unit" ]; then walk=(ctrl+alt+Tab "${walk[@]}"); fi
+        opened=()
+        if [ -n "$open" ]; then opened=(ATHANOR_BAR_OPEN="$open"); fi
+        stage_greeter_icons
+        seed_bar "$out/seed-orca-$2" "$preset" "$panel" "$dock" light
+        in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE="$settle" RIG_STABLE="$stable" \
+            RIG_CONFIG_SEED="/out/seed-orca-$2" RIG_DATA_OVERLAY="$bar_overlay" "${opened[@]}" \
+            RIG_HOLD="python3 /repo/forge/test/shell/orca_walk.py /out/$transcript ${walk[*]}" \
+            dbus-run-session -- /repo/forge/test/shell/scene.sh 1280 800 1.0 "orca-$2" -- \
+            bash -c "$enable && exec python3 /repo/forge/test/shell/bar_session.py $unit --client /out/bin/athanor-bar ${scene_args[*]}"
+        surface_not_closed orca "$2" "orca-$2"
+        ;;
     launcher)
         # One control, the entry (the rows are not focusable and Tab opens the result menu, so
         # the walk is the arrows): "cc window" lists two results under a header, CC Window and
-        # the web search; Down goes down them, Up back to the first. Orca presents no result yet,
-        # and cosmic-comp in the rig never activates the launcher, so its reference is
-        # athanor-sulphur's transcript (#751).
+        # the web search; Down goes down them, Up back to the first. The reference is the GTK
+        # launcher's transcript under athanor-sulphur, which spoke no result, as cosmic-comp in the
+        # rig never activated that launcher (#751), with the count of the results and the two rows
+        # that athanor-sal's launcher (#1154) speaks (doc_launcher.md LA5, need 6), so a walk that
+        # hears no result fails. That launcher is activated under both compositors, and Orca says
+        # each row the arrows select through the entry's active descendant, the focus staying on
+        # the entry (doc_launcher.md LA7).
         seed_bar "$out/seed-orca-launcher" float top visible light
         in_rig "$(rig_image)" env GTK_A11Y=atspi "${lang[@]}" RIG_SETTLE=8 RIG_CONFIG_SEED=/out/seed-orca-launcher \
             ATHANOR_LAUNCHER_SHOW="cc window" \
@@ -1745,7 +1883,7 @@ orca)
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
-        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
+        "/repo/forge/test/shell/golden/orca/$reference" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
     # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-sal's, with vello_cpu and with

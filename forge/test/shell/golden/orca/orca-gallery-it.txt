@@ -1,69 +1,163 @@
 Lettore schermo attivo.
 Galleria
-Pulsanti pulsante di commutazione premuto
-Scelte pulsante di commutazione non premuto
-Valori pulsante di commutazione non premuto
-Elenchi pulsante di commutazione non premuto
-Testo pulsante di commutazione non premuto
-Stati pulsante di commutazione non premuto
-Dialoghi pulsante di commutazione non premuto
-Un pulsante pulsante
-Uno pulsante di commutazione premuto
-Due pulsante di commutazione non premuto
-Tre pulsante di commutazione non premuto
-Nome testo
-apre un popup
+Pulsanti pulsante di commutazione premuto.
+spazio
+tabulazione
+Scelte pulsante di commutazione non premuto.
+tabulazione
+Valori pulsante di commutazione non premuto.
+tabulazione
+Elenchi pulsante di commutazione non premuto.
+tabulazione
+Testo pulsante di commutazione non premuto.
+tabulazione
+Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Un pulsante button.
+tabulazione
+Uno pulsante di commutazione premuto.
+tabulazione
+Due pulsante di commutazione non premuto.
+tabulazione
+Tre pulsante di commutazione non premuto.
+tabulazione
+Nome testo.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Scelte pulsante di commutazione premuto
-Valori pulsante di commutazione non premuto
-Elenchi pulsante di commutazione non premuto
-Testo pulsante di commutazione non premuto
-Stati pulsante di commutazione non premuto
-Dialoghi pulsante di commutazione non premuto
-Opzione uno casella di spunta spuntata
-Opzione due casella di spunta non spuntata
-Un interruttore attivo selettore
+Scelte pulsante di commutazione premuto.
+spazio
+tabulazione
+Valori pulsante di commutazione non premuto.
+tabulazione
+Elenchi pulsante di commutazione non premuto.
+tabulazione
+Testo pulsante di commutazione non premuto.
+tabulazione
+Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Opzione uno casella di spunta spuntata.
+tabulazione
+Opzione due casella di spunta non spuntata.
+tabulazione
+Un interruttore casella di spunta spuntata.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Valori pulsante di commutazione premuto
-Elenchi pulsante di commutazione non premuto
-Testo pulsante di commutazione non premuto
-Stati pulsante di commutazione non premuto
-Dialoghi pulsante di commutazione non premuto
+Valori pulsante di commutazione premuto.
+spazio
+tabulazione
+Elenchi pulsante di commutazione non premuto.
+tabulazione
+Testo pulsante di commutazione non premuto.
+tabulazione
+Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
 Un cursore controllo scorrevole orizzontale 50 50 percento.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Elenchi pulsante di commutazione premuto
-Testo pulsante di commutazione non premuto
-Stati pulsante di commutazione non premuto
-Dialoghi pulsante di commutazione non premuto
-Sostituisci le righe pulsante
+Elenchi pulsante di commutazione premuto.
+spazio
+tabulazione
+Testo pulsante di commutazione non premuto.
+tabulazione
+Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Sostituisci le righe button.
+tabulazione
 Un elenco Elenco con 51 voci
-Riga 1
-Una seconda riga
+Riga 1.
+Una seconda riga.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Testo pulsante di commutazione premuto
-Stati pulsante di commutazione non premuto
-Dialoghi pulsante di commutazione non premuto
-Note testo
+Testo pulsante di commutazione premuto.
+spazio
+tabulazione
+Stati pulsante di commutazione non premuto.
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Note testo.
 Il cursore parte da qui.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Galleria
-Stati pulsante di commutazione premuto
-Dialoghi pulsante di commutazione non premuto
-Abilita il pulsante non attivo selettore
+Stati pulsante di commutazione premuto.
+spazio
+tabulazione
+Calendario pulsante di commutazione non premuto.
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Abilita il pulsante casella di spunta non spuntata.
+Lettore schermo disattivato.
+Lettore schermo attivo.
+Galleria
+Calendario pulsante di commutazione premuto.
+spazio
+tabulazione
+Dialoghi pulsante di commutazione non premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
+tabulazione
+button.
 Lettore schermo disattivato.
 Lettore schermo attivo.
 Una finestra di dialogo Una finestra di dialogo trattiene la sua finestra finché non viene chiusa.
-Chiudi pulsante
+Chiudi button.
+spazio
+Galleria cornice
+Dialoghi pulsante di commutazione premuto.
+tabulazione
+Menu pulsante di commutazione non premuto.
+tabulazione
+Apri una finestra di dialogo button.
+Lettore schermo disattivato.
+Lettore schermo attivo.
 Galleria
-Dialoghi pulsante di commutazione premuto
-Apri una finestra di dialogo pulsante
+menù
+Nuova finestra.
+spazio
+Apri un menu contratto button.
+opens popup
+contratto
 Lettore schermo disattivato.

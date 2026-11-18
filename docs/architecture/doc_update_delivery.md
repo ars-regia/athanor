@@ -169,7 +169,7 @@ The policy, keys, registries.d and verification are UT2, UT3 and UT5. This secti
 
 **UD22. Every system image carries the policy of UT3, and the build fails without it.** `verify.py shipped` checks the `/etc/containers/policy.json` link to `/usr/share/athanor/containers/policy.json`, `registries.d/athanor.yaml` with `use-sigstore-attachments: true`, `keyPaths` naming `/usr/share/athanor/keys/athanor-image-1.pub`, and `default: reject`. The system image check job runs the same checks against the built image (`podman run --rm <image> ...`) before push. Acceptance: `python3 scripts/verify.py shipped`, and the image check job.
 
-**UD23. Every switch and upgrade enforces the policy.** The client already passes `--enforce-container-sigpolicy` to `switch` (`tools.rs:264`); once a machine boots `ostree-image-signed:`, `upgrade` keeps enforcing. No code path calls `bootc switch` without the flag; `cargo test -p athanor-update` asserts the argument vector of every `bootc` call. Acceptance: that test.
+**UD23. Every switch and upgrade enforces the policy.** The client already passes `--enforce-container-sigpolicy` to `switch` (`tools.rs:484`); once a machine boots `ostree-image-signed:`, `upgrade` keeps enforcing. No code path calls `bootc switch` without the flag; `cargo test -p athanor-update` asserts the argument vector of every `bootc` call. Acceptance: that test.
 
 **UD24. The build job pushes by run id only.** _(Landed, #299.)_ "Push OS Images" pushes `:<run_id>`, never `:latest`. `image-digests.sh` records the digests. Acceptance: UD1's check.
 
