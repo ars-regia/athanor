@@ -1,13 +1,15 @@
 Lettore schermo attivo.
-Blocca button.
+Alimentazione
+menù
+Blocca pulsante
+Termina sessione pulsante
 tabulazione
-Termina sessione button.
-Sospendi button.
+Sospendi pulsante
 tabulazione
-Riavvia button.
+Riavvia pulsante
 tabulazione
-Spegni button.
+Spegni pulsante
 tabulazione
-Blocca button.
+Blocca pulsante
 tabulazione
 Lettore schermo disattivato.

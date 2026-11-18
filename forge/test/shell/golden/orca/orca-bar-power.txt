@@ -1,13 +1,15 @@
 Screen reader on.
-Lock button.
+Power
+menu
+Lock button
+Log Out button
 tab
-Log Out button.
-Suspend button.
+Suspend button
 tab
-Restart button.
+Restart button
 tab
-Shut Down button.
+Shut Down button
 tab
-Lock button.
+Lock button
 tab
 Screen reader off.

@@ -1,15 +1,16 @@
 Screen reader on.
-Wi-Fi check box checked.
+Network
+Wi-Fi toggle button pressed
+Athanor Lab, connected button
 tab
-Athanor Lab, connected button.
+Corner Café button
 tab
-Corner Café button.
+Home Network, secured button
 tab
-Home Network, secured button.
+Office VPN toggle button not pressed
 tab
-Office VPN check box not checked.
+Airplane mode toggle button not pressed
 tab
-Airplane mode check box not checked.
+Wi-Fi toggle button pressed
 tab
-Wi-Fi check box checked.
 Screen reader off.
