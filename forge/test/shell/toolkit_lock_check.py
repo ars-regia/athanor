@@ -141,15 +141,13 @@ def drawn_at(lines, scale):
     return False
 
 
-def unlocked_first(lines):
-    """Whether unlock_and_destroy came once, after the lock surfaces were made, and before any
-    lock surface was destroyed that was live until then."""
+def unlocked_first(lines, outputs):
+    """Whether unlock_and_destroy came once, while each of the `outputs` outputs still had its
+    lock surface, and every lock surface was destroyed after it."""
     unlock = [i for i, line in enumerate(lines) if UNLOCK.search(line)]
     if len(unlock) != 1:
         return False
-    before = live(lines[: unlock[0]])
-    after = live(lines)
-    return bool(before) and not after
+    return len(live(lines[: unlock[0]])) == outputs and not live(lines)
 
 
 def sway(*args):
@@ -265,17 +263,19 @@ def main():
             lines = REFUSED_TRACE.read_text().splitlines()
             if (
                 refused.poll() is not None
+                or "locked" in REFUSED_STDOUT.read_text().splitlines()
                 or not any(LOCK_DESTROY.search(line) for line in lines)
                 or any(UNLOCK.search(line) for line in lines)
                 or live(lines)
             ):
                 raise SystemExit(
                     "toolkit_lock_check: a refused lock was not answered with destroy, "
-                    f"its surfaces {live(lines)} closed, the client staying"
+                    f"its surfaces {live(lines)} closed, the client staying and never locked"
                 )
         finally:
             refused.terminate()
         print("a second lock heard finished, answered destroy and closed its surfaces")
+        locked_on = len(outputs())
         subprocess.run([*TYPE, "-k", "Escape"], env=wayland, check=True)
         until(
             "Escape did not end the lock",
@@ -283,7 +283,7 @@ def main():
         )
         until(
             "the lock surfaces were not all destroyed after unlock_and_destroy",
-            lambda: unlocked_first(TRACE.read_text().splitlines()),
+            lambda: unlocked_first(TRACE.read_text().splitlines(), locked_on),
         )
         time.sleep(1)
         if client.poll() is not None:

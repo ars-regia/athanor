@@ -44,5 +44,32 @@ class CommittedTest(unittest.TestCase):
         self.assertIsNone(check.committed_as_the_protocol_asks(lines, "25"))
 
 
+
+UNLOCK = " -> ext_session_lock_v1#21.unlock_and_destroy()"
+
+
+def destroy(lock):
+    return f" -> ext_session_lock_surface_v1#{lock}.destroy()"
+
+
+class UnlockedFirstTest(unittest.TestCase):
+    def two(self):
+        return surface(3, 4, 30, 1280, 800, (1280, 800)) + surface(
+            5, 6, 31, 1280, 800, (1280, 800)
+        )
+
+    def test_an_unlock_before_every_surface_goes_holds(self):
+        lines = self.two() + [UNLOCK, destroy(30), destroy(31)]
+        self.assertTrue(check.unlocked_first(lines, 2))
+
+    def test_a_surface_destroyed_before_the_unlock_is_named(self):
+        lines = self.two() + [destroy(30), UNLOCK, destroy(31)]
+        self.assertFalse(check.unlocked_first(lines, 2))
+
+    def test_a_surface_left_after_the_unlock_is_named(self):
+        lines = self.two() + [UNLOCK, destroy(30)]
+        self.assertFalse(check.unlocked_first(lines, 2))
+
+
 if __name__ == "__main__":
     unittest.main()
