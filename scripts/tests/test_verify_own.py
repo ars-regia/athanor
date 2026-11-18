@@ -213,6 +213,23 @@ class Own(unittest.TestCase):
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("athanor-kiosk: reaches gtk4", problems[0])
 
+    def test_a_crate_no_lockfile_holds_counts_whatever_its_name(self):
+        self.write("kiosk/Cargo.toml", '[package]\nname = "kiosk-portal"\n\n[dependencies]\n'
+                   'gtk4 = "0.10"\n')
+        problems = self.problems()
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("kiosk-portal: reaches gtk4", problems[0])
+
+    def test_a_vendored_crate_patched_in_by_path_is_no_root(self):
+        self.write(
+            "Cargo.lock",
+            LOCK + '\n[[package]]\nname = "wayland-backend"\n'
+            'version = "0.3.0"\ndependencies = ["gtk4"]\n',
+        )
+        self.write("x/vendor/wayland-backend/Cargo.toml",
+                   '[package]\nname = "wayland-backend"\n\n[dependencies]\ngtk4 = "0.10"\n')
+        self.assertNotIn("wayland-backend", verify.toolkit_crates(self.root)[0])
+
     def test_a_crate_no_lockfile_holds_fails_when_its_toolkits_cannot_be_read(self):
         self.write("kiosk/Cargo.toml", '[package]\nname = "athanor-kiosk"\n\n[dependencies]\n'
                    'relm4 = "0.9"\n')

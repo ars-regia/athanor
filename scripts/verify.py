@@ -6629,7 +6629,9 @@ def toolkit_crates(root=None):
     feature reaches a toolkit; the dev-dependencies of a member are left out, as they are not
     shipped (toolkit-boundary does the same), and a registry crate's never reach the lockfile.
     A crate no lockfile holds counts when it names a toolkit directly, and is returned in the
-    second list otherwise, as its transitive dependencies cannot be read."""
+    second list otherwise, as its transitive dependencies cannot be read. A vendored crate that a
+    lockfile holds without a source, patched in by path (`[patch.crates-io]`), is no root of its
+    own: it counts through the crates of the repository that reach it."""
     root = Path(root or ROOT)
     listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
                             capture_output=True, text=True, check=True).stdout.split("\0")
@@ -6659,7 +6661,7 @@ def toolkit_crates(root=None):
                     yield from (c for c in by_name.get(name, []) if not version or c["version"] == version[0])
 
         for package in packages:
-            if "source" in package:
+            if "source" in package or package["name"] not in manifests:
                 continue
             seen, stack = set(), [package]
             while stack:
