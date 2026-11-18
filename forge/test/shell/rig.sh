@@ -10,7 +10,7 @@
 #   rig.sh publish-build-image  push the build stage and print its digest (needs a registry login)
 #   rig.sh probe-sandbox    prove that bubblewrap, and with it glycin, works in the rig
 #   rig.sh cosmic-comp-version   the rig runs the cosmic-comp the session ships: Athanor's build at the Version-Release of forge/specs/cosmic-comp (a build of the spec needs cosign on PATH, which verifies the builder)
-#                           (when the published rig holds another, the spec is built as the forge builds it and later recipes run a rig with it installed)
+#                           (when the published rig holds another, the spec is built as the forge builds it, in the signed builder or else in one built here from the checkout, never pushed, and later recipes run a rig with it installed)
 #   rig.sh css-parse        GTK parse gate over the generated stylesheets
 #   rig.sh cosmic-keys      every key COSMIC ships exists in our overlay
 #   rig.sh cosmic-preview   capture COSMIC Settings' appearance page under the Calmo defaults
@@ -163,27 +163,74 @@ image_id() {
     echo "${id#sha256:}"
 }
 
+# Builds the builder of this checkout into the archive $1 with builder_image.sh, loads it into the
+# local podman and leaves its image ID in $builder. The ID is the digest of the config file the
+# archive's manifest.json names, which is what podman takes for the ID of a docker archive; it is
+# read from the archive before the load, and the load must leave an image of that ID, so another
+# load that moves the local tag meanwhile cannot change which builder the spec builds in. Nothing
+# is retagged.
+load_local_builder() {
+    local archive=$1 manifest config
+    bash "$root/forge/scripts/builder_image.sh" build "$archive" || return $?
+    manifest=$(tar -xOf "$archive" manifest.json) || return $?
+    config=$(jq -er '.[0].Config' <<< "$manifest") || return $?
+    builder=$(tar -xOf "$archive" "$config" | sha256sum | cut -d' ' -f1) || return $?
+    bash "$root/forge/scripts/builder_image.sh" resolve "$archive" > /dev/null || return $?
+    if ! podman image inspect --format '{{.Id}}' "$builder" > /dev/null; then
+        echo "rig.sh: the load left no image of ID $builder, the config digest of the builder archive" >&2
+        return 1
+    fi
+}
+
 # Builds forge/specs/cosmic-comp the way the forge does and derives from the pinned rig an image
 # with that RPM installed, recorded in $spec_rig: build_spec_rig <pinned rig> <Version-Release>.
 # run_spec_build.sh is the DAG's and Spec Build Check's path: the sources checked against
 # SOURCES/sources.sha256, rpmbuild without network, sccache in a volume removed at the end, so
 # no cache is restored or kept (doc_pipeline.md, PL10). The builder is this checkout's, by its
-# content hash, as Spec Build Check takes it, never latest. The RPM is a pull-request test
-# artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
+# content hash, as Spec Build Check takes it, never latest: the published one when a trusted run
+# of call-build-builder.yml signed it, else the one forge/scripts/builder_image.sh builds from this
+# checkout (doc_build_system.md, section 5). That one is unsigned (the exception to PL12 of
+# doc_pipeline.md, for this recipe), loaded into the local podman only, under the archive's own
+# local tag and run by its image ID, never pushed, signed or cached under its hash, and used for
+# the RPM installed in the test rig. The RPM is a
+# pull-request test artifact: it stays in forge/RPMS and the local image, and nothing pushes it.
 build_spec_rig() {
-    local base=$1 want=$2 idemp builder rpm ctx id
+    local base=$1 want=$2 idemp builder rpm ctx id archive status
     # retry.sh, as Spec Build Check asks: a transient registry error is asked again, one that
     # outlasts the attempts fails the recipe. A failed attempt prints nothing on stdout.
     idemp=$(cd "$root/forge" && bash scripts/retry.sh bash scripts/check_idempotency.sh --package builder \
         --registry "${registry%%/*}" --owner "${registry#*/}" --image-name athanor-builder)
     # The digest check_idempotency.sh verified, never the tag again: the tag can move after it.
     builder=$(sed -n 's/^IMAGE=//p' <<< "$idemp")
-    if ! grep -qx 'CACHE_HIT=true' <<< "$idemp" || [ -z "$builder" ]; then
-        echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml, so forge/specs/cosmic-comp" \
-            "cannot be built here: land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
-        exit 1
+    if grep -qx 'CACHE_HIT=true' <<< "$idemp" && [ -n "$builder" ]; then
+        bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
+    else
+        # No signed builder for this checkout's inputs: build it here, for this test only.
+        if ! command -v nix > /dev/null; then
+            echo "rig.sh: $registry/athanor-builder:$(sed -n 's/^CONTENT_HASH=//p' <<< "$idemp"), the builder of this checkout, is not published, or not signed by a trusted run of call-build-builder.yml," \
+                "and nix, which builds it here, is not on PATH: install nix, or land the change to the builder's inputs (flake.nix, flake.lock, forge/builder) first" >&2
+            exit 1
+        fi
+        echo "rig.sh: no signed builder for this checkout: building it with builder_image.sh, unsigned, for this test only" >&2
+        # Outside $out/cosmic-comp-spec, which is the build context of the derived image.
+        mkdir -p "$out/builder-local"
+        archive=$out/builder-local/athanor-builder.tar.gz
+        # A run killed outright leaves the archive read-only, as the nix store copies it.
+        rm -f "$archive"
+        # The archive goes on every way out of this step, a signal included (bash runs the trap
+        # once the foreground nix build or podman load returns); the errors of the build and the
+        # load stay on stderr, and so does their exit status.
+        trap 'rm -f "$archive"; exit 130' INT
+        trap 'rm -f "$archive"; exit 143' TERM
+        status=0
+        load_local_builder "$archive" || status=$?
+        rm -f "$archive"
+        trap - INT TERM
+        if [ "$status" -ne 0 ]; then
+            echo "rig.sh: the builder of this checkout could not be built or loaded" >&2
+            exit "$status"
+        fi
     fi
-    bash "$root/forge/scripts/retry.sh" podman pull -q "$builder" > /dev/null
     rpm=$root/forge/RPMS/cosmic-comp-$want.x86_64.rpm
     rm -f "$rpm"
     bash "$root/forge/scripts/run_spec_build.sh" "$builder" specs/cosmic-comp
@@ -1646,7 +1693,8 @@ orca)
         exit 1
     fi
     enable='busctl --user set-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled b true'
-    transcript=orca-$2${3:+-$3}.txt own=()
+    reference=orca-$2${3:+-$3}.txt own=()
+    transcript=$reference
     case "$2" in
     chooser)
         bin=${ATHANOR_CHOOSER_BIN:-/out/bin/athanor-layout-chooser}
@@ -1697,6 +1745,9 @@ orca)
         # four buttons there (Workspaces and Applications are hidden, decision 28): Tab*6 goes
         # round to the test window. KP_Enter, "where am I", is Orca's own command, which reaches
         # Orca through the keyboard monitor; orca_dock.py fails the walk when Orca does not answer.
+        # The toolkit dock's transcript sits beside the GTK dock's under its own name, in the
+        # same artifact, and holds the GTK dock's reference.
+        transcript=orca-${dock_tag}dock${3:+-$3}.txt
         seed_bar "$out/seed-orca-dock" float top visible light
         walk=(Tab*9 shift+F10 Down*4 Escape)
         if [ -n "$unit" ]; then
@@ -1832,7 +1883,7 @@ orca)
         ;;
     esac
     in_rig "$(rig_image)" python3 -B /repo/forge/test/shell/orca_compare.py \
-        "/repo/forge/test/shell/golden/orca/$transcript" "/out/$transcript" "${own[@]}"
+        "/repo/forge/test/shell/golden/orca/$reference" "/out/$transcript" "${own[@]}"
     ;;
 measure-chooser)
     # doc_own_stack.md, T1 task 7: the GTK chooser and athanor-sal's, with vello_cpu and with
