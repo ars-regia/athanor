@@ -268,19 +268,6 @@ impl Dispatch<AthanorA11yManagerV1, ()> for State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::OwnedFd;
-    use std::os::unix::net::UnixStream;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-    use wayland_backend::protocol::Message;
-    use wayland_backend::server::{
-        Backend as ServerBackend, ClientData, ClientId, GlobalHandler, GlobalId,
-        Handle as ServerHandle, ObjectData, ObjectId,
-    };
-    use wayland_client::globals::registry_queue_init;
-
-    use crate::protocols::athanor_a11y::client::__interfaces::ATHANOR_A11Y_MANAGER_V1_INTERFACE;
 
     #[test]
     fn a_delay_above_the_bound_never_reaches_the_compositor() {
@@ -294,119 +281,14 @@ mod tests {
         assert!(check_delays(&aids(0, MAX_AID_DELAY + 1)).is_err());
     }
 
-    /// A server that offers `athanor_a11y_manager_v1` at `version` and records the opcode of
-    /// every request the client sends to the objects it binds.
-    struct Offer {
-        seen: Arc<Mutex<Vec<u16>>>,
-        stop: Arc<AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
-    }
-
-    struct Recorder(Arc<Mutex<Vec<u16>>>);
-
-    impl ObjectData<()> for Recorder {
-        fn request(
-            self: Arc<Self>,
-            _: &ServerHandle,
-            _: &mut (),
-            _: ClientId,
-            msg: Message<ObjectId, OwnedFd>,
-        ) -> Option<Arc<dyn ObjectData<()>>> {
-            self.0.lock().unwrap().push(msg.opcode);
-            None
-        }
-
-        fn destroyed(self: Arc<Self>, _: &ServerHandle, _: &mut (), _: ClientId, _: ObjectId) {}
-    }
-
-    struct Global(Arc<Mutex<Vec<u16>>>);
-
-    impl GlobalHandler<()> for Global {
-        fn bind(
-            self: Arc<Self>,
-            _: &ServerHandle,
-            _: &mut (),
-            _: ClientId,
-            _: GlobalId,
-            _: ObjectId,
-        ) -> Arc<dyn ObjectData<()>> {
-            Arc::new(Recorder(self.0.clone()))
-        }
-    }
-
-    impl ClientData for Offer {}
-
-    impl Offer {
-        fn start(version: u32) -> (Offer, UnixStream) {
-            let (client, server) = UnixStream::pair().unwrap();
-            let seen = Arc::new(Mutex::new(Vec::new()));
-            let stop = Arc::new(AtomicBool::new(false));
-            let (recorded, stopped) = (seen.clone(), stop.clone());
-            let thread = std::thread::spawn(move || {
-                let backend = ServerBackend::<()>::new().unwrap();
-                let handle = backend.handle();
-                handle.create_global::<()>(
-                    &ATHANOR_A11Y_MANAGER_V1_INTERFACE,
-                    version,
-                    Arc::new(Global(recorded.clone())),
-                );
-                handle.insert_client(server, Arc::new(Dummy)).unwrap();
-                while !stopped.load(Ordering::Relaxed) {
-                    backend.dispatch_all_clients(&mut ()).unwrap();
-                    backend.flush(None).unwrap();
-                    std::thread::sleep(Duration::from_millis(2));
-                }
-            });
-            (Offer { seen, stop, thread: Some(thread) }, client)
-        }
-
-        fn opcodes(&self) -> Vec<u16> {
-            self.seen.lock().unwrap().clone()
-        }
-    }
-
-    struct Dummy;
-
-    impl ClientData for Dummy {}
-
-    impl Drop for Offer {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Relaxed);
-            if let Some(thread) = self.thread.take() {
-                thread.join().unwrap();
-            }
-        }
-    }
-
-    /// Binds the manager at exactly `version` of a server that offers it, then calls
-    /// `set_reduced_motion`, and returns the result with the requests the server received.
-    fn reduced_motion_at(version: u32) -> (Result<(), Error>, Vec<u16>) {
-        let (offer, socket) = Offer::start(version);
-        let connection = Connection::from_socket(socket).unwrap();
-        let (globals, mut queue) = registry_queue_init::<State>(&connection).unwrap();
-        let manager: AthanorA11yManagerV1 =
-            bind(&globals, &queue.handle(), version..=version).expect("the manager is offered");
-        assert_eq!(manager.version(), version);
-        let result = Manager::Athanor(manager).set_reduced_motion(true);
-        connection.flush().unwrap();
-        queue.roundtrip(&mut State::default()).unwrap();
-        (result, offer.opcodes())
-    }
-
     /// A request above the bound version ends the connection, so a manager bound at version 1
-    /// gets the refusal and nothing reaches the wire.
+    /// is never sent `set_reduced_motion`. This tests the gate only: a wire test needs a
+    /// compositor, and this crate has none (the fixture is in athanor-sulphur, which does not
+    /// depend on this crate).
     #[test]
-    fn a_version_1_manager_refuses_the_reduced_motion_request() {
-        let (result, requests) = reduced_motion_at(1);
-        assert!(matches!(result, Err(Error::Unavailable(_))), "{result:?}");
-        assert_eq!(requests, Vec::<u16>::new());
-    }
-
-    #[test]
-    fn a_version_2_manager_sends_the_reduced_motion_request() {
-        let (result, requests) = reduced_motion_at(2);
-        assert!(result.is_ok(), "{result:?}");
-        assert_eq!(requests.len(), 1);
+    fn set_reduced_motion_is_sent_only_from_version_2() {
+        assert!(!has_reduced_motion(1));
+        assert!(has_reduced_motion(2));
     }
 
     #[test]

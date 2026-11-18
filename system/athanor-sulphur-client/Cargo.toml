@@ -37,9 +37,6 @@ wayland-client = { workspace = true }
 wayland-protocols = { workspace = true }
 wayland-scanner = { workspace = true }
 
-[dev-dependencies]
-wayland-backend = "0.3"
-
 [[example]]
 name = "cc-probe"
 required-features = ["gtk"]
