@@ -33,8 +33,9 @@ On 2026-11-06 the maintainer said "we must replace everything that is not our ow
 - the output management.
 
 `docs/operations/release-1.0.md` still says that the bar, the dock, the control center, the
-greeter UI and the layout chooser "stay GTK4". No record says what "own" means, so no check can
-tell when 1.0 meets it.
+greeter UI and the layout chooser "stay GTK4". That sentence is already stale for the bar, the
+control center and the layout chooser, which build without GTK today. No record says what "own"
+means, so no check can tell when 1.0 meets it.
 
 ### What is not own at `a43bf06d9`
 
@@ -61,14 +62,16 @@ tell when 1.0 meets it.
 - `athanor-dock`, behind a feature;
 - `athanor-apps`, `athanor-controls`, `athanor-style` and `athanor-sulphur-client`.
 
-Of these, `rig.sh no-gtk` already builds `athanor-apps`, `athanor-style`, the compositor client
-and `athanor-dock` without GTK. `rig.sh build-bar` and `rig.sh build-control-center` check that
+Of these, `rig.sh no-gtk` already builds `athanor-apps`, `athanor-style`, the compositor client,
+`athanor-dock` and `athanor-osd` without GTK. `rig.sh build-bar` and `rig.sh build-control-center` check that
 no GTK library is in the bar's or the control center's `DT_NEEDED`.
 
 **Specifications** that still name libadwaita for Athanor's applications:
 - `doc_files.md` FM1 and FM2;
 - `doc_settings.md`;
-- ten others.
+- `doc_accessibility.md`, `doc_disks.md`, `doc_first_run.md`, `doc_languages.md`, `doc_portal.md`,
+  `doc_session_daemons.md`, `doc_shell.md`, `doc_software.md`, `doc_virtualization.md` and
+  `doc_visual_language.md`.
 
 ## Decision
 
@@ -90,7 +93,8 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
    | Base system: kernel source, systemd, glibc, mesa, PipeWire, NetworkManager, polkitd, bootc, SELinux, firmware | Upstream. Athanor's part is the build, the integration, the hardening and the signature, already its own. |
    | Session: everything the user sees, and everything that mediates input, output, authentication or privilege in the session. That is the compositor, greeter (UI and authentication path), lock, polkit agent and prompter, bar, dock, launcher and application library, overview and window switcher, OSD, notifications, control center, layout chooser, idle, wallpaper, the settings daemon's roles, output management, portal backend and recovery console | **Own.** |
    | First-party applications: the file manager with the file chooser (`athanor-files-view`), and Settings | **Own.** |
-   | Other applications: terminal, viewers, editors, store | Third party, through Flatpak (`doc_software.md`). |
+   | Other applications: terminal, text editor, disk utility, viewers | Third party: the RPM defaults of `doc_software.md` decision 7, or Flatpak. Athanor's disk utility (`doc_disks.md`) is outside this record's 1.0 scope, and GNOME Disks stays the default until it ships. Nautilus leaves in 1.0, replaced by Athanor's file manager, which amends `doc_software.md` section 9.2. |
+   | The store | Third party: Bazaar for applications (`doc_software.md` section 9.4, option (b)), from the Fedora 45 base. Its Athanor page is own. `cosmic-store` leaves with decision 3. |
    | Compatibility bridges: xwayland-satellite | Upstream, as a library is. |
    | Assets: fonts, icon and cursor themes, and the GTK and Qt themes that third-party applications read | Upstream where their licence allows, but no COSMIC package (decision 3). |
 
@@ -129,7 +133,7 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
 7. **"Own" is a check, not a statement.** One automatic check, in `verify.py` or `just check`,
    runs on the 1.0 build and on every pull request. It refuses:
    - in the image, any `cosmic-*` RPM and `pop-launcher`;
-   - in the image, `gtk-layer-shell` and `gtk4-layer-shell`;
+   - in the image, `gtk-layer-shell`, `gtk4-layer-shell` and `xdg-user-dirs-gtk`;
    - any `athanor-*` crate whose dependency tree holds `gtk4`, `libadwaita`, `libcosmic` or `iced`.
 
    It starts with an allow-list of today's entries above, each with its issue. Like
@@ -169,7 +173,24 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
   - `doc_launcher.md`, LA12;
   - `doc_shell.md`;
   - `doc_files.md`;
-  - `doc_settings.md`.
+  - `doc_settings.md`;
+  - `doc_software.md`: decision 7, section 9.2 and SW15 to SW17;
+  - `doc_lock_and_prompts.md` and `doc_session_daemons.md`: cosmic-greeter as the locker and
+    cosmic-idle;
+  - `doc_visual_language.md`: the rule that applications keep libadwaita;
+  - the libadwaita mentions of the documents listed in the Context;
+  - `docs/architecture/components.toml`: each COSMIC component's entry.
+- Amended:
+  - [ADR-0121](0121-own-compositor-and-toolkit.md) decision 5: its words "with the GTK4 shell on
+    top";
+  - [ADR-0135](0135-faster-road-to-1-0.md) decision 3: cosmic-comp's session at the greeter in
+    1.0, and its move to 1.1 of the overview, the retirement of cosmic-workspaces and OS19 in full;
+  - [ADR-0138](0138-own-components-in-1-0.md) decision 2: its sentence that the overview and
+    cosmic-workspaces' retirement stay in 1.1;
+  - [ADR-0122](0122-own-compositor-optional-session-and-desktop-first.md) and
+    [ADR-0132](0132-own-compositor-default-before-full-acceptance.md): cosmic-comp's session as
+    the second choice at the greeter;
+  - [ADR-0103](0103-audit-5-decisions.md) D13: cosmic-workspaces kept until 1.1.
 - The check of decision 7 is opened as an issue and lands before the first port that it would
   measure.
 
@@ -178,6 +199,6 @@ no GTK library is in the bar's or the control center's `DT_NEEDED`.
 Given on 2026-11-18 (translated from Italian):
 
 1. Does "everything own" in 1.0 cover first-party applications? "Session plus Files and
-   Settings". The other applications stay third party through Flatpak.
+   Settings". The other applications stay third party.
 2. Does cosmic-comp stay at the greeter as a fallback in 1.0? "No, it leaves in 1.0".
 3. Do the overview and the retirement of cosmic-workspaces return to 1.0? "Yes, in 1.0".
