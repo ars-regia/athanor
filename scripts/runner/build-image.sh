@@ -46,8 +46,8 @@ users:
     uid: 1001
     shell: /bin/bash
     lock_passwd: true
-# openssl3-libs: from Fedora 45 openssl-libs is OpenSSL 4 (libssl.so.4); the runner's .NET
-# loads only libssl.so.3 and otherwise restarts forever with "OpenSSL is required for
+# openssl3-libs: from Fedora 45 openssl-libs is OpenSSL 4 (libssl.so.4), which the runner's
+# .NET does not load; without libssl.so.3 it restarts forever with "OpenSSL is required for
 # algorithm 'RSAOpenSsl'", which installdependencies.sh does not catch.
 packages: [podman, git, tar, gzip, openssl3-libs]
 write_files:
