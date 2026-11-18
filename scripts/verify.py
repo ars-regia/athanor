@@ -12,6 +12,9 @@ Uso:
     python3 scripts/verify.py --list
     python3 scripts/verify.py --known-red scripts/ci/known-red.txt [--known-red-base REF]
                                            # a listed red check does not fail the run (PQ12)
+    python3 scripts/verify.py specs --known-red-base REF
+                                           # REF is also the base `specs` measures Release raises
+                                           # against (#1202)
 
 Exit code: numero di controlli falliti (0 = tutto a posto).
 Nessuna dipendenza oltre a python3 e git. Va eseguito dalla radice del repo.
@@ -22,6 +25,7 @@ import collections
 import datetime
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -52,6 +56,9 @@ VENDORED_CRATES = {
 # --------------------------------------------------------------------------- #
 
 CHECKS = {}
+# The revision the change is measured against, from --known-red-base: the base of the pull
+# request or of the merge group in pr.yml (`just check-static`), None when none is given.
+BASE_REF = None
 BOLD, DIM, RED, GRN, YEL, OFF = "\033[1m", "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m"
 if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
     BOLD = DIM = RED = GRN = YEL = OFF = ""
@@ -1260,6 +1267,75 @@ def gallery_problems(root):
     return out
 
 
+# The one module the toolkit's root exposes: the rest of its surface is re-exported by `pub use`
+# (decision 3 of #649), so an application never names a module whose signatures carry accesskit,
+# vello_cpu or parley types. Widening the list is a decision of the API, not of the author.
+TOOLKIT_PUBLIC_MODULES = {"driver"}
+
+
+def use_paths(tree, prefix=()):
+    """The full paths of a `use` tree, without `as` aliases and a leading `crate::` or `self::`."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(tree + ","):
+        depth += (ch == "{") - (ch == "}")
+        if ch == "," and depth == 0:
+            item, start = tree[start:i].strip(), i + 1
+            item = re.sub(r"\s+as\s+\w+$", "", item)
+            if not item:  # a trailing comma
+                continue
+            head, brace, rest = item.partition("{")
+            segs = prefix + tuple(x.strip() for x in head.split("::") if x.strip())
+            if brace:
+                out += use_paths(rest[: rest.rindex("}")], segs)
+            elif segs:
+                out.append([x for x in segs if x])
+    return [p[1:] if p[0] in ("crate", "self") and len(p) > 1 else p for p in out]
+
+
+def api_problems(root):
+    """The toolkit's root declares no `pub mod` outside TOOLKIT_PUBLIC_MODULES, and WidgetId is no
+    alias of an integer: any id of that type would address another Ui's widgets (#649).
+
+    `pub use` of a private module of the root (`text`, `crate::{text as t}`, `text::*`) fails; a
+    glob of the root (`crate::*`) does not.
+
+    Limit: it does not see a foreign crate's type in a public signature; the rustdoc run with
+    `--all-features -- --document-private-items` (Justfile, rig.sh) catches the broken links, a reviewer the type."""
+    lib = f"{TOOLKIT}/src/lib.rs"
+    try:
+        text = read(root / lib)
+    except OSError as err:
+        return [f"{lib}: cannot read ({err})"]
+    # Only the root's own items count: comments are dropped and a `mod t { .. }` body is skipped.
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.S)
+    depth, top, stack = 0, [], []
+    for i, ch in enumerate(text):
+        if ch == "{":
+            stack.append(text[:i].rstrip().endswith("::"))  # a `use a::{b, c}` group is no block
+            depth += not stack[-1]
+        elif ch == "}" and stack:
+            depth -= not stack.pop()
+        top.append(ch if depth == 0 else " ")
+    top = "".join(top)
+    out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
+           "make it pub(crate) and re-export what an application needs"
+           for name in re.findall(r"\bpub\s+mod\s+(\w+)", top) if name not in TOOLKIT_PUBLIC_MODULES]
+    private = set(re.findall(r"\bmod\s+(\w+)", top)) - TOOLKIT_PUBLIC_MODULES
+    for use in re.findall(r"\bpub\s+use\s+([^;]*);", top):
+        for path in use_paths(use):
+            # A path of one segment, or `m::*`, that names a private module re-exports it whole;
+            # `crate::*` and an item of a module (`crate::widget::Kind`) are left alone.
+            if path[-1:] == ["*"]:
+                path = path[:-1]
+            if len(path) == 1 and path[0] in private:
+                out.append(f"{lib}: `pub use` of the module `{path[0]}` is outside the public modules "
+                           f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items")
+    for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
+        if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
+            out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")
+    return out
+
+
 def toolkit_boundary_problems(root=None):
     """The toolkit names no Athanor crate, no path and no workspace dependency in [dependencies]
     or [build-dependencies], and its `license` is the set of licence files beside the manifest
@@ -1294,10 +1370,10 @@ def toolkit_boundary_problems(root=None):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
         out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
-    return out + gallery_problems(root)
+    return out + gallery_problems(root) + api_problems(root)
 
 
-@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, and its licence files match its license")
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():
@@ -3593,6 +3669,88 @@ RELEASE_BY_HAND = {
     "forge/specs/greenboot-rs/greenboot-rs.spec",
     "forge/specs/polkit/polkit.spec",
 }
+# The RELEASE_BY_HAND spec whose Version-Release is the kernel's NVR: build.sh defines kversion
+# and krelease from nvr.sh, which reads the kernel pins, so the spec cannot raise it, and the
+# kernel pipeline already rebuilds and tests a change to microvm/ (build-inputs.py hashes its
+# spec and kernel-local, kernel_unchanged.py checks the whole directory).
+RELEASE_FROM_KERNEL = {"forge/specs/azoth/microvm/azoth-microvm.spec"}
+# Directories under a RELEASE_BY_HAND spec's directory that no Source line and no section of the
+# spec reads, so a change to them leaves the package as it is and raises no Release (#1202). The
+# spec file itself is never listed: a comment-only edit of a spec raises Release too.
+RELEASE_UNPACKAGED = {
+    "forge/specs/greenboot-rs/tests/": "unittest suites of the patches, run by just check, not packaged",
+    "forge/specs/polkit/tests/": "unittest suites of the agent helper, run by just check, not packaged",
+}
+
+
+def load_module(path):
+    """The Python module at PATH, relative to the repository, loaded by its file path: the
+    directories of scripts/ci and forge/scripts are not packages verify.py can import."""
+    spec = importlib.util.spec_from_file_location(Path(path).stem, ROOT / path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def unraised_releases(root, base):
+    """The RELEASE_BY_HAND specs of ROOT (but RELEASE_FROM_KERNEL) whose directory differs from
+    revision BASE outside RELEASE_UNPACKAGED while their Version-Release did not rise (#1202).
+
+    The working tree is compared with BASE, a two-tree diff as scripts/ci/changes.py makes: in
+    pr.yml BASE is the first parent of the checked-out merge, so the diff is the pull request's.
+    A spec absent at BASE is new, one absent from the tree is removed, and one whose base Release
+    still carried %{?athanor_content} had no hand Release to raise: none of them is compared.
+    Raises ValueError when BASE is not a commit or git cannot diff it.
+    """
+    rpms = load_module("forge/scripts/check_image_rpms.py")
+    classes = load_module("scripts/ci/release_class.py")
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+
+    if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
+        raise ValueError(f"{base} is not a commit of {root}")
+    diff = git("diff", "--name-only", "--no-renames", "-z", base, "--")
+    if diff.returncode != 0:
+        raise ValueError(f"git diff {base} failed: {diff.stderr.strip()}")
+    changed = [p for p in diff.stdout.split("\0") if p]
+
+    problems = []
+    for spec in sorted(RELEASE_BY_HAND - RELEASE_FROM_KERNEL):
+        directory = spec.rsplit("/", 1)[0] + "/"
+        content = [p for p in changed if p.startswith(directory)
+                   and not any(p.startswith(d) for d in RELEASE_UNPACKAGED)]
+        if not content or not (Path(root) / spec).is_file():
+            continue
+        listed = git("ls-tree", "-z", "--name-only", base, "--", spec)
+        if listed.returncode != 0:
+            problems.append(f"{spec}: cannot list it at {base}: {listed.stderr.strip()}")
+            continue
+        if not listed.stdout:
+            continue
+        before = git("show", f"{base}:{spec}")
+        if before.returncode != 0:
+            problems.append(f"{spec}: cannot read it at {base}: {before.stderr.strip()}")
+            continue
+        if re.search(r"^Release:.*%\{\?athanor_content\}", before.stdout, re.M):
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            old_spec = Path(tmp) / Path(spec).name
+            old_spec.write_text(before.stdout, encoding="utf-8")
+            try:
+                old = rpms.read_spec(old_spec)[1]()
+                new = rpms.read_spec(Path(root) / spec)[1]()
+                raised = classes.evrcmp(new, old) > 0
+            except (KeyError, ValueError, classes.ClassError) as e:
+                problems.append(f"{spec}: cannot read its Version-Release: {e}")
+                continue
+        if not raised:
+            problems.append(
+                f"{spec}: {', '.join(c[len(directory):] for c in content)} changed but "
+                f"Version-Release {new} is not higher than {old} at {base}: raise Release and add "
+                f"a %changelog entry, or add a path no build reads to RELEASE_UNPACKAGED in "
+                f"scripts/verify.py, only with its reason")
+    return problems
 
 
 @check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
@@ -3600,6 +3758,25 @@ def check_specs():
     r = Result()
     for problem in manifest_spec_problems():
         r.fail(problem)
+    if BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the Release raises of RELEASE_BY_HAND "
+               "were not checked")
+    else:
+        try:
+            for problem in unraised_releases(ROOT, BASE_REF):
+                r.fail(problem)
+        except ValueError as e:
+            r.fail(f"Release raises against {BASE_REF}: {e}")
+        else:
+            commits = {
+                subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+                                f"{ref}^{{commit}}"], capture_output=True, text=True).stdout
+                for ref in (BASE_REF, "HEAD")
+            }
+            if len(commits) == 1:
+                r.note(f"the base {BASE_REF} is the checked-out commit, so only uncommitted edits were compared for "
+                       "Release raises: pass the pull request's base, e.g. "
+                       "`just check-static origin/iso-v0`")
     import shlex
 
     def sections(text):
@@ -3861,10 +4038,10 @@ def check_gpu_grants():
 # landlock::PathFd opens a path following links, and a ruleset can name any descriptor: a
 # write grant built from either widens to wherever a link put at the path points (#1052).
 # athanor_unit::sandbox takes its write grants as dirs::Checked, which only athanor_unit::dirs
-# builds. This check holds the rest: no crate but athanor-unit and the pending ones depends on
-# the landlock crate, so every other one confines through athanor_unit::sandbox; no Rust file
-# outside those crates' rulesets names PathFd, under any name a `use ... as` gives it; and in
-# athanor_unit's sandbox.rs, PathFd appears only in its import and as the parent of a read grant.
+# builds. This check holds the rest: no crate but athanor-unit depends on the landlock crate,
+# so every other one confines through athanor_unit::sandbox; no other Rust file names PathFd,
+# under any name a `use ... as` gives it; and in athanor_unit's sandbox.rs, PathFd appears only
+# in its import and as the parent of a read grant.
 LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
 LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
@@ -3878,15 +4055,6 @@ PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
 SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
 SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
 SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
-# Rulesets of their own, outside athanor_unit, that still grant by path. The greeter runs in a
-# user namespace where the system's nodes are owned by nobody, and the chooser grants the
-# target of a layout document's link: neither fits athanor_unit::dirs's check as it is, so
-# moving them is their own change (#1059). The list only shrinks.
-LANDLOCK_PATH_PENDING = (
-    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/sandbox.rs",
-    "forge/specs/athanor-layout-chooser/athanor-layout-chooser-1.0.0/src/sandbox.rs",
-)
-LANDLOCK_CRATES_PENDING = tuple(f"{path.rsplit('/src/', 1)[0]}/Cargo.toml" for path in LANDLOCK_PATH_PENDING)
 
 
 def landlock_dependencies(manifest):
@@ -3943,9 +4111,9 @@ def sandbox_grant_problems(relative, code, read_grants):
 
 
 def landlock_fd_problems(root):
-    """No crate but athanor-unit and the pending ones depends on landlock; no Rust file but
-    their rulesets names PathFd; athanor_unit's sandbox.rs names it only in its import and as
-    the parent of a read grant. So a Landlock write grant is never built from a path."""
+    """No crate but athanor-unit depends on landlock; no Rust file names PathFd but
+    athanor_unit's sandbox.rs, and that only in its import and as the parent of a read grant.
+    So a Landlock write grant is never built from a path."""
     root = Path(root)
     problems = []
     # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
@@ -3958,7 +4126,7 @@ def landlock_fd_problems(root):
     files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
     for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
         path = root / relative
-        if relative == LANDLOCK_CRATE or relative in LANDLOCK_CRATES_PENDING:
+        if relative == LANDLOCK_CRATE:
             continue
         try:
             manifest = tomllib.loads(read(path))
@@ -3970,8 +4138,6 @@ def landlock_fd_problems(root):
                             f"athanor_unit::sandbox, whose grants are dirs::Checked")
     for relative in (name for name in files if name.endswith(".rs")):
         path = root / relative
-        if relative in LANDLOCK_PATH_PENDING:
-            continue
         text = read(path)
         allowed = []
         if relative == LANDLOCK_SANDBOX:
@@ -5859,6 +6025,191 @@ def check_agent_docs():
 
 
 # --------------------------------------------------------------------------- #
+# line-citations: a `path:N` in an architecture document still names what the sentence names
+# --------------------------------------------------------------------------- #
+
+# What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
+LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
+# What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
+# `cosmic-osd.service`), or a bare snake_case or `::` path.
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
+CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
+# The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
+LINE_RANGE_LIMIT = 200
+# A markdown line that holds no words: blank, or a table's rule (`| --- | --- |`).
+EMPTY_LINE = re.compile(r"[\s|:-]*")
+# The row a sentence names in a table of a cited document: `Archives row`.
+ROW_NAME = re.compile(r"\b([A-Z][a-z]+) row\b")
+# The id of a section of a specification (`SH3`, `BR2`); a section starts at its `**BR2.` line and
+# ends at the next such line or heading.
+SECTION_ID = re.compile(r"\b[A-Z]{1,4}\d+\b")
+SECTION_START = re.compile(r"\*\*[A-Z]{1,4}\d+[a-z]?\b|#{1,3} ")
+
+
+def section_lines(rows, ident):
+    """The first and the last line (from 1) of the section `ident` of a document, or None."""
+    for first, row in enumerate(rows, 1):
+        if row.startswith(f"**{ident}."):
+            end = next((n for n in range(first + 1, len(rows) + 1) if SECTION_START.match(rows[n - 1])),
+                       len(rows) + 1)
+            return first, end - 1
+    return None
+
+# Findings the heuristic cannot settle, each (document, cited path, cited lines, token, n) with the
+# reason: one entry covers one citation, the n-th (from 1) of the document that has the same path,
+# lines and token. An entry that matches no finding fails, so the list only shrinks.
+LINE_CITATIONS_KEPT = {
+    ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
+        "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
+}
+
+
+def holds_token(text, token):
+    """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
+    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open."""
+    word = re.escape(token.rsplit("::", 1)[-1])
+    return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
+
+
+def citation_findings(doc, text, tracked, read_file):
+    """The citations of the document's `text` that no longer name what they cite, as
+    (line, path, lines, token, message); `token` is None when the finding is not a moved line.
+    `tracked` is the repository's files, `read_file(path)` the text of one.
+
+    A citation is `path:N`, `path:N-M` or a list `path:N, M-K`; `:N` alone cites the file named
+    last in the same line, with or without a line of its own. A backtick span that is no file name
+    (an identifier) leaves that file as it was; a file name that resolves to no file, or a
+    citation of one, clears it, and a `:N` after that cites nothing and is not checked. A path resolves as written, then under the crate whose full path the line names
+    before it, then by the one tracked file whose path ends with it; a name that several files
+    end with (`Cargo.toml`) is not read. A path that starts with a top-level directory of the
+    repository (read from `tracked`: `experimental/`, `.claude/`, `docs/`, ...) and resolves to no
+    file is a finding, as is a bare `*.md` name that no tracked file ends with. A range is no line range when it starts at 0, ends before it starts,
+    reaches past the end of the file, or spans LINE_RANGE_LIMIT lines or more. A cited markdown
+    document (`doc_x.md:N`) is read as any file; its first cited line must also hold words, a
+    sentence that names a table row (`the Archives row`) names a word the cited lines must hold,
+    and the section ids of the sentence (`BR2`) that the document has as a `**BR2.` line fix the
+    sections the cited lines lie in (or name the id themselves, as a list of other documents does).
+
+    The token is the nearest code token before the citation in its sentence (after the last `. `,
+    `; `, `: `, `), ` or ` | `) that the cited file holds as a whole word; the cited lines must
+    hold it, as a whole identifier. For a list the lines of all its entries count together: a list names the places of
+    several words of one sentence (`packages.json:2, 51` for two lists), so the token cannot be
+    attributed to one entry; each entry must still be a line range.
+
+    Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
+    place holding the token, and a word that the cited lines hold in a comment or a string
+    satisfies the check as it does in code. A citation of another document with no token, no row
+    name and no section id in its sentence is checked only for a first line that holds words, so
+    a stale one that still lands on text goes unseen (#1089)."""
+    known = set(tracked)
+    prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
+    suffixes = {}
+    for path in known:
+        parts = path.split("/")
+        for i in range(len(parts)):
+            suffixes.setdefault("/".join(parts[i:]), []).append(path)
+
+    def resolve(name, crate):
+        for candidate in (f"{crate}/{name}" if crate else None, name):
+            if candidate in known:
+                return candidate
+        found = suffixes.get(name, [])
+        return found[0] if len(found) == 1 else None
+
+    out = []
+    for number, line in enumerate(text.split("\n"), 1):
+        last = crate = None
+        for span in re.finditer(r"`([^`]+)`", line):
+            m = LINE_CITATION.fullmatch(span.group(1))
+            if not m:
+                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
+                continue
+            named, spec = m.groups()
+            path = last if named is None else resolve(named, crate)
+            if path is None and named and (named.startswith(prefixes) or (
+                    named.endswith(".md") and "/" not in named
+                    and not any(t.endswith("/" + named) for t in known))):
+                out.append((number, named, spec, None,
+                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
+            last = path
+            if path is None:
+                continue
+            body = read_file(path)
+            if (c := CRATE_ROOT.match(path)):
+                crate = c.group(1)
+            ranges = []
+            for part in re.split(r",\s*", spec):
+                first, _, end = part.partition("-")
+                ranges.append((int(first), int(end or first)))
+            rows = body.split("\n")
+            if rows[-1] == "":
+                rows.pop()
+            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
+                            f"(fewer than {LINE_RANGE_LIMIT} lines)"))
+                continue
+            if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
+                continue
+            start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
+            own = {part.split(".")[0] for part in path.split("/")}
+            sentence = line[start + 1:span.start()]
+            found = [(m.start(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            if path.endswith(".md"):
+                found += [(m.start(), m.group(1)) for m in ROW_NAME.finditer(sentence)]
+            if path.endswith(".md"):
+                spans = {i: section_lines(rows, i) for i in dict.fromkeys(SECTION_ID.findall(sentence))}
+                spans = {i: lines for i, lines in spans.items() if lines}
+                if spans:
+                    low = min(first for first, _ in spans.values())
+                    high = max(last for _, last in spans.values())
+                    if any(not (low <= f and e <= high or any(holds_token("\n".join(rows[f - 1:e]), i)
+                                                               for i in spans)) for f, e in ranges):
+                        named = ", ".join(spans)
+                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
+                                    f"the section of {named}, which its sentence names: the lines moved"))
+                        continue
+            tokens = [t for _, t in sorted(found)
+                      if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
+            held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
+            if tokens and not holds_token(held, tokens[-1]):
+                out.append((number, path, spec, tokens[-1], f"{doc}:{number}: `{path}:{spec}` does not hold "
+                            f"`{tokens[-1]}`, which its sentence names: the lines moved"))
+    return out
+
+
+@check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
+def check_line_citations():
+    r = Result()
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
+    if listed.returncode:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    tracked = {f for f in listed.stdout.split("\0") if f}
+
+    def read_file(path):
+        try:
+            return read(ROOT / path)
+        except OSError:
+            return ""
+
+    seen = set()
+    for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
+        counted = {}
+        for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
+            n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
+            seen.add((doc.name, path, spec, token, n))
+            if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
+                r.fail(problem)
+    for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
+        r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
+    return r
+
+
+# --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
 
@@ -5990,9 +6341,8 @@ def main(argv):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    if known_red_ref and not known_red_path:
-        print("--known-red-base needs --known-red", file=sys.stderr)
-        return 2
+    global BASE_REF
+    BASE_REF = known_red_ref
 
     if "--list" in argv:
         for n, f in CHECKS.items():

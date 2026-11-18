@@ -25,17 +25,19 @@ pub(crate) struct Globals {
 }
 
 impl Client {
-    /// Follows the keyboard's group (`Event::KeyboardGroup`) through athanor-sulphur's
-    /// manager. Nothing to do under cosmic-comp, whose manager is bound at connect, nor where the
-    /// manager is already bound.
+    /// Follows the keyboard's group (`Event::KeyboardGroup`) and layouts: through
+    /// athanor-sulphur's manager, bound here once, or under cosmic-comp, whose manager is bound
+    /// at connect, through LN9's store (`keyboard.rs`).
     pub fn watch_keyboard_group(&self) -> Result<(), Error> {
         self.live()?;
+        if self.inner.state.borrow().globals.keyboard_layouts.is_some() {
+            self.follow_store(crate::keyboard::Store::session());
+            return Ok(());
+        }
         {
             let mut state = self.inner.state.borrow_mut();
             let state = &mut *state;
-            if state.globals.keyboard_layouts.is_some()
-                || state.globals.keyboard_group.manager.is_some()
-            {
+            if state.globals.keyboard_group.manager.is_some() {
                 return Ok(());
             }
             let manager: Option<AthanorKeyboardGroupManagerV1> =
@@ -115,11 +117,13 @@ impl State {
         }
     }
 
-    /// The names of a keymap, which are the seat's where no `layouts` event names them.
+    /// The names of a keymap, which are the seat's where neither a `layouts` event nor LN9's
+    /// store names them.
     pub(crate) fn keymap_layouts(&mut self, names: Vec<String>) {
-        if !self.globals.keyboard_group.names_layouts {
-            self.set_layouts(names);
+        if !self.globals.keyboard_group.names_layouts && !self.layouts_from_store {
+            self.set_layouts(names.clone());
         }
+        self.keymap_names = names;
     }
 }
 
@@ -135,10 +139,10 @@ mod tests {
         assert_eq!(names_of("English (US)\n\nItalian\n"), ["English (US)", "", "Italian"]);
     }
 
-    /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp and
-    /// version 1 a keymap is all there is.
+    /// wtype's keymap names no layout: under version 2 the seat's stay, under cosmic-comp the
+    /// store's, and under version 1 a keymap is all there is.
     #[test]
-    fn a_keymap_names_the_layouts_only_where_no_event_does() {
+    fn a_keymap_names_the_layouts_only_where_no_event_nor_store_does() {
         let seat = vec!["English (US)".to_owned(), "Italian".to_owned()];
         let mut state = State::default();
         state.keymap_layouts(seat.clone());
@@ -146,7 +150,72 @@ mod tests {
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, seat);
         state.globals.keyboard_group.names_layouts = false;
+        state.layouts_from_store = true;
+        state.keymap_layouts(Vec::new());
+        assert_eq!(state.keyboard_layouts, seat);
+        state.layouts_from_store = false;
         state.keymap_layouts(Vec::new());
         assert_eq!(state.keyboard_layouts, Vec::<String>::new());
+    }
+
+    /// Least privilege, as for the window globals (#1058): under cosmic-comp a client that never
+    /// watches the keyboard group reads neither the store nor `evdev.xml` and holds no watch;
+    /// one that watches holds one, once across its watches.
+    #[test]
+    fn only_a_client_that_watches_the_group_follows_the_store() {
+        let _context = crate::MAIN_CONTEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_connection, client, _bound) =
+            crate::windows::tests::connect(&["zcosmic_keyboard_layout_manager_v1"]);
+        assert!(client.inner.state.borrow().globals.keyboard_layouts.is_some());
+        assert!(client.inner.store.borrow().is_none());
+        assert!(!client.inner.state.borrow().layouts_from_store);
+        let store = crate::keyboard::test_store("watch", Some("(layout: \"us,it\", variant: \",\")"));
+        let path = store.changing();
+        client.follow_store(store);
+        assert_eq!(client.keyboard_layouts(), ["English (US)", "Italian"]);
+        let first = client.inner.store.borrow().clone().expect("a watch of the store");
+        // Once it follows a store, a watch reads no other, the session's included.
+        client.watch_keyboard_group().expect("watch");
+        assert_eq!(client.inner.store.borrow().as_ref(), Some(&first));
+        assert_eq!(client.keyboard_layouts(), ["English (US)", "Italian"]);
+        // A change reaches an open client; a closed one reads none.
+        let follow = |record, layouts: &[&str]| {
+            crate::keyboard::replace(&path, record);
+            let context = glib::MainContext::default();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while std::time::Instant::now() < deadline && client.keyboard_layouts() != layouts {
+                context.iteration(false);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        follow("(layout: \"it\", variant: \"\")", &["Italian"]);
+        assert_eq!(client.keyboard_layouts(), ["Italian"]);
+        client.inner.set_closed();
+        follow("(layout: \"us\", variant: \"\")", &["English (US)"]);
+        assert_eq!(client.keyboard_layouts(), ["Italian"], "a closed client takes no change");
+    }
+
+    /// Under cosmic-comp, a virtual keyboard's keymap after the store's two layouts leaves two.
+    #[test]
+    fn a_virtual_keyboards_keymap_leaves_the_stores_layouts() {
+        let store = crate::keyboard::test_store("virtual", Some("(layout: \"us,it\", variant: \",\")"));
+        let mut state = State::default();
+        state.store_layouts(store.names());
+        state.keymap_layouts(vec!["English (US)".to_owned(), "Italian".to_owned()]);
+        state.keymap_layouts(Vec::new());
+        assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
+    }
+
+    /// A client that connects while the keymap is a virtual keyboard's one-layout one still
+    /// reads the store's two.
+    #[test]
+    fn a_client_started_after_a_one_layout_keymap_reads_the_store() {
+        let store = crate::keyboard::test_store("late", Some("(layout: \"us,it\", variant: \",\")"));
+        let mut state = State::default();
+        state.store_layouts(store.names());
+        state.keymap_layouts(vec!["English (US)".to_owned()]);
+        assert_eq!(state.keyboard_layouts, ["English (US)", "Italian"]);
     }
 }

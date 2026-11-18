@@ -6,11 +6,11 @@ use crate::text::{keeps, printable, Brush, TextContext, TextField, TextStyle};
 use crate::theme::{Rgba, Theme, TitleBarStyle};
 use crate::wrap::{self, Wrap};
 use parley::Layout;
-use std::cell::Cell;
 use std::fmt;
 use std::time::{Duration, Instant};
 
 mod alert;
+mod calendar;
 mod exact_value;
 mod horizontal;
 mod spacing;
@@ -19,6 +19,8 @@ pub(crate) mod labelled;
 mod rows;
 mod strip;
 pub(crate) mod wheel;
+
+pub use calendar::{Calendar, CalendarText, Cell, Date};
 
 /// A widget of a [`Ui`], as [`Ui::add`] returns it; [`Ui::ROOT`] is the root column. The id names
 /// the widget's slot in the `Ui` and the slot's generation, and is meaningful only in the `Ui`
@@ -65,8 +67,8 @@ const HUSH: Duration = Duration::from_secs(60);
 /// node, does not flood the journal.
 #[derive(Default)]
 struct Hush {
-    said: Cell<Option<Instant>>,
-    held: Cell<u64>,
+    said: std::cell::Cell<Option<Instant>>,
+    held: std::cell::Cell<u64>,
 }
 
 impl Hush {
@@ -207,6 +209,18 @@ impl std::ops::IndexMut<WidgetId> for Widgets {
         self.scratch = dead();
         &mut self.scratch
     }
+}
+
+/// How urgently assistive technologies speak an announcement ([`Ui::announce`]), as GTK's
+/// `GtkAccessibleAnnouncementPriority` and AT-SPI's politeness.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Priority {
+    /// After what the screen reader is saying: GTK's low and medium priorities.
+    #[default]
+    Polite,
+    /// At once, interrupting what the screen reader is saying: GTK's high priority, for what
+    /// needs attention now, such as a critical notification.
+    Assertive,
 }
 
 /// The longest length layout keeps, in logical pixels: 2^64 times less than the largest `f32`,
@@ -397,6 +411,18 @@ pub enum Kind {
     Menu,
     /// An item of a [`Kind::Menu`], with its label; activating it raises [`Event::Clicked`].
     MenuItem(String),
+    /// An item of a [`Kind::Menu`] with a mark, as GTK's model buttons: a check or a radio at
+    /// the start edge, or an arrow to a submenu at the end edge, or the arrow back from one at
+    /// the start edge of a submenu's title. When one item of a menu has a check or a radio, the
+    /// labels of all of them start after the room it takes, as GTK's indicator size group. Add it
+    /// with [`Ui::menu_check`], [`Ui::menu_radio`] or [`Ui::submenu`].
+    #[non_exhaustive]
+    MenuEntry {
+        /// The text of the item.
+        label: String,
+        /// What the item shows beside its label and does when activated.
+        mark: Mark,
+    },
     /// A line between groups of a menu's items. It takes no input.
     Separator,
     /// The text of a tooltip, which the driver shows in a popup of its own.
@@ -490,6 +516,17 @@ pub enum Kind {
         /// The text shown after the image; empty shows the image alone.
         text: String,
     },
+    /// A month, as GTK's `Calendar`: a heading with the month and the year, each between
+    /// buttons to the one before and the one after, the weekdays' short names from the
+    /// locale's first, and six weeks of [`Kind::CalendarCell`]s. The days are one stop of the
+    /// focus: the arrows move it between them, Ctrl+Left and Ctrl+Right change the month,
+    /// Ctrl+Up and Ctrl+Down the year, the wheel the month, and Enter, Space or a click select
+    /// the focused day. A change of the selected day raises [`Event::Changed`] for the
+    /// calendar. In a column it fills the line. Add it with [`Ui::calendar`].
+    Calendar(Box<Calendar>),
+    /// A weekday's name or a day of a [`Kind::Calendar`], which makes them; a day takes the
+    /// focus and reads as a label with its number.
+    CalendarCell(Cell),
 }
 
 /// The state of a [`Kind::Level`]: a name, a maximum above zero, a full mark from above zero to
@@ -576,6 +613,27 @@ impl Slider {
     }
 }
 
+/// What a [`Kind::MenuEntry`] shows and does, as GTK's model buttons in a sliding
+/// `PopoverMenu`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Mark {
+    /// A check box, ticked when `true`. Activating the item flips it and raises
+    /// [`Event::Toggled`].
+    Check(bool),
+    /// A radio ring, filled when `true`. Activating the item fills it and raises
+    /// [`Event::Toggled`]; the other radios of the menu are the application's to clear, as GTK's
+    /// radio items each have an action of their own.
+    Radio(bool),
+    /// An arrow at the end edge to the submenu `page`, a [`Kind::Menu`] that shares the parent
+    /// of the item's menu. Activating the item, or the right arrow on it, slides to the page,
+    /// which takes the place of the item's menu, and focuses the page's title.
+    Submenu(WidgetId),
+    /// The title of a submenu's page, its label centred and an arrow at the start edge.
+    /// Activating it, or the left arrow on it, slides back to the menu of `item` and focuses it.
+    Back(WidgetId),
+}
+
 /// A button of the title bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -624,7 +682,8 @@ pub struct Widget {
     pub(crate) wrap: Option<(Wrap, Option<f32>, f32)>,
     /// The least width it measures, as GTK's `width-request`: see [`Ui::set_min_width`].
     pub(crate) min_w: f32,
-    /// The colour of a label's text in place of the theme's: see [`Ui::set_ink`].
+    /// The colour of a label's text, or an island's outline, in place of the theme's: see
+    /// [`Ui::set_ink`].
     pub(crate) ink: Option<Rgba>,
     /// Whether it takes a share of the width its inline has to spare, as GTK's `hexpand`: see
     /// [`Ui::set_fill`].
@@ -694,9 +753,11 @@ impl Widget {
                     | Kind::TextArea(_)
                     | Kind::WindowButton(_)
                     | Kind::MenuItem(_)
+                    | Kind::MenuEntry { .. }
                     | Kind::IconButton { .. }
                     | Kind::LabelledButton { .. }
                     | Kind::ListRow(_)
+                    | Kind::CalendarCell(Cell { day: Some(_), .. })
             )
     }
 }
@@ -857,6 +918,28 @@ pub enum Key {
     Cut,
     /// Ctrl+V: pastes the clipboard into a field.
     Paste,
+    /// Ctrl+Left: the month before on a calendar; elsewhere the left arrow.
+    ControlLeft,
+    /// Ctrl+Right: the month after on a calendar; elsewhere the right arrow.
+    ControlRight,
+    /// Ctrl+Up: the year before on a calendar; elsewhere the up arrow.
+    ControlUp,
+    /// Ctrl+Down: the year after on a calendar; elsewhere the down arrow.
+    ControlDown,
+}
+
+impl Key {
+    /// The arrow a Ctrl+arrow is outside a calendar, its Ctrl left to the modifiers: what an
+    /// application's key hook and every other widget read.
+    pub(crate) fn control_arrow(&self) -> Option<Key> {
+        match self {
+            Key::ControlLeft => Some(Key::Left),
+            Key::ControlRight => Some(Key::Right),
+            Key::ControlUp => Some(Key::Up),
+            Key::ControlDown => Some(Key::Down),
+            _ => None,
+        }
+    }
 }
 
 /// What the root of a surface is to assistive technologies, named by [`Ui::title`]. New roles
@@ -903,6 +986,8 @@ pub struct Ui {
     /// items are the old ones.
     pub(crate) stale_popup: bool,
     pub(crate) focus: Option<WidgetId>,
+    /// The focus given without its ring, until a key is pressed: see [`Ui::focus_quietly`].
+    pub(crate) quiet_focus: Option<WidgetId>,
     pub(crate) text: TextContext,
     pub(crate) title_bar: Option<WidgetId>,
     /// A modal dialog's widgets: see [`Ui::set_dialog`].
@@ -918,8 +1003,8 @@ pub struct Ui {
     /// The field whose selection these widgets offered last as the primary selection, and its
     /// text, until the selection ends.
     offered: Option<(WidgetId, String)>,
-    /// The text [`Ui::announce`] asked for, until the driver publishes it.
-    pub(crate) announcement: Option<String>,
+    /// The text [`Ui::announce`] asked for and its priority, until the driver publishes it.
+    pub(crate) announcement: Option<(String, Priority)>,
     /// How the surface's motion draws the widgets now ([`crate::Shell::animate`]).
     pub(crate) pose: crate::motion::Pose,
     /// The ids of the next widgets of the slots [`Ui::remove_children`] freed, which
@@ -928,6 +1013,21 @@ pub struct Ui {
     /// The widgets whose active descendant is the selected row of a list, by the widget: see
     /// [`Ui::set_active_descendant`].
     pub(crate) descendants: Vec<(WidgetId, WidgetId)>,
+    /// The island whose fill points at the widget this popup opened from ([`Ui::set_arrow`]).
+    pub(crate) arrow: Option<Arrow>,
+}
+
+/// The arrow of an island marked by [`Ui::set_arrow`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Arrow {
+    /// The island it stands out of.
+    pub island: WidgetId,
+    /// Where the popup stands from its widget, set when it opens: the arrow is on the island's
+    /// edge that faces the widget.
+    pub side: Option<crate::driver::Side>,
+    /// The middle of the widget along that edge, in this surface's logical pixels, once the
+    /// compositor placed the popup. Nothing is drawn before.
+    pub at: Option<f32>,
 }
 
 impl Ui {
@@ -945,6 +1045,7 @@ impl Ui {
             resizable: true,
             stale_popup: false,
             focus: None,
+            quiet_focus: None,
             text: TextContext::default(),
             title_bar: None,
             modal: false,
@@ -958,6 +1059,7 @@ impl Ui {
             pose: crate::motion::Pose::REST,
             free: std::collections::BTreeSet::new(),
             descendants: Vec::new(),
+            arrow: None,
         }
     }
 
@@ -1090,13 +1192,13 @@ impl Ui {
         self.add(parent, Kind::Toggle { label, active, radio })
     }
 
-    /// Announces `text` to assistive technologies at polite priority, once, as a live region of
-    /// the root that leaves the tree as soon as it is announced, so no stale text stays behind:
-    /// what `gtk_accessible_announce` does. Takes effect when the driver next publishes the
-    /// tree, with the next frame; a later call before then replaces the text. A surface out of
-    /// the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
-    pub fn announce(&mut self, text: &str) {
-        self.announcement = Some(text.to_owned());
+    /// Announces `text` to assistive technologies at `priority`, once, as a live region of the
+    /// root that leaves the tree as soon as it is announced, so no stale text stays behind: what
+    /// `gtk_accessible_announce` does. Takes effect when the driver next publishes the tree, with
+    /// the next frame; a later call before then replaces the text and its priority. A surface out
+    /// of the accessibility tree ([`crate::driver::Shell::set_accessible`]) announces nothing.
+    pub fn announce(&mut self, text: &str, priority: Priority) {
+        self.announcement = Some((text.to_owned(), priority));
     }
 
     /// Adds a check button showing `label`, checked when `active`. See [`Kind::Check`].
@@ -1107,6 +1209,48 @@ impl Ui {
     pub fn check(&mut self, parent: WidgetId, label: &str, active: bool) -> WidgetId {
         let label = label.to_owned();
         self.add(parent, Kind::Check { label, active })
+    }
+
+    /// Adds to `menu` an item showing `label` and a check box, ticked when `active`. See
+    /// [`Mark::Check`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_check(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Check(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` and a radio ring, filled when `active`. See
+    /// [`Mark::Radio`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn menu_radio(&mut self, menu: WidgetId, label: &str, active: bool) -> WidgetId {
+        let label = label.to_owned();
+        self.add(menu, Kind::MenuEntry { label, mark: Mark::Radio(active) })
+    }
+
+    /// Adds to `menu` an item showing `label` that opens a submenu, and the submenu's page: a
+    /// hidden [`Kind::Menu`] beside `menu`, under the same parent, whose first row is its title,
+    /// `label` again. Returns the item and the page, to which the submenu's items are added. The
+    /// menus that share a parent are the pages of one popup, each as wide as the widest, as GTK's
+    /// stack of pages; one is shown at a time. See [`Mark::Submenu`].
+    ///
+    /// # Panics
+    ///
+    /// When `menu` names no widget of this `Ui`.
+    pub fn submenu(&mut self, menu: WidgetId, label: &str) -> (WidgetId, WidgetId) {
+        let parent = self.widgets[menu].parent.unwrap_or(Self::ROOT);
+        let page = self.add(parent, Kind::Menu);
+        self.widgets[page].visible = false;
+        let label = label.to_owned();
+        let mark = Mark::Submenu(page);
+        let item = self.add(menu, Kind::MenuEntry { label: label.clone(), mark });
+        self.add(page, Kind::MenuEntry { label, mark: Mark::Back(item) });
+        (item, page)
     }
 
     /// Adds a switch named `label`, on when `active`. See [`Kind::Switch`].
@@ -1128,6 +1272,19 @@ impl Ui {
     /// When `parent` names no widget of this `Ui`.
     pub fn island(&mut self, parent: WidgetId, vertical: bool, margin: [f32; 4]) -> WidgetId {
         self.add(parent, Kind::Island { vertical, margin })
+    }
+
+    /// Marks `island` to point at the widget a popup of these widgets opens from, as GTK's
+    /// popover arrow: once the compositor placed the popup, a triangle of the theme's
+    /// `island_arrow` stands out of the island's edge that faces the widget, at the widget's
+    /// middle, kept clear of the island's corners. The island's margin on that edge leaves it
+    /// room. Only the latest island marked has one.
+    pub fn set_arrow(&mut self, island: WidgetId) {
+        self.arrow = Some(Arrow {
+            island,
+            side: None,
+            at: None,
+        });
     }
 
     /// Adds a flat button named `label` for assistive technologies, showing `image` in a
@@ -1288,6 +1445,10 @@ impl Ui {
             Kind::Toggle { active: true, .. }
                 | Kind::Check { active: true, .. }
                 | Kind::Switch { active: true, .. }
+                | Kind::MenuEntry {
+                    mark: Mark::Check(true) | Mark::Radio(true),
+                    ..
+                }
                 | Kind::Tile(crate::tile::Tile { active: true, .. })
                 | Kind::IconToggle(crate::icon_toggle::IconToggle { active: true, .. })
         )
@@ -1330,6 +1491,13 @@ impl Ui {
                 Some(Event::Toggled(id))
             }
             Kind::Toggle { active: false, .. } if active => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut now) | Mark::Radio(ref mut now),
+                ..
+            } if *now != active => {
+                *now = active;
+                Some(Event::Toggled(id))
+            }
             _ => None,
         }
     }
@@ -1371,6 +1539,7 @@ impl Ui {
             | Kind::Label(t)
             | Kind::Button(t)
             | Kind::MenuItem(t)
+            | Kind::MenuEntry { label: t, .. }
             | Kind::ListRow(t)
             | Kind::ListHeading(t)
             | Kind::Tooltip(t)
@@ -1821,16 +1990,16 @@ impl Ui {
         live
     }
 
-    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or, with `None`,
-    /// in the theme's text colour again. `false`, and nothing changes, for a widget that is not a
-    /// label.
+    /// Draws the text of label `id` in `ink`, as a CSS `color` on a GTK label, or the outline of
+    /// island `id` in it, as a CSS `border-color`; with `None`, in the theme's text or border
+    /// colour again. `false`, and nothing changes, for a widget that is neither.
     ///
     /// # Panics
     ///
     /// When `id` names no widget of this `Ui`.
     pub fn set_ink(&mut self, id: WidgetId, ink: Option<Rgba>) -> bool {
         let widget = &mut self.widgets[id];
-        if !matches!(widget.kind, Kind::Label(_)) {
+        if !matches!(widget.kind, Kind::Label(_) | Kind::Island { .. }) {
             return false;
         }
         widget.ink = ink;
@@ -1915,6 +2084,23 @@ impl Ui {
         }
     }
 
+    /// Focuses `id` without drawing its ring until a key is pressed, as GTK focuses a window's
+    /// first control at map and shows the ring once the keyboard is used (AX7; AX8's
+    /// `:focus-visible`). Moved elsewhere, the focus shows its ring as usual.
+    pub(crate) fn focus_quietly(&mut self, id: WidgetId) {
+        self.set_focus(Some(id));
+        self.quiet_focus = self.focus.filter(|&focus| focus == id);
+    }
+
+    /// Focuses `id`, a rebuilt surface's counterpart of `old`'s focus, without its ring while
+    /// `old`'s focus had none yet (AX8): the rebuild does not show what no key has asked for.
+    pub fn carry_focus(&mut self, old: &Ui, id: Option<WidgetId>) {
+        match id {
+            Some(id) if old.quiet_focus.is_some() => self.focus_quietly(id),
+            _ => self.set_focus(id),
+        }
+    }
+
     /// Moves the focus to `to`. A field that loses it ends its input method's composition: the
     /// input method sends a preedit only for the focused field, so another would stay shown.
     fn move_focus(&mut self, to: Option<WidgetId>) {
@@ -1923,6 +2109,7 @@ impl Ui {
         }
         self.end_composition();
         self.focus = to;
+        self.quiet_focus = None;
     }
 
     /// Ends the input method's composition in the focused field, without its text, as when the
@@ -2034,7 +2221,10 @@ impl Ui {
     pub fn is_flat(&self, id: WidgetId) -> bool {
         let widget = &self.widgets[id];
         match widget.kind {
-            Kind::MenuItem(_) | Kind::IconButton { .. } | Kind::LabelledButton { .. } => true,
+            Kind::MenuItem(_)
+            | Kind::MenuEntry { .. }
+            | Kind::IconButton { .. }
+            | Kind::LabelledButton { .. } => true,
             Kind::Button(_) => widget
                 .parent
                 .is_some_and(|p| matches!(self.widgets[p].kind, Kind::Menu)),
@@ -2150,6 +2340,10 @@ impl Ui {
         let inks = [t.text, t.on_accent];
         let (control_border, control_min) = (t.control_border, t.control_min_height);
         let rtl = self.rtl;
+        let pages = match self.widgets[id].kind {
+            Kind::Menu => self.pages_width(id),
+            _ => 0.0,
+        };
         let bar_first = id == Self::ROOT && self.title_bar.is_some();
         let is_switch = matches!(self.widgets[id].kind, Kind::Switch { .. });
         let children = self.visible_children(id);
@@ -2159,12 +2353,14 @@ impl Ui {
         let natural = self.widgets[id].natural;
         let between = match self.widgets[id].kind {
             Kind::Column => self.widgets[id].spacing.unwrap_or(section_gap),
+            Kind::Inline { .. } => self.widgets[id].spacing.unwrap_or(gap),
             _ => gap,
         };
         let widget = &mut self.widgets[id];
         let style = widget.style.clone();
         let (w, h) = match &mut widget.kind {
-            Kind::Menu | Kind::List { .. } => {
+            Kind::Menu => (pages, sizes.iter().map(|s| s.1).sum::<f32>()),
+            Kind::List { .. } => {
                 let w = sizes.iter().map(|s| s.0).fold(0.0, f32::max);
                 (w, sizes.iter().map(|s| s.1).sum::<f32>())
             }
@@ -2211,7 +2407,7 @@ impl Ui {
                     content[1] + 2.0 * island_pad + top + bottom,
                 )
             }
-            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
                 // The title bar spans the window above the root's margin.
                 let (bar, content) = match sizes.split_first() {
                     Some((bar, rest)) if bar_first => (*bar, rest),
@@ -2237,7 +2433,7 @@ impl Ui {
                 (title + 2.0 * buttons + 2.0 * pad, bar)
             }
             Kind::WindowButton(_) => (size + pad, size + pad),
-            Kind::Inline { padding } => strip::measure_inline(&sizes, gap, *padding),
+            Kind::Inline { padding } => strip::measure_inline(&sizes, between, *padding),
             Kind::CenterBox => strip::measure_center(&sizes),
             Kind::LabelledButton {
                 image, size: side, text, ..
@@ -2280,6 +2476,12 @@ impl Ui {
                 widget.text = Some(layout);
                 wh
             }
+            Kind::CalendarCell(cell) => {
+                let layout = self.text.layout(&cell.text, size, rtl, &style);
+                let wh = calendar::measure_cell(layout.width(), layout.height(), pad);
+                widget.text = Some(layout);
+                wh
+            }
             Kind::Button(text) | Kind::Toggle { label: text, radio: false, .. } => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 // GTK's box: the minimum height inside the outline, the outline outside it.
@@ -2298,6 +2500,22 @@ impl Ui {
             Kind::MenuItem(text) | Kind::ListRow(text) | Kind::ListHeading(text) => {
                 let layout = self.text.layout(text, size, rtl, &style);
                 let wh = (layout.width() + 2.0 * pad, layout.height() + pad);
+                widget.text = Some(layout);
+                wh
+            }
+            // The mark's room at the start is the menu's to add, as every row of it takes it; a
+            // submenu's arrow at the end is its own.
+            Kind::MenuEntry { label, mark } => {
+                let (mark_w, mark_h) = mark_size(false, size);
+                let arrow = match mark {
+                    Mark::Submenu(_) | Mark::Back(_) => gap + mark_w,
+                    Mark::Check(_) | Mark::Radio(_) => 0.0,
+                };
+                let layout = self.text.layout(label, size, rtl, &style);
+                let wh = (
+                    layout.width() + 2.0 * pad + arrow,
+                    mark_h.max(layout.height()) + pad,
+                );
                 widget.text = Some(layout);
                 wh
             }
@@ -2429,7 +2647,7 @@ impl Ui {
                     }
                 }
             }
-            Kind::Column | Kind::Group(_) | Kind::Alert(_) => {
+            Kind::Column | Kind::Group(_) | Kind::Alert(_) | Kind::Calendar(_) => {
                 let mut cy = y + edge;
                 let mut children = &children[..];
                 if let (Some(bar), true) = (self.title_bar, id == Self::ROOT) {
@@ -2480,6 +2698,7 @@ impl Ui {
                             | Kind::CenterBox
                             | Kind::Group(_)
                             | Kind::Alert(_)
+                            | Kind::Calendar(_)
                             | Kind::Menu
                             | Kind::Switch { .. }
                             | Kind::Tile(_)
@@ -2596,6 +2815,9 @@ impl Ui {
             return None;
         }
         self.set_focus(Some(id));
+        if let Some(calendar) = self.calendar_of(id) {
+            return self.activate_in_calendar(calendar, id);
+        }
         match self.widgets[id].kind {
             Kind::Button(_)
             | Kind::MenuItem(_)
@@ -2611,6 +2833,39 @@ impl Ui {
                 Some(Event::Toggled(id))
             }
             Kind::Toggle { .. } => Some(self.select_toggle(id)),
+            Kind::MenuEntry {
+                mark: Mark::Check(ref mut active),
+                ..
+            } => {
+                *active = !*active;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Radio(ref mut active),
+                ..
+            } => {
+                *active = true;
+                Some(Event::Toggled(id))
+            }
+            Kind::MenuEntry {
+                mark: Mark::Submenu(page),
+                ..
+            } => {
+                // The page's title, its first row, takes the focus, as in GTK.
+                let title = self.widgets[page].children.first().copied();
+                self.slide_to(id, page, title);
+                None
+            }
+            Kind::MenuEntry {
+                mark: Mark::Back(item),
+                ..
+            } => {
+                let menu = self.widgets[item].parent;
+                if let Some(menu) = menu {
+                    self.slide_to(id, menu, Some(item));
+                }
+                None
+            }
             Kind::ListRow(_) => {
                 let list = self.list_of(id);
                 if let Some(Kind::List { selected, .. }) = list.map(|l| &mut self.widgets[l].kind) {
@@ -2953,12 +3208,21 @@ impl Ui {
     /// shows the input method's preedit: the input method's to cancel, as GTK's input method
     /// filters keys before a dialog's bindings.
     pub fn key(&mut self, key: Key) -> Option<Event> {
+        self.quiet_focus = None;
         if key == Key::Escape && self.modal {
             return (!self.composing()).then_some(Event::Window(WindowButton::Close));
         }
         if key == Key::Escape {
             return Some(Event::Escape);
         }
+        if let Some(done) = self.calendar_key(&key) {
+            return done;
+        }
+        // Outside a calendar, Ctrl leaves an arrow what it is.
+        let key = match key.control_arrow() {
+            Some(arrow) => arrow,
+            None => key,
+        };
         let focused = self.focus;
         if let Some(id) = focused {
             let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
@@ -3047,6 +3311,28 @@ impl Ui {
             key => key,
         };
         if let Some(id) = focused {
+            // A group of radios: the arrows move the choice along the group and wrap round, left
+            // and right as read, as GTK's grouped check buttons and the WAI-ARIA radio group.
+            let group = focus::radio_group(self, id);
+            let forward = match key {
+                Key::Down => Some(true),
+                Key::Up => Some(false),
+                Key::Right => Some(!self.rtl),
+                Key::Left => Some(self.rtl),
+                _ => None,
+            };
+            if let (Some(forward), false) = (forward, group.is_empty()) {
+                let n = group.len();
+                let at = group.iter().position(|&r| r == id).unwrap_or(0);
+                let to = group[if forward { (at + 1) % n } else { (at + n - 1) % n }];
+                return if to == id && self.is_active(to) {
+                    None
+                } else {
+                    self.activate(to)
+                };
+            }
+        }
+        if let Some(id) = focused {
             if let Kind::Slider(slider) = &self.widgets[id].kind {
                 let (min, max) = (slider.min, slider.max);
                 // What is seen: Right moves the knob right, which is toward min when mirrored.
@@ -3128,7 +3414,83 @@ impl Ui {
         }
     }
 
+    /// Whether the focused item is a submenu's, which `key` opens, or a submenu's title, which
+    /// `key` leaves.
+    fn slides_on(&self, key: &Key) -> bool {
+        let mark = match self.focus.map(|id| &self.widgets[id].kind) {
+            Some(Kind::MenuEntry { mark, .. }) => *mark,
+            _ => return false,
+        };
+        matches!(
+            (key, mark),
+            (Key::Right, Mark::Submenu(_)) | (Key::Left, Mark::Back(_))
+        )
+    }
+
+    /// Shows the menu `to` in place of the menu of the item `from`, and focuses `focus` on it:
+    /// a slide between the pages of one popup.
+    fn slide_to(&mut self, from: WidgetId, to: WidgetId, focus: Option<WidgetId>) {
+        let Some(menu) = self.widgets[from].parent else {
+            return;
+        };
+        self.widgets[to].visible = true;
+        self.set_focus(focus);
+        self.widgets[menu].visible = false;
+    }
+
+    /// The room a menu leaves at the start of each row when one of its rows has a check or a
+    /// radio there, as GTK's indicator size group: the mark and the gap after it.
+    pub(crate) fn menu_indent(&self, menu: WidgetId) -> f32 {
+        let marked = self.widgets[menu].children.iter().any(|&c| {
+            let widget = &self.widgets[c];
+            widget.visible
+                && matches!(
+                    widget.kind,
+                    Kind::MenuEntry {
+                        mark: Mark::Check(_) | Mark::Radio(_),
+                        ..
+                    }
+                )
+        });
+        if marked {
+            mark_size(false, self.theme.font_size).0 + self.theme.gap
+        } else {
+            0.0
+        }
+    }
+
+    /// The width of the widest of the menus that share the parent of `menu`, the pages of one
+    /// popup, which GTK's stack makes as wide as each other; the hidden ones are measured here.
+    fn pages_width(&mut self, menu: WidgetId) -> f32 {
+        let pages: Vec<WidgetId> = match self.widgets[menu].parent {
+            Some(parent) => self.widgets[parent]
+                .children
+                .iter()
+                .copied()
+                .filter(|&p| matches!(self.widgets[p].kind, Kind::Menu))
+                .collect(),
+            None => vec![menu],
+        };
+        let mut widest = 0.0_f32;
+        for page in pages {
+            let rows = self.widgets[page].children.clone();
+            let mut w = 0.0_f32;
+            for row in rows {
+                if self.widgets[row].visible {
+                    w = w.max(self.measure(row).0);
+                }
+            }
+            widest = widest.max(w + self.menu_indent(page));
+        }
+        widest
+    }
+
     fn navigate(&mut self, key: Key) -> Option<Event> {
+        // GTK slides to a submenu on the right arrow and back on the left one, whatever the
+        // direction of the text.
+        if self.slides_on(&key) {
+            return self.focus.and_then(|id| self.activate(id));
+        }
         let next = match (key, self.menu()) {
             // Up and down cycle through a menu's items, as in GTK's menus.
             (Key::Up, Some(menu)) => focus::cycle(self, menu, true),
@@ -3641,6 +4003,83 @@ mod tests {
         let third = ui.add(menu, Kind::MenuItem("Quit".into()));
         ui.layout();
         (ui, [menu, first, second, third])
+    }
+
+    #[test]
+    fn a_menus_checks_and_radios_flip_and_fill_as_gtks_model_buttons() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let check = ui.menu_check(menu, "Mute", false);
+        let low = ui.menu_radio(menu, "Low", true);
+        let high = ui.menu_radio(menu, "High", false);
+        ui.layout();
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(ui.is_active(check));
+        assert_eq!(ui.activate(check), Some(Event::Toggled(check)));
+        assert!(!ui.is_active(check));
+        assert_eq!(ui.activate(high), Some(Event::Toggled(high)));
+        assert!(ui.is_active(high));
+        assert!(
+            ui.is_active(low),
+            "the other radios are the application's to clear"
+        );
+        assert_eq!(ui.set_active(low, false), Some(Event::Toggled(low)));
+        assert_eq!(ui.set_active(low, false), None);
+        assert!(ui.is_flat(check));
+    }
+
+    #[test]
+    fn a_submenu_slides_in_on_the_right_arrow_and_out_on_the_left_in_both_directions() {
+        for rtl in [false, true] {
+            let mut ui = Ui::new("Menu", Theme::default(), rtl);
+            let menu = ui.add(Ui::ROOT, Kind::Menu);
+            let first = ui.add(menu, Kind::MenuItem("Open".into()));
+            let (item, page) = ui.submenu(menu, "Volume");
+            let low = ui.menu_radio(page, "Low", true);
+            ui.layout();
+            assert!(!ui.is_visible(page), "rtl {rtl}: the page starts hidden");
+            ui.set_focus(Some(first));
+            assert_eq!(ui.key(Key::Right), None);
+            assert_eq!(ui.focus(), Some(first), "rtl {rtl}: a plain item opens nothing");
+            ui.set_focus(Some(item));
+            assert_eq!(ui.key(Key::Right), None);
+            let title = ui.widget(page).children[0];
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: the title takes the focus");
+            assert!(ui.is_visible(page) && !ui.is_visible(menu), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Down), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: the arrows stay on the page");
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(low), "rtl {rtl}: only the title leaves");
+            ui.set_focus(Some(title));
+            assert_eq!(ui.key(Key::Left), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: back on the parent item");
+            assert!(ui.is_visible(menu) && !ui.is_visible(page), "rtl {rtl}");
+            assert_eq!(ui.key(Key::Enter), None);
+            assert_eq!(ui.focus(), Some(title), "rtl {rtl}: Enter opens it too");
+            assert_eq!(ui.activate(title), None);
+            assert_eq!(ui.focus(), Some(item), "rtl {rtl}: activating the title returns");
+        }
+    }
+
+    #[test]
+    fn a_menus_pages_are_as_wide_as_the_widest_and_a_check_indents_every_label() {
+        let mut ui = Ui::new("Menu", Theme::default(), false);
+        let menu = ui.add(Ui::ROOT, Kind::Menu);
+        let plain = ui.add(menu, Kind::MenuItem("Open".into()));
+        let (item, page) = ui.submenu(menu, "More");
+        let long = ui.menu_check(page, "A much longer row than the others", false);
+        ui.layout();
+        assert_eq!(ui.menu_indent(menu), 0.0, "no check or radio on the main page");
+        assert!(ui.menu_indent(page) > 0.0);
+        let width = ui.widget(plain).rect.w;
+        assert_eq!(width, ui.widget(item).rect.w);
+        assert_eq!(ui.activate(item), None);
+        ui.layout();
+        assert_eq!(
+            ui.widget(long).rect.w,
+            width,
+            "the hidden page set the main page's width"
+        );
     }
 
     #[test]

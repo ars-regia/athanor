@@ -1,0 +1,8 @@
+Lettore schermo attivo.
+cc-window-1
+tabulazione
+tabulazione
+tabulazione
+F10
+esc
+Lettore schermo disattivato.
