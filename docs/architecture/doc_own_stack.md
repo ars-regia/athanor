@@ -81,7 +81,8 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   directions, for keys and buttons; touch points never collide.
 - Proposed on 2026-11-18, awaiting the maintainer's approval: decision 38, the user's bindings
   and the input and window settings the compositor follows, with OS13, as `doc_settings.md`
-  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6).
+  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6); decisions 39, Sal's SR1 to SR14 with
+  OS11, and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -647,7 +648,7 @@ takes it as a git dependency pinned to a commit:
 
 **OS11. Stage 2: a toolkit of GTK's class** (direction, no date). Later, the toolkit grows toward
 what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
-revision records the direction only; a later revision specifies stage 2 before its code starts.
+revision records the direction only; a later revision specifies stage 2 before its code starts. Decision 39 proposes the part the file manager needs (2026-11-18).
 
 **OS20. The first surface's acceptance.** The layout chooser moves to the toolkit when, besides OS8
 and OS9, each visible difference milestone T1 recorded against the GTK goldens is closed or recorded
@@ -1179,7 +1180,7 @@ compositor and that the own compositor did not yet offer:
       unmarked where no window covers it. A cursor surface is at most 256 px a side
       (`cursor.rs`) and stays unmarked, a risk this decision accepts: it has room for a small
       imitation, which moves with the pointer. Drag and drop is cancelled today, and a drag icon,
-      when it comes, needs a rule here first.
+      when it comes, needs a rule here first (decision 40, proposed on 2026-11-18).
     - Each mark is stacked with its window, under whatever stands above that window, and
       neither is drawn while the lock holds the session. One function builds that stack for
       `draw_view` and for the DRM path of `udev.rs`, so that what the fixture reads is what a
@@ -1974,6 +1975,123 @@ compositor and that the own compositor did not yet offer:
       that the compositor alone would read once cosmic-comp has left; GNOME's keys relayed by a
       privileged client (option 3), a relay for settings only the compositor uses; and the
       settings left out of 1.0 until the compositor has a store (option 4).
+
+39. **What Sal gains for the file manager, SR1 to SR14** (OS10, OS11; `doc_files.md` revision 3,
+    section 7, and decisions 7, 10 and 11; proposed on 2026-11-18, awaiting the maintainer's
+    approval under ADR-0074). This decision specifies the part of OS11's stage 2 that the file
+    manager and its chooser need; the rest of stage 2 stays a direction. Sal as it is at
+    `89753530b`: a retained tree of widgets under generational ids (`system/athanor-sal/src/widget.rs:36`),
+    one focused widget walked in tree order and by the arrows over laid-out boxes
+    (`system/athanor-sal/src/focus.rs:10`, `:132`), a vertical scroll that measures every child
+    (`system/athanor-sal/src/widget.rs:2375-2381`), a list that chooses one row, a clipboard of
+    UTF-8 text (`system/athanor-sal/src/driver/clipboard.rs:41`), and `wl_data_device` callbacks
+    that do nothing (`system/athanor-sal/src/driver/clipboard.rs:537-555`). Each item is public
+    API with rustdoc, a page of the gallery, unit tests, its goldens drawn with `vello_cpu` and
+    its transcript (OS9, OS10), and is met before the step of `doc_files.md` FM21 that uses it:
+    SR1 to SR4, SR6 and SR14 before `athanor-files-view` (step 2, the chooser first, decision 3 of
+    that revision), the others before the window.
+    - **SR1, SR3. An item view over the application's model.** A new kind, the item view, in two
+      layouts, list and grid, holds a count and asks the application for the items it shows,
+      by index; it makes widgets for the items in its viewport and one viewport's height on each
+      side, and reuses them as it scrolls. Its rows have one height, and a grid's cells one size,
+      chosen by the application, so the content's height is computed and never measured; a
+      variable height is not offered. The grid lays out as many columns as the width holds and
+      reflows at each resize; Up and Down move by a row of cells, Left and Right by one, Home,
+      End, Page Up and Page Down as a list's. A model's change is reported by range (inserted,
+      removed, changed), so a folder that grows keeps the focused item and the scroll. Test: a
+      model of 100,000 items lays out and draws its first frame within FM20's 200 ms on the
+      reference laptop, with no more widgets than the viewport needs plus its margins.
+    - **SR2. Multiple selection.** The item view holds a set of selected indices, an anchor and
+      a cursor apart from the selection. A click selects one; Ctrl with a click toggles one;
+      Shift with a click or an arrow extends from the anchor; Ctrl with an arrow moves the cursor
+      alone and Ctrl+Space toggles at the cursor; Ctrl+A selects all while the view holds the
+      focus, a field keeping its own Ctrl+A; a drag from empty space draws a rubber band, which
+      Ctrl adds to. One event reports a change of selection. Test: each gesture against an
+      expected set, and the set kept across a model's change by range.
+    - **SR4. Columns.** The list layout gains a header of column buttons, each with a name, a
+      share of the width and a sort state (ascending, descending, none); a click on a header, or
+      Enter on it, reports the column, and the application sorts its model. Columns are not
+      resized or reordered by the user in this decision.
+    - **SR5. Tabs.** A strip of tabs over a stack of pages: each tab with its title and a close
+      button; Ctrl+Page Up and Ctrl+Page Down, Ctrl+Tab and Ctrl+Shift+Tab move between them,
+      Ctrl+Shift+Page Up and Page Down reorder, and a drag within the strip reorders, on the
+      in-surface drag Sal has (`Event::DragStarted`); a strip wider than the window scrolls with
+      two arrow buttons.
+    - **SR6. A path bar.** A strip of buttons that keeps the last segments and gathers the
+      earlier ones in a menu button at its start when the line is full; Ctrl+L puts an editable
+      field in its place, Escape or the focus leaving it puts the strip back.
+    - **SR7. A toast.** One transient message at the bottom of a window, with an optional action
+      button; it is announced politely through `Ui::announce`, a new one replaces the old, and it
+      stays at least 5 s, and while the pointer is over it or the focus inside it (WCAG 2.2.1).
+      F6 moves the focus to it and back.
+    - **SR8. The title bar's controls.** `Ui::add_title_bar` gains a start and an end slot for the
+      application's buttons and menu buttons, before Minimize and Close, the title kept centred
+      in the space between.
+    - **SR9. Windows at run time.** `Shell::open` with `Role::Window` is called at any time after
+      the start, and the run ends when the application says so, not when its last window
+      closes: an application that does nothing keeps the behaviour of today.
+    - **SR10. Raised with a caller's token.** `Shell` gains the call that activates one of the
+      application's own windows with an `xdg_activation_v1` token a caller passed, beside
+      `Shell::request_activation_token`, which asks for one.
+    - **SR11. The application's key bindings.** The application registers accelerators, a key
+      with modifiers, for an action of its own; Sal offers a key to the focused widget first, so a
+      field keeps Ctrl+A, C, X, V, Z and Shift+Z, and the accelerator acts when the widget does
+      not take the key. The function keys and Ctrl with every letter reach the application. A
+      menu item shows its accelerator, and the accessible tree carries it as the item's shortcut.
+    - **SR12. Typed contents on the clipboard.** The clipboard offers and reads a list of media
+      types the application names, each value bounded by a limit it gives, beside the text a
+      field copies; the file manager names `text/uri-list` and `x-special/gnome-copied-files`,
+      with `text/plain` holding the paths.
+    - **SR13. Drag and drop between clients.** A widget starts a drag with a `wl_data_source` of
+      the media types and the actions (copy, move) the application names, and an icon Sal draws
+      from a widget the application gives, within decision 40's limit; a widget names the media
+      types and actions it accepts as a target, and Sal reports the enter, the motion, the
+      leave and the drop, with the data read at the drop and bounded as SR12's. The keyboard's
+      way to the same result is the clipboard (SR12); a drag has no keyboard equivalent.
+    - **SR14. Their accessibility.** The item view's list is a list box of options, multi-
+      selectable; its grid a grid of cells; its columns a table with column headers that carry
+      their sort direction; the tabs a tab list of tabs over tab panels. Each item made from the
+      model carries its position and the size of the set, so Orca reads "3 of 10,000" for an
+      item made only when in view. The reference for OS8 is `doc_files.md` FM20's AT-SPI
+      scenarios with a transcript the maintainer reviews (that revision's decision 10).
+
+    Not taken: SR1 with rows of any height, measured as they come into view, which costs a
+    measure per row at each scroll for a need the file manager does not have; one widget per item
+    with a scroll that skips drawing, which `Kind::Scroll` already does and which holds 10,000
+    widgets in memory; and SR4's columns resized by the user in 1.0, left to a later revision.
+
+40. **Drag and drop between clients, and the drag icon** (OS4, OS17; decisions 30, 31 and 37;
+    `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, awaiting the maintainer's
+    approval under ADR-0074). The compositor cancels every drag and drop today, through the
+    default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/handlers.rs:1591-1592`),
+    and decision 37's toplevel drag runs on that same grab. The compositor runs Smithay's drag
+    and drop grab:
+    - **What starts a drag.** A client starts one only with the serial of a press of a button or a
+      touch point it holds on its own surface (decision 30's touch serial included); any other
+      start is refused, as Smithay checks.
+    - **Who receives the offer.** Only the surface under the pointer or the touch point, as it
+      moves; the data passes only at the drop, the user's gesture choosing the target as a paste
+      does, so the rule of the clipboard holds and no security context changes it. The action is
+      negotiated between the source's and the target's actions as the protocol defines.
+    - **The lock.** No drag starts while the session is locked; a drag active when a lock is
+      requested is cancelled before the lock surface shows, and the source and the target are
+      told, as decision 37 has it for the toplevel drag.
+    - **The drag icon** (the rule decision 31 waits for). The icon is a surface of the dragging
+      client, drawn above every window and under the lock, as the cursor is. It is at most 256
+      logical pixels a side, as a cursor surface (`src/cursor.rs`); a larger one is not drawn,
+      and the drag goes on without it. The icon of a confined client carries decision 31's
+      three-line border, so a confined client cannot move an unmarked surface the size of a small
+      window over others.
+    - Fixture tests (OS6): an offer reaching the surface under the pointer and no other, the data
+      read at the drop, a drag refused without a valid serial, a touch drag, a cancel at a lock
+      request, an icon larger than the limit left undrawn, a confined client's icon with its
+      border, and decision 37's toplevel drag on the same grab.
+
+    Not taken: the icon of a confined client left unmarked within the limit, the risk decision 31
+    accepts for the cursor, since an icon moves only during a drag the user holds but may be
+    drawn as a window's imitation; and drag and drop refused to confined clients, which would
+    take a Flatpak application's files out of reach of the file manager's drag (`doc_files.md`
+    S6).
 
 ## 8. Risks
 
