@@ -621,6 +621,11 @@ def battery(ctx):
         found = labelled(app, Atspi, "slider", "Screen brightness")
         return found[0] if found else None
 
+    def brightness_is(percent):
+        # One query of the accessibility tree: the slider can leave it between two.
+        slider = brightness()
+        return slider is not None and abs(slider.get_current_value() - percent) < 1.0
+
     def display_device(state, percent, to_empty, to_full, present):
         fx.call(
             bus, fx.UPOWER, "/org/freedesktop/UPower", fx.MOCK, "SetupDisplayDevice", "(uuddddxxbsu)",
@@ -652,7 +657,7 @@ def battery(ctx):
 
     check(
         "the brightness slider shows the backlight's 60 %",
-        brightness() is not None and abs(brightness().get_current_value() - 60.0) < 1.0,
+        brightness_is(60.0),
     )
     brightness().set_current_value(30.0)
     check(
@@ -665,7 +670,7 @@ def battery(ctx):
     brightness().set_current_value(5.0)
     check(
         "a refused brightness puts the slider back",
-        wait_for(lambda: brightness() is not None and abs(brightness().get_current_value() - 30.0) < 1.0, 5),
+        wait_for(lambda: brightness_is(30.0), 5),
     )
     check("and the popover says the action did not complete", wait_for(lambda: labelled(app, Atspi, "label", NOT_COMPLETED), 5))
 

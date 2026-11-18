@@ -28,6 +28,18 @@ COPIED = (
 )
 PUBLISHED = "1.11.0-2.fc43.athanor1"
 SPEC = "1.11.0-2.fc43.athanor2"
+# What decides which signatures a run trusts, as TRUST_ENV of forge/scripts/tests/signed_registry.py,
+# and the tokens that would let a test reach the network.
+RUNNER_ENV = (
+    "GITHUB_REF",
+    "GITHUB_BASE_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+    "TIER_TRUSTED_REFS",
+    "GITHUB_ACTIONS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+)
 DERIVED_ID = "d" * 64
 BASE_ID = "b" * 64
 
@@ -185,7 +197,14 @@ class Rig:
         path.write_text(spec(release))
 
     def run(self, *args):
-        env = {k: v for k, v in os.environ.items() if not k.startswith("ATHANOR_")}
+        # A pull request into a rebase/* branch sets GITHUB_BASE_REF, which makes tier-digests.sh
+        # read that branch's rules over the network: the tests answer the registry through their
+        # own skopeo and cosign, so nothing of the runner's environment may reach them.
+        env = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith("ATHANOR_") and k not in RUNNER_ENV
+        }
         env.update(
             PATH=f"{self.tmp / 'bin'}:{env['PATH']}",
             ATHANOR_RIG_OUT=str(self.out),
