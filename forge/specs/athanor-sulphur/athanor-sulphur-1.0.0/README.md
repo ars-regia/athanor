@@ -285,8 +285,8 @@ magnifier and the colour inversion and filters (doc_accessibility.md AX10): the 
 granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
 `enable-animations` (AX9) to stop the bell blinking; the compositor keeps it in memory only,
 false until a bar sends it, and the last value sent stands after the bar exits. The inversion
-and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron` under the state root, read at start and written atomically, in cosmic-comp's format, at each
-change; a file that cannot be read changes nothing and is written over only at the next change,
+and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron` under the state root,
+read at start and written atomically, in cosmic-comp's format, at each change; a file that cannot be read changes nothing and is written over only at the next change,
 and a filter this compositor does not name is kept, sent as `unknown` and not drawn. The
 magnifier's increment, how the view follows the pointer and the mouse zoom shortcuts are
 cosmic-comp's `accessibility_zoom` under the configuration root, read at start and after each
