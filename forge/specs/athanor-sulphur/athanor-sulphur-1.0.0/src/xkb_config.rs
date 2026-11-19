@@ -30,7 +30,7 @@ const LIMIT: u64 = 64 * 1024;
 const MAX_LAYOUTS: usize = 4;
 
 /// The settings of one `xkb_config` record.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub rules: String,
     pub model: String,
@@ -559,6 +559,7 @@ impl State {
         }
         // The new keymap replaced the virtual keyboard's: its saved seat keymap is stale.
         self.virtual_keymap = None;
+        self.eis_keymap_changed(settings);
         let layouts = keyboard.with_xkb_state(self, |context| {
             let xkb = context.xkb().lock().unwrap_or_else(PoisonError::into_inner);
             u32::try_from(xkb.layouts().count()).unwrap_or(u32::MAX)

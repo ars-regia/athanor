@@ -4,8 +4,8 @@
 # (issue #1205): :latest never names a builder no trusted run signed.
 #
 # :latest names the builder of the default branch, for what runs the builder without a content
-# hash (rust-security-audit.yml with BUILDER_STABLE_TAG unset, which still pulls it by tag and
-# verifies no signature): it moves on a cache hit as well as after a build,
+# hash (rust-security-audit.yml with BUILDER_STABLE_TAG unset, which runs the digest it names
+# once forge/scripts/resolve_builder_image.sh verified it): it moves on a cache hit as well as after a build,
 # and a run on any other branch leaves it alone.
 # The pull request spec check (spec-build-check.yml) no longer reads it: it pulls the builder of
 # the checkout by its content hash (#789). Before this, :latest moved only when a run rebuilt the image,

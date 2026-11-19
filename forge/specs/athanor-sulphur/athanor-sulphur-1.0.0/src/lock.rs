@@ -96,6 +96,8 @@ impl SessionLockHandler for State {
         // A finger held on a window goes on reaching it no more: its surface is told the touch
         // is cancelled, and its release is no event (`touch.rs`).
         self.cancel_touches();
+        // What EIS contexts hold is let go before the focus moves to the lock (`eis.rs`).
+        self.eis_suspend();
         // Decision 36: from the lock request on no lease is granted, and every one ends now.
         self.leases_locked();
         // A token made before the lock activates nothing after it (L14): every one pending is
@@ -195,6 +197,7 @@ impl State {
             self.aids_focus_changed(None);
             self.loop_handle.insert_idle(|state| state.refresh_constraint());
         }
+        self.eis_focusing(surface.as_ref());
         keyboard.set_focus(self, surface, SERIAL_COUNTER.next_serial());
     }
 

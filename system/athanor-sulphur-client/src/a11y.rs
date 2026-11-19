@@ -17,6 +17,9 @@ use crate::protocols::athanor_a11y::client::athanor_a11y_manager_v1::{
     self, Aid as AthanorAid, AthanorA11yManagerV1, Filter as AthanorFilter,
 };
 
+/// The version of `athanor_a11y_manager_v1` that has `set_reduced_motion`.
+const REDUCED_MOTION: u32 = 2;
+
 /// The version of `cosmic_a11y_manager_v1` that replaced the screen filter's messages.
 const SCREEN_FILTER2: u32 = 3;
 
@@ -42,7 +45,7 @@ impl Client {
                 return Ok(());
             }
             state.globals.a11y =
-                bind(&self.inner.registry, &self.inner.qh, 1..=1).map(Manager::Athanor);
+                bind(&self.inner.registry, &self.inner.qh, 1..=2).map(Manager::Athanor);
         }
         self.flush()
     }
@@ -55,6 +58,11 @@ fn check_delays(aids: &KeyboardAids) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+/// Whether a manager bound at `version` has `set_reduced_motion`.
+fn has_reduced_motion(version: u32) -> bool {
+    version >= REDUCED_MOTION
 }
 
 impl Manager {
@@ -70,6 +78,19 @@ impl Manager {
         manager.set_bounce_keys(athanor_state(aids.bounce), aids.bounce_delay);
         manager.set_aid_gestures(athanor_state(aids.gestures));
         Ok(())
+    }
+
+    /// Sends the user's reduced-motion setting (AX9). Version 2 of athanor-sulphur's manager
+    /// has the request: a version 1 compositor, and cosmic-comp, are refused here, since a
+    /// request above the bound version ends the connection.
+    pub(crate) fn set_reduced_motion(&self, reduced: bool) -> Result<(), Error> {
+        match self {
+            Manager::Athanor(manager) if has_reduced_motion(manager.version()) => {
+                manager.set_reduced_motion(athanor_state(reduced));
+                Ok(())
+            }
+            _ => Err(Error::Unavailable("athanor_a11y_manager_v1 version 2")),
+        }
     }
 
     pub(crate) fn set_magnifier(&self, enabled: bool) {
@@ -258,6 +279,16 @@ mod tests {
         assert!(check_delays(&aids(MAX_AID_DELAY, MAX_AID_DELAY)).is_ok());
         assert!(check_delays(&aids(MAX_AID_DELAY + 1, 0)).is_err());
         assert!(check_delays(&aids(0, MAX_AID_DELAY + 1)).is_err());
+    }
+
+    /// A request above the bound version ends the connection, so a manager bound at version 1
+    /// is never sent `set_reduced_motion`. This tests the gate only: a wire test needs a
+    /// compositor, and this crate has none (the fixture is in athanor-sulphur, which does not
+    /// depend on this crate).
+    #[test]
+    fn set_reduced_motion_is_sent_only_from_version_2() {
+        assert!(!has_reduced_motion(1));
+        assert!(has_reduced_motion(2));
     }
 
     #[test]

@@ -18,13 +18,13 @@ type TouchStart = smithay::input::touch::GrabStartData<State>;
 #[derive(Default)]
 pub(super) struct Seen {
     /// Each down: the surface, the touch point, where on the surface, and its serial.
-    downs: Vec<(ObjectId, i32, (f64, f64), u32)>,
+    pub(super) downs: Vec<(ObjectId, i32, (f64, f64), u32)>,
     /// Each motion: the touch point and where on its surface.
-    motions: Vec<(i32, (f64, f64))>,
+    pub(super) motions: Vec<(i32, (f64, f64))>,
     /// The touch point of each up.
-    ups: Vec<i32>,
-    frames: usize,
-    cancels: usize,
+    pub(super) ups: Vec<i32>,
+    pub(super) frames: usize,
+    pub(super) cancels: usize,
 }
 
 impl Dispatch<wl_touch::WlTouch, ()> for Client {

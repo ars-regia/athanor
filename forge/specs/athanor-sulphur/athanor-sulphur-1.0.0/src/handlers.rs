@@ -1475,6 +1475,7 @@ impl XdgShellHandler for State {
                 grab.ungrab(PopupUngrabStrategy::All);
                 return;
             }
+            self.eis_focusing(grab.current_grab().as_ref());
             keyboard.set_focus(self, grab.current_grab(), serial);
             keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
             self.popup_grab = Some(grab.clone());
