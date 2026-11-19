@@ -1115,8 +1115,6 @@ class CheckPlan(Repo):
             "system/nvidia/locks/open.lock": "l\n",
             "system/nvidia/lock.py": "p\n",
             "system/nvidia/azoth-nvidia-kmod.spec": "s\n",
-            "system/nvidia/build-rpms.sh": "b\n",
-            "system/nvidia/gate.sh": "g\n",
             "system/nvidia/tests/test_lock.py": "t\n",
             "docs/architecture/doc_system_image.md": "d\n",
         })
@@ -1134,6 +1132,20 @@ class CheckPlan(Repo):
 
     def test_nvidia_pin_bump_with_another_file_of_the_image_fails(self):
         r = self.pin_bump_with("system/Containerfile")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_the_variant_build_fails(self):
+        # build-rpms.sh builds the variants: a change to it is checked by building them, before
+        # the merge, in its own pull request (#1323).
+        r = self.pin_bump_with("system/nvidia/build-rpms.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_the_variant_gate_fails(self):
+        # gate.sh judges the variants: weakening it beside a pin bump would only run after the
+        # merge (#1323).
+        r = self.pin_bump_with("system/nvidia/gate.sh")
         self.assertEqual(r.returncode, 1)
         self.assertIn("own pull request", r.stderr)
 
