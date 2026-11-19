@@ -617,6 +617,11 @@ dependencies = [
 [[package]]
 name = "athanor-lock"
 version = "1.0.0"
+dependencies = [
+ "calloop",
+ "tokio",
+ "zbus 6.2.1",
+]
 
 [[package]]
 name = "athanor-osd"
