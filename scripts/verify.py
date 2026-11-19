@@ -6601,7 +6601,7 @@ def citation_findings(doc, text, tracked, read_file):
     satisfies the check as it does in code. A citation of another document with no token, no row
     name and no section id in its sentence is checked only for a first line that holds words, so
     a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
-    only across the exact `are in`, `is in`, `is listed in` or `under`: with other words between
+    only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
     them ("are both in"), only the key is demanded, and a removed single-word entry is not seen."""
     known = set(tracked)
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
