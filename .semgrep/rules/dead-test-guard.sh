@@ -21,6 +21,22 @@ for d in a b; do
   # ruleid: dead-test-guard
   [ -n "$d" ] && [ -n "$b" ]
 done
+case "$c" in
+  x)
+    # ruleid: dead-test-guard
+    [ -n "$a" ] && [ -n "$b" ]
+    ;;
+esac
+while
+  # ok: dead-test-guard
+  [ -n "$a" ] && [ -n "$b" ]
+do
+  break
+done
+x=$(
+  # ok: dead-test-guard
+  [[ -n "$a" ]] && [[ -n "$b" ]]
+)
 # ok: dead-test-guard
 [ "$scanned" -gt 0 ] || { echo "no library scanned" >&2; exit 1; }
 # ok: dead-test-guard
