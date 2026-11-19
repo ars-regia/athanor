@@ -6514,7 +6514,10 @@ PLAIN_PATH = re.compile(r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
 # that names nothing the check can match is a finding, and its hyphenated lowercase words
 # (`cosmic-osd`, not in backticks) count as tokens when the file holds them.
 LIST_FILES = {"packages.json", "Cargo.toml"}
-LIST_GAP = re.compile(r"[\s,`]*(?:and|or|(?:are|is)(?:\s+listed)?\s+(?:in|under))?[\s,`]*")
+LIST_GAP = re.compile(r"[\s,`]*(?:and|or)?[\s,`]*")
+# The verb between a list of entries and the key that holds them: `are in` takes the list before it,
+# `is in` one name only, so "`x` is in `a` and `y` is in `b`" does not join `a` to `b`.
+LIST_KEY_GAP = re.compile(r"[\s`]*(are|is)(?:\s+listed)?\s+(?:in|under)[\s`]*")
 BARE_NAME = re.compile(r"(?<![\w`/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/`-])")
 
 
@@ -6541,7 +6544,7 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_software.md", "forge/config/packages.json", "2-82", "exclude", 1):
+    ("doc_software.md", "forge/config/packages.json", "2-82", None, 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 
@@ -6585,8 +6588,10 @@ def citation_findings(doc, text, tracked, read_file):
     A path written in plain text (`forge/config/packages.json:128`) is read as one in backticks. For
     `packages.json` and `Cargo.toml`, lists of entries, the check is stricter: the entries a
     citation names are the run of names next to it that only a comma, `and` or `or` separates (before
-    it, else after it), each must be in the cited lines, a name is a backticked identifier or a
-    hyphenated lowercase word (`cosmic-osd`), a JSON name matches a whole string
+    it, else after it), and that reaches across an `are in` (the whole list) or an `is in` (one name)
+    to the key nearest the citation; each must be in the cited lines, a name is a backticked
+    identifier or a hyphenated lowercase word (`cosmic-osd`), a hyphenated name in backticks that
+    the file no longer holds stays in the run and is a finding, a JSON name matches a whole string
     (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
 
     Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
@@ -6676,15 +6681,21 @@ def citation_findings(doc, text, tracked, read_file):
             tokens = usable(found)
             if listed:
                 # The items the citation names: the run of tokens next to it that only a comma,
-                # `and`, `or` or an `is in` separates (`nix` and `nix-daemon` are in `upstream_core`);
-                # with none before it, the run that follows it. A name in backticks stays in the run
-                # when the file no longer holds it, so a removed entry is a finding.
-                run = []
+                # `and` or `or` separates, reaching from the key nearest the citation across an
+                # `are in` (`nix` and `nix-daemon` are in `upstream_core`) or, for one name, an
+                # `is in`; with none before it, the run that follows it. A hyphenated name in
+                # backticks stays in the run when the file no longer holds it, so a removed entry
+                # is a finding.
+                run, single = [], False
                 for item in reversed(sorted({*tokens, *(
                         i for i in found if sentence[i[0] - 1:i[0]] == "`" == sentence[i[1]:i[1] + 1]
-                        and "." not in i[2] and not FILE_LIKE.search(i[2]) and i[2] not in own)})):
-                    if run and not LIST_GAP.fullmatch(sentence[item[1]:run[-1][0]]):
-                        break
+                        and BARE_NAME.fullmatch(i[2]) and i[2] not in own)})):
+                    if run:
+                        gap = sentence[item[1]:run[-1][0]]
+                        key = len(run) == 1 and LIST_KEY_GAP.fullmatch(gap)
+                        if single or not (key or LIST_GAP.fullmatch(gap)):
+                            break
+                        single = bool(key) and key.group(1) == "is"
                     run.append(item)
                 if not run:
                     after = line[span.end():]

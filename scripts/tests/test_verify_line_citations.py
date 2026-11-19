@@ -138,6 +138,18 @@ class Lists(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("does not hold `nix-daemon`", out[0])
 
+    def test_an_is_in_joins_one_name_and_no_other_clause(self):
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
+        self.assertEqual(messages(f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5-6`).",
+                                  keyed), [])
+        out = messages(f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5`).", keyed)
+        self.assertEqual(len(out), 1)
+        self.assertIn("does not hold `nix`", out[0])
+
+    def test_a_backticked_word_that_is_no_entry_is_not_demanded(self):
+        self.assertEqual(self.found(f"The `nix` ships in the image, built by `rpmbuild` (`{self.PJ}:6`)."), [])
+
     def test_a_name_in_backticks_the_file_no_longer_holds_is_a_finding(self):
         for text in (f"The `nix` and `gone-pkg` are at `{self.PJ}:6-7`.",
                      f"The `gone-pkg` and `nix` are at `{self.PJ}:6-7`."):
