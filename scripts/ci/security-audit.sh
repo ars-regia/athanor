@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Rust security audit: clippy (warnings denied) over the root workspace and the toolkit's gallery,
-# and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s. Licences, bans and sources of the same
-# policy run in the pull request gate (`just check-deny`), so they are not repeated here.
+# and the advisory check of the cargo-deny policy (deny.toml) over their lockfiles and fuzz/'s, and
+# `cargo audit --deny yanked` over the vendored lockfiles of scripts/ci/audited-lockfiles.txt.
+# Licences, bans and sources of the same policy run in the pull request gate (`just check-deny`), so they are not repeated here.
 # Logs land in $AUDIT_OUT (default: audit-out) so a workflow can upload the directory.
 set -euo pipefail
 
@@ -24,4 +25,22 @@ cargo clippy --manifest-path system/athanor-sal/gallery/Cargo.toml --locked --al
 : > "$out/deny.log"
 for manifest in Cargo.toml system/athanor-sal/gallery/Cargo.toml fuzz/Cargo.toml; do
     cargo deny --manifest-path "$manifest" --config deny.toml check advisories 2>&1 | tee -a "$out/deny.log"
+done
+
+# The vendored lockfiles cargo-deny cannot read (no workspace) are audited by cargo-audit, which
+# reads a bare lockfile. Yanked crates are denied, as deny.toml does; unsound and unmaintained
+# advisories are reported, not denied, until greenboot-rs carries the rustix fix (#1302). An
+# `unaudited` line of the list is skipped. An empty or missing list fails.
+list=scripts/ci/audited-lockfiles.txt
+[ -f "$list" ] || { echo "security-audit: $list is missing" >&2; exit 1; }
+mapfile -t entries < "$list"
+locks=()
+for entry in "${entries[@]}"; do
+    case "$entry" in '' | '#'* | 'unaudited '*) ;; *) locks+=("$entry") ;; esac
+done
+[ "${#locks[@]}" -gt 0 ] || { echo "security-audit: $list names no lockfile" >&2; exit 1; }
+: > "$out/audit.log"
+for lock in "${locks[@]}"; do
+    echo "security-audit: cargo audit $lock" | tee -a "$out/audit.log"
+    cargo audit --deny yanked --file "$lock" < /dev/null 2>&1 | tee -a "$out/audit.log"
 done
