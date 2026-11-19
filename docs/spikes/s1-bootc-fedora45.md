@@ -38,14 +38,15 @@ the beta ones of 2026-10-09.
 | Fedora's bootc reference image (composefs probe only, item 7) | `quay.io/fedora/fedora-bootc:45`, version `45.20261118.0` | index `sha256:69b66da0839f186f799addae6620aae19a6998b3fd4d2def00168c8dab50c486`; amd64 `sha256:a14fce7d40c31ad2f924444c2d7d3424a9f4617c561ea1ef729df9c5e3205455` |
 | Current base, for comparison | `quay.io/fedora-ostree-desktops/base-atomic:43` | `sha256:08056a9c8b568f7fff9cceff34e2fe1fe3401b6d7743fe2702a089ddbdea1e7a` (the digest pinned in `system/Containerfile` on `iso-v0`) |
 | Fedora 45 release state | `dl.fedoraproject.org/pub/fedora/linux/releases/45/` answers 200 | Final published |
-| Kernel | the Azoth vmlinuz signed for Secure Boot, from `azoth-boot` by the digest `system/kernel-artifacts.sh resolve` records | an fc43 build: S1 measures the MOK chain, the fc45 kernel rebuild is P4a |
+| Kernel | the Azoth vmlinuz signed for Secure Boot, from `azoth-boot` by the digest `system/kernel-artifacts.sh resolve` records | the build the branch image carries, `7.3.3-300.azoth.fc45` at boot on 2026-11-19: S1 measures the MOK chain with it |
 | Athanor system image of the branch (`ACC_BASE`, the plan's task 8) | the system image of the Orchestrator run 44392939761 on `rebase/fedora-45` | `sha256:566a97fd9da5e983af45afa258a3a793da1c72b847581b897544533730dd0811` |
 | Secure Boot certificate enrolled as MOK | `forge/specs/azoth/keys/secureboot/athanor-secureboot.pem` (public) | no private key is used anywhere in S1 |
 
-The images are pinned by these digests for the whole run. The package versions that matter
+The images are pinned by these digests for the whole run. `ACC_BASE` is the branch image above,
+copied once by digest; the local build of section 3 is the fallback for a run with no branch image. The package versions that matter
 (`bootc`, `ostree`, `rpm-ostree`, `systemd`, `grub2-efi-x64`, `shim-x64`, `bootupd`,
 `containers-common`, `selinux-policy`, `composefs`) are recorded by item 0 from the built
-image, because the Fedora package metadata service does not index `f45` yet.
+image under test.
 
 ## 2. Probes
 
@@ -451,7 +452,8 @@ the report.
 Acceptance images and test images:
 
 `images.sh` takes the `athanor-update` RPM from `ACC_RPM_DIR` (default `RPMS_OUT/` at the
-root) and the base from `ACC_BASE`; both come from the step above. Its keys and registry
+root) and the base from `ACC_BASE`: the branch image of section 1 and the `athanor-update` RPM of
+the same run's tier 3, or both from the local build above when there is no branch image. Its keys and registry
 configuration go to `ACC_STATE`, kept out of the maintainer's state, and its registry is S1's
 own, `athanor-s1-registry` on port 5001 with the prefix `s1` (section 5, point 4):
 
