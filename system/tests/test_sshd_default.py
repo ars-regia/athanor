@@ -7,6 +7,7 @@ New install: every install kickstart runs `services --disabled=sshd`. Existing m
 enabled (ADR-0142 point 1); no package of Athanor enables, disables or masks it (point 2).
 """
 
+import fnmatch
 import pathlib
 import re
 import unittest
@@ -37,16 +38,21 @@ class NewInstallTest(unittest.TestCase):
 class ExistingMachineTest(unittest.TestCase):
     def test_no_shipped_preset_names_sshd(self):
         for preset in ROOT.glob("forge/specs/*/SOURCES/**/system-preset/*.preset"):
+            lines = [ln.split() for ln in active_lines(preset.relative_to(ROOT))]
             self.assertFalse(
-                [ln for ln in active_lines(preset.relative_to(ROOT)) if re.fullmatch(r"(en|dis)able\s+(sshd\S*|\*)", ln)],
+                [ln for ln in lines if len(ln) > 1 and ln[0] in ("enable", "disable") and fnmatch.fnmatch("sshd.service", ln[1])],
                 preset.name,
             )
 
-    def test_no_shipped_file_masks_sshd(self):
-        found = [p for p in ROOT.glob("forge/specs/*/SOURCES/etc/systemd/system/sshd*") if p.exists() or p.is_symlink()]
+    def test_no_shipped_link_or_unit_turns_sshd_on_or_off(self):
+        # A link in any wants or requires directory, a mask, or a unit that pulls sshd in.
+        found = [p for p in ROOT.glob("forge/specs/*/SOURCES/**/systemd/**/sshd*") if p.exists() or p.is_symlink()]
         self.assertEqual(found, [])
+        pulls = re.compile(r"^\s*(Wants|Requires|BindsTo|Upholds|Also)\s*=.*\bsshd\b", re.M)
+        units = [p for p in ROOT.glob("forge/specs/*/SOURCES/**/systemd/**/*") if p.is_file() and pulls.search(p.read_text(errors="ignore"))]
+        self.assertEqual(units, [])
 
-    def test_the_image_check_expects_sshd_to_be_enabled(self):
+    def test_the_image_check_allows_sshd_as_a_listener(self):
         text = (ROOT / "forge/config/contacts.toml").read_text()
         self.assertRegex(text, r'\[\[listener\]\][^\[]*unit = "sshd\.service"')
 
