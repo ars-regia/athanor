@@ -1,5 +1,10 @@
 # Vendored Cargo lockfiles that scripts/ci/security-audit.sh audits with `cargo audit --file` because
 # cargo-deny cannot read them: each ships a lockfile with no workspace to resolve (#465).
-# One path per line; `#` starts a comment. scripts/verify.py (advisory-locks) fails on a
-# Cargo.lock under forge/specs that is not listed here, so a new one cannot go unread.
+# One path per line; `#` starts a comment. `unaudited PATH #ISSUE` names a tracked lockfile no
+# advisory check reads yet, with the issue that ends the exclusion; security-audit.sh skips it.
+# scripts/verify.py (advisory-locks) fails on a tracked Cargo.lock that neither cargo-deny's loop
+# in security-audit.sh nor this list covers, so a new one cannot go unread.
 forge/specs/greenboot-rs/SOURCES/Cargo.lock
+# A build-time derive tool that no spec installs (`just check-deny` leaves it out too); its
+# lockfile fails `cargo audit --deny yanked` today.
+unaudited forge/tools/calmo-cosmic-theme/Cargo.lock #1301

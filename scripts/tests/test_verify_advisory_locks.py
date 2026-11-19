@@ -71,6 +71,45 @@ class AdvisoryLocks(unittest.TestCase):
         self.write(LOCK)
         self.assertEqual(verify.advisory_lock_problems(self.root), [])
 
+    def test_a_lockfile_outside_forge_specs_is_named(self):
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        self.write("tools/b/Cargo.lock")
+        problems = verify.advisory_lock_problems(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("tools/b/Cargo.lock", problems[0])
+
+    def test_a_lockfile_cargo_deny_reads_is_not_asked_for(self):
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        for lock in verify.DENY_LOCKFILES:
+            self.write(lock)
+        self.assertEqual(verify.advisory_lock_problems(self.root), [])
+
+    def test_an_unaudited_lockfile_with_an_issue_passes(self):
+        self.write(verify.AUDITED_LOCKFILES, f"unaudited {LOCK} #1301\n")
+        self.write(LOCK)
+        self.assertEqual(verify.advisory_lock_problems(self.root), [])
+
+    def test_an_unaudited_lockfile_without_an_issue_is_named(self):
+        self.write(verify.AUDITED_LOCKFILES, f"unaudited {LOCK}\n")
+        self.write(LOCK)
+        problems = verify.advisory_lock_problems(self.root)
+        self.assertEqual(len(problems), 2, problems)
+        self.assertIn("expected `unaudited PATH #ISSUE`", problems[0])
+
+    def test_an_unaudited_lockfile_that_is_gone_is_named(self):
+        self.write(verify.AUDITED_LOCKFILES, f"unaudited {LOCK} #1301\n")
+        self.write("forge/specs/.keep")
+        problems = verify.advisory_lock_problems(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("does not exist", problems[0])
+
+    def test_a_cargo_deny_loop_that_drifts_is_named(self):
+        self.write(verify.AUDITED_LOCKFILES, "# none\n")
+        self.write("scripts/ci/security-audit.sh", "for manifest in Cargo.toml fuzz/Cargo.toml; do\n")
+        problems = verify.advisory_lock_problems(self.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("does not match DENY_LOCKFILES", problems[0])
+
 
 if __name__ == "__main__":
     unittest.main()

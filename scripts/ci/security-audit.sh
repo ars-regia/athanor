@@ -28,13 +28,15 @@ for manifest in Cargo.toml system/athanor-sal/gallery/Cargo.toml fuzz/Cargo.toml
 done
 
 # The vendored lockfiles cargo-deny cannot read (no workspace) are audited by cargo-audit, which
-# reads a bare lockfile. Yanked crates are denied, as deny.toml does. An empty or missing list fails.
+# reads a bare lockfile. Yanked crates are denied, as deny.toml does; unsound and unmaintained
+# advisories are reported, not denied, until greenboot-rs carries the rustix fix (#1302). An
+# `unaudited` line of the list is skipped. An empty or missing list fails.
 list=scripts/ci/audited-lockfiles.txt
 [ -f "$list" ] || { echo "security-audit: $list is missing" >&2; exit 1; }
 mapfile -t entries < "$list"
 locks=()
 for entry in "${entries[@]}"; do
-    case "$entry" in '' | '#'*) ;; *) locks+=("$entry") ;; esac
+    case "$entry" in '' | '#'* | 'unaudited '*) ;; *) locks+=("$entry") ;; esac
 done
 [ "${#locks[@]}" -gt 0 ] || { echo "security-audit: $list names no lockfile" >&2; exit 1; }
 : > "$out/audit.log"
