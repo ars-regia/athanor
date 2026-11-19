@@ -415,12 +415,13 @@ command -v qemu-system-x86_64 swtpm virt-fw-vars
 ```
 
 The branch image and its `athanor-update` RPM, by digest, from the Orchestrator run 44392939761
-on `rebase/fedora-45`, with the scripts of that branch in a throwaway worktree. The image is
+on `rebase/fedora-45`, with the scripts of the commit that run built in a throwaway worktree. The image is
 unsigned (`rebase/*` never signs, ADR-0125), so the copy uses a one-off policy file that is
 deleted at once; the system policy is not changed:
 
 ```
-git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build origin/rebase/fedora-45
+# The commit run 44392939761 built (its head_sha), so the scripts match the image.
+git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build 288df1ed55e908c91b5c432a9fb46248d53e01ca
 W=/var/tmp/athanor-wt/s1-build
 P=/var/tmp/athanor-s1/accept-one-copy.json
 mkdir -p /var/tmp/athanor-s1/rpms /var/tmp/athanor-s1/tier3-oci
