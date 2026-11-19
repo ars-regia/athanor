@@ -1924,7 +1924,7 @@ compositor and that the own compositor did not yet offer:
       key, except the protected keys of decision 30, which no user binding takes; a system action
       runs the user's command in place of the default's. A binding the compositor refuses (a
       protected key, an action it does not carry out, a combination it cannot parse) is skipped and
-      logged, and the others apply; a file it refuses whole (malformed, larger than its limit)
+      logged, and the others apply; a file it refuses whole (malformed, or larger than 1 MiB, the bound under which `athanor_sulphur_client::shortcuts` reads the same files, `system/athanor-sulphur-client/src/shortcuts.rs:27`)
       changes nothing and is logged. While the session is locked no user binding acts: only the actions `Action::while_locked` names
       act then (`src/bindings.rs`).
       The reader is an exception to SH2's containment outside `athanor-sulphur-client`, as
