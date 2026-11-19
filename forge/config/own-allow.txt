@@ -1,0 +1,42 @@
+# What is not yet Athanor's own (ADR-0141 decision 7), one entry per line: `rpm|crate NAME #ISSUE`.
+# rpm: a cosmic-* RPM, pop-launcher, gtk-layer-shell, gtk4-layer-shell or xdg-user-dirs-gtk that
+# the system image may still hold (forge/scripts/check_image_own.py, on every image build).
+# crate: a crate built from the repository, athanor-* or not, whose dependencies,
+# dev-dependencies aside, still reach gtk4,
+# libadwaita, libcosmic or iced, or a subcrate of one such as gtk4-sys or iced_core
+# (scripts/verify.py own, on every pull request).
+# The list only shrinks: an entry that no longer applies leaves it, and a pull request adds none.
+# 1.0 ships when it is empty.
+rpm cosmic-app-library #1292
+rpm cosmic-comp #1292
+rpm cosmic-greeter #1292
+rpm cosmic-icon-theme #1292
+rpm cosmic-launcher #1292
+rpm cosmic-osd #1292
+rpm cosmic-randr #1292
+rpm cosmic-settings #1292
+rpm cosmic-settings-daemon #1292
+rpm cosmic-store #1292
+rpm cosmic-workspaces #1292
+rpm gtk4-layer-shell #1292
+rpm gtk-layer-shell #1292
+rpm pop-launcher #1292
+rpm xdg-user-dirs-gtk #1292
+crate athanor-apps #1292
+crate athanor-bar #1292
+crate athanor-control-center #1292
+crate athanor-controls #1292
+crate athanor-dock #1292
+crate athanor-fuzz #1292
+crate athanor-fuzz-entries #1292
+crate athanor-greeter-ui #1292
+crate athanor-idle #1292
+crate athanor-launcher #1292
+crate athanor-layout-chooser #1292
+crate athanor-osd #1292
+crate athanor-preview-render #1292
+crate athanor-recovery #1292
+crate athanor-style #1292
+crate athanor-sulphur-client #1292
+crate athanor-wallpaper #1292
+crate calmo-cosmic-theme #1292
