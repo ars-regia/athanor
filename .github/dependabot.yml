@@ -10,13 +10,19 @@ updates:
       actions:
         update-types: ["minor", "patch"]
 
+  # The root workspace, and the fuzz workspace and Sal's gallery, which build workspace crates by
+  # path and keep lockfiles of their own (#1313). A major move changes a workspace manifest, so
+  # each major move updates the three lockfiles in one pull request.
   - package-ecosystem: "cargo"
-    directory: "/"
+    directories: ["/", "/fuzz", "/system/athanor-sal/gallery"]
     schedule:
       interval: "weekly"
     groups:
       cargo:
         update-types: ["minor", "patch"]
+      cargo-major:
+        update-types: ["major"]
+        group-by: dependency-name
     ignore:
       # accesskit_unix 0.24.1 requires accesskit_atspi_common 0.21.1, past the patched copy under
       # system/athanor-sal/vendor/ (#638); it moves when that copy's PATCHES.md entry goes.
