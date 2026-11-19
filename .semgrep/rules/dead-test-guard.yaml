@@ -1,0 +1,21 @@
+# AGENTS.md, "No hidden failures": a guard of two tests, `[ a ] && [ b ]`, followed by another
+# command. Under `set -e` a failure before the last `&&` does not stop the script, so when the
+# first test fails the script goes on as if the guard had passed (#1322, builder-openssl-check
+# of flake.nix). As the last command of a function or a script the list's status is the
+# answer, and the line is right: the rule matches only a guard that another command follows.
+# Write each condition on its own line, or `[ a ] || { echo "why" >&2; exit 1; }`.
+# Limits: semgrep reads the text, not the shell; a guard inside an `if` body that ends with
+# `fi` is not matched.
+rules:
+  - id: dead-test-guard
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Under `set -e` this guard does not stop the script when its first test fails (AGENTS.md,
+      "No hidden failures"): write each test on its own line, or fail with `|| { ...; exit 1; }`.
+    paths:
+      exclude:
+        - /docs/
+        - '*.md'
+    patterns:
+      - pattern-regex: '(?m)^[ \t]*\[\[?[ \t][^\n]*[ \t]\]\]?[ \t]*&&[ \t]*\[\[?[ \t][^\n]*[ \t]\]\]?[ \t]*;?[ \t]*\n(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]*[^\s}''#]'
