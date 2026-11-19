@@ -15,8 +15,10 @@ impl Layouts {
     /// Takes the names of a new keymap's layouts: `true` when the active layout changed.
     pub(crate) fn keymap(&mut self, text: &str) -> bool {
         let before = self.active();
-        // libxkbcommon writes the text, so it holds no NUL, on which xkbcommon would panic.
-        self.names = if text.contains('\0') {
+        // xkbcommon 0.8 builds the keymap text and the layout names with
+        // `str::from_utf8_unchecked`, so a byte that is not UTF-8 is refused here. libxkbcommon
+        // writes the text, so it holds no NUL, on which `new_from_string` would panic.
+        self.names = if text.contains('\0') || std::str::from_utf8(text.as_bytes()).is_err() {
             Vec::new()
         } else {
             let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
@@ -28,7 +30,10 @@ impl Layouts {
             )
             .map(|keymap| {
                 (0..keymap.num_layouts())
-                    .map(|index| keymap.layout_get_name(index).to_owned())
+                    .map(|index| {
+                        std::str::from_utf8(keymap.layout_get_name(index).as_bytes())
+                            .map_or_else(|_| String::new(), str::to_owned)
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -41,6 +46,14 @@ impl Layouts {
         let before = self.active();
         self.group = group;
         self.active() != before
+    }
+
+    /// Forgets the keymap and the group when the seat loses its keyboard: `true` when a layout
+    /// was named. A new keyboard starts at group 0 with a keymap of its own.
+    pub(crate) fn clear(&mut self) -> bool {
+        let before = self.active();
+        *self = Self::default();
+        before.is_some()
     }
 
     /// The effective group and its name; `None` before a keymap, or for a layout it names not.
@@ -113,5 +126,16 @@ mod tests {
         assert!(layouts.group(1));
         assert!(layouts.keymap(&keymap("English (US)", "Italian (intl.)")));
         assert_eq!(layouts.active(), Some((1, "Italian (intl.)".to_owned())));
+    }
+
+    #[test]
+    fn a_lost_keyboard_names_no_layout() {
+        let mut layouts = us_it();
+        assert!(layouts.group(1));
+        assert!(layouts.clear());
+        assert_eq!(layouts.active(), None);
+        assert!(!layouts.clear(), "nothing was named the second time");
+        assert!(layouts.keymap(&keymap("English (US)", "Italian")));
+        assert_eq!(layouts.active(), Some((0, "English (US)".to_owned())), "a new keyboard starts at group 0");
     }
 }

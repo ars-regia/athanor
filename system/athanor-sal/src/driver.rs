@@ -3173,6 +3173,9 @@ impl SeatHandler for App {
                 if let Some(keyboard) = self.keyboard.take() {
                     keyboard.release();
                 }
+                if self.shell.layouts.clear() {
+                    self.application.layout_changed(&mut self.shell);
+                }
             }
             Capability::Pointer => {
                 if let Some(device) = self.cursor_shape_device.take() {

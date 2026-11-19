@@ -505,7 +505,7 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
 - **Sal today** (`system/athanor-sal`).
   - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:149-182`).
   - Surfaces open at start or one per output (`Application::start` and `output`, `:220-232`). When revision 3 was written, `Shell::open` and `close` were private, so no layer surface opened on a chosen output at run time; #1022 (2026-11-06) added the public `Shell::open_layer` (`:893`) and made `Shell::close` (`:914`) public.
-  - The keyboard handler (`src/driver.rs:3192-3288`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
+  - The keyboard handler (`src/driver.rs:3195-3291`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
   - `sync_window_focus` (`src/driver.rs:2528`) gives AccessKit window focus to the surface that holds the keys.
   - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
 - **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
@@ -565,7 +565,7 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 **OV27. Sal prerequisites** (proposed, revision 3), in one Sal pull request agreed with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display, which need items 1 to 3 too:
 
 1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:1238`, and `close`, `:2438`; `Shell::open_layer`, `:909`, and a public `close`, `:930`, have since landed). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
-2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:3193-3223, 3251-3288`).
+2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:3196-3226, 3254-3291`).
 3. **Focus at map.** The focused widget is reported to AT-SPI when the surface first takes the keyboard, proven by an AT-SPI golden.
 4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:377-384`). Enter raises `Event::Selected` on the selected row, as it does today.
 
