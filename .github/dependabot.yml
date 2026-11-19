@@ -1,7 +1,7 @@
 version: 2
 updates:
-  # One pull request a week per ecosystem: the minor and patch moves of each go together, and a
-  # major move, which may break the build, keeps a pull request of its own.
+  # One pull request a week per ecosystem and directory: the minor and patch moves of each go
+  # together, and a major move, which may break the build, keeps a pull request of its own.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -11,8 +11,10 @@ updates:
         update-types: ["minor", "patch"]
 
   # The root workspace, and the fuzz workspace and Sal's gallery, which build workspace crates by
-  # path and keep lockfiles of their own (#1313). A major move changes a workspace manifest, so
-  # each major move updates the three lockfiles in one pull request.
+  # path and keep lockfiles of their own (#1313). The minor and patch moves come in one pull
+  # request per directory, and change only that directory's lockfile. A major move changes a
+  # workspace manifest, so group-by puts it into one pull request for every directory whose lock
+  # holds the crate.
   - package-ecosystem: "cargo"
     directories: ["/", "/fuzz", "/system/athanor-sal/gallery"]
     schedule:
