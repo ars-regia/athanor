@@ -171,6 +171,8 @@ pub struct State {
     pub session_calls: Option<crate::session_calls::SessionCalls>,
     /// Orca's keyboard monitor: who watches and grabs keys (`keyboard_monitor.rs`).
     pub keyboard_monitor: crate::keyboard_monitor::Monitor,
+    /// The EIS contexts of the portal backend's sessions (`eis.rs`).
+    pub(crate) eis: crate::eis::Eis,
     /// The keyboard aids of AX11, their settings and the keys they hold (`aids.rs`).
     pub aids: crate::aids::Aids,
     /// The modifiers each virtual keyboard last set, applied to its own keys only
@@ -469,6 +471,7 @@ impl State {
             lock_epoch: std::sync::Arc::default(),
             session_calls: None,
             keyboard_monitor: crate::keyboard_monitor::Monitor::default(),
+            eis: Default::default(),
             aids: Default::default(),
             virtual_modifiers: HashMap::new(),
             past_grab_keys: HashMap::new(),
@@ -1736,6 +1739,15 @@ pub fn identity_of(client: &Client) -> Option<Identity> {
     client
         .get_data::<ClientState>()
         .and_then(|data| data.identity.clone())
+}
+
+/// Whether `client` has no identity though it could have one: it connected outside a security
+/// context and its process could not be read, or it has no client state. A confined client has
+/// none by design.
+pub fn unidentified(client: &Client) -> bool {
+    client
+        .get_data::<ClientState>()
+        .is_none_or(|data| !data.confined && data.identity.is_none())
 }
 
 /// Whether `a` and `b` connected through security contexts that name one application instance:

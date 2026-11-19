@@ -412,8 +412,13 @@ struct Client {
     /// The serial of the last `wl_pointer.enter` the client was sent.
     pointer_enter: Option<u32>,
     pointer_motions: u32,
+    /// The `wl_pointer.axis` events the client was sent.
+    axes: u32,
     /// The serial of the last `wl_pointer.button` press the client was sent.
     button: Option<u32>,
+    /// Each key and button event the client was sent, in order: its code, and whether it was a
+    /// press.
+    input: Vec<(u32, bool)>,
     /// The events of every athanor_toplevel_state_v1 object, in order.
     toplevel_states: Vec<(ObjectId, StateEvent)>,
     /// The token of the last xdg_activation_v1 token done.
@@ -803,12 +808,16 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for Client {
             } => {
                 client.keys.push(key);
                 client.keys_under.push(client.keymap_size);
+                client.input.push((key, true));
             }
             wl_keyboard::Event::Key {
                 key,
                 state: WEnum::Value(wl_keyboard::KeyState::Released),
                 ..
-            } => client.released.push(key),
+            } => {
+                client.released.push(key);
+                client.input.push((key, false));
+            }
             wl_keyboard::Event::Enter { surface, keys, .. } => {
                 client.keyboard_entered.push(surface.id().protocol_id());
                 let (keys, _) = keys.as_chunks::<4>();
@@ -847,11 +856,21 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Client {
         match event {
             wl_pointer::Event::Enter { serial, .. } => client.pointer_enter = Some(serial),
             wl_pointer::Event::Motion { .. } => client.pointer_motions += 1,
+            wl_pointer::Event::Axis { .. } => client.axes += 1,
             wl_pointer::Event::Button {
                 serial,
+                button,
                 state: WEnum::Value(wl_pointer::ButtonState::Pressed),
                 ..
-            } => client.button = Some(serial),
+            } => {
+                client.button = Some(serial);
+                client.input.push((button, true));
+            }
+            wl_pointer::Event::Button {
+                button,
+                state: WEnum::Value(wl_pointer::ButtonState::Released),
+                ..
+            } => client.input.push((button, false)),
             _ => {}
         }
     }
@@ -1384,8 +1403,12 @@ struct Fake(
 );
 
 impl Process for Fake {
+    /// An empty executable cannot be read, as a process that exits while it is read.
     fn executable(&self, _pid: i32) -> std::io::Result<PathBuf> {
-        Ok(self.0.lock().expect("identity").0.into())
+        match self.0.lock().expect("identity").0 {
+            "" => Err(std::io::ErrorKind::NotFound.into()),
+            executable => Ok(executable.into()),
+        }
     }
     fn executable_file(&self, _pid: i32) -> std::io::Result<FileId> {
         self.2.fetch_add(1, Ordering::SeqCst);
@@ -9151,6 +9174,44 @@ fn lock_session_with_surface(
     (locker, lock, surface)
 }
 
+/// A lock whose client goes without unlocking leaves the session locked, its outputs blank and
+/// the keyboard with no client; a second lock takes it over and unlocks it, and the window has
+/// the keyboard back (doc_lock_and_prompts.md LP17, a locker that crashes).
+#[test]
+fn a_second_lock_takes_over_a_lock_whose_client_died() {
+    let mut run = Running::start(None);
+    let (window, _) = window_under_pointer(&run);
+    let focus = |state: &State| state.seat.get_keyboard().and_then(|k| k.current_focus());
+    run.until("the window has the keyboard", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+    let (locker, lock) = lock_session(&mut run);
+    drop(lock);
+    drop(locker);
+    run.until("the dead lock shows no surface", |state| {
+        state.lock.as_ref().is_some_and(|lock| {
+            state.space.outputs().all(|output| lock.surface_on(output).is_none())
+        })
+    });
+    // The focus may stay on the dead lock surface, which no client owns any more.
+    let held = focus(&run.state);
+    assert!(
+        held.as_ref().is_none_or(|surface| !surface.is_alive()),
+        "a live client has the keyboard: {held:?}, the window {}",
+        held.as_ref() == Some(&window)
+    );
+
+    let (mut second, lock) = lock_session(&mut run);
+    assert!(second.client.locked, "the second lock is confirmed");
+    lock.unlock_and_destroy();
+    second.roundtrip(&mut run);
+    run.until("the session is unlocked", |state| state.lock.is_none());
+    run.until("the window has the keyboard back", |state| {
+        focus(state).as_ref() == Some(&window)
+    });
+    run.stop();
+}
+
 /// A virtual keyboard while the session is locked (open question 12 of the OS9 plan): with the
 /// lock surface focused, a granted client's virtual key reaches neither the lock surface nor any
 /// other client; a hardware key reaches it; after unlock the same virtual key reaches the window
@@ -13662,6 +13723,9 @@ mod touch;
 
 #[cfg(test)]
 mod keyboard_monitor;
+
+#[cfg(test)]
+mod eis;
 
 #[cfg(test)]
 mod aids;

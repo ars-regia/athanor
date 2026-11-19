@@ -658,15 +658,19 @@ fn ax4_caps_lock_leaves_the_lock_as_the_window_knows_it() {
 }
 
 /// A private session bus: a `dbus-daemon` of its own, stopped and removed when dropped.
-struct Bus {
+pub(super) struct Bus {
     daemon: Child,
     address: String,
     dir: PathBuf,
 }
 
 impl Bus {
-    fn start() -> Self {
-        let dir = std::env::temp_dir().join(format!("athanor-sulphur-{}", std::process::id()));
+    pub(super) fn start() -> Self {
+        // One directory per bus: the tests of a process run in parallel.
+        static BUSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let bus = BUSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("athanor-sulphur-{}-{bus}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("the bus's directory");
         // A configuration of its own: `--session` reads the host's, which on a system running
         // dbus-broker has no <listen> element.
@@ -695,12 +699,22 @@ impl Bus {
         }
     }
 
-    fn builder(&self) -> Builder<'static> {
+    pub(super) fn builder(&self) -> Builder<'static> {
         Builder::address(self.address.as_str())
     }
 
-    fn connect(&self) -> Connection {
+    pub(super) fn connect(&self) -> Connection {
         zbus::block_on(self.builder().build()).expect("a connection to the bus")
+    }
+
+    /// Stops the daemon, which then answers nothing until the bus is dropped.
+    pub(super) fn stop(&self) {
+        let stopped = Command::new("kill")
+            .arg("-STOP")
+            .arg(self.daemon.id().to_string())
+            .status()
+            .expect("kill runs");
+        assert!(stopped.success(), "the bus daemon stops");
     }
 }
 

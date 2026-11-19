@@ -877,7 +877,7 @@ fn a_window_s_alpha_leaves_its_marks_opaque() {
 }
 
 /// Runs the compositor until the frame shows `done`.
-fn settled(run: &mut Running, what: &str, done: impl Fn(&[u8]) -> bool) {
+pub(super) fn settled(run: &mut Running, what: &str, done: impl Fn(&[u8]) -> bool) {
     let started = Instant::now();
     while !done(&frame(run)) {
         assert!(started.elapsed() < TIMEOUT, "{what}: not in time");
@@ -892,7 +892,7 @@ fn settled(run: &mut Running, what: &str, done: impl Fn(&[u8]) -> bool) {
 delegate_noop!(Client: XdgSystemBellV1);
 
 /// Rings the bell from `local`, on its window's surface or, with `on_window` false, on none.
-fn ring(run: &mut Running, local: &mut Local, on_window: bool) {
+pub(super) fn ring(run: &mut Running, local: &mut Local, on_window: bool) {
     let bells: XdgSystemBellV1 = local.bind(1);
     let surface = local.window.clone().map(|(surface, _)| surface);
     bells.ring(surface.as_ref().filter(|_| on_window));
@@ -900,7 +900,7 @@ fn ring(run: &mut Running, local: &mut Local, on_window: bool) {
 }
 
 /// A new client's window at `AT`, with the keyboard and outlined.
-fn belled(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
+pub(super) fn belled(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
     clear_the_fixture(run);
     let mut local = Local::connect(run, None);
     let toplevel = local.toplevel(run);
@@ -910,17 +910,17 @@ fn belled(run: &mut Running) -> (Local, xdg_toplevel::XdgToplevel) {
 }
 
 /// The outline's first column, on the left of the window at `AT`.
-fn outlined(shown: &[u8]) -> bool {
+pub(super) fn outlined(shown: &[u8]) -> bool {
     at(shown, AT.0 - 1, AT.1 + HEIGHT / 2) == ACCENT
 }
 
 /// The column the outline reaches only at twice its width.
-fn widened(shown: &[u8]) -> bool {
+pub(super) fn widened(shown: &[u8]) -> bool {
     at(shown, AT.0 - 2 * OUTLINE, AT.1 + HEIGHT / 2) == ACCENT
 }
 
 /// Whether the outline's first column shows the background: hidden, not blended.
-fn hidden(shown: &[u8]) -> bool {
+pub(super) fn hidden(shown: &[u8]) -> bool {
     background(&at(shown, AT.0 - 1, AT.1 + HEIGHT / 2))
 }
 

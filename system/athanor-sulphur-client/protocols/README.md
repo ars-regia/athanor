@@ -40,7 +40,8 @@ served by athanor-sulphur. It is MIT,
 
 `athanor-a11y-v1.xml` is Athanor's own protocol too (doc_own_stack.md OS5, as amended on
 2026-10-30; doc_accessibility.md AX10 and AX11, revision 3): the magnifier, the colour inversion
-and filters and the keyboard aids of athanor-sulphur, through `athanor_a11y_manager_v1`. It
+and filters and the keyboard aids of athanor-sulphur, through `athanor_a11y_manager_v1`, and
+from its version 2 the reduced-motion setting (AX9, doc_own_stack.md decision 37). It
 is MIT, 2026 Athanor Forge, and it is not in `SHA256SUMS` either. The client binds it in
 `src/a11y.rs` when it is offered, else `cosmic_a11y_manager_v1`; the compositor serves it from
 `src/a11y.rs`, and its RPM spec names it in a `# repo-input:` line.

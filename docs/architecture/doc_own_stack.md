@@ -1843,7 +1843,7 @@ compositor and that the own compositor did not yet offer:
     taskbar of a third party lists windows and cannot act on them. Each item below comes with its row in
     `data/globals` where it adds a global, and its fixture test (OS17; OS19, item 2):
     - **Reduced motion reaches the compositor through version 2 of `athanor_a11y_manager_v1`**
-      (#1104). The bar, which holds the grant, sends `reduced_motion` with the value of
+      (#1104). The bar, which holds the grant, sends `set_reduced_motion` with the value of
       `enable-animations` inverted after it binds the global and at each change, as it sends the
       accessibility keys. The compositor keeps the value it was last given, and false until a client
       sends one, so without the bar its animations run. A fixture test sends the request and

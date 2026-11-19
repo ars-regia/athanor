@@ -163,9 +163,9 @@ the client of the window with the keyboard, at most one a second and never while
 is locked, the outline is hidden for 250 ms and drawn again, with no transition, or, under
 reduced motion (`doc_accessibility.md` AX9), drawn at twice its width for 500 ms. A bell is
 dropped wherever decision 31 draws no outline: from any other client, without a surface, on a
-maximised or full-screen window, with `active_hint` off or at a theme width of 0. Reduced
-motion is open: the compositor has no source for it yet, so the flag (`Bell::reduced_motion`)
-is read but only the fixture sets it (`src/bell.rs`, `src/fixture/marks.rs`).
+maximised or full-screen window, with `active_hint` off or at a theme width of 0. Version 2
+of `athanor_a11y_manager_v1` sets reduced motion with `set_reduced_motion`, and the flag
+(`Bell::reduced_motion`) is read from it (`src/bell.rs`, `src/a11y.rs`, `src/fixture/marks.rs`).
 
 Decision 33, wave 2b, adds `wl_drm`, standard, for the older Mesa clients that look for it
 before linux-dmabuf (`src/wl_drm.rs`, `src/fixture/wave2b.rs`). It is offered on a render node
@@ -282,9 +282,11 @@ most 64 KiB or does not compile leaves the last keymap, with a warning; without 
 keymap is the environment's and the repeat 25 per second after 200 ms.
 `athanor_a11y_manager_v1` (`athanor-a11y-v1.xml` of athanor-sulphur-client) switches the
 magnifier and the colour inversion and filters (doc_accessibility.md AX10): the bar alone is
-granted it. The inversion and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron`
-under the state root, read at start and written atomically, in cosmic-comp's format, at each
-change; a file that cannot be read changes nothing and is written over only at the next change,
+granted it. Its version 2 adds `set_reduced_motion`, which the bar sends from
+`enable-animations` (AX9) to stop the bell blinking; the compositor keeps it in memory only,
+false until a bar sends it, and the last value sent stands after the bar exits. The inversion
+and the filter are cosmic-comp's `cosmic-comp/a11y_screen_filter.ron` under the state root,
+read at start and written atomically, in cosmic-comp's format, at each change; a file that cannot be read changes nothing and is written over only at the next change,
 and a filter this compositor does not name is kept, sent as `unknown` and not drawn. The
 magnifier's increment, how the view follows the pointer and the mouse zoom shortcuts are
 cosmic-comp's `accessibility_zoom` under the configuration root, read at start and after each

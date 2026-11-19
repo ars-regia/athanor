@@ -3,6 +3,8 @@
 //! is Athanor's own, `system/athanor-sulphur-client/protocols/athanor-a11y-v1.xml`. The
 //! manager is privileged (OS4): the bar's accessibility module is its one client. The keyboard
 //! aids' requests and events are served here, and the aids themselves are `aids.rs` (AX11).
+//! Version 2 adds `set_reduced_motion`, which the bar sends from GNOME's `enable-animations`
+//! (AX9): it sets the bell's reduced-motion state, in memory only, false until a bar sends it.
 //!
 //! The magnifier scales each output's frame about a focal point, which follows the pointer as
 //! `accessibility_zoom`'s `view_moves` says, and the colour filter is one pass over the frame
@@ -115,7 +117,7 @@ pub struct A11yManagers;
 
 /// Offers the manager to the clients the allow-list grants it.
 pub fn global(dh: &DisplayHandle) {
-    dh.create_global::<State, AthanorA11yManagerV1, _>(1, A11yManagers);
+    dh.create_global::<State, AthanorA11yManagerV1, _>(2, A11yManagers);
 }
 
 impl GlobalDispatch2<AthanorA11yManagerV1, State> for A11yManagers {
@@ -188,6 +190,10 @@ impl Dispatch2<AthanorA11yManagerV1, State> for A11yManagers {
                 active: WEnum::Value(active),
                 delay,
             } => bounded(state.set_bounce_keys(on(active), delay)),
+            Request::SetReducedMotion { active } => match active {
+                WEnum::Value(active) => state.bell.reduced_motion = on(active),
+                WEnum::Unknown(_) => refuse("no such active_state"),
+            },
             Request::SetStickyKeys { .. }
             | Request::SetAidGestures { .. }
             | Request::SetSlowKeys { .. }

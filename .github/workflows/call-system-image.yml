@@ -3,8 +3,8 @@ name: Call System Image (Reusable Workflow)
 on:
   workflow_call:
     inputs:
-      builder_content_hash:
-        description: "Content hash of the builder container image"
+      builder_image:
+        description: "The builder image by digest, as call-build-builder.yml verified it signed"
         required: true
         type: string
 
@@ -52,7 +52,7 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
           GITHUB_REF: ${{ github.ref }}
           KERNEL_REGISTRY: ${{ vars.KERNEL_REGISTRY }}
-          BUILDER_CONTENT_HASH: ${{ inputs.builder_content_hash }}
+          BUILDER_IMAGE: ${{ inputs.builder_image }}
         run: |
           set -euo pipefail
           echo "${GITHUB_TOKEN}" | podman login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
@@ -65,11 +65,11 @@ jobs:
             -e GITHUB_REF="${GITHUB_REF}" \
             -e GITHUB_REPOSITORY -e GITHUB_SERVER_URL -e KERNEL_REGISTRY \
             -e ACTIONS_ID_TOKEN_REQUEST_URL -e ACTIONS_ID_TOKEN_REQUEST_TOKEN \
-            "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/athanor-builder:${BUILDER_CONTENT_HASH}" \
+            "${BUILDER_IMAGE}" \
             bash scripts/aggregate_tier_repos.sh
 
       - name: Hand the tier digests to the image build
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: tier-digests
           path: tier-digests/tier-digests.json
@@ -235,7 +235,7 @@ jobs:
           done
 
       - name: 📎 Keep the package sets for the evidence bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-sets
           path: artifacts/packages/
@@ -263,7 +263,7 @@ jobs:
             --variants artifacts/variants.txt
 
       - name: 📎 Hand the digests to the signing job
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-digests
           path: artifacts/image-digests.txt
@@ -278,7 +278,7 @@ jobs:
             | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: 📎 Keep the upgrade measure
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: upgrade-bytes
           path: artifacts/metrics/upgrade-bytes.json
@@ -343,7 +343,7 @@ jobs:
         run: bash forge/scripts/publish_iso.sh
 
       - name: 📎 Hand the ISO digest to the acceptance
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: iso-digest
           path: artifacts/iso-digest.txt

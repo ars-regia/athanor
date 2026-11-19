@@ -335,14 +335,17 @@ impl State {
             .seat
             .get_pointer()
             .and_then(|pointer| self.hold(&pointer, at));
-        match held {
+        let target = match held {
             Some(Hold::Confined(root, origin, region))
                 if confines(&root, origin, region.as_ref(), at) =>
             {
                 Some((root, origin))
             }
             _ => self.surface_under(at),
-        }
+        };
+        // An injected motion never gives the portal backend's surfaces the pointer (`eis.rs`).
+        target
+            .filter(|(surface, _)| !(self.eis.injecting() && crate::eis::backend_surface(surface)))
     }
 
     /// Activates the constraint of the surface the pointer is on, or of the surface that one

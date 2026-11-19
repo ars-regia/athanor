@@ -26,7 +26,7 @@ Workflow references are `file:line` under `.github/workflows/` at `e238b833` (`o
 | SEC4 | `COSIGN_PASSWORD` | environment `signing-images` | passphrase of SEC3 | as SEC3 (:335) | none |
 | SEC7 | retired 2026-10-09 (replaced by SEC15; the maintainer deletes `KERNEL_BUMP_TOKEN`, then sets `retired` in `personal_tokens` of `actions.json`) | | | | |
 | SEC8 | retired 2026-10-09 (replaced by SEC15; the maintainer deletes `SPECS_UPDATE_TOKEN`, as for SEC7) | | | | |
-| SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:32, :39) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
+| SEC9 | `FORGE_PAT` | repository | personal access token (classic) | `forge-ghcr-cleanup.yml` `cleanup-janitor` (:35, :42) through `forge/scripts/clean_ghcr.sh`, which deletes container package versions | none |
 | SEC10 | `GITHUB_TOKEN` | automatic, per job | GitHub App installation token | most workflows; its scopes are each workflow's `permissions:` block | none |
 | SEC12 | runner credential `github-token` | host of the self-hosted runner, not GitHub | GitHub token read by `install.sh` from standard input | `scripts/runner/install.sh:30,52-53` encrypts it with `systemd-creds` (host key and TPM2) into `/etc/credstore.encrypted/athanor-runner.github-token`; `athanor-runner.service:22` loads it; `vm.sh:29,102` uses it only to create a just-in-time runner configuration per job | none |
 
@@ -44,9 +44,9 @@ The repository variables set are `SETTINGS_APP_CLIENT_ID`, `EVIDENCE_REGISTRY` a
 
 | Id | Name | Default | Used by |
 | --- | --- | --- | --- |
-| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:100), `call-build-builder.yml:12`, `call-dag-compile.yml:20-21`, `forge-ghcr-cleanup.yml:34,41`, `promote-stable.yml:37,42`, `rust-security-audit.yml:49`, `spec-build-check.yml:106` |
+| VAR1 | `REGISTRY_HOST` | `ghcr.io` | orchestrator (:111), `accept.yml:49,181`, `call-build-builder.yml:15`, `call-dag-compile.yml:19`, `forge-ghcr-cleanup.yml:37,44`, `maintenance.yml:103`, `promote-stable.yml:52,88,152`, `rust-security-audit.yml:47`, `spec-build-check.yml:62` |
 | VAR2 | `KERNEL_REGISTRY` | `ghcr.io/<owner>` (`system/kernel-artifacts.sh:63`) | orchestrator (:153, :206, :268), `kernel-build.yml:55`, `kernel-bump.yml:61,259`, `nvidia-kmod.yml:45`, `call-nvidia-kmod-prepare.yml:37`, `system-image-check.yml:53` |
-| VAR3 | `BUILDER_STABLE_TAG` | `latest` | `forge-ghcr-cleanup.yml:25`, `rust-security-audit.yml:49` |
+| VAR3 | `BUILDER_STABLE_TAG` | `latest` | `rust-security-audit.yml:48` |
 | VAR4 | `RELEASE_BRANCH` | `iso-v0` | PR #180 only: orchestrator, `call-system-image.yml`, `accept.yml`, `promote-stable.yml` |
 | VAR5 | `PROMOTE_DWELL_HOURS` | `24` | not a repository variable: `promote-stable.yml` sets it from its `dwell_hours` input (0 to 24, UD5), and `scripts/ci/promotion-record.sh` records it in `promotion.json` and the approval summary |
 | VAR6 | `SETTINGS_APP_CLIENT_ID` | none; set by the maintainer | `maintenance.yml` `settings-drift`: client id of the settings GitHub App (SEC13) |
