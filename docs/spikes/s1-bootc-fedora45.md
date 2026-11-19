@@ -283,7 +283,7 @@ itself): PB10 is not built.
 unchanged on a Fedora 45 base, and whether the major upgrade from Fedora 43 and back works.
 
 **Run.** `scripts/devvm/acceptance/run.sh` with `ACC_BASE` naming the Fedora 45 image
-(section 3), every stage from `install` to `report`, among them `rotate`, `recover` and
+(the branch image of section 1, copied in section 3), every stage from `install` to `report`, among them `rotate`, `recover` and
 `goback`. Then the major upgrade: the Fedora 43 guest from `create.sh` switched to the F45
 `v1`, booted, greenboot green, `bootc rollback` and reboot back to Fedora 43.
 
@@ -414,8 +414,29 @@ gh api 'repos/ars-regia/athanor/actions/runs?status=in_progress' --jq .total_cou
 command -v qemu-system-x86_64 swtpm virt-fw-vars
 ```
 
-Build the Fedora 45 variant in a throwaway worktree (no commit, no push), in containers
-only: `scripts/devvm/local-image.sh` builds the `athanor-update` RPM in the builder image
+The branch image and its `athanor-update` RPM, by digest, from the Orchestrator run 44392939761
+on `rebase/fedora-45`, with the scripts of that branch in a throwaway worktree. The image is
+unsigned (`rebase/*` never signs, ADR-0125), so the copy uses a one-off policy file that is
+deleted at once; the system policy is not changed:
+
+```
+git -C /var/home/hr-mes/athanor worktree add --detach /var/tmp/athanor-wt/s1-build origin/rebase/fedora-45
+W=/var/tmp/athanor-wt/s1-build
+P=/var/tmp/athanor-s1/accept-one-copy.json
+mkdir -p /var/tmp/athanor-s1/rpms /var/tmp/athanor-s1/tier3-oci
+printf '{"default":[{"type":"insecureAcceptAnything"}]}\n' > "$P"
+skopeo --policy "$P" copy --quiet \
+  docker://ghcr.io/ars-regia/athanor-system@sha256:566a97fd9da5e983af45afa258a3a793da1c72b847581b897544533730dd0811 \
+  containers-storage:localhost/athanor-s1-base:f45
+rm -- "$P"
+D=/var/tmp/athanor-s1/tier3-oci
+skopeo copy --quiet docker://ghcr.io/ars-regia/athanor-forge-tier3-repo@sha256:61917f48938bc3e93892efa5bf2c3578a66e9b88d677d5317e61a538f58e5b12 "dir:$D"
+tar -xzf "$D/2550c3f504e64e313562b4d09231723b536040c3600d8fb820e275ab5ce09dd7" \
+  -C /var/tmp/athanor-s1/rpms --wildcards '*athanor-update-1*.x86_64.rpm'
+```
+
+Fallback, only with no branch image: build the Fedora 45 variant in a throwaway worktree (no
+commit, no push), in containers only: `scripts/devvm/local-image.sh` builds the `athanor-update` RPM in the builder image
 (`athanor-builder`, as `call-dag-compile.yml` does), serves it through a tier 3 overlay on the
 acceptance registry, and builds the system image with `system/build-image.sh`, which resolves
 the kernel and tier digests itself. Nothing is installed on the host. Four jobs: the builder's
@@ -458,9 +479,11 @@ configuration go to `ACC_STATE`, kept out of the maintainer's state, and its reg
 own, `athanor-s1-registry` on port 5001 with the prefix `s1` (section 5, point 4):
 
 ```
+# Fallback: ACC_BASE=localhost:5001/s1/athanor-system:$(cat "$W/.scratch/local-image/tag")
+#           ACC_RPM_DIR=$W/.scratch/local-image/rpms
 ACC_PORT=5001 ACC_REGISTRY=localhost:5001/s1 \
-ACC_BASE=localhost:5001/s1/athanor-system:$(cat "$W/.scratch/local-image/tag") \
-ACC_RPM_DIR=$W/.scratch/local-image/rpms ACC_STATE=/var/tmp/athanor-s1/acceptance \
+ACC_BASE=localhost/athanor-s1-base:f45 \
+ACC_RPM_DIR=/var/tmp/athanor-s1/rpms ACC_STATE=/var/tmp/athanor-s1/acceptance \
   bash "$W/scripts/devvm/acceptance/images.sh"
 # then bad-greeter, panic, unsigned-kernel and etc-v2 FROM localhost:5001/s1/athanor-system:v2,
 # pushed and signed with acc-1 as images.sh's build and sign functions do
