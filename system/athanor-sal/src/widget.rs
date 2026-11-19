@@ -1137,6 +1137,28 @@ impl Ui {
         self.add(parent, Kind::Field(Box::new(field)))
     }
 
+    /// Adds a trusted password field named `name`, as the lock and the authentication prompts
+    /// ask for one (doc_lock_and_prompts.md, D36): a [`Ui::password`] that takes only what is
+    /// typed on the keyboard. The input method is never enabled while it has the focus, and
+    /// nothing it commits or composes reaches the field; nothing is pasted in, from the keyboard, its menu or the middle button; an assistive
+    /// technology's SetValue is refused; and it keeps no selection, its selection commands
+    /// moving the caret only. [`Ui::set_field_text`] still clears it.
+    ///
+    /// # Panics
+    ///
+    /// When `parent` names no widget of this `Ui`.
+    pub fn trusted_password(&mut self, parent: WidgetId, name: &str) -> WidgetId {
+        let field = TextField::trusted_password(name, self.theme.font_size, self.rtl);
+        self.add(parent, Kind::Field(Box::new(field)))
+    }
+
+    /// Whether `id` is a trusted password field ([`Ui::trusted_password`]); false for a widget
+    /// this `Ui` does not hold.
+    pub(crate) fn is_trusted_field(&self, id: WidgetId) -> bool {
+        let kind = self.widgets.get(id).map(|w| &w.kind);
+        matches!(kind, Some(Kind::Field(field)) if field.is_trusted())
+    }
+
     /// What was typed in the password field `id`, or `None` if it is not one. Every other read
     /// of the field, [`Ui::field_text`] among them, gives only its masks. Clear it with
     /// [`Ui::set_field_text`] once it is used: the old text is overwritten.
@@ -2988,7 +3010,9 @@ impl Ui {
                 };
                 self.set_focus(Some(id));
                 self.point_in_field(id, x, y, false);
-                self.clips.push(Clip::PastePrimary(id));
+                if !self.is_trusted_field(id) {
+                    self.clips.push(Clip::PastePrimary(id));
+                }
                 None
             }
         }
@@ -3031,7 +3055,7 @@ impl Ui {
     /// paste with no text left changes nothing, its selection included.
     pub(crate) fn paste(&mut self, id: WidgetId, text: &str) -> Option<Event> {
         let multiline = matches!(self.widgets.get(id)?.kind, Kind::TextArea(_));
-        if !self.is_sensitive(id) {
+        if !self.is_sensitive(id) || self.is_trusted_field(id) {
             return None;
         }
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
@@ -3101,6 +3125,7 @@ impl Ui {
         // A password field's selection is deleted, never copied or cut.
         let (copied, selected) = (field.selected_text().is_some(), field.has_selection());
         let empty = field.text().is_empty();
+        let can_paste = can_paste && !field.is_trusted();
         let mut menu = Ui::new(&self.title, self.theme.clone(), self.rtl);
         let list = menu.add(Ui::ROOT, Kind::Menu);
         let mut items = Vec::new();
@@ -3292,7 +3317,9 @@ impl Ui {
                         false
                     }
                     Key::Paste => {
-                        self.clips.push(Clip::Paste(id));
+                        if !field.is_trusted() {
+                            self.clips.push(Clip::Paste(id));
+                        }
                         false
                     }
                     Key::Menu => return Some(Event::ContextMenu(id)),
@@ -3541,6 +3568,9 @@ impl Ui {
 
     /// Shows the input method's preedit in the focused field, scrolled to its caret.
     pub fn compose(&mut self, preedit: &str, cursor: Option<(usize, usize)>) {
+        if self.focus.is_some_and(|id| self.is_trusted_field(id)) {
+            return;
+        }
         if let Some(Kind::Field(field) | Kind::TextArea(field)) =
             self.focus.map(|id| &mut self.widgets[id].kind)
         {
@@ -3550,9 +3580,14 @@ impl Ui {
     }
 
     /// Commits the input method's text into the focused field, without the control
-    /// characters but a text area's newlines, as typing them would.
+    /// characters but a text area's newlines, as typing them would. A trusted password field
+    /// takes none: a commit the input method sent for the field focused before it, or one it
+    /// sends while disabled, is dropped.
     pub fn commit(&mut self, text: &str) -> Option<Event> {
         let id = self.focus?;
+        if self.is_trusted_field(id) {
+            return None;
+        }
         let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
@@ -5418,6 +5453,135 @@ mod tests {
         ui.set_field_text(field, "");
         assert_eq!(ui.password_text(field), Some(""));
         assert_eq!(ui.field_text(field).as_deref(), Some(""));
+    }
+
+    /// A trusted password field holding `text`, typed, and a plain field after it.
+    fn trusted(text: &str) -> (Ui, WidgetId, WidgetId) {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        let other = ui.field(Ui::ROOT, "Name", "");
+        ui.layout();
+        ui.set_focus(Some(field));
+        ui.key(Key::Text(text.into()));
+        ui.take_clips();
+        (ui, field, other)
+    }
+
+    /// The byte offset of the end of `chars` masks.
+    fn masks(chars: usize) -> usize {
+        chars * crate::password::MASK.len_utf8()
+    }
+
+    #[test]
+    fn trusted_password_refuses_paste_key() {
+        let (mut ui, field, _) = trusted("abc");
+        assert_eq!(ui.key(Key::Paste), None);
+        assert!(ui.take_clips().is_empty(), "the clipboard is not read");
+        assert_eq!(
+            ui.paste(field, "x"),
+            None,
+            "a paste that arrives anyway is refused"
+        );
+        // The middle button focuses it and pastes no primary selection.
+        let r = ui.widget(field).rect;
+        ui.pointer_press(r.x + 1.0, r.y + r.h / 2.0, PointerButton::Middle);
+        assert!(ui.take_clips().is_empty());
+        assert_eq!(ui.password_text(field), Some("abc"));
+        assert!(ui.is_trusted_field(field));
+    }
+
+    #[test]
+    fn trusted_password_menu_paste_insensitive() {
+        let (mut ui, field, _) = trusted("abc");
+        ui.key(Key::SelectAll);
+        let (menu, items) = ui.field_menu(field, true).expect("a field's menu");
+        for (item, key) in items {
+            if matches!(key, Key::Paste | Key::Copy | Key::Cut) {
+                assert!(!menu.is_sensitive(item), "{key:?} is refused");
+            }
+        }
+        assert_eq!(ui.field_edit(field, Key::Paste), None);
+        assert!(ui.take_clips().is_empty());
+    }
+
+    #[test]
+    fn trusted_password_select_all_moves_cursor_only() {
+        let (mut ui, field, _) = trusted("abc");
+        ui.key(Key::Left);
+        ui.key(Key::Left);
+        ui.key(Key::SelectAll);
+        assert_eq!(ui.field_range(field), Some((masks(3), masks(3))));
+        assert!(ui.take_clips().is_empty(), "no primary selection");
+        // What is typed next is added at the end, and replaces nothing.
+        ui.key(Key::Text("d".into()));
+        assert_eq!(ui.password_text(field), Some("abcd"));
+    }
+
+    #[test]
+    fn trusted_password_drag_keeps_no_selection() {
+        let (mut ui, field, other) = trusted("abcdef");
+        ui.set_focus(Some(other));
+        let r = ui.widget(field).rect;
+        let (start, end, y) = (r.x + 1.0, r.x + r.w - 1.0, r.y + r.h / 2.0);
+        ui.pointer_press(start, y, PointerButton::Primary);
+        assert_eq!(ui.focus(), Some(field));
+        ui.pointer_motion(end, y);
+        ui.pointer_release(end, y, PointerButton::Primary);
+        let (anchor, focus) = ui.field_range(field).expect("a field's range");
+        assert_eq!(
+            anchor, focus,
+            "the caret follows the pointer, and nothing is selected"
+        );
+        assert_eq!(focus, masks(6));
+        assert!(ui.take_clips().is_empty());
+    }
+
+    #[test]
+    fn trusted_password_shift_move_keeps_no_selection() {
+        let (mut ui, field, _) = trusted("abc");
+        ui.key(Key::SelectLeft);
+        ui.key(Key::SelectLeft);
+        assert_eq!(ui.field_range(field), Some((masks(1), masks(1))));
+        ui.key(Key::SelectRight);
+        assert_eq!(ui.field_range(field), Some((masks(2), masks(2))));
+        // An assistive technology's selection puts the caret at its focus.
+        ui.set_field_range(field, (0, masks(3)));
+        assert_eq!(ui.field_range(field), Some((masks(3), masks(3))));
+        ui.set_field_range(field, (masks(3), masks(1)));
+        ui.key(Key::Text("x".into()));
+        assert_eq!(
+            ui.password_text(field),
+            Some("axbc"),
+            "typing replaced nothing"
+        );
+    }
+
+    #[test]
+    fn trusted_password_refuses_commit() {
+        let (mut ui, field, _) = trusted("abc");
+        assert_eq!(ui.commit("x"), None, "a late or unasked commit is dropped");
+        ui.compose("y", Some((1, 1)));
+        assert_eq!(ui.password_text(field), Some("abc"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("\u{25CF}\u{25CF}\u{25CF}"));
+    }
+
+    #[test]
+    fn password_still_takes_paste() {
+        let mut ui = Ui::new("Wi-Fi", Theme::default(), false);
+        let field = ui.password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert!(!ui.is_trusted_field(field));
+        let (menu, items) = ui.field_menu(field, true).expect("a field's menu");
+        let paste = items.iter().find(|(_, key)| *key == Key::Paste);
+        assert!(paste.is_some_and(|(item, _)| menu.is_sensitive(*item)));
+        assert_eq!(ui.key(Key::Paste), None);
+        assert_eq!(ui.take_clips(), [Clip::Paste(field)]);
+        assert_eq!(ui.paste(field, "pw"), Some(Event::Edited(field)));
+        assert_eq!(ui.password_text(field), Some("pw"));
+        // A select-all still selects.
+        ui.key(Key::SelectAll);
+        assert_eq!(ui.field_range(field), Some((0, masks(2))));
     }
 
     #[test]

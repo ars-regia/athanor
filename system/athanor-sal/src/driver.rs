@@ -1988,6 +1988,8 @@ fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let widget = ui.widget(id);
     let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // A trusted password field takes only the keyboard: the input method stays disabled.
+        Kind::Field(field) if field.is_trusted() => return None,
         // An input method neither shows, learns nor suggests what a password field is given.
         Kind::Field(field) if field.is_password() => {
             ContentHint::HiddenText | ContentHint::SensitiveData
@@ -4065,6 +4067,35 @@ mod tests {
         // Another field of the same hint, on the same surface.
         assert!(ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
         assert!(!ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+    }
+
+    #[test]
+    fn trusted_password_disables_text_input() {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.focus(), Some(field));
+        assert_eq!(ime_field(&ui).map(|(id, _, _)| id), None);
+    }
+
+    #[test]
+    fn plain_field_enables_text_input_again() {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        ui.layout();
+        let a = SurfaceId(1);
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (a, id, hint));
+        let mut ime = Ime::default();
+        ui.set_focus(Some(name));
+        assert!(ime.change(asked(&ui)), "enabled for the plain field");
+        ui.set_focus(Some(field));
+        assert_eq!(asked(&ui), None);
+        assert!(ime.change(asked(&ui)), "disabled for the trusted field");
+        ui.set_focus(Some(name));
+        assert!(ime.change(asked(&ui)), "enabled again");
+        assert_eq!(asked(&ui).map(|(_, id, _)| id), Some(name));
     }
 
     #[test]

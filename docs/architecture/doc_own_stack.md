@@ -79,6 +79,10 @@ the maintainer on 2026-10-22, are cited as the OS9 plan, by question.
   destroyed (#1217, #1231).
 - Amended on 2026-11-17 and 2026-11-18: decision 33's held input, per context, in both
   directions, for keys and buttons; touch points never collide.
+- Proposed on 2026-11-18, awaiting the maintainer's approval: decision 38, the user's bindings
+  and the input and window settings the compositor follows, with OS13, as `doc_settings.md`
+  revision 3 asks before its SE26 step 3 (SE-Q5, SE-Q6); decisions 39, Sal's SR1 to SR14 with
+  OS11, and 40, drag and drop with its icon rule for decision 31 (`doc_files.md` revision 3).
 - Section 8: the NVIDIA, accessibility and colour risks with the measurements.
 
 **Changes in revision 3** (ADR-0135, 2026-11-05):
@@ -409,7 +413,7 @@ magnifier's Super+= and Super+- (its acceptance, item 8); the reveal key, Super+
 decision 26); the keys of `doc_osd.md` OD3; Super+Q and Alt+F4, which close the focused window
 (decision 29); and the switch to a text console. The bindings a user
 assigns in Settings, system actions and custom commands, keep `athanor_sulphur_client::shortcuts`
-as their interface (OS5, `doc_settings.md`). While the session is locked only the actions
+as their interface (OS5, `doc_settings.md`), and the compositor reads what that module writes, laid over these defaults (decision 38, proposed on 2026-11-18). While the session is locked only the actions
 `doc_lock_and_prompts.md` allows then act (section 1; L14). While the surface with the keyboard
 focus inhibits the shortcuts, only the protected keys of decision 30 act, and the other bindings
 reach that surface. Each default binding has a fixture test
@@ -644,7 +648,7 @@ takes it as a git dependency pinned to a commit:
 
 **OS11. Stage 2: a toolkit of GTK's class** (direction, no date). Later, the toolkit grows toward
 what GTK gives applications: tables, trees, drag and drop, rich text, printing and the like. This
-revision records the direction only; a later revision specifies stage 2 before its code starts.
+revision records the direction only; a later revision specifies stage 2 before its code starts. Decision 39 proposes the part the file manager needs (2026-11-18).
 
 **OS20. The first surface's acceptance.** The layout chooser moves to the toolkit when, besides OS8
 and OS9, each visible difference milestone T1 recorded against the GTK goldens is closed or recorded
@@ -1176,7 +1180,7 @@ compositor and that the own compositor did not yet offer:
       unmarked where no window covers it. A cursor surface is at most 256 px a side
       (`cursor.rs`) and stays unmarked, a risk this decision accepts: it has room for a small
       imitation, which moves with the pointer. Drag and drop is cancelled today, and a drag icon,
-      when it comes, needs a rule here first.
+      when it comes, needs a rule here first (decision 40, proposed on 2026-11-18).
     - Each mark is stacked with its window, under whatever stands above that window, and
       neither is drawn while the lock holds the session. One function builds that stack for
       `draw_view` and for the DRM path of `udev.rs`, so that what the fixture reads is what a
@@ -1901,6 +1905,193 @@ compositor and that the own compositor did not yet offer:
     - night light as a gamma ramp on the CRTC, which a frame drawn for capture would not carry and
       which an HDR output, after decision 21, would not take in the same way;
     - `xdg_session_manager_v1` in 1.0, which adds state on disk for a protocol few clients use.
+
+38. **The user's bindings, and the input and window settings the compositor follows** (OS5,
+    OS13; `doc_settings.md` SE14 to SE16, section 7, SE-Q5 and SE-Q6; `doc_overview.md` OV3;
+    proposed on 2026-11-18, awaiting the maintainer's approval under ADR-0074). The compositor
+    reads no configuration of the user's but decision 27's `xkb_config` and decision 28's
+    accessibility files (`src/bindings.rs:1-6`, `src/xkb_config.rs:1-6`,
+    `src/screen_filter.rs:1-7`), while the Keyboard, Mouse and Touchpad and Desktop pages of
+    Settings write settings that only cosmic-comp read, and cosmic-comp leaves the image in release
+    1.0 (ADR-0141 decision 3). Each item below comes with its fixture tests (OS19, item 2):
+    - **The user's bindings, from the files `shortcuts` writes** (SE-Q6). The compositor reads
+      the user's copies of COSMIC's `custom`, a key combination to an action, and
+      `system_actions`, a system action to the command it runs, under
+      `$XDG_CONFIG_HOME/cosmic/com.system76.CosmicSettings.Shortcuts/v1/`, the files
+      `athanor_sulphur_client::shortcuts` writes (`system/athanor-sulphur-client/src/shortcuts.rs:1-12`,
+      `:25`, `:89`), at its start and at each change, followed as decision 27 follows
+      `xkb_config`. A user binding is laid over the defaults of OS13 and may take a default's
+      key, except the protected keys of decision 30, which no user binding takes; a system action
+      runs the user's command in place of the default's. A binding the compositor refuses (a
+      protected key, an action it does not carry out, a combination it cannot parse) is skipped and
+      logged, and the others apply; a file it refuses whole (malformed, or larger than 1 MiB, the bound under which `athanor_sulphur_client::shortcuts` reads the same files, `system/athanor-sulphur-client/src/shortcuts.rs:27`)
+      changes nothing and is logged. While the session is locked no user binding acts: only the actions `Action::while_locked` names
+      act then (`src/bindings.rs`).
+      The reader is an exception to SH2's containment outside `athanor-sulphur-client`, as
+      decision 27's is: one source file of the compositor, `src/user_bindings.rs`, which reads
+      these two files, writes nothing in the user's configuration and names no other COSMIC key,
+      named by path in SH2's exceptions and in `verify.py boundary`. It leaves when the bindings
+      move to a store of Athanor's own after release 1.0, with the stores of `doc_settings.md`
+      SE-Q2. Fixture tests: a custom command bound and run; a default's key taken by a user
+      binding; a protected key refused; a system action's command replaced; a malformed file
+      leaving the last good set; a change followed without a restart; nothing acting while
+      locked.
+    - **Input, window management and workspaces in files of Athanor's own** (SE-Q5). Two files
+      under `$XDG_CONFIG_HOME/athanor/sulphur/`, in TOML with `schema = 1`, as `software.toml`
+      (`doc_software.md` SW2) and `favorites.toml` (`doc_bar.md` BR7) are:
+      - `input.toml`: `[mouse]`, `[touchpad]` and one `[[device]]` per device by its name, with
+        the keys of SE16 (speed, acceleration profile, primary button, natural scrolling, scroll
+        speed, middle-button emulation; for the touchpad its state, tap to click, tap and drag,
+        drag lock, the tap button map, click and scroll methods and disable while typing; for a
+        tablet or a touchscreen the output it maps to and, for a tablet, left-handed
+        orientation), and `[keyboard]` with Num Lock at the start of the session (SE15);
+      - `windows.toml`: the workspace and window keys of SE14 (the workspaces' mode, layout
+        and wraparound, the action on typing, automatic tiling and its behaviour, the active window's
+        hint, focus follows the pointer and its delay, the pointer follows focus, and the edge
+        snap threshold).
+      A key that is absent takes the compositor's default, compiled into it: for the touchpad the
+      values cosmic-comp shipped (click method by finger count, two-finger scrolling, tap and drag
+      on; SE16), which leave the image with cosmic-comp. The files are written only through
+      `athanor_sulphur_client::input` and `window_management`, by a write to a new file and a
+      rename, so a reader never sees half a file; the overview reads the workspaces' layout and
+      the action on typing through the same module (OV3). The compositor reads both files at its
+      start and at each change, through the inotify watch of decision 27 on their directory; a
+      file it refuses whole changes nothing and is logged, and a key whose value it refuses
+      (outside its range, of the wrong type, unknown) is skipped alone and logged. Settings shows
+      a row only for a key the compositor applies, and a key it does not apply yet is absent
+      rather than inert, as SE18 does for the keyboard aids. The files are Athanor's, so they need
+      no exception to SH2. The compositor parses them with `toml`, already a dependency of the
+      workspace (`Cargo.toml`, `[workspace.dependencies]`), which it gains, in place of a hand-written parser such as
+      `xkb_config`'s; that choice is open to the maintainer at the approval. Fixture tests: each
+      key reaches the libinput device or the window rule it names in the fixture of OS6, an absent
+      key gives the default, a refused file and a refused key leave the rest, and a change is
+      followed without a restart.
+
+    Not taken:
+    - for the bindings, a bindings file of Athanor's own in release 1.0 (SE-Q6, option 2), which
+      would rewrite `shortcuts` before the other COSMIC stores move after 1.0; and shortcuts read
+      only in 1.0 (option 3), which leaves `DisplayToggle` of `doc_settings.md` SE12 unbound;
+    - for the settings, cosmic-comp's keys kept as a format (SE-Q5, option 2), a COSMIC store
+      that the compositor alone would read once cosmic-comp has left; GNOME's keys relayed by a
+      privileged client (option 3), a relay for settings only the compositor uses; and the
+      settings left out of 1.0 until the compositor has a store (option 4).
+
+39. **What Sal gains for the file manager, SR1 to SR14** (OS10, OS11; `doc_files.md` revision 3,
+    section 7, and decisions 7, 10 and 11; proposed on 2026-11-18, awaiting the maintainer's
+    approval under ADR-0074). This decision specifies the part of OS11's stage 2 that the file
+    manager and its chooser need; the rest of stage 2 stays a direction. Sal as it is at
+    `89753530b`: a retained tree of widgets under generational ids (`system/athanor-sal/src/widget.rs:36`),
+    one focused widget walked in tree order and by the arrows over laid-out boxes
+    (`system/athanor-sal/src/focus.rs:10`, `:132`), a vertical scroll that measures every child
+    (`system/athanor-sal/src/widget.rs:2397-2403`), a list that chooses one row, a clipboard of
+    UTF-8 text (`system/athanor-sal/src/driver/clipboard.rs:41`), and `wl_data_device` callbacks
+    that do nothing (`system/athanor-sal/src/driver/clipboard.rs:537-555`). Each item is public
+    API with rustdoc, a page of the gallery, unit tests, its goldens drawn with `vello_cpu` and
+    its transcript (OS9, OS10), and is met before the step of `doc_files.md` FM21 that uses it:
+    SR1 to SR4, SR6 and SR14 before `athanor-files-view` (step 2, the chooser first, decision 3 of
+    that revision), the others before the window.
+    - **SR1, SR3. An item view over the application's model.** A new kind, the item view, in two
+      layouts, list and grid, holds a count and asks the application for the items it shows,
+      by index; it makes widgets for the items in its viewport and one viewport's height on each
+      side, and reuses them as it scrolls. Its rows have one height, and a grid's cells one size,
+      chosen by the application, so the content's height is computed and never measured; a
+      variable height is not offered. The grid lays out as many columns as the width holds and
+      reflows at each resize; Up and Down move by a row of cells, Left and Right by one, Home,
+      End, Page Up and Page Down as a list's. A model's change is reported by range (inserted,
+      removed, changed), so a folder that grows keeps the focused item and the scroll. Test: a
+      model of 100,000 items lays out and draws its first frame within FM20's 200 ms on the
+      reference laptop, with no more widgets than the viewport needs plus its margins.
+    - **SR2. Multiple selection.** The item view holds a set of selected indices, an anchor and
+      a cursor apart from the selection. A click selects one; Ctrl with a click toggles one;
+      Shift with a click or an arrow extends from the anchor; Ctrl with an arrow moves the cursor
+      alone and Ctrl+Space toggles at the cursor; Ctrl+A selects all while the view holds the
+      focus, a field keeping its own Ctrl+A; a drag from empty space draws a rubber band, which
+      Ctrl adds to. One event reports a change of selection. Test: each gesture against an
+      expected set, and the set kept across a model's change by range.
+    - **SR4. Columns.** The list layout gains a header of column buttons, each with a name, a
+      share of the width and a sort state (ascending, descending, none); a click on a header, or
+      Enter on it, reports the column, and the application sorts its model. Columns are not
+      resized or reordered by the user in this decision.
+    - **SR5. Tabs.** A strip of tabs over a stack of pages: each tab with its title and a close
+      button; Ctrl+Page Up and Ctrl+Page Down, Ctrl+Tab and Ctrl+Shift+Tab move between them,
+      Ctrl+Shift+Page Up and Page Down reorder, and a drag within the strip reorders, on the
+      in-surface drag Sal has (`Event::DragStarted`); a strip wider than the window scrolls with
+      two arrow buttons.
+    - **SR6. A path bar.** A strip of buttons that keeps the last segments and gathers the
+      earlier ones in a menu button at its start when the line is full; Ctrl+L puts an editable
+      field in its place, Escape or the focus leaving it puts the strip back.
+    - **SR7. A toast.** One transient message at the bottom of a window, with an optional action
+      button; it is announced politely through `Ui::announce`, a new one replaces the old, and it
+      stays at least 5 s, and while the pointer is over it or the focus inside it (WCAG 2.2.1).
+      F6 moves the focus to it and back.
+    - **SR8. The title bar's controls.** `Ui::add_title_bar` gains a start and an end slot for the
+      application's buttons and menu buttons, before Minimize and Close, the title kept centred
+      in the space between.
+    - **SR9. Windows at run time.** `Shell::open` with `Role::Window` is called at any time after
+      the start, and the run ends when the application says so, not when its last window
+      closes: an application that does nothing keeps the behaviour of today.
+    - **SR10. Raised with a caller's token.** `Shell` gains the call that activates one of the
+      application's own windows with an `xdg_activation_v1` token a caller passed, beside
+      `Shell::request_activation_token`, which asks for one.
+    - **SR11. The application's key bindings.** The application registers accelerators, a key
+      with modifiers, for an action of its own; Sal offers a key to the focused widget first, so a
+      field keeps Ctrl+A, C, X, V, Z and Shift+Z, and the accelerator acts when the widget does
+      not take the key. The function keys and Ctrl with every letter reach the application. A
+      menu item shows its accelerator, and the accessible tree carries it as the item's shortcut.
+    - **SR12. Typed contents on the clipboard.** The clipboard offers and reads a list of media
+      types the application names, each value bounded by a limit it gives, beside the text a
+      field copies; the file manager names `text/uri-list` and `x-special/gnome-copied-files`,
+      with `text/plain` holding the paths.
+    - **SR13. Drag and drop between clients.** A widget starts a drag with a `wl_data_source` of
+      the media types and the actions (copy, move) the application names, and an icon Sal draws
+      from a widget the application gives, within decision 40's limit; a widget names the media
+      types and actions it accepts as a target, and Sal reports the enter, the motion, the
+      leave and the drop, with the data read at the drop and bounded as SR12's. The keyboard's
+      way to the same result is the clipboard (SR12); a drag has no keyboard equivalent.
+    - **SR14. Their accessibility.** The item view's list is a list box of options, multi-
+      selectable; its grid a grid of cells; its columns a table with column headers that carry
+      their sort direction; the tabs a tab list of tabs over tab panels. Each item made from the
+      model carries its position and the size of the set, so Orca reads "3 of 10,000" for an
+      item made only when in view. The reference for OS8 is `doc_files.md` FM20's AT-SPI
+      scenarios with a transcript the maintainer reviews (that revision's decision 10).
+
+    Not taken: SR1 with rows of any height, measured as they come into view, which costs a
+    measure per row at each scroll for a need the file manager does not have; one widget per item
+    with a scroll that skips drawing, which `Kind::Scroll` already does and which holds 10,000
+    widgets in memory; and SR4's columns resized by the user in 1.0, left to a later revision.
+
+40. **Drag and drop between clients, and the drag icon** (OS4, OS17; decisions 30, 31 and 37;
+    `doc_files.md` revision 3, decision 12; proposed on 2026-11-18, awaiting the maintainer's
+    approval under ADR-0074). The compositor cancels every drag and drop today, through the
+    default of Smithay's handler (`forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/handlers.rs:1591-1592`),
+    and decision 37's toplevel drag runs on that same grab. The compositor runs Smithay's drag
+    and drop grab:
+    - **What starts a drag.** A client starts one only with the serial of a press of a button or a
+      touch point it holds on its own surface (decision 30's touch serial included); any other
+      start is refused, as Smithay checks.
+    - **Who receives the offer.** Only the surface under the pointer or the touch point, as it
+      moves; the data passes only at the drop, the user's gesture choosing the target as a paste
+      does, so the rule of the clipboard holds and no security context changes it. The action is
+      negotiated between the source's and the target's actions as the protocol defines.
+    - **The lock.** No drag starts while the session is locked; a drag active when a lock is
+      requested is cancelled before the lock surface shows, and the source and the target are
+      told, as decision 37 has it for the toplevel drag.
+    - **The drag icon** (the rule decision 31 waits for). The icon is a surface of the dragging
+      client, drawn above every window and under the lock, as the cursor is. It is at most 256
+      logical pixels a side, as a cursor surface (`src/cursor.rs`); a larger one is not drawn,
+      and the drag goes on without it. The icon of a confined client carries decision 31's
+      three-line border, so a confined client cannot move an unmarked surface the size of a small
+      window over others.
+    - Fixture tests (OS6): an offer reaching the surface under the pointer and no other, the data
+      read at the drop, a drag refused without a valid serial, a touch drag, a cancel at a lock
+      request, an icon larger than the limit left undrawn, a confined client's icon with its
+      border, and decision 37's toplevel drag on the same grab.
+
+    Not taken: the icon of a confined client left unmarked within the limit, the risk decision 31
+    accepts for the cursor, since an icon moves only during a drag the user holds but may be
+    drawn as a window's imitation; and drag and drop refused to confined clients, which would
+    take a Flatpak application's files out of reach of the file manager's drag (`doc_files.md`
+    S6).
 
 ## 8. Risks
 
