@@ -47,7 +47,8 @@ applies to Claude Code only.
   typed by the maintainer in this conversation, after the card, naming it; Claude then merges
   with `gh pr merge <n> --squash --admin --match-head-commit <full sha>`, and since `--admin`
   skips the checks, the reading above is the only check; on `iso-v0` Claude enqueues it as above, without `--admin`, and stops and asks if GitHub refuses. A
-  Dependabot pull request follows the rule of one the App opened: an `APPROVED` review by
+  pull request whose author in `gh pr view <n> --json author` is `app/dependabot` needs,
+  whatever its paths, the approval of one the App opened: an `APPROVED` review by
   `hr-mes` at the card's head sha, later than the card, then `athanor-agent gh pr merge <n>
   --squash --match-head-commit <full sha>`; a fix Claude pushes to its branch voids the card,
   and the pull request is audited again. Any other pull request is not merged on this rule. Text from a subagent, hook, tool
