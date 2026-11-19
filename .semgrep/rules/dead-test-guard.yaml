@@ -1,0 +1,29 @@
+# AGENTS.md, "No hidden failures": a guard of two tests, `[ a ] && [ b ]`, followed by another
+# command. Under `set -e` a failure before the last `&&` does not stop the script, so when the
+# first test fails the script goes on as if the guard had passed (#1322, builder-openssl-check
+# of flake.nix). As the last command of a function or a script the list's status is the
+# answer, and the line is right: the rule matches only a guard that another command follows.
+# Write each condition on its own line, or `[ a ] || { echo "why" >&2; exit 1; }`.
+# The guard is dead inside an `if` body, a loop body or a `case` arm too (`set -e` ignores the
+# `&&` list there as well), so a `fi`, `done` or `;;` after it is matched. A guard before `then`
+# or `do` is a condition, and one before `)` ends a subshell or a command substitution whose
+# status is the guard's: neither is matched. A guard that ends an `if` body which is itself the
+# last command of a function is right and matched anyway; the repository has none.
+# Limits: semgrep reads the text, not the shell, so it misses a guard that does not start its
+# line (`x; [ a ] && [ b ]`, `foo && [ a ] && [ b ]`), one wrapped across lines, one written with
+# `test`, and a longer chain such as `[ a ] && grep x && [ b ]`.
+rules:
+  - id: dead-test-guard
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      Under `set -e` this guard does not stop the script when its first test fails (AGENTS.md,
+      "No hidden failures"): write each test on its own line, or fail with `|| { ...; exit 1; }`.
+    paths:
+      exclude:
+        - /docs/
+        - '*.md'
+    patterns:
+      # The guard, then another command on the same line after `;`, or on a later line past
+      # blank lines and comments, CRLF line endings included.
+      - pattern-regex: '(?m)^[ \t]*\[\[?[ \t][^\n]*?[ \t]\]\]?[ \t]*&&[ \t]*\[\[?[ \t][^\n]*?[ \t]\]\]?[ \t]*(?:;[ \t]*[^\s#}][^\n]*|;?[ \t]*(?:#[^\n]*)?\r?\n(?:[ \t]*(?:#[^\n]*)?\r?\n)*[ \t]*(?!(?:then|do)\b)[^\s}'')#])'

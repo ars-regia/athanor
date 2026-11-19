@@ -233,7 +233,8 @@
               done < <(find "$dir" -maxdepth 1 -name '*.so*' -type f -print0)
             done
             echo "$scanned libraries scanned"
-            [ "$scanned" -gt 0 ] && [ "$found" = 0 ]
+            [ "$scanned" -gt 0 ] || { echo "no library scanned" >&2; exit 1; }
+            [ "$found" = 0 ]
             mkdir $out
           '';
 
