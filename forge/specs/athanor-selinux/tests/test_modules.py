@@ -12,7 +12,6 @@ HERE = pathlib.Path(__file__).resolve().parents[1]
 SOURCES = HERE / "SOURCES"
 SPEC = (HERE / "athanor-selinux.spec").read_text()
 PSTORE = SOURCES / "athanor_systemd_pstore.te"
-PCSCD = SOURCES / "athanor_pcscd_cgroup.te"
 POWERPROFILES = SOURCES / "athanor_powerprofiles_passwd.te"
 
 
@@ -36,10 +35,6 @@ class Modules(unittest.TestCase):
     def test_pstore_grants_dir_create_and_nothing_else(self):
         got = [" ".join(r.split()) for r in rules(PSTORE.read_text()) if not r.startswith("module ")]
         self.assertEqual(got, ["allow systemd_pstore_t systemd_pstore_var_lib_t:dir create"])
-
-    def test_pcscd_grants_cgroup_dir_search_and_nothing_else(self):
-        got = [" ".join(r.split()) for r in rules(PCSCD.read_text()) if not r.startswith("module ")]
-        self.assertEqual(got, ["allow pcscd_t cgroup_t:dir { getattr search open }"])
 
     def test_powerprofiles_reads_passwd_and_nothing_else(self):
         got = [" ".join(r.split()) for r in rules(POWERPROFILES.read_text()) if not r.startswith("module ")]

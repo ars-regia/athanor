@@ -2,7 +2,7 @@
 id: ADR-0119
 title: "An upgrade does not keep ssh in the installer's public zone, sshd enabled or not"
 date: 2026-10-16
-status: accepted
+status: amended by ADR-0142
 issues: [441]
 areas: [security, network]
 ---

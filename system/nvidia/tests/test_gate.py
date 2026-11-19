@@ -103,7 +103,7 @@ class Gate(unittest.TestCase):
         for ko in ("nvidia.ko",):
             self.touch(f"usr/lib/modules/7.2.5-100.azoth.fc43.x86_64/extra/nvidia/{ko}")
             self.modules[ko] = "580.178.04"
-        for pkg in ("xorg-x11-drv-nvidia", "xorg-x11-drv-nvidia-libs", "azoth-nvidia-kmod"):
+        for pkg in ("xorg-x11-drv-nvidia-580xx", "xorg-x11-drv-nvidia-580xx-libs", "azoth-nvidia-kmod"):
             self.packages[pkg] = "580.178.04"
         self.touch("usr/share/glvnd/egl_vendor.d/10_nvidia.json")
         self.touch("usr/lib64/gbm/nvidia-drm_gbm.so")

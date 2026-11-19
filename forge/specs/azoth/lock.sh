@@ -66,8 +66,9 @@ current() { # current ENV/NAME: the lock header matches its inputs
     [[ -f $HERE/$1.lock && $(grep -E '^# (base|kernel|inputs): ' "$HERE/$1.lock") == "$(header "$1")" ]]
 }
 
+# The keys are under /usr/share since Fedora 45; /etc/pki/rpm-gpg is empty in its base.
 release_key() { # release_key RELEASE: the primary key file of a Fedora release in the base
-    echo "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$1-primary"
+    echo "/usr/share/pki/rpm-gpg/RPM-GPG-KEY-fedora-$1-primary"
 }
 
 os_release() { (. /etc/os-release && echo "$VERSION_ID"); }

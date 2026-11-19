@@ -1,21 +1,22 @@
 Screen reader on.
-Output volume horizontal slider 40 39 percent.
+Sound
+Output volume horizontal slider 39.9993896484375 39 percent.
+Mute output toggle button not pressed
 tab
-Mute output check box not checked.
+Speakers, in use button
 tab
-Speakers, in use button.
+Headphones button
 tab
-Headphones button.
+Input volume horizontal slider 54.998779296875 54 percent.
 tab
-Input volume horizontal slider 55 54 percent.
+Mute microphone toggle button not pressed
 tab
-Mute microphone check box not checked.
+Previous track button
 tab
-Previous track button.
+Pause button
 tab
-Pause button.
+Next track button
 tab
-Next track button.
+Output volume horizontal slider 39.9993896484375 39 percent.
 tab
-Output volume horizontal slider 40 39 percent.
 Screen reader off.

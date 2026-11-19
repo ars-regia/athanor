@@ -163,7 +163,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 **LN4. Languages and locale data in the image.**
 
 - **Our catalogs** ship for Italian and English (SH13, SW14). The test rig adds German and the right-to-left pseudo-locale, which never ship.
-- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:408`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
+- **glibc locales.** All of them stay through `glibc-all-langpacks`, which the base image already ships (`system/Containerfile:412`). `glibc-langpack-en` and `glibc-langpack-it` leave `forge/config/packages.json`: together they hold 9.7 MB of locale data that all-langpacks already provides.
   - No locale is generated at first boot, and `/etc` holds no locale archive, so every locale a user picks works on the immutable image without a rebuild.
 - **Translations of third-party packages** stay as Fedora ships them: all languages, inside each package.
 - **Spell-checking dictionaries** ship for each shipped language: `hunspell-en` is already installed, and `hunspell-it` (1,441,631 bytes) is added. Other dictionaries come from Software as described in LN15.

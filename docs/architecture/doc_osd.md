@@ -330,8 +330,8 @@ Applied with the approval of this document.
 
 Revision 3 adds, applied with its approval:
 
-- `doc_own_stack.md`, OS5 (`doc_own_stack.md:329`): the keyboard group's private protocol has a second client, `athanor-osd` (OD6); a private protocol for the touchpad switch's state (K2) joins the list, described in `system/athanor-sulphur-client/protocols/` before its first client, privileged, and granted to `athanor-osd` by its line (OD12).
-- `doc_own_stack.md`, OS13 (`:396`) and decision 29: at OD17 step 5 the keys of OD3 become calls of `os.athanor.Osd1`; volume and brightness leave `src/bindings/cosmic.rs`, which keeps the screen-reader key until `athanor-a11y`; and the keyboard-brightness, `XF86KbdLightOnOff`, `XF86WLAN` and `XF86RFKill` keys become default bindings, each with its fixture test.
+- `doc_own_stack.md`, OS5 (`doc_own_stack.md:333`): the keyboard group's private protocol has a second client, `athanor-osd` (OD6); a private protocol for the touchpad switch's state (K2) joins the list, described in `system/athanor-sulphur-client/protocols/` before its first client, privileged, and granted to `athanor-osd` by its line (OD12).
+- `doc_own_stack.md`, OS13 (`:400`) and decision 29: at OD17 step 5 the keys of OD3 become calls of `os.athanor.Osd1`; volume and brightness leave `src/bindings/cosmic.rs`, which keeps the screen-reader key until `athanor-a11y`; and the keyboard-brightness, `XF86KbdLightOnOff`, `XF86WLAN` and `XF86RFKill` keys become default bindings, each with its fixture test.
 - `doc_shell.md`, SH4 (`doc_shell.md:88`): the on-screen display and its dialogs are written in Sal, not GTK4 (ADR-0138, decision 6), with one process per surface and the logic in a module with no Sal or Wayland type.
 - `doc_lock_and_prompts.md`, LP18 step 5 (`:266`): the coupling stands; the one change also carries athanor-sulphur's rows of OD3 and removes cosmic-osd's grant, and this document's OD19 work arrives built and switched off from its step 4b.
 - `shell-features.md`, On-screen display: F-osd-06 notes that under athanor-sulphur no touchpad indicator shows today, since the compositor's switch tells no client; F-osd-11 notes that under athanor-sulphur cosmic-osd most likely shows no layout indicator, since the compositor offers no cosmic keyboard-layout protocol (section 1).
@@ -341,7 +341,7 @@ Revision 3 adds, applied with its approval:
 Revision 4 adds, applied with its approval:
 
 - `doc_session_daemons.md`, section 3: the amendment owed to OD4 and OD15 is met by this revision; nothing changes there.
-- `doc_own_stack.md` and Sulphur's README, owed (proposed, revision 4): Sulphur's outputs report make, model and serial from the connector's EDID through the shared parser, in place of `Athanor`, `DRM` and an empty serial. No specification states that identity normatively: `doc_own_stack.md` (OS4, `:204`; OS14, `:425`) and `doc_session_daemons.md` SD23 name wlr-output-management only for its grants and its configuration requests. The pull request that applies the parser records the rule where the maintainer places it.
+- `doc_own_stack.md` and Sulphur's README, owed (proposed, revision 4): Sulphur's outputs report make, model and serial from the connector's EDID through the shared parser, in place of `Athanor`, `DRM` and an empty serial. No specification states that identity normatively: `doc_own_stack.md` (OS4, `:208`; OS14, `:429`) and `doc_session_daemons.md` SD23 name wlr-output-management only for its grants and its configuration requests. The pull request that applies the parser records the rule where the maintainer places it.
 - `doc_control_center.md`: its External monitors row (`:107`) and the Display page's slider (`:79`) move to OD4's two methods; spike S4's udev rule is merged with the scope of SD2, role 12; the control center holds no i2c-dev grant; CC8's backlight row is unchanged. The same pull request amends that document.
 
 ## 4. Open doubts

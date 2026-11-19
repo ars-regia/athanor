@@ -546,7 +546,31 @@ clock_restore() {
 # restarted so that it reads the state afresh, the shield pressed, and a row asked for by its exact
 # name. The rows depend on the sheet of BR6 items 6 and 7 (plan Task 10).
 SHIELD_HEADERS='System image verified|Not verified yet|Update refused'
+# The bar's accessibility tree (athanor-sal's AccessKit) exists only while the accessibility bus
+# says it is enabled, and from at-spi2-core 2.61 nothing turns it on without a screen reader
+# (doc_accessibility.md). The probe reads that tree, so the run turns the bus on, as
+# launcher-acceptance.sh does, marks it, and turns it off again at its end (#1312). A reboot
+# starts the session with the bus off again, so every probe checks it. The stages own the EXIT
+# trap, so a run that dies after a probe leaves the bus on and the mark kept: the next run that
+# reaches its end turns it off, and reset.sh starts the guest afresh.
+A11Y_MARK=$ACC_STATE/a11y-enabled
+a11y_bus() { # a11y_bus get | a11y_bus set true|false
+  # shellcheck disable=SC2016 # expanded by the guest's shell
+  guest_ssh "export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus; busctl --user $1-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled${2:+ b $2}"
+}
+require_a11y() {
+  [[ $(a11y_bus get) == "b true" ]] && return
+  touch "$A11Y_MARK"
+  a11y_bus set true || die "FAIL  the accessibility bus cannot be enabled"
+}
+release_a11y() {
+  if [[ -e $A11Y_MARK ]]; then
+    a11y_bus set false || die "FAIL  the accessibility bus cannot be turned off again"
+    rm "$A11Y_MARK"
+  fi
+}
 shield_sheet() {
+  require_a11y
   guest_ssh sudo systemctl --user --machine="$GUEST_USER@.host" restart athanor-bar.service
   session_probe press "$SHIELD_HEADERS" > /dev/null || die "FAIL  no showing shield named any of '$SHIELD_HEADERS'"
 }
@@ -1212,3 +1236,4 @@ for stage in "${STAGES[@]}"; do
   echo "== $stage"
   "$prefix${stage//-/_}"
 done
+release_a11y
