@@ -640,11 +640,7 @@ check_tier() {
   registry=$(jq -er '.registry | strings' "$tiers") || die "$tiers names no registry"
   digest=$(jq -er '.tier0 | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$tiers") || die "$tiers has no valid tier0 digest"
   # The tag system/tier-digests.sh resolved the digest from, for the message only.
-  tag=latest
-  if [[ -n ${GITHUB_BASE_REF:-} && $GITHUB_BASE_REF != iso-v0 && $GITHUB_BASE_REF != main ]]; then
-    tag=${GITHUB_BASE_REF,,}
-    tag=branch-${tag//[^a-z0-9._-]/-}
-  fi
+  tag=$(bash "$ROOT/system/tier-digests.sh" tag) || die "system/tier-digests.sh cannot name the tag of the tiers"
   ref=$registry/athanor-forge-tier0-repo@$digest
   # A tier image is its RPMs and repodata: the kernel it carries is the name of its kernel-core RPM.
   retry skopeo copy "docker://$ref" "dir:$TMP/tier0"
