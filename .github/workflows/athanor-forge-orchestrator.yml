@@ -112,7 +112,7 @@ jobs:
         run: nix shell --inputs-from .. nixpkgs#cosign -c ./scripts/dynamic-matrix.sh
 
       - name: Hashes of this run (read by the system image build)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: dag-hashes
           path: forge/dag-state/hashes.json
@@ -248,13 +248,13 @@ jobs:
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: bash forge/specs/azoth/signer/run.sh sign
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: nvidia-signed
           path: out/
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: azoth-kernel-signed
           path: kernel-signed/
@@ -293,7 +293,7 @@ jobs:
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Require ready (system/kernel-artifacts.sh)
         run: bash system/kernel-artifacts.sh require-ready
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: kernel-artifacts
           path: kernel-artifacts/kernel-artifacts.env
@@ -323,7 +323,7 @@ jobs:
           path: kernel-artifacts
       - name: Kernel artefacts the release signs (system/kernel-artifacts.sh)
         run: bash system/kernel-artifacts.sh release-digests kernel-artifacts/kernel-digests.txt kernel-artifacts/kernel-unsigned.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: kernel-digests
           path: |
@@ -407,7 +407,7 @@ jobs:
         env:
           BUILDER_HASH: ${{ needs.build-builder.outputs.content_hash }}
         run: python3 -B scripts/ci/release_request.py --image-digests artifacts/image-digests.txt --kernel-digests kernel --out "${RUNNER_TEMP}/out" | tee -a "${GITHUB_STEP_SUMMARY}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-request
           path: ${{ runner.temp }}/out/release-request.json

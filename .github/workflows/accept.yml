@@ -131,13 +131,13 @@ jobs:
 
       - name: 📎 Hand the evidence to the promotion
         if: always() && hashFiles('evidence/*.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evidence-${{ inputs.run_id }}-iso-acceptance
           path: evidence/
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: acceptance-${{ inputs.run_id }}-${{ github.run_id }}
@@ -252,13 +252,13 @@ jobs:
 
       - name: 📎 Hand the evidence to the promotion
         if: always() && hashFiles('evidence/*.json') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: evidence-${{ inputs.run_id }}-upgrade-acceptance
           path: evidence/
           if-no-files-found: error
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: upgrade-acceptance-${{ inputs.run_id }}-${{ github.run_id }}
