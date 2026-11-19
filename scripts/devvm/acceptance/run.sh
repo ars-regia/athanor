@@ -550,7 +550,9 @@ SHIELD_HEADERS='System image verified|Not verified yet|Update refused'
 # says it is enabled, and from at-spi2-core 2.61 nothing turns it on without a screen reader
 # (doc_accessibility.md). The probe reads that tree, so the run turns the bus on, as
 # launcher-acceptance.sh does, marks it, and turns it off again at its end (#1312). A reboot
-# starts the session with the bus off again, so every probe checks it.
+# starts the session with the bus off again, so every probe checks it. The stages own the EXIT
+# trap, so a run that dies after a probe leaves the bus on and the mark kept: the next run that
+# reaches its end turns it off, and reset.sh starts the guest afresh.
 A11Y_MARK=$ACC_STATE/a11y-enabled
 a11y_bus() { # a11y_bus get | a11y_bus set true|false
   # shellcheck disable=SC2016 # expanded by the guest's shell
