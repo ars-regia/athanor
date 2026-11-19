@@ -3803,6 +3803,64 @@ def check_sysctl():
     return r
 
 
+# A Cargo.lock whose workspace cargo-deny does not read is read by no advisory check unless
+# scripts/ci/security-audit.sh audits it with `cargo audit --file`. That script reads its list from
+# scripts/ci/audited-lockfiles.txt; a lockfile missing from it is never checked (#465).
+AUDITED_LOCKFILES = "scripts/ci/audited-lockfiles.txt"
+# The lockfiles of the workspaces security-audit.sh runs `cargo deny check advisories` on.
+DENY_LOCKFILES = ("Cargo.lock", "system/athanor-sal/gallery/Cargo.lock", "fuzz/Cargo.lock")
+UNAUDITED = re.compile(r"unaudited (\S+) #\d+")
+
+
+def advisory_lock_problems(root=None):
+    """Every tracked Cargo.lock is read by an advisory check: cargo-deny's (DENY_LOCKFILES), or
+    cargo-audit's through AUDITED_LOCKFILES, or it is listed there as `unaudited PATH #ISSUE`; every
+    entry is tracked. A member of the root workspace, or a crate its [patch] tables point at, is
+    resolved by the root Cargo.lock, and a lockfile of its own is never used, so it is not asked for."""
+    root = root or ROOT
+    manifest = root / "Cargo.toml"
+    data = tomllib.loads(read(manifest)) if manifest.exists() else {}
+    members = set(data.get("workspace", {}).get("members", []))
+    members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
+                if isinstance(d, dict) and "path" in d}
+    listed, unaudited, problems = [], [], []
+    for line in read(root / AUDITED_LOCKFILES).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("unaudited"):
+            match = UNAUDITED.fullmatch(line)
+            if match is None:
+                problems.append(f"{AUDITED_LOCKFILES}: expected `unaudited PATH #ISSUE`, got `{line}`")
+            else:
+                unaudited.append(match[1])
+        else:
+            listed.append(line)
+    script = root / "scripts/ci/security-audit.sh"
+    if script.exists():
+        loop = re.search(r"^for manifest in (.+); do$", read(script), re.M)
+        manifests = loop[1].split() if loop else []
+        if sorted(m.replace("Cargo.toml", "Cargo.lock") for m in manifests) != sorted(DENY_LOCKFILES):
+            problems.append(f"{script.relative_to(root)}: its cargo-deny loop ({' '.join(manifests)}) "
+                            "does not match DENY_LOCKFILES in scripts/verify.py")
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, text=True, check=True).stdout.split("\0")
+    locks = {f for f in tracked if f == "Cargo.lock" or f.endswith("/Cargo.lock")}
+    found = {f for f in locks - set(DENY_LOCKFILES) if f.removesuffix("/Cargo.lock") not in members}
+    problems += [f"{p}: a tracked lockfile that no advisory check reads; add it to {AUDITED_LOCKFILES}"
+                 for p in sorted(found - set(listed) - set(unaudited))]
+    problems += [f"{AUDITED_LOCKFILES}: {p} does not exist" for p in listed + unaudited if p not in found]
+    return problems
+
+
+@check("advisory-locks", "Every tracked Cargo.lock is read by an advisory check (security-audit.sh), or excluded with an issue")
+def check_advisory_locks():
+    r = Result()
+    for problem in advisory_lock_problems():
+        r.fail(problem)
+    return r
+
+
 # A udev rule that sets GROUP= to a group no sysusers.d file declares makes udev log
 # "Unknown group" at every boot and fall back to root (doc_kernel_profile.md section 14,
 # boot ordering). A group the Fedora base declares goes into athanor-base-config's
