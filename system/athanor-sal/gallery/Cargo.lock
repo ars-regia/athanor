@@ -211,6 +211,7 @@ dependencies = [
  "smithay-client-toolkit",
  "vello_cpu",
  "wayland-client",
+ "xkbcommon",
  "yeslogic-fontconfig-sys",
  "zeroize",
 ]
