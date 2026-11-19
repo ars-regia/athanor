@@ -55,7 +55,8 @@ fn entry(info: &gio::AppInfo, id: String) -> Option<Entry> {
         secondary.extend(desktop.keywords().iter().take(MAX_KEYWORDS).map(|keyword| keyword.to_string()));
     }
     secondary.extend(
-        info.executable().file_name().map(|name| name.to_string_lossy().into_owned()),
+        info.executable()
+            .and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned())),
     );
     secondary.extend(
         id.strip_suffix(".desktop")
