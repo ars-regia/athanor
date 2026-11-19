@@ -24,6 +24,7 @@ on:
       - "flake.lock"
       - "forge/scripts/retry.sh"
       - "scripts/ci/security-audit.sh"
+      - "scripts/ci/audited-lockfiles.txt"
       - ".github/workflows/rust-security-audit.yml"
   # The advisory database changes without a commit: maintenance.yml calls this workflow every
   # day, and its alert job opens a ci-alert issue when the run fails (PL51).
@@ -88,7 +89,7 @@ jobs:
 
       - name: Upload the audit logs
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-audit-logs
           path: audit-out
