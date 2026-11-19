@@ -1,3 +1,6 @@
 Screen reader on.
-English (US) selected radio button.
+Input source: English (US)
+English (US) selected radio button
+Italian selected radio button
+English (US) selected radio button
 Screen reader off.

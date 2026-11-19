@@ -1,3 +1,6 @@
 Lettore schermo attivo.
-English (US) selezionato pulsante radio.
+Sorgente di input: English (US)
+English (US) selezionato pulsante radio
+Italian selezionato pulsante radio
+English (US) selezionato pulsante radio
 Lettore schermo disattivato.

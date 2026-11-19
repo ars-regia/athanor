@@ -339,11 +339,14 @@ def sway():
     display = sway_display()
     code, lines = probe("snapshot", display=display)
     state = snapshot(lines)
+    # sway 1.12 serves ext-workspace-v1, so its workspaces are listed (sway 1.11 listed none);
+    # what it cannot give is COSMIC's tiling state.
     expect("sway: the snapshot has no COSMIC state",
            code == 0 and state.get("accessibility") is None and state.get("keyboard_layouts") == []
-           and state.get("workspaces") == [] and state.get("own_compositor") is False, lines)
+           and state.get("workspaces") and state.get("own_compositor") is False
+           and all(workspace["tiling"] is None for workspace in state["workspaces"]), lines)
     refusals = {
-        ("tiling", "on"): "no active workspace",
+        ("tiling", "on"): "does not offer zcosmic_workspace_manager_v2",
         ("group", "1"): "does not offer athanor_keyboard_group_manager_v1",
         ("magnifier", "on"): "does not offer an accessibility manager",
     }

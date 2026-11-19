@@ -1,15 +1,16 @@
 Lettore schermo attivo.
-Wi-Fi casella di spunta spuntata.
+Rete
+Wi-Fi pulsante di commutazione premuto
+Athanor Lab, connessa pulsante
 tabulazione
-Athanor Lab, connessa button.
+Corner Café pulsante
 tabulazione
-Corner Café button.
+Home Network, protetta pulsante
 tabulazione
-Home Network, protetta button.
+Office VPN pulsante di commutazione non premuto
 tabulazione
-Office VPN casella di spunta non spuntata.
+Modalità aereo pulsante di commutazione non premuto
 tabulazione
-Modalità aereo casella di spunta non spuntata.
+Wi-Fi pulsante di commutazione premuto
 tabulazione
-Wi-Fi casella di spunta spuntata.
 Lettore schermo disattivato.

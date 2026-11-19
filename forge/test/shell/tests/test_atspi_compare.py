@@ -398,6 +398,34 @@ class CompareTest(unittest.TestCase):
         _, failures = compare.compare(reference, bare, arrows=True)
         self.assertEqual(failures, ["button '': state 'focusable' missing"] * 4)
 
+    def test_gtk_4_24s_english_arrows_match_the_toolkits_same_arrow(self):
+        gtk = ["Previous Month", "Next Month", "Previous Year", "Next Year"]
+        # The gallery's page shows two calendars: each arrow twice, matched in order.
+        reference = [node("button", name, ["focusable", "showing"]) for name in gtk * 2]
+        for names in (
+            ["Previous month", "Next month", "Previous year", "Next year"],
+            ["Mese precedente", "Mese successivo", "Anno precedente", "Anno successivo"],
+        ):
+            with self.subTest(names=names):
+                transcript = [node("button", name, ["focusable", "showing"]) for name in names * 2]
+                lines, failures = compare.compare(reference, transcript, arrows=True)
+                self.assertEqual(failures, [])
+                self.assertEqual(
+                    [line.split("; ")[-1] for line in lines],
+                    [f"note: named {name!r}: {compare.GTK_ARROWS_NOTE}" for name in names * 2],
+                )
+                # Without the rule the English names are missing.
+                self.assertEqual(
+                    compare.compare(reference, transcript)[1],
+                    [f"button {name!r}: missing" for name in gtk * 2],
+                )
+        # An arrow the toolkit names as another arrow, or does not show, still fails.
+        reference = [node("button", "Previous Month", ["showing"])]
+        for transcript in ([node("button", "Next month", ["showing"])], []):
+            with self.subTest(transcript=transcript):
+                _, failures = compare.compare(reference, transcript, arrows=True)
+                self.assertEqual(failures, ["button 'Previous Month': missing"])
+
     def test_the_arrow_rule_holds_only_for_the_calendars_references(self):
         reference = [node("button", "", ["showing"])]
         transcript = [node("button", "Next month", ["showing"])]

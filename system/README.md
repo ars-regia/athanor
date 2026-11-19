@@ -12,7 +12,7 @@ Crates listed in `experimental/EXEMPT` are workspace members that no package shi
 
 ## Image
 
-`Containerfile` builds three images from Fedora's `base-atomic:43`, pinned by digest. The
+`Containerfile` builds three images from Fedora's `base-atomic:45`, pinned by digest. The
 build argument `GPU` selects the variant:
 
 | `GPU` | Image |
