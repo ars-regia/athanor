@@ -122,7 +122,7 @@ rusqlite = { version = "0.43", default-features = false }
 rand = "0.8.5"
 # Dates and time zones: chrono is unmaintained (RUSTSEC-2026-0543). The system time zone
 # and /usr/share/zoneinfo only, so no bundled time zone database enters the tree.
-jiff = { version = "0.2.35", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+jiff = { version = "1.0.0", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 
 [profile.dev]
 panic = "abort"
