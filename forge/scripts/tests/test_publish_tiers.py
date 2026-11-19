@@ -105,6 +105,7 @@ class PublishTiers(unittest.TestCase):
                 "FAIL_PUSH",
                 "GITHUB_REF",
                 "GITHUB_BASE_REF",
+                "GITHUB_HEAD_REF",
             )
         }
         self.env["RETRY_ATTEMPTS"] = "1"

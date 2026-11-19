@@ -5310,6 +5310,7 @@ SESSION_UNITS = {
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
     "athanor-idle.service": ("guard", True, "preset"),
+    "athanor-lock.service": ("guard", True, "preset"),
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
@@ -5383,6 +5384,8 @@ SESSION_EXEMPT = {
     ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("athanor-lock.service", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}"):
+        "installed and not enabled until its preset at the switch (doc_lock_and_prompts.md, LP18 step 3)",
     ("athanor-launcher.service", ACTIVATED_INSTALL):
         "enabled by hand until the switch (doc_launcher.md, LA12)",
     ("athanor-control-center.service", ACTIVATED_INSTALL):

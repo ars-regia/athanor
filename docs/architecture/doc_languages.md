@@ -455,7 +455,7 @@ Applied with the approval of this document. Line numbers into code are those of 
   - Software extends Flatpak's `extra-languages` if spike S3 requires it (LN14).
 - **`forge/specs/athanor-base-config/`:** adds `SOURCES/usr/share/polkit-1/rules.d/40-athanor-locale1.rules` and its `%files` line in `athanor-base-config.spec` (LN5, LN19 step 3).
 - **`forge/test/shell/Containerfile:23`:** adds `google-noto-sans-hebrew-fonts` and `google-noto-sans-cjk-vf-fonts` (LN13); `adwaita-sans-fonts` and `adwaita-mono-fonts` are there already, at `:54` (#532).
-- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:96-97`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
+- **`forge/config/packages.json`:** removes `glibc-langpack-en` and `glibc-langpack-it` (`packages.json:98-99`), and adds `hunspell-it` (LN4). `ibus-wayland` and `ibus-panel` are added at LN19 step 5.
 - Amendments received, from the maintainer's rulings of 2026-10-05: LN7 gains the first-run hand-off step (`doc_first_run.md` FR15); the `system_actions` file of LN9 is defined here as the single owner of that file.
 
 ## 4. Open doubts

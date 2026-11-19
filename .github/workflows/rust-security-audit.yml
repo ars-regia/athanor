@@ -69,8 +69,9 @@ jobs:
 
       - name: Run the audit in the builder image
         env:
-          # Reads the rules of a rebase/* base branch, whose signatures system/tier-digests.sh
-          # trusts only when a ruleset protects it.
+          # Reads the rules of a rebase/* base branch, or of the rebase/* head of a pull request into
+          # iso-v0 or main, whose signatures system/tier-digests.sh trusts only when a ruleset
+          # protects it.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
