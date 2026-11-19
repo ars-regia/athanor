@@ -136,8 +136,10 @@ NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/s
 # the documents that describe it (a branch moving to another repository tree changes its lock and
 # lock.py together, #669): only the NVIDIA variants use the packaging, and the check builds them
 # after the merge. Only the files that read the pins and locks: never the keys, the mirror
-# scripts or athanor-nvidia-config.
-NVIDIA_PIN_COMPANIONS=(system/nvidia/lock.py system/nvidia/azoth-nvidia-kmod.spec system/nvidia/build-rpms.sh system/nvidia/gate.sh 'system/nvidia/tests/*' 'docs/*')
+# scripts or athanor-nvidia-config, and never build-rpms.sh or gate.sh, which build and judge the
+# variants: a change to either moves in its own pull request, whose check builds the variants
+# before the merge (#1323).
+NVIDIA_PIN_COMPANIONS=(system/nvidia/lock.py system/nvidia/azoth-nvidia-kmod.spec 'system/nvidia/tests/*' 'docs/*')
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
 # Kept by hand, not by kernel-bump.yml, but inputs of the kernel build like the pins
 # (build-inputs.py): a builder move changes them with the pins (clang 23 drops kernel-local's
