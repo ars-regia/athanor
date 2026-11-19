@@ -6518,6 +6518,8 @@ LIST_GAP = re.compile(r"[\s,`]*(?:and|or)?[\s,`]*")
 # The verb between a list of entries and the key that holds them: `are in` takes the list before it,
 # `is in` one name only, so "`x` is in `a` and `y` is in `b`" does not join `a` to `b`.
 LIST_KEY_GAP = re.compile(r"[\s`]*(are|is)(?:\s+listed)?\s+(?:in|under)[\s`]*")
+# A name that such a verb precedes is the key of an earlier clause, where a run that crossed one stops.
+LIST_KEY_BEFORE = re.compile(r"\b(?:are|is)(?:\s+listed)?\s+(?:in|under)[\s`]*$")
 BARE_NAME = re.compile(r"(?<![\w`/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/`-])")
 
 
@@ -6598,7 +6600,9 @@ def citation_findings(doc, text, tracked, read_file):
     place holding the token, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
     name and no section id in its sentence is checked only for a first line that holds words, so
-    a stale one that still lands on text goes unseen (#1089)."""
+    a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
+    only across the exact `are in`, `is in`, `is listed in` or `under`: with other words between
+    them ("are both in"), only the key is demanded, and a removed single-word entry is not seen."""
     known = set(tracked)
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
@@ -6686,16 +6690,18 @@ def citation_findings(doc, text, tracked, read_file):
                 # `is in`; with none before it, the run that follows it. A hyphenated name in
                 # backticks stays in the run when the file no longer holds it, so a removed entry
                 # is a finding.
-                run, single = [], False
+                run, single, crossed = [], False, False
                 for item in reversed(sorted({*tokens, *(
                         i for i in found if sentence[i[0] - 1:i[0]] == "`" == sentence[i[1]:i[1] + 1]
                         and BARE_NAME.fullmatch(i[2]) and i[2] not in own)})):
                     if run:
                         gap = sentence[item[1]:run[-1][0]]
                         key = len(run) == 1 and LIST_KEY_GAP.fullmatch(gap)
-                        if single or not (key or LIST_GAP.fullmatch(gap)):
+                        if single or not (key or LIST_GAP.fullmatch(gap)) or (
+                                crossed and LIST_KEY_BEFORE.search(sentence[:item[0]])):
                             break
                         single = bool(key) and key.group(1) == "is"
+                        crossed = crossed or bool(key)
                     run.append(item)
                 if not run:
                     after = line[span.end():]

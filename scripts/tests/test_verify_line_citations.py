@@ -147,6 +147,15 @@ class Lists(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("does not hold `nix`", out[0])
 
+    def test_an_are_in_clause_does_not_reach_the_key_of_the_clause_before(self):
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
+        cite = "`x-one` and `y-two` are in `a` and `nix` and `nix-daemon` are in `upstream_core` (`%s:%s`)."
+        self.assertEqual(messages(cite % (self.PJ, "5-7"), keyed), [])
+        out = messages(cite % (self.PJ, "5-6"), keyed)
+        self.assertEqual(len(out), 1)
+        self.assertIn("does not hold `nix-daemon`", out[0])
+
     def test_a_backticked_word_that_is_no_entry_is_not_demanded(self):
         self.assertEqual(self.found(f"The `nix` ships in the image, built by `rpmbuild` (`{self.PJ}:6`)."), [])
 
