@@ -156,7 +156,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0086 | 0086 | [toolbox is not isolation; podman as container_t or the dev VM is](0086-toolbox-is-not-isolation.md) | accepted | security, apps |
 | ADR-0087 | 0087 | [Keep athanor-attestation outside the workspace until its Keylime rewrite](0087-attestation-outside-the-workspace.md) | amended by ADR-0103 | security, build |
 | ADR-0088 | 0088 | [Pipeline revision 2](0088-pipeline-revision-2.md) | amended by ADR-0098, ADR-0104, ADR-0137 | build, signing, security |
-| ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | amended by ADR-0103, ADR-0116 | security, network |
+| ADR-0089 | 0089 | [Defaults that contact or listen are off until the person turns them on](0089-defaults-that-contact-or-listen.md) | amended by ADR-0103, ADR-0116, ADR-0142 | security, network |
 | ADR-0090 | 0090 | [Account lockout through authselect's with-faillock](0090-account-lockout-faillock.md) | accepted | security |
 | ADR-0091 | 0091 | [QEMU stays in the image for the runner and the development VM](0091-qemu-in-the-image.md) | accepted | packages |
 | ADR-0092 | 0092 | [Carry cosmic-comp PR #1441 as our own patch; upstream first, never dependent on upstream](0092-carry-pr-1441-upstream-first.md) | accepted | security, shell |

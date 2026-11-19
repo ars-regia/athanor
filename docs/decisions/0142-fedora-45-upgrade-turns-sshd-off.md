@@ -28,10 +28,10 @@ image's default `/etc` (`/usr/etc`). Neither machine has a local change that wou
 1. The move to Fedora 45 follows Fedora's preset. On a machine where `sshd` is enabled only by
    the image's default `/etc`, `sshd` is off after the switch. A link that a person added to
    `/etc` and that the image's default does not hold stays, and so does the state of `sshd` it
-   gives. This amends ADR-0103 D18 and ADR-0119 point 1 for `sshd`; ADR-0119's firewall points
+   gives. This amends ADR-0089 item 3, ADR-0103 D18 and ADR-0119 point 1 for `sshd`; ADR-0119's firewall points
    stand.
 2. No package of Athanor ships a preset, link or unit that enables `sshd`. New installs keep it
-   off (ADR-0089 item 2).
+   off (ADR-0089 item 3).
 3. The release notes of the first release on Fedora 45 say that remote login is off after the
    update, and how to turn it on again from a console:
    `sudo systemctl enable --now sshd.service`, together with ADR-0119 point 3 on a network in

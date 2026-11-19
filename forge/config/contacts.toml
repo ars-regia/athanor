@@ -112,4 +112,4 @@ reason = "fetches a DNSSEC anchor for an unbound that is not installed"
 
 [[listener]]
 unit = "sshd.service"
-reason = "remote login, key only; off on new installs (kickstart services --disabled=sshd), kept on existing installs (doc_software.md, decision 2; ADR-0089)"
+reason = "remote login, key only; off on new installs (kickstart services --disabled=sshd) and, from Fedora 45, on existing installs where a person did not enable it (doc_software.md, decision 2; ADR-0089, ADR-0142)"
