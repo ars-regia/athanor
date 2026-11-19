@@ -20,6 +20,7 @@
 #               before a build is skipped or a job runs in it, issue #1205)
 #   probe REF [WORKFLOW]
 #               one attempt of signed
+#   tag         print the tag resolve reads, which system/kernel-artifacts.sh check-tier names
 #
 # The Orchestrator does not resolve: forge/scripts/publish_tiers.sh writes the same file with
 # the digests it published in the same run, and signs keyless each image it pushes. The file is
@@ -69,7 +70,7 @@ die() {
     exit 1
 }
 case ${1:-}:$# in
-resolve:1 | verify:1 | signed:2 | probe:2) ;;
+resolve:1 | verify:1 | tag:1 | signed:2 | probe:2) ;;
 signed:3 | probe:3) [[ $3 == call-system-image.yml || $3 == call-dag-compile.yml || $3 == call-build-builder.yml ]] || usage ;;
 *) usage ;;
 esac
@@ -105,6 +106,12 @@ if [[ $BASE == iso-v0 || $BASE == main ]]; then
 fi
 if [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
     die "the $KIND branch '$BASE' is not a branch name"
+fi
+# TAG: the tag resolve reads, `branch-<name>` as forge/scripts/publish_tiers.sh names BASE's tiers.
+TAG=latest
+if [[ -n $BASE ]]; then
+    TAG=${BASE,,}
+    TAG=branch-${TAG//[^a-z0-9._-]/-}
 fi
 
 # protected: whether a ruleset protects BASE; dies when its rules cannot be read.
@@ -194,6 +201,7 @@ verify_tiers() {
 }
 
 case $1 in
+tag) echo "$TAG" ;;
 probe) probe "$2" ;;
 signed) signed "$2" ;;
 verify)
@@ -210,15 +218,10 @@ verify)
 resolve)
     registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
     registry=${registry,,}
-    tag=latest
-    if [[ -n $BASE ]]; then
-        tag=${BASE,,}
-        tag=branch-${tag//[^a-z0-9._-]/-}
-    fi
     args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     digests=()
     for n in 0 1 2 3; do
-        ref=$registry/athanor-forge-tier$n-repo:$tag
+        ref=$registry/athanor-forge-tier$n-repo:$TAG
         digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref") ||
             die "$ref cannot be read"
         [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$ref gave no digest: '$digest'"

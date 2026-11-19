@@ -1028,6 +1028,28 @@ class CheckTier(Repo):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
 
+    def test_the_tier_is_named_by_the_tag_tier_digests_resolved(self):
+        """The tag comes from system/tier-digests.sh: a landing pull request (issue #1321) names
+        its rebase/* head's tiers, not `latest`."""
+        self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm"])
+        for n, (base, head, tag) in enumerate((
+            ("rebase/fedora-45", None, "branch-rebase-fedora-45"),
+            ("iso-v0", "rebase/fedora-45", "branch-rebase-fedora-45"),
+            ("main", "rebase/Fedora-45", "branch-rebase-fedora-45"),
+            ("iso-v0", "fix/tiers", "latest"),
+            ("rebase/fedora-45", "rebase/fedora-46", "branch-rebase-fedora-45"),
+            (None, None, "latest"),
+        )):
+            with self.subTest(base=base, head=head):
+                for name, value in (("GITHUB_BASE_REF", base), ("GITHUB_HEAD_REF", head)):
+                    if value is None:
+                        self.env.pop(name, None)
+                    else:
+                        self.env[name] = value
+                r = self.check({"system/x": f"{n}\n"})
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"tier 0 {tag} ({self.TIER0}) carries {NVR}", r.stdout)
+
     def test_a_tier_that_cannot_be_read_fails(self):
         self.prepare([f"./kernel-core-{NVR}.x86_64.rpm"], errors=[self.REF])
         r = self.check({"system/x": "1\n"})

@@ -505,6 +505,53 @@ class TierDigests(unittest.TestCase):
                 self.assertNotIn(":latest", json.dumps(self.calls()))
                 self.assertFalse(self.out.exists())
 
+    def test_signed_and_probe_on_a_landing_pull_request_trust_exactly_the_head(self):
+        """The head is added to the identity regex as one anchored branch name: a sibling, a
+        longer name or another case is a foreign identity."""
+        self.env["GITHUB_REF"] = "refs/pull/1317/merge"
+        self.env["GITHUB_BASE_REF"] = "iso-v0"
+        self.env["GITHUB_HEAD_REF"] = "rebase/fedora-45"
+        for identity, verdict in (
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-45", "signed"),
+            (TRUSTED, "signed"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-455", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-45x", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/Fedora-45", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedoraX45", "unsigned"),
+        ):
+            for mode in ("signed", "probe"):
+                with self.subTest(identity=identity, mode=mode):
+                    self.publish(
+                        "ghcr.io/ars-regia",
+                        signers={"tier0": identity},
+                        api={RULES: PROTECTED},
+                        **DIGESTS,
+                    )
+                    r = self.resolve(mode, f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}")
+                    self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+
+    def test_a_landing_pull_request_with_partial_rules_is_not_trusted(self):
+        for name, rules in (
+            ("no code owner review", [
+                *(r for r in PROTECTED if r["type"] != "pull_request"),
+                {"type": "pull_request", "parameters": {"require_code_owner_review": False}},
+            ]),
+            ("pull_request without the parameter", [
+                *(r for r in PROTECTED if r["type"] != "pull_request"),
+                {"type": "pull_request", "parameters": {}},
+            ]),
+            ("force pushes allowed", [r for r in PROTECTED if r["type"] != "non_fast_forward"]),
+        ):
+            with self.subTest(name=name):
+                (self.dir / "calls.log").unlink(missing_ok=True)
+                self.out.unlink(missing_ok=True)
+                r = self.landing(rules=rules)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("the head branch 'rebase/fedora-45' is not protected by a ruleset", r.stderr)
+                self.assertIn("tier0 tier1 tier2 tier3: not signed by a trusted run", r.stderr)
+                self.assertNotIn(":latest", json.dumps(self.calls()))
+                self.assertFalse(self.out.exists())
+
     def test_a_head_branch_name_outside_the_branch_alphabet_dies(self):
         for head in ("rebase/x|.*", "rebase/(x)", "rebase/x y", "rebase/$x"):
             with self.subTest(head=head):
