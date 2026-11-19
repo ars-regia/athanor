@@ -25,7 +25,7 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **The legacy store crates.**
 
-- `forge/specs/athanor-store-rs` was out of the workspace (the root `Cargo.toml`, `exclude`, line 55 then) and is out of the image (absent from `forge/config/packages.json:2-82`). Its former entry in `experimental/EXEMPT` recorded why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
+- `forge/specs/athanor-store-rs` was out of the workspace (the root `Cargo.toml`, `exclude`, line 55 then) and is out of the image (absent from `forge/config/packages.json:2-84`). Its former entry in `experimental/EXEMPT` recorded why: it ran `flatpak install` for any D-Bus caller without the polkit check its policy declares, and verified signatures against a caller-supplied key. Read on 2026-09-30: ADR-0073 deleted this crate from the tree.
   - The unit is a system unit with `Type=dbus`, `BusName=os.athanor.Store` and `DynamicUser=yes` (`athanor-store-rs.spec:50-60`), the bus policy lets only root own the name (`os.athanor.Store.conf:5-7`), and the code connects to the **session** bus (`src/backend/dbus.rs:105`). It could never have started.
   - `os.athanor.store.install` is declared (`os.athanor.store.policy:9`) and checked nowhere.
   - `verify_pqc_package` verifies a Dilithium signature against a public key the caller passes in (`src/backend/dbus.rs:31-51`), which proves nothing: a facade in a security path.
@@ -34,7 +34,7 @@ Checked in the repository at `27378de3`, and, where the repository cannot answer
 
 **Nix.**
 
-- `nix` and `nix-daemon` are in `upstream_core` (`forge/config/packages.json:83-85`); the `nix` meta-package does not pull the daemon.
+- `nix` and `nix-daemon` are in `upstream_core` (`forge/config/packages.json:85-87`); the `nix` meta-package does not pull the daemon.
 - `/nix` is a bind mount of `/var/nix` (`forge/specs/athanor-nix-support/SOURCES/usr/lib/systemd/system/nix.mount:26-30`), ordered after `systemd-tmpfiles-setup` with `DefaultDependencies=no` (`nix.mount:18-24`), with the store skeleton seeded by tmpfiles (`usr/lib/tmpfiles.d/10-athanor-nix.conf:15-21`) and the daemon socket directory by `etc/tmpfiles.d/nix-daemon.conf:9-10`.
 - `nix.mount` and `nix-daemon.socket` are enabled by preset (`80-athanor-nix.preset:13-14`; `nix-daemon.socket` again in `80-athanor-system.preset:7`). An SELinux module in CIL labels the daemon socket `nix_socket_t` and lets PID 1 create it (`forge/specs/athanor-selinux/SOURCES/athanor_nix_daemon.cil:64-65, 84-85`); Fedora's policy has no Nix type.
 - Users are multi-user Nix clients through the daemon. `/etc/nix/nix.conf` enables `nix-command flakes` and sets `nixpkgs=flake:nixpkgs`, so `nixpkgs` resolves through the flake registry over the network (desktop).
