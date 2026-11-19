@@ -8,6 +8,19 @@ mkdir "$out"
 [[ -n "$a" ]] && [[ "$b" = 1 ]]
 # a comment between the guard and the next command
 echo done
+# ruleid: dead-test-guard
+[ -n "$a" ] && [ -n "$b" ] # a trailing comment
+echo done
+# ruleid: dead-test-guard
+[ -n "$a" ] && [ -n "$b" ]; echo done
+if [ -n "$c" ]; then
+  # ruleid: dead-test-guard
+  [ -n "$a" ] && [ -n "$b" ]
+fi
+for d in a b; do
+  # ruleid: dead-test-guard
+  [ -n "$d" ] && [ -n "$b" ]
+done
 # ok: dead-test-guard
 [ "$scanned" -gt 0 ] || { echo "no library scanned" >&2; exit 1; }
 # ok: dead-test-guard
