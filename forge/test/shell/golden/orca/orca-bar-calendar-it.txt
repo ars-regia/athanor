@@ -1,12 +1,14 @@
 Lettore schermo attivo.
-button.
+Calendario
+Mese precedente pulsante
+Mese successivo pulsante
 tabulazione
-button.
+Anno precedente pulsante
 tabulazione
-button.
+Anno successivo pulsante
 tabulazione
-button.
+18
 tabulazione
-button.
+Mese precedente pulsante
 tabulazione
 Lettore schermo disattivato.

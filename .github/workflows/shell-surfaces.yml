@@ -93,7 +93,7 @@ jobs:
         run: bash forge/test/shell/rig.sh orca greeter
       - name: Orca's speech on the greeter in Italian against its transcript
         run: bash forge/test/shell/rig.sh orca greeter it
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-greeter
@@ -137,7 +137,7 @@ jobs:
         run: bash forge/test/shell/rig.sh orca chooser it
       - name: A preset picked in the chooser applies without a restart
         run: bash forge/test/shell/rig.sh chooser-e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-layout
@@ -175,7 +175,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-compositor-client
       - name: The client against cosmic-comp and sway
         run: bash forge/test/shell/rig.sh compositor-e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-compositor
@@ -214,7 +214,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-toolkit
       - name: Copy, cut, paste and the primary selection under cosmic-comp
         run: bash forge/test/shell/rig.sh toolkit-clipboard
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-toolkit-clipboard
@@ -253,7 +253,7 @@ jobs:
         run: bash forge/test/shell/rig.sh toolkit-popup
       - name: A layer surface's motion on its frame callbacks
         run: bash forge/test/shell/rig.sh toolkit-motion
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-toolkit-surfaces
@@ -278,7 +278,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-shelld
       - name: The daemon on a session bus
         run: bash forge/test/shell/rig.sh shelld-e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-shelld
@@ -321,7 +321,7 @@ jobs:
         run: bash forge/test/shell/rig.sh shield-e2e
       - name: Tray host and menus against athanor-shelld
         run: bash forge/test/shell/rig.sh tray-e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-bar
@@ -351,7 +351,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-shelld
       - name: Seal the binaries
         run: bash forge/test/shell/rig.sh seal-bin athanor-bar athanor-shelld
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shell-rig-bin
           path: |
@@ -398,7 +398,7 @@ jobs:
         run: bash forge/test/shell/rig.sh verify-bin athanor-bar athanor-shelld
       - name: Cases against the goldens
         run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-${{ matrix.scene }}
@@ -445,7 +445,7 @@ jobs:
         run: bash forge/test/shell/rig.sh orca "${{ matrix.popover }}"
       - name: Orca's speech on the popover in Italian against its transcript
         run: bash forge/test/shell/rig.sh orca "${{ matrix.popover }}" it
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-a11y-${{ matrix.popover }}
@@ -497,7 +497,7 @@ jobs:
         run: bash forge/test/shell/rig.sh orca dock it
       - name: Openers, running windows, pinning, the knob and presets live, and memory
         run: bash forge/test/shell/rig.sh dock-e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-dock
@@ -521,7 +521,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-dock
       - name: Cases against the goldens
         run: bash forge/test/shell/rig.sh surface dock
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-dock-scene
@@ -544,7 +544,7 @@ jobs:
         run: bash forge/test/shell/rig.sh build-control-center
       - name: Seal the binary
         run: bash forge/test/shell/rig.sh seal-bin athanor-control-center
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: shell-rig-control-center-bin
           path: |
@@ -562,7 +562,7 @@ jobs:
         run: bash forge/test/shell/rig.sh orca control-center
       - name: Orca's speech on the panel and its pages in Italian against the transcript
         run: bash forge/test/shell/rig.sh orca control-center it
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-control-center
@@ -599,7 +599,7 @@ jobs:
         run: bash forge/test/shell/rig.sh verify-bin athanor-control-center
       - name: Cases against the goldens
         run: bash forge/test/shell/rig.sh surface "${{ matrix.scene }}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-${{ matrix.scene }}
@@ -638,7 +638,7 @@ jobs:
         env:
           RIG_COMPOSITOR: athanor
         run: bash forge/test/shell/rig.sh orca launcher it
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-rig-launcher

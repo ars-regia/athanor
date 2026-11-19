@@ -1,13 +1,14 @@
 Screen reader on.
-Bluetooth check box checked.
+Bluetooth
+Bluetooth toggle button pressed
+Headphones, connected button
 tab
-Headphones, connected button.
+Keyboard button
 tab
-Keyboard button.
+Phone button
 tab
-Phone button.
+Speaker button
 tab
-Speaker button.
+Bluetooth toggle button pressed
 tab
-Bluetooth check box checked.
 Screen reader off.

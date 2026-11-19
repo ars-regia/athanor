@@ -105,7 +105,7 @@ jobs:
           cat repro-out/summary.md >> "$GITHUB_STEP_SUMMARY"
           exit "$rc"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ always() && hashFiles('repro-out/**') != '' }}
         with:
           name: repro-report
@@ -116,7 +116,7 @@ jobs:
         # Only when the comparison is red: A is in the registry, B would otherwise vanish
         # with the runner.
         if: ${{ failure() && hashFiles('out-b/kernel/kernel-core-*.rpm') != '' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: repro-b-rpms
           path: |
@@ -152,7 +152,7 @@ jobs:
             bash forge/specs/azoth/build.sh --stage build --variant "$VARIANT" --out /forge/out-v
           cat out-v/nvr
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: kernel-variant
           path: out-v/kernel/kernel-core-*.rpm
@@ -221,7 +221,7 @@ jobs:
           mkdir -p "history/$GITHUB_RUN_ID" && cp -r bench-out/. "history/$GITHUB_RUN_ID/"
           python3 forge/specs/azoth/bench-report.py history/* | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: ${{ always() && hashFiles('bench-out/**') != '' }}
         with:
           name: bench-results

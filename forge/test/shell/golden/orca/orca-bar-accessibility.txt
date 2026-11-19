@@ -1,17 +1,18 @@
 Screen reader on.
-High contrast check box not checked.
+Accessibility
+High contrast toggle button not pressed
+Screen reader toggle button not pressed
 tab
-Screen reader check box not checked.
-Magnifier check box not checked.
+Magnifier toggle button not pressed
 tab
-Invert colours check box not checked.
+Invert colours toggle button not pressed
 tab
-No colour filter selected radio button.
+No colour filter selected radio button
 tab
-Greyscale selected radio button.
-Red-green (protanopia) selected radio button.
-Green-red (deuteranopia) selected radio button.
-Blue-yellow (tritanopia) selected radio button.
-High contrast check box not checked.
+Greyscale selected radio button
+Red-green (protanopia) selected radio button
+Green-red (deuteranopia) selected radio button
+Blue-yellow (tritanopia) selected radio button
+High contrast toggle button not pressed
 tab
 Screen reader off.

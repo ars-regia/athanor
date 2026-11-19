@@ -27,9 +27,9 @@ contents = """
 # than this file.
 xconfig --startxonboot
 
-# Remote login is off on new installs (doc_software.md, decision 2). The image's preset
-# keeps Fedora's preset, which enables sshd, so that existing installs keep it through the /etc
-# merge; a new installation turns it off here.
+# Remote login is off on new installs (doc_software.md, decision 2), and a new installation
+# turns it off here. On an existing machine Fedora's preset decides, which disables sshd from
+# Fedora 45 on (ADR-0142).
 # The firewall stays as the image ships it (ADR-0089, decision 2: public allows neither ssh nor
 # mdns). Without this, Anaconda runs `firewall-offline-cmd --enabled --service=ssh`, which writes
 # a local /etc/firewalld/zones/public.xml with ssh open; the image's preset enables firewalld.
@@ -251,11 +251,11 @@ mv /etc/fstab.athanor /etc/fstab
 # installer against any sysroot whose boot/ holds no loader entries. Anaconda's own
 # ConfigureBootloader issues the identical call, chrooted into this same system root and
 # without --sysroot (pyanaconda/modules/payloads/payload/rpm_ostree/installation.py,
-# branch fedora-43).
+# branch fedora-45).
 #
 # %post scripts run after that task: the boss queues RunScriptsWithTask(KS_SCRIPT_POST)
 # in the configuration queue, which follows the installation queue carrying the payload's
-# post-install tasks (pyanaconda/modules/boss/installation.py, branch fedora-43). So the
+# post-install tasks (pyanaconda/modules/boss/installation.py, branch fedora-45). So the
 # arguments ConfigureBootloader wrote -- root=, rootflags=subvol=, rw -- are already on
 # the deployment, --merge keeps them and appends this one, and the initrd's
 # systemd-fstab-generator joins every rootflags=. Nothing rewrites the entries after the

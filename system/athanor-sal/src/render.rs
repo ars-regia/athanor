@@ -40,8 +40,8 @@ pub trait Canvas {
         self.fill_image_part(resources, rect, pixmap, &whole);
     }
     /// Fills `rect` with the part `source` of an image, in its pixels, scaled to it on each axis.
-    /// vello_cpu reads the pixmap as it draws; vello_gpu draws the copy uploaded to its atlas
-    /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no copy of.
+    /// vello_cpu reads the pixmap as it draws; vello_gpu draws the texture uploaded from it
+    /// before the frame (`gpu.rs`), and draws nothing for a pixmap it has no texture of.
     fn fill_image_part(
         &mut self,
         resources: &Self::Resources,

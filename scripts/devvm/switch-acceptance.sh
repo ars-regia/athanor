@@ -324,14 +324,14 @@ if mode and outputs[0]["position"] == {"x": 0, "y": 0} and outputs[0]["scale"] =
     print(mode["width"], mode["height"])')
     [[ -n $output ]] || fail "the click needs one output at 0,0 at scale 1: $(in_session wlr-randr)"
     in_session "systemd-run --user --quiet --collect --unit=switch-acceptance-orca orca --replace --debug-file=$log"
-    wait_until 30 in_session "busctl --user status org.gnome.Orca.Service > /dev/null" ||
-        fail "Orca did not take org.gnome.Orca.Service"
+    wait_until 30 in_session "busctl --user status org.gnome.Orca1.Service > /dev/null" ||
+        fail "Orca did not take org.gnome.Orca1.Service"
     center=$(in_session python3 - center athanor-bar "\"$SHIELD_NAMES\"" < "$HERE/shield_probe.py") ||
         fail "no showing shield named any of '$SHIELD_NAMES'"
     # shellcheck disable=SC2086 # two numbers each
     run "sudo python3 - $center $output" < "$HERE/pointer_click.py" > /dev/null
     sleep 3
-    in_session "busctl --user call org.gnome.Orca.Service /org/gnome/Orca/Service org.gnome.Orca.Service Quit > /dev/null"
+    in_session "busctl --user call org.gnome.Orca1.Service /org/gnome/Orca1/Service org.gnome.Orca1.Service Quit > /dev/null"
     wait_until 10 in_session "! systemctl --user is-active --quiet switch-acceptance-orca.service" ||
         fail "Orca did not quit"
     spoken=$(in_session "grep -F 'SPEECH OUTPUT:' $log")

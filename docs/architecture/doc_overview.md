@@ -388,7 +388,7 @@ Applied with the approval of this document.
 - **Owed to revision 3** (the window switcher, section 8), each proposed in revision 3, in the pull request of OV28 step 1 unless it says otherwise:
   - `docs/operations/release-1.0.md`: amended by ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) itself (row 12, section 3); nothing more is owed here.
   - `doc_own_stack.md`: the 1.1 placement of the window switcher at the lines ADR-0138 lists (about 423, 666, 778, 917 to 920, 940 and 1205), and OS13's list of default bindings, which gains Alt+Tab and Alt+Shift+Tab.
-  - `doc_session.md` SN16, gap 8 (`:227`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
+  - `doc_session.md` SN16, gap 8 (`:229`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
   - `doc_launcher.md` LA12 (`:173`) and "Left for plan 3c" (`:254`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
   - `doc_shell.md` SH3, the row of cosmic-launcher (`:70`): its condition is met by OV28 step 7.
   - `shell-features.md` F-overview-10 (`:399`): owned by this document, not by "the launcher's plan 3c"; its source becomes `athanor-switcher` at OV28 step 7.
@@ -503,10 +503,10 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
   - Its globals include no COSMIC protocol (`S/data/globals`), so cosmic-launcher's switcher, a client of COSMIC's toplevel protocols, does not serve this session.
 - **The compositor client.** `Window { id, app_id, title, state, outputs }`, with `activated` and `minimized` in `state` and the window's output connectors in `outputs` (`system/athanor-sulphur-client/src/model.rs:51-61`). Neither compositor reports an order of use.
 - **Sal today** (`system/athanor-sal`).
-  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:138-184`).
-  - Surfaces open at start or one per output (`Application::start` and `output`, `:195-205`); `Shell::open` (`:717`) and `close` (`:837`) are private, so no layer surface opens on a chosen output at run time.
-  - The keyboard handler (`:2009-2082`) ignores the keys held at `enter`, leaves `release_key` empty and keeps the modifiers to itself.
-  - `sync_window_focus` (`:1493`) gives AccessKit window focus to the surface that holds the keys.
+  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:148-181`).
+  - Surfaces open at start or one per output (`Application::start` and `output`, `:220-232`). When revision 3 was written, `Shell::open` and `close` were private, so no layer surface opened on a chosen output at run time; #1022 (2026-11-06) added the public `Shell::open_layer` (`:893`) and made `Shell::close` (`:914`) public.
+  - The keyboard handler (`src/driver.rs:3176-3257`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
+  - `sync_window_focus` (`src/driver.rs:2512`) gives AccessKit window focus to the surface that holds the keys.
   - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
 - **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
 

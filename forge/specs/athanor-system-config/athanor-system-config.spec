@@ -2,7 +2,7 @@
 %global __requires_exclude ^kernel-rt$
 Name:           athanor-system-config
 Version:        1.0.0
-Release:        %{?autorelease}%{!?autorelease:76.fc43%{?athanor_content}}
+Release:        %{?autorelease}%{!?autorelease:76.fc45%{?athanor_content}}
 Summary:        Athanor OS athanor-system-config
 License:        GPL-3.0-or-later
 URL:            https://github.com/ars-regia/athanor
@@ -10,7 +10,7 @@ BuildArch:      noarch
 
 Requires: cosmic-comp greetd greenboot systemd-ukify nodejs
 # athanor-session passes --keep-shortcuts, which Athanor's cosmic-comp patch adds (#144).
-Requires: cosmic-comp >= 1.10.0-2.fc43.athanor2
+Requires: cosmic-comp >= 1.11.0-2.fc45.athanor1
 # athanor-greeter-client builds the greeter's sandbox with bwrap and filters its system
 # bus through xdg-dbus-proxy.
 Requires: bubblewrap xdg-dbus-proxy
@@ -93,6 +93,8 @@ mv %{buildroot}/etc/greenboot/greenboot.conf %{buildroot}/usr/share/athanor-syst
 
 %changelog
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 1.0.0-76
+- Fedora 45 base: the release takes the fc45 dist tag, and the cosmic-comp requirement names
+  Athanor's fc45 build, which Fedora's own 1.11.0-2.fc45 does not satisfy.
 - Follow the rename of athanor-compositor to athanor-sulphur (ADR-0134): its crate,
   binaries, user unit, session script and data directory.
 

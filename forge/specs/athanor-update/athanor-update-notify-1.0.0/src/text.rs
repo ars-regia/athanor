@@ -55,7 +55,7 @@ impl Texts {
     /// into `/usr/share/zoneinfo`, which the Landlock ruleset grants.
     #[must_use]
     pub fn time(&self, seconds: i64) -> String {
-        let Ok(time) = jiff::Timestamp::from_second(seconds).map(|time| time.to_zoned(jiff::tz::TimeZone::system())) else { return String::new() };
+        let Ok(time) = jiff::Timestamp::from_second(seconds).map(|time| time.to_zoned_datetime(jiff::tz::TimeZone::system())) else { return String::new() };
         // A month is 1 to 12.
         format!("{} {}, {}", time.day(), self.months[usize::from(time.month().unsigned_abs() - 1)], time.strftime("%H:%M"))
     }
@@ -103,7 +103,7 @@ mod tests {
         assert_eq!(it.postpone, "Rimanda");
         assert!(it.postponed_until.contains("{time}") && en.postponed_until.contains("{time}"));
         // Local time: the day and hour depend on the zone, the month and the shape do not.
-        let local = jiff::Timestamp::from_second(1_790_604_800).expect("in range").to_zoned(jiff::tz::TimeZone::system());
+        let local = jiff::Timestamp::from_second(1_790_604_800).expect("in range").to_zoned_datetime(jiff::tz::TimeZone::system());
         let (day, hour) = (local.day(), local.strftime("%H:%M"));
         assert_eq!((en.time(1_790_604_800), it.time(1_790_604_800)), (format!("{day} September, {hour}"), format!("{day} settembre, {hour}")));
     }

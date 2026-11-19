@@ -113,7 +113,7 @@ fn create() -> Result<()> {
 fn prune() -> Result<()> {
     let snapshots = snapshots()?;
     let mut failed = Vec::new();
-    let now = Timestamp::now().to_zoned(TimeZone::UTC).datetime();
+    let now = Timestamp::now().to_zoned_datetime(TimeZone::UTC).datetime();
     for id in prunable(&snapshots, now) {
         let path = Path::new(SNAPSHOT_DIR).join(id);
         match btrfs(&[

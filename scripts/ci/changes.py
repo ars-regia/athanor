@@ -114,6 +114,7 @@ AREAS = {
         "flake.lock",
         "forge/scripts/retry.sh",
         "scripts/ci/security-audit.sh",
+        "scripts/ci/audited-lockfiles.txt",
         ".github/workflows/rust-security-audit.yml",
     ),
 }

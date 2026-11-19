@@ -66,7 +66,7 @@ FROM ${FORGE_REGISTRY}/athanor-forge-tier3-repo@${TIER3_DIGEST} AS tier3-repo
 # reaches an image. KERNEL_REGISTRY locates the mirror of the locked RPMs (lock.py). The two RPMs
 # built here carry SOURCE_DATE_EPOCH as their build time and file times, which the rpm database of
 # the NVIDIA variants records.
-FROM registry.fedoraproject.org/fedora:43@sha256:53bd1f7adf2b504673778ae4f8488a0ef0c16ca075ce1d72b582660590c0afdf AS nvidia-rpms
+FROM registry.fedoraproject.org/fedora:45@sha256:2f80a0ca2d1ed94d8979b2fc5f766f4ad6763bfdf290eca0de3df862340e7e83 AS nvidia-rpms
 ARG KERNEL_REGISTRY
 ARG SOURCE_DATE_EPOCH
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -77,9 +77,9 @@ RUN dnf5 install -y --setopt=install_weak_deps=False rpm-build python3 && \
 
 # Fedora's atomic desktop base (S1): the bootc base of Silverblue and Kinoite, pinned by
 # digest and moved by the bump bot.
-FROM quay.io/fedora-ostree-desktops/base-atomic:43@sha256:08056a9c8b568f7fff9cceff34e2fe1fe3401b6d7743fe2702a089ddbdea1e7a AS system
+FROM quay.io/fedora-ostree-desktops/base-atomic:45@sha256:eb54b6e50c84ef86b70b33068decf445b24847f96cbf138454ec2b28aa12d3b1 AS system
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-ARG FEDORA_VERSION=43
+ARG FEDORA_VERSION=45
 ENV FEDORA_VERSION=$FEDORA_VERSION
 ARG TETRAGON_VERSION=v1.3.0
 ARG ATHANOR_OWNED_EXCLUDES
@@ -89,6 +89,10 @@ ARG SOURCE_DATE_EPOCH
 # TIER 0: BEDROCK HARDWARE & KERNEL FOUNDATION
 # The tier repositories mount under /tmp: in an ostree image /mnt is a symlink to var/mnt,
 # which does not exist at build time, so podman cannot create a mount target below it.
+# The tier images are pinned by digest, so athanor-base-config installs at rpm's digest level:
+# rpm 6 refuses an unsigned package by default, and the forge's RPMs are not signed (UD44).
+# dnf5 installs local files without an OpenPGP check. verify.py update-trust allows no other
+# signature override.
 # The Azoth kernel's kernel-uki-virt and kernel-uki-virt-addons subpackages are left out of the
 # install: a UKI returns only with sealed composefs in 1.1 (D6, #491), and one on disk costs 69 MB.
 RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
@@ -102,7 +106,7 @@ RUN --mount=type=bind,from=tier0-repo,source=/,target=/tmp/tier0-repo \
     if [ -n "$BASE_CONFIG" ]; then \
         echo "Tier 0: Installing core Athanor Forge base configuration..." && \
         if rpm -q fedora-logos >/dev/null; then rpm -e --nodeps fedora-logos; fi && \
-        rpm -Uvh --replacefiles --replacepkgs --nodeps "$BASE_CONFIG"; \
+        rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps "$BASE_CONFIG"; \
     fi && \
     RPM_LIST=$(find /tmp/tier0-repo -name "*.rpm" 2>/dev/null | awk '!/systemd-standalone-|.*-free-.*\.rpm|glibc32|kernel-debug|rpm-.*\.rpm|fedora-release-|selinux-policy|athanor-base-config|-doc-|debuginfo|debugsource|kernel-uki-virt/ && (!/-devel-/ || /kernel-devel/)') && \
     if [ -n "$RPM_LIST" ]; then \

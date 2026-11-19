@@ -13,7 +13,8 @@ branches, and NVIDIA's container toolkit (the container-toolkit set) both varian
                                     package in the repository metadata
   lock.py verify SET --version V     compare locks/<SET>.lock, which must be at V, with the
                                     repository metadata; RPMs are downloaded only from a
-                                    repository whose metadata gives another checksum than SHA-256
+                                    repository whose metadata gives another checksum than SHA-256;
+                                    fails when the set's successor repository publishes it
   lock.py mirrored SET               print the mirror reference of locks/<SET>.lock and exit 0
                                     if the mirror holds every locked RPM
 
@@ -27,7 +28,8 @@ keep only the newest builds, so a lock outlives their files.
 
 Exit codes: 0 success, 3 the requested version is not published, 4 (verify) the repository
 publishes V with other files or checksums than the lock, 5 (mirrored) the mirror lacks a locked
-RPM, 1 any other error (network, metadata, lock file), 2 usage.
+RPM, 6 (verify) the set's successor repository publishes it, so the set must move there, 1 any
+other error (network, metadata, lock file), 2 usage.
 
 Locks always record SHA-256, the mirror's blob digest; a repository whose metadata gives
 SHA-512 (NVIDIA's) is checked by SHA-512 when the lock is written. GPG signatures are verified
@@ -39,11 +41,13 @@ import argparse
 import functools
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import pathlib
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -58,29 +62,51 @@ ARCHES = ("x86_64", "noarch")
 NOT_PUBLISHED = 3
 STALE = 4
 NOT_MIRRORED = 5
+MOVED = 6
 MIRROR = "athanor-nvidia-rpms"
 # The repository metadata checksums a lock can be generated from, with their names in messages.
 CHECKSUMS = {"sha256": "SHA-256", "sha512": "SHA-512"}
+# http_get's attempts and first delay, those of forge/scripts/retry.sh: the delay doubles from
+# 15 s, so the five attempts span about four minutes, long enough to outlast a restart.
+ATTEMPTS = 5
+DELAY = 15
+# The HTTP answers that pass: a server error and rate limiting. Any other status, a 404 or a 401
+# among them, is the server's real answer, and no attempt changes it.
+TRANSIENT = frozenset(range(500, 600)) | {429}
 BRANCHES = {
     "open": {
         "primary": "nvidia-driver",
-        "baseurl": "https://negativo17.org/repos/nvidia/fedora-43/x86_64/",
+        "baseurl": "https://negativo17.org/repos/nvidia/fedora-45/x86_64/",
         "packages": [
             "nvidia-driver", "nvidia-driver-common", "nvidia-driver-cuda", "nvidia-driver-cuda-libs",
             "nvidia-driver-libs", "nvidia-kmod-common", "nvidia-modprobe", "nvidia-persistenced",
         ],
         # nvidia-kmod-common requires (nvidia-driver-selinux if selinux-policy-targeted).
         "companions": ["nvidia-driver-selinux"],
+        "floor": False,
+        "successor": None,
     },
+    # RPM Fusion's Fedora 45 tree names the 580 branch -580xx; the unsuffixed names are the 615
+    # branch. It ships nvidia-modprobe and nvidia-persistenced only at 615, which the 580xx
+    # packages accept (>= their version), so those two are companions. The releases tree, not
+    # updates/45: on 2026-11-04 updates/45 publishes no NVIDIA package (#669).
     "legacy": {
-        "primary": "xorg-x11-drv-nvidia",
-        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/updates/43/x86_64/",
+        "primary": "xorg-x11-drv-nvidia-580xx",
+        "baseurl": "https://download1.rpmfusion.org/nonfree/fedora/releases/45/Everything/x86_64/os/",
         "packages": [
-            "nvidia-modprobe", "nvidia-persistenced", "nvidia-settings", "xorg-x11-drv-nvidia",
-            "xorg-x11-drv-nvidia-cuda", "xorg-x11-drv-nvidia-cuda-libs", "xorg-x11-drv-nvidia-libs",
-            "xorg-x11-drv-nvidia-power",
+            "nvidia-settings-580xx", "xorg-x11-drv-nvidia-580xx", "xorg-x11-drv-nvidia-580xx-cuda",
+            "xorg-x11-drv-nvidia-580xx-cuda-libs", "xorg-x11-drv-nvidia-580xx-libs",
+            "xorg-x11-drv-nvidia-580xx-power",
         ],
-        "companions": [],
+        "companions": ["nvidia-modprobe", "nvidia-persistenced"],
+        # Each companion at least at the driver's epoch:version (#943). RPM Fusion's metadata
+        # requires it of both through xorg-x11-drv-nvidia-580xx-cuda, which the set locks, and of
+        # nvidia-modprobe through xorg-x11-drv-nvidia-580xx as well. The floor is one rule for
+        # every companion, so a companion a future 580xx build stops requiring keeps it too.
+        "floor": True,
+        # Where the set's updates will appear: verify fails once it publishes the primary
+        # package, so the set moves there instead of staying on the frozen releases tree.
+        "successor": "https://download1.rpmfusion.org/nonfree/fedora/updates/45/x86_64/",
     },
     # CDI specs and the OCI hook for GPU containers (S4). NVIDIA's repository, not Fedora's
     # golang-github-nvidia-container-toolkit, which lags the security fixes. Not a kernel input:
@@ -93,6 +119,8 @@ BRANCHES = {
             "nvidia-container-toolkit-base",
         ],
         "companions": [],
+        "floor": False,
+        "successor": None,
     },
 }
 
@@ -105,9 +133,32 @@ class NotPublished(LockError):
     """The repository does not publish the branch at the requested version."""
 
 
+class Moved(LockError):
+    """The branch's successor repository publishes it: the lock reads a tree that has gone stale."""
+
+
 def http_get(url):
-    with urllib.request.urlopen(url, timeout=120) as response:
-        return response.read()
+    """The body at `url`. A transient failure (a network error, a timeout, HTTP 5xx or 429) is
+    retried as forge/scripts/retry.sh retries; the last one, or any other, is raised."""
+    delay = DELAY
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=120) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            if error.code not in TRANSIENT or attempt == ATTEMPTS:
+                raise
+            reason = f"HTTP {error.code}"
+        # After HTTPError, its subclass. A timeout, a reset or a body cut short during the read is
+        # not wrapped, and http.client's errors are not OSErrors.
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
+            if attempt == ATTEMPTS:
+                raise
+            reason = str(error)
+        print(f"lock.py: {url}: {reason}, attempt {attempt} of {ATTEMPTS}: retrying in {delay} s", file=sys.stderr)
+        time.sleep(delay)
+        delay *= 2
+    raise AssertionError("unreachable")
 
 
 def mirror_repository():
@@ -297,11 +348,12 @@ def evr_compare(one, two):
     return rpmvercmp(one[1], two[1]) or rpmvercmp(one[2], two[2])
 
 
-def select(primary_xml, names, version, companions=()):
+def select(primary_xml, names, version, companions=(), floor=None):
     """One entry per name at exactly `version`, and one per companion (a package whose version
     does not follow the driver's) at any version, for x86_64 or noarch. Each takes its newest
     published release: a repository may keep several rebuilds of one version, and the lock
-    records the chosen file by SHA-256 either way."""
+    records the chosen file by SHA-256 either way. With `floor`, one of `names`, a companion
+    older than that package's epoch:version is refused: the set requires it at least there."""
     releases = {name: [] for name in (*names, *companions)}
     for pkg in parse_xml(primary_xml).iter(f"{COMMON}package"):
         name = pkg.findtext(f"{COMMON}name")
@@ -335,8 +387,14 @@ def select(primary_xml, names, version, companions=()):
         top = [entry for evr, entry in published if evr_compare(evr, newest) == 0]
         if len(top) > 1:
             raise LockError(f"ambiguous at its newest release: {name}")
-        chosen[name] = top[0]
-    return [chosen[n] for n in sorted(chosen)]
+        chosen[name] = (newest, top[0])
+    if floor:
+        least = (chosen[floor][0][0], version, "")
+        low = sorted(n for n in companions if evr_compare(chosen[n][0], least) < 0)
+        if low:
+            found = ", ".join("{} {}:{}-{}".format(n, *chosen[n][0]) for n in low)
+            raise LockError(f"older than {least[0]}:{version}, which the set requires: {found}")
+    return [chosen[n][1] for n in sorted(chosen)]
 
 
 def vtuple(version):
@@ -387,15 +445,24 @@ def read_lock(path):
     return branch, version, baseurl, entries
 
 
-def primary_xml(branch, download):
-    base = BRANCHES[branch]["baseurl"]
+def primary_xml(base, download):
     href = primary_href(download(base + "repodata/repomd.xml"))
     return gzip.decompress(download(base + href))
 
 
 def resolve(branch, version, download):
-    return select(primary_xml(branch, download), BRANCHES[branch]["packages"], version,
-                  BRANCHES[branch]["companions"])
+    spec = BRANCHES[branch]
+    return select(primary_xml(spec["baseurl"], download), spec["packages"], version, spec["companions"],
+                  spec["primary"] if spec["floor"] else None)
+
+
+def moved_to(branch, download):
+    """Moved when the branch's successor repository publishes its primary package; a successor
+    that cannot be read is an error like any other (exit 1), never a move."""
+    successor, name = BRANCHES[branch]["successor"], BRANCHES[branch]["primary"]
+    if successor and any(pkg.findtext(f"{COMMON}name") == name
+                         for pkg in parse_xml(primary_xml(successor, download)).iter(f"{COMMON}package")):
+        raise Moved(f"{successor} publishes {name}: the {branch} set must move there from {BRANCHES[branch]['baseurl']}")
 
 
 def downloaded_sha256(entry, url, download):
@@ -439,12 +506,13 @@ def main(argv=None, download=http_get, mirror=None):
         if args.command == "latest":
             if not args.major:
                 raise LockError("latest needs --major")
-            print(newest(primary_xml(args.branch, download), BRANCHES[args.branch]["primary"], args.major))
+            print(newest(primary_xml(BRANCHES[args.branch]["baseurl"], download), BRANCHES[args.branch]["primary"], args.major))
             return 0
         if args.command == "verify":
             path, version, entries = load_lock(args.locks, args.branch)
             if version != args.version:
                 raise LockError(f"{path}: lock at {version}, {args.version} expected")
+            moved_to(args.branch, download)
             base = BRANCHES[args.branch]["baseurl"]
             published = {
                 (e["digest"] if e["checksum"] == "sha256" else downloaded_sha256(e, base + e["href"], download), base + e["href"])
@@ -492,6 +560,9 @@ def main(argv=None, download=http_get, mirror=None):
     except NotPublished as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return NOT_PUBLISHED
+    except Moved as error:
+        print(f"lock.py: {error}", file=sys.stderr)
+        return MOVED
     except (LockError, OSError) as error:
         print(f"lock.py: {error}", file=sys.stderr)
         return 1

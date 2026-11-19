@@ -14,8 +14,8 @@ use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 use vello_gpu::{
-    ClearSettings, ImageId, ImageSource, Pixmap, RenderSize, RenderTargetConfig, TargetInit,
-    TextureBindings,
+    ImageSource, Pixmap, RenderOptions, RenderTarget, RenderTargetConfig, TextureBindings,
+    TextureId, TextureRegion,
 };
 use wayland_client::{protocol::wl_surface::WlSurface, Connection, Proxy};
 use wgpu::rwh::{HasDisplayHandle, RawWindowHandle, WaylandWindowHandle};
@@ -39,43 +39,28 @@ struct Painter {
     scene: vello_gpu::Scene,
     /// The first error wgpu reported outside a call's result, which the next frame returns.
     errors: Arc<Mutex<Option<String>>>,
-    /// The size of the atlas vello_gpu made on `device`.
-    atlas_side: (u32, u32),
+    /// The largest side of a texture on `device`.
+    max_side: u32,
 }
 
-/// The total area of the images uploaded to vello_gpu's atlas, in pixels: one atlas of the eight
-/// it may grow to. vello_gpu panics when an upload finds no room (`upload_image` unwraps the
-/// allocation), and an image is uploaded only when it fits the atlas on each side
-/// ([`atlas_side`]), so the room this leaves keeps the packing from failing.
-// ponytail: an area budget, not the atlas's own accounting; read the allocator's free space
-// if vello_gpu ever exposes it.
-const ATLAS_BUDGET: u64 = 4096 * 4096;
-
-/// The width and height of vello_gpu's atlas on a device whose textures are at most
-/// `device_max` on a side: its default size, clamped to that limit as `Renderer::new` clamps
-/// it. An image larger on either side fails its upload, which vello_gpu unwraps.
-fn atlas_side(device_max: u32) -> (u32, u32) {
-    let (width, height) = vello_gpu::MemorySettings::default()
-        .image_atlas_config
-        .atlas_size;
-    let max = u16::try_from(device_max).unwrap_or(u16::MAX);
-    let side = |s: u16| u32::from(s.min(max).max(1));
-    (side(width), side(height))
+/// Whether `pixmap` fits a texture of a device whose textures are at most `max_side` on a side.
+/// wgpu fails a larger one, and with it every frame that binds it.
+fn fits(pixmap: &Pixmap, max_side: u32) -> bool {
+    u32::from(pixmap.width()) <= max_side && u32::from(pixmap.height()) <= max_side
 }
 
-/// Whether `pixmap` fits an atlas of `side`.
-fn fits(pixmap: &Pixmap, (width, height): (u32, u32)) -> bool {
-    u32::from(pixmap.width()) <= width && u32::from(pixmap.height()) <= height
-}
-
-/// vello_gpu's resources, and the images of the window uploaded to its atlas. vello_gpu 0.3
-/// panics on an image paint that carries its pixmap ("pixmap image sources are not supported
-/// by Vello GPU"): an image must be uploaded first and drawn by the id the upload returns.
+/// vello_gpu's resources, and the images of the window, each in a wgpu texture of its own.
+/// vello_gpu panics on an image paint that carries its pixmap ("pixmap image sources are not
+/// supported by Vello GPU"): an image is drawn from a texture bound by its id.
 pub struct Resources {
     vello: vello_gpu::Resources,
-    /// Each uploaded pixmap with its id. The `Arc` is held, so that the address it is matched
-    /// by is not reused while it is listed.
-    images: Vec<(Arc<Pixmap>, ImageId)>,
+    /// Each uploaded pixmap with the id its texture is bound by. The `Arc` is held, so that the
+    /// address it is matched by is not reused while it is listed.
+    images: Vec<(Arc<Pixmap>, TextureId)>,
+    /// The texture of each id of `images`; a view holds its texture.
+    bindings: TextureBindings,
+    /// The id the next upload takes.
+    next: u64,
     /// The pixmaps left out at the last frame for want of room, so that each is logged once.
     skipped: Vec<Arc<Pixmap>>,
 }
@@ -86,7 +71,9 @@ impl Resources {
         self.images
             .iter()
             .find(|(uploaded, _)| Arc::ptr_eq(uploaded, pixmap))
-            .map(|(_, id)| ImageSource::opaque_id(*id))
+            .map(|(uploaded, id)| {
+                ImageSource::external_texture(*id, TextureRegion::Full, uploaded.may_have_transparency())
+            })
     }
 
     /// What vello_gpu draws glyphs with.
@@ -213,9 +200,10 @@ impl Painter {
                 slot.get_or_insert_with(|| error.to_string());
             }
         }));
-        let atlas_side = atlas_side(device.limits().max_texture_dimension_2d);
+        let max_side = device.limits().max_texture_dimension_2d;
         let (renderer, resources) = vello_gpu::Renderer::new(
             &device,
+            &queue,
             &RenderTargetConfig {
                 format,
                 width: 1,
@@ -229,11 +217,13 @@ impl Painter {
             resources: Resources {
                 vello: resources,
                 images: Vec::new(),
+                bindings: TextureBindings::new(),
+                next: 0,
                 skipped: Vec::new(),
             },
             scene: vello_gpu::Scene::new(1, 1),
             errors,
-            atlas_side,
+            max_side,
         })
     }
 
@@ -246,29 +236,29 @@ impl Painter {
         view: &wgpu::TextureView,
     ) -> Result<(), Error> {
         self.scene.reset_and_resize(width, height);
-        let mut encoder = self.device.create_command_encoder(&Default::default());
-        self.upload_images(ui, &mut encoder);
+        self.upload_images(ui);
         paint(ui, scale, &mut self.scene, &mut self.resources)?;
+        let mut encoder = self.device.create_command_encoder(&Default::default());
+        // The default options clear the target first, as each frame draws all of it.
         self.renderer.render(
             &self.scene,
             &mut self.resources.vello,
-            &self.device,
-            &self.queue,
             &mut encoder,
-            &RenderSize { width, height },
-            view,
-            None,
-            &TextureBindings::new(),
-            TargetInit::Clear(ClearSettings::default()),
+            RenderTarget {
+                view,
+                depth_view: None,
+            },
+            &self.resources.bindings,
+            RenderOptions::default(),
         )?;
         self.queue.submit([encoder.finish()]);
         self.check()
     }
 
-    /// Uploads the images of `ui`'s widgets that the atlas lacks, and frees those no widget
-    /// holds any more. An image larger than the atlas on a side, or that would pass
-    /// [`ATLAS_BUDGET`], is left out, and logged.
-    fn upload_images(&mut self, ui: &Ui, encoder: &mut wgpu::CommandEncoder) {
+    /// Uploads each image of `ui`'s widgets that has no texture yet to a texture of its own, and
+    /// releases the textures of those no widget holds any more. An image larger on a side than
+    /// the device's textures is left out, and logged.
+    fn upload_images(&mut self, ui: &Ui) {
         let wanted: Vec<&Arc<Pixmap>> = ui
             .ids()
             .flat_map(|id| match &ui.widget(id).kind {
@@ -289,52 +279,59 @@ impl Painter {
             .into_iter()
             .partition(|(uploaded, _)| wanted.iter().any(|w| Arc::ptr_eq(w, uploaded)));
         resources.images = kept;
-        if !gone.is_empty() {
-            // destroy_image clears the freed rectangles with a pass in an encoder, while an
-            // upload writes through the queue, which runs before the next submission's passes:
-            // in the frame's encoder the clear would wipe an image uploaded to a freed
-            // rectangle. The clears go in a submission of their own, before the uploads.
-            let mut clears = self.device.create_command_encoder(&Default::default());
-            for (_, id) in gone {
-                self.renderer
-                    .destroy_image(&mut resources.vello, &mut clears, id);
-            }
-            self.queue.submit([clears.finish()]);
+        for (_, id) in gone {
+            // The view held the texture: wgpu frees it once no submitted frame reads it.
+            resources.bindings.remove(id);
         }
-        let area = |pixmap: &Pixmap| u64::from(pixmap.width()) * u64::from(pixmap.height());
-        let mut used: u64 = resources.images.iter().map(|(p, _)| area(p)).sum();
         let mut skipped = Vec::new();
         for pixmap in wanted {
             if resources.image(pixmap).is_some() {
                 continue;
             }
-            let large = !fits(pixmap, self.atlas_side);
-            if large || used + area(pixmap) > ATLAS_BUDGET {
+            let (width, height) = (u32::from(pixmap.width()), u32::from(pixmap.height()));
+            if !fits(pixmap, self.max_side) {
                 // Left out, so not drawn; the rest of the window is.
                 if !resources.skipped.iter().any(|s| Arc::ptr_eq(s, pixmap)) {
-                    let (width, height) = self.atlas_side;
-                    let reason = if large {
-                        format!("the GPU atlas is {width}x{height} pixels")
-                    } else {
-                        format!("the window's images pass the GPU atlas budget of {ATLAS_BUDGET} pixels")
-                    };
                     eprintln!(
-                        "athanor-sal: an image of {}x{} pixels is not drawn: {reason}",
-                        pixmap.width(),
-                        pixmap.height()
+                        "athanor-sal: an image of {width}x{height} pixels is not drawn: the GPU's \
+                         textures are at most {} pixels on a side",
+                        self.max_side
                     );
                 }
                 skipped.push(Arc::clone(pixmap));
                 continue;
             }
-            used += area(pixmap);
-            let id = self.renderer.upload_image(
-                &mut resources.vello,
-                &self.device,
-                &self.queue,
-                encoder,
-                pixmap,
+            let size = wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            };
+            // Premultiplied RGBA8, as the pixmap holds it and vello_gpu samples it.
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            self.queue.write_texture(
+                texture.as_image_copy(),
+                pixmap.data_as_u8_slice(),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: None,
+                },
+                size,
             );
+            let id = TextureId(resources.next);
+            resources.next += 1;
+            resources
+                .bindings
+                .insert(id, texture.create_view(&Default::default()));
             resources.images.push((Arc::clone(pixmap), id));
         }
         resources.skipped = skipped;
@@ -425,19 +422,17 @@ mod tests {
         Ok([pixel[0], pixel[1], pixel[2], pixel[3]])
     }
 
-    /// A picture wider than the atlas is left out instead of reaching vello_gpu's upload, which
-    /// aborts on it; one as wide as the atlas is uploaded. The atlas side follows the device's
-    /// limit below the default.
+    /// A picture wider or taller than the device's textures is left out instead of reaching
+    /// wgpu, which would fail the frame; one at the limit is uploaded.
     #[test]
-    fn a_picture_wider_than_the_atlas_is_not_uploaded() -> Result<(), Error> {
-        let side = atlas_side(8192);
-        assert_eq!(side, (4096, 4096));
-        assert_eq!(atlas_side(2048), (2048, 2048));
+    fn a_picture_larger_than_the_device_allows_is_not_uploaded() -> Result<(), Error> {
         let wide = Image::from_rgba8(4097, 1, vec![0; 4097 * 4])?;
-        assert!(!fits(wide.pixmap(), side));
+        assert!(!fits(wide.pixmap(), 4096));
+        let tall = Image::from_rgba8(1, 4097, vec![0; 4097 * 4])?;
+        assert!(!fits(tall.pixmap(), 4096));
         let edge = Image::from_rgba8(4096, 1, vec![0; 4096 * 4])?;
-        assert!(fits(edge.pixmap(), side));
-        assert!(!fits(edge.pixmap(), atlas_side(2048)));
+        assert!(fits(edge.pixmap(), 4096));
+        assert!(!fits(edge.pixmap(), 2048));
         Ok(())
     }
 
@@ -456,11 +451,11 @@ mod tests {
         }
     }
 
-    /// The image of a widget replaced by another of the same size: the second is uploaded to
-    /// the rectangle the first frees, and must survive the clear of that rectangle.
+    /// The image of a widget replaced by another of the same size: the first's texture is
+    /// released, and the second is drawn.
     #[test]
     #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
-    fn an_image_uploaded_where_another_was_freed_is_drawn() -> Result<(), Error> {
+    fn an_image_replaced_by_another_is_drawn() -> Result<(), Error> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         // No adapter fails the test: it runs only where one was asked for.
@@ -475,7 +470,7 @@ mod tests {
         Ok(())
     }
 
-    /// An icon toggle's image reaches the atlas, as an icon button's does, and is drawn.
+    /// An icon toggle's image is uploaded, as an icon button's is, and is drawn.
     #[test]
     #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
     fn an_icon_toggles_image_is_uploaded_and_drawn() -> Result<(), Error> {
@@ -495,7 +490,7 @@ mod tests {
         Ok(())
     }
 
-    /// A tile's glyphs, off and on, reach the atlas, as an icon button's image does. The glyph
+    /// A tile's glyphs, off and on, are uploaded, as an icon button's image is. The glyph
     /// sits in the disc, off the tile's centre, so only the upload is read.
     #[test]
     #[ignore = "needs a wgpu adapter: run with --features gpu -- --ignored where one exists"]
