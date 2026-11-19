@@ -129,6 +129,23 @@ class Lists(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertIn("does not hold `nix`", out[0])
 
+    def test_a_run_reaches_across_an_is_in_to_the_key(self):
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
+        cite = "`nix` and `nix-daemon` are in `upstream_core` (`%s:%s`)."
+        self.assertEqual(messages(cite % (self.PJ, "5-7"), keyed), [])
+        out = messages(cite % (self.PJ, "3-5"), keyed)
+        self.assertEqual(len(out), 1)
+        self.assertIn("does not hold `nix-daemon`", out[0])
+
+    def test_a_name_in_backticks_the_file_no_longer_holds_is_a_finding(self):
+        for text in (f"The `nix` and `gone-pkg` are at `{self.PJ}:6-7`.",
+                     f"The `gone-pkg` and `nix` are at `{self.PJ}:6-7`."):
+            with self.subTest(text=text):
+                out = self.found(text)
+                self.assertEqual(len(out), 1)
+                self.assertIn("does not hold `gone-pkg`", out[0])
+
     def test_a_name_of_another_clause_is_not_part_of_the_run(self):
         self.assertEqual(self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), [])
 
@@ -295,15 +312,16 @@ class Limits(unittest.TestCase):
 
 class Kept(unittest.TestCase):
     def test_the_kept_list_only_shrinks(self):
-        self.assertLessEqual(len(verify.LINE_CITATIONS_KEPT), 4)
+        self.assertLessEqual(len(verify.LINE_CITATIONS_KEPT), 2)
 
     def test_a_kept_entry_covers_one_citation_only(self):
-        key, why = next(iter(verify.LINE_CITATIONS_KEPT.items()))
-        moved = {(*key[:2], "1", *key[3:]): why}
-        with mock.patch.object(verify, "LINE_CITATIONS_KEPT", moved):
-            result = verify.check_line_citations()
-        self.assertTrue(any("matches no finding" in p for p in result.problems))
-        self.assertTrue(any("does not hold" in p for p in result.problems))
+        for key, why in verify.LINE_CITATIONS_KEPT.items():
+            with self.subTest(key=key):
+                moved = {(*key[:2], "1", *key[3:]): why}
+                with mock.patch.object(verify, "LINE_CITATIONS_KEPT", moved):
+                    result = verify.check_line_citations()
+                self.assertTrue(any("matches no finding" in p for p in result.problems))
+                self.assertTrue(any("does not hold" in p for p in result.problems))
 
     def test_a_kept_entry_that_matches_no_finding_fails(self):
         stale = dict(verify.LINE_CITATIONS_KEPT)
@@ -315,11 +333,12 @@ class Kept(unittest.TestCase):
         self.assertIn("doc_none.md", stale_problems[0])
 
     def test_a_kept_entry_names_the_nth_citation_of_its_key(self):
-        key, why = next(iter(verify.LINE_CITATIONS_KEPT.items()))
-        second = {(*key[:4], 2): why}
-        with mock.patch.object(verify, "LINE_CITATIONS_KEPT", second):
-            result = verify.check_line_citations()
-        self.assertTrue(any("matches no finding" in p for p in result.problems))
+        for key, why in verify.LINE_CITATIONS_KEPT.items():
+            with self.subTest(key=key):
+                second = {(*key[:4], 2): why}
+                with mock.patch.object(verify, "LINE_CITATIONS_KEPT", second):
+                    result = verify.check_line_citations()
+                self.assertTrue(any("matches no finding" in p for p in result.problems))
 
     def test_the_shipped_documents_pass(self):
         self.assertEqual(verify.check_line_citations().problems, [])

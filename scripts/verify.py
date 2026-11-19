@@ -6514,7 +6514,7 @@ PLAIN_PATH = re.compile(r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
 # that names nothing the check can match is a finding, and its hyphenated lowercase words
 # (`cosmic-osd`, not in backticks) count as tokens when the file holds them.
 LIST_FILES = {"packages.json", "Cargo.toml"}
-LIST_GAP = re.compile(r"[\s,`]*(?:and|or)?[\s,`]*")
+LIST_GAP = re.compile(r"[\s,`]*(?:and|or|(?:are|is)(?:\s+listed)?\s+(?:in|under))?[\s,`]*")
 BARE_NAME = re.compile(r"(?<![\w`/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/`-])")
 
 
@@ -6541,13 +6541,8 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    ("doc_settings.md", "forge/config/packages.json", "128-129", None, 1):
-        "a list of the files that change at the retirement step: the lines are the two entries it removes, "
-        "which no word of the sentence names",
-    ("doc_software.md", "forge/config/packages.json", "2-82", None, 1):
+    ("doc_software.md", "forge/config/packages.json", "2-82", "exclude", 1):
         "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
-    ("shell-features.md", "forge/config/packages.json", "25", None, 1):
-        "the package built from forge/specs/athanor-cliphist is listed as `cliphist`, not as the crate's name",
 }
 
 
@@ -6681,9 +6676,13 @@ def citation_findings(doc, text, tracked, read_file):
             tokens = usable(found)
             if listed:
                 # The items the citation names: the run of tokens next to it that only a comma,
-                # `and` or `or` separates; with none before it, the run that follows it.
+                # `and`, `or` or an `is in` separates (`nix` and `nix-daemon` are in `upstream_core`);
+                # with none before it, the run that follows it. A name in backticks stays in the run
+                # when the file no longer holds it, so a removed entry is a finding.
                 run = []
-                for item in reversed(tokens):
+                for item in reversed(sorted({*tokens, *(
+                        i for i in found if sentence[i[0] - 1:i[0]] == "`" == sentence[i[1]:i[1] + 1]
+                        and "." not in i[2] and not FILE_LIKE.search(i[2]) and i[2] not in own)})):
                     if run and not LIST_GAP.fullmatch(sentence[item[1]:run[-1][0]]):
                         break
                     run.append(item)
