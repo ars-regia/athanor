@@ -6506,6 +6506,24 @@ ROW_NAME = re.compile(r"\b([A-Z][a-z]+) row\b")
 # ends at the next such line or heading.
 SECTION_ID = re.compile(r"\b[A-Z]{1,4}\d+\b")
 SECTION_START = re.compile(r"\*\*[A-Z]{1,4}\d+[a-z]?\b|#{1,3} ")
+# A path with a directory and an extension written in plain text, with or without its `:N` span
+# (`forge/config/packages.json:128`): read as if it were in backticks.
+PLAIN_PATH = re.compile(r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
+                        r"(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?)(?![\w/`-])")
+# The files whose entries are named by words that are rarely in backticks: a citation of one
+# that names nothing the check can match is a finding, and its hyphenated lowercase words
+# (`cosmic-osd`, not in backticks) count as tokens when the file holds them.
+LIST_FILES = {"packages.json", "Cargo.toml"}
+LIST_GAP = re.compile(r"[\s,`]*(?:and|or)?[\s,`]*")
+BARE_NAME = re.compile(r"(?<![\w`/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/`-])")
+
+
+def backtick_plain_paths(line):
+    """`line` with each path written outside backticks put in backticks."""
+    parts = line.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = PLAIN_PATH.sub(lambda m: f"`{m.group(1)}`", parts[i])
+    return "`".join(parts)
 
 
 def section_lines(rows, ident):
@@ -6523,12 +6541,23 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
+    ("doc_settings.md", "forge/config/packages.json", "128-129", None, 1):
+        "a list of the files that change at the retirement step: the lines are the two entries it removes, "
+        "which no word of the sentence names",
+    ("doc_software.md", "forge/config/packages.json", "2-82", None, 1):
+        "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
+    ("shell-features.md", "forge/config/packages.json", "25", None, 1):
+        "the package built from forge/specs/athanor-cliphist is listed as `cliphist`, not as the crate's name",
 }
 
 
-def holds_token(text, token):
+def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
-    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open."""
+    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
+    `quoted` (a JSON file) the token must be a whole string: `"cosmic-settings"`, not
+    `cosmic-settings-daemon` or `cosmic-osd.service`."""
+    if quoted:
+        return f'"{token}"' in text
     word = re.escape(token.rsplit("::", 1)[-1])
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 
@@ -6558,6 +6587,13 @@ def citation_findings(doc, text, tracked, read_file):
     several words of one sentence (`packages.json:2, 51` for two lists), so the token cannot be
     attributed to one entry; each entry must still be a line range.
 
+    A path written in plain text (`forge/config/packages.json:128`) is read as one in backticks. For
+    `packages.json` and `Cargo.toml`, lists of entries, the check is stricter: the entries a
+    citation names are the run of names next to it that only a comma, `and` or `or` separates (before
+    it, else after it), each must be in the cited lines, a name is a backticked identifier or a
+    hyphenated lowercase word (`cosmic-osd`), a JSON name matches a whole string
+    (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
+
     Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
     place holding the token, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
@@ -6581,6 +6617,7 @@ def citation_findings(doc, text, tracked, read_file):
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
+        line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
@@ -6617,10 +6654,13 @@ def citation_findings(doc, text, tracked, read_file):
                 continue
             start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
             own = {part.split(".")[0] for part in path.split("/")}
+            listed = path.rsplit("/", 1)[-1] in LIST_FILES
             sentence = line[start + 1:span.start()]
-            found = [(m.start(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            found = [(m.start(), m.end(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            if listed:
+                found += [(m.start(), m.end(), m.group(0)) for m in BARE_NAME.finditer(sentence)]
             if path.endswith(".md"):
-                found += [(m.start(), m.group(1)) for m in ROW_NAME.finditer(sentence)]
+                found += [(m.start(1), m.end(1), m.group(1)) for m in ROW_NAME.finditer(sentence)]
             if path.endswith(".md"):
                 spans = {i: section_lines(rows, i) for i in dict.fromkeys(SECTION_ID.findall(sentence))}
                 spans = {i: lines for i, lines in spans.items() if lines}
@@ -6633,12 +6673,41 @@ def citation_findings(doc, text, tracked, read_file):
                         out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
                                     f"the section of {named}, which its sentence names: the lines moved"))
                         continue
-            tokens = [t for _, t in sorted(found)
-                      if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
+            quoted = path.endswith(".json")
+            def usable(items):
+                return [i for i in sorted(items) if not FILE_LIKE.search(i[2]) and i[2] not in own
+                        and holds_token(body, i[2], quoted)]
+
+            tokens = usable(found)
+            if listed:
+                # The items the citation names: the run of tokens next to it that only a comma,
+                # `and` or `or` separates; with none before it, the run that follows it.
+                run = []
+                for item in reversed(tokens):
+                    if run and not LIST_GAP.fullmatch(sentence[item[1]:run[-1][0]]):
+                        break
+                    run.append(item)
+                if not run:
+                    after = line[span.end():]
+                    ends = [i for i in (after.find(". "), after.find("; ")) if i >= 0]
+                    after = after[:min(ends)] if ends else after
+                    items = usable([(m.start(), m.end(), m.group(0))
+                                    for m in (*CITED_TOKEN.finditer(after), *BARE_NAME.finditer(after))])
+                    for item in items:
+                        if run and not LIST_GAP.fullmatch(after[run[-1][1]:item[0]]):
+                            break
+                        run.append(item)
+                tokens = run
+            else:
+                tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
-            if tokens and not holds_token(held, tokens[-1]):
-                out.append((number, path, spec, tokens[-1], f"{doc}:{number}: `{path}:{spec}` does not hold "
-                            f"`{tokens[-1]}`, which its sentence names: the lines moved"))
+            if listed and not tokens:
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` names no token "
+                            "that the file holds: put the entry's name in backticks, or hyphenated, "
+                            "in its sentence"))
+            elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
+                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}:{spec}` does not hold "
+                            f"`{missing}`, which its sentence names: the lines moved"))
     return out
 
 
@@ -6658,7 +6727,8 @@ def check_line_citations():
             return ""
 
     seen = set()
-    for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
+    for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
+                       ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
         for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1

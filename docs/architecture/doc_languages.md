@@ -87,7 +87,7 @@ Status: **revision 2, approved by the maintainer on 2026-10-08 with the recommen
 - **Locale data on the image** (checked on 2026-10-05, glibc 2.42-16.fc43).
   - `glibc-all-langpacks` is installed with an installed size of 237,950,035 bytes. `localedef --list-archive` lists 887 locales.
   - `system/Containerfile:408` keeps glibc-all-langpacks deliberately.
-  - `forge/config/packages.json:104-105` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
+  - `forge/config/packages.json:96-97` also install `glibc-langpack-en` (5,992,542 bytes) and `glibc-langpack-it` (3,720,981 bytes). These duplicate data that all-langpacks already ships.
   - `/usr/share/locale` holds 699 language directories (335 MB), because Fedora keeps translations inside the main packages (`%_install_langs` is `all`).
   - composefs is enabled (`/usr/lib/ostree/prepare-root.conf`), so the two identical locale archives (`locale-archive` and `locale-archive.real`, 233,242,544 bytes each, same sha256) are stored once.
 - **Fonts** (checked on 2026-10-05).
