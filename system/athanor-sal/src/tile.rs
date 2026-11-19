@@ -45,7 +45,7 @@ pub struct Tile {
     /// `None` before the first. [`Ui::layout`] records it.
     pub(crate) placed: Option<f32>,
     /// The glyph in the disc's inks, off and on, made by a layout from `image` and the theme's
-    /// inks: kept between frames, so that the GPU's atlas holds them and a frame tints nothing.
+    /// inks: kept between frames, so that the GPU keeps their textures and a frame tints nothing.
     pub(crate) glyphs: Option<Glyphs>,
 }
 

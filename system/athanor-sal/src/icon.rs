@@ -179,8 +179,8 @@ impl Image {
     /// by row from the top left, which are premultiplied in place. Refused when `pixels` does not
     /// hold exactly that many, or when a side is 0 or over 65535, the largest a buffer holds.
     /// [`MAX_IMAGE_SIDE`] applies to files only: a picture is as large as its output. The `gpu`
-    /// renderer draws no image larger than its atlas (4096 by 4096, or the device's limit when
-    /// smaller): it logs one line and leaves that part of the surface empty.
+    /// renderer draws no image larger on a side than the device's textures allow: it logs one
+    /// line and leaves that part of the surface empty.
     pub fn from_rgba8(width: u32, height: u32, pixels: Vec<u8>) -> Result<Self, Error> {
         Self::from_pixels(width, height, pixels, ImageAlphaType::Alpha)
     }
