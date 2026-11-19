@@ -18,7 +18,7 @@ FileChooser request (options, filters, choices, save names, the answer) lives in
 `xdg-desktop-portal-athanor` gains a Sal run beside its zbus thread, its confinement of PT3,
 and the FileChooser object; the switch of `athanor-portals.conf` is its own last change.
 
-**Tech stack:** Rust 2024, Sal (`vello_cpu`, parley, AccessKit, smithay-client-toolkit 0.21),
+**Tech stack:** Rust (edition 2021, as in every crate this plan touches), Sal (`vello_cpu`, parley, AccessKit, smithay-client-toolkit 0.21),
 zbus 6 on a current-thread Tokio runtime, GLib and GIO 0.22 as libraries (doc_files decision 4),
 Landlock through `athanor_unit::sandbox`, systemd user unit, xdg-desktop-portal 1.20 frontend
 and its document store.
@@ -80,7 +80,7 @@ ADR-0139, ADR-0141.
   input, remote_desktop, settings and testing; its `interfaces/` hold the RemoteDesktop,
   Request and Session XML. The backend's `interfaces/` hold only the Settings XML.
 - **Landlock has no make-directory grant.** `system/athanor-unit/src/sandbox.rs` offers
-  `ensure_single_threaded` (:21), `restrict` (:36), `restrict_writes` (:62-82, ABI V3) and
+  `ensure_single_threaded` (:21), `restrict` (:36), `restrict_writes` (:62-79, ABI V3) and
   `deny_tcp` (:84); `restrict_writes_and_mkdir` of PT3 does not exist. `src/dirs.rs` checks a
   granted directory on its descriptor and accepts a root-owned one (`owned_dir`, :94), which
   `/run/media` needs.
@@ -100,9 +100,10 @@ ADR-0139, ADR-0141.
   that measures every child (:2375-2381), `Kind::Field` (:358), `Kind::DropDown` (:347),
   `Kind::Menu` (:411), `Kind::Image` (:433) and `Ui::password` (:1135). No virtualised view,
   grid, multiple selection, column header or path bar exists (SR1-SR4, SR6).
-- **Sal translates few accelerators.** Only Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V (:2745-2748) and
-  Shift or Ctrl with the arrows (:2737-2742) reach an application as keys; Ctrl+L and Ctrl+H of
-  the chooser do not (SR11).
+- **Sal translates few accelerators.** Only Ctrl+A, Ctrl+C, Ctrl+X and Ctrl+V (:2745-2748), Shift+Left and
+  Shift+Right (`SelectLeft`, `SelectRight`, :2737-2738) and Ctrl with the arrows (:2739-2742)
+  reach an application as distinct keys; Shift+Up and Shift+Down arrive as plain Up and Down
+  with the modifier set, and Ctrl+L, Ctrl+H and Ctrl+Space are not translated (SR11).
 - **Sal's accessibility lacks the roles.** `a11y.rs` maps `Role::ListBox` (:324) and
   `Role::ListBoxOption` (:329); there is no grid, table, column header or position in set
   (SR14).
@@ -150,14 +151,17 @@ ADR-0139, ADR-0141.
 **Proposed:** one docs-only pull request that applies the amendments of "Changes owed" and
 records the maintainer's approval in each header: doc_files revision 3; doc_own_stack decisions
 39 and 40; doc_portal's amendment of 2026-11-18, extended with the PT2, PT3, PT7 and section 4
-items below. The maintainer approves it; nothing else in this plan opens a pull request before
+items below for the file chooser only; the access dialog (PT6) and the screen-sharing picker
+(PT9) keep their text until Decision D11 is decided. The maintainer approves it; nothing else in this plan opens a pull request before
 it merges.
 
 **Verification:** `python3 scripts/verify.py docs line-citations coverage`.
 
-**Acceptance:** each of the three headers names an approved revision; doc_portal no longer says
-GTK4, libadwaita, `GSK_RENDERER=cairo` or `/dev/dri` for the backend; PT2, PT3 and PT7 state
-what the maintainer decides for D1, D3, D4 and D6.
+**Acceptance:** each of the three headers names an approved revision; doc_portal's PT2, PT3 and
+PT7 describe the file chooser as a Sal window in the backend's process, with no GTK4, libadwaita,
+`GSK_RENDERER=cairo` or `/dev/dri` for it, and state what the maintainer decides for D1, D3, D4
+and D6; the text on PT6 and PT9 is untouched, as decision 8 of doc_files revision 3 and the
+2026-11-18 amendment leave it.
 
 ## Prerequisites in Sal (no Athanor dependency, ADR-0126)
 
@@ -219,13 +223,11 @@ chosen row (`:384`).
 
 **Proposed:** an item view over an application model (count, uniform item height, a callback
 that fills a row or a cell), making widgets only for the viewport plus a margin, in a list or a
-grid layout, with range-change events and keyboard navigation (arrows, Page, Home, End,
-type-ahead to a name). Accessibility: `ListBox`/`ListBoxOption` for the list, a grid role for
+grid layout, with range-change events and keyboard navigation (arrows, Page, Home, End, as decision 39's SR1 lists them). Accessibility: `ListBox`/`ListBoxOption` for the list, a grid role for
 the grid, position in set ("3 of 10,000") (SR14).
 
 **Tests:** `a_view_of_100000_items_makes_widgets_only_for_its_viewport`,
-`scrolling_reports_the_new_range`, `type_ahead_moves_the_cursor_to_the_first_match`, and the
-200 ms first-frame budget of decision 39 on 100,000 items.
+`scrolling_reports_the_new_range`, and the 200 ms first-frame budget of decision 39 on 100,000 items.
 
 **Acceptance:** the gallery shows 100,000 rows and the same items as a grid; Orca reads the
 position in set; right-to-left mirrors the grid.
@@ -233,6 +235,7 @@ position in set; right-to-left mirrors the grid.
 ### Task 0d: multiple selection (SR2)
 
 **Files:** `system/athanor-sal/src/item_view.rs`, `system/athanor-sal/src/a11y.rs`, `system/athanor-sal/gallery/`.
+Depends on 0c and 0g: Ctrl+Space reaches the view only through 0g's key translation.
 
 **Proposed:** a selection set with anchor and cursor on the item view: Ctrl+click, Shift+click,
 Ctrl+Space, Shift+arrows, Ctrl+A, rubber band; a single-selection mode for `multiple` false.
@@ -247,24 +250,26 @@ selected option as selected.
 
 **Files:** `system/athanor-sal/src/item_view.rs`, `system/athanor-sal/src/a11y.rs`, `system/athanor-sal/gallery/`.
 
-**Proposed:** header buttons over the list layout; each carries its sort direction; a click
-cycles it and raises an event; columns resize within bounds.
+**Proposed:** header buttons over the list layout; each carries a name, a share of the width and
+a sort state (ascending, descending, none); a click, or Enter on a header, reports the column
+and the application sorts its model (SR4). Columns are not resized or reordered by the user.
 
-**Tests:** `a_header_click_cycles_the_sort_direction`, `the_sort_direction_is_announced`.
+**Tests:** `a_header_click_reports_its_column`, `the_sort_state_is_announced`.
 
 **Acceptance:** AT-SPI shows a table with column headers carrying their sort direction (SR14).
 
 ### Task 0f: the path bar (SR6)
 
 **Files:** new `system/athanor-sal/src/path_bar.rs`, `system/athanor-sal/src/widget.rs`,
-`system/athanor-sal/src/a11y.rs`, `system/athanor-sal/gallery/`.
+`system/athanor-sal/src/a11y.rs`, `system/athanor-sal/gallery/`. Depends on 0g: Ctrl+L reaches the
+bar only through 0g's key translation.
 
 **Proposed:** a row of segment buttons that overflows into a menu button at its start; an
-editable location field that replaces it on Ctrl+L, a click on the bar's free space, or a typed
-`/` or `~`; Escape restores the buttons. Segments are opaque labels the application gives.
+editable location field that replaces it on Ctrl+L; Escape, or the focus leaving the field,
+restores the buttons (SR6). Segments are opaque labels the application gives.
 
 **Tests:** `segments_overflow_into_the_menu_from_the_start`, `ctrl_l_puts_the_field_in`,
-`escape_restores_the_segments`.
+`escape_restores_the_segments`, `the_focus_leaving_restores_the_segments`.
 
 **Acceptance:** a 30-segment path fits a 400 px window with the last segments visible; Orca
 reads each segment as a button.
@@ -274,10 +279,11 @@ reads each segment as a button.
 **Files:** `system/athanor-sal/src/driver.rs` (key translation), `system/athanor-sal/src/widget.rs`,
 `system/athanor-sal/src/a11y.rs`, `system/athanor-sal/gallery/`.
 
-**Gap:** only Ctrl+A/C/X/V and Ctrl or Shift with the arrows reach an application
-(`driver.rs:2737-2748`).
+**Gap:** only Ctrl+A/C/X/V, Shift+Left/Right and Ctrl with the arrows reach an application as
+distinct keys (`driver.rs:2737-2748`); Ctrl+L and Ctrl+Space are not translated.
 
-**Proposed:** an accelerator table an application registers (modifiers plus keysym to an
+**Proposed:** the translation of the keys the tasks above consume (Ctrl+L, Ctrl+Space and the set
+of Decision D9), and an accelerator table an application registers (modifiers plus keysym to an
 action), shown in tooltips and in AccessKit's keyboard shortcut; at least the set of Decision
 D9.
 
@@ -326,21 +332,21 @@ reads the sort column and direction.
 
 ### Task 3: the sidebar (FM12, FM14, FM17)
 
-**Files:** `system/athanor-files-view/src/sidebar.rs`, and per Decision D5 either
-`system/athanor-services/src/udisks.rs` or nothing there. Depends on 2.
+**Files:** `system/athanor-files-view/src/sidebar.rs`. Per Decision D5 nothing in
+`system/athanor-services`: the `udisks` module is `doc_disks.md`'s (DK3). Depends on 2.
 
 **Proposed:** Home, the XDG user directories, the bookmarks of
-`$XDG_CONFIG_HOME/gtk-3.0/bookmarks` (read only), removable drives (Decision D5), Trash shown by
+`$XDG_CONFIG_HOME/gtk-3.0/bookmarks` (read only), the removable filesystems already mounted
+under `/run/media` (Decision D5; listed, never mounted), Trash shown by
 the window only; Recent shown only when the host asks for it (Decision D4). Bookmark names are
 untrusted and escaped as names are.
 
-**Verification:** `forge/test/shell/rig.sh cargo test -p athanor-files-view sidebar`;
-`cargo test -p athanor-services udisks` if the model of Decision D5 lands.
+**Verification:** `forge/test/shell/rig.sh cargo test -p athanor-files-view sidebar`.
 
 **Acceptance, as the maintainer decides D4 and D5:** a bookmark to a missing folder shows
-disabled; a USB stick plugged in appears within a second; activated by a user in `wheel`, it
-mounts without a prompt; for a user outside `wheel`, until LP18's agent or `doc_disks.md`
-DK20 A lands, the mount is refused and the refusal named (doc_files decision 14).
+disabled; a USB stick mounted under `/run/media` appears in the sidebar within a second and
+leaves it when unmounted; the sidebar offers no mount, unlock or eject, which are FM21 step 4's
+and wait as doc_files decision 14 (a) says, for LP18's agent or `doc_disks.md` DK20 A.
 
 ### Task 4: thumbnails through the host callback (FM10, FM17, PT7)
 
@@ -372,14 +378,19 @@ Runs in parallel with every Sal task.
 with bounds on counts and lengths and refusal of malformed values; glob and MIME filter
 matching; the save name rule (no `/`, no NUL, not `.` or `..`); SaveFiles' " (2)", " (3)"
 naming; the per-application last folder held in memory; the `writable` answer from the real
-access; the TM3 rule of Decision D3 on canonical paths; the results map.
+access; the TM3 rule of Decision D3 on canonical paths (existing target: its canonical path; absent
+target: canonical parent plus name; a dangling link refused for writing; the canonical TM3 list;
+`writable` false for a folder that is, lies beneath or contains a TM3 path); the results map,
+which carries the checked canonical URI.
 
 **Verification:** `cargo test -p athanor-portal file_chooser`,
 `python3 scripts/verify.py panics zbus-replies`.
 
 **Acceptance:** `writable` is true for a file the user may write and false for one they may not
 (the two tests PT7 asks for); if the maintainer takes D3, a save into `~/.bashrc`, into `~/.config/autostart/` or through a
-link that resolves into a TM3 path is refused; 10,000 filters are refused, not parsed.
+link that resolves into a TM3 path (also `/var/home/...` for `/home/...`) is refused, a picked
+`~`, `~/.config` or `~/.local/share` with `directory` true answers `writable` false, and the
+answer holds the canonical URI that was checked; 10,000 filters are refused, not parsed.
 
 ### Task 6: the backend draws with Sal (PT2, PT3)
 
@@ -389,13 +400,21 @@ the spec's `%files` if anything new ships; `components.toml:402` description. De
 **Proposed:** per Decision D1, the main thread runs a resident Sal run with `GlibSource`, the
 zbus thread stays as it is, and the two talk through a channel woken in calloop. `confine()`
 keeps `ensure_single_threaded` first and calls `restrict_writes_and_mkdir` with the dconf
-runtime directory, the cache directory and `/tmp` as full writes and `$HOME` and `/run/media`
-as make-directory roots, then `deny_tcp`, all before the zbus thread starts. The unit gains
-`ReadWritePaths=%h -/run/media` (Decision D6 for `/run/media`). No interface is added yet.
+runtime directory and `/tmp` as full writes and `$HOME` and `/run/media` as make-directory
+roots, then `deny_tcp`, all before the zbus thread starts. The unit gains one line,
+`ReadWritePaths=%h -/run/media` (Decision D6 for `/run/media`); it has no `CacheDirectory=` and no
+`RuntimeDirectory=xdg-desktop-portal-athanor` and gains none, since nothing in the chooser writes
+there: thumbnails are held in memory (D8, PT7), and the unit's own runtime and cache directories
+of PT3 come with the first task that writes to them (screenshots in flight, PT8). `writable`
+(Task 5) is read by `access(W_OK)` in the unit's mount namespace, which makes it false, in the
+safe direction, for user-writable paths the namespace holds read-only: `/var/mnt/<label>`,
+`/mnt`, and the real `/tmp` and `/var/tmp` that `PrivateTmp` replaces. No interface is added yet.
 
 **Verification:** `cargo test -p xdg-desktop-portal-athanor`; `python3 scripts/verify.py
 services landlock-fd landlock-proc own panics`; the PT16 sandbox test in the VM: a write
-beneath `$HOME` fails, a `mkdir` succeeds, a `mkdir` on a mounted stick succeeds.
+beneath `$HOME` fails, a `mkdir` succeeds, a `mkdir` on a mounted stick succeeds; `access(W_OK)`
+is true beneath `$HOME` and `/run/media` and false (or the path absent) in `/var/mnt/<label>`,
+`/mnt`, `/tmp` and `/var/tmp`, recorded as the limit above.
 
 **Acceptance:** Settings still answers as before (its tests unchanged), with no compositor
 reachable as well: the Wayland connection is made at the first chooser request, and its
@@ -415,13 +434,13 @@ The window: the view and sidebar of `athanor-files-view`, a filter drop-down, `c
 boxes or drop-downs, the name field for SaveFile, New Folder, the accept button labelled by
 `accept_label` or the default; the requesting application's name from its desktop file, "An
 application" for an empty id (PT4); "Replace" with Cancel the default for an existing name.
-Mounting goes through UDisks2; nothing is formatted, ejected, renamed or deleted.
+The chooser mounts nothing (Decision D5); nothing is formatted, ejected, renamed or deleted.
 
 **Verification:** `cargo test -p xdg-desktop-portal-athanor file_chooser`; the PT16 frontend
 test on a private bus with the SH13 rig; the four surface variants of PT16; a test that injected
 input through an EIS context reaches no chooser surface (`backend_surface`, `eis.rs:617`).
 
-**Acceptance:** a `Close` on the Request while the dialog is shown closes it and answers 2; a
+**Acceptance:** a `Close` on the Request while the dialog is shown closes it and answers 1, as PT4 says; a
 second request from another application opens a second dialog while the first stays; a Flatpak
 application's SaveFile on a new name returns one URI that the document store grants write to.
 
@@ -432,7 +451,7 @@ application's SaveFile on a new name returns one URI that the document store gra
 accepts icons only for the first release (Decision D8).
 
 **Verification:** `python3 scripts/verify.py allow-list boundary shipped`; doc_portal acceptance
-4 on the reference laptop: Papers opens a PDF from the home and from a USB stick, and a text
+4 on the reference laptop: Papers opens a PDF from the home and from a mounted USB stick, and a text
 editor saves a new file and replaces an existing one after the question; PT17: first frame
 within 200 ms on 1,000 files, 64 MB PSS at rest; the maintainer's judgement.
 
@@ -442,9 +461,10 @@ reverting the `athanor-portals.conf` line alone restores GTK's.
 ## Order and parallelism
 
 1. Task 0 (docs, outside the pull request limit).
-2. In parallel: 0a, 0b, 0c, 0g, Task 1, Task 5. Then 0d and 0e after 0c; 0f in parallel.
-   That is at most seven open pull requests at once; with other work open, 0a, 0b and 0c go
-   first because everything else waits on them.
+2. In parallel: 0a, 0b, 0c, 0g, Task 1, Task 5. Then 0e after 0c, 0f after 0g, and 0d after 0c
+   and 0g (Ctrl+Space and Ctrl+L need 0g's key translation). The first wave is six open pull
+   requests, the next three open as their dependencies merge; with other work open, 0a, 0b, 0c
+   and 0g go first because everything else waits on them.
 3. Task 2 after 0c, 0d, 0e and 0f; Task 6 after 0a and 1, in parallel with Task 2.
 4. Task 3 after 2; Task 4 after 2 and 6; the two in parallel.
 5. Task 7 after 0b, 0g, 2, 3, 5 and 6.
@@ -467,11 +487,19 @@ alternative, one Sal run and one Wayland connection per request on a new thread,
 today's Sal, at the cost of a thread, a Wayland connection and a font load per dialog, and of
 dialogs that cannot share state such as the last folder without a lock.
 
-D3. **The persistence paths of TM3.** Recommended: SaveFile and SaveFiles refuse a target whose
-canonical path is, or lies beneath, a TM3 path, with a message naming Settings; OpenFile answers
-`writable` false for such a file; New Folder is refused beneath one; a `current_folder` or
-`current_file` in a TM3 path opens the home instead. The list becomes one constant that
-`verify.py` checks against `doc_threat_model.md` TM3 (a new check, per the audit rule). The
+D3. **The persistence paths of TM3.** Recommended: every comparison is on canonical paths, and
+TM3's list is canonicalised the same way (`/home` is a link to `/var/home`). A target's canonical
+path is its own when it exists, the canonical parent plus the name when it is absent (a new
+SaveFile name, New Folder), and a dangling link as the target name is refused for writing. SaveFile
+and SaveFiles refuse a target whose canonical path is, or lies beneath, a TM3 path, with a message
+naming Settings; OpenFile answers `writable` false for a file that is, or lies beneath, one, and
+for a picked folder (`directory` true) that is, lies beneath, or contains one (`~`, `~/.config`,
+`~/.local/share`), since a write grant on a folder covers its subtree; New Folder is refused
+beneath one; a `current_folder` or `current_file` in a TM3 path opens the home instead. The
+backend answers with the checked canonical URI, never the original, so a link re-pointed after the
+check cannot redirect the answer; a swap by another process of the same user after the answer is
+outside what the backend can check. The list becomes one constant that `verify.py` checks against
+`doc_threat_model.md` TM3 (a new check, per the audit rule). The
 alternative is to allow it, since the user picks the file; a deceptive application can still
 suggest `~/.bashrc` as `current_file`, and the document store's write grant outlives the dialog.
 
@@ -479,13 +507,17 @@ D4. **Recent in the chooser.** Recommended: hidden, as PT15 says, and read only 
 the view shows Recent only when its host asks. The alternative, FM12's full sidebar in the
 chooser, needs PT15 amended and Recent read through `glib::BookmarkFile`.
 
-D5. **Drives before DK3's model.** Recommended: the `udisks` model of `athanor-services` that
-FM14 names, limited to listing removable filesystems and `Filesystem.Mount`, in Task 3. UDisks2's
-own policy lets the active session mount without a prompt (`doc_files.md:21`), but Athanor's
-rule asks a user outside `wheel` for an administrator until `doc_disks.md` DK20 A ships
-(`doc_files.md:336`); with no polkit agent before LP18, that user's mount is refused and named,
-as decision 14 (b) does for the window. The alternative, `gio::VolumeMonitor` through gvfs, is
-smaller but contradicts FM14 and keeps a gvfs dependency the window would drop.
+D5. **Drives in the chooser.** Recommended, following decision 14 (a) of `doc_files.md` revision
+3 and DK3 of `doc_disks.md`: the chooser writes no udisks model, since `doc_disks.md` owns the
+`udisks` module of `athanor-services`; drive mounting, unlocking and ejection wait with FM21
+step 4 for LP18's agent or DK20 A. Task 3 lists the removable filesystems already mounted under
+`/run/media` and mounts nothing; once the module has landed (DK3, before step 4), the sidebar
+may read its state. Whether a stick reaches `/run/media` without the file manager's window
+(the session's automount, FM21 S7) is checked on the reference laptop before Task 8. The
+alternative reverses decision 14 (a): a mount action in the chooser through that module, limited
+to `Filesystem.Mount`, with a user outside `wheel` refused and the refusal named until LP18's
+agent or DK20 A, as decision 14 (b) does; it needs the module written first, and the
+maintainer's word.
 
 D6. **`/run/media` at start.** Recommended: the image ships a tmpfiles.d line creating
 `/run/media` (root, 0755), so Landlock's make-directory root and `ReadWritePaths=-/run/media`
@@ -512,16 +544,27 @@ D10. **Whether the chooser waits for the file manager's own engine.** Recommende
 chooser writes nothing but New Folder, which is one `mkdir` in the backend, and FM21 step 1 runs
 beside it. The alternative waits for the engine for one code path.
 
+D11. **How the access dialog (PT6) and the screen-sharing picker (PT9) leave GTK and
+libadwaita.** Decision 8 of `doc_files.md` revision 3 and the amendment of 2026-11-18 leave both
+unchanged, so `doc_portal.md` keeps its GTK4 and libadwaita wording for them. Recommended: a
+separate revision of `doc_portal.md` after the chooser, with its own approval and plan (PT18
+steps 2 and 5), and Task 0 limited to the chooser. The alternatives: extend Task 0's amendment to
+PT6 and PT9 now, which asks the maintainer to approve a design for two dialogs this plan does not
+build; or leave both on the gtk backend, as the table of `athanor-portals.conf` already does
+(`Access=gtk`, `ScreenCast=none`), until their steps, with no document revision.
+
 ## Changes owed
 
 - `doc_files.md:3` and section 8: record revision 3's approval (ADR-0074).
 - `doc_own_stack.md:82-85`, decisions 39 and 40: record their approval; decision 39 places the
   resident-process part of SR9 (Task 0a) and the chooser's SR11 set (Task 0g) before
   `athanor-files-view`, if D2 and D9 are taken.
-- `doc_portal.md` PT2: the backend draws with Sal (D1), with no GTK4, no libadwaita and no Sal
-  thread "beside GTK's"; PT6 and PT9's dialogs follow on the same run.
-- `doc_portal.md` PT3: no `GSK_RENDERER=cairo`, no `/dev/dri`; the unit's
-  `ReadWritePaths=%h -/run/media`; the reason for the main Wayland socket restated for Sulphur.
+- `doc_portal.md` PT2: the file chooser is drawn with Sal in the backend's process (D1), with no
+  GTK4, no libadwaita and no Sal thread "beside GTK's" for it; PT6 and PT9 are not changed here
+  (D11).
+- `doc_portal.md` PT3: no `GSK_RENDERER=cairo`, no `/dev/dri` for the chooser; the unit's
+  `ReadWritePaths=%h -/run/media`; the runtime and cache directories of its Landlock list wait
+  for PT8; the reason for the main Wayland socket restated for Sulphur.
 - `doc_portal.md` PT7: the TM3 rule of D3; Recent per D4.
 - `doc_portal.md` section 4, spike S3: rerun on Sulphur with GTK4, Qt 6 and Chromium handles;
   Sulphur's `fixture/parented.rs` covers the compositor half.
@@ -536,16 +579,22 @@ beside it. The alternative waits for the engine for one code path.
 - **The document store is the boundary.** The backend answers URIs and `writable`; the frontend
   registers each URI in the document store and grants the application read, and write when
   `writable` is true or for SaveFile. A wrong `writable` widens a sandbox for as long as the
-  grant lives, so Task 5 computes it from the real access and Task 7 tests both answers.
+  grant lives, so Task 5 computes it from the real access and Task 7 tests both answers. The
+  access is read in the unit's mount namespace, so `writable` is false for a path the user may
+  write but the unit sees read-only (`/var/mnt/<label>`, `/mnt`, the real `/tmp` and `/var/tmp`,
+  which `PrivateTmp` replaces): the safe direction, a limit and not a defect.
 - **Only the frontend calls.** `caller.rs` is reused; the FileChooser methods authorise before
   they parse.
-- **Landlock and the unit.** Reads everywhere; full writes only to the runtime, dconf, cache
-  directories and `/tmp`; beneath `$HOME` and `/run/media` only `MAKE_DIR` (PT3); no TCP. New
+- **Landlock and the unit.** Reads everywhere; full writes only to the dconf runtime directory
+  and `/tmp` (the unit's own runtime and cache directories wait for PT8); beneath `$HOME` and `/run/media` only `MAKE_DIR` (PT3); no TCP. New
   Folder is the only write the chooser makes. `ProtectSystem=strict` stays; `ReadWritePaths`
   opens the home only as far as Landlock lets it.
 - **TM3.** Without D3, a confined application can obtain a write grant on a persistence path
-  through SaveFile or a writable OpenFile, which TM3 reserves to Settings. D3's check runs on
-  the canonical path, so a link that resolves into a TM3 path is refused.
+  through SaveFile, a writable OpenFile, or a picked folder that contains one (`~`,
+  `~/.config`), which TM3 reserves to Settings. D3's check runs on the canonical path against
+  TM3's canonicalised list: a link that resolves into a TM3 path is refused, a folder that is,
+  lies beneath or contains one is never `writable`, and the answer carries the checked canonical
+  URI. A swap after the answer by another process of the same user is not closed by it.
 - **Untrusted text.** File names, bookmark names, the title, `accept_label`, filter and choice
   labels come from users or applications: escaped as FM18 requires, bounded in length, never
   markup.
@@ -554,15 +603,20 @@ beside it. The alternative waits for the engine for one code path.
   moved the chooser to another process would lose it. Task 7 tests it.
 - **Thumbnails.** Decoding runs in `athanor-preview-render` with `ProtectHome=yes`; the backend
   reads the shared cache and never writes it; Sal bounds every decoded image at 1024 px.
-- **Mounting.** Through UDisks2 and its polkit actions only; the chooser formats, ejects,
-  renames and deletes nothing (PT7).
+- **Mounting.** The chooser mounts, formats, ejects, renames and deletes nothing (PT7,
+  Decision D5); when a mount action is added it goes through the `udisks` module of
+  `doc_disks.md` and UDisks2's polkit actions only.
 
 ## Not in this plan
+
+Behaviour that decision 39 does not list, each needing an amendment of it first: type-ahead to a
+name in the item view, columns resized by the user (SR4 lists them as "Not taken"), and a path
+bar field entered by a click on free space or a typed `/` or `~` (SR6 has Ctrl+L only).
 
 Tabs (SR5), toasts (SR7), title-bar controls (SR8), raising with a caller's token (SR10), file
 clipboard (SR12), drag and drop between clients (SR13, decision 40), the file manager's window
 and FM21 steps 1 and 3-5, `FileManager1`, mimeapps and Nautilus's removal, the Access dialog
-(PT6) and the screenshot picker (PT9), and dropping `Requires: xdg-desktop-portal-gtk`.
+(PT6) and the screenshot picker (PT9) (Decision D11), and dropping `Requires: xdg-desktop-portal-gtk`.
 
 ## Review focus
 
