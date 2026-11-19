@@ -1,10 +1,10 @@
-"""Remote login defaults (ADR-0089 items 2 and 3, ADR-0103 D18): sshd is off on a new install and a
-machine that already has it enabled keeps it
+"""Remote login defaults (ADR-0089 items 2 and 3, ADR-0142): sshd is off on a new install, and the
+image leaves its state to Fedora's preset and to the person
 (python3 -B -m unittest discover -s system/tests -v).
 
-New install: every install kickstart runs `services --disabled=sshd`. Existing machine: the image keeps
-Fedora's preset, which enables sshd, and an upgrade does not rerun the kickstart, so the state in /etc
-survives; that holds only while nothing the image ships disables or masks sshd.
+New install: every install kickstart runs `services --disabled=sshd`. Existing machine: Fedora 45's
+81-desktop.preset disables sshd, so the switch turns off an sshd that only the image's default /etc
+enabled (ADR-0142 point 1); no package of Athanor enables, disables or masks it (point 2).
 """
 
 import pathlib
@@ -35,10 +35,10 @@ class NewInstallTest(unittest.TestCase):
 
 
 class ExistingMachineTest(unittest.TestCase):
-    def test_no_shipped_preset_disables_sshd(self):
+    def test_no_shipped_preset_names_sshd(self):
         for preset in ROOT.glob("forge/specs/*/SOURCES/**/system-preset/*.preset"):
             self.assertFalse(
-                [ln for ln in active_lines(preset.relative_to(ROOT)) if re.fullmatch(r"disable\s+(sshd\S*|\*)", ln)],
+                [ln for ln in active_lines(preset.relative_to(ROOT)) if re.fullmatch(r"(en|dis)able\s+(sshd\S*|\*)", ln)],
                 preset.name,
             )
 
