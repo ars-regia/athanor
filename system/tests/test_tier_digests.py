@@ -530,6 +530,25 @@ class TierDigests(unittest.TestCase):
                     r = self.resolve(mode, f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}")
                     self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
 
+    def test_a_dot_in_the_head_matches_only_a_dot(self):
+        """The head's dots are escaped in the identity regex: rebase/f.45 does not trust rebase/fX45."""
+        self.env["GITHUB_REF"] = "refs/pull/1317/merge"
+        self.env["GITHUB_BASE_REF"] = "iso-v0"
+        self.env["GITHUB_HEAD_REF"] = "rebase/f.45"
+        for identity, verdict in (
+            (f"{WORKFLOW}@refs/heads/rebase/f.45", "signed"),
+            (f"{WORKFLOW}@refs/heads/rebase/fX45", "unsigned"),
+        ):
+            with self.subTest(identity=identity):
+                self.publish(
+                    "ghcr.io/ars-regia",
+                    signers={"tier0": identity},
+                    api={"/repos/ars-regia/athanor/rules/branches/rebase/f.45": PROTECTED},
+                    **DIGESTS,
+                )
+                r = self.resolve("signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}")
+                self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+
     def test_a_landing_pull_request_with_partial_rules_is_not_trusted(self):
         for name, rules in (
             ("no code owner review", [
