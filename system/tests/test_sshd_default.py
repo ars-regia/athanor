@@ -48,9 +48,21 @@ class ExistingMachineTest(unittest.TestCase):
         # A link in any wants or requires directory, a mask, or a unit that pulls sshd in.
         found = [p for p in ROOT.glob("forge/specs/*/SOURCES/**/systemd/**/sshd*") if p.exists() or p.is_symlink()]
         self.assertEqual(found, [])
-        pulls = re.compile(r"^\s*(Wants|Requires|BindsTo|Upholds|Also)\s*=.*\bsshd\b", re.M)
-        units = [p for p in ROOT.glob("forge/specs/*/SOURCES/**/systemd/**/*") if p.is_file() and pulls.search(p.read_text(errors="ignore"))]
+        pulls = re.compile(r"^\s*(Wants|Requires|Requisite|BindsTo|Upholds|Also|Alias)\s*=.*\bsshd\b", re.M)
+        units = [
+            p
+            for p in ROOT.glob("forge/specs/*/SOURCES/**/systemd/**/*")
+            if p.is_file() and pulls.search(p.read_text(errors="ignore").replace("\\\n", " "))
+        ]
         self.assertEqual(units, [])
+
+    def test_no_build_step_or_tmpfiles_entry_turns_sshd_on_or_off(self):
+        # A scriptlet of a spec or a step of the image build, and a tmpfiles.d link.
+        command = re.compile(r"systemctl\b[^\n]*\b(enable|disable|mask|unmask|preset|add-wants|add-requires)\b[^\n]*\bsshd\b")
+        builds = [*ROOT.glob("forge/specs/*/*.spec"), ROOT / "system/Containerfile"]
+        self.assertEqual([p for p in builds if command.search(p.read_text().replace("\\\n", " "))], [])
+        link = re.compile(r"^\s*L\S*\s+\S*sshd", re.M)
+        self.assertEqual([p for p in ROOT.glob("forge/specs/*/SOURCES/**/tmpfiles.d/*") if link.search(p.read_text(errors="ignore"))], [])
 
     def test_the_image_check_allows_sshd_as_a_listener(self):
         text = (ROOT / "forge/config/contacts.toml").read_text()
