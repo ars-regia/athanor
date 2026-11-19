@@ -12,7 +12,7 @@ parley = "0.12"
 # Asks fontconfig for the font GTK draws Latin text with (text/fontconfig.rs). The version fontique
 # already links, so no crate enters the tree.
 yeslogic-fontconfig-sys = "6.0.1"
-vello_cpu = "0.3"
+vello_cpu = "0.4"
 # Rasterises the SVG icons of the icon theme; no text, fonts or embedded raster images.
 resvg = { version = "0.49.0", default-features = false }
 vello_gpu = { version = "0.3", default-features = false, features = ["wgpu", "text"], optional = true }
