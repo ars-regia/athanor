@@ -111,7 +111,7 @@ zeroize = "1.8.1"
 subtle = "2.6.1"
 
 # System Utilities & CLI
-nix = "0.31.3"
+nix = "0.32.0"
 calloop = "0.14.5"
 clap = { version = "4.6.4", features = ["derive"] }
 greetd_ipc = "0.10.3"
