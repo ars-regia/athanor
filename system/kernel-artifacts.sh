@@ -137,8 +137,8 @@ NVIDIA_PIN_FILES=(forge/specs/azoth/pins.env forge/specs/azoth/KERNEL.md forge/s
 # lock.py together, #669): only the NVIDIA variants use the packaging, and the check builds them
 # after the merge. Only the files that read the pins and locks: never the keys, the mirror
 # scripts or athanor-nvidia-config, and never build-rpms.sh or gate.sh, which build and judge the
-# variants: a change to either moves in its own pull request, whose check builds the variants
-# before the merge (#1323).
+# variants: a change to either moves in a pull request of its own, before or after the pins, and
+# is built and gated with every variant there when the kernel's artefacts are ready (#1323).
 NVIDIA_PIN_COMPANIONS=(system/nvidia/lock.py system/nvidia/azoth-nvidia-kmod.spec 'system/nvidia/tests/*' 'docs/*')
 KERNEL_PIN_FILES=("${NVIDIA_PIN_FILES[@]}" forge/specs/azoth/SOURCES/sources.sha256 forge/specs/azoth/builder/Containerfile forge/specs/azoth/builder/toolchain.lock forge/specs/azoth/boot/Containerfile forge/specs/azoth/boot/schbench.lock forge/specs/azoth/boot/toolchain.lock forge/specs/azoth/nvidia/Containerfile forge/specs/azoth/nvidia/toolchain.lock)
 # Kept by hand, not by kernel-bump.yml, but inputs of the kernel build like the pins
@@ -608,7 +608,7 @@ check_plan() {
         gpus='none nvidia' delta=true
         annotate warning "the legacy NVIDIA modules of azoth:$nvr are not published: the check builds the default and nvidia images only (ADR-0103 D24)"
       else
-        [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request, with only the NVIDIA packaging and documents"
+        [[ $only_nvidia_pins == true && $nvidia_moved == true && $other_moved == false ]] || die "the signed kernel artefacts of azoth:$nvr (NVIDIA modules, signed vmlinuz) are not published: with unchanged NVIDIA pins publishing them is the Orchestrator's job (bootstrap, interrupted publication or a new Secure Boot certificate), and NVIDIA pins move in their own pull request, with only lock.py, the kmod spec, the NVIDIA tests and documents (build-rpms.sh and gate.sh land in a pull request of their own)"
         grep -q '^boot_digest=.' "$FILE" || die "the signed vmlinuz of azoth:$nvr is not published, and every image copies it in: the Orchestrator publishes it (NVIDIA kmod) before an NVIDIA pin bump can be checked"
         gpus=none delta=true
         annotate warning "the NVIDIA modules of the new pins are not published yet: only the default image is built; the variants are built and gated after the merge"
