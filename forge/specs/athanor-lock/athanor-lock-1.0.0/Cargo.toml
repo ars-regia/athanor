@@ -1,0 +1,11 @@
+[package]
+name = "athanor-lock"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "The Athanor session lock, written in Sal (doc_lock_and_prompts.md, LP2)"
+authors = ["Athanor Forge <forge@athanor.os>"]
+
+# LP18 step 2, task 1: the crate, the unit and the package come first, with no dependency. Sal,
+# athanor-auth and zbus arrive with the tasks that use them.
+[dependencies]
