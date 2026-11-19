@@ -151,7 +151,7 @@ ADR-0139, ADR-0141.
 **Proposed:** one docs-only pull request that applies the amendments of "Changes owed" and
 records the maintainer's approval in each header: doc_files revision 3; doc_own_stack decisions
 39 and 40; doc_portal's amendment of 2026-11-18, extended with the PT2, PT3, PT7 and section 4
-items below for the file chooser only; the access dialog (PT6) and the screen-sharing picker
+items below for the file chooser only, and the amendment of decision 39's SR1 for type-ahead; the access dialog (PT6) and the screen-sharing picker
 (PT9) keep their text until Decision D11 is decided. The maintainer approves it; nothing else in this plan opens a pull request before
 it merges.
 
@@ -160,7 +160,8 @@ it merges.
 **Acceptance:** each of the three headers names an approved revision; doc_portal's PT2, PT3 and
 PT7 describe the file chooser as a Sal window in the backend's process, with no GTK4, libadwaita,
 `GSK_RENDERER=cairo` or `/dev/dri` for it, and state what the maintainer decides for D1, D3, D4
-and D6; the text on PT6 and PT9 is untouched, as decision 8 of doc_files revision 3 and the
+and D6; PT7's sentence on mounting from the sidebar through UDisks2 reads as Decision D5 leaves it
+(the chooser mounts nothing before FM21 step 4); the text on PT6 and PT9 is untouched, as decision 8 of doc_files revision 3 and the
 2026-11-18 amendment leave it.
 
 ## Prerequisites in Sal (no Athanor dependency, ADR-0126)
@@ -223,11 +224,13 @@ chosen row (`:384`).
 
 **Proposed:** an item view over an application model (count, uniform item height, a callback
 that fills a row or a cell), making widgets only for the viewport plus a margin, in a list or a
-grid layout, with range-change events and keyboard navigation (arrows, Page, Home, End, as decision 39's SR1 lists them). Accessibility: `ListBox`/`ListBoxOption` for the list, a grid role for
+grid layout, with range-change events and keyboard navigation (arrows, Page, Home, End, and type-ahead to a name in the current folder,
+which FM18 asks and SR1 does not list yet: see "Changes owed"). Accessibility: `ListBox`/`ListBoxOption` for the list, a grid role for
 the grid, position in set ("3 of 10,000") (SR14).
 
 **Tests:** `a_view_of_100000_items_makes_widgets_only_for_its_viewport`,
-`scrolling_reports_the_new_range`, and the 200 ms first-frame budget of decision 39 on 100,000 items.
+`scrolling_reports_the_new_range`, `type_ahead_moves_the_cursor_to_the_first_match`, and the
+200 ms first-frame budget of decision 39 on 100,000 items.
 
 **Acceptance:** the gallery shows 100,000 rows and the same items as a grid; Orca reads the
 position in set; right-to-left mirrors the grid.
@@ -337,15 +340,25 @@ reads the sort column and direction.
 
 **Proposed:** Home, the XDG user directories, the bookmarks of
 `$XDG_CONFIG_HOME/gtk-3.0/bookmarks` (read only), the removable filesystems already mounted
-under `/run/media` (Decision D5; listed, never mounted), Trash shown by
+under `/run/media/<user>` (Decision D5; listed, never mounted; read from `/proc/self/mountinfo`
+and read again when the file reports a change, see below), Trash shown by
 the window only; Recent shown only when the host asks for it (Decision D4). Bookmark names are
 untrusted and escaped as names are.
+
+**Mount watch:** "removable" means a mount point beneath `/run/media/<user>` (canonicalised),
+where udisks puts the drives a user may mount. The source is `/proc/self/mountinfo`, re-read when
+`poll()` reports `POLLPRI` on it, the kernel's signal that the mount table changed. calloop's
+`Generic` source expresses read and write interest only, so the watch is a GLib fd source with
+`IOCondition::PRI | IOCondition::ERR` on the default context, which D1's main loop runs through
+`GlibSource`; Task 3 confirms it on the rig. No crate of the workspace parses mountinfo today
+(searched on 2026-11-19), so the small parser (fields, octal escapes in the mount point) is new,
+in `athanor-files-view`, with a test on a fixture file.
 
 **Verification:** `forge/test/shell/rig.sh cargo test -p athanor-files-view sidebar`.
 
 **Acceptance, as the maintainer decides D4 and D5:** a bookmark to a missing folder shows
 disabled; a USB stick mounted under `/run/media` appears in the sidebar within a second and
-leaves it when unmounted; the sidebar offers no mount, unlock or eject, which are FM21 step 4's
+leaves it when unmounted, which rests on the mount watch below; the sidebar offers no mount, unlock or eject, which are FM21 step 4's
 and wait as doc_files decision 14 (a) says, for LP18's agent or `doc_disks.md` DK20 A.
 
 ### Task 4: thumbnails through the host callback (FM10, FM17, PT7)
@@ -379,7 +392,8 @@ with bounds on counts and lengths and refusal of malformed values; glob and MIME
 matching; the save name rule (no `/`, no NUL, not `.` or `..`); SaveFiles' " (2)", " (3)"
 naming; the per-application last folder held in memory; the `writable` answer from the real
 access; the TM3 rule of Decision D3 on canonical paths (existing target: its canonical path; absent
-target: canonical parent plus name; a dangling link refused for writing; the canonical TM3 list;
+target: canonical parent plus name; a dangling link refused for writing; any canonicalisation error refusing the write, never a
+fallback; the canonical TM3 list;
 `writable` false for a folder that is, lies beneath or contains a TM3 path); the results map,
 which carries the checked canonical URI.
 
@@ -490,7 +504,9 @@ dialogs that cannot share state such as the last folder without a lock.
 D3. **The persistence paths of TM3.** Recommended: every comparison is on canonical paths, and
 TM3's list is canonicalised the same way (`/home` is a link to `/var/home`). A target's canonical
 path is its own when it exists, the canonical parent plus the name when it is absent (a new
-SaveFile name, New Folder), and a dangling link as the target name is refused for writing. SaveFile
+SaveFile name, New Folder), and a dangling link as the target name is refused for writing. Any canonicalisation error (a
+dangling link in an intermediate component, an absent parent, a permission error) refuses the
+write, `writable` false or the save refused, and never falls back to the original path. SaveFile
 and SaveFiles refuse a target whose canonical path is, or lies beneath, a TM3 path, with a message
 naming Settings; OpenFile answers `writable` false for a file that is, or lies beneath, one, and
 for a picked folder (`directory` true) that is, lies beneath, or contains one (`~`, `~/.config`,
@@ -511,9 +527,12 @@ D5. **Drives in the chooser.** Recommended, following decision 14 (a) of `doc_fi
 3 and DK3 of `doc_disks.md`: the chooser writes no udisks model, since `doc_disks.md` owns the
 `udisks` module of `athanor-services`; drive mounting, unlocking and ejection wait with FM21
 step 4 for LP18's agent or DK20 A. Task 3 lists the removable filesystems already mounted under
-`/run/media` and mounts nothing; once the module has landed (DK3, before step 4), the sidebar
-may read its state. Whether a stick reaches `/run/media` without the file manager's window
-(the session's automount, FM21 S7) is checked on the reference laptop before Task 8. The
+`/run/media/<user>` and mounts nothing; once the module has landed (DK3, before step 4), the sidebar
+may read its state. This is a regression against the gtk chooser: switching the portals table
+removes its gvfs mount, so a stick that is not yet mounted is unreachable from the chooser until
+FM21 step 4 and LP18's agent, and doc_portal acceptance 4 ("from a USB stick") is met only for a
+mounted stick. Whether a stick reaches `/run/media` without the file manager's window
+(the session's automount, FM21 S7) is checked on the reference laptop before Task 8, and that check is the gate. The
 alternative reverses decision 14 (a): a mount action in the chooser through that module, limited
 to `Filesystem.Mount`, with a user outside `wheel` refused and the refusal named until LP18's
 agent or DK20 A, as decision 14 (b) does; it needs the module written first, and the
@@ -556,6 +575,9 @@ build; or leave both on the gtk backend, as the table of `athanor-portals.conf` 
 ## Changes owed
 
 - `doc_files.md:3` and section 8: record revision 3's approval (ADR-0074).
+- `doc_own_stack.md` decision 39, SR1: an amendment listing type-ahead to a name in the current
+  folder, which `doc_files.md` FM18 (revision 2) asks of the view and Task 0c builds; it is part of
+  Task 0's pull request.
 - `doc_own_stack.md:82-85`, decisions 39 and 40: record their approval; decision 39 places the
   resident-process part of SR9 (Task 0a) and the chooser's SR11 set (Task 0g) before
   `athanor-files-view`, if D2 and D9 are taken.
@@ -565,7 +587,10 @@ build; or leave both on the gtk backend, as the table of `athanor-portals.conf` 
 - `doc_portal.md` PT3: no `GSK_RENDERER=cairo`, no `/dev/dri` for the chooser; the unit's
   `ReadWritePaths=%h -/run/media`; the runtime and cache directories of its Landlock list wait
   for PT8; the reason for the main Wayland socket restated for Sulphur.
-- `doc_portal.md` PT7: the TM3 rule of D3; Recent per D4.
+- `doc_portal.md` PT7: the TM3 rule of D3; Recent per D4; the sentence "Mounting a removable drive
+  from the sidebar goes through UDisks2 under its own polkit actions" (`:127`) amended to D5: the
+  sidebar lists mounted drives, and mounting waits for FM21 step 4 and LP18's agent or DK20 A.
+  Acceptance 4 ("from a USB stick") is met only for a mounted stick.
 - `doc_portal.md` section 4, spike S3: rerun on Sulphur with GTK4, Qt 6 and Chromium handles;
   Sulphur's `fixture/parented.rs` covers the compositor half.
 - `doc_threat_model.md:95`: the owed TM3 clause for the FileChooser, closed by PT7's amendment.
@@ -604,13 +629,12 @@ build; or leave both on the gtk backend, as the table of `athanor-portals.conf` 
 - **Thumbnails.** Decoding runs in `athanor-preview-render` with `ProtectHome=yes`; the backend
   reads the shared cache and never writes it; Sal bounds every decoded image at 1024 px.
 - **Mounting.** The chooser mounts, formats, ejects, renames and deletes nothing (PT7,
-  Decision D5); when a mount action is added it goes through the `udisks` module of
+  Decision D5, which amends PT7's mounting sentence); when a mount action is added it goes through the `udisks` module of
   `doc_disks.md` and UDisks2's polkit actions only.
 
 ## Not in this plan
 
-Behaviour that decision 39 does not list, each needing an amendment of it first: type-ahead to a
-name in the item view, columns resized by the user (SR4 lists them as "Not taken"), and a path
+Behaviour that decision 39 does not list, each needing an amendment of it first: columns resized by the user (SR4 lists them as "Not taken"), and a path
 bar field entered by a click on free space or a typed `/` or `~` (SR6 has Ctrl+L only).
 
 Tabs (SR5), toasts (SR7), title-bar controls (SR8), raising with a caller's token (SR10), file
