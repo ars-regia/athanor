@@ -503,10 +503,10 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
   - Its globals include no COSMIC protocol (`S/data/globals`), so cosmic-launcher's switcher, a client of COSMIC's toplevel protocols, does not serve this session.
 - **The compositor client.** `Window { id, app_id, title, state, outputs }`, with `activated` and `minimized` in `state` and the window's output connectors in `outputs` (`system/athanor-sulphur-client/src/model.rs:51-61`). Neither compositor reports an order of use.
 - **Sal today** (`system/athanor-sal`).
-  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:138-184`).
+  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:148-181`).
   - Surfaces open at start or one per output (`Application::start` and `output`, `:220-232`). When revision 3 was written, `Shell::open` and `close` were private, so no layer surface opened on a chosen output at run time; #1022 (2026-11-06) added the public `Shell::open_layer` (`:893`) and made `Shell::close` (`:914`) public.
-  - The keyboard handler (`:2009-2082`) ignores the keys held at `enter`, leaves `release_key` empty and keeps the modifiers to itself.
-  - `sync_window_focus` (`:1493`) gives AccessKit window focus to the surface that holds the keys.
+  - The keyboard handler (`src/driver.rs:3176-3257`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
+  - `sync_window_focus` (`src/driver.rs:2512`) gives AccessKit window focus to the surface that holds the keys.
   - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
 - **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
 
