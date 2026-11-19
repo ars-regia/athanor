@@ -564,9 +564,10 @@ require_a11y() {
   a11y_bus set true || die "FAIL  the accessibility bus cannot be enabled"
 }
 release_a11y() {
-  [[ -e $A11Y_MARK ]] || return 0
-  a11y_bus set false || die "FAIL  the accessibility bus cannot be turned off again"
-  rm "$A11Y_MARK"
+  if [[ -e $A11Y_MARK ]]; then
+    a11y_bus set false || die "FAIL  the accessibility bus cannot be turned off again"
+    rm "$A11Y_MARK"
+  fi
 }
 shield_sheet() {
   require_a11y
