@@ -1391,7 +1391,7 @@ mod tests {
         let plain = ui.password(Ui::ROOT, "Other");
         ui.layout();
         ui.set_focus(Some(field));
-        ui.commit("pin");
+        ui.set_field_text(field, "pin");
         assert!(!node(&ui, field, 1.0).supports_action(Action::SetValue));
         assert!(node(&ui, plain, 1.0).supports_action(Action::SetValue));
         let set = |target| ActionRequest {

@@ -1139,8 +1139,8 @@ impl Ui {
 
     /// Adds a trusted password field named `name`, as the lock and the authentication prompts
     /// ask for one (doc_lock_and_prompts.md, D36): a [`Ui::password`] that takes only what is
-    /// typed on the keyboard. The input method is never enabled while it has the focus;
-    /// nothing is pasted in, from the keyboard, its menu or the middle button; an assistive
+    /// typed on the keyboard. The input method is never enabled while it has the focus, and
+    /// nothing it commits or composes reaches the field; nothing is pasted in, from the keyboard, its menu or the middle button; an assistive
     /// technology's SetValue is refused; and it keeps no selection, its selection commands
     /// moving the caret only. [`Ui::set_field_text`] still clears it.
     ///
@@ -3568,6 +3568,9 @@ impl Ui {
 
     /// Shows the input method's preedit in the focused field, scrolled to its caret.
     pub fn compose(&mut self, preedit: &str, cursor: Option<(usize, usize)>) {
+        if self.focus.is_some_and(|id| self.is_trusted_field(id)) {
+            return;
+        }
         if let Some(Kind::Field(field) | Kind::TextArea(field)) =
             self.focus.map(|id| &mut self.widgets[id].kind)
         {
@@ -3577,9 +3580,14 @@ impl Ui {
     }
 
     /// Commits the input method's text into the focused field, without the control
-    /// characters but a text area's newlines, as typing them would.
+    /// characters but a text area's newlines, as typing them would. A trusted password field
+    /// takes none: a commit the input method sent for the field focused before it, or one it
+    /// sends while disabled, is dropped.
     pub fn commit(&mut self, text: &str) -> Option<Event> {
         let id = self.focus?;
+        if self.is_trusted_field(id) {
+            return None;
+        }
         let multiline = matches!(self.widgets[id].kind, Kind::TextArea(_));
         let (Kind::Field(field) | Kind::TextArea(field)) = &mut self.widgets[id].kind else {
             return None;
@@ -5546,6 +5554,15 @@ mod tests {
             Some("axbc"),
             "typing replaced nothing"
         );
+    }
+
+    #[test]
+    fn trusted_password_refuses_commit() {
+        let (mut ui, field, _) = trusted("abc");
+        assert_eq!(ui.commit("x"), None, "a late or unasked commit is dropped");
+        ui.compose("y", Some((1, 1)));
+        assert_eq!(ui.password_text(field), Some("abc"));
+        assert_eq!(ui.field_text(field).as_deref(), Some("\u{25CF}\u{25CF}\u{25CF}"));
     }
 
     #[test]
