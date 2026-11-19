@@ -274,6 +274,15 @@ item = "SE23"
 purpose = "The layout chooser (os.athanor.Layout); retired when the Settings Desktop page lands"
 
 [[component]]
+path = "forge/specs/athanor-lock"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP2"
+purpose = "The session lock, written in Sal, and its guard user unit; installed and not enabled until LP18 step 3"
+
+[[component]]
 path = "forge/specs/athanor-matugen"
 kind = "rpm spec"
 area = "shell"

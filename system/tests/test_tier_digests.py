@@ -11,6 +11,8 @@ import unittest
 HERE = pathlib.Path(__file__).resolve().parent
 SCRIPT = HERE.parent / "tier-digests.sh"
 DIGESTS = {f"tier{n}": "sha256:" + "0123"[n] * 64 for n in range(4)}
+# What `latest` names beside the branch tiers of a landing pull request.
+LATEST = {f"tier{n}": "sha256:" + "abcd"[n] * 64 for n in range(4)}
 WORKFLOW = (
     "https://github.com/ars-regia/athanor/.github/workflows/call-system-image.yml"
 )
@@ -45,6 +47,7 @@ class TierDigests(unittest.TestCase):
                 "GITHUB_SERVER_URL",
                 "GITHUB_REF",
                 "GITHUB_BASE_REF",
+                "GITHUB_HEAD_REF",
                 "TIER_TRUSTED_REFS",
             )
         }
@@ -426,6 +429,157 @@ class TierDigests(unittest.TestCase):
         r = self.resolve("resolve")
         self.assertEqual(r.returncode, 1)
         self.assertIn("tier1: not signed by a trusted run", r.stderr)
+
+    def landing(self, head="rebase/fedora-45", base="iso-v0", rules=PROTECTED, branch_tag=True):
+        """A pull request from HEAD into BASE (ADR-0125's landing pull request by default): the
+        head branch's tiers, signed by its runs, under branch-<head>, beside other tiers under
+        `latest` signed by iso-v0. RULES is what the API answers for the head branch (None: the
+        call fails); BRANCH_TAG False leaves branch-<head> unpublished."""
+        self.env["GITHUB_REF"] = "refs/pull/1317/merge"
+        self.env["GITHUB_BASE_REF"] = base
+        self.env["GITHUB_HEAD_REF"] = head
+        self.publish(
+            "ghcr.io/ars-regia",
+            tag="branch-rebase-fedora-45",
+            signers={f"tier{n}": f"{WORKFLOW}@refs/heads/rebase/fedora-45" for n in range(4)},
+            api=None if rules is None else {RULES: rules},
+            **DIGESTS,
+        )
+        fixture = json.loads(self.fixture.read_text())
+        if not branch_tag:
+            fixture["tags"] = {}
+        for tier, digest in LATEST.items():
+            fixture["tags"][f"ghcr.io/ars-regia/athanor-forge-{tier}-repo:latest"] = digest
+            fixture["signatures"][f"ghcr.io/ars-regia/athanor-forge-{tier}-repo@{digest}"] = TRUSTED
+        self.fixture.write_text(json.dumps(fixture))
+        return self.resolve("resolve")
+
+    def calls(self):
+        log = self.dir / "calls.log"
+        return [json.loads(ln) for ln in log.read_text().splitlines()] if log.exists() else []
+
+    def test_a_landing_pull_request_builds_on_the_head_branch_s_tiers(self):
+        """Issue #1321: a rebase/* branch into iso-v0 or main builds on its own tiers, not on the
+        old release's `latest`."""
+        for base in ("iso-v0", "main"):
+            with self.subTest(base=base):
+                r = self.landing(base=base)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                out = json.loads(self.out.read_text())
+                self.assertEqual({k: v for k, v in out.items() if k.startswith("tier")}, DIGESTS)
+                self.assertEqual(out["registry"], "ghcr.io/ars-regia")
+                self.assertNotIn(":latest", json.dumps(self.calls()))
+                self.assertIn(["gh", "api", RULES], self.calls())
+
+    def test_an_ordinary_pull_request_into_iso_v0_still_reads_latest(self):
+        for head in ("fix/tiers", "fix/c++", "feature/rebase/x", "rebased"):
+            with self.subTest(head=head):
+                r = self.landing(head=head)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(
+                    {k: v for k, v in json.loads(self.out.read_text()).items() if k.startswith("tier")},
+                    LATEST,
+                )
+                self.assertNotIn("branch-", json.dumps(self.calls()))
+                self.assertNotIn("gh", [c[0] for c in self.calls()])
+
+    def test_a_rebase_head_into_another_branch_reads_the_base_as_before(self):
+        self.env["GITHUB_HEAD_REF"] = "rebase/fedora-46"
+        r = self.into_rebase_branch(PROTECTED)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.out.read_text())["tier2"], DIGESTS["tier2"])
+
+    def test_a_landing_pull_request_never_falls_back_to_latest(self):
+        for name, kw, message in (
+            ("no branch tag", {"branch_tag": False},
+             "ghcr.io/ars-regia/athanor-forge-tier0-repo:branch-rebase-fedora-45 cannot be read"),
+            ("unprotected", {"rules": []}, "the head branch 'rebase/fedora-45' is not protected by a ruleset"),
+            ("rules unreadable", {"rules": None}, "cannot read the rules of the head branch 'rebase/fedora-45'"),
+        ):
+            with self.subTest(name=name):
+                (self.dir / "calls.log").unlink(missing_ok=True)
+                self.out.unlink(missing_ok=True)
+                r = self.landing(**kw)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(message, r.stderr)
+                self.assertNotIn(":latest", json.dumps(self.calls()))
+                self.assertFalse(self.out.exists())
+
+    def test_signed_and_probe_on_a_landing_pull_request_trust_exactly_the_head(self):
+        """The head is added to the identity regex as one anchored branch name: a sibling, a
+        longer name or another case is a foreign identity."""
+        self.env["GITHUB_REF"] = "refs/pull/1317/merge"
+        self.env["GITHUB_BASE_REF"] = "iso-v0"
+        self.env["GITHUB_HEAD_REF"] = "rebase/fedora-45"
+        for identity, verdict in (
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-45", "signed"),
+            (TRUSTED, "signed"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-455", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedora-45x", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/Fedora-45", "unsigned"),
+            (f"{WORKFLOW}@refs/heads/rebase/fedoraX45", "unsigned"),
+        ):
+            for mode in ("signed", "probe"):
+                with self.subTest(identity=identity, mode=mode):
+                    self.publish(
+                        "ghcr.io/ars-regia",
+                        signers={"tier0": identity},
+                        api={RULES: PROTECTED},
+                        **DIGESTS,
+                    )
+                    r = self.resolve(mode, f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}")
+                    self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+
+    def test_a_dot_in_the_head_matches_only_a_dot(self):
+        """The head's dots are escaped in the identity regex: rebase/f.45 does not trust rebase/fX45."""
+        self.env["GITHUB_REF"] = "refs/pull/1317/merge"
+        self.env["GITHUB_BASE_REF"] = "iso-v0"
+        self.env["GITHUB_HEAD_REF"] = "rebase/f.45"
+        for identity, verdict in (
+            (f"{WORKFLOW}@refs/heads/rebase/f.45", "signed"),
+            (f"{WORKFLOW}@refs/heads/rebase/fX45", "unsigned"),
+        ):
+            with self.subTest(identity=identity):
+                self.publish(
+                    "ghcr.io/ars-regia",
+                    signers={"tier0": identity},
+                    api={"/repos/ars-regia/athanor/rules/branches/rebase/f.45": PROTECTED},
+                    **DIGESTS,
+                )
+                r = self.resolve("signed", f"ghcr.io/ars-regia/athanor-forge-tier0-repo@{DIGESTS['tier0']}")
+                self.assertEqual((r.returncode, r.stdout), (0, verdict + "\n"), r.stderr)
+
+    def test_a_landing_pull_request_with_partial_rules_is_not_trusted(self):
+        for name, rules in (
+            ("no code owner review", [
+                *(r for r in PROTECTED if r["type"] != "pull_request"),
+                {"type": "pull_request", "parameters": {"require_code_owner_review": False}},
+            ]),
+            ("pull_request without the parameter", [
+                *(r for r in PROTECTED if r["type"] != "pull_request"),
+                {"type": "pull_request", "parameters": {}},
+            ]),
+            ("force pushes allowed", [r for r in PROTECTED if r["type"] != "non_fast_forward"]),
+        ):
+            with self.subTest(name=name):
+                (self.dir / "calls.log").unlink(missing_ok=True)
+                self.out.unlink(missing_ok=True)
+                r = self.landing(rules=rules)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn("the head branch 'rebase/fedora-45' is not protected by a ruleset", r.stderr)
+                self.assertIn("tier0 tier1 tier2 tier3: not signed by a trusted run", r.stderr)
+                self.assertNotIn(":latest", json.dumps(self.calls()))
+                self.assertFalse(self.out.exists())
+
+    def test_a_head_branch_name_outside_the_branch_alphabet_dies(self):
+        for head in ("rebase/x|.*", "rebase/(x)", "rebase/x y", "rebase/$x"):
+            with self.subTest(head=head):
+                (self.dir / "calls.log").unlink(missing_ok=True)
+                r = self.landing(head=head)
+                self.assertEqual(r.returncode, 1, r.stderr)
+                self.assertIn(f"the head branch '{head}' is not a branch name", r.stderr)
+                self.assertEqual(self.calls(), [])
+                self.assertFalse(self.out.exists())
 
     def test_a_cosign_failure_is_an_error_not_a_missing_signature_signed(self):
         self.publish("ghcr.io/ars-regia", transient=("tier2",), **DIGESTS)

@@ -1,0 +1,41 @@
+[Unit]
+Description=Athanor session lock
+# A guard (doc_session.md, SN6; doc_lock_and_prompts.md, LP10): it is never given up, because a
+# lock that stays down leaves a dark locked screen with no way to unlock. It connects to the
+# compositor, so it starts after the readiness gate and requires it (SN3).
+After=graphical-session.target athanor-desktop.service
+Requisite=athanor-desktop.service
+PartOf=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/athanor-lock
+# SN6: the RESTART_RESET=1 a guard sends after 60 s of healthy running reaches the manager.
+NotifyAccess=main
+Restart=always
+RestartSec=100ms
+RestartSteps=5
+RestartMaxDelaySec=30s
+Slice=session.slice
+# MemoryMax= is set at spike L5's measurement plus 15% (LP15, ADR-0068), with LP18 step 2's
+# VM test.
+
+# LP15: Wayland, the system and session buses and athanor-unlockd's socket are all Unix sockets.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateNetwork=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+SystemCallFilter=@system-service
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX
+
+# Installed and not enabled until LP18 step 3, the switch, adds its user preset.
+[Install]
+WantedBy=athanor-session.target

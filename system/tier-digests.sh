@@ -20,6 +20,7 @@
 #               before a build is skipped or a job runs in it, issue #1205)
 #   probe REF [WORKFLOW]
 #               one attempt of signed
+#   tag         print the tag resolve reads, which system/kernel-artifacts.sh check-tier names
 #
 # The Orchestrator does not resolve: forge/scripts/publish_tiers.sh writes the same file with
 # the digests it published in the same run, and signs keyless each image it pushes. The file is
@@ -32,23 +33,27 @@
 # ars-regia/athanor) run on a branch of
 # TIER_TRUSTED_REFS (space separated, default "iso-v0 main"), or on the branch of this run when
 # GITHUB_REF is refs/heads/<name>: a branch run builds from the tiers it published itself, and no
-# trusted run accepts them. No other branch is trusted, rebase/* included, but for the base of a
-# pull request below: creating a branch is not protected, and a tier signed there could be
-# adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
+# trusted run accepts them. No other branch is trusted, rebase/* included, but for the base or
+# the rebase/* head of a pull request below: creating a branch is not protected, and a tier
+# signed there could be adopted by the next iso-v0 run. A missing or foreign signature is unsigned, and resolve and
 # verify fail on it; any other failure of cosign (registry, Rekor, TUF, network) is an error,
 # never a missing signature. Needs skopeo, cosign and jq, and a registry session when the tier
 # images are private.
 #
 # resolve reads the tag `latest`, except in a pull request (GITHUB_BASE_REF set) into a branch
-# other than iso-v0 and main, such as a rebase integration branch (ADR-0125): there it reads the
-# tag `branch-<base>` that forge/scripts/publish_tiers.sh gives that branch's tiers, and trusts
-# that branch's signatures when a ruleset on the branch requires a code owner's review of pull
+# other than iso-v0 and main, such as a rebase integration branch (ADR-0125), and in the pull
+# request that lands such a branch: one whose head (GITHUB_HEAD_REF) is a rebase/* branch and
+# whose base is iso-v0 or main (issue #1321). There it reads the tag `branch-<name>` that
+# forge/scripts/publish_tiers.sh gives the tiers of that base, or of that head, and trusts that
+# branch's signatures when a ruleset on the branch requires a code owner's review of pull
 # requests and forbids force pushes (decided by the maintainer on 2026-10-22), so the check
-# builds on the base it merges into. The branch's creation is not itself reviewed. `gh api`
-# (GH_TOKEN) reads the rules of the branch at check time: a pull_request rule with
-# require_code_owner_review and a non_fast_forward rule; rules that cannot be read are an error,
-# never an unprotected branch. The trust affects only that pull request's check, never the tiers
-# publish_tiers.sh reuses or anything pushed to iso-v0 or main.
+# builds on the base it merges into, or on the release the landing brings. The branch's
+# creation is not itself reviewed. `gh api` (GH_TOKEN) reads the rules of the branch at check
+# time: a pull_request rule with require_code_owner_review and a non_fast_forward rule; rules
+# that cannot be read are an error, never an unprotected branch. A landing pull request never
+# falls back to `latest`: a branch tag that cannot be read, or a branch that is not protected,
+# fails the resolve. The trust holds in every mode of this script within that pull request's
+# check, never for the tiers publish_tiers.sh reuses or anything pushed to iso-v0 or main.
 set -euo pipefail
 shopt -s inherit_errexit
 
@@ -65,7 +70,7 @@ die() {
     exit 1
 }
 case ${1:-}:$# in
-resolve:1 | verify:1 | signed:2 | probe:2) ;;
+resolve:1 | verify:1 | tag:1 | signed:2 | probe:2) ;;
 signed:3 | probe:3) [[ $3 == call-system-image.yml || $3 == call-dag-compile.yml || $3 == call-build-builder.yml ]] || usage ;;
 *) usage ;;
 esac
@@ -89,24 +94,36 @@ ISSUER=https://token.actions.githubusercontent.com
 # wrongly; any other verifier must not use it to tell "unsigned" from an error.
 UNVERIFIED='no signatures found|no matching CertificateIdentity|none of the expected identities matched|no matching signatures: *$|no matching signatures: error verifying bundle: empty key *$'
 
-# BASE: the base branch of a pull request into a branch other than iso-v0 and main, else empty.
-BASE=${GITHUB_BASE_REF:-}
+# BASE: the branch whose tiers a pull request builds on, else empty: the base of a pull request
+# into a branch other than iso-v0 and main, or the rebase/* head of one into iso-v0 or main.
+# KIND names which, for the messages.
+BASE=${GITHUB_BASE_REF:-} KIND=base
 if [[ $BASE == iso-v0 || $BASE == main ]]; then
     BASE=''
-elif [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
-    die "the base branch '$BASE' is not a branch name"
+    if [[ ${GITHUB_HEAD_REF:-} == rebase/* ]]; then
+        BASE=$GITHUB_HEAD_REF KIND=head
+    fi
+fi
+if [[ -n $BASE && ! $BASE =~ ^[A-Za-z0-9._/-]+$ ]]; then
+    die "the $KIND branch '$BASE' is not a branch name"
+fi
+# TAG: the tag resolve reads, `branch-<name>` as forge/scripts/publish_tiers.sh names BASE's tiers.
+TAG=latest
+if [[ -n $BASE ]]; then
+    TAG=${BASE,,}
+    TAG=branch-${TAG//[^a-z0-9._-]/-}
 fi
 
 # protected: whether a ruleset protects BASE; dies when its rules cannot be read.
 protected() {
     local rules verdict
     rules=$(gh api "/repos/${GITHUB_REPOSITORY:-ars-regia/athanor}/rules/branches/$BASE") ||
-        die "cannot read the rules of the base branch '$BASE'"
+        die "cannot read the rules of the $KIND branch '$BASE'"
     verdict=$(jq -r 'if type == "array" then
             any(.[]; .type == "pull_request" and .parameters.require_code_owner_review == true)
             and any(.[]; .type == "non_fast_forward")
         else error("not a list of rules") end' <<< "$rules") ||
-        die "cannot read the rules of the base branch '$BASE'"
+        die "cannot read the rules of the $KIND branch '$BASE'"
     [[ $verdict == true ]]
 }
 
@@ -135,7 +152,7 @@ trust() {
     if [[ -n $BASE ]] && protected; then
         refs+="|${BASE//./\\.}"
     elif [[ -n $BASE ]]; then
-        echo "tier-digests: the base branch '$BASE' is not protected by a ruleset: its tiers are not trusted" >&2
+        echo "tier-digests: the $KIND branch '$BASE' is not protected by a ruleset: its tiers are not trusted" >&2
     fi
     IDENTITY="^${workflow}@refs/heads/(${refs})\$"
 }
@@ -184,6 +201,7 @@ verify_tiers() {
 }
 
 case $1 in
+tag) echo "$TAG" ;;
 probe) probe "$2" ;;
 signed) signed "$2" ;;
 verify)
@@ -200,16 +218,12 @@ verify)
 resolve)
     registry=${REGISTRY_HOST:-ghcr.io}/${GITHUB_REPOSITORY_OWNER:-ars-regia}
     registry=${registry,,}
-    tag=latest
-    if [[ -n $BASE ]]; then
-        tag=${BASE,,}
-        tag=branch-${tag//[^a-z0-9._-]/-}
-    fi
     args=(--arg registry "$registry" --arg resolved "$(date -u +%Y-%m-%dT%H:%M:%SZ)")
     digests=()
     for n in 0 1 2 3; do
-        ref=$registry/athanor-forge-tier$n-repo:$tag
-        digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref")
+        ref=$registry/athanor-forge-tier$n-repo:$TAG
+        digest=$(bash "$ROOT/forge/scripts/retry.sh" skopeo inspect --format '{{.Digest}}' "docker://$ref") ||
+            die "$ref cannot be read"
         [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || die "$ref gave no digest: '$digest'"
         args+=(--arg "tier$n" "$digest")
         digests+=("$digest")

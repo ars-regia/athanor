@@ -34,7 +34,8 @@
     "cosmic-comp",
     "greenboot-rs",
     "polkit",
-    "unlockd"
+    "unlockd",
+    "lock"
   ],
   "custom_tier0": [
     "base-config",
@@ -77,7 +78,8 @@
     "sessiond",
     "recovery",
     "xdg-desktop-portal-athanor",
-    "unlockd"
+    "unlockd",
+    "lock"
   ],
   "cachyos_addons": [],
   "upstream_core": [

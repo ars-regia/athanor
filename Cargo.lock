@@ -615,6 +615,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-lock"
+version = "1.0.0"
+
+[[package]]
 name = "athanor-osd"
 version = "1.0.0"
 dependencies = [
