@@ -1,6 +1,6 @@
 # System image: base and GPU variants
 
-Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
+Status: **approved by the maintainer on 2026-09-16; implemented by the plan in history: `git show 1fbef951:docs/superpowers/plans/2026-09-16-system-image-variants.md`; S1 revised for the Fedora 45 base (ADR-0078) on 2026-10-21; S5 and the RPM Fusion risk revised for RPM Fusion's Fedora 45 tree on 2026-11-04 (#669)**. This document records what the maintainer decided on 2026-09-16: option C+A, with Fedora's atomic desktop base. `doc_kernel_build.md` (section 10) and `doc_kernel_profile.md` (sections 6 and 14) keep owning the kernel modules and the kernel profile; section 8 lists what they must change to agree with this document.
 
 ## 1. Context
 
@@ -29,10 +29,10 @@ The base the image used until S1, `ghcr.io/hr-mes/ermete-base-nvidia:latest`, wa
 
 ## 2. Decisions
 
-**S1. Base image.** The image starts from `quay.io/fedora-ostree-desktops/base-atomic:43`, pinned by digest.
+**S1. Base image.** The image starts from `quay.io/fedora-ostree-desktops/base-atomic:45`, pinned by digest (`:43` until the rebase of ADR-0078).
 
-- **Who publishes it:** the Fedora Atomic Desktops SIG, as the common base of Silverblue and Kinoite. It is rebuilt daily (`43.20260916.0` at the time of writing).
-- **What it is:** a bootc image (`containers.bootc=1`, `ostree.bootable=true`). It shares the bottom layer of `fedora-bootc:43` (same `ostree.final-diffid`) and adds the desktop plumbing: NetworkManager with Wi-Fi and WWAN, pipewire, bluez, firmware, CUPS, ibus, Mesa, flatpak and Xwayland.
+- **Who publishes it:** the Fedora Atomic Desktops SIG, as the common base of Silverblue and Kinoite. It is rebuilt daily (`43.20260916.0` when this document was approved, `45.20261021.0` when the base moved to Fedora 45).
+- **What it is:** a bootc image (`containers.bootc=1`, `ostree.bootable=true`). It shares the bottom layer of `fedora-bootc:45` (same `ostree.final-diffid`, checked again on 2026-10-21) and adds the desktop plumbing: NetworkManager with Wi-Fi and WWAN, pipewire, bluez, firmware, CUPS, ibus, Mesa, flatpak and Xwayland.
 - **What it replaces:** `ermete-base-nvidia`. The additions that base made become declared, reviewed content of this repository:
   - repositories, as pinned release packages with vendored GPG keys;
   - codecs: Cisco openh264 from Fedora's `fedora-cisco-openh264` repository replaces the `noopenh264` stub of the base;
@@ -76,7 +76,7 @@ The tier packages, the upstream packages, the signed kernel, the initramfs and t
 **S5. `athanor-system-nvidia-legacy`.** The same structure, with three differences:
 
 - the signed legacy modules come from `azoth-nvidia:<kernel-nvr>-legacy`;
-- the userspace is RPM Fusion's `xorg-x11-drv-nvidia` family at exactly `NVIDIA_LEGACY_VERSION`, including `xorg-x11-drv-nvidia-power` for suspend and resume, because negativo17 publishes no 580 for Fedora 43;
+- the userspace is RPM Fusion's `xorg-x11-drv-nvidia-580xx` family at exactly `NVIDIA_LEGACY_VERSION`, including `xorg-x11-drv-nvidia-580xx-power` for suspend and resume, because negativo17 publishes no 580 for Fedora 43 or 45. Fedora 45's tree ships `nvidia-modprobe` and `nvidia-persistenced` only at the open branch's version, which the 580xx packages accept (they require at least their own version), so the lock takes those two at their newest release;
 - no GSP firmware is needed.
 
 The shim provides whatever kernel-module capability those packages require; the implementation plan reads it from their `Requires` before building the shim.
@@ -145,8 +145,8 @@ A mismatch is a build failure with the exact values, never a warning.
   - A package negativo17 drops before the bot mirrors it is still lost. The bot mirrors on every daily run and right after it regenerates a manifest, which leaves a window of about one day.
   - The last-resort fallback is to extract firmware and userspace from NVIDIA's `.run` of the pinned version ourselves. `nvidia.sh` already downloads it for the legacy branch.
 - **RPM Fusion keeps only the latest release.**
-  - `updates/43` publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock every day and regenerates it by pull request; its kernel group moves the pin weekly (ADR-0109).
-  - When 580 becomes a legacy series, RPM Fusion renames the packages (`xorg-x11-drv-nvidia-580xx*`). That needs a change to the package list in `lock.py`, not only a version bump.
+  - The Fedora 45 tree the lock reads (`releases/45` while `updates/45` carries no NVIDIA package) publishes only the newest NVR of each package. The mirror (S7) keeps the pinned NVR building after RPM Fusion moves past it, and the bump bot verifies the lock every day and regenerates it by pull request; its kernel group moves the pin weekly (ADR-0109).
+  - When 580 became a legacy series, RPM Fusion renamed the packages (`xorg-x11-drv-nvidia-580xx*`), and the shim `azoth-nvidia-kmod` provides `nvidia-580xx-kmod` for them. A further rename needs a change to the package list in `lock.py`, not only a version bump.
 - **CI cost:** three image builds per cycle instead of one. The shared stages are cached layers, so only the GPU layer and the initramfs are paid three times.
 - **Flatpak applications** need the NVIDIA GL runtime extension matching the host driver version (`org.freedesktop.Platform.GL.nvidia-<version>`). flatpak installs it when the host driver is present; the hardware check covers it.
 - **Content drift of the base:** the digest pin plus a reviewed bump PR, with the package difference reported in the PR body.

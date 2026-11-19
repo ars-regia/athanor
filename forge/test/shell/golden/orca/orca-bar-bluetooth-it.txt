@@ -1,13 +1,14 @@
 Lettore schermo attivo.
-Bluetooth casella di spunta spuntata.
+Bluetooth
+Bluetooth pulsante di commutazione premuto
+Headphones, connesso pulsante
 tabulazione
-Headphones, connesso button.
+Keyboard pulsante
 tabulazione
-Keyboard button.
+Phone pulsante
 tabulazione
-Phone button.
+Speaker pulsante
 tabulazione
-Speaker button.
+Bluetooth pulsante di commutazione premuto
 tabulazione
-Bluetooth casella di spunta spuntata.
 Lettore schermo disattivato.

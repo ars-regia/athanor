@@ -212,11 +212,11 @@ class BumpGroups(unittest.TestCase):
             f"lock.sh: not signed by the Fedora key {f45}: kernel-7.4.1-300.fc46.src.rpm",
             r.stderr,
         )
-        self.assertEqual(imported, "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-46-primary\n")
+        self.assertEqual(imported, "/usr/share/pki/rpm-gpg/RPM-GPG-KEY-fedora-46-primary\n")
         # Control: the same release under its own key passes.
         r, imported = self.resolve_srpm_checksig("7.3.3-300.fc45", f45, f45)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(imported, "/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary\n")
+        self.assertEqual(imported, "/usr/share/pki/rpm-gpg/RPM-GPG-KEY-fedora-45-primary\n")
 
     def test_a_failed_lock_is_a_failed_prep_so_the_pull_request_still_opens(self):
         jobs = yaml.safe_load((AZOTH.parents[2] / ".github/workflows/kernel-bump.yml").read_text())["jobs"]

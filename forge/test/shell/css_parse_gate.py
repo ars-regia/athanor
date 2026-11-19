@@ -15,7 +15,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gio, Gtk  # noqa: E402
 
-KNOWN_BAD = ".x { backdrop-filter: blur(4px); color: red !important; }\n"
+KNOWN_BAD = ".x { no-such-property: 1px; color: red !important; }\n"
 
 
 def reports(path):

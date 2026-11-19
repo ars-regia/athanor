@@ -2,9 +2,9 @@
 # archive with five patches of ours; Fedora's own downstream patches are not carried, and
 # License and Requires were copied from Fedora's spec, so a bump diffs them by hand. Same
 # Name so that it replaces Fedora's build instead of sitting beside it (like
-# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc43.athanor1 sorts
-# above 1.8.0-1.fc43 and below 1.8.0-2.fc43: the Nix builder defines no %%dist.
-%global fedora_release 2.fc43
+# forge/specs/just). The release spells out Fedora's, so that 1.8.0-1.fc45.athanor1 sorts
+# above 1.8.0-1.fc45 and below 1.8.0-2.fc45: the Nix builder defines no %%dist.
+%global fedora_release 2.fc45
 # The commit of upstream's tag epoch-%{version}, embedded as GIT_HASH.
 %global commit 8cb1802caada438bb5cc7670dfabdaca5fad0502
 %global cosmic_minver 1.8.0
@@ -66,7 +66,7 @@ export GIT_HASH=%{commit}
 cargo build --release --locked
 
 %install
-# What the `install` recipe of upstream's justfile installs; 1.10.0 has no Makefile.
+# What the `install` recipe of upstream's justfile installs.
 install -Dm0755 target/release/cosmic-comp %{buildroot}%{_bindir}/cosmic-comp
 install -Dm0644 data/keybindings.ron \
     %{buildroot}%{_datadir}/cosmic/com.system76.CosmicSettings.Shortcuts/v1/defaults
@@ -80,16 +80,30 @@ install -Dm0644 data/tiling-exceptions.ron \
 %{_datadir}/cosmic/com.system76.CosmicSettings.WindowRules/v1/tiling_exception_defaults
 
 %changelog
+* Mon Nov 16 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor2
+- Build against wayland-backend 0.3.15 with a wire parser that rejects a null its signature
+  forbids, as libwayland does, and answers a malformed request with a protocol error.
+
 * Sun Nov 15 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc43.athanor2
 - Build against wayland-backend 0.3.15 with a wire parser that rejects a null its signature
   forbids, as libwayland does, and answers a malformed request with a protocol error.
 
+* Sun Nov 01 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc45.athanor1
+- Fedora's cosmic-comp 1.11.0-2.fc45.
+
 * Fri Oct 30 2026 Athanor Forge <forge@athanor.os> - 1.11.0-2.fc43.athanor1
 - Fedora's cosmic-comp 1.11.0-2.fc43.
+
+* Sun Oct 25 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc45.athanor2
+- Focus the lock surface when the session locks with no window and no keyboard focus: the
+  locker's password field took no keys until a click (pop-os/cosmic-greeter#474).
 
 * Sat Oct 24 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor3
 - Focus the lock surface when the session locks with no window and no keyboard focus: the
   locker's password field took no keys until a click (pop-os/cosmic-greeter#474).
+
+* Wed Oct 21 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc45.athanor1
+- Fedora's cosmic-comp 1.10.0-2.fc45.
 
 * Thu Oct 15 2026 Athanor Forge <forge@athanor.os> - 1.10.0-2.fc43.athanor2
 - Add --keep-shortcuts: with a command on the command line cosmic-comp ran as a kiosk and

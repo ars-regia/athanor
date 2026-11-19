@@ -1,22 +1,24 @@
 Lettore schermo attivo.
-Spazi di lavoro button.
-Applicazioni button.
-venerdì 18 settembre 2026, 10:00 contratto button.
-opens popup
-contratto
-Sorgente di input: English (US) contratto button.
-opens popup
-contratto
-Accessibilità contratto button.
-opens popup
-contratto
-Affiancamento contratto button.
-opens popup
-contratto
-Alimentazione contratto button.
-opens popup
-contratto
-Immagine di sistema verificata contratto button.
-opens popup
-contratto
+Barra
+Spazi di lavoro pulsante
+Applicazioni pulsante
+tabulazione
+venerdì 18 settembre 2026, 10:00 contratto pulsante
+apre un popup
+tabulazione
+Sorgente di input: English (US) contratto pulsante
+apre un popup
+tabulazione
+Accessibilità contratto pulsante
+apre un popup
+tabulazione
+Affiancamento contratto pulsante
+apre un popup
+tabulazione
+Alimentazione contratto pulsante
+apre un popup
+tabulazione
+Immagine di sistema verificata contratto pulsante
+apre un popup
+tabulazione
 Lettore schermo disattivato.

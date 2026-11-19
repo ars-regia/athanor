@@ -1,17 +1,18 @@
 Lettore schermo attivo.
-Contrasto elevato casella di spunta non spuntata.
+Accessibilità
+Contrasto elevato pulsante di commutazione non premuto
+Lettore dello schermo pulsante di commutazione non premuto
 tabulazione
-Lettore dello schermo casella di spunta non spuntata.
-Lente d'ingrandimento casella di spunta non spuntata.
+Lente d'ingrandimento pulsante di commutazione non premuto
 tabulazione
-Inverti i colori casella di spunta non spuntata.
+Inverti i colori pulsante di commutazione non premuto
 tabulazione
-Nessun filtro colore selezionato pulsante radio.
+Nessun filtro colore selezionato pulsante radio
 tabulazione
-Scala di grigi selezionato pulsante radio.
-Rosso-verde (protanopia) selezionato pulsante radio.
-Verde-rosso (deuteranopia) selezionato pulsante radio.
-Blu-giallo (tritanopia) selezionato pulsante radio.
-Contrasto elevato casella di spunta non spuntata.
+Scala di grigi selezionato pulsante radio
+Rosso-verde (protanopia) selezionato pulsante radio
+Verde-rosso (deuteranopia) selezionato pulsante radio
+Blu-giallo (tritanopia) selezionato pulsante radio
+Contrasto elevato pulsante di commutazione non premuto
 tabulazione
 Lettore schermo disattivato.

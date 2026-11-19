@@ -9,6 +9,9 @@
 # A soname that only another Athanor package provides, built in another job, fails here: no
 # spec has one today, and the first that does needs a way to name it.
 #
+# OpenSSL 3 (libssl.so.3, libcrypto.so.3) fails whoever provides it: the image carries
+# OpenSSL 4 only, and the openssl3-libs compat package of Fedora 45 must not reach it (M3).
+#
 # Runs in the Fedora image system/Containerfile pins (run_spec_build.sh), with network for
 # the repository metadata. A metadata download or a query that fails is an error, never a pass.
 # Usage: check_rpm_sonames.sh RPM...
@@ -23,6 +26,7 @@ here=$(dirname "${BASH_SOURCE[0]}")
 # A soname with a version after .so, as rpm's elfdeps writes it: libfoo.so.3()(64bit), or
 # libc.so.6(GLIBC_2.34)(64bit) for a symbol version.
 soname='^[^[:space:]()]+\.so\.[0-9][^[:space:]()]*\('
+openssl3='^lib(ssl|crypto)\.so\.3\('
 
 built=$(rpm -qp --provides "$@" | sed 's/ .*//' | sort -u)
 bash "$here/retry.sh" dnf5 -q makecache
@@ -32,6 +36,11 @@ for rpm in "$@"; do
     requires=$(rpm -qp --requires "$rpm" | sed 's/ .*//')
     while read -r requirement; do
         [[ $requirement =~ $soname ]] || continue
+        if [[ $requirement =~ $openssl3 ]]; then
+            echo "error: $(basename "$rpm") requires $requirement: OpenSSL 3 must not reach the image, link against OpenSSL 4 (M3)" >&2
+            bad=1
+            continue
+        fi
         grep -qxF -- "$requirement" <<< "$built" && continue
         rpm -q --quiet --whatprovides "$requirement" && continue
         providers=$(dnf5 -q repoquery --whatprovides "$requirement") || {
