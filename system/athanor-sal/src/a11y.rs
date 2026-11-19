@@ -304,7 +304,10 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
             });
             node.set_label(field.name.as_str());
             node.set_value(field.text());
-            node.add_action(Action::SetValue);
+            // A trusted password field takes only what is typed (Ui::trusted_password).
+            if !field.is_trusted() {
+                node.add_action(Action::SetValue);
+            }
             // Its edit menu, as GTK 4.24's entry says; AT-SPI receives it through the patched
             // accesskit_atspi_common (vendor/accesskit_atspi_common/PATCHES.md, #638).
             node.set_has_popup(HasPopup::Menu);
@@ -651,6 +654,7 @@ impl Ui {
             (Action::Increment, _) => self.step_value(id, 1),
             (Action::Decrement, _) => self.step_value(id, -1),
             (Action::SetValue, Some(ActionData::NumericValue(value))) => self.set_value(id, *value),
+            (Action::SetValue, Some(ActionData::Value(_))) if self.is_trusted_field(id) => None,
             (Action::SetValue, Some(ActionData::Value(value))) => self.set_field_text(id, value),
             _ => None,
         }
@@ -1377,6 +1381,32 @@ mod tests {
             data: None,
         };
         assert_eq!(menu.do_action(&click), None);
+    }
+
+    /// A trusted password field offers no SetValue, and refuses one sent anyway.
+    #[test]
+    fn trusted_password_refuses_set_value() {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        let plain = ui.password(Ui::ROOT, "Other");
+        ui.layout();
+        ui.set_focus(Some(field));
+        ui.set_field_text(field, "pin");
+        assert!(!node(&ui, field, 1.0).supports_action(Action::SetValue));
+        assert!(node(&ui, plain, 1.0).supports_action(Action::SetValue));
+        let set = |target| ActionRequest {
+            action: Action::SetValue,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: node_id(target),
+            data: Some(ActionData::Value("guess".into())),
+        };
+        assert_eq!(ui.do_action(&set(field)), None);
+        assert_eq!(ui.password_text(field), Some("pin"));
+        assert_eq!(ui.do_action(&set(plain)), Some(crate::Event::Edited(plain)));
+        assert_eq!(ui.password_text(plain), Some("guess"));
+        // The application still clears it.
+        ui.set_field_text(field, "");
+        assert_eq!(ui.password_text(field), Some(""));
     }
 
     #[test]
