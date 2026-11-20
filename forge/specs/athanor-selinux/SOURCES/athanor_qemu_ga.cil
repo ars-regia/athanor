@@ -1,0 +1,6 @@
+; The QEMU guest agent runs with NoNewPrivileges=yes (ADR-0144,
+; athanor-base-config's qemu-guest-agent.service.d/10-athanor.conf). Under no_new_privs the
+; kernel refuses systemd's transition to Fedora's confined domain unless the policy grants
+; nnp_transition, and the agent stays in init_t: measured on the Fedora 45 S1 guest on
+; 2026-11-20, `ps -Z` read init_t without this rule and the agent was confined with it.
+(allow init_t virt_qemu_ga_t (process2 (nnp_transition nosuid_transition)))

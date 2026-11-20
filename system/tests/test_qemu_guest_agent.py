@@ -13,6 +13,27 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "forge/specs/athanor-base-config"
 SOURCES = CONFIG / "SOURCES"
 FEDORA_RULE = "99-qemu-guest-agent.rules"
+SELINUX = ROOT / "forge/specs/athanor-selinux"
+# The whole allow-list of ADR-0144, decision 2. A new RPC is a choice to make in the ADR first.
+ALLOWED = {
+    "guest-sync-delimited",
+    "guest-sync",
+    "guest-ping",
+    "guest-info",
+    "guest-get-osinfo",
+    "guest-get-host-name",
+    "guest-get-timezone",
+    "guest-get-time",
+    "guest-set-time",
+    "guest-network-get-interfaces",
+    "guest-get-fsinfo",
+    "guest-fsfreeze-status",
+    "guest-fsfreeze-freeze",
+    "guest-fsfreeze-freeze-list",
+    "guest-fsfreeze-thaw",
+    "guest-fstrim",
+    "guest-shutdown",
+}
 # What a host could use to act inside the guest as root, or to read who is logged in.
 REFUSED = re.compile(
     r"^guest-(exec|file-|set-user-password|ssh-|suspend-|set-vcpus|set-memory-blocks|get-users)"
@@ -25,6 +46,10 @@ def active_lines(path):
         for ln in path.read_text().splitlines()
         if ln.strip() and not ln.lstrip().startswith("#")
     ]
+
+
+def active_cil(path):
+    return [ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.lstrip().startswith(";")]
 
 
 class OffByDefaultTest(unittest.TestCase):
@@ -71,13 +96,21 @@ class AllowListTest(unittest.TestCase):
         self.assertNotIn("--block-rpcs", value)
         return value.removeprefix("--allow-rpcs=").split(",")
 
-    def test_the_allow_list_refuses_commands_files_passwords_and_keys(self):
+    def test_the_allow_list_is_the_decided_one(self):
         rpcs = self.rpcs()
-        self.assertIn("guest-fsfreeze-freeze", rpcs)
-        self.assertEqual([r for r in rpcs if REFUSED.match(r)], [])
+        self.assertEqual(len(rpcs), len(set(rpcs)))
+        self.assertEqual(set(rpcs), ALLOWED)
 
-    def test_the_agent_runs_without_new_privileges(self):
+    def test_the_decided_list_refuses_commands_files_passwords_and_keys(self):
+        self.assertEqual(sorted(r for r in ALLOWED if REFUSED.match(r)), [])
+
+    def test_the_agent_runs_without_new_privileges_in_its_own_domain(self):
+        # Under no_new_privs the agent stays in init_t unless the policy grants the transition.
         self.assertIn("NoNewPrivileges=yes", self.lines)
+        rule = "(allow init_t virt_qemu_ga_t (process2 (nnp_transition nosuid_transition)))"
+        self.assertIn(rule, active_cil(SELINUX / "SOURCES/athanor_qemu_ga.cil"))
+        spec = (SELINUX / "athanor-selinux.spec").read_text()
+        self.assertIn("%{_datadir}/selinux/packages/athanor_qemu_ga.cil", spec)
 
 
 if __name__ == "__main__":

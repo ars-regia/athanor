@@ -59,9 +59,16 @@ Decided by the maintainer on 2026-11-20.
    It refuses commands, files, passwords, SSH keys, the users' list, suspend, and changes to
    CPUs and memory.
 
-   The drop-in also sets `NoNewPrivileges=yes` (TM8). A `QEMU_GA_ARGS` line written in
-   `/etc/sysconfig/qemu-ga` replaces the list, because systemd reads that file after the
-   drop-in. That is the person's choice.
+   The drop-in also sets `NoNewPrivileges=yes` (TM8), `LockPersonality=yes`,
+   `RestrictRealtime=yes` and `RestrictSUIDSGID=yes`. Under `no_new_privs` the kernel refuses
+   systemd's transition to Fedora's confined domain, `virt_qemu_ga_t`, unless the policy
+   grants `nnp_transition`, and the agent would run in `init_t`. That was measured on Fedora 45
+   on 2026-11-20. So `athanor-selinux` ships `athanor_qemu_ga.cil`, which grants it, as
+   `athanor_nix_daemon.cil` does for nix-daemon.
+
+   A `QEMU_GA_ARGS` line written in `/etc/sysconfig/qemu-ga` replaces the list, because systemd
+   reads that file after the drop-in. That is the person's choice. Fedora 45's file carries the
+   line commented out.
 
 ## Alternatives rejected
 
@@ -80,9 +87,13 @@ Decided by the maintainer on 2026-11-20.
   it. The release notes of that release say so, and give the command of point 1.
 - The acceptance moves `qemu-guest-agent.service` from `absent` to `disabled`
   (`scripts/devvm/acceptance/expectations.toml`). `system/tests/test_qemu_guest_agent.py`
-  checks the preset line, the udev rule, the package's file list and the allow-list.
+  checks the preset line, the udev rule, the package's file list, the allow-list against the
+  list of decision 2, and the policy rule that keeps the domain.
 - The development VM offers no agent port. The acceptance therefore reads the unit's state,
-  not a running agent. Whether an enabled agent starts and refuses `guest-exec` is checked
-  by hand, on a VM that offers the port.
+  not a running agent. On 2026-11-20 `qemu-ga` 11.1.3 was started on the Fedora 45 S1 guest
+  with this list on a Unix socket. It answered `guest-ping` and `guest-get-osinfo`, and refused
+  `guest-exec`, `guest-file-open`, `guest-ssh-get-authorized-keys` and `guest-get-users`. The
+  udev rule and the preset in a built image, on a VM that offers the port, are checked by
+  hand.
 - `doc_software.md` has no switch for the agent. Adding a row to its table of switches is a
   change to the specification, and is left to its next revision.
