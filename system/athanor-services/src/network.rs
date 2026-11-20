@@ -468,6 +468,84 @@ pub struct SecretsRequest {
     pub key_mgmt: Option<String>,
 }
 
+/// The `connection` argument of `GetSecrets`, `a{sa{sv}}`, reduced while zbus deserialises it
+/// to the three fields the agent reads: `connection.id`, `802-11-wireless.ssid` and the
+/// security setting's `key-mgmt`. Every other value, `psk`, `802-1x` and `vpn` secrets
+/// included, is skipped as `IgnoredAny`: it is never built into an owned value that would be
+/// freed without being wiped. What this cannot reach is zbus's: the received message buffer,
+/// which holds the whole dictionary as NetworkManager sent it until the call ends, and the
+/// socket's and kernel's buffers. None of those is wiped.
+struct ConnectionHints(BTreeMap<String, Props>);
+
+impl zbus::Type for ConnectionHints {
+    const SIGNATURE: &'static zbus::Signature = <BTreeMap<String, Props> as zbus::Type>::SIGNATURE;
+}
+
+/// The fields of the settings that `ConnectionHints` keeps, as (setting, key).
+const KEPT: [(&str, &str); 3] = [
+    ("connection", "id"),
+    ("802-11-wireless", "ssid"),
+    (SECURITY_SETTING, "key-mgmt"),
+];
+
+impl<'de> serde::Deserialize<'de> for ConnectionHints {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(HintsVisitor)
+    }
+}
+
+struct HintsVisitor;
+
+impl<'de> serde::de::Visitor<'de> for HintsVisitor {
+    type Value = ConnectionHints;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the settings of a connection")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let mut kept = BTreeMap::new();
+        while let Some(name) = map.next_key::<String>()? {
+            let props = map.next_value_seed(Setting(&name))?;
+            if !props.is_empty() {
+                kept.insert(name, props);
+            }
+        }
+        Ok(ConnectionHints(kept))
+    }
+}
+
+/// One setting, `a{sv}`, of which only the `KEPT` keys are built.
+struct Setting<'a>(&'a str);
+
+impl<'de> serde::de::DeserializeSeed<'de> for Setting<'_> {
+    type Value = Props;
+
+    fn deserialize<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<Props, D::Error> {
+        deserializer.deserialize_map(self)
+    }
+}
+
+impl<'de> serde::de::Visitor<'de> for Setting<'_> {
+    type Value = Props;
+
+    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a setting")
+    }
+
+    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Props, A::Error> {
+        let mut kept = Props::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if KEPT.contains(&(self.0, key.as_str())) {
+                kept.insert(key, map.next_value()?);
+            } else {
+                map.next_value::<serde::de::IgnoredAny>()?;
+            }
+        }
+        Ok(kept)
+    }
+}
+
 /// What the password page shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PasswordPage {
@@ -723,7 +801,7 @@ impl Agent {
 impl Agent {
     async fn get_secrets(
         &self,
-        connection: BTreeMap<String, Props>,
+        connection: ConnectionHints,
         connection_path: ObjectPath<'_>,
         setting_name: String,
         _hints: Vec<String>,
@@ -731,9 +809,13 @@ impl Agent {
         #[zbus(header)] header: Header<'_>,
     ) -> Result<SecretsReply, AgentError> {
         self.require_nm(&header, "GetSecrets")?;
-        let request = secrets_request(&connection, connection_path.as_str(), &setting_name, flags);
-        // The settings may carry secrets: nothing of them is kept past the request.
-        drop(connection);
+        let request = secrets_request(
+            &connection.0,
+            connection_path.as_str(),
+            &setting_name,
+            flags,
+        );
+        // `connection` holds the three fields read above and no secret: see `ConnectionHints`.
         if request.prompt().is_none() {
             return Err(AgentError::NoSecrets(
                 "this agent answers only Wi-Fi personal passwords".to_owned(),
@@ -2197,6 +2279,18 @@ mod tests {
         agent: &Connection,
         flags: u32,
     ) -> tokio::task::JoinHandle<zbus::Result<Message>> {
+        get_secrets_with(caller, agent, flags, "key-mgmt", "wpa-psk")
+    }
+
+    /// As `get_secrets`, with one more entry in the security setting: `psk` as NetworkManager
+    /// sends it when it re-requests a secret it holds.
+    fn get_secrets_with(
+        caller: &Connection,
+        agent: &Connection,
+        flags: u32,
+        extra: &'static str,
+        value: &'static str,
+    ) -> tokio::task::JoinHandle<zbus::Result<Message>> {
         let (caller, name) = (
             caller.clone(),
             agent.unique_name().expect("unique name").to_string(),
@@ -2214,7 +2308,10 @@ mod tests {
                 ("802-11-wireless", HashMap::from([("ssid", bytes(b"Home"))])),
                 (
                     SECURITY_SETTING,
-                    HashMap::from([("key-mgmt", Variant::from("wpa-psk"))]),
+                    HashMap::from([
+                        ("key-mgmt", Variant::from("wpa-psk")),
+                        (extra, Variant::from(value)),
+                    ]),
                 ),
             ]);
             let path = ObjectPath::try_from(SAVED)?;
@@ -2767,7 +2864,10 @@ mod tests {
         if let NetworkCommand::Join { password, .. } = &command {
             overwritten(password);
         }
-        fn answered<T: zeroize::ZeroizeOnDrop>(_: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>) {}
+        fn answered<T: zeroize::ZeroizeOnDrop>(
+            _: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>,
+        ) {
+        }
         answered(|prompt| prompt.reply);
     }
 
@@ -2828,7 +2928,10 @@ mod tests {
         let refused = get_secrets(&stranger, &rig.client, 0x1).await.unwrap();
         assert_eq!(outcome(&refused), DENIED);
         // The first request is still open: the stranger's cancel did not withdraw it.
-        prompt.reply.send(Some(Zeroizing::new("hunter2hunter2".into()))).unwrap();
+        prompt
+            .reply
+            .send(Some(Zeroizing::new("hunter2hunter2".into())))
+            .unwrap();
         let reply = asked.await.unwrap().unwrap();
         let answer: BTreeMap<String, Props> = reply.body().deserialize().unwrap();
         assert_eq!(
@@ -2853,6 +2956,56 @@ mod tests {
         assert_eq!(prompt.request.label, "Home");
         drop(prompt);
         assert_eq!(outcome(&asked.await.unwrap()), NO_SECRETS);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_connection_that_carries_a_psk_is_answered_as_one_without() {
+        let mut rig = rig(REPLY_TIMEOUT).await;
+        let asked = get_secrets_with(&rig.nm, &rig.client, 0x1, "psk", "old-secret");
+        let prompt = next_prompt(&mut rig.prompts).await;
+        assert_eq!(prompt.request.label, "Home");
+        assert_eq!(prompt.request.key_mgmt.as_deref(), Some("wpa-psk"));
+        prompt
+            .reply
+            .send(Some(Zeroizing::new("new".to_owned())))
+            .unwrap();
+        assert_eq!(outcome(&asked.await.unwrap()), "ok");
+    }
+
+    #[test]
+    fn the_connection_keeps_the_fields_the_agent_reads_and_nothing_else() {
+        let sent: HashMap<&str, HashMap<&str, Variant>> = HashMap::from([
+            (
+                "connection",
+                HashMap::from([("id", Variant::from("Home")), ("uuid", Variant::from("u"))]),
+            ),
+            ("802-11-wireless", HashMap::from([("ssid", bytes(b"Home"))])),
+            (
+                SECURITY_SETTING,
+                HashMap::from([
+                    ("key-mgmt", Variant::from("wpa-psk")),
+                    ("psk", Variant::from("secret")),
+                ]),
+            ),
+            ("802-1x", HashMap::from([("password", Variant::from("pw"))])),
+        ]);
+        let context = zbus::wire::serialized::Context::new(zbus::wire::LE, 0);
+        let encoded = zbus::wire::to_bytes(context, &sent).unwrap();
+        let (kept, _): (ConnectionHints, _) = encoded.deserialize().unwrap();
+        let kept = kept.0;
+        assert_eq!(
+            kept.keys().map(String::as_str).collect::<Vec<_>>(),
+            ["802-11-wireless", SECURITY_SETTING, "connection"]
+        );
+        assert_eq!(kept["connection"].keys().collect::<Vec<_>>(), ["id"]);
+        assert_eq!(
+            kept[SECURITY_SETTING].keys().collect::<Vec<_>>(),
+            ["key-mgmt"]
+        );
+        assert_eq!(
+            secrets_request(&kept, "/s/1", SECURITY_SETTING, 1).label,
+            "Home"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
