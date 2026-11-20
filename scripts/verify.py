@@ -3848,7 +3848,9 @@ def advisory_lock_problems(root=None):
     members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
                 if isinstance(d, dict) and "path" in d}
     listed, unaudited, problems = [], [], []
-    for number, line in enumerate(read(root / AUDITED_LOCKFILES).splitlines(), 1):
+    # Split on "\n" only, as the shell reader does: CRLF, \x0b, \x0c and \x85 stay in the line.
+    raw = (root / AUDITED_LOCKFILES).read_bytes().decode("utf-8", errors="replace")
+    for number, line in enumerate(raw.split("\n"), 1):
         if line != line.strip():
             # security-audit.sh takes a line as it is, so a stray blank is part of a path there
             problems.append(f"{AUDITED_LOCKFILES}:{number}: leading or trailing whitespace, which "
@@ -6579,7 +6581,8 @@ def diff_hunks(root, base):
     an insertion after the old line (or a deletion before the new one). Raises ValueError when git
     cannot diff BASE."""
     diff = subprocess.run(["git", "-C", str(root), "-c", "core.quotepath=off", "diff", "-U0",
-                           "--no-renames", "--no-ext-diff", base, "--"], capture_output=True, text=True)
+                           "--no-renames", "--no-ext-diff", "--no-textconv", "--no-color",
+                           "--src-prefix=a/", "--dst-prefix=b/", base, "--"], capture_output=True, text=True)
     if diff.returncode != 0:
         raise ValueError(f"git diff {base} failed: {diff.stderr.strip()}")
     out, hunks = {}, None
@@ -6588,6 +6591,8 @@ def diff_hunks(root, base):
             hunks = out.setdefault(m[1], [])
         elif hunks is not None and (m := HUNK_HEADER.match(line)):
             hunks.append((int(m[1]), 1 if m[2] is None else int(m[2]), 1 if m[3] is None else int(m[3])))
+    if diff.stdout.strip() and not out:
+        raise ValueError(f"git diff {base} printed no `diff --git a/X b/X` header: the hunks cannot be read")
     return out
 
 
@@ -6650,7 +6655,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     a citation on a line of the document that the change left as it was is also read through the
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
-    the document that the change wrote or edited is the author's own placing, and is not read so."""
+    the document that the change wrote or edited is the author's own placing, and is not read so:
+    limit, every citation on an edited line is skipped, also one the edit did not touch."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))

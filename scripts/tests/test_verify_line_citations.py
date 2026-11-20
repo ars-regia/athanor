@@ -404,6 +404,11 @@ class DiffHunks(unittest.TestCase):
                 verify.diff_hunks(root, "HEAD"),
                 {"a b.rs": [(0, 0, 1), (3, 1, 0)], "gone.rs": [(1, 2, 0)]},
             )
+            git("config", "diff.noprefix", "true")
+            self.assertEqual(
+                verify.diff_hunks(root, "HEAD"),
+                {"a b.rs": [(0, 0, 1), (3, 1, 0)], "gone.rs": [(1, 2, 0)]},
+            )
             with self.assertRaises(ValueError):
                 verify.diff_hunks(root, "no-such-revision")
 
