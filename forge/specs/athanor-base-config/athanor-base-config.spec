@@ -1,7 +1,7 @@
 %global debug_package %{nil}
 Name:           athanor-base-config
 Version:        45.0.0
-Release:        3%{?athanor_content}%{?dist}
+Release:        4%{?athanor_content}%{?dist}
 Summary:        Athanor OS Base Configuration (Systemd, Branding, GPG)
 
 License:        GPL-3.0-or-later
@@ -75,10 +75,17 @@ rm -rf %{buildroot}/etc/tmpfiles.d
 /usr/lib/systemd/system-preset/*
 /usr/lib/systemd/system/scx_loader.service.d/*
 /usr/lib/sysusers.d/*
+/usr/lib/udev/rules.d/*
 /usr/share/pixmaps/*
 /usr/share/plymouth/themes/spinner/watermark.png
 
 %changelog
+* Fri Nov 20 2026 Athanor Forge <forge@athanor.os> - 45.0.0-4
+- Turn the QEMU guest agent off until a person enables it (ADR-0144): a preset line disables it,
+  and 99-zz-athanor-qemu-guest-agent.rules takes back the start that qemu-guest-agent's own udev
+  rule asks for whenever the hypervisor offers the port. Once enabled, a drop-in limits it to an
+  allow-list of RPCs, without commands, files, passwords or SSH keys, under NoNewPrivileges=yes
+
 * Wed Nov 04 2026 Athanor Forge <forge@athanor.os> - 45.0.0-3
 - rpmfusion.repo: back to the Fedora 45 GA layout now that the *-updates-released-45 metalinks
   answer with mirrors: the updates repos are enabled and the updates-testing repos removed (#802)

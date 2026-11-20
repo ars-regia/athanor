@@ -1,0 +1,5 @@
+# qemu-guest-agent's 99-qemu-guest-agent.rules starts the agent whenever the hypervisor offers its
+# virtio port, enabled or not. This rule sorts after it and takes that start back, so the agent
+# runs only where a person enabled it: the device's wants link that `systemctl enable` makes
+# (WantedBy= of the unit) still starts it when the port appears (ADR-0144).
+SUBSYSTEM=="virtio-ports", ATTR{name}=="org.qemu.guest_agent.0", ENV{SYSTEMD_WANTS}=""

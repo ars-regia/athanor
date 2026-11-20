@@ -227,10 +227,17 @@ class Expectations(unittest.TestCase):
         f["units"]["rpm-ostree-countme.timer"] = "disabled"
         self.assertEqual(failed(f), {"units"})
 
+    def test_an_enabled_guest_agent_fails(self):
+        f = good()
+        f["units"]["qemu-guest-agent.service"] = "enabled"
+        self.assertEqual(failed(f), {"units"})
+
     def test_an_installed_absent_unit_fails(self):
         f = good()
-        f["units"]["qemu-guest-agent.service"] = "disabled"
-        self.assertEqual(failed(f), {"units"})
+        f["units"]["example-absent.service"] = "disabled"
+        expect = EXPECT | {"units": EXPECT["units"] | {"absent": ["example-absent.service"]}}
+        got = {c for c, _ in probes.evaluate(f, expect, CONTACTS, TUNNEL, SIGNED)}
+        self.assertEqual(got, {"units"})
 
     def test_an_unmasked_debug_shell_fails(self):
         f = good()
