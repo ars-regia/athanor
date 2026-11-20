@@ -31,6 +31,11 @@ use crate::state::Outcome;
 /// The helper's socket (LP8).
 pub const SOCKET: &str = "/run/athanor/unlockd.socket";
 
+/// The lines an attempt reads at most. The password stack sends a prompt, a few messages and a
+/// verdict; a helper that streams more is broken, and would otherwise hold the main thread in
+/// `step` and grow the message lists without bound. Each line is at most `MAX_LINE` bytes.
+pub const MAX_LINES: u32 = 64;
+
 /// How an attempt ended, with PAM's messages on the way.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ended {
@@ -47,6 +52,7 @@ pub struct Attempt {
     attempt: u32,
     stream: UnixStream,
     reader: LineReader,
+    lines: u32,
     answered: bool,
     errors: Vec<String>,
     info: Vec<String>,
@@ -68,6 +74,7 @@ impl Attempt {
             attempt,
             stream,
             reader: LineReader::new(),
+            lines: 0,
             answered: false,
             errors: Vec::new(),
             info: Vec::new(),
@@ -76,11 +83,6 @@ impl Attempt {
 
     pub fn attempt(&self) -> u32 {
         self.attempt
-    }
-
-    /// A second handle on the socket, for [`Watch::socket`].
-    pub fn socket(&self) -> io::Result<UnixStream> {
-        self.stream.try_clone()
     }
 
     /// Reads every line the socket holds. At the first secret prompt, `answer` fills the
@@ -93,8 +95,15 @@ impl Attempt {
                 Ok(None) => return None,
                 Err(_) => return Some(self.end(Outcome::EndOfStream)),
             };
+            self.lines += 1;
+            if self.lines > MAX_LINES {
+                return Some(self.end(Outcome::EndOfStream));
+            }
             let outcome = match line {
-                Ok(Line::Success) => Outcome::Success,
+                // The helper asks for the password before any verdict (`PAM_DISALLOW_NULL_AUTHTOK`,
+                // no `nullok`, A2-23): a success before the answer is no helper this lock knows.
+                Ok(Line::Success) if self.answered => Outcome::Success,
+                Ok(Line::Success) => Outcome::EndOfStream,
                 Ok(Line::Failure) => Outcome::Failure,
                 Ok(Line::Unavailable) => Outcome::Unavailable,
                 Ok(Line::Error(text)) => {
@@ -141,26 +150,42 @@ enum Next {
     Socket(Option<UnixStream>),
 }
 
+/// What the source and its [`Watch`] share.
+struct Shared {
+    next: Next,
+    /// The attempt whose socket was handed over last, pending or watched.
+    watched: Option<u32>,
+}
+
 /// The main loop's handle on the socket the source watches.
 #[derive(Clone)]
 pub struct Watch {
-    next: Rc<RefCell<Next>>,
+    shared: Rc<RefCell<Shared>>,
     ping: Ping,
 }
 
 impl Watch {
-    /// Watches `socket`, a new attempt's, in place of any socket before it.
-    pub fn socket(&self, socket: UnixStream) {
-        self.set(Some(socket));
+    /// Watches the socket of `attempt` in place of any socket before it.
+    pub fn socket(&self, attempt: &Attempt) -> io::Result<()> {
+        let socket = attempt.stream.try_clone()?;
+        let mut shared = self.shared.borrow_mut();
+        shared.next = Next::Socket(Some(socket));
+        shared.watched = Some(attempt.attempt);
+        drop(shared);
+        self.ping.ping();
+        Ok(())
     }
 
-    /// Watches no socket: the attempt ended.
-    pub fn release(&self) {
-        self.set(None);
-    }
-
-    fn set(&self, socket: Option<UnixStream>) {
-        *self.next.borrow_mut() = Next::Socket(socket);
+    /// Watches no socket once `attempt` ended. A release that comes after a newer attempt was
+    /// handed over leaves that one watched.
+    pub fn release(&self, attempt: u32) {
+        let mut shared = self.shared.borrow_mut();
+        if shared.watched != Some(attempt) {
+            return;
+        }
+        shared.next = Next::Socket(None);
+        shared.watched = None;
+        drop(shared);
         self.ping.ping();
     }
 }
@@ -170,7 +195,7 @@ impl Watch {
 pub struct Source {
     ping: PingSource,
     socket: Option<Generic<UnixStream>>,
-    next: Rc<RefCell<Next>>,
+    shared: Rc<RefCell<Shared>>,
 }
 
 impl Source {
@@ -178,15 +203,18 @@ impl Source {
     /// hands the source each attempt's socket.
     pub fn new() -> io::Result<(Source, Ping, Watch)> {
         let (ping, source) = make_ping()?;
-        let next = Rc::new(RefCell::new(Next::Keep));
+        let shared = Rc::new(RefCell::new(Shared {
+            next: Next::Keep,
+            watched: None,
+        }));
         let watch = Watch {
-            next: Rc::clone(&next),
+            shared: Rc::clone(&shared),
             ping: ping.clone(),
         };
         let source = Source {
             ping: source,
             socket: None,
-            next,
+            shared,
         };
         Ok((source, ping, watch))
     }
@@ -220,7 +248,7 @@ impl EventSource for Source {
         if woken {
             callback((), &mut ());
         }
-        Ok(match *self.next.borrow() {
+        Ok(match self.shared.borrow().next {
             Next::Keep => PostAction::Continue,
             Next::Socket(_) => PostAction::Reregister,
         })
@@ -236,7 +264,7 @@ impl EventSource for Source {
 
     fn reregister(&mut self, poll: &mut Poll, factory: &mut TokenFactory) -> calloop::Result<()> {
         self.ping.reregister(poll, factory)?;
-        let next = std::mem::replace(&mut *self.next.borrow_mut(), Next::Keep);
+        let next = std::mem::replace(&mut self.shared.borrow_mut().next, Next::Keep);
         match next {
             Next::Keep => {
                 if let Some(socket) = &mut self.socket {
@@ -394,6 +422,40 @@ mod tests {
         assert_eq!(read_all(helper), b"athanor-lock\n");
     }
 
+    #[test]
+    fn a_success_before_the_answer_ends_the_attempt() {
+        let (mut attempt, mut helper) = attempt();
+        helper.write_all(b"SUCCESS\n").expect("verdict");
+        let (ended, asked) = run(&mut attempt);
+        assert_eq!((ended.outcome, asked), (Outcome::EndOfStream, 0));
+    }
+
+    #[test]
+    fn a_helper_that_never_stops_talking_ends_the_attempt() {
+        let (mut attempt, mut helper) = attempt();
+        for _ in 0..MAX_LINES {
+            helper.write_all(b"PAM_TEXT_INFO x\n").expect("text");
+        }
+        helper.write_all(b"SUCCESS\n").expect("verdict");
+        let (ended, asked) = run(&mut attempt);
+        assert_eq!((ended.outcome, asked), (Outcome::EndOfStream, 0));
+        assert_eq!(ended.info.len(), MAX_LINES as usize);
+    }
+
+    #[test]
+    fn a_late_release_leaves_the_new_attempt_watched() {
+        let (mut event_loop, watch) = event_loop();
+        let (first, _first_helper) = attempt();
+        let (client, mut helper) = UnixStream::pair().expect("socket pair");
+        let second = Attempt::over(client, 2).expect("attempt");
+        watch.socket(&first).expect("socket");
+        watch.socket(&second).expect("socket");
+        watch.release(first.attempt());
+        assert_eq!(wakes(&mut event_loop), 1, "the hand-over's ping");
+        helper.write_all(PROMPT).expect("prompt");
+        assert_eq!(wakes(&mut event_loop), 1, "the second attempt's socket is watched");
+    }
+
     /// A loop around the source, counting its wake-ups.
     fn event_loop() -> (EventLoop<'static, u32>, Watch) {
         let event_loop = EventLoop::try_new().expect("event loop");
@@ -417,7 +479,7 @@ mod tests {
     fn a_new_attempt_wakes_the_loop() {
         let (mut event_loop, watch) = event_loop();
         let (attempt, mut helper) = attempt();
-        watch.socket(attempt.socket().expect("socket"));
+        watch.socket(&attempt).expect("socket");
         assert_eq!(wakes(&mut event_loop), 1, "the hand-over's ping");
         assert_eq!(wakes(&mut event_loop), 0, "nothing to read yet");
         helper.write_all(PROMPT).expect("prompt");
@@ -428,14 +490,14 @@ mod tests {
     fn no_wake_up_between_attempts() {
         let (mut event_loop, watch) = event_loop();
         let (mut attempt, mut helper) = attempt();
-        watch.socket(attempt.socket().expect("socket"));
+        watch.socket(&attempt).expect("socket");
         assert_eq!(wakes(&mut event_loop), 1);
         helper.write_all(b"FAILURE\n").expect("verdict");
         drop(helper);
         assert_eq!(wakes(&mut event_loop), 1);
         assert_eq!(run(&mut attempt).0.outcome, Outcome::Failure);
         drop(attempt);
-        watch.release();
+        watch.release(1);
         // The release's ping, and the closed socket if its event comes before the swap.
         assert!(wakes(&mut event_loop) >= 1, "the release's ping");
         // The closed socket is readable for ever, and no longer watched.
