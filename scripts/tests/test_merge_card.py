@@ -20,7 +20,6 @@ import merge_card  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HEAD = "a" * 40
 BASE = "b" * 40
-RUN = "https://github.com/o/r/actions/runs/7/job/8"
 RULES = [
     {
         "type": "required_status_checks",
@@ -38,30 +37,24 @@ PR = {
     "isDraft": False,
     "mergeable": "MERGEABLE",
     "reviewDecision": "REVIEW_REQUIRED",
-    "reviews": [],
-    "statusCheckRollup": [
-        {
-            "__typename": "CheckRun",
-            "name": "gate",
-            "status": "COMPLETED",
-            "conclusion": "SUCCESS",
-            "startedAt": "2026-01-01T10:00:00Z",
-            "detailsUrl": RUN,
-        },
-        {
-            "__typename": "CheckRun",
-            "name": "kernel",
-            "status": "COMPLETED",
-            "conclusion": "SKIPPED",
-            "startedAt": "2026-01-01T10:00:00Z",
-            "detailsUrl": RUN,
-        },
-    ],
+    "changedFiles": 2,
 }
-DIFF = (
-    "diff --git a/.github/workflows/pr.yml b/.github/workflows/pr.yml\n--- a/.github/workflows/pr.yml\n+++ b/.github/workflows/pr.yml\n@@ -1 +1 @@\n+on: push\n"
-    "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n+    unsafe { f() }\n"
-)
+
+
+def entry(path, *lines, **more):
+    """An entry of pulls/<n>/files with a patch of the given changed lines."""
+    return {
+        "filename": path,
+        "status": "modified",
+        "patch": "@@ -1 +1 @@\n" + "\n".join(lines),
+        **more,
+    }
+
+
+FILES = [
+    entry(".github/workflows/pr.yml", "+on: push"),
+    entry("src/a.rs", "+    unsafe { f() }"),
+]
 CODEOWNERS = "* @someone\n# owners\n* @hr-mes  # the maintainer\n/docs/ @other\n"
 APPROVAL = {
     "author": {"login": "hr-mes"},
@@ -69,8 +62,38 @@ APPROVAL = {
     "submittedAt": "2026-01-02T00:00:00Z",
     "commit": {"oid": HEAD},
 }
-FRESH = {"event": "pull_request", "created_at": "2026-01-01T10:00:00Z"}
-OLD = {"event": "pull_request", "created_at": "2026-01-01T08:00:00Z"}
+
+
+def check(name, conclusion="SUCCESS", **more):
+    return {
+        "name": name,
+        "status": "COMPLETED",
+        "conclusion": conclusion,
+        "startedAt": "2026-01-01T10:00:00Z",
+        **more,
+    }
+
+
+GOOD = [check("gate"), check("kernel", "SKIPPED")]
+
+
+def review_api(r):
+    return {
+        "user": {"login": r["author"]["login"]},
+        "state": r["state"],
+        "submitted_at": r["submittedAt"],
+        "commit_id": r["commit"]["oid"],
+    }
+
+
+def run_api(c):
+    return {
+        "name": c["name"],
+        "status": c["status"].lower(),
+        "conclusion": c["conclusion"].lower() or None,
+        "started_at": c["startedAt"],
+        "check_suite": {"id": c.get("workflowName", 0)},
+    }
 
 
 def run(
@@ -79,40 +102,68 @@ def run(
     protection=merge_card.NotFound("404"),
     argv=(),
     behind=0,
-    runs=FRESH,
-    later_head=None,
-    diff=None,
-    codeowners=None,
+    checks=GOOD,
+    statuses=(),
+    reviews=(),
+    files=FILES,
+    codeowners=CODEOWNERS,
+    later=None,
 ):
-    """(exit code, stdout, stderr) of the script against a faked GitHub."""
+    """(exit code, stdout, stderr) of the script against a faked GitHub.
+
+    later: values the end of the reading sees (head, base, state, base_sha, reviews).
+    """
     pr = {**PR, **(pr or {})}
     rules = RULES if rules is None else rules
-    responses = {
-        "/rules/branches/": rules,
-        "/branches/": {"commit": {"sha": BASE}},
-        "/compare/": {"behind_by": behind},
-        f"/commits/{BASE}": {"commit": {"committer": {"date": "2026-01-01T09:00:00Z"}}},
-        "/actions/runs/7": runs,
-    }
+    later = later or {}
+    calls = {"branch": 0, "reviews": 0}
 
     def fake_gh(*args):
-        if args[:2] == ("pr", "view"):
-            if args[-1] == "headRefOid":
-                return json.dumps({"headRefOid": later_head or pr["headRefOid"]})
-            return json.dumps(pr)
-        if "Accept: application/vnd.github.diff" in args:
-            return DIFF if diff is None else diff
         path = args[-1]
+        if args[:2] == ("pr", "view"):
+            if path == "headRefOid,baseRefName,state":
+                return json.dumps(
+                    {
+                        "headRefOid": later.get("head", pr["headRefOid"]),
+                        "baseRefName": later.get("base", pr["baseRefName"]),
+                        "state": later.get("state", pr["state"]),
+                    }
+                )
+            return json.dumps(pr)
+        if "Accept: application/vnd.github.raw" in args:
+            assert path.endswith(f"?ref={BASE}"), path
+            if codeowners is None:
+                raise merge_card.NotFound("404")
+            return codeowners
+        if "--paginate" in args:
+            assert "--slurp" in args, "a paginated read must keep every page"
+            if path.endswith("/check-runs"):
+                runs = [run_api(c) for c in checks]
+                return json.dumps([{"total_count": len(runs), "check_runs": runs}])
+            if path.endswith("/status"):
+                return json.dumps([{"statuses": list(statuses)}])
+            if path.endswith("/reviews"):
+                calls["reviews"] += 1
+                shown = (
+                    later["reviews"]
+                    if calls["reviews"] > 1 and "reviews" in later
+                    else reviews
+                )
+                return json.dumps([[review_api(r) for r in shown]])
+            if path.endswith("/files"):
+                return json.dumps([files])
         if path.endswith("/protection"):
             if isinstance(protection, Exception):
                 raise protection
             return json.dumps(protection)
-        if "/contents/.github/CODEOWNERS" in path:
-            assert path.endswith(f"?ref={BASE}"), path
-            return CODEOWNERS if codeowners is None else codeowners
-        for key, value in responses.items():
-            if key in path:
-                return json.dumps(value)
+        if "/rules/branches/" in path:
+            return json.dumps(rules)
+        if "/branches/" in path:
+            calls["branch"] += 1
+            sha = later.get("base_sha", BASE) if calls["branch"] > 1 else BASE
+            return json.dumps({"commit": {"sha": sha}})
+        if "/compare/" in path:
+            return json.dumps({"behind_by": behind})
         raise AssertionError(f"unexpected gh call {args}")
 
     out, err = io.StringIO(), io.StringIO()
@@ -123,22 +174,6 @@ def run(
     ):
         code = merge_card.main(["-R", "o/r", "5", *argv])
     return code, out.getvalue(), err.getvalue()
-
-
-def checks(*entries):
-    return {
-        "statusCheckRollup": [
-            {
-                "__typename": "CheckRun",
-                "name": n,
-                "status": "COMPLETED",
-                "conclusion": c,
-                "startedAt": "2026-01-01T10:00:00Z",
-                "detailsUrl": RUN,
-            }
-            for n, c in entries
-        ]
-    }
 
 
 class Card(unittest.TestCase):
@@ -157,6 +192,7 @@ class Card(unittest.TestCase):
             "merge_queue yes",
             "CI workflows: .github/workflows/pr.yml",
             "unsafe: src/a.rs",
+            "2 files, the list is complete; the patterns are heuristic",
         ):
             self.assertIn(text, out)
 
@@ -164,13 +200,21 @@ class Card(unittest.TestCase):
         self.refused("has no required check", rules=RULES[1:])
 
     def test_a_required_check_that_is_missing_or_red_is_refused(self):
-        self.refused("required check gate is missing", pr=checks(("other", "SUCCESS")))
-        self.refused("required check gate is fail", pr=checks(("gate", "FAILURE")))
+        self.refused("required check gate is missing", checks=[check("other")])
+        self.refused("required check gate is fail", checks=[check("gate", "FAILURE")])
 
     def test_another_check_that_is_not_pass_or_skipping_is_refused(self):
         self.refused(
-            "check lint is fail", pr=checks(("gate", "SUCCESS"), ("lint", "FAILURE"))
+            "check lint is fail", checks=[check("gate"), check("lint", "FAILURE")]
         )
+
+    def test_a_commit_status_counts_as_a_check(self):
+        status = {
+            "context": "ci/x",
+            "state": "failure",
+            "created_at": "2026-01-01T10:00:00Z",
+        }
+        self.refused("check ci/x is fail", statuses=[status])
 
     def test_the_protection_adds_its_checks_and_a_404_means_rulesets_only(self):
         self.refused(
@@ -187,7 +231,7 @@ class Card(unittest.TestCase):
     def test_a_draft_or_an_unmergeable_or_a_closed_pull_request_is_refused(self):
         self.refused("is a draft", pr={"isDraft": True})
         self.refused("mergeable is CONFLICTING", pr={"mergeable": "CONFLICTING"})
-        self.refused("is MERGED", pr={"state": "MERGED"})
+        self.refused("is MERGED", pr={"state": "MERGED"}, later={"state": "MERGED"})
 
     def test_a_review_decision_outside_the_three_is_refused(self):
         self.refused(
@@ -203,39 +247,215 @@ class Card(unittest.TestCase):
             "state": "CHANGES_REQUESTED",
             "submittedAt": "2026-01-01T00:00:00Z",
         }
-        self.refused(
-            "hr-mes's latest review is CHANGES_REQUESTED", pr={"reviews": [old]}
-        )
-        self.assertEqual(run(pr={"reviews": [old, APPROVAL]})[0], 0)
+        self.refused("hr-mes's latest review is CHANGES_REQUESTED", reviews=[old])
+        self.assertEqual(run(reviews=[old, APPROVAL])[0], 0)
 
-    def test_a_queue_needs_no_reading_of_the_base_but_a_plain_base_does(self):
-        self.assertEqual(run(behind=1, runs=OLD)[0], 0)
-        self.refused("stale base", rules=NO_QUEUE, behind=1, runs=OLD)
+    def test_a_queue_needs_no_reading_of_the_base_and_any_other_base_needs_ancestry(
+        self,
+    ):
+        self.assertEqual(run(behind=1)[0], 0)
+        self.refused("stale base", rules=NO_QUEUE, behind=1)
         self.refused(
-            "stale base", rules=NO_QUEUE, behind=1, runs={**FRESH, "event": "push"}
+            "stale base", pr={"baseRefName": "main"}, rules=NO_QUEUE, behind=1, later={}
         )
-        self.assertEqual(run(rules=NO_QUEUE, behind=1)[0], 0)
-        self.assertEqual(run(rules=NO_QUEUE, behind=0, runs=OLD)[0], 0)
+        self.assertEqual(run(rules=NO_QUEUE, behind=0)[0], 0)
 
-    def test_a_check_with_no_workflow_run_is_refused_on_a_stale_base(self):
-        pr = checks(("gate", "SUCCESS"))
-        pr["statusCheckRollup"][0]["detailsUrl"] = ""
-        self.refused("has no workflow run", pr=pr, rules=NO_QUEUE, behind=1)
 
-    def test_a_rebase_base_takes_only_the_ancestry_way(self):
-        self.refused(
-            "takes pushes", pr={"baseRefName": "rebase/x"}, rules=NO_QUEUE, behind=1
+class Approval(unittest.TestCase):
+    ARGS = (
+        "--verify-approval",
+        "2026-01-01T12:00:00Z",
+        "--head",
+        HEAD,
+        "--base-sha",
+        BASE,
+    )
+
+    def test_an_owner_approval_at_the_head_after_the_card_passes(self):
+        self.assertEqual(run(reviews=[APPROVAL], argv=self.ARGS)[0], 0)
+
+    def test_each_way_the_approval_fails_is_named(self):
+        for change in (
+            {"commit": {"oid": "c" * 40}},
+            {"submittedAt": "2026-01-01T11:00:00Z"},
+            {"author": {"login": "someone"}},
+            {"state": "COMMENTED"},
+        ):
+            code, _, err = run(reviews=[{**APPROVAL, **change}], argv=self.ARGS)
+            self.assertEqual(code, 1)
+            self.assertIn("no APPROVED review by ['hr-mes']", err)
+
+    def test_a_head_or_base_that_is_not_the_cards_is_refused(self):
+        card = "2026-01-01T12:00:00Z"
+        _, _, err = run(
+            reviews=[APPROVAL],
+            argv=("--verify-approval", card, "--head", "d" * 40, "--base-sha", BASE),
         )
+        self.assertIn("the card's is " + "d" * 40, err)
+        _, _, err = run(reviews=[APPROVAL], argv=(*self.ARGS[:-1], "e" * 40))
+        self.assertIn("base head is", err)
+
+
+class Findings(unittest.TestCase):
+    """One test per finding of the audits of the first versions."""
+
+    def test_the_base_sha_and_the_head_are_both_needed_to_verify(self):
+        card = "2026-01-01T12:00:00Z"
+        for argv in (
+            ("--verify-approval", card, "--head", HEAD),
+            ("--verify-approval", card, "--base-sha", BASE),
+        ):
+            with (
+                self.assertRaises(SystemExit),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                run(argv=argv)
+
+    def test_rules_come_only_from_the_api(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            run(argv=("--base-rules-from", "x.json"))
+
+    def test_the_same_job_name_in_two_workflows_hides_nothing(self):
+        checks = [
+            check("gate", workflowName=1),
+            check("gate", "FAILURE", workflowName=2),
+        ]
+        self.assertIn("required check gate is fail", run(checks=checks)[2])
+
+    def test_a_queued_rerun_is_pending_not_hidden_by_an_older_pass(self):
+        queued = {
+            **check("gate"),
+            "status": "QUEUED",
+            "conclusion": "",
+            "startedAt": "0001-01-01T00:00:00Z",
+        }
+        self.assertIn(
+            "required check gate is pending", run(checks=[check("gate"), queued])[2]
+        )
+
+    def test_a_check_with_no_usable_start_is_pending(self):
+        broken = {**check("gate"), "startedAt": "0001-01-01T00:00:00Z"}
+        self.assertIn("required check gate is pending", run(checks=[broken])[2])
+
+    def test_the_approver_must_be_an_owner_at_the_pinned_base(self):
+        other = {**APPROVAL, "author": {"login": "other"}}
+        _, _, err = run(reviews=[other], argv=(*Approval.ARGS, "--approver", "other"))
+        self.assertIn("other is not a code owner in CODEOWNERS", err)
+        _, _, err = run(
+            reviews=[APPROVAL], argv=Approval.ARGS, codeowners="* @someone\n"
+        )
+        self.assertIn("hr-mes is not a code owner", err)
+
+    def test_a_missing_codeowners_is_a_refusal_not_a_traceback(self):
+        _, _, err = run(reviews=[APPROVAL], argv=Approval.ARGS, codeowners=None)
+        self.assertIn("CODEOWNERS is not found", err)
+
+    def test_an_empty_or_zoneless_card_time_is_a_refusal_not_a_traceback(self):
+        for text in ("", "2026-01-01T12:00:00", "not a time"):
+            argv = ("--verify-approval", text, "--head", HEAD, "--base-sha", BASE)
+            code, _, err = run(reviews=[APPROVAL], argv=argv)
+            self.assertEqual(code, 1)
+            self.assertIn("is not an ISO 8601 time with a time zone", err)
+
+    def test_what_moves_while_reading_is_refused(self):
+        for key, value, word in (
+            ("head", "f" * 40, "head"),
+            ("base", "main", "base"),
+            ("state", "CLOSED", "state"),
+            ("base_sha", "9" * 40, "base head"),
+            ("reviews", [APPROVAL], "reviews"),
+        ):
+            _, _, err = run(later={key: value})
+            self.assertIn(f"the {word} changed while reading", err)
+
+    def test_the_count_of_files_must_match_and_stay_under_the_cap(self):
+        self.assertIn("1 files read, the pull request has 2", run(files=FILES[:1])[2])
+        many = [entry(f"f{i}.txt", "+x") for i in range(merge_card.FILE_CAP)]
+        _, _, err = run(pr={"changedFiles": len(many)}, files=many)
+        self.assertIn("reach the API cap", err)
+
+    def test_a_quoted_or_odd_path_is_listed_by_its_real_name(self):
+        files = [
+            entry("src/é b/x.rs", "+unsafe { f() }"),
+            entry('src/"q"\\z.rs', "+x"),
+        ]
+        _, out, _ = run(files=files)
+        self.assertIn("unsafe: src/é b/x.rs", out)
+
+    def test_a_rename_or_a_deletion_names_the_path_it_left(self):
+        files = [
+            {
+                "filename": "docs/x",
+                "previous_filename": ".github/CODEOWNERS",
+                "status": "renamed",
+            },
+            {
+                "filename": "docs/w",
+                "previous_filename": ".github/workflows/w.yml",
+                "status": "copied",
+            },
+        ]
+        _, out, _ = run(files=files)
+        self.assertIn("CODEOWNERS: .github/CODEOWNERS (path)", out)
+        self.assertIn("CI workflows: .github/workflows/w.yml (path)", out)
+
+    def test_a_file_with_no_patch_is_listed_never_clean(self):
+        files = [{"filename": "img.png", "status": "added"}, FILES[0]]
+        _, out, _ = run(files=files)
+        self.assertIn("no patch shown: review the whole file: img.png (added)", out)
+
+    def test_a_patch_line_with_plus_signs_is_a_changed_line(self):
+        files = [entry("a.rs", "+++subprocess.run(x)", "---old"), FILES[1]]
         self.assertEqual(
-            run(pr={"baseRefName": "rebase/x"}, rules=NO_QUEUE, behind=0)[0], 0
+            merge_card.changed_lines(files[0]), ["+++subprocess.run(x)", "---old"]
         )
+
+    def test_only_docs_prose_is_left_out_and_tests_are_listed_apart(self):
+        files = [
+            entry("docs/guide.md", "+unsafe prose"),
+            entry("docs/gen/tool.py", "+subprocess.run(x)"),
+            entry("system/foo/tests/t.rs", "+unsafe { f() }"),
+        ]
+        _, out, _ = run(pr={"changedFiles": 3}, files=files)
+        self.assertNotIn("guide.md", out)
+        self.assertIn("process launch: docs/gen/tool.py: +subprocess.run(x)", out)
+        self.assertIn("unsafe: in tests: system/foo/tests/t.rs", out)
+        self.assertNotIn("unsafe: system/foo/tests", out)
+
+    def test_process_launch_catches_command_and_the_process_modules(self):
+        for line in (
+            "+let c = Command::new(x);",
+            "+use std::process::Command as C;",
+            "+tokio::process::Command",
+        ):
+            _, out, _ = run(files=[entry("src/a.rs", line), FILES[0]])
+            self.assertIn("process launch: src/a.rs", out, line)
+
+    def test_ci_covers_all_of_github_except_codeowners_and_settings(self):
+        files = [
+            entry(".github/actions/x/action.yml", "+a"),
+            entry(".github/CODEOWNERS", "+* @x"),
+        ]
+        _, out, _ = run(files=files)
+        self.assertIn("CI workflows: .github/actions/x/action.yml (path)", out)
+        self.assertNotIn("CI workflows: .github/CODEOWNERS", out)
+        self.assertIn("CODEOWNERS: .github/CODEOWNERS (path)", out)
+
+    def test_a_submodule_is_a_dependency(self):
+        files = [
+            entry("vendor/sub", "-Subproject commit 1", "+Subproject commit 2"),
+            {"filename": ".gitmodules", "status": "modified"},
+        ]
+        _, out, _ = run(files=files)
+        self.assertIn("dependencies: vendor/sub: -Subproject commit 1", out)
+        self.assertIn("dependencies: .gitmodules (path)", out)
 
 
 class Comments(unittest.TestCase):
     CATS = [{"name": "unsafe", "paths": [], "patterns": [r"\bunsafe\b"]}]
 
     def hunks(self, path, *lines):
-        return merge_card.hunks([(path, list(lines))], self.CATS)
+        return merge_card.hunks([entry(path, *lines)], self.CATS)[:2]
 
     def test_a_comment_only_match_is_counted_and_has_no_hunk(self):
         code, comments = self.hunks(
@@ -257,154 +477,35 @@ class Comments(unittest.TestCase):
         self.assertIn("unsafe", self.hunks("a.sh", "+// unsafe")[0])
 
     def test_a_mixed_file_yields_both_and_the_card_prints_the_count_line(self):
-        diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n+unsafe { f() }\n+// unsafe is why\n"
-        files = merge_card.parse_diff(diff)
-        code, comments = merge_card.hunks(files, self.CATS)
+        files = [entry("a.rs", "+unsafe { f() }", "+// unsafe is why")]
+        code, comments, _ = merge_card.hunks(files, self.CATS)
         self.assertEqual((len(code["unsafe"]), comments["unsafe"]), (1, {"a.rs": 1}))
         out = io.StringIO()
+        pr = {**PR, "checks": [], "reviews": []}
         with contextlib.redirect_stdout(out):
-            merge_card.print_card(
-                {**PR, "reviews": []}, BASE, RULES, None, files, self.CATS
-            )
+            merge_card.print_card(pr, BASE, RULES, None, files, self.CATS)
         self.assertIn("unsafe: a.rs: +unsafe { f() }", out.getvalue())
         self.assertIn("unsafe: also 1 comment line in a.rs", out.getvalue())
 
-
-class Approval(unittest.TestCase):
-    ARGS = (
-        "--verify-approval",
-        "2026-01-01T12:00:00Z",
-        "--head",
-        HEAD,
-        "--base-sha",
-        BASE,
-    )
-
-    def test_an_owner_approval_at_the_head_after_the_card_passes(self):
-        self.assertEqual(run(pr={"reviews": [APPROVAL]}, argv=self.ARGS)[0], 0)
-
-    def test_each_way_the_approval_fails_is_named(self):
-        for change in (
-            {"commit": {"oid": "c" * 40}},
-            {"submittedAt": "2026-01-01T11:00:00Z"},
-            {"author": {"login": "someone"}},
-            {"state": "COMMENTED"},
-        ):
-            code, _, err = run(pr={"reviews": [{**APPROVAL, **change}]}, argv=self.ARGS)
-            self.assertEqual(code, 1)
-            self.assertIn("no APPROVED review by ['hr-mes']", err)
-
-    def test_a_head_or_base_that_is_not_the_cards_is_refused(self):
-        _, _, err = run(
-            pr={"reviews": [APPROVAL]},
-            argv=(
-                "--verify-approval",
-                "2026-01-01T12:00:00Z",
-                "--head",
-                "d" * 40,
-                "--base-sha",
-                BASE,
-            ),
-        )
-        self.assertIn("the card's is " + "d" * 40, err)
-        _, _, err = run(pr={"reviews": [APPROVAL]}, argv=(*self.ARGS[:-1], "e" * 40))
-        self.assertIn("base head is", err)
-
-
-class Findings(unittest.TestCase):
-    """One test per finding of the audit of the first version."""
-
-    def test_the_base_sha_and_the_head_are_both_needed_to_verify(self):
-        card = "2026-01-01T12:00:00Z"
-        for argv in (
-            ("--verify-approval", card, "--head", HEAD),
-            ("--verify-approval", card, "--base-sha", BASE),
-        ):
-            with (
-                self.assertRaises(SystemExit),
-                contextlib.redirect_stderr(io.StringIO()),
-            ):
-                run(argv=argv)
-
-    def test_rules_come_only_from_the_api(self):
-        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-            run(argv=("--base-rules-from", "x.json"))
-
-    def test_the_same_job_name_in_two_workflows_hides_nothing(self):
-        pr = checks(("gate", "SUCCESS"), ("gate", "FAILURE"))
-        pr["statusCheckRollup"][0]["workflowName"] = "Pull Request"
-        pr["statusCheckRollup"][1]["workflowName"] = "Other"
-        self.assertIn("required check gate is fail", run(pr=pr)[2])
-
-    def test_a_queued_rerun_is_pending_not_hidden_by_an_older_pass(self):
-        pr = checks(("gate", "SUCCESS"), ("gate", "SUCCESS"))
-        pr["statusCheckRollup"][1].update(
-            status="QUEUED", conclusion="", startedAt="0001-01-01T00:00:00Z"
-        )
-        self.assertIn("required check gate is pending", run(pr=pr)[2])
-
-    def test_a_check_with_no_usable_start_is_pending(self):
-        pr = checks(("gate", "SUCCESS"))
-        pr["statusCheckRollup"][0]["startedAt"] = "0001-01-01T00:00:00Z"
-        self.assertIn("required check gate is pending", run(pr=pr)[2])
-
-    def test_the_approver_must_be_an_owner_at_the_pinned_base(self):
-        other = {**APPROVAL, "author": {"login": "other"}}
-        _, _, err = run(
-            pr={"reviews": [other]}, argv=(*Approval.ARGS, "--approver", "other")
-        )
-        self.assertIn("other is not a code owner in CODEOWNERS", err)
-        _, _, err = run(
-            pr={"reviews": [APPROVAL]}, argv=Approval.ARGS, codeowners="* @someone\n"
-        )
-        self.assertIn("hr-mes is not a code owner", err)
-
-    def test_the_head_that_moves_while_reading_is_refused(self):
-        self.assertIn("the head moved from", run(later_head="f" * 40)[2])
-
-    def test_a_form_feed_and_a_forged_header_in_a_changed_line_hide_nothing(self):
-        forged = "+x\x0cdiff --git a/q b/docs/q"
-        diff = (
-            "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1,2 @@\n"
-            + forged
-            + "\n+unsafe { f() }\n"
-        )
-        self.assertEqual(
-            merge_card.parse_diff(diff), [("src/a.rs", [forged, "+unsafe { f() }"])]
-        )
-
-    def test_changed_lines_starting_with_two_pluses_or_minuses_count(self):
-        diff = "diff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n+++subprocess.run(x)\n---old\n"
-        self.assertEqual(
-            merge_card.parse_diff(diff), [("a.rs", ["+++subprocess.run(x)", "---old"])]
-        )
-
-    def test_a_rename_a_copy_and_a_deletion_name_the_path_they_left(self):
-        diff = (
-            "diff --git a/.github/CODEOWNERS b/docs/x\nsimilarity index 100%\n"
-            "rename from .github/CODEOWNERS\nrename to docs/x\n"
-            "diff --git a/.github/workflows/w.yml b/docs/w\n"
-            "copy from .github/workflows/w.yml\ncopy to docs/w\n"
-        )
-        paths = {p for p, _ in merge_card.parse_diff(diff)}
-        self.assertEqual(
-            paths, {".github/CODEOWNERS", "docs/x", ".github/workflows/w.yml", "docs/w"}
-        )
-        _, out, _ = run(diff=diff)
-        self.assertIn("CODEOWNERS: .github/CODEOWNERS (path)", out)
-        self.assertIn("CI workflows: .github/workflows/w.yml (path)", out)
-
-    def test_a_deleted_file_is_listed_by_its_old_path(self):
-        diff = "diff --git a/gone.rs b/gone.rs\ndeleted file mode 100644\n--- a/gone.rs\n+++ /dev/null\n@@ -1 +0,0 @@\n-unsafe\n"
-        self.assertEqual(merge_card.parse_diff(diff), [("gone.rs", ["-unsafe"])])
+    def test_the_count_line_is_plural_from_two(self):
+        files = [entry("a.rs", "+// unsafe", "+// unsafe again")]
+        out = io.StringIO()
+        pr = {**PR, "checks": [], "reviews": []}
+        with contextlib.redirect_stdout(out):
+            merge_card.print_card(pr, BASE, RULES, None, files, self.CATS)
+        self.assertIn("also 2 comment lines in a.rs", out.getvalue())
 
 
 class Categories(unittest.TestCase):
     CATEGORIES = json.loads(merge_card.CATEGORIES.read_text())["categories"]
+    # The repository has no submodule yet; the day it has one, the file is a dependency change.
+    NOT_YET = {".gitmodules"}
 
     def test_every_listed_path_exists(self):
         for cat in self.CATEGORIES:
-            for path in cat["paths"]:
+            for path in cat["paths"] + cat.get("exclude", []):
+                if path in self.NOT_YET:
+                    continue
                 if path.endswith("/"):
                     self.assertTrue((ROOT / path).is_dir(), path)
                 else:

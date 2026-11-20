@@ -1,7 +1,7 @@
 {
-  "_comment": "Categories of the merge card (CLAUDE.md, Merging). paths: a directory prefix ending in '/', a glob, or a file; any change to a match lists the file. patterns: regular expressions tried on every added or removed line outside docs/ and tests.",
+  "_comment": "Categories of the merge card (CLAUDE.md, Merging). paths: a directory prefix ending in '/', a glob, or a file, matched on filename and previous_filename, minus exclude; patterns: regular expressions tried on every added or removed line of a file's patch, except docs/**/*.md prose; matches under a tests directory are listed apart.",
   "categories": [
-    {"name": "process launch", "paths": [], "patterns": ["Command::new", "\\bExecStart=", "\\bsubprocess\\.", "\\bposix_spawn\\b", "\\bexecve?\\("]},
+    {"name": "process launch", "paths": [], "patterns": ["Command::new", "\\bExecStart=", "\\bsubprocess\\.", "\\bposix_spawn\\b", "\\bexecve?\\(", "\\bCommand\\b", "std::process", "tokio::process"]},
     {"name": "files", "paths": [], "patterns": ["std::fs::", "\\bOpenOptions\\b", "\\bFile::(create|open)\\b", "\\bset_permissions\\b", "\\bchmod\\b", "\\bfs::(write|remove|rename)"]},
     {"name": "unsafe", "paths": [], "patterns": ["\\bunsafe\\b"]},
     {"name": "D-Bus", "paths": [], "patterns": ["\\bzbus\\b", "\\bdbus\\b", "#\\[(zbus::)?interface"]},
@@ -10,9 +10,9 @@
     {"name": "power", "paths": [], "patterns": ["(?i)\\blogind\\b", "(?i)\\b(suspend|hibernate|poweroff|reboot)\\b", "PrepareForSleep"]},
     {"name": "signing", "paths": ["forge/specs/azoth/keys/", "system/keys/", "system/sign-images.sh", "system/promote.sh", "forge/scripts/sign_attest.sh"], "patterns": ["\\bcosign\\b", "\\bsbsign\\b", "(?i)\\bMOK\\b"]},
     {"name": "approved document text", "paths": ["docs/architecture/doc_*.md", "docs/decisions/*.md"], "patterns": []},
-    {"name": "CI workflows", "paths": [".github/workflows/"], "patterns": []},
+    {"name": "CI workflows", "paths": [".github/"], "patterns": [], "exclude": [".github/CODEOWNERS", ".github/settings/"]},
     {"name": "repository settings", "paths": [".github/settings/", ".claude/settings.json"], "patterns": []},
     {"name": "CODEOWNERS", "paths": [".github/CODEOWNERS"], "patterns": []},
-    {"name": "dependencies", "paths": ["*Cargo.lock", "*Cargo.toml", "deny.toml", "forge/config/packages.json", "scripts/ci/audited-lockfiles.txt", "scripts/ci/requirements*.txt", "system/nvidia/locks/"], "patterns": ["^[ +-]*(\\[(dev-|build-)?dependencies[.\\]]|[A-Za-z0-9_-]+ = \\{ *(version|git|path)\\b)"]}
+    {"name": "dependencies", "paths": ["*Cargo.lock", "*Cargo.toml", "deny.toml", "forge/config/packages.json", "scripts/ci/audited-lockfiles.txt", "scripts/ci/requirements*.txt", "system/nvidia/locks/", ".gitmodules"], "patterns": ["^[ +-]*(\\[(dev-|build-)?dependencies[.\\]]|[A-Za-z0-9_-]+ = \\{ *(version|git|path)\\b)", "Subproject commit"]}
   ]
 }
