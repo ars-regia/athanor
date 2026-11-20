@@ -878,5 +878,35 @@ class Publish(GithubRelease):
         )
 
 
+# The CI run's trust environment must not reach the scripts under test: on a pull request into
+# rebase/*, GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
+TRUST_ENV = (
+    "GITHUB_BASE_REF",
+    "GITHUB_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+    "TIER_TRUSTED_REFS",
+    "GITHUB_ACTIONS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+)
+_environ_patch = None
+
+
+def setUpModule():
+    global _environ_patch
+    import os
+    from unittest import mock
+
+    _environ_patch = mock.patch.dict(os.environ)
+    _environ_patch.start()
+    for name in TRUST_ENV:
+        os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ_patch.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -7181,39 +7181,104 @@ def judge_known_red(entries, base, results, today):
 # GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
 TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
                    "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
-ENVIRON_COPY = re.compile(r"os\.environ\.(?:items|copy)\(|\*\*os\.environ|dict\(os\.environ|patch\.dict\(os\.environ")
 SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
+SUBPROCESS_RUNNERS = {"run", "Popen", "check_call", "check_output", "call"}
+
+
+def environment_readers(tree):
+    """Lines where a test hands the whole environment on: os.environ (or `environ` imported from
+    os) read as a whole rather than as os.environ[...] or os.environ.get(...), and a subprocess call
+    with no env= keyword, which inherits everything."""
+    parents = {id(c): n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+    from_os = any(isinstance(n, ast.ImportFrom) and n.module == "os"
+                  and any(a.name == "environ" for a in n.names) for n in ast.walk(tree))
+    lines = []
+    for n in ast.walk(tree):
+        whole = (isinstance(n, ast.Attribute) and n.attr == "environ" and isinstance(n.value, ast.Name)
+                 and n.value.id == "os") or (from_os and isinstance(n, ast.Name) and n.id == "environ")
+        if whole:
+            up = parents.get(id(n))
+            single = (isinstance(up, ast.Subscript) and up.value is n) or (
+                isinstance(up, ast.Attribute) and up.attr in ("get", "setdefault", "pop", "__contains__"))
+            if not single and not isinstance(up, ast.Compare):
+                lines.append(n.lineno)
+        elif isinstance(n, ast.Call):
+            f = n.func
+            name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+            owner = f.value.id if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else "subprocess"
+            if (name in SUBPROCESS_RUNNERS and owner == "subprocess"
+                    and not any(k.arg in ("env", None) for k in n.keywords)):
+                lines.append(n.lineno)
+    return lines
+
+
+def dropped_names(tree, shared):
+    """The strings a test lists in a tuple, list or set literal, plus those of the shared TRUST_ENV
+    tuple when the test names it."""
+    names = {e.value for n in ast.walk(tree) if isinstance(n, (ast.Tuple, ast.List, ast.Set))
+             for e in n.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    if any((isinstance(n, ast.Name) and n.id == "TRUST_ENV")
+           or (isinstance(n, ast.ImportFrom) and any(a.name == "TRUST_ENV" for a in n.names))
+           for n in ast.walk(tree)):
+        names |= shared
+    return names
 
 
 def trust_env_problems(root=None):
-    """Every tracked test_*.py that copies os.environ and names a script reaching tier-digests.sh
-    names every TRUST_ENV_NAMES entry too, itself or through the TRUST_ENV tuple of
-    SHARED_TRUST_ENV."""
+    """Every tracked test_*.py that hands the whole environment to a subprocess (environment_readers)
+    and names a script that reaches tier-digests.sh lists every TRUST_ENV_NAMES entry in a tuple, list
+    or set literal, or names the TRUST_ENV tuple of SHARED_TRUST_ENV. A script reaches tier-digests.sh
+    when a non-comment line of it names tier-digests.sh or a script that does, on a path boundary."""
     root = root or ROOT
-    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                             capture_output=True, text=True, check=True).stdout.split("\0")
-    calls = re.compile(r'(?:bash\s+"?|=)\S*tier-digests\.sh')  # not a path in an error message
-    reaching = {"tier-digests.sh"} | {f.rsplit("/", 1)[-1] for f in tracked
-                                      if f.endswith(".sh") and calls.search(read(root / f))}
-    shared = read(root / SHARED_TRUST_ENV) if (root / SHARED_TRUST_ENV).exists() else ""
-    problems = []
+    tracked = [f for f in subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
+                                         text=True, check=True).stdout.split("\0") if f]
+    problems, shells = [], {}
+    for f in tracked:
+        if f.endswith(".sh"):
+            try:
+                shells[f.rsplit("/", 1)[-1]] = re.sub(r"(?m)^\s*#.*$", "", read(root / f))
+            except OSError as e:
+                problems.append(f"{f}: tracked but unreadable ({e.strerror})")
+
+    def names(script, text):
+        return re.search(r"""(?:^|[/"' =])""" + re.escape(script) + r"\b", text) is not None
+
+    reaching = {"tier-digests.sh"}
+    while True:
+        more = {n for n, text in shells.items() if n not in reaching and any(names(r, text) for r in reaching)}
+        if not more:
+            break
+        reaching |= more
+    shared = set()
+    try:
+        tree = ast.parse(read(root / SHARED_TRUST_ENV))
+        shared = dropped_names(tree, set()) if any(
+            isinstance(n, ast.Name) and n.id == "TRUST_ENV" for n in ast.walk(tree)) else set()
+    except (OSError, SyntaxError):
+        pass
     for f in sorted(tracked):
         if not re.search(r"(?:^|/)test_[^/]*\.py$", f):
             continue
-        text = re.sub(r"(?m)^\s*#.*$", "", read(root / f))
-        if not ENVIRON_COPY.search(text):
+        try:
+            text = read(root / f)
+            tree = ast.parse(text)
+        except OSError as e:
+            problems.append(f"{f}: tracked but unreadable ({e.strerror})")
             continue
-        if not any(n in text for n in reaching):
+        except SyntaxError as e:
+            problems.append(f"{f}: not parseable ({e.msg}, line {e.lineno})")
             continue
-        known = text + shared if "TRUST_ENV" in text else text
-        missing = [n for n in TRUST_ENV_NAMES if n not in known]
+        code = re.sub(r"(?m)^\s*#.*$", "", text)
+        if not any(names(r, code) for r in reaching) or not environment_readers(tree):
+            continue
+        missing = [n for n in TRUST_ENV_NAMES if n not in dropped_names(tree, shared)]
         if missing:
-            problems.append(f"{f}: passes a copy of os.environ to a script that reaches tier-digests.sh "
-                            f"without removing {', '.join(missing)}")
+            problems.append(f"{f}: hands the whole environment to a subprocess of a script that reaches "
+                            f"tier-digests.sh without dropping {', '.join(missing)}")
     return problems
 
 
-@check("test-trust-env", "A test that copies os.environ for a script reaching tier-digests.sh drops the CI run's trust environment")
+@check("test-trust-env", "A test that hands the whole environment to a script reaching tier-digests.sh drops the CI run's trust environment")
 def check_test_trust_env():
     r = Result()
     for problem in trust_env_problems():

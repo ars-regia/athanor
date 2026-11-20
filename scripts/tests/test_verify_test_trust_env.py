@@ -70,12 +70,89 @@ class TestTrustEnv(unittest.TestCase):
 
     def test_a_test_of_a_script_that_does_not_reach_the_script_passes(self):
         self.write(
-            "forge/scripts/other.sh", 'echo "run system/tier-digests.sh resolve" >&2\n'
+            "forge/scripts/other.sh", "echo hello\n"
         )
         self.write(
             TEST.replace("caller", "other"), INHERITING.replace("caller", "other")
         )
         self.assertEqual(verify.trust_env_problems(self.root), [])
+
+
+    def flagged(self, body):
+        self.write(TEST, body)
+        return len(verify.trust_env_problems(self.root))
+
+    def test_every_way_to_inherit_the_environment_is_named(self):
+        for body in (
+            'import os\nenv = os.environ | {"A": "1"}\nrun(["caller.sh"], env=env)\n',
+            'from os import environ\nenv = environ.copy()\nrun(["caller.sh"], env=env)\n',
+            'from os import environ\nenv = dict(environ)\nrun(["caller.sh"], env=env)\n',
+            'import os\nenv = dict(\n    os.environ\n)\nrun(["caller.sh"], env=env)\n',
+            'import os\nrun(["caller.sh"], env=os.environ)\n',
+            'import os\nenv = {k: v for k in os.environ for v in [1]}\nrun(["caller.sh"], env=env)\n',
+        ):
+            with self.subTest(body=body):
+                self.assertEqual(self.flagged(body), 1)
+
+    def test_a_subprocess_call_with_no_env_is_named(self):
+        self.assertEqual(self.flagged('import subprocess\nsubprocess.run(["caller.sh"])\n'), 1)
+        self.assertEqual(self.flagged('import subprocess\nsubprocess.run(["caller.sh"], env={})\n'), 0)
+
+    def test_reading_one_variable_does_not_inherit(self):
+        body = 'import os\nPATH = os.environ["PATH"] + os.environ.get("HOME", "")\nrun(["caller.sh"], env={})\n'
+        self.assertEqual(self.flagged(body), 0)
+
+    def test_a_script_two_hops_from_tier_digests_is_reached(self):
+        self.write("forge/scripts/outer.sh", 'bash "$here/caller.sh"\n')
+        self.write(TEST, INHERITING.replace("caller.sh", "outer.sh"))
+        self.assertEqual(len(verify.trust_env_problems(self.root)), 1)
+
+    def test_a_name_in_a_longer_name_does_not_count(self):
+        self.write(TEST, INHERITING + f"DROP = {verify.TRUST_ENV_NAMES[:-1] + ('GITHUB_TOKEN_FILE',)!r}\n")
+        self.assertIn("GITHUB_TOKEN", verify.trust_env_problems(self.root)[0])
+        self.write(TEST, INHERITING + "NOTE = 'GITHUB_BASE_REF GITHUB_REF'\n")
+        self.assertIn("GITHUB_BASE_REF", verify.trust_env_problems(self.root)[0])
+        self.write("forge/scripts/mytier-digests.sh.bak.sh", "")
+        self.write(TEST, INHERITING.replace("caller.sh", "my-caller.sh"))
+        self.assertEqual(verify.trust_env_problems(self.root), [])
+
+    def test_a_tracked_file_missing_from_the_worktree_is_a_problem(self):
+        self.write(TEST, INHERITING)
+        (self.root / TEST).unlink()
+        self.write("forge/scripts/gone.sh")
+        (self.root / "forge/scripts/gone.sh").unlink()
+        problems = verify.trust_env_problems(self.root)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(all("unreadable" in p for p in problems))
+
+# The CI run's trust environment must not reach the scripts under test: on a pull request into
+# rebase/*, GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
+TRUST_ENV = (
+    "GITHUB_BASE_REF",
+    "GITHUB_REF",
+    "GITHUB_REPOSITORY",
+    "GITHUB_SERVER_URL",
+    "TIER_TRUSTED_REFS",
+    "GITHUB_ACTIONS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+)
+_environ_patch = None
+
+
+def setUpModule():
+    global _environ_patch
+    import os
+    from unittest import mock
+
+    _environ_patch = mock.patch.dict(os.environ)
+    _environ_patch.start()
+    for name in TRUST_ENV:
+        os.environ.pop(name, None)
+
+
+def tearDownModule():
+    _environ_patch.stop()
 
 
 if __name__ == "__main__":
