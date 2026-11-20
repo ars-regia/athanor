@@ -1,6 +1,8 @@
 //! zbus runs the logind thread's connections on that thread's Tokio runtime and starts no
 //! runtime of its own (plan decision M3): the thread adds itself to the process and nothing
 //! else. A test binary of its own, with one test, so that no other test's threads are counted.
+//! The count holds whichever zbus features the build unifies: the root workspace's adds
+//! `tokio-multithread` (athanor-sulphur), the package build of `-p athanor-lock` does not.
 
 mod common;
 
@@ -17,19 +19,6 @@ fn threads() -> Vec<String> {
         .collect();
     names.sort();
     names
-}
-
-/// This process's threads once they equal `expected`, or after 5 s. A joined thread can stay
-/// listed in `/proc/self/task` for a moment after `join` returns.
-fn threads_settled(expected: &[String]) -> Vec<String> {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let now = threads();
-        if now == expected || std::time::Instant::now() >= deadline {
-            return now;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
 }
 
 #[test]
@@ -51,35 +40,4 @@ fn the_logind_thread_is_the_only_thread_it_adds() {
     expected.push("logind".to_owned());
     expected.sort();
     assert_eq!(threads(), expected);
-
-    // The control, for what the count cannot tell: zbus's own runtime starts no thread either,
-    // but runs only inside its own `block_on`. A connection built off Tokio, then driven by a
-    // Tokio `block_on` as the logind thread drives its own, gets no answer, so the logind
-    // thread's answers above came through Tokio.
-    let address = bus.address.clone();
-    let connection = std::thread::spawn(move || {
-        zbus::block_on(zbus::connection::Builder::address(address.as_str()).build())
-            .expect("a connection off Tokio")
-    })
-    .join()
-    .expect("the control's thread");
-    let answer = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("runtime")
-        .block_on(async {
-            let bus = zbus::fdo::DBusProxy::new(&connection)
-                .await
-                .expect("bus proxy");
-            tokio::time::timeout(std::time::Duration::from_secs(1), bus.get_id()).await
-        });
-    assert!(
-        answer.is_err(),
-        "a connection off Tokio answered under Tokio: {answer:?}"
-    );
-    assert_eq!(
-        threads_settled(&expected),
-        expected,
-        "nor did it start a thread"
-    );
 }
