@@ -57,8 +57,12 @@ below reverses or completes one recorded earlier.
       type of `athanor-sulphur-client`;
    2. the `xdg-dbus-proxy` filter, one per confined application (SD9).
 
-   The rest of the broker (SD7, SD22 steps 6 and 7) follows as far as these two need it, and the
-   specifications say where. This completes ADR-0138, which places no broker step in 1.0. Until
+   Both go into the launch path that exists today: the `Unit` of `athanor-sulphur-client`, which
+   every launch of the shell already starts as a transient unit of the user manager (BR2.3). They
+   do not wait for the broker. The broker (SD7, SD22 steps 6 and 7) is placed in 1.0 with them,
+   keeps the order of SD22, with S1, S2, S3 and S5 of its table first, and takes over the launch
+   path, the properties and the filter included, when it lands. This completes ADR-0138, which
+   places no broker step in 1.0. Until
    the two steps land, the limits declared in `doc_files.md` FM3 and FM4 stand, and tier 2 of the
    threat model (TM2, TM3) is not met for the `confined` class.
 
@@ -67,7 +71,11 @@ below reverses or completes one recorded earlier.
    `%__spec_build_pre`) are removed from the build of the workspace's packages, and so is any spec that overrides
    `RUSTFLAGS` or the profile for one. This executes ADR-0075 decision 3, and amends its sentence
    "release builds use thin LTO": the release profile is the one `Cargo.toml` states, today
-   `lto = true` and `codegen-units = 1`.
+   `lto = true` and `codegen-units = 1`. The flags of `%rustflags` that are not profile settings
+   stay, in the workspace's `.cargo/config.toml`: `target-cpu=x86-64-v3`, which the hardware
+   audience of [ADR-0054](0054-audience-and-support-window.md) needs, and the mold linker. With the
+   `RUSTFLAGS` override gone, the hardening flags that `.cargo/config.toml` already sets (full
+   RELRO, PIC, frame pointers, `-D unsafe_code`) apply to the RPM builds too.
    If the build time proves too high, `Cargo.toml` itself changes, by a record that amends this
    one, and the macros do not return. The macros also apply to upstream Rust packages that the
    forge builds; which of them keep a flag is decided in the pull request that removes the
@@ -95,8 +103,9 @@ below reverses or completes one recorded earlier.
 6. **ADR-0141 decision 5 is amended for the recovery console** (#1355). The recovery console stays
    the text console that `doc_recovery.md` specifies (R1), which is Athanor's own and needs no
    port to Sal. The dead GTK kiosk source, `forge/specs/athanor-recovery/athanor-recovery-1.0.0`,
-   and the `athanor-recovery` line of `forge/config/own-allow.txt` are removed, as R4 and R10
-   decided on 2026-10-08. A graphical recovery, if one is ever built, is written from scratch in
+   the legacy glass theme of `athanor-style` (`system/athanor-style/src/glass.rs`) and the
+   `athanor-recovery` line of `forge/config/own-allow.txt` are removed, as R4 and R10 decided on
+   2026-10-08. A graphical recovery, if one is ever built, is written from scratch in
    Sal (R4) and is not a 1.0 item.
 
 ## Tracking corrections, not reversals
@@ -128,6 +137,7 @@ below reverses or completes one recorded earlier.
   - `doc_pipeline.md` PL51 and the PB2 row of section 12; `doc_ci.md` CI10;
   - `release-1.0.md`: the kernel reproducibility condition, and the confined class;
   - `doc_overview.md`, for ADR-0141 decision 4;
+  - `forge/README.md`, section "Compiler flags", for decision 2;
   - `doc_recovery.md` needs no revision: it already says what decision 6 keeps.
 - The first work of decision 1 is the unit properties of the launch path. The broker's
   implementation touches process launch and confinement and is stop-and-ask under `AGENTS.md`
