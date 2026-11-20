@@ -69,7 +69,11 @@ pub fn image(icons: &mut Icons, name: &str, scale: u16, rtl: bool) -> Option<Ima
 pub fn after_turn(turn: Turn, resized: impl FnOnce() -> bool, stay: impl FnOnce() -> Reply) -> Reply {
     match turn {
         Turn::Rebuild => Reply::Reopen,
-        Turn::Updated if resized() => Reply::Reopen,
+        // A close the page asked for wins over a reopen: `stay` consumes it.
+        Turn::Updated if resized() => match stay() {
+            Reply::Stay => Reply::Reopen,
+            other => other,
+        },
         Turn::Updated | Turn::Unchanged => stay(),
     }
 }
@@ -98,7 +102,8 @@ mod tests {
     #[test]
     fn a_page_set_in_place_reopens_the_popover_only_when_its_size_changed() {
         let stay = || Reply::Close;
-        assert_eq!(after_turn(Turn::Updated, || true, stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Updated, || true, || Reply::Stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Updated, || true, stay), Reply::Close, "a close wins");
         assert_eq!(after_turn(Turn::Updated, || false, stay), Reply::Close);
         assert_eq!(after_turn(Turn::Rebuild, || false, stay), Reply::Reopen);
         assert_eq!(after_turn(Turn::Unchanged, || panic!("no turn, no layout"), stay), Reply::Close);
