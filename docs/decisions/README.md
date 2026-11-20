@@ -211,3 +211,4 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | amended by ADR-0143 | shell, security, apps, process, docs |
 | ADR-0142 | 0142 | [The move to Fedora 45 turns sshd off on upgraded machines, as Fedora's desktop preset does](0142-fedora-45-upgrade-turns-sshd-off.md) | accepted | security, network |
 | ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | accepted | security, build, process, kernel, shell, docs |
+| ADR-0144 | 0144 | [The QEMU guest agent is off until a person turns it on, and then answers an allow-list](0144-qemu-guest-agent-off-by-default.md) | accepted | security |
