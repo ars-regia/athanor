@@ -6996,6 +6996,8 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                     out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
                                 "before it on its line, and no file named there resolves: name its path"))
                 continue
+            if (c := CRATE_ROOT.match(path)):
+                crate = c.group(1)
             if not symbol and cited is not None:
                 cited.add(path)
             if not symbol and lines_kept is not None and path not in lines_kept:
@@ -7003,8 +7005,6 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"symbol, `{path}#name`, or keep a file with no symbol in CITATION_LINES_KEPT"))
                 continue
             body = read_file(path)
-            if (c := CRATE_ROOT.match(path)):
-                crate = c.group(1)
             if symbol:
                 try:
                     defs = symbol_definitions(path, body)

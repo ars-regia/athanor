@@ -145,6 +145,13 @@ class Acceptance(unittest.TestCase):
         )
         self.assertEqual(messages(text), [])
 
+    def test_a_line_citation_outside_the_kept_list_still_names_the_crate(self):
+        extra = {"crate/src/lib.rs": "fn deep() {}\n", "crate/Cargo.toml": "[dependencies]\ngio = 1\n"}
+        text = "`crate/src/lib.rs:1`, and `gio` in `Cargo.toml#dependencies.gio`."
+        out = messages(text, extra, lines_kept={})
+        self.assertEqual(len(out), 1, out)
+        self.assertIn("cites lines", out[0])
+
     def test_a_kept_file_is_still_read_by_its_lines(self):
         out = messages(
             "The `cosmic-osd` is at `data/clients:1`.",
