@@ -725,6 +725,7 @@ dependencies = [
  "futures-util",
  "libc",
  "libpulse-binding",
+ "serde",
  "tokio",
  "tracing",
  "zbus 6.2.1",

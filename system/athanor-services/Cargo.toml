@@ -13,6 +13,8 @@ athanor-unit = { path = "../athanor-unit" }
 libc = { workspace = true }
 # The PulseAudio protocol that pipewire-pulse serves, on libpulse's threaded main loop.
 libpulse-binding = { workspace = true }
+# The Serialize of a GetSecrets reply that borrows the password it owns (network.rs).
+serde = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 zbus = { workspace = true }
