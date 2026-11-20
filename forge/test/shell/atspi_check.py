@@ -221,9 +221,9 @@ def find_application(Atspi, name, seconds=20):
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         desktop = Atspi.get_desktop(0)
-        for app in children(desktop):
-            if app.get_name() == name:
-                return app
+        found = afresh(lambda: next((app for app in children(desktop) if app.get_name() == name), None))
+        if found is not None:
+            return found
         time.sleep(0.5)
     return None
 

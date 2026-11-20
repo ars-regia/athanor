@@ -33,7 +33,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import collect, find_application, walk  # noqa: E402
+from atspi_check import afresh, collect, find_application, walk  # noqa: E402
 
 READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
@@ -191,14 +191,17 @@ def confirm_button(app, Atspi, name):
     """The confirmation's button: the sibling of Cancel called `name`. The row of the
     same name sits on the hidden page of the stack."""
 
-    for cancel in buttons(app, Atspi, "Cancel"):
-        siblings = collect(
-            cancel.get_parent(),
-            lambda node: node.get_role_name() == "button" and node.get_name() == name,
-        )
-        if siblings:
-            return cancel, siblings[0]
-    return None, None
+    def find():
+        for cancel in buttons(app, Atspi, "Cancel"):
+            siblings = collect(
+                cancel.get_parent(),
+                lambda node: node.get_role_name() == "button" and node.get_name() == name,
+            )
+            if siblings:
+                return cancel, siblings[0]
+        return None, None
+
+    return afresh(find)
 
 
 def pss_kb(pid):

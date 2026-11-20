@@ -213,10 +213,6 @@ class WalkTest(unittest.TestCase):
         sleep.assert_not_called()
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 @unittest.mock.patch.object(check.time, "sleep")
 class CollectTest(unittest.TestCase):
     def app(self, times):
@@ -229,3 +225,7 @@ class CollectTest(unittest.TestCase):
     def test_a_tree_that_keeps_changing_raises_not_an_empty_list(self, _sleep):
         with self.assertRaises(Vanished):
             check.collect(self.app(check.WALK_TRIES), lambda node: node.get_role_name() == "button")
+
+
+if __name__ == "__main__":
+    unittest.main()
