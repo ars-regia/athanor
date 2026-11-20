@@ -39,8 +39,25 @@ def commits(*messages):
 
 STUB_CARGO = """#!/usr/bin/env bash
 echo "cargo $*" >> "$STUB_LOG"
-sed -i "s/$STUB_OLD/$STUB_MASTER/g" "$(git rev-parse --show-toplevel)/Cargo.lock"
+top=$(git rev-parse --show-toplevel)
+manifest=Cargo.toml
+while (($#)); do
+    [[ $1 == --manifest-path ]] && manifest=$2
+    shift
+done
+[[ -n ${STUB_SKIP:-} && $manifest == *"$STUB_SKIP"* ]] && exit 0
+sed -i "s/$STUB_OLD/$STUB_MASTER/g" "$(dirname "$manifest")/Cargo.lock"
 """
+
+
+def lock(smithay=OLD, extras=OLD):
+    return "".join(
+        f'[[package]]\nname = "{name}"\nversion = "0.7.0"\nsource = "git+{URL}?rev={rev}#{rev}"\n\n'
+        for name, rev in (("smithay", smithay), ("smithay-drm-extras", extras))
+    )
+
+
+LOCK = lock()
 
 
 def manifest(rev):
@@ -60,9 +77,9 @@ class BumpSmithay(unittest.TestCase):
         subprocess.run(["git", "init", "-q"], cwd=self.work, check=True)
         (self.work / MANIFEST).parent.mkdir(parents=True)
         (self.work / MANIFEST).write_text(manifest(OLD))
-        (self.work / "Cargo.lock").write_text(
-            f'name = "smithay"\nsource = "git+{URL}?rev={OLD}#{OLD}"\n'
-        )
+        (self.work / "Cargo.lock").write_text(LOCK)
+        (self.work / "fuzz").mkdir()
+        (self.work / "fuzz" / "Cargo.lock").write_text((self.work / "Cargo.lock").read_text())
         for name, text in (("gh", STUB_GH), ("cargo", STUB_CARGO)):
             (stub / name).write_text(text)
             (stub / name).chmod(0o755)
@@ -97,7 +114,12 @@ class BumpSmithay(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.work / MANIFEST).read_text(), manifest(NEW))
         self.assertIn(f"?rev={NEW}#{NEW}", (self.work / "Cargo.lock").read_text())
-        self.assertIn("cargo update", self.calls())
+        self.assertIn(f"?rev={NEW}#{NEW}", (self.work / "fuzz" / "Cargo.lock").read_text())
+        for crate in ("", "fuzz/"):
+            self.assertIn(
+                f"cargo update --manifest-path {self.work}/{crate}Cargo.toml -p smithay -p smithay-drm-extras",
+                self.calls(),
+            )
         self.assertEqual(
             (self.out / "title").read_text(),
             f"chore(sulphur): bump Smithay to {NEW[:12]}\n",
@@ -168,11 +190,24 @@ class BumpSmithay(unittest.TestCase):
         self.assertTrue((self.out / "title").exists())
         self.assertIn(f"compare/{HOLD}...{NEW}", self.calls())
 
+    def test_a_fuzz_lock_cargo_did_not_move_fails(self):
+        self.env["STUB_SKIP"] = "/fuzz/"
+        result = self.run_script(NEW)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("fuzz/Cargo.lock does not take smithay at", result.stderr)
+
+    def test_a_lock_that_moves_one_package_fails(self):
+        (self.work / "Cargo.lock").write_text(lock(smithay=NEW))
+        self.env["STUB_OLD"] = "nothing-to-replace"
+        result = self.run_script(NEW)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Cargo.lock does not take smithay-drm-extras", result.stderr)
+
     def test_a_lock_cargo_did_not_move_fails(self):
         self.env["STUB_OLD"] = "nothing-to-replace"
         result = self.run_script(NEW)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("Cargo.lock does not take Smithay", result.stderr)
+        self.assertIn("Cargo.lock does not take smithay at", result.stderr)
         self.assertFalse((self.out / "title").exists())
 
 

@@ -11,7 +11,7 @@ mod protocol;
 
 use std::io::{self, Read, Write};
 
-pub use buffer::{read_line, read_line_within, Full, ReadError, Secret};
+pub use buffer::{read_line, read_line_within, Full, LineReader, ReadError, Secret};
 pub use protocol::{
     encode, escape, parse, unescape, Kind, Line, ProtocolError, FAILURE, SUCCESS, UNAVAILABLE,
 };
@@ -136,8 +136,7 @@ where
     S: Read + Write,
     F: FnMut(&Prompt, &mut Secret),
 {
-    stream.write_all(service.name().as_bytes())?;
-    stream.write_all(b"\n")?;
+    write_selector(stream, service)?;
     let mut line = Secret::new();
     let mut reply = Secret::new();
     let mut verdict = Verdict {
@@ -170,14 +169,20 @@ where
         };
         reply.clear();
         answer(&prompt, &mut reply);
-        let sent = send(stream, &reply);
+        let sent = write_answer(stream, &reply);
         reply.clear();
         sent?;
     }
 }
 
-/// Writes one answer and its newline, as two writes.
-fn send(stream: &mut impl Write, reply: &Secret) -> Result<(), TransactError> {
+/// Writes the client's first line, the selector of `service` (D28).
+pub fn write_selector(stream: &mut impl Write, service: Service) -> io::Result<()> {
+    stream.write_all(service.name().as_bytes())?;
+    stream.write_all(b"\n")
+}
+
+/// Writes one answer and its newline, as two writes, so that no buffer holds them together.
+pub fn write_answer(stream: &mut impl Write, reply: &Secret) -> Result<(), TransactError> {
     if reply.len() >= MAX_LINE {
         return Err(TransactError::AnswerTooLong);
     }

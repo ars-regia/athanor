@@ -273,6 +273,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-auth"
+version = "1.0.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "zeroize",
+]
+
+[[package]]
 name = "athanor-bar"
 version = "1.0.0"
 dependencies = [
@@ -325,6 +333,7 @@ dependencies = [
 name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
+ "athanor-auth",
  "athanor-bar",
  "athanor-layout",
  "athanor-shelld",
@@ -382,6 +391,7 @@ dependencies = [
  "futures-util",
  "libc",
  "libpulse-binding",
+ "serde",
  "tokio",
  "tracing",
  "zbus 6.2.1",

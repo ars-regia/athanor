@@ -548,6 +548,10 @@ impl View {
     }
 
     fn submit(self: &Rc<Self>) {
+        // GTK hands the text out as a `GString` copy, freed without being wiped: glib offers no
+        // safe way to overwrite it, nor to read the entry's buffer in place. The copies this
+        // page makes from it are `Zeroizing`. The GTK page ships in no product; the bar and the
+        // control center build the Sal page, whose field keeps no copy that is not wiped.
         let password = self.entry.text();
         if !network::password_acceptable(self.security.get(), &password) {
             return;

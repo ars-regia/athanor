@@ -3,3 +3,4 @@
 
 pub mod logind;
 pub mod state;
+pub mod unlock;
