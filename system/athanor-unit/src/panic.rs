@@ -10,17 +10,22 @@ use std::backtrace::Backtrace;
 use std::panic::{self, PanicHookInfo};
 use std::thread;
 
-/// Installs the hook. Call it first in `main`: through tracing once a subscriber is set,
-/// to stderr before that, which a unit's journal reads either way.
+/// Installs the hook. Call it first in `main`: through tracing when the subscriber takes an
+/// error from this module, to stderr otherwise (none set yet, or a `RUST_LOG` that drops it),
+/// which a unit's journal reads either way.
 pub fn install() {
     panic::set_hook(Box::new(|info| {
         let report = report(info, &Backtrace::force_capture());
-        if tracing::dispatcher::has_been_set() {
+        if through_tracing() {
             tracing::error!("{report}");
         } else {
             eprintln!("{report}");
         }
     }));
+}
+
+fn through_tracing() -> bool {
+    tracing::enabled!(tracing::Level::ERROR)
 }
 
 fn report(info: &PanicHookInfo<'_>, backtrace: &Backtrace) -> String {
@@ -69,5 +74,19 @@ mod tests {
         assert!(report.contains(": index 7 out of range\n"), "{report}");
         let anchor = format!("install at {:#x}:", install as fn() as usize);
         assert!(report.contains(&anchor), "{report}");
+    }
+
+    #[test]
+    fn a_filter_that_drops_the_report_leaves_it_to_stderr() {
+        let logs_under = |filter: &str| {
+            let subscriber = tracing_subscriber::fmt()
+                .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+                .with_writer(std::io::sink)
+                .finish();
+            tracing::subscriber::with_default(subscriber, through_tracing)
+        };
+        assert!(logs_under("error"));
+        assert!(!logs_under("off"));
+        assert!(!logs_under("athanor_bar=debug"));
     }
 }
