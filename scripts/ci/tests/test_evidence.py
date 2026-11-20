@@ -148,34 +148,22 @@ class Evidence(unittest.TestCase):
                 self.assertEqual(self.write(**kwargs).returncode, 2)
 
 
-# The CI run's trust environment must not reach the scripts under test: on a pull request into
-# rebase/*, GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
-TRUST_ENV = (
-    "GITHUB_BASE_REF",
-    "GITHUB_REF",
-    "GITHUB_REPOSITORY",
-    "GITHUB_SERVER_URL",
-    "TIER_TRUSTED_REFS",
-    "GITHUB_ACTIONS",
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-)
-_environ_patch = None
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
+             "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+_environ = _mock.patch.dict(_os.environ)
 
 
 def setUpModule():
-    global _environ_patch
-    import os
-    from unittest import mock
-
-    _environ_patch = mock.patch.dict(os.environ)
-    _environ_patch.start()
-    for name in TRUST_ENV:
-        os.environ.pop(name, None)
+    _environ.start()
+    [_os.environ.pop(name, None) for name in TRUST_ENV]
 
 
 def tearDownModule():
-    _environ_patch.stop()
+    _environ.stop()
 
 
 if __name__ == "__main__":
