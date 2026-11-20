@@ -2,6 +2,7 @@
 
 import importlib.util
 import pathlib
+import re
 import unittest
 
 import yaml
@@ -17,9 +18,39 @@ changes = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(changes)
 
 
+ADR_0137 = ROOT / "docs" / "decisions" / "0137-merge-queue-on-iso-v0.md"
+
+
 def needs(job):
     value = job.get("needs", [])
     return [value] if isinstance(value, str) else value
+
+
+class QueueBuildsTest(unittest.TestCase):
+    def test_adr_0137_names_the_builds_the_queue_skips(self):
+        # The decision record states which builds the merge_group run leaves out; it must say what
+        # changes.py does, and every skip must cite a decision record that exists.
+        text = ADR_0137.read_text()
+        found = re.search(r"^Not built in the queue: (.+)\.$", text, re.M)
+        self.assertIsNotNone(found, "ADR-0137 has no 'Not built in the queue:' line")
+        stated = {name.strip() for name in found.group(1).split(",")}
+        self.assertEqual(stated, set(changes.QUEUE_SKIPS))
+        for area, adr in changes.QUEUE_SKIPS.items():
+            number = adr.removeprefix("ADR-")
+            self.assertTrue(list((ROOT / "docs" / "decisions").glob(f"{number}-*.md")), area)
+
+    def test_only_the_pull_request_builds_what_the_queue_skips(self):
+        for area in changes.QUEUE_SKIPS:
+            self.assertIn(area, changes.BUILDS)
+            self.assertIn(area, self.jobs_selected_by_changes(), area)
+
+    def jobs_selected_by_changes(self):
+        jobs = yaml.safe_load(PR.read_text())["jobs"]
+        return {
+            name
+            for name, job in jobs.items()
+            if f"changes.outputs.changes).{name}" in str(job.get("if", ""))
+        }
 
 
 class GateShapeTest(unittest.TestCase):

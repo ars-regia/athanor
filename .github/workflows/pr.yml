@@ -5,7 +5,8 @@ name: Pull Request
 #
 # changes: scripts/ci/changes.py writes changes.json, the areas the change touches; it is the
 #   `changes` artifact, and the job output carries the same JSON for the `if:` of the jobs. On
-#   merge_group it selects no build (kernel, specs, shell): the pull request proved them (PL44).
+#   merge_group it selects the specs and the shell as on a pull request, so the queue builds the
+#   merge result, and not the kernel, which the pull request head proved (ADR-0110, ADR-0137).
 # check-*: the parts of `just check`, the gate a contributor runs locally, one job and one recipe
 #   each so they run in parallel: check-static (lint, every verify.py check with
 #   scripts/ci/known-red.txt, kernel profile, Calmo), check-system and check-other (the Python

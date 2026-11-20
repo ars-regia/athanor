@@ -246,11 +246,15 @@ class MainTest(unittest.TestCase):
         self.assertRegex(written["base"], r"^[0-9a-f]{40}$")
 
     def test_every_area_is_a_build_or_the_audit(self):
-        # A new area must be placed: a build, which merge_group never selects, or not.
+        # A new area must be placed: a build, which merge_group selects unless QUEUE_SKIPS
+        # allows it, or not.
         self.assertEqual(set(changes.AREAS), {*changes.BUILDS, "rust_audit"})
+        self.assertLessEqual(set(changes.QUEUE_SKIPS), set(changes.BUILDS))
 
-    def test_a_merge_group_selects_no_build_but_still_the_audit(self):
+    def test_a_merge_group_builds_the_shell_and_the_specs_but_not_the_kernel(self):
         (self.root / "forge/specs/azoth/notes.txt").write_text("kernel 2\n")
+        (self.root / "forge/specs/athanor-bar").mkdir(parents=True)
+        (self.root / "forge/specs/athanor-bar/bar.spec").write_text("Name: bar\n")
         (self.root / "system/athanor-sal").mkdir(parents=True)
         (self.root / "system/athanor-sal/lib.rs").write_text("fn main() {}\n")
         self.git("add", "-A")
@@ -258,11 +262,11 @@ class MainTest(unittest.TestCase):
         out = self.root / "out" / "changes.json"
         changes.main("HEAD^1", str(out), cwd=self.root)
         on_pr = json.loads(out.read_text())
-        self.assertTrue(on_pr["kernel"] and on_pr["shell"] and on_pr["rust_audit"])
+        self.assertTrue(on_pr["kernel"] and on_pr["shell"] and on_pr["specs"] and on_pr["rust_audit"])
         changes.main("HEAD^1", str(out), cwd=self.root, event="merge_group")
         written = json.loads(out.read_text())
         for area in changes.BUILDS:
-            self.assertFalse(written[area], area)
+            self.assertEqual(written[area], area not in changes.QUEUE_SKIPS, area)
         self.assertTrue(written["rust_audit"])
         self.assertFalse(written["docs_only"])
 
