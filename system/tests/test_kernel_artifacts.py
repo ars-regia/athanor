@@ -1,6 +1,7 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
+import ast
 import datetime
 import hashlib
 import json
@@ -1234,6 +1235,19 @@ class CheckPlan(Repo):
         recorded = re.search(r"Allowed: (`[^\n]*?`)\.", doc)
         self.assertIsNotNone(recorded, "doc_build_ordering.md does not record the companions of an NVIDIA pin bump")
         self.assertEqual(set(re.findall(r"`([^`]+)`", recorded.group(1))), set(out.stdout.split()))
+
+    def test_lock_tests_keep_refusing_bytes_that_do_not_match(self):
+        """lock.py fetch is allowed beside NVIDIA pins and first runs after the merge (#1332):
+        the tests that make it refuse an RPM whose SHA-256 differs from the lock, on the download
+        path and on the mirror path, must stay, or a pin bump could thin them out unseen."""
+        tree = ast.parse((ROOT / "system/nvidia/tests/test_lock.py").read_text())
+        have = {(c.name, f.name) for c in tree.body if isinstance(c, ast.ClassDef) for f in c.body if isinstance(f, ast.FunctionDef)}
+        guards = {
+            ("Fetch", "test_hash_mismatch_fails_and_keeps_nothing"),
+            ("MirrorFirst", "test_fetch_falls_back_when_the_mirror_returns_other_bytes"),
+            ("MirrorFirst", "test_fetch_still_refuses_wrong_bytes_from_both_sources"),
+        }
+        self.assertEqual(guards - have, set())
 
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
