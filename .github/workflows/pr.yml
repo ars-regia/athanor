@@ -190,6 +190,8 @@ jobs:
     if: ${{ fromJSON(needs.changes.outputs.changes).shell }}
     permissions:
       contents: read
+      # The ceiling for the alert job of shell-surfaces.yml, which runs on a push only.
+      issues: write
     uses: ./.github/workflows/shell-surfaces.yml
 
   rust_audit:

@@ -647,3 +647,24 @@ jobs:
             .scratch/shell-rig/*.log
             .scratch/shell-rig/orca-*.txt
             .scratch/shell-rig/launcher-*.png
+
+  alert:
+    # ADR-0137: the merge queue does not build the shell, so this push run on iso-v0 is where a
+    # shell failure of the merged base is seen. A failed or cancelled job opens or updates its
+    # ci-alert issue, and a success closes it (PL51). It never runs on a pull request or in the
+    # merge queue, where pr.yml calls this workflow.
+    needs: [lint, css-parse, greeter, layout, compositor, no-gtk, toolkit-clipboard, toolkit-surfaces, shelld, bar, build-bar, bar-scenes, bar-popovers, dock, dock-scene, control-center, control-center-scenes, launcher]
+    if: ${{ always() && github.event_name == 'push' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/alert
+        with:
+          needs: ${{ toJSON(needs) }}

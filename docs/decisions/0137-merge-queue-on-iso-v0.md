@@ -55,7 +55,10 @@ reports it, runs on `merge_group`. On `main` it does not: `main` requires `Kerne
    built because one shell entry costs about 45 to 50 minutes of wall clock and about 240
    runner minutes (runs of 2026-11-20), against about 15 minutes for an entry that builds
    nothing; the push run of `shell-surfaces.yml` on `iso-v0` catches a shell failure of the
-   merged base after the merge (maintainer decision, 2026-11-21).
+   merged base after the merge, and its `alert` job opens a `ci-alert` issue for it
+   (maintainer decision, 2026-11-21). `verify.py workflows` fails when a build the queue skips
+   has no such covering workflow with that alert, or a stated reason why it has none (the
+   kernel's, ADR-0110).
 
 Not built in the queue: kernel, shell.
 
@@ -92,5 +95,5 @@ Not built in the queue: kernel, shell.
   in the queue (decision 4), so the queue never waits for the self-hosted runner. A shell
   change is not built either: it lands on the checks of its pull request and is built on the
   merged base by the push run of `shell-surfaces.yml`, so a failure there is seen after the
-  merge, not before it. `scripts/ci/tests/test_pr_workflow.py` pins the line "Not built in the queue" to
+  merge, not before it, and alerts through a `ci-alert` issue (PL51). `scripts/ci/tests/test_pr_workflow.py` pins the line "Not built in the queue" to
   `QUEUE_SKIPS` in `changes.py`, so this record cannot drift from the script again.

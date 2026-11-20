@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 ALERT = """
   alert:
     needs: [{needs}]
-    if: ${{{{ always() }}}}
+    if: ${{{{ always() && github.event_name == '{event}' }}}}
     runs-on: {runner}
     steps:
       - uses: ./.github/actions/alert
@@ -31,18 +31,18 @@ def problems(text, name="w.yml"):
 
 class ScheduledAlertTest(unittest.TestCase):
     def test_a_workflow_with_an_alert_that_needs_every_job_passes(self):
-        self.assertEqual([], problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04")))
+        self.assertEqual([], problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule")))
 
     def test_a_scheduled_workflow_without_an_alert_job_fails(self):
         self.assertEqual(1, len(problems(HEAD)))
 
     def test_an_alert_that_skips_a_job_fails(self):
-        found = problems(HEAD + ALERT.format(needs="a", runner="ubuntu-24.04"))
+        found = problems(HEAD + ALERT.format(needs="a", runner="ubuntu-24.04", event="schedule"))
         self.assertEqual(1, len(found))
         self.assertIn("needs b", found[0])
 
     def test_an_alert_on_a_self_hosted_runner_fails(self):
-        self.assertEqual(1, len(problems(HEAD + ALERT.format(needs="a, b", runner="self-hosted"))))
+        self.assertEqual(1, len(problems(HEAD + ALERT.format(needs="a, b", runner="self-hosted", event="schedule"))))
 
     def test_an_exempt_workflow_needs_no_alert_until_it_has_one(self):
         name = "exempt.yml"
@@ -50,7 +50,7 @@ class ScheduledAlertTest(unittest.TestCase):
         verify.ALERT_EXEMPT[name] = "its alert job lands elsewhere"
         self.addCleanup(lambda: (verify.ALERT_EXEMPT.clear(), verify.ALERT_EXEMPT.update(saved)))
         self.assertEqual([], problems(HEAD, name))
-        found = problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04"), name)
+        found = problems(HEAD + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="schedule"), name)
         self.assertEqual(1, len(found))
         self.assertIn("no longer exempt", found[0])
         self.assertEqual(1, len(problems(HEAD)))
@@ -60,6 +60,53 @@ class ScheduledAlertTest(unittest.TestCase):
 
     def test_every_scheduled_workflow_of_the_repository_has_its_alert(self):
         self.assertEqual([], verify.scheduled_alert_problems(ROOT))
+
+
+PUSH = "on:\n  push:\njobs:\n  a:\n    runs-on: x\n  b:\n    runs-on: x\n"
+
+
+def queue_problems(workflow, covered_by=None):
+    root = pathlib.Path(tempfile.mkdtemp())
+    (root / ".github/workflows").mkdir(parents=True)
+    (root / "scripts/ci").mkdir(parents=True)
+    (root / "scripts/ci/changes.py").write_text((ROOT / "scripts/ci/changes.py").read_text())
+    if workflow is not None:
+        (root / ".github/workflows/shell-surfaces.yml").write_text(workflow)
+    saved = dict(verify.QUEUE_COVERED_BY)
+    verify.QUEUE_COVERED_BY.update(covered_by or {})
+    try:
+        return verify.queue_skip_problems(root)
+    finally:
+        verify.QUEUE_COVERED_BY.clear()
+        verify.QUEUE_COVERED_BY.update(saved)
+
+
+class QueueSkipTest(unittest.TestCase):
+    def test_a_skipped_shell_with_a_push_alert_passes(self):
+        text = PUSH + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="push")
+        self.assertEqual([], queue_problems(text))
+
+    def test_a_skipped_shell_without_a_push_alert_fails(self):
+        found = queue_problems(PUSH)
+        self.assertEqual(1, len(found))
+        self.assertIn("shell-surfaces.yml", found[0])
+
+    def test_an_alert_that_also_runs_on_a_pull_request_fails(self):
+        text = PUSH + ALERT.format(needs="a, b", runner="ubuntu-24.04", event="push").replace(
+            "event_name == 'push'", "event_name != 'x'")
+        self.assertEqual(1, len(queue_problems(text)))
+
+    def test_a_workflow_that_does_not_run_on_push_fails(self):
+        text = PUSH.replace("push", "workflow_call") + ALERT.format(
+            needs="a, b", runner="ubuntu-24.04", event="push")
+        self.assertEqual(1, len(queue_problems(text)))
+
+    def test_a_skip_nobody_covers_fails(self):
+        found = queue_problems(None, {"shell": None})
+        self.assertIn("says nothing", " ".join(found))
+
+    def test_every_skip_of_the_repository_is_covered(self):
+        self.assertEqual([], verify.queue_skip_problems(ROOT))
 
 
 if __name__ == "__main__":

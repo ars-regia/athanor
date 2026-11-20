@@ -60,7 +60,7 @@
   the rest.
   Also amended 2026-11-21 (#1353, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)),
   approved by the maintainer with the pull request that makes the change: the `merge_group` run
-  builds the specs a change selects, and not the kernel or the shell (a shell entry costs about 45-50 minutes of wall clock and about 240 runner minutes; the push run of `shell-surfaces.yml` covers it after the merge); PL44, M3, the `pr.yml`
+  builds the specs a change selects, and not the kernel or the shell (a shell entry costs about 45-50 minutes of wall clock and about 240 runner minutes; the push run of `shell-surfaces.yml` covers it after the merge and alerts on failure); PL44, M3, the `pr.yml`
   row of section 3.5 and the `changes.json` row of section 3.3 follow.
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
@@ -1134,7 +1134,7 @@ decides; Kernel Build no longer runs on unrelated pull requests.
 
 **PL44. The release path does not repeat what the merge queue proved, and an artifact is
 built at most twice.** The pull-request run builds what the change selects; the
-`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it, ADR-0137); `build.yml`
+`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it and alerts on failure, ADR-0137); `build.yml`
 starts from the plan and builds once, and that build is the one signed, accepted on its own
 digests (UD17) and promoted, so what is released is what was tested. Building the release
 candidates in the `merge_group` run instead is not adopted now: the queue's ref is not a
@@ -1204,6 +1204,8 @@ The action opens or updates one issue per workflow and job labelled `ci-alert`, 
 it on the next success. No scheduled failure stays silent. Every scheduled workflow ends with
 that job but `athanor-forge-orchestrator.yml`, whose alert job lands in a separate pull request
 (`ALERT_EXEMPT` in `verify.py`, which names the exception and fails once it is stale), and
+`shell-surfaces.yml` ends with the same job on a push to `iso-v0`, since the merge queue does not
+build the shell (ADR-0137; `QUEUE_COVERED_BY` in `verify.py` holds it), and
 `verify.py workflows` fails when another does not: a workflow with an `on.schedule`
 trigger needs an `always()` job on a hosted runner that uses the action and, with the other
 such jobs, needs every other job (#1353).
