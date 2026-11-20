@@ -344,7 +344,10 @@ bootc switch --mutate-in-place --enforce-container-sigpolicy --transport registr
 # The upgrade case's access, for the test VM only (UD19): the per-run public key that
 # run_iso_test.sh substitutes, a passwordless sudo rule for the test user, the runner bound
 # to the home zone, which keeps ssh (the public zone has none, ADR-0089 and ADR-0116), and
-# sshd started at boot. Deleted with its markers in every other case.
+# sshd started at boot. sshd is pulled in by a link the image's default /etc does not hold
+# (ADR-0142 point 3): `systemctl enable` would write the link a Fedora 43 image already ships,
+# which bootc's /etc merge drops on the upgrade to a Fedora 45 candidate, and the harness
+# would lose the guest after Apply() (#1372). Deleted with its markers in every other case.
 # upgrade-acceptance begin
 %post --erroronfail
 set -eu
@@ -358,6 +361,6 @@ echo 'collaudo ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/50-collaudo
 chmod 0440 /etc/sudoers.d/50-collaudo
 visudo -cf /etc/sudoers.d/50-collaudo
 firewall-offline-cmd --zone=home --add-source=10.0.2.2
-systemctl enable sshd.service
+systemctl add-wants graphical.target sshd.service
 %end
 # upgrade-acceptance end
