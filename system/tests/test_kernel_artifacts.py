@@ -1229,17 +1229,13 @@ class CheckPlan(Repo):
 
     def test_nvidia_pin_companions_match_the_recorded_accepted_risk(self):
         """Files allowed beside NVIDIA pins run only after the merge (#1332): the list is
-        recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change."""
+        recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change.
+        The scan is lexical; the real boundary is that kernel-artifacts.sh is not a companion, so a pin bump cannot edit it."""
         script = SCRIPT.read_text()
-        self.assertEqual(len(re.findall(r"^NVIDIA_PIN_COMPANIONS\+?=", script, re.M)), 1, "assigned once, never extended")
-        other_writes = [
-            r"NVIDIA_PIN_COMPANIONS\+=",
-            r"NVIDIA_PIN_COMPANIONS\[[^@*\]][^\]]*\]\+?=",
-            r"(mapfile|readarray)\b[^\n]*\bNVIDIA_PIN_COMPANIONS\b",
-            r"\bread\b[^\n]*\s-\w*a\w*\s[^\n]*\bNVIDIA_PIN_COMPANIONS\b",
-        ]
-        for pattern in other_writes:
-            self.assertIsNone(re.search(pattern, script), f"NVIDIA_PIN_COMPANIONS is written by {pattern}")
+        self.assertEqual(len(re.findall(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", script, re.M)), 1, "assigned once, at top level")
+        rest = re.sub(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", "", script, flags=re.M)
+        rest = rest.replace('"${NVIDIA_PIN_COMPANIONS[@]}"', "")
+        self.assertNotIn("NVIDIA_PIN_COMPANIONS", rest, "NVIDIA_PIN_COMPANIONS may appear only in its one assignment and as a quoted \"${NVIDIA_PIN_COMPANIONS[@]}\" read")
         line = re.search(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", script, re.M).group(0)
         out = subprocess.run(["bash", "-c", line + "\nprintf '%s\\n' \"${NVIDIA_PIN_COMPANIONS[@]}\"\n"], capture_output=True, text=True, check=True)
         doc = (ROOT / "docs/architecture/doc_build_ordering.md").read_text()
