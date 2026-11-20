@@ -1,8 +1,10 @@
 # Spike S1: the two-step bootc chain on Fedora 45
 
 Probe plan of spike S1 (issue #124, milestone 0.3), written on 2026-10-09 against
-`origin/iso-v0` at `52352f15`. Nothing below has run yet: every item carries its probe and the
-observation that passes or fails it, and its **Answer** is filled in when the spike runs.
+`origin/iso-v0` at `52352f15`. Every item carries its probe and the observation that passes or
+fails it. Items 1 and 4 ran on 2026-11-19 and 2026-11-20, and item 5 ran in part. Section 6 is
+the report. Items 0, 2, 3, 6 and 7 did not run, and neither did item 5's own readings. Each
+has a 1.0 issue, named in its **Answer**.
 
 The question format follows the shell-standard spikes (`docs/shell-bench/spikes.md`):
 question, run, answer, verdict. S1 is a platform spike, not a shell one, so it has a directory
@@ -89,7 +91,7 @@ grub-boot-success.timer`; `cat /etc/greenboot/greenboot.conf`.
 both greenboot units enabled by `80-athanor-recovery.preset`; `GREENBOOT_AUTO_REBOOT=false`.
 **Fail.** Any of them missing or disabled: P4a input, the remaining items wait.
 
-**Answer.** Not run.
+**Answer.** Not run (#1364).
 
 ### Item 1: `/etc` per deployment (D39, the acceptance of S1)
 
@@ -156,7 +158,43 @@ the rollback notice says so.
 AVC denial absent from the `v1` baseline, a non-enforcing boot, or an `/etc` that no longer
 matches either deployment.
 
-**Answer.** Not run.
+**Answer.** Run on 2026-11-20, in two legs, each on a fresh guest. The records, the login
+probes and the run's notes are kept outside the repository.
+
+- The F43 leg is phase 4: Fedora 43 → F45 `v1` → `GoBack()` → `bootc rollback`. The migration
+  unit was masked for this leg, so that no staged deployment could change the rollback.
+- The F45 leg is phases 1 to 3: `v1` → `Apply()` of `etc-v2` → `GoBack()` → `bootc rollback`.
+
+Each subject:
+
+- *User and group databases.* After each update, `s1a` resolves, and so does `s1img` after
+  `etc-v2` in the F45 leg. Pass. The three-way merge is read in the F45 leg only, from both
+  deployments' `/etc` on disk at the end of the leg: `/etc/issue` holds the local edit in both,
+  and `/etc/s1-new.conf` is in `etc-v2`'s only. Pass. The records missed these two lines,
+  because the record's `ausearch` read the rest of the script from standard input.
+- *`machine-id`.* The value is the same in every record of each leg, across Fedora 43 and 45.
+  Pass.
+- *NetworkManager connections.* `s1-before` survives both updates. After each `GoBack()` the
+  list is phase 1's. Pass.
+- *SELinux policy store.* Every record reads `Enforcing` and holds the `s1before` module and
+  the `virt_use_nfs` boolean. The records' AVC reading measured nothing, for the same reason
+  as above. The verdict is therefore pass for the F45 leg, and not measured for the F43 leg.
+  - The F45 leg's audit log was read again afterwards, across its boots. It holds one denial,
+    and that denial comes before phase 1: `bootupctl`, `sys_admin`, in the permissive
+    `bootupd_t` domain, on the first F45 boot. No denial came after it. Pass for the F45 leg.
+  - The F43 leg's guest was gone before this reading, so its AVCs were not measured.
+  - Whether a relabel would be required was not checked.
+- *Phase 3 after the rollback.* **Fail** in both legs, as expected.
+  - After `GoBack()` the four files have the same sha256 as in phase 1. `s1b` and `s1g` are
+    gone, P1 logs in and P2 is refused.
+  - In the F45 leg, `s1-after` is absent, so that part of `/etc` reverts as the rule says.
+    `/etc/issue` cannot tell the deployments apart here, because both hold the local edit.
+  - No rollback notice was observed in the F45 leg within two minutes of reaching the guest.
+    In the F43 leg no session could be captured, so the notice was not observed either way.
+  - After the roll forward, the four files equal the state before the rollback.
+  - The maintainer ruled on 2026-11-20 that S1 passes, and deferred this rule to #1363.
+- *Limit.* The second boolean, `virt_sandbox_use_all_caps`, is on by default on Fedora 45, so
+  its revert cannot be seen in these records.
 
 ### Item 2: boot counting and greenboot's fallback
 
@@ -238,7 +276,7 @@ console step, or a later boot returns to it. G3: the timer runs in a user manage
 `boot_success` is unset at the early read on a healthy deployment, which would make the counter
 fall back from a good update unless Athanor ships a unit.
 
-**Answer.** Not run.
+**Answer.** Not run (#1365).
 
 ### Item 3: the confirmation of section 8
 
@@ -275,7 +313,7 @@ unbootable or inconsistent state after C5.
 **Not probed.** The security-class path of UT13 (the check service unlocks the deployment
 itself): PB10 is not built.
 
-**Answer.** Not run.
+**Answer.** Not run (#1366).
 
 ### Item 4: update and rollback
 
@@ -291,7 +329,23 @@ unchanged on a Fedora 45 base, and whether the major upgrade from Fedora 43 and 
 boots, passes greenboot and rolls back to a working Fedora 43.
 **Fail.** Any `FAIL` line; record the stage and the guest journal.
 
-**Answer.** Not run.
+**Answer.** Pass, with two `FAIL` lines judged to be outside Fedora 45.
+
+- The maintainer decided F6 and ruled that S1 passes.
+- That F5 is a harness defect is this report's own judgement.
+
+- `run.sh` ran on the F45 branch image, after the harness fixes of findings F1 to F4
+  (section 6). It never ended green in one run.
+- From `install`, it passed every stage up to `older`. `older` failed its last assertion on F5,
+  a harness defect, fixed afterwards in #1361. That assertion was not run again.
+- The run resumed from `goback` on the same guest. It passed every stage up to the runtime
+  probes, where the probe of F6, the QEMU guest agent, failed. That probe stays red until
+  ADR-0144 (#1371) lands.
+- `report` was then run on its own and printed `acceptance complete`.
+- The major upgrade comes from item 1's F43 leg, not from `run.sh`. The Fedora 43 guest
+  switched to F45 `v1`, booted, and returned to Fedora 43 through `GoBack()`, then to `v1`
+  through `bootc rollback`. Each boot was reached over SSH and logged in. Greenboot's result
+  was not recorded on those boots.
 
 ### Item 5: the manifest and the verification path
 
@@ -315,7 +369,9 @@ PL31, leaves it out on purpose, because an expiry needs a key in a scheduled job
 the maintainer on 2026-10-09, ADR pending: no expiry at 1.0; rollback protection comes from
 the signed build time (UT5), which the `older` stage checks.
 
-**Answer.** Not run.
+**Answer.** In part. `migrate` and `refuse` passed within item 4. `older` passed all but its
+last assertion (item 4). The readings of `.signature`, `skopeo` and `containers-common` were
+not taken (#1367).
 
 ### Item 6: signing and the MOK chain
 
@@ -342,7 +398,7 @@ S1-e as described.
 **Fail.** Any of those not holding. S1-d is a record: an ESP that is never updated is a
 maintenance cost and an SBAT risk the report states.
 
-**Answer.** Not run.
+**Answer.** Not run (#1368).
 
 ### Item 7: maintenance cost, and the 1.1 gate
 
@@ -365,7 +421,7 @@ Fedora 45 has boot counting yet, the condition A2-8 sets for release 1.1.
 
 **Pass.** The measurements are recorded. The 1.1 gate is a yes or no.
 
-**Answer.** Not run.
+**Answer.** Not run (#1369).
 
 ## 3. How to run it on this machine
 
@@ -575,3 +631,39 @@ composefs install about 20 minutes.
    sitting.
 5. **Issue #124.** Its body still describes the bake-off and asks for D6 and D39 to be closed;
    both are closed. Update the body or let the A2-8 comment stand.
+
+## 6. Report, 2026-11-20
+
+**Verdict.** S1 passes, by the maintainer's ruling in conversation on 2026-11-20.
+
+- The two-step chain works on Fedora 45, from `v1` to `v2` and from Fedora 43 to 45, and
+  back. Through an update it keeps the D39 subjects that item 1 measured, within the limits
+  item 1 states.
+- The rule of phase 3 fails, as this plan expected. It is deferred to #1363 and does not block
+  Fedora 45.
+- The items that did not run are 1.0 issues, #1364 to #1369.
+
+**Runs.** On this machine's dev VM, from the branch image of section 1, then from `iso-v0`:
+
+- 2026-11-19, 01:56 to 11:17: three attempts. They stopped on F2 and F3, then by the
+  maintainer's decision. F1 stopped only the image build, which was run again three minutes
+  later.
+- 2026-11-20, 15:22 to 15:55: two attempts. One stopped on F4, the other for a host reboot.
+- 2026-11-20, 16:03 to 17:44: item 4, as its **Answer** describes.
+- 2026-11-20, 17:53 to 18:17: item 1.
+
+**Findings.**
+
+- F1 and F2 are changes that Fedora 45 brings. Athanor has absorbed them.
+- F3 to F6 are defects of the harness or of its expectations.
+- F7 is a limit of bootc's `/etc` model.
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| F1 | rpm 6.1 on Fedora 45 refuses an unsigned RPM, and the acceptance image installs the forge's unsigned `athanor-update` | harness fix with the Fedora 45 landing; RPM signing is UD44 |
+| F2 | `81-desktop.preset` of base-atomic:45 turns sshd off, and bootc's `/etc` merge follows it | ADR-0142 (#1310): off, as Fedora; the harness enables it |
+| F3 | `run.sh` probed the Sal bar without turning the AT-SPI bus on | #1318 |
+| F4 | `shield_probe.py` matched labels only, and the Sal bar names its switch itself | #1360 |
+| F5 | `stage_older` read a signature object that #926's pruning had removed | #1361 |
+| F6 | `expectations.toml` declares `qemu-guest-agent.service` absent, and the image has always shipped it, enabled, with every RPC open | ADR-0144 (#1371): off by default, with an allow-list |
+| F7 | after a rollback, the four account files are the previous deployment's; no rollback notice was observed | #1363 |
