@@ -6908,6 +6908,64 @@ def check_own():
     return r
 
 
+# Workspaces of their own that build the root workspace's crates by path, with a lock that
+# Dependabot never moves (it updates only the dependencies a directory's own manifest declares).
+# ponytail: listed by hand; a new such workspace is added here (#1313).
+SUB_LOCKS = ["fuzz/Cargo.lock", "system/athanor-sal/gallery/Cargo.lock"]
+
+
+def lock_versions(text, registry_only):
+    """The versions of each package in the text of a Cargo.lock, of crates.io packages only when
+    `registry_only`."""
+    out = {}
+    for package in tomllib.loads(text).get("package", []):
+        if not registry_only or package.get("source", "").startswith("registry+"):
+            out.setdefault(package["name"], set()).add(package["version"])
+    return out
+
+
+def semver_compatible(a, b):
+    """True if cargo can move `a` to `b` under a caret requirement: the same first non-zero
+    component, and every component before it."""
+    def key(v):
+        parts = v.split("+")[0].split("-")[0].split(".")
+        for i, part in enumerate(parts):
+            if part != "0":
+                return parts[: i + 1]
+        return parts
+    return key(a) == key(b)
+
+
+def lock_version_problems(root, sub, path):
+    """A registry crate of the lock `path` (text `sub`) at a version the root lock (text `root`)
+    does not hold, from the registry or from a [patch] of its own: the same crate builds at two
+    versions, and only the root one is tested and moved by Dependabot. A crate the root does not
+    use is the sub-workspace's own."""
+    root_versions = lock_versions(root, registry_only=False)
+    manifest = str(Path(path).with_name("Cargo.toml"))
+    out = []
+    for name, versions in sorted(lock_versions(sub, registry_only=True).items()):
+        held = root_versions.get(name)
+        if not held:
+            continue
+        for old in sorted(versions - held):
+            new = [v for v in sorted(held) if semver_compatible(old, v)]
+            fix = (f"cargo update --manifest-path {manifest} -p {name}@{old} --precise {new[0]}"
+                   if new else f"no semver-compatible root version ({', '.join(sorted(held))})")
+            out.append(f"{path}: {name} {old} is not in the root Cargo.lock: {fix}")
+    return out
+
+
+@check("lock-versions", "The fuzz and Sal gallery lockfiles hold the root Cargo.lock's version of every crate they share with it")
+def check_lock_versions():
+    r = Result()
+    root = read(ROOT / "Cargo.lock")
+    for path in SUB_LOCKS:
+        for problem in lock_version_problems(root, read(ROOT / path), path):
+            r.fail(problem)
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #
