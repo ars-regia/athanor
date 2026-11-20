@@ -104,6 +104,7 @@ class LockVersionProblemsTest(unittest.TestCase):
         found = problems(root, [("smithay", "0.7.0", SMITHAY.format("bbb"))])
         self.assertEqual(len(found), 1)
         self.assertNotIn("--precise", found[0])
+        self.assertIn("cargo update --manifest-path fuzz/Cargo.toml -p smithay", found[0])
 
     def test_a_registry_crate_the_root_takes_from_git_names_the_source(self):
         found = problems(
@@ -112,6 +113,40 @@ class LockVersionProblemsTest(unittest.TestCase):
         )
         self.assertEqual(len(found), 1)
         self.assertIn("take the root's source of smithay", found[0])
+
+
+class FuzzPatchProblemsTest(unittest.TestCase):
+    ROOT_PATCH = (
+        '[patch.crates-io]\na = { path = "vendor/a" }\nb = { path = "vendor/b" }\n'
+    )
+
+    def found(self, fuzz):
+        return verify.fuzz_patch_problems(
+            {"Cargo.toml": self.ROOT_PATCH, "fuzz/Cargo.toml": fuzz}
+        )
+
+    def test_the_root_patches_from_the_same_directories_pass(self):
+        fuzz = '[patch.crates-io]\na = { path = "../vendor/a" }\nb = { path = "../vendor/b" }\nc = "1"\n'
+        self.assertEqual(self.found(fuzz), [])
+
+    def test_a_missing_root_patch_fails(self):
+        found = self.found('[patch.crates-io]\na = { path = "../vendor/a" }\n')
+        self.assertEqual(len(found), 1)
+        self.assertIn("[patch.crates-io] b", found[0])
+        self.assertIn("vendor/b", found[0])
+
+    def test_a_patch_from_another_directory_fails(self):
+        fuzz = '[patch.crates-io]\na = { path = "../vendor/a" }\nb = { path = "../copy/b" }\n'
+        self.assertEqual(len(self.found(fuzz)), 1)
+
+    def test_no_patch_table_fails_for_each_entry(self):
+        self.assertEqual(len(self.found('[package]\nname = "f"\n')), 2)
+
+    def test_an_untracked_fuzz_manifest_fails(self):
+        self.assertEqual(
+            verify.fuzz_patch_problems({"Cargo.toml": self.ROOT_PATCH}),
+            ["fuzz/Cargo.toml is not tracked"],
+        )
 
 
 class SemverCompatibleTest(unittest.TestCase):
@@ -244,6 +279,12 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(
             compared, ["fuzz/Cargo.lock", "system/athanor-sal/gallery/Cargo.lock"]
         )
+
+    def test_a_fuzz_patch_problem_fails_the_check(self):
+        with mock.patch.object(
+            verify, "fuzz_patch_problems", lambda manifests: ["fuzz: patch"]
+        ):
+            self.assertEqual(verify.check_lock_versions().problems, ["fuzz: patch"])
 
     def test_a_drifted_lock_fails_the_check(self):
         with mock.patch.object(

@@ -6997,7 +6997,9 @@ def lock_version_problems(root, sub, path):
             continue
         versions = sorted({v for v, s in held[name] if s == "registry"})
         new = [v for v in versions if semver_compatible(old, v)]
-        if git or not versions:
+        if git and any(k.startswith("git+") for _, k in held[name]):
+            fix = f"cargo update --manifest-path {manifest} -p {name}"
+        elif git or not versions:
             fix = f"take the root's source of {name} in {manifest}"
         elif new:
             fix = f"cargo update --manifest-path {manifest} -p {name}@{old} --precise {new[0]}"
@@ -7005,6 +7007,33 @@ def lock_version_problems(root, sub, path):
             fix = f"no semver-compatible root version ({', '.join(versions)})"
         out.append(f"{path}: {name} {old} ({source}) is not in the root Cargo.lock: {fix}")
     return sorted(out)
+
+
+FUZZ_MANIFEST = "fuzz/Cargo.toml"
+
+
+def fuzz_patch_problems(manifests):
+    """Every [patch] entry of the root Cargo.toml that fuzz/Cargo.toml does not carry, from the
+    same directory: the fuzzed compositor must parse the wire as the shipped one does, and a
+    workspace of its own takes no [patch] of the root. The gallery patches only AccessKit instead
+    (GALLERY_PATCH, ADR-0126). `manifests` maps every tracked Cargo.toml to its text."""
+    if FUZZ_MANIFEST not in manifests:
+        return [f"{FUZZ_MANIFEST} is not tracked"]
+
+    def patches(name):
+        data = load_toml(name, manifests[name])
+        table = data.get("patch") if isinstance(data.get("patch"), dict) else {}
+        out = {}
+        for registry, entries in table.items():
+            for crate, spec in entries.items() if isinstance(entries, dict) else ():
+                path = spec.get("path") if isinstance(spec, dict) else None
+                out[(registry, crate)] = ((ROOT / name).parent / path).resolve() if isinstance(path, str) else spec
+        return out
+    fuzz = patches(FUZZ_MANIFEST)
+    return [f"{FUZZ_MANIFEST}: [patch.{registry}] {crate} is not the root Cargo.toml's entry, "
+            f"{spec.relative_to(ROOT) if isinstance(spec, Path) else spec}"
+            for (registry, crate), spec in sorted(patches("Cargo.toml").items())
+            if fuzz.get((registry, crate)) != spec]
 
 
 @check("lock-versions", "A workspace of its own that builds the root's crates by path holds the root Cargo.lock's version of every crate they share")
@@ -7028,6 +7057,8 @@ def check_lock_versions():
         for path in subs:
             for problem in lock_version_problems(root, read(ROOT / path), path):
                 r.fail(problem)
+        for problem in fuzz_patch_problems(manifests):
+            r.fail(problem)
     except (OSError, ValueError) as e:
         r.fail(f"a Cargo.lock or Cargo.toml could not be read: {e}")
     return r
