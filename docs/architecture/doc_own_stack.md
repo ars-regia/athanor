@@ -1991,8 +1991,8 @@ compositor and that the own compositor did not yet offer:
     SR1 to SR4, SR6 and SR14 before `athanor-files-view` (step 2, the chooser first, decision 3 of
     that revision), the others before the window. Two parts of the others come before
     `athanor-files-view` too, for the chooser in the portal's resident backend (`doc_portal.md`
-    PT2, PT7; *proposed for approval, 2026-11-21*, on the recommendations of decisions D2 and D9
-    of `docs/superpowers/plans/2026-11-19-file-chooser.md`): of SR9, windows opened at run time
+    PT2, PT7; *proposed for approval, 2026-11-21*, on the maintainer's decisions of 2026-11-21, D2
+    and D9 of `docs/superpowers/plans/2026-11-19-file-chooser.md`): of SR9, windows opened at run time
     and a run that goes on with no window; of SR11, the keys the chooser uses, Ctrl+L, Ctrl+H,
     Ctrl+Space, Alt+Up, Alt+Left, Alt+Right, Ctrl+Shift+N and F6.
     - **SR1, SR3. An item view over the application's model.** A new kind, the item view, in two
