@@ -57,13 +57,11 @@ below reverses or completes one recorded earlier.
       type of `athanor-sulphur-client`;
    2. the `xdg-dbus-proxy` filter, one per confined application (SD9).
 
-   Both go into the launch path that exists today: the `Unit` of `athanor-sulphur-client`, which
-   every launch of the shell already starts as a transient unit of the user manager (BR2.3). They
-   do not wait for the broker. The broker (SD7, SD22 steps 6 and 7) is placed in 1.0 with them,
-   keeps the order of SD22, with S1, S2, S3 and S5 of its table first, and takes over the launch
-   path, the properties and the filter included, when it lands. This completes ADR-0138, which
-   places no broker step in 1.0. Until
-   the two steps land, the limits declared in `doc_files.md` FM3 and FM4 stand, and tier 2 of the
+   The broker that SD7 to SD9 assign this work to (SD22 steps 6 and 7) is placed in 1.0 with
+   them, as the specification writes it: its prerequisites stay, spikes S1, S2, S3 and S5 of
+   section 4 of `doc_session_daemons.md` first (decision 11 there). This decision changes when
+   the class ships, not how it is built. It completes ADR-0138, which places no broker step in
+   1.0. Until the two steps land, the limits declared in `doc_files.md` FM3 and FM4 stand, and tier 2 of the
    threat model (TM2, TM3) is not met for the `confined` class.
 
 2. **`Cargo.toml` is the single source of the build policy of the shipped Rust binaries** (#1350).
@@ -72,10 +70,14 @@ below reverses or completes one recorded earlier.
    `RUSTFLAGS` or the profile for one. This executes ADR-0075 decision 3, and amends its sentence
    "release builds use thin LTO": the release profile is the one `Cargo.toml` states, today
    `lto = true` and `codegen-units = 1`. The flags of `%rustflags` that are not profile settings
-   stay, in the workspace's `.cargo/config.toml`: `target-cpu=x86-64-v3`, which the hardware
-   audience of [ADR-0054](0054-audience-and-support-window.md) needs, and the mold linker. With the
-   `RUSTFLAGS` override gone, the hardening flags that `.cargo/config.toml` already sets (full
-   RELRO, PIC, frame pointers, `-D unsafe_code`) apply to the RPM builds too.
+   move into the workspace's `.cargo/config.toml`, in both its `[build]` table and its
+   `[target.'cfg(target_os = "linux")']` table, which shadows `[build]` on Linux:
+   `target-cpu=x86-64-v3`, which the hardware audience of
+   [ADR-0054](0054-audience-and-support-window.md) needs, and the mold linker. Every build of the
+   workspace, local and CI ones included, then targets x86-64-v3, as the image already does.
+   With the `RUSTFLAGS` override gone, the hardening flags that `.cargo/config.toml` already sets
+   (full RELRO, PIC, frame pointers, `-D unsafe_code`) apply to the RPM builds of the workspace's
+   packages too.
    If the build time proves too high, `Cargo.toml` itself changes, by a record that amends this
    one, and the macros do not return. The macros also apply to upstream Rust packages that the
    forge builds; which of them keep a flag is decided in the pull request that removes the
@@ -103,7 +105,7 @@ below reverses or completes one recorded earlier.
 6. **ADR-0141 decision 5 is amended for the recovery console** (#1355). The recovery console stays
    the text console that `doc_recovery.md` specifies (R1), which is Athanor's own and needs no
    port to Sal. The dead GTK kiosk source, `forge/specs/athanor-recovery/athanor-recovery-1.0.0`,
-   the legacy glass theme of `athanor-style` (`system/athanor-style/src/glass.rs`) and the
+   the legacy glass theme of `athanor-style` and the
    `athanor-recovery` line of `forge/config/own-allow.txt` are removed, as R4 and R10 decided on
    2026-10-08. A graphical recovery, if one is ever built, is written from scratch in
    Sal (R4) and is not a 1.0 item.
