@@ -114,6 +114,16 @@ class LockVersionProblemsTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("take the root's source of smithay", found[0])
 
+    def test_a_git_crate_the_root_takes_from_the_registry_names_the_source(self):
+        found = problems(
+            [("smithay", "0.7.0", REGISTRY)],
+            [("smithay", "0.7.0", SMITHAY.format("aaa"))],
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("take the root's source of smithay", found[0])
+        self.assertNotIn("cargo update", found[0])
+        self.assertNotIn("--precise", found[0])
+
 
 class FuzzPatchProblemsTest(unittest.TestCase):
     ROOT_PATCH = (
@@ -141,6 +151,26 @@ class FuzzPatchProblemsTest(unittest.TestCase):
 
     def test_no_patch_table_fails_for_each_entry(self):
         self.assertEqual(len(self.found('[package]\nname = "f"\n')), 2)
+
+    def test_a_root_patch_that_is_not_a_path_is_compared_by_value(self):
+        root = {"Cargo.toml": '[patch.crates-io]\na = "1"\nb = { git = "https://example.org/b" }\n'}
+        same = '[patch.crates-io]\na = "1"\nb = { git = "https://example.org/b" }\n'
+        self.assertEqual(verify.fuzz_patch_problems({**root, "fuzz/Cargo.toml": same}), [])
+        found = verify.fuzz_patch_problems(
+            {**root, "fuzz/Cargo.toml": '[patch.crates-io]\na = "2"\nb = { git = "https://example.org/b" }\n'}
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("[patch.crates-io] a", found[0])
+        self.assertIn("1", found[0])
+
+    def test_a_root_patch_path_outside_the_repository_is_printed_as_written(self):
+        root = '[patch.crates-io]\na = { path = "../outside/a" }\n'
+        found = verify.fuzz_patch_problems(
+            {"Cargo.toml": root, "fuzz/Cargo.toml": "[package]\nname = \"f\"\n"}
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("[patch.crates-io] a", found[0])
+        self.assertTrue(found[0].endswith("../outside/a"), found[0])
 
     def test_an_untracked_fuzz_manifest_fails(self):
         self.assertEqual(
