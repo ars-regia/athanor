@@ -149,9 +149,7 @@ class UnraisedReleasesTest(unittest.TestCase):
 
     def test_a_rename_out_of_the_spec_directory_fails(self):
         (self.root / "elsewhere").mkdir()
-        self.git(
-            "mv", "forge/specs/fork/SOURCES/0001-fix.patch", "elsewhere/0001-fix.patch"
-        )
+        self.git("mv", "forge/specs/fork/SOURCES/0001-fix.patch", "elsewhere/0001-fix.patch")
         [problem] = self.problems()
         self.assertIn("SOURCES/0001-fix.patch changed", problem)
 
@@ -190,10 +188,7 @@ class UnraisedReleasesTest(unittest.TestCase):
 
     def test_a_base_spec_git_cannot_list_or_read_is_a_problem_not_an_absence(self):
         self.write("forge/specs/fork/SOURCES/0001-fix.patch", "b\n")
-        for command, problem in (
-            ("ls-tree", "cannot list it"),
-            ("show", "cannot read it"),
-        ):
+        for command, problem in (("ls-tree", "cannot list it"), ("show", "cannot read it")):
             with self.subTest(command=command), self.failing(command):
                 self.assertEqual(
                     self.problems(), [f"{HAND}: {problem} at HEAD: fatal: no tree"]
@@ -204,9 +199,8 @@ class CheckSpecsBaseTest(unittest.TestCase):
     """check_specs reports the base it could not measure against, and a base that is HEAD."""
 
     def run_specs(self, base, unraised):
-        with (
-            mock.patch.object(verify, "BASE_REF", base),
-            mock.patch.object(verify, "unraised_releases", unraised),
+        with mock.patch.object(verify, "BASE_REF", base), mock.patch.object(
+            verify, "unraised_releases", unraised
         ):
             return verify.check_specs()
 
@@ -222,8 +216,7 @@ class CheckSpecsBaseTest(unittest.TestCase):
     def test_a_base_that_is_head_says_only_uncommitted_edits_were_compared(self):
         res = self.run_specs("HEAD", lambda root, base: [])
         self.assertTrue(
-            any("only uncommitted edits were compared" in n for n in res.notes),
-            res.notes,
+            any("only uncommitted edits were compared" in n for n in res.notes), res.notes
         )
 
 

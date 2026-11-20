@@ -26,16 +26,10 @@ from typing import NamedTuple
 CLASS_DIR = "release/class/"
 CLASS_NAME = re.compile(r"release/class/[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9-]+\.toml")
 ADVISORY_ID = re.compile(r"[A-Za-z0-9._-]+")
-SANITY = (
-    "filesystem",
-    "glibc",
-    "kernel",
-)  # every image has them: an empty list is a failed read
+SANITY = ("filesystem", "glibc", "kernel")  # every image has them: an empty list is a failed read
 TIMEOUT = 900  # seconds for one external command; a pull of an image is the longest
 MAX_FILESIZE = 256 * 1024 * 1024  # bytes of one download from a Fedora mirror
-METALINK = (
-    "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f{}&arch=x86_64"
-)
+METALINK = "https://mirrors.fedoraproject.org/metalink?repo=updates-released-f{}&arch=x86_64"
 ALNUM = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 DIGITS = frozenset("0123456789")
 
@@ -179,21 +173,9 @@ def git_half(base, candidate, repo_root, repository):
     there is none. A path under release/class/ with another name than the convention, at the
     candidate or touched in the range, is an error."""
     name = repository.rsplit("/", 1)[-1]
-    if (
-        git(
-            repo_root,
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            f"{base}^{{commit}}",
-            ok=(0, 1),
-        )
-        is None
-    ):
+    if git(repo_root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}", ok=(0, 1)) is None:
         raise ClassError(f"label commit {base} is not in the repository")
-    carried = nul(
-        git(repo_root, "ls-tree", "-r", "-z", "--name-only", candidate, "--", CLASS_DIR)
-    )
+    carried = nul(git(repo_root, "ls-tree", "-r", "-z", "--name-only", candidate, "--", CLASS_DIR))
     touched = nul(
         git(
             repo_root, "log", "-z", "--name-only", "--format=", "--no-renames", "--full-history",
@@ -202,37 +184,17 @@ def git_half(base, candidate, repo_root, repository):
     )  # fmt: skip
     bad = sorted(p for p in {*carried, *touched} if not CLASS_NAME.fullmatch(p))
     if bad:
-        raise ClassError(
-            f"{bad} under {CLASS_DIR} do not match <YYYY-MM-DD>-<slug>.toml"
-        )
+        raise ClassError(f"{bad} under {CLASS_DIR} do not match <YYYY-MM-DD>-<slug>.toml")
     in_range = set(
         nul(
             git(
-                repo_root,
-                "rev-list",
-                "-z",
-                "--full-history",
-                f"{base}..{candidate}",
-                "--",
-                CLASS_DIR,
+                repo_root, "rev-list", "-z", "--full-history", f"{base}..{candidate}", "--", CLASS_DIR
             )
         )
     )
     ids, found = set(), False
     for path in carried:
-        last = nul(
-            git(
-                repo_root,
-                "log",
-                "-1",
-                "-z",
-                "--full-history",
-                "--format=%H",
-                candidate,
-                "--",
-                path,
-            )
-        )
+        last = nul(git(repo_root, "log", "-1", "-z", "--full-history", "--format=%H", candidate, "--", path))
         if not last or last[0] not in in_range:
             continue
         try:
@@ -246,17 +208,11 @@ def git_half(base, candidate, repo_root, repository):
             or extra
             or not isinstance(advisories, list)
             or not advisories
-            or not all(
-                isinstance(a, str) and ADVISORY_ID.fullmatch(a) for a in advisories
-            )
-            or not (
-                scope is None
-                or isinstance(scope, list)
-                and all(isinstance(s, str) for s in scope)
-            )
+            or not all(isinstance(a, str) and ADVISORY_ID.fullmatch(a) for a in advisories)
+            or not (scope is None or isinstance(scope, list) and all(isinstance(s, str) for s in scope))
         ):
             raise ClassError(
-                f'{path}: needs class = "security", a non-empty advisories list of ids and, optionally, repositories'
+                f"{path}: needs class = \"security\", a non-empty advisories list of ids and, optionally, repositories"
             )
         if scope is None or name in scope:
             found = True
@@ -278,15 +234,9 @@ def parse_updateinfo(xml):
         fixed = {}
         for p in update.iter("package"):
             if not (p.get("name") and p.get("version") and p.get("release")):
-                raise ClassError(
-                    f"advisory {update.findtext('id', '')}: a package lacks name, version or release"
-                )
-            fixed[p.get("name")] = (
-                f"{p.get('epoch') or 0}:{p.get('version')}-{p.get('release')}"
-            )
-        advisories.append(
-            Advisory(update.findtext("id", ""), update.get("type", ""), fixed)
-        )
+                raise ClassError(f"advisory {update.findtext('id', '')}: a package lacks name, version or release")
+            fixed[p.get("name")] = f"{p.get('epoch') or 0}:{p.get('version')}-{p.get('release')}"
+        advisories.append(Advisory(update.findtext("id", ""), update.get("type", ""), fixed))
     return advisories
 
 
@@ -336,9 +286,7 @@ def run(*args, text=True, timeout=TIMEOUT, input=None):
     except subprocess.TimeoutExpired:
         raise ClassError(f"{' '.join(args)}: timed out") from None
     if r.returncode:
-        raise ClassError(
-            f"{' '.join(args)}: {r.stderr.decode(errors='replace').strip()}"
-        )
+        raise ClassError(f"{' '.join(args)}: {r.stderr.decode(errors='replace').strip()}")
     if not text:
         return r.stdout
     try:
@@ -367,12 +315,7 @@ class PodmanSources(Sources):
             try:
                 ctr = run("podman", "create", "--entrypoint", "/bin/true", ref).strip()
                 run("podman", "cp", f"{ctr}:/usr/lib/sysimage/rpm", str(tmp / "rpm"))
-                run(
-                    "podman",
-                    "cp",
-                    f"{ctr}:/usr/lib/os-release",
-                    str(tmp / "os-release"),
-                )
+                run("podman", "cp", f"{ctr}:/usr/lib/os-release", str(tmp / "os-release"))
             except ClassError as error:
                 failure = error
             cleanup = []  # the pulled image goes on every path, a failed create included
@@ -383,22 +326,11 @@ class PodmanSources(Sources):
                 except ClassError as error:
                     cleanup.append(str(error))
             if failure:
-                raise ClassError(
-                    f"{ref}: {failure}"
-                    + (
-                        f" (cleanup also failed: {'; '.join(cleanup)})"
-                        if cleanup
-                        else ""
-                    )
-                )
+                raise ClassError(f"{ref}: {failure}" + (f" (cleanup also failed: {'; '.join(cleanup)})" if cleanup else ""))
             for line in cleanup:
                 print(f"release_class: cleanup: {line}", file=sys.stderr)
             packages = self._packages(ref, tmp / "rpm")
-            match = re.search(
-                r'^VERSION_ID="?([0-9]+)"?$',
-                (tmp / "os-release").read_text(errors="replace"),
-                re.M,
-            )
+            match = re.search(r'^VERSION_ID="?([0-9]+)"?$', (tmp / "os-release").read_text(errors="replace"), re.M)
         if not match:
             raise ClassError(f"{ref}: os-release has no VERSION_ID")
         self._seen[ref] = packages, match.group(1)
@@ -416,17 +348,13 @@ class PodmanSources(Sources):
         for line in listing.splitlines():
             fields = line.split()
             if len(fields) != 2:
-                raise ClassError(
-                    f"{ref}: rpm printed '{line}', not 'name epoch:version-release'"
-                )
+                raise ClassError(f"{ref}: rpm printed '{line}', not 'name epoch:version-release'")
             name, version = fields
             if name not in packages or evrcmp(version, packages[name]) > 0:
                 packages[name] = version
         missing = [n for n in SANITY if n not in packages]
         if missing:
-            raise ClassError(
-                f"{ref}: the RPM database lacks {missing}: an empty or unreadable database"
-            )
+            raise ClassError(f"{ref}: the RPM database lacks {missing}: an empty or unreadable database")
         return packages
 
     def packages(self, ref):
@@ -453,11 +381,7 @@ class PodmanSources(Sources):
         except ET.ParseError as error:
             raise ClassError(f"the Fedora metalink is not XML: {error}") from None
         want = next(
-            (
-                h.text
-                for h in metalink.iter()
-                if local_name(h) == "hash" and h.get("type") == "sha256"
-            ),
+            (h.text for h in metalink.iter() if local_name(h) == "hash" and h.get("type") == "sha256"),
             None,
         )
         urls = [
@@ -469,9 +393,7 @@ class PodmanSources(Sources):
             and u.text.strip().endswith("/repomd.xml")
         ]
         if not want or not urls:
-            raise ClassError(
-                "the Fedora metalink names no https repomd.xml with a sha256"
-            )
+            raise ClassError("the Fedora metalink names no https repomd.xml with a sha256")
         errors = []
         for url in urls:
             try:
@@ -488,36 +410,20 @@ class PodmanSources(Sources):
             root = ET.fromstring(repomd)
         except ET.ParseError as error:
             raise ClassError(f"repomd.xml is not XML: {error}") from None
-        data = next(
-            (
-                d
-                for d in root
-                if local_name(d) == "data" and d.get("type") == "updateinfo"
-            ),
-            None,
-        )
+        data = next((d for d in root if local_name(d) == "data" and d.get("type") == "updateinfo"), None)
         if data is None:
             raise ClassError("repomd.xml has no updateinfo")
         field = {local_name(e): e for e in data}
         loc = field["location"].get("href") if "location" in field else None
         checksum = field.get("checksum")
-        if (
-            not loc
-            or checksum is None
-            or checksum.get("type") != "sha256"
-            or not checksum.text
-        ):
-            raise ClassError(
-                "the updateinfo entry of repomd.xml has no location or sha256 checksum"
-            )
+        if not loc or checksum is None or checksum.get("type") != "sha256" or not checksum.text:
+            raise ClassError("the updateinfo entry of repomd.xml has no location or sha256 checksum")
         stamp = None
         if "timestamp" in field:
             try:
                 stamp = int(float(field["timestamp"].text))
             except (TypeError, ValueError, OverflowError):
-                raise ClassError(
-                    f"updateinfo timestamp '{field['timestamp'].text}' is not a number"
-                ) from None
+                raise ClassError(f"updateinfo timestamp '{field['timestamp'].text}' is not a number") from None
         blob = self._fetch(urllib.parse.urljoin(base, loc))
         if hashlib.sha256(blob).hexdigest() != checksum.text:
             raise ClassError(f"{loc} does not match the repomd.xml checksum")
@@ -559,22 +465,14 @@ def derive(repository, baseline, candidate, commit, sources):
         if before != after:
             # Every build of the new Fedora release compares later than the old one's, so the
             # advisories of its updates repository say nothing about this change (#681).
-            record["class_reason"] = ",".join(
-                filter(None, [record["class_reason"], f"base-change:{before}->{after}"])
-            )
+            record["class_reason"] = ",".join(filter(None, [record["class_reason"], f"base-change:{before}->{after}"]))
         else:
             stamp, xml = sources.updateinfo(candidate.ref)
-            old, new, advisories = (
-                sources.packages(baseline.ref),
-                sources.packages(candidate.ref),
-                parse_updateinfo(xml),
-            )
+            old, new, advisories = sources.packages(baseline.ref), sources.packages(candidate.ref), parse_updateinfo(xml)
             ids.update(fedora_half(old, new, advisories))
             closed = kernel_half(old, new, advisories)
             if closed and baseline.revision and stated is None:
-                raise ClassError(
-                    f"the kernel change closes {closed}: a {CLASS_DIR} file must say so (PL55)"
-                )
+                raise ClassError(f"the kernel change closes {closed}: a {CLASS_DIR} file must say so (PL55)")
         bad = sorted(i for i in ids if not ADVISORY_ID.fullmatch(i))
         if bad:
             raise ClassError(f"advisory ids {bad} are not of the form [A-Za-z0-9._-]+")

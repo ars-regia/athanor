@@ -76,9 +76,7 @@ def _stream(response, dest, limit):
         while chunk := response.read(1 << 20):
             size += len(chunk)
             if size > limit:
-                raise ValueError(
-                    f"the download is longer than the {limit} bytes the API reports"
-                )
+                raise ValueError(f"the download is longer than the {limit} bytes the API reports")
             digest.update(chunk)
             out.write(chunk)
     return digest.hexdigest()
@@ -98,9 +96,7 @@ class Api:
     def json(self, path):
         request = urllib.request.Request(self.url + path, headers=self.headers)
         # No redirect: the token is sent to the API host only, and a redirect fails as an HTTPError.
-        with urllib.request.build_opener(_NoRedirect).open(
-            request, timeout=60
-        ) as response:
+        with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
             return json.load(response)
 
     def download(self, path, dest, limit):
@@ -108,9 +104,7 @@ class Api:
         redirects an artifact to storage outside GitHub: the redirect is followed without the token."""
         request = urllib.request.Request(self.url + path, headers=self.headers)
         try:
-            with urllib.request.build_opener(_NoRedirect).open(
-                request, timeout=60
-            ) as response:
+            with urllib.request.build_opener(_NoRedirect).open(request, timeout=60) as response:
                 return _stream(response, dest, limit)
         except urllib.error.HTTPError as error:
             if error.code not in (301, 302, 303, 307, 308):
@@ -134,9 +128,7 @@ def source_run(api, repository, sha):
     pulls = [
         p
         for p in api.json(f"/repos/{repository}/commits/{sha}/pulls")
-        if p["merged_at"]
-        and p["merge_commit_sha"] == sha
-        and p["base"]["ref"] == BRANCH
+        if p["merged_at"] and p["merge_commit_sha"] == sha and p["base"]["ref"] == BRANCH
     ]
     if len(pulls) != 1:
         raise Refused(
@@ -146,9 +138,7 @@ def source_run(api, repository, sha):
     head = pull["head"]["sha"]
     # A head shared with another pull request (a stack, a twin against main) may have a newer
     # green run built on another base: refuse rather than guess which run belongs to this one.
-    sharing = [
-        p["number"] for p in api.json(f"/repos/{repository}/commits/{head}/pulls")
-    ]
+    sharing = [p["number"] for p in api.json(f"/repos/{repository}/commits/{head}/pulls")]
     if sharing != [pull["number"]]:
         raise Refused(
             f"condition 1: the head {head} belongs to pull requests {sharing}, expected only #{pull['number']}"
@@ -171,19 +161,13 @@ def source_run(api, repository, sha):
             f"condition 1: no completed pull_request run of {WORKFLOW} in {repository} for the head {head}"
         )
     run = max(runs, key=lambda r: r["id"])
-    jobs = api.json(
-        f"/repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100"
-    )
+    jobs = api.json(f"/repos/{repository}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")
     if jobs["total_count"] != len(jobs["jobs"]):
-        raise Refused(
-            f"condition 1: run {run['id']} lists {jobs['total_count']} jobs, read {len(jobs['jobs'])}"
-        )
+        raise Refused(f"condition 1: run {run['id']} lists {jobs['total_count']} jobs, read {len(jobs['jobs'])}")
     for name in JOBS:
         found = [j["conclusion"] for j in jobs["jobs"] if j["name"] == name]
         if found != ["success"]:
-            raise Refused(
-                f"condition 1: job '{name}' of run {run['id']} concluded {found or 'absent'}"
-            )
+            raise Refused(f"condition 1: job '{name}' of run {run['id']} concluded {found or 'absent'}")
     return pull, run
 
 
@@ -211,14 +195,10 @@ def compare_trees(repo, sha, head, base):
     revs = {"head": head, "pushed": sha, "base": base, "parent": parent}
     trees = {}
     for path in COMPARED:
-        ids = {
-            name: git(repo, "rev-parse", f"{rev}:{path}") for name, rev in revs.items()
-        }
+        ids = {name: git(repo, "rev-parse", f"{rev}:{path}") for name, rev in revs.items()}
         trees[path] = ids
         if ids["head"] != ids["pushed"]:
-            raise Refused(
-                f"condition 2: {path} differs between the run's head {head} and the pushed commit {sha}"
-            )
+            raise Refused(f"condition 2: {path} differs between the run's head {head} and the pushed commit {sha}")
         if ids["base"] != ids["parent"]:
             raise Refused(
                 f"condition 2: {path} differs between the base {base} recorded for the run "
@@ -233,15 +213,11 @@ def untouched_since_head(api, repository, head, parent):
     change made and reverted on iso-v0 after head branched leaves equal trees at the recorded
     base and at the parent, and a different build."""
     for path in COMPARED:
-        latest = api.json(
-            f"/repos/{repository}/commits?sha={parent}&path={path}&per_page=1"
-        )
+        latest = api.json(f"/repos/{repository}/commits?sha={parent}&path={path}&per_page=1")
         if len(latest) != 1:
             raise Refused(f"condition 2: no commit of {parent} touches {path}")
         commit = latest[0]["sha"]
-        status = api.json(f"/repos/{repository}/compare/{commit}...{head}?per_page=1")[
-            "status"
-        ]
+        status = api.json(f"/repos/{repository}/compare/{commit}...{head}?per_page=1")["status"]
         if status not in ("ahead", "identical"):
             raise Refused(
                 f"condition 2: commit {commit} changed {path} on {BRANCH} after the run's head {head} branched"
@@ -251,56 +227,35 @@ def untouched_since_head(api, repository, head, parent):
 def build_inputs(repo, rev, tmp):
     """The JSON build-inputs.py prints in the kernel directory of REV."""
     archive = subprocess.run(
-        ["git", "-C", str(repo), "archive", rev, "forge/specs/azoth"],
-        check=True,
-        capture_output=True,
+        ["git", "-C", str(repo), "archive", rev, "forge/specs/azoth"], check=True, capture_output=True
     ).stdout
     with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
         tar.extractall(tmp, filter="data")
     out = subprocess.run(
-        [sys.executable, "-B", str(pathlib.Path(tmp) / BUILD_INPUTS)],
-        check=True,
-        capture_output=True,
-        text=True,
+        [sys.executable, "-B", str(pathlib.Path(tmp) / BUILD_INPUTS)], check=True, capture_output=True, text=True
     ).stdout
     return json.loads(out)
 
 
 def fetch_artifact(api, repository, run, dest):
     """Condition 4: the one kernel-build artifact of RUN, downloaded by id, digest checked."""
-    listing = api.json(
-        f"/repos/{repository}/actions/runs/{run['id']}/artifacts?name={ARTIFACT}&per_page=100"
-    )
-    found = [
-        a
-        for a in listing["artifacts"]
-        if a["name"] == ARTIFACT and a["workflow_run"]["id"] == run["id"]
-    ]
+    listing = api.json(f"/repos/{repository}/actions/runs/{run['id']}/artifacts?name={ARTIFACT}&per_page=100")
+    found = [a for a in listing["artifacts"] if a["name"] == ARTIFACT and a["workflow_run"]["id"] == run["id"]]
     # ponytail: a run whose build job ran twice has two kernel-build artifacts and builds again;
     # pick by the latest attempt if re-runs make that common.
     if len(found) != 1:
-        raise Refused(
-            f"condition 4: run {run['id']} has {len(found)} artifacts named {ARTIFACT}, expected one"
-        )
+        raise Refused(f"condition 4: run {run['id']} has {len(found)} artifacts named {ARTIFACT}, expected one")
     artifact = found[0]
     if artifact["expired"]:
-        raise Refused(
-            f"condition 4: artifact {artifact['id']} of run {run['id']} has expired"
-        )
+        raise Refused(f"condition 4: artifact {artifact['id']} of run {run['id']} has expired")
     expected = artifact.get("digest") or ""
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
-        raise Refused(
-            f"condition 4: the API reports no SHA-256 digest for artifact {artifact['id']}"
-        )
+        raise Refused(f"condition 4: the API reports no SHA-256 digest for artifact {artifact['id']}")
     actual = "sha256:" + api.download(
-        f"/repos/{repository}/actions/artifacts/{artifact['id']}/zip",
-        dest,
-        artifact["size_in_bytes"],
+        f"/repos/{repository}/actions/artifacts/{artifact['id']}/zip", dest, artifact["size_in_bytes"]
     )
     if actual != expected:
-        raise Refused(
-            f"condition 4: artifact {artifact['id']} has digest {actual}, the API reports {expected}"
-        )
+        raise Refused(f"condition 4: artifact {artifact['id']} has digest {actual}, the API reports {expected}")
     return artifact
 
 
@@ -319,12 +274,7 @@ def decide(api, repo, repository, sha, nvr, tmp):
             "workflow": WORKFLOW,
             "event": "pull_request",
         },
-        "pull_request": {
-            "number": pull["number"],
-            "head": head,
-            "base": base,
-            "merge_commit": sha,
-        },
+        "pull_request": {"number": pull["number"], "head": head, "base": base, "merge_commit": sha},
     }
     base_unchanged(api, repository, pull["number"])
     parent, decision["trees"] = compare_trees(repo, sha, head, base)
@@ -332,26 +282,18 @@ def decide(api, repo, repository, sha, nvr, tmp):
     untouched_since_head(api, repository, head, parent)
     inputs = build_inputs(repo, sha, tmp / "pushed")
     if build_inputs(repo, head, tmp / "head") != inputs:
-        raise Refused(
-            "condition 3: build-inputs.py gives other inputs at the run's head than at the pushed commit"
-        )
+        raise Refused("condition 3: build-inputs.py gives other inputs at the run's head than at the pushed commit")
     canonical = json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()
     decision["build_inputs_sha256"] = hashlib.sha256(canonical).hexdigest()
     artifact = fetch_artifact(api, repository, run, tmp / "artifact.zip")
-    decision["artifact"] = {
-        "id": artifact["id"],
-        "name": ARTIFACT,
-        "digest": artifact["digest"],
-    }
+    decision["artifact"] = {"id": artifact["id"], "name": ARTIFACT, "digest": artifact["digest"]}
     # Condition 3, second half: read from the artifact only now that its digest matched.
     with zipfile.ZipFile(tmp / "artifact.zip") as archive:
         if "nvr" not in archive.namelist():
             raise Refused(f"condition 3: artifact {artifact['id']} holds no nvr")
         built = archive.read("nvr").decode().strip()
     if built != nvr:
-        raise Refused(
-            f"condition 3: artifact {artifact['id']} holds NVR {built}, the pins give {nvr}"
-        )
+        raise Refused(f"condition 3: artifact {artifact['id']} holds NVR {built}, the pins give {nvr}")
     decision["nvr"] = nvr
     return decision
 
@@ -373,23 +315,14 @@ def promote(api, repo, repository, sha, nvr, extract):
         detail = getattr(error, "stderr", None) or ""
         if isinstance(detail, bytes):
             detail = detail.decode(errors="replace")
-        return {
-            "promoted": False,
-            "reason": f"error: {type(error).__name__}: {error} {detail}".strip(),
-        }
+        return {"promoted": False, "reason": f"error: {type(error).__name__}: {error} {detail}".strip()}
 
 
 def summary(decision):
     lines = ["### Kernel promotion (ADR-0110)", ""]
     if not decision["promoted"]:
-        return "\n".join(
-            [*lines, f"Not promoted, the push builds: {decision['reason']}", ""]
-        )
-    run, pull, artifact = (
-        decision["source_run"],
-        decision["pull_request"],
-        decision["artifact"],
-    )
+        return "\n".join([*lines, f"Not promoted, the push builds: {decision['reason']}", ""])
+    run, pull, artifact = decision["source_run"], decision["pull_request"], decision["artifact"]
     lines += [
         (
             f"Promoted: the RPMs of run [{run['id']}]({run['url']}) of pull request #{pull['number']} "
@@ -401,9 +334,7 @@ def summary(decision):
         "| --- | --- | --- | --- | --- |",
     ]
     for path, ids in decision["trees"].items():
-        lines.append(
-            f"| `{path}` | `{ids['head']}` | `{ids['pushed']}` | `{ids['base']}` | `{ids['parent']}` |"
-        )
+        lines.append(f"| `{path}` | `{ids['head']}` | `{ids['pushed']}` | `{ids['base']}` | `{ids['parent']}` |")
     return "\n".join([*lines, ""])
 
 
@@ -415,29 +346,13 @@ def main(argv=None):
     parser.add_argument("--extract", required=True)
     parser.add_argument("--repo", default=".")
     args = parser.parse_args(argv)
-    api = Api(
-        os.environ.get("GITHUB_API_URL", "https://api.github.com"),
-        os.environ.get("GH_TOKEN", ""),
-    )
-    decision = promote(
-        api,
-        args.repo,
-        os.environ.get("GITHUB_REPOSITORY", ""),
-        args.sha,
-        args.nvr,
-        args.extract,
-    )
+    api = Api(os.environ.get("GITHUB_API_URL", "https://api.github.com"), os.environ.get("GH_TOKEN", ""))
+    decision = promote(api, args.repo, os.environ.get("GITHUB_REPOSITORY", ""), args.sha, args.nvr, args.extract)
     out = pathlib.Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "decision.json").write_text(
-        json.dumps(decision, indent=2, sort_keys=True) + "\n"
-    )
+    (out / "decision.json").write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n")
     (out / "summary.md").write_text(summary(decision))
-    outcome = (
-        "promoted"
-        if decision["promoted"]
-        else f"not promoted, the push builds: {decision['reason']}"
-    )
+    outcome = "promoted" if decision["promoted"] else f"not promoted, the push builds: {decision['reason']}"
     # A refusal is routine; an error disables promotion until someone reads it.
     level = "warning" if decision["reason"].startswith("error: ") else "notice"
     print(f"::{level} title=Kernel promotion::{outcome}")

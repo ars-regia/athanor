@@ -19,37 +19,19 @@ TOOLKIT = "system/athanor-sal/Cargo.toml"
 
 
 def GREETER_ENTRIES():
-    return [
-        p
-        for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
-        if e[2] == verify.GPL3_ONLY_DEPENDENCY
-    ]
+    return [p for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
+            if e[2] == verify.GPL3_ONLY_DEPENDENCY]
 
 
 class SpdxTest(unittest.TestCase):
     def test_known_expressions_pass(self):
-        for e in (
-            "MIT",
-            "MIT OR Apache-2.0",
-            "(MIT OR Apache-2.0) AND ISC",
-            "GPL-2.0-only WITH Linux-syscall-note",
-        ):
+        for e in ("MIT", "MIT OR Apache-2.0", "(MIT OR Apache-2.0) AND ISC",
+                  "GPL-2.0-only WITH Linux-syscall-note"):
             self.assertIsNone(verify.spdx_problem(e), e)
 
     def test_unknown_or_malformed_expressions_fail(self):
-        for e in (
-            "BSD",
-            "mit",
-            "GPLv3",
-            "GPL-3.0",
-            "MIT AND AND",
-            "MIT OR",
-            "(MIT",
-            "MIT)",
-            "",
-            "MIT WITH Nope",
-            "MIT Apache-2.0",
-        ):
+        for e in ("BSD", "mit", "GPLv3", "GPL-3.0", "MIT AND AND", "MIT OR", "(MIT",
+                  "MIT)", "", "MIT WITH Nope", "MIT Apache-2.0"):
             self.assertIsNotNone(verify.spdx_problem(e), e)
 
 
@@ -61,21 +43,14 @@ class LicenceExceptionTest(unittest.TestCase):
             self.assertTrue(reason, path)
 
     def test_an_exception_must_match_exactly(self):
-        crate, spec = sorted(
-            [
-                p
-                for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
-                if e[2] == verify.GPL3_ONLY_DEPENDENCY
-            ]
-        )
+        crate, spec = sorted([p for p, e in verify.OWN_LICENCE_EXCEPTIONS.items()
+                       if e[2] == verify.GPL3_ONLY_DEPENDENCY])
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             subprocess.run(["git", "-C", tmp, "init", "-q"], check=True)
             (root / "LICENSE").write_text("text")
-            for rel, body in (
-                (crate, CRATE % OWN + '[dependencies]\ngreetd_ipc = "1"\n'),
-                (spec, f"License: {OWN}\n"),
-            ):
+            for rel, body in ((crate, CRATE % OWN + "[dependencies]\ngreetd_ipc = \"1\"\n"),
+                              (spec, f"License: {OWN}\n")):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
                 (root / rel).write_text(body)
             self.assertEqual(len(verify.licence_problems(root)), 2)
@@ -96,11 +71,8 @@ class ExceptionSelfCheckTest(unittest.TestCase):
 
     def test_a_dependent_outside_the_table_fails(self):
         root = self.tree(None)
-        self.write(
-            root,
-            "system/other/Cargo.toml",
-            CRATE % OWN + '[dependencies]\n%s = "0.10"\n' % verify.GPL3_ONLY_DEPENDENCY,
-        )
+        self.write(root, "system/other/Cargo.toml",
+                   CRATE % OWN + "[dependencies]\n%s = \"0.10\"\n" % verify.GPL3_ONLY_DEPENDENCY)
         problems = verify.licence_problems(root)
         self.assertEqual(len(problems), 1)
         self.assertIn("no entry in OWN_LICENCE_EXCEPTIONS", problems[0])
@@ -116,13 +88,8 @@ class ExceptionSelfCheckTest(unittest.TestCase):
     def test_an_entry_with_the_dependency_passes(self):
         root = self.tree(None)
         crate = next(p for p in GREETER_ENTRIES() if p.endswith("Cargo.toml"))
-        self.write(
-            root,
-            crate,
-            CRATE % "GPL-3.0-only"
-            + "[dependencies]\n%s = { workspace = true }\n"
-            % verify.GPL3_ONLY_DEPENDENCY,
-        )
+        self.write(root, crate, CRATE % "GPL-3.0-only"
+                   + "[dependencies]\n%s = { workspace = true }\n" % verify.GPL3_ONLY_DEPENDENCY)
         self.assertEqual(verify.licence_problems(root), [])
 
     def test_a_chosen_exception_passes_with_its_licence(self):
@@ -139,12 +106,8 @@ class ExceptionSelfCheckTest(unittest.TestCase):
 
     def test_a_chosen_exception_does_not_cover_the_gpl_dependency(self):
         root = self.tree(None)
-        self.write(
-            root,
-            TOOLKIT,
-            CRATE % verify.OWN_LICENCE_EXCEPTIONS[TOOLKIT][0]
-            + '[dependencies]\n%s = "0.10"\n' % verify.GPL3_ONLY_DEPENDENCY,
-        )
+        self.write(root, TOOLKIT, CRATE % verify.OWN_LICENCE_EXCEPTIONS[TOOLKIT][0]
+                   + "[dependencies]\n%s = \"0.10\"\n" % verify.GPL3_ONLY_DEPENDENCY)
         problems = verify.licence_problems(root)
         self.assertEqual(len(problems), 1)
         self.assertIn("no entry in OWN_LICENCE_EXCEPTIONS", problems[0])
@@ -173,9 +136,8 @@ class LicenceProblemsTest(unittest.TestCase):
         return root
 
     def test_a_clean_tree_has_no_problem(self):
-        root = self.repo(
-            {"forge/tools/t/Cargo.toml": CRATE % OWN, "a/own.spec": f"License: {OWN}\n"}
-        )
+        root = self.repo({"forge/tools/t/Cargo.toml": CRATE % OWN,
+                          "a/own.spec": f"License: {OWN}\n"})
         self.assertEqual(verify.licence_problems(root), [])
 
     def test_a_crate_outside_system_and_forge_specs_is_checked(self):
@@ -194,9 +156,7 @@ class LicenceProblemsTest(unittest.TestCase):
 
     def test_upstream_exemption_is_by_path_not_stem(self):
         stem = pathlib.PurePosixPath(UPSTREAM).name
-        root = self.repo(
-            {UPSTREAM: "License: MIT\n", f"other/{stem}": "License: MIT\n"}
-        )
+        root = self.repo({UPSTREAM: "License: MIT\n", f"other/{stem}": "License: MIT\n"})
         problems = verify.licence_problems(root)
         self.assertEqual(len(problems), 1)
         self.assertTrue(problems[0].startswith(f"other/{stem}"), problems[0])

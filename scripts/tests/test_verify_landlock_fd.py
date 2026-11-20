@@ -24,7 +24,7 @@ READ_GRANT = """use landlock::{
         ))?;
     }
 """
-LANDLOCK = "[dependencies]\nlandlock = { workspace = true }\n"
+LANDLOCK = '[dependencies]\nlandlock = { workspace = true }\n'
 
 
 def problems(files):
@@ -42,92 +42,56 @@ class LandlockFdTest(unittest.TestCase):
         # Both confine through athanor_unit::sandbox since #1059: a path grant there is refused.
         for crate in ("athanor-greeter-ui", "athanor-layout-chooser"):
             base = f"forge/specs/{crate}/{crate}-1.0.0"
-            found = problems(
-                {f"{base}/src/sandbox.rs": GRANT, f"{base}/Cargo.toml": LANDLOCK}
-            )
+            found = problems({f"{base}/src/sandbox.rs": GRANT, f"{base}/Cargo.toml": LANDLOCK})
             self.assertEqual(len(found), 2, found)
 
     def test_the_shared_sandbox_reads_through_path_fd_and_never_writes(self):
         self.assertEqual(problems({verify.LANDLOCK_SANDBOX: READ_GRANT}), [])
         found = problems({verify.LANDLOCK_SANDBOX: READ_GRANT + GRANT})
         self.assertEqual(len(found), 1, found)
-        self.assertIn(
-            "sandbox.rs:11: PathFd other than the parent of a read grant", found[0]
-        )
+        self.assertIn("sandbox.rs:11: PathFd other than the parent of a read grant", found[0])
 
     def test_the_real_sandbox_passes(self):
-        real = (
-            pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX
-        ).read_text()
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
         self.assertEqual(problems({verify.LANDLOCK_SANDBOX: real}), [])
 
     def test_a_restrict_that_takes_any_descriptor_is_refused(self):
-        real = (
-            pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX
-        ).read_text()
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
         code = real.replace("write: &[Checked])", "write: &[impl AsFd])", 1)
         self.assertNotEqual(code, real)
         found = problems({verify.LANDLOCK_SANDBOX: code})
-        self.assertTrue(
-            any("restrict takes `write: &[impl AsFd]`" in p for p in found), found
-        )
+        self.assertTrue(any("restrict takes `write: &[impl AsFd]`" in p for p in found), found)
 
     def test_code_around_the_tests_module_is_still_read(self):
-        real = (
-            pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX
-        ).read_text()
-        for code in (
-            "// #[cfg(test)]\n"
-            + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
-            "#[cfg(test)]\nuse std::fs::File;\n"
-            + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
-            real + "\npub fn widen(write: &[impl AsFd]) {}\n",
-        ):
+        real = (pathlib.Path(__file__).resolve().parents[2] / verify.LANDLOCK_SANDBOX).read_text()
+        for code in ("// #[cfg(test)]\n" + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
+                     "#[cfg(test)]\nuse std::fs::File;\n" + real.replace("write: &[Checked])", "write: &[impl AsFd])", 1),
+                     real + "\npub fn widen(write: &[impl AsFd]) {}\n"):
             found = problems({verify.LANDLOCK_SANDBOX: code})
             self.assertTrue(any("&[impl AsFd]" in p for p in found), found)
 
     def test_a_grant_opened_in_the_sandbox_is_refused(self):
-        for grant in (
-            "PathBeneath::new(std::fs::File::open(p)?, writes)",
-            "landlock::path_beneath_rules(paths, writes)",
-        ):
-            found = problems(
-                {
-                    verify.LANDLOCK_SANDBOX: READ_GRANT
-                    + f"    ruleset.add_rules({grant})?;\n"
-                }
-            )
+        for grant in ("PathBeneath::new(std::fs::File::open(p)?, writes)",
+                      "landlock::path_beneath_rules(paths, writes)"):
+            found = problems({verify.LANDLOCK_SANDBOX: READ_GRANT + f"    ruleset.add_rules({grant})?;\n"})
             self.assertTrue(found, grant)
 
     def test_a_read_grant_widened_with_writes_is_refused(self):
-        code = READ_GRANT.replace(
-            "AccessFs::from_read(ABI::V1),",
-            "AccessFs::from_read(ABI::V1) | AccessFs::from_write(ABI::V3),",
-        )
+        code = READ_GRANT.replace("AccessFs::from_read(ABI::V1),",
+                                  "AccessFs::from_read(ABI::V1) | AccessFs::from_write(ABI::V3),")
         found = problems({verify.LANDLOCK_SANDBOX: code})
         self.assertEqual(len(found), 1, found)
         self.assertIn("PathFd other than the parent of a read grant", found[0])
 
     def test_a_crate_outside_system_and_forge_specs_is_scanned(self):
-        found = problems(
-            {
-                "fuzz/Cargo.toml": LANDLOCK,
-                "forge/tools/x/src/main.rs": "use landlock::PathFd;\n",
-            }
-        )
+        found = problems({"fuzz/Cargo.toml": LANDLOCK,
+                          "forge/tools/x/src/main.rs": "use landlock::PathFd;\n"})
         self.assertEqual(len(found), 2, found)
 
     def test_a_git_ignored_tree_is_not_scanned(self):
-        self.assertEqual(
-            problems(
-                {
-                    ".gitignore": ".scratch/\n",
-                    ".scratch/x/Cargo.toml": LANDLOCK,
-                    ".scratch/x/src/main.rs": "use landlock::PathFd;\n",
-                }
-            ),
-            [],
-        )
+        self.assertEqual(problems({".gitignore": ".scratch/\n",
+                                   ".scratch/x/Cargo.toml": LANDLOCK,
+                                   ".scratch/x/src/main.rs": "use landlock::PathFd;\n"}), [])
 
     def test_an_alias_in_the_shared_sandbox_is_refused(self):
         code = "use landlock::{PathFd as Fd, AccessFs};\n"
@@ -135,33 +99,17 @@ class LandlockFdTest(unittest.TestCase):
 
     def test_only_athanor_unit_depends_on_landlock(self):
         self.assertEqual(problems({verify.LANDLOCK_CRATE: LANDLOCK}), [])
-        found = problems(
-            {
-                "forge/specs/athanor-dock/athanor-dock-1.0.0/Cargo.toml": LANDLOCK,
-                "system/athanor-idle/Cargo.toml": "[target.'cfg(unix)'.dev-dependencies]\nll = { package = \"landlock\" }\n",
-            }
-        )
+        found = problems({"forge/specs/athanor-dock/athanor-dock-1.0.0/Cargo.toml": LANDLOCK,
+                          "system/athanor-idle/Cargo.toml":
+                              '[target.\'cfg(unix)\'.dev-dependencies]\nll = { package = "landlock" }\n'})
         self.assertEqual(len(found), 2, found)
-        self.assertTrue(
-            any(
-                "athanor-dock-1.0.0/Cargo.toml: [dependencies] names the landlock crate"
-                in problem
-                for problem in found
-            ),
-            found,
-        )
-        self.assertTrue(
-            any("[target.cfg(unix).dev-dependencies]" in problem for problem in found),
-            found,
-        )
+        self.assertTrue(any("athanor-dock-1.0.0/Cargo.toml: [dependencies] names the landlock crate"
+                            in problem for problem in found), found)
+        self.assertTrue(any("[target.cfg(unix).dev-dependencies]" in problem for problem in found), found)
 
     def test_path_fd_anywhere_else_is_reported(self):
-        found = problems(
-            {
-                "forge/specs/athanor-dock/src/start.rs": GRANT,
-                "system/athanor-idle/src/confine.rs": "use landlock::PathFd;\n",
-            }
-        )
+        found = problems({"forge/specs/athanor-dock/src/start.rs": GRANT,
+                          "system/athanor-idle/src/confine.rs": "use landlock::PathFd;\n"})
         self.assertEqual(len(found), 2, found)
         self.assertTrue(all("PathFd grants by path" in problem for problem in found))
 

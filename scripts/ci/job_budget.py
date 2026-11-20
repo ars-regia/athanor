@@ -21,10 +21,7 @@ def check(stamp: pathlib.Path, budget_minutes: float, now: float) -> tuple[bool,
     elapsed = now - float(stamp.read_text())
     used = f"{int(elapsed // 60)}:{int(elapsed % 60):02d} of {budget_minutes:g} minutes"
     if elapsed > budget_minutes * 60:
-        return (
-            False,
-            f"The job took {used}: over its budget, which sits below its timeout.",
-        )
+        return False, f"The job took {used}: over its budget, which sits below its timeout."
     return True, f"The job took {used}."
 
 

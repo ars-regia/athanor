@@ -63,9 +63,7 @@ class PipelineWorkflowsTest(unittest.TestCase):
                 (root / "workflows" / name).write_text("")
             if doc is not None:
                 (root / "doc.md").write_text(doc)
-            return verify.pipeline_workflow_problems(
-                root / "doc.md", root / "workflows"
-            )
+            return verify.pipeline_workflow_problems(root / "doc.md", root / "workflows")
 
     def table(self, *names, n=None):
         rows = "".join(f"| `{name}` | kept |\n" for name in names)
@@ -95,9 +93,7 @@ class PipelineWorkflowsTest(unittest.TestCase):
         self.assertIn("counts 29", problems[0])
 
     def test_a_heading_without_a_count_is_reported(self):
-        doc = self.table("a.yml", "b.yaml").replace(
-            "Today's 2 workflows", "Today's workflows"
-        )
+        doc = self.table("a.yml", "b.yaml").replace("Today's 2 workflows", "Today's workflows")
         problems = self.problems(doc)
         self.assertEqual(len(problems), 1)
         self.assertIn("states no workflow count", problems[0])
@@ -118,17 +114,12 @@ class PipelineWorkflowsTest(unittest.TestCase):
         self.assertIn("missing", problems[0])
 
     def test_a_hash_line_in_a_code_fence_does_not_end_the_section(self):
-        doc = (
-            self.HEAD.format(n=2)
-            + "| `a.yml` | kept |\n\n```bash\n# a comment\n```\n\n"
-            "| `b.yaml` | kept |\n" + self.TAIL
-        )
+        doc = (self.HEAD.format(n=2) + "| `a.yml` | kept |\n\n```bash\n# a comment\n```\n\n"
+               "| `b.yaml` | kept |\n" + self.TAIL)
         self.assertEqual(self.problems(doc), [])
 
     def test_a_heading_in_a_code_fence_is_not_the_section(self):
-        doc = "```\n### 3.5 Example\n| `a.yml` | x |\n```\n" + self.table(
-            "a.yml", "b.yaml"
-        )
+        doc = "```\n### 3.5 Example\n| `a.yml` | x |\n```\n" + self.table("a.yml", "b.yaml")
         self.assertEqual(self.problems(doc), [])
 
 

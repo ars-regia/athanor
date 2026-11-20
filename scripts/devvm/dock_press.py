@@ -35,9 +35,7 @@ def button(app, name):
                 and node.get_state_set().contains(Atspi.StateType.SHOWING)
             ):
                 return node
-            children = [
-                node.get_child_at_index(i) for i in range(node.get_child_count())
-            ]
+            children = [node.get_child_at_index(i) for i in range(node.get_child_count())]
         except GLib.Error:
             # The widget was destroyed while the tree was walked: a rebuild replaced it.
             continue

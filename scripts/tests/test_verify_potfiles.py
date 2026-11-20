@@ -163,7 +163,6 @@ class ModuleTreeTest(unittest.TestCase):
             )
 
         both = {"u.rs": TRANSLATED, "b.rs": TRANSLATED}
-
         def unlisted(found, name):
             self.assertEqual(len(found), 1, found)
             self.assertIn(f"system/shared/src/{name} calls tr", found[0])
@@ -171,9 +170,7 @@ class ModuleTreeTest(unittest.TestCase):
 
         def missing(found, name):
             self.assertEqual(len(found), 1, found)
-            self.assertIn(
-                f"declares a module whose file system/shared/src/{name}", found[0]
-            )
+            self.assertIn(f"declares a module whose file system/shared/src/{name}", found[0])
 
         # Holds: the path applies, and src/b.rs is not read.
         unlisted(found('not(feature = "extra")', {"u.rs": TRANSLATED}), "u.rs")
@@ -188,9 +185,7 @@ class ModuleTreeTest(unittest.TestCase):
         found_both = found('target_os = "linux"', both)
         self.assertEqual(len(found_both), 2, found_both)
         for name in ("u.rs", "b.rs"):
-            self.assertTrue(
-                any(f"system/shared/src/{name} calls tr" in f for f in found_both)
-            )
+            self.assertTrue(any(f"system/shared/src/{name} calls tr" in f for f in found_both))
         missing(found('target_os = "linux"', {}), "u.rs")
         # An unparsable predicate cannot be judged either.
         unlisted(found("not()", {"b.rs": TRANSLATED}), "b.rs")
@@ -222,9 +217,7 @@ class ModuleTreeTest(unittest.TestCase):
         found = self.found(lib, {"l.rs": TRANSLATED, "f.rs": TRANSLATED})
         self.assertEqual(len(found), 2, found)
         for name in ("l.rs", "f.rs"):
-            self.assertTrue(
-                any(f"system/shared/src/{name} calls tr" in f for f in found), found
-            )
+            self.assertTrue(any(f"system/shared/src/{name} calls tr" in f for f in found), found)
 
     def test_a_conditional_path_is_split_at_its_own_commas_and_quotes(self):
         # A comma and a parenthesis inside the quoted path do not end the attribute.

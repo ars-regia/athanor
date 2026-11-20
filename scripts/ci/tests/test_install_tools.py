@@ -66,20 +66,13 @@ class ChecksumTest(unittest.TestCase):
             fake = pathlib.Path(tmp) / "fake"
             fake.mkdir()
             # sleep is faked so retry.sh's 15 s delay costs nothing.
-            for name, text in (
-                ("curl", FLAKY_CURL),
-                ("python3", FAKE_PYTHON),
-                ("sleep", "#!/usr/bin/env bash\n"),
-            ):
+            for name, text in (("curl", FLAKY_CURL), ("python3", FAKE_PYTHON),
+                               ("sleep", "#!/usr/bin/env bash\n")):
                 (fake / name).write_text(text)
                 (fake / name).chmod(0o755)
             calls = pathlib.Path(tmp) / "curl-calls"
-            env = {
-                **os.environ,
-                "LC_ALL": "C",
-                "PATH": f"{fake}:{os.environ['PATH']}",
-                "CURL_CALLS": str(calls),
-            }
+            env = {**os.environ, "LC_ALL": "C", "PATH": f"{fake}:{os.environ['PATH']}",
+                   "CURL_CALLS": str(calls)}
             run = subprocess.run(
                 ["bash", str(SCRIPT), str(pathlib.Path(tmp) / "tools")],
                 env=env,
@@ -102,12 +95,8 @@ class ChecksumTest(unittest.TestCase):
                 (fake / name).chmod(0o755)
             out = pathlib.Path(tmp) / "tools"
             env = {**os.environ, "LC_ALL": "C", "PATH": f"{fake}:{os.environ['PATH']}"}
-            subprocess.run(
-                ["bash", str(SCRIPT), str(out)], env=env, capture_output=True
-            )
-            calls = [
-                line.split() for line in (out / "pip-args").read_text().splitlines()
-            ]
+            subprocess.run(["bash", str(SCRIPT), str(out)], env=env, capture_output=True)
+            calls = [line.split() for line in (out / "pip-args").read_text().splitlines()]
         # The build backend first, from wheels; then the tools, built against it.
         self.assertEqual(len(calls), 2)
         for args, requirements in zip(calls, (BUILD_REQUIREMENTS, REQUIREMENTS)):

@@ -44,17 +44,7 @@ def device(name, keys, width=0, height=0):
     os.write(
         fd,
         struct.pack(
-            f"80sHHHHi{4 * ABS_CNT}i",
-            name,
-            BUS_VIRTUAL,
-            0,
-            0,
-            1,
-            0,
-            *absmax,
-            *zeros,
-            *zeros,
-            *zeros,
+            f"80sHHHHi{4 * ABS_CNT}i", name, BUS_VIRTUAL, 0, 0, 1, 0, *absmax, *zeros, *zeros, *zeros
         ),
     )
     fcntl.ioctl(fd, UI_DEV_CREATE)
@@ -79,12 +69,8 @@ def main():
             match op:
                 case ["move", x, y]:
                     if not (0 <= int(x) < width and 0 <= int(y) < height):
-                        raise SystemExit(
-                            f"{x},{y} lies outside the {width}x{height} output"
-                        )
-                    t_ns = send(
-                        pointer, (EV_ABS, ABS_X, int(x)), (EV_ABS, ABS_Y, int(y))
-                    )
+                        raise SystemExit(f"{x},{y} lies outside the {width}x{height} output")
+                    t_ns = send(pointer, (EV_ABS, ABS_X, int(x)), (EV_ABS, ABS_Y, int(y)))
                 case ["press" | "release" as what, *side] if side in ([], ["right"]):
                     button = BTN_RIGHT if side else BTN_LEFT
                     t_ns = send(pointer, (EV_KEY, button, int(what == "press")))

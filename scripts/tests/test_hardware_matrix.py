@@ -64,6 +64,7 @@ class Rows(unittest.TestCase):
         self.assertIn("duplicate", problems)
         self.assertIn("needs a reason", problems)
 
+
     def test_since_must_be_a_release(self):
         for since in ("next", 0.1, 1):
             with self.subTest(since=since):
@@ -76,11 +77,7 @@ class Rows(unittest.TestCase):
             "row": SMALL["row"] + [{**SMALL["row"][1], "id": "c", "since": "0.10"}],
             "untested": [{**SMALL["untested"][0], "since": "0.10"}],
         }
-        for release, ids in (
-            ("0.9", ["a", "b"]),
-            ("0.10", ["a", "b", "c"]),
-            ("1.0", ["a", "b", "c"]),
-        ):
+        for release, ids in (("0.9", ["a", "b"]), ("0.10", ["a", "b", "c"]), ("1.0", ["a", "b", "c"])):
             with self.subTest(release=release):
                 scoped = matrix.scoped(later, release)
                 self.assertEqual([r["id"] for r in scoped["row"]], ids)
@@ -179,11 +176,7 @@ class Checks(unittest.TestCase):
         written = []
         with (
             mock.patch.object(matrix, "read_record", return_value=old),
-            mock.patch.object(
-                matrix,
-                "write_record",
-                side_effect=lambda r, m, rec: written.append(dict(rec["rows"])),
-            ),
+            mock.patch.object(matrix, "write_record", side_effect=lambda r, m, rec: written.append(dict(rec["rows"]))),
             mock.patch.object(matrix, "host", return_value={}),
             mock.patch.object(matrix, "attempt", return_value=("pass", "seen")),
         ):

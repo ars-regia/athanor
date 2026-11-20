@@ -111,18 +111,11 @@ class SessionUnitsTest(unittest.TestCase):
         for line in ("StartLimitBurst=10\n", "StartLimitIntervalSec=10min\n"):
             with self.subTest(line=line):
                 bar = BAR.replace(line, "")
-                self.assertEqual(
-                    problems({"athanor-bar.service": bar}),
-                    [("athanor-bar.service", "class")],
-                )
+                self.assertEqual(problems({"athanor-bar.service": bar}), [("athanor-bar.service", "class")])
 
     def test_a_restart_setting_outside_the_service_section_does_not_count(self):
-        bar = BAR.replace("Restart=on-failure\n", "").replace(
-            "[Unit]\n", "[Unit]\nRestart=on-failure\n"
-        )
-        self.assertEqual(
-            problems({"athanor-bar.service": bar}), [("athanor-bar.service", "class")]
-        )
+        bar = BAR.replace("Restart=on-failure\n", "").replace("[Unit]\n", "[Unit]\nRestart=on-failure\n")
+        self.assertEqual(problems({"athanor-bar.service": bar}), [("athanor-bar.service", "class")])
 
     def test_an_activated_unit_a_preset_enables_fails(self):
         self.assertEqual(
@@ -201,37 +194,16 @@ class SessionUnitsTest(unittest.TestCase):
         target = TARGET.replace("Wants=x-wanted.service", "Wants=x-compositor.service")
         for units, enabled, expected in (
             ({}, (), []),
-            (
-                {
-                    "x-compositor.service": compositor
-                    + "[Install]\nWantedBy=athanor-session.target\n"
-                },
-                (),
-                ["install"],
-            ),
+            ({"x-compositor.service": compositor + "[Install]\nWantedBy=athanor-session.target\n"}, (), ["install"]),
             ({}, ("x-compositor.service",), ["install"]),
             ({"athanor-session.target": target}, (), ["install"]),
-            (
-                {"x-compositor.service": compositor + "Restart=on-failure\n"},
-                (),
-                ["class"],
-            ),
-            (
-                {
-                    "x-compositor.service": compositor.replace(
-                        "PartOf=graphical-session.target\n", ""
-                    )
-                },
-                (),
-                ["binding"],
-            ),
+            ({"x-compositor.service": compositor + "Restart=on-failure\n"}, (), ["class"]),
+            ({"x-compositor.service": compositor.replace("PartOf=graphical-session.target\n", "")}, (), ["binding"]),
         ):
             with self.subTest(units=units, enabled=enabled):
                 shipped = {"x-compositor.service": compositor, **units}
                 self.assertEqual(
-                    problems(
-                        shipped, enabled=("athanor-bar.service", *enabled), table=table
-                    ),
+                    problems(shipped, enabled=("athanor-bar.service", *enabled), table=table),
                     [("x-compositor.service", rule) for rule in expected],
                 )
 
@@ -251,9 +223,7 @@ class ExemptTest(unittest.TestCase):
             return verify.session_exempt_problems(self.FOUND)
 
     def test_an_exempt_finding_passes(self):
-        self.assertEqual(
-            self.exempt_problems({("x.service", "RestartSec=30, too slow"): "why"}), []
-        )
+        self.assertEqual(self.exempt_problems({("x.service", "RestartSec=30, too slow"): "why"}), [])
 
     def test_an_exemption_covers_its_own_finding_only(self):
         found = self.exempt_problems({("x.service", "RestartSteps=5, too many"): "why"})
@@ -263,26 +233,18 @@ class ExemptTest(unittest.TestCase):
 
     def test_the_tree_s_exemptions_all_match(self):
         units, _ = verify.shipped_user_units(verify.ROOT)
-        enabled = {
-            unit
-            for verb, unit, _ in verify.preset_lines(verify.ROOT)
-            if verb == "enable"
-        }
+        enabled = {unit for verb, unit, _ in verify.preset_lines(verify.ROOT) if verb == "enable"}
         self.assertEqual(
-            verify.session_exempt_problems(
-                verify.session_unit_problems(units, enabled)
-            ),
-            [],
+            verify.session_exempt_problems(verify.session_unit_problems(units, enabled)), []
         )
+
 
 
 class StateLinkTest(unittest.TestCase):
     STATE = "[Service]\nStateDirectory=athanor/search cosmic:link\n"
 
     def test_a_state_directory_without_a_tmpfiles_line_fails(self):
-        found = verify.state_link_problems(
-            {"a.service": self.STATE, "b.service": self.STATE}, set()
-        )
+        found = verify.state_link_problems({"a.service": self.STATE, "b.service": self.STATE}, set())
         self.assertEqual(len(found), 2)
         self.assertIn("'athanor' is StateDirectory= of a.service, b.service", found[0])
         self.assertIn("'cosmic'", found[1])
@@ -360,12 +322,7 @@ class SpecFilesTest(unittest.TestCase):
                 self.assertEqual((names, found), ([], [line]))
 
     def test_any_other_section_ends_the_files_list(self):
-        for section in (
-            "%verifyscript",
-            "%post",
-            "%sepolicy",
-            "%generate_buildrequires",
-        ):
+        for section in ("%verifyscript", "%post", "%sepolicy", "%generate_buildrequires"):
             with self.subTest(section=section):
                 text = f"%files\n/usr/lib/systemd/user/a.service\n{section}\n/usr/lib/systemd/user/c.service\n"
                 self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
@@ -381,10 +338,7 @@ class SpecFilesTest(unittest.TestCase):
         self.assertEqual(verify.spec_user_units(text), (["a.service"], []))
 
     def test_another_directory_macro_is_reported(self):
-        self.assertEqual(
-            self.files("%{systemd_user_dir}/a.service"),
-            ([], ["%{systemd_user_dir}/a.service"]),
-        )
+        self.assertEqual(self.files("%{systemd_user_dir}/a.service"), ([], ["%{systemd_user_dir}/a.service"]))
 
     def test_what_is_not_a_user_unit_is_left_alone(self):
         text = (
@@ -399,9 +353,7 @@ class SpecFilesTest(unittest.TestCase):
         self.assertEqual(verify.spec_user_units(text), ([], []))
 
     def test_an_unclassified_line_fails_the_check(self):
-        with mock.patch.object(
-            verify, "read", return_value="%files\n/usr/lib/systemd/user/*.service\n"
-        ):
+        with mock.patch.object(verify, "read", return_value="%files\n/usr/lib/systemd/user/*.service\n"):
             _, found = verify.shipped_user_units(verify.ROOT)
         self.assertTrue(found and "cannot tell which user unit" in found[0])
 

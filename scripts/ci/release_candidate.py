@@ -60,9 +60,7 @@ def sha256(path):
 def sh(args, **kw):
     """subprocess.run, with a timeout that refuses the release instead of hanging it."""
     try:
-        return subprocess.run(
-            args, capture_output=True, text=True, timeout=TIMEOUT, **kw
-        )
+        return subprocess.run(args, capture_output=True, text=True, timeout=TIMEOUT, **kw)
     except subprocess.TimeoutExpired:
         raise Refused(f"{' '.join(args)}: timed out after {TIMEOUT} s") from None
 
@@ -269,9 +267,7 @@ def classes(verdicts, commit, sources):
             f"{repository}@{v['candidate_digest']}", v["candidate_digest"]
         )
         try:
-            records.append(
-                release_class.derive(repository, baseline, candidate, commit, sources)
-            )
+            records.append(release_class.derive(repository, baseline, candidate, commit, sources))
         except release_class.ClassError as error:
             raise Refused(str(error)) from None
     return records
@@ -342,17 +338,10 @@ def check(out):
             shutil.copy(tmp / name, out / name)
     verdicts = order(repo, out / "image-digests.txt", request["commit"])
     records = classes(verdicts, request["commit"], release_class.PodmanSources(ROOT))
-    notes = [
-        f"- {r['repository']}: class_reason `{r['class_reason']}`\n"
-        for r in records
-        if r["class_reason"]
-    ]
+    notes = [f"- {r['repository']}: class_reason `{r['class_reason']}`\n" for r in records if r["class_reason"]]
     if notes and os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-            f.write(
-                "Class derived by fallback (PL55) or across a change of Fedora release (#681):\n"
-                + "".join(notes)
-            )
+            f.write("Class derived by fallback (PL55) or across a change of Fedora release (#681):\n" + "".join(notes))
     else:
         sys.stderr.write("".join(notes))
     candidate = {

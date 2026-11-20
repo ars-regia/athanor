@@ -59,14 +59,7 @@ CHECKS = {}
 # The revision the change is measured against, from --known-red-base: the base of the pull
 # request or of the merge group in pr.yml (`just check-static`), None when none is given.
 BASE_REF = None
-BOLD, DIM, RED, GRN, YEL, OFF = (
-    "\033[1m",
-    "\033[2m",
-    "\033[31m",
-    "\033[32m",
-    "\033[33m",
-    "\033[0m",
-)
+BOLD, DIM, RED, GRN, YEL, OFF = "\033[1m", "\033[2m", "\033[31m", "\033[32m", "\033[33m", "\033[0m"
 if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
     BOLD = DIM = RED = GRN = YEL = OFF = ""
 
@@ -76,7 +69,6 @@ def check(name, title):
         fn.title = title
         CHECKS[name] = fn
         return fn
-
     return deco
 
 
@@ -96,26 +88,13 @@ class Result:
         return not self.problems
 
 
-PRUNE = {
-    "target",
-    ".git",
-    "repo-cache",
-    ".cache",
-    "node_modules",
-    "graph-vaults",
-    "graph-pages",
-    ".codegraph",
-    "graphify-out",
-    "experimental",
-}
+PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
+         "graph-vaults", "graph-pages", ".codegraph", "graphify-out",
+         "experimental"}
 
 
 # Units that sealed LUKS to the TPM or bumped its rollback counter on their own (D42, issue #148).
-AUTO_TPM_UNITS = (
-    "athanor-tpm-luks-seal",
-    "athanor-tpm-rollback-check",
-    "athanor-tpm-rollback-update",
-)
+AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athanor-tpm-rollback-update")
 
 
 def walk(base, suffix):
@@ -156,7 +135,6 @@ def rel(p):
 # 1. workflow — il difetto che ha spento il CI il 2026-08-31
 # --------------------------------------------------------------------------- #
 
-
 @check("workflows", "I workflow GitHub sono validi e non esfiltrano log")
 def check_workflows():
     r = Result()
@@ -175,48 +153,34 @@ def check_workflows():
                 continue
             indent = len(m.group(1))
             body = []
-            for nxt in lines[i + 1 :]:
+            for nxt in lines[i + 1:]:
                 if not nxt.strip():
                     continue
                 if len(nxt) - len(nxt.lstrip()) <= indent:
                     break
                 body.append(nxt.strip())
             if not any(b.startswith(("run:", "uses:")) for b in body):
-                r.fail(
-                    f"{wf.name}:{i + 1} step senza run/uses -> GitHub rifiuta tutto il file "
-                    f"({m.group(2)[:45]})"
-                )
+                r.fail(f"{wf.name}:{i+1} step senza run/uses -> GitHub rifiuta tutto il file "
+                       f"({m.group(2)[:45]})")
 
         # 1b. blocchi if/fi vuoti -> errore di sintassi bash, uccide lo step
         for i, line in enumerate(lines):
             if re.search(r";\s*then\s*$", line):
                 nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
                 if nxt == "fi":
-                    r.fail(
-                        f"{wf.name}:{i + 1} blocco if vuoto -> errore di sintassi bash (exit 2)"
-                    )
+                    r.fail(f"{wf.name}:{i+1} blocco if vuoto -> errore di sintassi bash (exit 2)")
 
         # 1c. log spediti fuori dal perimetro
         for i, line in enumerate(lines):
-            for host in (
-                "webhook.site",
-                "dpaste.com",
-                "pastebin.com",
-                "transfer.sh",
-                "0x0.st",
-            ):
+            for host in ("webhook.site", "dpaste.com", "pastebin.com", "transfer.sh", "0x0.st"):
                 if host in line:
-                    r.fail(
-                        f"{wf.name}:{i + 1} log inviati a un servizio esterno ({host})"
-                    )
+                    r.fail(f"{wf.name}:{i+1} log inviati a un servizio esterno ({host})")
 
         # 1f. A workflow that runs on its own sets the token's permissions, or it gets the
         # repository default (CodeQL actions/missing-workflow-permissions, 2026-11-14). A
         # reusable workflow takes them from its caller.
         if yaml is None:
-            r.fail(
-                f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked"
-            )
+            r.fail(f"{wf.name}: PyYAML missing, the permissions of the workflow are not checked")
             continue
         try:
             doc = yaml.safe_load(read(wf))
@@ -228,38 +192,24 @@ def check_workflows():
             continue
         events = triggers(doc)
         if events != {"workflow_call"} and "permissions" not in doc:
-            r.fail(
-                f"{wf.name}: no top-level permissions, so the token gets the repository "
-                f"default (triggers: {', '.join(sorted(events)) or 'none'})"
-            )
+            r.fail(f"{wf.name}: no top-level permissions, so the token gets the repository "
+                   f"default (triggers: {', '.join(sorted(events)) or 'none'})")
 
     # 1e. D43: signing keys only in sign-only jobs
-    for problem in (
-        signing_problems(ROOT)
-        + merge_queue_problems(ROOT)
-        + release_problems(ROOT)
-        + policy_pull_problems(ROOT)
-        + release_cache_problems(ROOT)
-    ):
+    for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
     try:
-        p = subprocess.run(
-            ["actionlint", "-no-color", "-oneline"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        p = subprocess.run(["actionlint", "-no-color", "-oneline"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=120)
         if p.returncode != 0:
             for line in (p.stdout or p.stderr).strip().split("\n")[:15]:
                 if line.strip():
                     r.fail(f"actionlint: {line.strip()}")
     except FileNotFoundError:
-        r.note(
-            "actionlint non installato — installalo, intercetta molto più di questo controllo"
-        )
+        r.note("actionlint non installato — installalo, intercetta molto più di questo controllo")
     except Exception as e:
         r.note(f"actionlint non eseguito: {e}")
 
@@ -273,8 +223,7 @@ def check_workflows():
 
 # The actions a sign-only job may use, pinned by a full commit SHA (D43).
 SIGN_ONLY_ACTIONS = re.compile(
-    r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$"
-)
+    r"^actions/(?:checkout|download-artifact|upload-artifact)@[0-9a-f]{40}$")
 # The only inputs of those actions a sign-only job may set: no other ref or repository to check
 # out, no other run's or repository's artifacts, no checkout outside the workspace root (D43).
 SIGN_ONLY_INPUTS = {
@@ -295,10 +244,8 @@ COSIGN_LOGIN = 'echo "${GITHUB_TOKEN}" | cosign login ghcr.io -u "${GITHUB_ACTOR
 SIGN_JOB_DOWNLOADS = {"out", "artifacts"}
 # The ref check of every job of release.yml (doc_pipeline.md PL54): a release run on any ref but
 # iso-v0 fails, never skips. A signing job may run it: it reads no secret and changes nothing.
-RELEASE_REF_CHECK = (
-    '[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || '
-    '{ echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }'
-)
+RELEASE_REF_CHECK = ('[[ "${GITHUB_REF}" == refs/heads/iso-v0 ]] || '
+                     '{ echo "::error::release.yml releases only from refs/heads/iso-v0, not ${GITHUB_REF}"; exit 1; }')
 # The only commands a step of a signing job may run, whole. A sign-only job receives built
 # artefacts and runs no build step, and an earlier step must not be able to rewrite the sign
 # script or the environment of the step that holds the key ($GITHUB_ENV, BASH_ENV) (D43).
@@ -307,19 +254,13 @@ SIGN_JOB_COMMANDS = {
     "bash forge/specs/azoth/signer/run.sh sign",
     'echo "${GITHUB_TOKEN}" | skopeo login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin',
     'bash system/sign-images.sh --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"'
-    " --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations"
+    ' --kernel-digests artifacts/kernel-unsigned.txt --attestations artifacts/attestations'
     ' artifacts/image-digests.txt | tee -a "${GITHUB_STEP_SUMMARY}"',
     RELEASE_REF_CHECK,
 }
 # The names a signing job, its steps and its workflow may set in env besides the secrets of the
 # job's environment: plain values, none read by bash, the dynamic loader or a PATH lookup.
-SIGN_JOB_ENV = {
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GITHUB_ACTOR",
-    "KERNEL_DIGEST",
-    "KERNEL_REGISTRY",
-}
+SIGN_JOB_ENV = {"GH_TOKEN", "GITHUB_TOKEN", "GITHUB_ACTOR", "KERNEL_DIGEST", "KERNEL_REGISTRY"}
 # The image sign script runs beside the key and starts no container: system/verify-images.sh
 # verifies its signatures in a job without the key (D43). The kernel signer is the exception
 # by design: it runs a digest-pinned signer image it verifies first. Of cosign it runs only
@@ -339,9 +280,8 @@ GITHUB_HOSTED = re.compile(r"^ubuntu-(?:latest|\d{2}\.\d{2})$")
 SIGN_SCRIPTS = re.compile(
     r"^bash (?:forge/specs/azoth/signer/run\.sh sign"
     r'|system/sign-images\.sh --registry "ghcr\.io/\$\{GITHUB_REPOSITORY_OWNER,,\}"'
-    r" --kernel-digests artifacts/kernel-unsigned\.txt --attestations artifacts/attestations"
-    r' artifacts/image-digests\.txt \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$'
-)
+    r' --kernel-digests artifacts/kernel-unsigned\.txt --attestations artifacts/attestations'
+    r' artifacts/image-digests\.txt \| tee -a "\$\{GITHUB_STEP_SUMMARY\}")$')
 EXPRESSION = re.compile(r"\$\{\{(.*?)\}\}", re.S)
 # Contexts are case-insensitive: secrets.cosign_private_key reads COSIGN_PRIVATE_KEY.
 SECRET_NAME = re.compile(r"\bsecrets\s*\.\s*([A-Za-z_][A-Za-z0-9_-]*)", re.I)
@@ -397,13 +337,8 @@ def triggers(doc):
 def protected_branches(root):
     """The branches branch-protection.json protects against force pushes and deletion."""
     protection = json.loads(read(Path(root) / BRANCH_PROTECTION_JSON))
-    return {
-        branch
-        for branch, rules in protection.items()
-        if rules
-        and rules.get("allow_force_pushes") is False
-        and rules.get("allow_deletions") is False
-    }
+    return {branch for branch, rules in protection.items()
+            if rules and rules.get("allow_force_pushes") is False and rules.get("allow_deletions") is False}
 
 
 def deployment_problem(policy, protected):
@@ -427,10 +362,7 @@ def deployment_problem(policy, protected):
 def image_key_rotation(root):
     """Image key rotation (docs/operations/secrets.md section 4.1): it lasts while system/keys
     holds both image keys, and ends when athanor-image-1.pub leaves."""
-    return all(
-        (Path(root) / "system/keys" / f"athanor-image-{n}.pub").is_file()
-        for n in (1, 2)
-    )
+    return all((Path(root) / "system/keys" / f"athanor-image-{n}.pub").is_file() for n in (1, 2))
 
 
 def signing_environments(root):
@@ -443,35 +375,25 @@ def signing_environments(root):
     so the keys it still keeps until the rotation ends are not counted twice."""
     environments = json.loads(read(Path(root) / ENVIRONMENTS_JSON))
     alias = "signing" if image_key_rotation(root) else None
-    signing = {
-        name: env for name, env in environments.items() if name.startswith("signing")
-    }
+    signing = {name: env for name, env in environments.items() if name.startswith("signing")}
     if not signing:
         return {}, [f"{ENVIRONMENTS_JSON}: no signing environment (D43)"]
     holders, problems = {}, []
     protected = protected_branches(root)
     for name, env in sorted(signing.items()):
         if not env.get("reviewers"):
-            problems.append(
-                f"{ENVIRONMENTS_JSON}: the {name} environment has no required reviewer (D43)"
-            )
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment has no required reviewer (D43)")
         if env.get("can_admins_bypass") is not False:
-            problems.append(
-                f"{ENVIRONMENTS_JSON}: the {name} environment lets administrators bypass "
-                "its reviewer (D43)"
-            )
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment lets administrators bypass "
+                            "its reviewer (D43)")
         where = deployment_problem(env.get("deployment_branch_policy"), protected)
         if where:
-            problems.append(
-                f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
-                f"from branches {BRANCH_PROTECTION_JSON} protects (D43)"
-            )
+            problems.append(f"{ENVIRONMENTS_JSON}: the {name} environment deploys from {where}, not only "
+                            f"from branches {BRANCH_PROTECTION_JSON} protects (D43)")
         for secret in env.get("secrets", []) if name != alias else []:
             if secret in holders:
-                problems.append(
-                    f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
-                    "each key has one environment (D43)"
-                )
+                problems.append(f"{ENVIRONMENTS_JSON}: {secret} is in {holders[secret]} and in {name}: "
+                                "each key has one environment (D43)")
             holders.setdefault(secret, name)
     return holders, problems
 
@@ -487,13 +409,8 @@ def refs_overlap(a, b):
     ignored, which can only report more."""
     # Two globs that overlap without one matching the other (`a*`, `*b`) read as disjoint: the
     # rulesets name literal branches or a single glob, so this holds until two globs meet.
-    return (
-        a is None
-        or b is None
-        or any(
-            fnmatch.fnmatchcase(x, y) or fnmatch.fnmatchcase(y, x) for x in a for y in b
-        )
-    )
+    return a is None or b is None or any(
+        fnmatch.fnmatchcase(x, y) or fnmatch.fnmatchcase(y, x) for x in a for y in b)
 
 
 def merge_queue_problems(root):
@@ -506,28 +423,17 @@ def merge_queue_problems(root):
     both are matched as GitHub composes them."""
     root = Path(root)
     rulesets = json.loads(read(root / RULESETS_JSON))
-    queued = sorted(
-        name
-        for name, rs in rulesets.items()
-        if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", []))
-    )
+    queued = sorted(name for name, rs in rulesets.items()
+                    if any(rule.get("type") == "merge_queue" for rule in rs.get("rules", [])))
     if not queued:
         return []
-    sources = [
-        ([f"refs/heads/{branch}"], check["context"])
-        for branch, protection in json.loads(
-            read(root / BRANCH_PROTECTION_JSON)
-        ).items()
-        if protection
-        for check in (protection.get("required_status_checks") or {}).get("checks", [])
-    ]
-    sources += [
-        (ruleset_refs(rs), check["context"])
-        for rs in rulesets.values()
-        for rule in rs.get("rules", [])
-        if rule.get("type") == "required_status_checks"
-        for check in rule["parameters"]["required_status_checks"]
-    ]
+    sources = [([f"refs/heads/{branch}"], check["context"])
+               for branch, protection in json.loads(read(root / BRANCH_PROTECTION_JSON)).items()
+               if protection
+               for check in (protection.get("required_status_checks") or {}).get("checks", [])]
+    sources += [(ruleset_refs(rs), check["context"]) for rs in rulesets.values()
+                for rule in rs.get("rules", []) if rule.get("type") == "required_status_checks"
+                for check in rule["parameters"]["required_status_checks"]]
     reported = set()
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         doc = yaml.safe_load(read(wf))
@@ -537,12 +443,10 @@ def merge_queue_problems(root):
     for name in queued:
         refs = ruleset_refs(rulesets[name])
         required = {context for where, context in sources if refs_overlap(refs, where)}
-        problems += [
-            f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
-            f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
-            for context in sorted(required)
-            if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)
-        ]
+        problems += [f"{RULESETS_JSON}: ruleset {name} enables a merge queue, but the required context "
+                     f"{context!r} is reported by no workflow that runs on merge_group (PIPE-N06)"
+                     for context in sorted(required)
+                     if not any(fnmatch.fnmatchcase(context, pattern) for pattern in reported)]
     return problems
 
 
@@ -561,10 +465,7 @@ def job_contexts(root, doc, depth=0):
             patterns.add(name)
         elif uses.startswith("./") and depth < 4 and (root / uses).is_file():
             inner = yaml.safe_load(read(root / uses)) or {}
-            patterns |= {
-                f"{name} / {context}"
-                for context in job_contexts(root, inner, depth + 1)
-            }
+            patterns |= {f"{name} / {context}" for context in job_contexts(root, inner, depth + 1)}
         else:
             patterns.add(f"{name} / *")
     return patterns
@@ -575,9 +476,7 @@ ORCHESTRATOR_YML = ".github/workflows/athanor-forge-orchestrator.yml"
 RELEASE_GROUP = "${{ github.workflow }}"
 BUILD_GROUP = "${{ github.workflow }}-${{ github.ref }}"
 ON_ISO_V0 = "github.ref == 'refs/heads/iso-v0'"
-RELEASE_DISPATCH = (
-    'gh workflow run release.yml --ref iso-v0 -f build_run_id="${GITHUB_RUN_ID}"'
-)
+RELEASE_DISPATCH = 'gh workflow run release.yml --ref iso-v0 -f build_run_id="${GITHUB_RUN_ID}"'
 # The whole dispatch step but its name: no continue-on-error, shell or other token may qualify it.
 RELEASE_DISPATCH_STEP = {
     "if": ON_ISO_V0,
@@ -589,12 +488,8 @@ INPUT_IN_RUN = re.compile(r"\$\{\{(?:(?!\}\}).)*\binputs\b", re.S)
 # system/tag-images.sh is the one script that moves a tag of the system images (PL35); a raw
 # skopeo copy onto :latest is not recognised, nor a tag held in a variable, and ADR-0111 item 5
 # accepts that the registry itself binds no workflow.
-LATEST_WRITER = re.compile(
-    r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])"
-)
-STABLE_WRITER = re.compile(
-    r"promote(?:-iso)?\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])"
-)
+LATEST_WRITER = re.compile(r"tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?latest\b(?![-.\w])")
+STABLE_WRITER = re.compile(r"promote(?:-iso)?\.sh\b|tag-images\.sh\b[^\n]*--tag(?:=|\s+)[\"']?stable\b(?![-.\w])")
 
 
 def release_problems(root):
@@ -621,15 +516,11 @@ def release_problems(root):
             if step.get("run") == RELEASE_REF_CHECK:
                 # Nothing may make the check optional: no if, no continue-on-error.
                 if set(step) - {"name", "run"}:
-                    problems.append(
-                        f"release.yml: job {job_id} qualifies RELEASE_REF_CHECK with "
-                        f"{', '.join(sorted(set(step) - {'name', 'run'}))}"
-                    )
+                    problems.append(f"release.yml: job {job_id} qualifies RELEASE_REF_CHECK with "
+                                    f"{', '.join(sorted(set(step) - {'name', 'run'}))}")
                 break
             if not str(step.get("uses", "")).startswith("actions/checkout@"):
-                problems.append(
-                    f"release.yml: job {job_id} runs a step before RELEASE_REF_CHECK"
-                )
+                problems.append(f"release.yml: job {job_id} runs a step before RELEASE_REF_CHECK")
                 break
         else:
             problems.append(f"release.yml: job {job_id} never runs RELEASE_REF_CHECK")
@@ -640,90 +531,47 @@ def release_problems(root):
         return problems + [f"{Path(ORCHESTRATOR_YML).name}: no request-release job"]
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
-        problems.append(
-            f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()"
-        )
+        problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
     for job_id in sorted(set(jobs) - {"request-release"}):
         if job_id not in request.get("needs", []):
-            problems.append(
-                f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}"
-            )
+            problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":
             if "needs.system-image.result == 'success'" not in condition:
-                problems.append(
-                    f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success of system-image"
-                )
-        elif (
-            f"""contains(fromJSON('["success", "skipped"]'), needs.{job_id}.result)"""
-            not in condition
-        ):
-            problems.append(
-                f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success or a skip of {job_id}"
-            )
-    dispatches = [
-        {key: value for key, value in step.items() if key != "name"}
-        for step in request.get("steps", [])
-        if "release.yml" in str(step.get("run", ""))
-    ]
+                problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success of system-image")
+        elif f"""contains(fromJSON('["success", "skipped"]'), needs.{job_id}.result)""" not in condition:
+            problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask a success or a skip of {job_id}")
+    dispatches = [{key: value for key, value in step.items() if key != "name"}
+                  for step in request.get("steps", []) if "release.yml" in str(step.get("run", ""))]
     if dispatches != [RELEASE_DISPATCH_STEP]:
-        problems.append(
-            f"{Path(ORCHESTRATOR_YML).name}: request-release does not dispatch release.yml once, "
-            "on iso-v0 alone, with its run id (PL54)"
-        )
+        problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not dispatch release.yml once, "
+                        "on iso-v0 alone, with its run id (PL54)")
     if triggers(release) != {"workflow_dispatch"}:
-        problems.append(
-            f"release.yml: starts on {sorted(triggers(release))}, not on workflow_dispatch alone (PL54)"
-        )
-    for name, doc, group in (
-        ("release.yml", release, RELEASE_GROUP),
-        (Path(ORCHESTRATOR_YML).name, orchestrator, BUILD_GROUP),
-    ):
+        problems.append(f"release.yml: starts on {sorted(triggers(release))}, not on workflow_dispatch alone (PL54)")
+    for name, doc, group in (("release.yml", release, RELEASE_GROUP),
+                             (Path(ORCHESTRATOR_YML).name, orchestrator, BUILD_GROUP)):
         if doc.get("concurrency") != {"group": group, "cancel-in-progress": False}:
-            problems.append(
-                f"{name}: concurrency is not the group {group} without cancel-in-progress (PL57)"
-            )
+            problems.append(f"{name}: concurrency is not the group {group} without cancel-in-progress (PL57)")
     for job_id, job in release["jobs"].items():
         if "concurrency" in job:
-            problems.append(
-                f"release.yml: job {job_id} declares a concurrency group of its own (PL57)"
-            )
-        if any(
-            INPUT_IN_RUN.search(str(step.get("run", "")))
-            for step in job.get("steps", [])
-        ):
-            problems.append(
-                f"release.yml: job {job_id} interpolates an input into run:, which only env may carry (PL54)"
-            )
+            problems.append(f"release.yml: job {job_id} declares a concurrency group of its own (PL57)")
+        if any(INPUT_IN_RUN.search(str(step.get("run", ""))) for step in job.get("steps", [])):
+            problems.append(f"release.yml: job {job_id} interpolates an input into run:, which only env may carry (PL54)")
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         try:
             doc = yaml.safe_load(read(wf))
         except yaml.YAMLError:
             continue  # signing_problems reports a workflow it cannot read
-        for job_id, job in (
-            (doc.get("jobs") or {}).items() if isinstance(doc, dict) else ()
-        ):
+        for job_id, job in (doc.get("jobs") or {}).items() if isinstance(doc, dict) else ():
             environment = (job_environment(job) or "").lower()
-            if (
-                environment in ("signing", "signing-images")
-                and wf.name != "release.yml"
-            ):
-                problems.append(
-                    f"{wf.name}: job {job_id} runs in {environment}, which only release.yml may use (PL56)"
-                )
+            if environment in ("signing", "signing-images") and wf.name != "release.yml":
+                problems.append(f"{wf.name}: job {job_id} runs in {environment}, which only release.yml may use (PL56)")
             for step in job.get("steps", []):
                 run = re.sub(r"\\\n\s*", " ", str(step.get("run", "")))
-                if LATEST_WRITER.search(run) and (wf.name, job_id) != (
-                    "release.yml",
-                    "tag-latest",
-                ):
-                    problems.append(
-                        f"{wf.name}: job {job_id} moves :latest of the system images, "
-                        "which only tag-latest of release.yml writes (PL35, PL56)"
-                    )
+                if LATEST_WRITER.search(run) and (wf.name, job_id) != ("release.yml", "tag-latest"):
+                    problems.append(f"{wf.name}: job {job_id} moves :latest of the system images, "
+                                    "which only tag-latest of release.yml writes (PL35, PL56)")
                 if STABLE_WRITER.search(run) and environment != "release":
-                    problems.append(
-                        f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)"
-                    )
+                    problems.append(f"{wf.name}: job {job_id} writes :stable outside the environment release (PL60)")
     return problems
 
 
@@ -731,24 +579,15 @@ def release_problems(root):
 # compared in lower case as GitHub resolves names and without the ref; a local composite action
 # is also read step by step. Any other action fails the check until it is checked and listed.
 RELEASE_PATH_ACTIONS = {
-    "actions/attest-build-provenance",
-    "actions/checkout",
-    "actions/create-github-app-token",
-    "actions/download-artifact",
-    "actions/upload-artifact",
-    "anchore/sbom-action/download-syft",
-    "cachix/install-nix-action",
-    "oras-project/setup-oras",
-    "sigstore/cosign-installer",
-    "ublue-os/remove-unwanted-software",
-    "./.github/actions/kvm",
+    "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
+    "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
+    "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
 }
 # The settings that give a build a cache from outside the job: sccache on the Actions cache, and
 # a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
 # own disk or volume is not one.
-CACHE_BACKEND = re.compile(
-    r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b|\bcache-(?:from|to)\b", re.I
-)
+CACHE_BACKEND = re.compile(r"\bSCCACHE_GHA_\w+|\bACTIONS_CACHE_URL\b|\btype=gha\b|\bcache-(?:from|to)\b", re.I)
 LOCAL_WORKFLOW = "./.github/workflows/"
 LOCAL_ACTION = "./.github/actions/"
 # The token grants of a job that publishes: id-token for a keyless signature, attestation or
@@ -761,9 +600,7 @@ def publishes(permissions):
     """Whether a permissions block grants the token a write that publishes (PUBLISHING_GRANTS)."""
     if permissions == "write-all":
         return True
-    return isinstance(permissions, dict) and any(
-        permissions.get(g) == "write" for g in PUBLISHING_GRANTS
-    )
+    return isinstance(permissions, dict) and any(permissions.get(g) == "write" for g in PUBLISHING_GRANTS)
 
 
 def release_path_workflows(root):
@@ -781,37 +618,22 @@ def release_path_workflows(root):
         except yaml.YAMLError:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
-            jobs = {
-                job_id: job
-                for job_id, job in doc["jobs"].items()
-                if isinstance(job, dict)
-            }
+            jobs = {job_id: job for job_id, job in doc["jobs"].items() if isinstance(job, dict)}
             workflows[wf.name] = jobs, doc.get("env"), doc.get("permissions")
-
     def releasing(job, permissions):
         environment = (job_environment(job) or "").lower()
-        return (
-            environment.startswith("signing")
-            or environment == "release"
-            or publishes(job.get("permissions", permissions))
-        )
-
-    pending = [
-        name
-        for name, (jobs, _, permissions) in workflows.items()
-        if any(releasing(job, permissions) for job in jobs.values())
-    ]
+        return (environment.startswith("signing") or environment == "release"
+                or publishes(job.get("permissions", permissions)))
+    pending = [name for name, (jobs, _, permissions) in workflows.items()
+               if any(releasing(job, permissions) for job in jobs.values())]
     path = {}
     while pending:
         name = pending.pop()
         if name in path or name not in workflows:
             continue
         path[name] = workflows[name][:2]
-        pending += [
-            uses[len(LOCAL_WORKFLOW) :]
-            for job in path[name][0].values()
-            if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)
-        ]
+        pending += [uses[len(LOCAL_WORKFLOW):] for job in path[name][0].values()
+                    if (uses := str(job.get("uses", ""))).startswith(LOCAL_WORKFLOW)]
     return path
 
 
@@ -831,18 +653,12 @@ def expanded_steps(root, steps, problems, depth=0):
                 try:
                     action = yaml.safe_load(read(path))
                 except yaml.YAMLError as error:
-                    problems.append(
-                        f"{uses}/{manifest}: not YAML the PL10 check can read: "
-                        f"{str(error).splitlines()[0]}"
-                    )
+                    problems.append(f"{uses}/{manifest}: not YAML the PL10 check can read: "
+                                    f"{str(error).splitlines()[0]}")
                     continue
                 runs = action.get("runs") if isinstance(action, dict) else None
-                yield from expanded_steps(
-                    root,
-                    (runs or {}).get("steps") if isinstance(runs, dict) else None,
-                    problems,
-                    depth + 1,
-                )
+                yield from expanded_steps(root, (runs or {}).get("steps") if isinstance(runs, dict) else None,
+                                          problems, depth + 1)
 
 
 def release_cache_problems(root):
@@ -856,28 +672,19 @@ def release_cache_problems(root):
     for name, (jobs, env) in sorted(release_path_workflows(root).items()):
         for job_id, job in jobs.items():
             called = str(job.get("uses", ""))
-            if called and not (
-                called.startswith(LOCAL_WORKFLOW)
-                and "/" not in called[len(LOCAL_WORKFLOW) :]
-            ):
-                problems.append(
-                    f"{name}: job {job_id} calls {called}, which the check cannot follow: call "
-                    f"a workflow of this repository as {LOCAL_WORKFLOW}<file> (PL10)"
-                )
+            if called and not (called.startswith(LOCAL_WORKFLOW) and "/" not in called[len(LOCAL_WORKFLOW):]):
+                problems.append(f"{name}: job {job_id} calls {called}, which the check cannot follow: call "
+                                f"a workflow of this repository as {LOCAL_WORKFLOW}<file> (PL10)")
             steps = list(expanded_steps(root, job.get("steps"), problems))
             for step in steps:
                 action = str(step.get("uses", "")).split("@")[0]
                 if action and action.lower() not in RELEASE_PATH_ACTIONS:
-                    problems.append(
-                        f"{name}: job {job_id} uses {action}, which is not in RELEASE_PATH_ACTIONS: "
-                        "add it once it is checked to restore and save no cache (PL10)"
-                    )
+                    problems.append(f"{name}: job {job_id} uses {action}, which is not in RELEASE_PATH_ACTIONS: "
+                                    "add it once it is checked to restore and save no cache (PL10)")
             if CACHE_BACKEND.search(json.dumps([env, job, steps], default=str)):
-                problems.append(
-                    f"{name}: job {job_id} gives a build a cache from outside the job (sccache "
-                    "on the Actions cache, cache-from or cache-to) on the release path, which "
-                    "restores and saves no cache (PL10)"
-                )
+                problems.append(f"{name}: job {job_id} gives a build a cache from outside the job (sccache "
+                                "on the Actions cache, cache-from or cache-to) on the release path, which "
+                                "restores and saves no cache (PL10)")
     return problems
 
 
@@ -898,10 +705,8 @@ def signing_problems(root):
     holders, problems = signing_environments(root)
     problems += image_sign_script_problems(root)
     if yaml is None:
-        return problems + [
-            "scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
-            "workflows (pip install pyyaml)"
-        ]
+        return problems + ["scripts/verify.py: PyYAML is missing, so the D43 lint cannot read the "
+                           "workflows (pip install pyyaml)"]
     environments = json.loads(read(root / ENVIRONMENTS_JSON))
     signing = {name for name in environments if name.startswith("signing")}
     # GitHub compares environment names without regard to case.
@@ -915,53 +720,32 @@ def signing_problems(root):
         canonical["signing"] = "signing-images"
     repository = set(json.loads(read(root / ACTIONS_JSON)).get("secrets") or [])
     for secret in sorted(repository & holders.keys()):
-        problems.append(
-            f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
-            f"and {holders[secret]} holds it (D43)"
-        )
-    declared = (
-        repository
-        | BUILTIN_SECRETS
-        | {
-            secret
-            for env in environments.values()
-            for secret in env.get("secrets") or []
-        }
-    )
+        problems.append(f"{ACTIONS_JSON}: {secret} is a repository secret, which every job reads, "
+                        f"and {holders[secret]} holds it (D43)")
+    declared = repository | BUILTIN_SECRETS | {
+        secret for env in environments.values() for secret in env.get("secrets") or []}
     workflows = {}
     for wf in sorted((root / ".github/workflows").glob("*.y*ml")):
         try:
             doc = yaml.safe_load(read(wf))
         except yaml.YAMLError as error:
-            problems.append(
-                f"{wf.name}: not YAML the D43 lint can read: {str(error).splitlines()[0]}"
-            )
+            problems.append(f"{wf.name}: not YAML the D43 lint can read: {str(error).splitlines()[0]}")
             continue
         jobs = doc.get("jobs") if isinstance(doc, dict) else None
-        if (
-            not isinstance(jobs, dict)
-            or not jobs
-            or not all(isinstance(job, dict) for job in jobs.values())
-        ):
+        if not isinstance(jobs, dict) or not jobs or not all(isinstance(job, dict) for job in jobs.values()):
             problems.append(f"{wf.name}: no mapping of jobs the D43 lint can read")
             continue
         workflows[wf.name] = doc
-
     def environment_of(job):
         environment = job_environment(job)
         return canonical.get(environment.lower(), environment) if environment else None
 
-    with_signing_job = {
-        name
-        for name, doc in workflows.items()
-        if any(environment_of(job) in signing for job in doc["jobs"].values())
-    }
+    with_signing_job = {name for name, doc in workflows.items()
+                        if any(environment_of(job) in signing for job in doc["jobs"].values())}
     for name, doc in workflows.items():
         if "pull_request_target" in triggers(doc):
-            problems.append(
-                f"{name}: runs on pull_request_target, which runs with the secrets of this "
-                "repository on behalf of a fork (D43)"
-            )
+            problems.append(f"{name}: runs on pull_request_target, which runs with the secrets of this "
+                            "repository on behalf of a fork (D43)")
         if name in with_signing_job:
             if "workflow_call" in triggers(doc):
                 for job_id, job in doc["jobs"].items():
@@ -970,49 +754,29 @@ def signing_problems(root):
                             f"{name}: signing job {job_id} is in a workflow that runs on workflow_call, "
                             "where its environment's secrets are empty unless the caller inherits every "
                             "secret (actions/runner#4453): sign in a job of the workflow the event "
-                            "starts (D43)"
-                        )
+                            "starts (D43)")
             env = doc.get("env") or {}
-            for key in (
-                sorted(set(env) - SIGN_JOB_ENV) if isinstance(env, dict) else ["env"]
-            ):
-                problems.append(
-                    f"{name}: sets {key} in env, beside a signing job: only {sorted(SIGN_JOB_ENV)} (D43)"
-                )
+            for key in sorted(set(env) - SIGN_JOB_ENV) if isinstance(env, dict) else ["env"]:
+                problems.append(f"{name}: sets {key} in env, beside a signing job: only {sorted(SIGN_JOB_ENV)} (D43)")
             if "defaults" in doc:
-                problems.append(
-                    f"{name}: sets defaults, beside a signing job, which changes what its steps "
-                    "run (D43)"
-                )
-        problems += workflow_signing_problems(
-            name,
-            doc["jobs"],
-            holders,
-            signing,
-            with_signing_job,
-            set(workflows),
-            environment_of,
-        )
+                problems.append(f"{name}: sets defaults, beside a signing job, which changes what its steps "
+                                "run (D43)")
+        problems += workflow_signing_problems(name, doc["jobs"], holders, signing, with_signing_job,
+                                              set(workflows), environment_of)
         undeclared = set()
         for path, text in yaml_strings(doc):
             names, dynamic = secret_references(text)
             undeclared |= names - declared
             if dynamic:
-                problems.append(
-                    f"{name}: {'.'.join(map(str, path))} reads secrets other than as "
-                    "secrets.NAME, which hides the secret it reads (D43)"
-                )
+                problems.append(f"{name}: {'.'.join(map(str, path))} reads secrets other than as "
+                                "secrets.NAME, which hides the secret it reads (D43)")
             if names & holders.keys() and path[:1] != ("jobs",):
                 for secret in sorted(names & holders.keys()):
-                    problems.append(
-                        f"{name}: {secret} at the workflow level ({path[0]}), where every job "
-                        "reads it (D43)"
-                    )
+                    problems.append(f"{name}: {secret} at the workflow level ({path[0]}), where every job "
+                                    "reads it (D43)")
         for secret in sorted(undeclared):
-            problems.append(
-                f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
-                "declares (D43)"
-            )
+            problems.append(f"{name}: reads {secret}, which neither {ENVIRONMENTS_JSON} nor {ACTIONS_JSON} "
+                            "declares (D43)")
     return problems
 
 
@@ -1029,25 +793,15 @@ def policy_pull_problems(root):
     root = Path(root)
     problems = []
     # ponytail: shell and workflow files only; extend if a pull lands in Python or a Justfile.
-    files = [
-        *walk(root, ".sh"),
-        *walk(root / ".github/workflows", ".yml"),
-        *walk(root / ".github/workflows", ".yaml"),
-    ]
+    files = [*walk(root, ".sh"), *walk(root / ".github/workflows", ".yml"), *walk(root / ".github/workflows", ".yaml")]
     for path in sorted(files):
         name = path.relative_to(root).as_posix()
         if name in POLICY_PULLERS or "tests" in path.relative_to(root).parts:
             continue
         code = re.sub(r"\\\n\s*", " ", read(path))
-        if any(
-            POLICY_PULL.search(line)
-            for line in code.splitlines()
-            if not line.lstrip().startswith("#")
-        ):
-            problems.append(
-                f"{name}: pulls through a policy outside system/verify-images.sh, which runs it "
-                "in the builder image (runner skopeo 1.13)"
-            )
+        if any(POLICY_PULL.search(line) for line in code.splitlines() if not line.lstrip().startswith("#")):
+            problems.append(f"{name}: pulls through a policy outside system/verify-images.sh, which runs it "
+                            "in the builder image (runner skopeo 1.13)")
     return problems
 
 
@@ -1069,76 +823,48 @@ def image_sign_script_problems(root):
         if code.startswith("#"):
             continue
         if CONTAINER_ENGINE.search(code):
-            problems.append(
-                f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
-                "signatures in a job without it, system/verify-images.sh (D43)"
-            )
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} starts a container beside the key: verify the "
+                            "signatures in a job without it, system/verify-images.sh (D43)")
         if len(COSIGN_WORD.findall(code)) != len(COSIGN_ATTEST.findall(code)):
-            problems.append(
-                f"{IMAGE_SIGN_SCRIPT}:{number} runs cosign other than cosign attest beside the "
-                "key (D43, ADR-0127)"
-            )
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs cosign other than cosign attest beside the "
+                            "key (D43, ADR-0127)")
         if EVAL.search(code):
-            problems.append(
-                f"{IMAGE_SIGN_SCRIPT}:{number} runs eval beside the key (D43, ADR-0127)"
-            )
+            problems.append(f"{IMAGE_SIGN_SCRIPT}:{number} runs eval beside the key (D43, ADR-0127)")
     return problems
 
 
-def workflow_signing_problems(
-    name, jobs, holders, signing, with_signing_job, readable, environment_of
-):
+def workflow_signing_problems(name, jobs, holders, signing, with_signing_job, readable, environment_of):
     """The D43 problems of the jobs of one workflow (see signing_problems)."""
     problems = []
     for job_id, job in jobs.items():
         environment = environment_of(job)
         if environment and "${{" in environment:
-            problems.append(
-                f"{name}: job {job_id} names its environment with an expression the D43 lint "
-                "cannot resolve"
-            )
+            problems.append(f"{name}: job {job_id} names its environment with an expression the D43 lint "
+                            "cannot resolve")
         steps = job.get("steps") if isinstance(job.get("steps"), list) else []
         for path, text in yaml_strings(job):
             for secret in sorted(secret_references(text)[0] & holders.keys()):
                 if environment != holders[secret]:
-                    problems.append(
-                        f"{name}: job {job_id} reads {secret} without environment: "
-                        f"{holders[secret]}, which holds it (D43)"
-                    )
+                    problems.append(f"{name}: job {job_id} reads {secret} without environment: "
+                                    f"{holders[secret]}, which holds it (D43)")
                 elif path[:1] != ("steps",) or path[2:3] != ("env",) or len(path) != 4:
-                    problems.append(
-                        f"{name}: job {job_id} reads {secret} in {'.'.join(map(str, path))}, "
-                        "not in the env of the step that signs (D43)"
-                    )
+                    problems.append(f"{name}: job {job_id} reads {secret} in {'.'.join(map(str, path))}, "
+                                    "not in the env of the step that signs (D43)")
                 else:
                     step = steps[path[1]]
                     run = step.get("run")
-                    if (
-                        "uses" in step
-                        or not isinstance(run, str)
-                        or not SIGN_SCRIPTS.match(run.strip())
-                    ):
-                        problems.append(
-                            f"{name}: job {job_id} step {path[1] + 1} hands {secret} to a step "
-                            "that does not run only a sign script (D43)"
-                        )
+                    if "uses" in step or not isinstance(run, str) or not SIGN_SCRIPTS.match(run.strip()):
+                        problems.append(f"{name}: job {job_id} step {path[1] + 1} hands {secret} to a step "
+                                        "that does not run only a sign script (D43)")
         if job.get("secrets") == "inherit":
             called = str(job.get("uses", ""))
             local = called.removeprefix("./.github/workflows/")
             if local == called or local in with_signing_job or local not in readable:
-                problems.append(
-                    f"{name}: job {job_id} inherits every secret into {called}, which has a "
-                    "signing job or cannot be read: pass the secrets it needs by name (D43)"
-                )
+                problems.append(f"{name}: job {job_id} inherits every secret into {called}, which has a "
+                                "signing job or cannot be read: pass the secrets it needs by name (D43)")
         if environment in signing:
-            problems += signing_job_problems(
-                f"{name}: signing job {job_id}",
-                job,
-                steps,
-                environment,
-                holders,
-                (name, job_id) == COSIGN_INSTALLER_JOB,
-            )
+            problems += signing_job_problems(f"{name}: signing job {job_id}", job, steps, environment, holders,
+                                             (name, job_id) == COSIGN_INSTALLER_JOB)
     return problems
 
 
@@ -1155,91 +881,49 @@ def signing_job_problems(where, job, steps, environment, holders, attests=False)
     environment and plain values."""
     problems = []
     runs_on = job.get("runs-on")
-    if "uses" not in job and not (
-        isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)
-    ):
-        problems.append(
-            f"{where} runs on {runs_on}: only a GitHub-hosted ubuntu label (D43)"
-        )
+    if "uses" not in job and not (isinstance(runs_on, str) and GITHUB_HOSTED.match(runs_on)):
+        problems.append(f"{where} runs on {runs_on}: only a GitHub-hosted ubuntu label (D43)")
     for key in ("container", "services"):
         if key in job:
             problems.append(f"{where} runs a {key} beside the key (D43)")
     if "defaults" in job and job["defaults"] != SIGN_JOB_DEFAULTS:
-        problems.append(
-            f"{where} sets defaults other than {SIGN_JOB_DEFAULTS}, which changes what its steps "
-            "run (D43)"
-        )
+        problems.append(f"{where} sets defaults other than {SIGN_JOB_DEFAULTS}, which changes what its steps "
+                        "run (D43)")
     if "uses" in job:
-        problems.append(
-            f"{where} uses {job['uses']}: only checkout, download-artifact and upload-artifact "
-            "pinned by SHA (D43)"
-        )
-    allowed_env = SIGN_JOB_ENV | {
-        secret for secret, holder in holders.items() if holder == environment
-    }
+        problems.append(f"{where} uses {job['uses']}: only checkout, download-artifact and upload-artifact "
+                        "pinned by SHA (D43)")
+    allowed_env = SIGN_JOB_ENV | {secret for secret, holder in holders.items() if holder == environment}
     envs = [("env", job.get("env"))]
-    envs += [
-        (f"steps.{index + 1}.env", step.get("env"))
-        for index, step in enumerate(steps)
-        if isinstance(step, dict)
-    ]
+    envs += [(f"steps.{index + 1}.env", step.get("env")) for index, step in enumerate(steps) if isinstance(step, dict)]
     for path, env in envs:
-        for key in (
-            sorted(set(env) - allowed_env)
-            if isinstance(env, dict)
-            else ([] if env is None else ["env"])
-        ):
-            problems.append(
-                f"{where} sets {key} in {path}: only the secrets of its environment and "
-                f"{sorted(SIGN_JOB_ENV)} (D43)"
-            )
+        for key in sorted(set(env) - allowed_env) if isinstance(env, dict) else ([] if env is None else ["env"]):
+            problems.append(f"{where} sets {key} in {path}: only the secrets of its environment and "
+                            f"{sorted(SIGN_JOB_ENV)} (D43)")
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
-            problems.append(
-                f"{where} step {index + 1} is not a mapping the D43 lint can read"
-            )
+            problems.append(f"{where} step {index + 1} is not a mapping the D43 lint can read")
             continue
         for key in ("shell", "working-directory"):
             if key in step:
                 problems.append(f"{where} step {index + 1} sets {key} (D43)")
-        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS | (
-            {COSIGN_LOGIN} if attests else set()
-        ):
-            command = (
-                str(step["run"]).strip().splitlines()[0]
-                if str(step["run"]).strip()
-                else ""
-            )
-            problems.append(
-                f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}"
-            )
+        if "run" in step and str(step["run"]).strip() not in SIGN_JOB_COMMANDS | ({COSIGN_LOGIN} if attests else set()):
+            command = str(step["run"]).strip().splitlines()[0] if str(step["run"]).strip() else ""
+            problems.append(f"{where} step {index + 1} runs a command outside the allow-list of D43: {command}")
         if "uses" not in step:
             continue
         action = str(step["uses"])
-        if not (
-            SIGN_ONLY_ACTIONS.match(action)
-            or (attests and COSIGN_INSTALLER.match(action))
-        ):
-            problems.append(
-                f"{where} uses {action}: only checkout, download-artifact and upload-artifact "
-                "pinned by SHA (D43)"
-            )
+        if not (SIGN_ONLY_ACTIONS.match(action) or (attests and COSIGN_INSTALLER.match(action))):
+            problems.append(f"{where} uses {action}: only checkout, download-artifact and upload-artifact "
+                            "pinned by SHA (D43)")
             continue
         action = action.split("@")[0]
         inputs = step.get("with") if isinstance(step.get("with"), dict) else {}
         for key in sorted(set(inputs) - SIGN_ONLY_INPUTS[action]):
-            problems.append(
-                f"{where} sets {key} on {action}: it signs only this run's artifacts of this "
-                "repository (D43)"
-            )
-        if (
-            action == "actions/download-artifact"
-            and str(inputs.get("path", "")).rstrip("/") not in SIGN_JOB_DOWNLOADS
-        ):
-            problems.append(
-                f"{where} downloads into {inputs.get('path', 'the workspace root')}: only into one of "
-                f"{sorted(SIGN_JOB_DOWNLOADS)}, outside the checkout (D43)"
-            )
+            problems.append(f"{where} sets {key} on {action}: it signs only this run's artifacts of this "
+                            "repository (D43)")
+        if action == "actions/download-artifact" and str(inputs.get("path", "")).rstrip("/") not in SIGN_JOB_DOWNLOADS:
+            problems.append(f"{where} downloads into {inputs.get('path', 'the workspace root')}: only into one of "
+                            f"{sorted(SIGN_JOB_DOWNLOADS)}, outside the checkout (D43)")
     return problems
 
 
@@ -1356,9 +1040,7 @@ def installer_problems(root=None):
     try:
         pinned, pinned_path = read(root / SECUREBOOT_PIN).split()
     except (OSError, ValueError) as err:
-        return problems + [
-            f"{SECUREBOOT_PIN}: cannot read one 'sha256  path' line ({err})"
-        ]
+        return problems + [f"{SECUREBOOT_PIN}: cannot read one 'sha256  path' line ({err})"]
     if pinned_path != shipped.group(1):
         problems.append(
             f"{SECUREBOOT_PIN}: pins {pinned_path}, but {containerfile} ships {shipped.group(1)}; {rotation}"
@@ -1419,22 +1101,15 @@ def kickstart_problems(root=None):
         for relative, path in targets:
             # Without --followincludes an %include is accepted unread: collaudo.ks includes a
             # file that exists only on the installation medium (/run/install/repo).
-            p = subprocess.run(
-                ["ksvalidator", "--version", KICKSTART_SYNTAX, str(path)],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            p = subprocess.run(["ksvalidator", "--version", KICKSTART_SYNTAX, str(path)],
+                               capture_output=True, text=True, timeout=60)
             if p.returncode != 0:
                 detail = " ".join(p.stderr.split()) or " ".join(p.stdout.split())
                 problems.append(f"{relative}: {detail}")
     return problems
 
 
-@check(
-    "kickstart",
-    f"I kickstart sono sintassi valida per l'Anaconda di {KICKSTART_SYNTAX}",
-)
+@check("kickstart", f"I kickstart sono sintassi valida per l'Anaconda di {KICKSTART_SYNTAX}")
 def check_kickstart():
     r = Result()
     try:
@@ -1442,10 +1117,8 @@ def check_kickstart():
     except FileNotFoundError:
         # A workstation may lack the tool; CI installs it (scripts/ci/install-tools.sh,
         # call-lint.yml), so there its absence means nothing was checked.
-        missing = (
-            "ksvalidator is not installed (`dnf install pykickstart`): no kickstart is "
-            "checked before an install"
-        )
+        missing = ("ksvalidator is not installed (`dnf install pykickstart`): no kickstart is "
+                   "checked before an install")
         (r.fail if os.environ.get("GITHUB_ACTIONS") == "true" else r.note)(missing)
         return r
     except (OSError, subprocess.SubprocessError) as e:
@@ -1462,15 +1135,10 @@ def check_kickstart():
 
 # The kickstarts that install a machine for a person, and the one that tests that install.
 # Each carries the same %post, which records <repository>:stable through ostree-image-signed.
-INSTALL_KICKSTARTS = (
-    "system/athanor-install.ks",
-    "system/disk_config/iso.toml",
-    "forge/test/iso/collaudo.ks",
-)
-STABLE_SWITCH = (
-    "bootc switch --mutate-in-place --enforce-container-sigpolicy "
-    '--transport registry "$repository:stable"'
-)
+INSTALL_KICKSTARTS = ("system/athanor-install.ks", "system/disk_config/iso.toml",
+                      "forge/test/iso/collaudo.ks")
+STABLE_SWITCH = ('bootc switch --mutate-in-place --enforce-container-sigpolicy '
+                 '--transport registry "$repository:stable"')
 KICKSTART_POST = re.compile(r"^%post\b.*?^%end$", re.M | re.S)
 
 
@@ -1493,45 +1161,26 @@ def install_channel_problems(root=None):
             if code.startswith("#"):
                 continue
             if re.search(r":latest\b", code):
-                problems.append(
-                    f"{relative}:{i}: names :latest; installed systems follow :stable (UD2)"
-                )
-            if (
-                re.search(r"\bbootc\s+switch\b", code)
-                and "--enforce-container-sigpolicy" not in code
-            ):
-                problems.append(
-                    f"{relative}:{i}: bootc switch without --enforce-container-sigpolicy (UD2)"
-                )
+                problems.append(f"{relative}:{i}: names :latest; installed systems follow :stable (UD2)")
+            if re.search(r"\bbootc\s+switch\b", code) and "--enforce-container-sigpolicy" not in code:
+                problems.append(f"{relative}:{i}: bootc switch without --enforce-container-sigpolicy (UD2)")
         if relative in INSTALL_KICKSTARTS:
             # A line of its own, so a comment that quotes the command does not count.
-            found = [
-                b
-                for b in KICKSTART_POST.findall(text)
-                if STABLE_SWITCH in (line.strip() for line in b.split("\n"))
-            ]
+            found = [b for b in KICKSTART_POST.findall(text)
+                     if STABLE_SWITCH in (line.strip() for line in b.split("\n"))]
             if len(found) != 1:
-                problems.append(
-                    f"{relative}: needs one %post that runs `{STABLE_SWITCH}` (UD2)"
-                )
+                problems.append(f"{relative}: needs one %post that runs `{STABLE_SWITCH}` (UD2)")
             elif "--erroronfail" not in found[0].split("\n", 1)[0].split():
-                problems.append(
-                    f"{relative}: the :stable %post needs --erroronfail, or a failed switch "
-                    f"leaves an install that follows the unverified run tag (UD2)"
-                )
+                problems.append(f"{relative}: the :stable %post needs --erroronfail, or a failed switch "
+                                f"leaves an install that follows the unverified run tag (UD2)")
             else:
                 blocks[relative] = found[0]
     if len(set(blocks.values())) > 1:
-        problems.append(
-            f"the :stable %post differs between {', '.join(sorted(blocks))}: keep them identical"
-        )
+        problems.append(f"the :stable %post differs between {', '.join(sorted(blocks))}: keep them identical")
     return problems
 
 
-@check(
-    "install-channel",
-    "Install kickstarts leave the machine on :stable with the signature policy enforced",
-)
+@check("install-channel", "Install kickstarts leave the machine on :stable with the signature policy enforced")
 def check_install_channel():
     r = Result()
     for problem in install_channel_problems():
@@ -1563,32 +1212,19 @@ def os_release_problems(root=None):
         except OSError as err:
             return [f"{path}: cannot read ({err})"]
     text, release = texts
-    out = [
-        f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
-        for number, line in enumerate(text.splitlines(), 1)
-        if line.strip() and "=" not in line
-    ]
-    version = next(
-        (
-            line.split("=", 1)[1].strip().strip('"')
-            for line in text.splitlines()
-            if line.startswith("VERSION_ID=")
-        ),
-        None,
-    )
+    out = [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+           for number, line in enumerate(text.splitlines(), 1)
+           if line.strip() and "=" not in line]
+    version = next((line.split("=", 1)[1].strip().strip('"') for line in text.splitlines()
+                    if line.startswith("VERSION_ID=")), None)
     named = re.search(r" release (\S+) ", release)
     if not named or named.group(1) != version:
-        out.append(
-            f"{FEDORA_RELEASE}: names release {named.group(1) if named else 'none'}, "
-            f"os-release VERSION_ID is {version}"
-        )
+        out.append(f"{FEDORA_RELEASE}: names release {named.group(1) if named else 'none'}, "
+                   f"os-release VERSION_ID is {version}")
     return out
 
 
-@check(
-    "os-release",
-    "Every line of os-release is KEY=VALUE, as bootc-image-builder requires, and fedora-release names its VERSION_ID",
-)
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires, and fedora-release names its VERSION_ID")
 def check_os_release():
     r = Result()
     for problem in os_release_problems():
@@ -1609,21 +1245,13 @@ GALLERY_DEPENDENCY = {"athanor-sal": {"path": ".."}}
 # The one patch the gallery may carry: the toolkit's own patch of AccessKit's AT-SPI bridge, the
 # same as the repository root's, which a workspace root of its own does not inherit (#638;
 # system/athanor-sal/vendor/accesskit_atspi_common/PATCHES.md). It goes when the patch does.
-GALLERY_PATCH = {
-    "crates-io": {
-        "accesskit_atspi_common": {"path": "../vendor/accesskit_atspi_common"}
-    }
-}
+GALLERY_PATCH = {"crates-io": {"accesskit_atspi_common": {"path": "../vendor/accesskit_atspi_common"}}}
 
 
 def dependency_tables(data, kinds):
     """Every table of `kinds` in a manifest, at the top and under [target.*], with the
     underscore spellings cargo still accepts (`build_dependencies`, `dev_dependencies`)."""
-    kinds = [
-        spelling
-        for kind in kinds
-        for spelling in dict.fromkeys((kind, kind.replace("-", "_")))
-    ]
+    kinds = [spelling for kind in kinds for spelling in dict.fromkeys((kind, kind.replace("-", "_")))]
     tables = [(kind, data.get(kind, {})) for kind in kinds]
     for target, spec in data.get("target", {}).items():
         tables += [(f"target.{target}.{kind}", spec.get(kind, {})) for kind in kinds]
@@ -1639,25 +1267,16 @@ def gallery_problems(root):
         data = tomllib.loads(read(root / GALLERY_MANIFEST))
     except (OSError, tomllib.TOMLDecodeError) as err:
         return [f"{GALLERY_MANIFEST}: cannot read ({err})"]
-    tables = dependency_tables(
-        data, ("dependencies", "build-dependencies", "dev-dependencies")
-    )
-    out = [
-        f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
-        for kind in ("patch", "replace")
-        if kind in data and data[kind] != GALLERY_PATCH
-    ]
-    out += [
-        f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
-        for key in data.get("workspace", {})
-    ]
+    tables = dependency_tables(data, ("dependencies", "build-dependencies", "dev-dependencies"))
+    out = [f"{GALLERY_MANIFEST}: [{kind}] is not allowed: it would change what the gallery builds"
+           for kind in ("patch", "replace") if kind in data and data[kind] != GALLERY_PATCH]
+    out += [f"{GALLERY_MANIFEST}: [workspace] {key} is not allowed: the workspace is the gallery alone"
+            for key in data.get("workspace", {})]
     for table, deps in tables:
         for name, dep in deps.items():
             if table != "dependencies" or GALLERY_DEPENDENCY.get(name) != dep:
-                out.append(
-                    f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
-                    'the gallery depends only on athanor-sal = { path = ".." }'
-                )
+                out.append(f"{GALLERY_MANIFEST}: [{table}] {name} is not allowed: "
+                           'the gallery depends only on athanor-sal = { path = ".." }')
     return out
 
 
@@ -1705,20 +1324,15 @@ def api_problems(root):
     depth, top, stack = 0, [], []
     for i, ch in enumerate(text):
         if ch == "{":
-            stack.append(
-                text[:i].rstrip().endswith("::")
-            )  # a `use a::{b, c}` group is no block
+            stack.append(text[:i].rstrip().endswith("::"))  # a `use a::{b, c}` group is no block
             depth += not stack[-1]
         elif ch == "}" and stack:
             depth -= not stack.pop()
         top.append(ch if depth == 0 else " ")
     top = "".join(top)
-    out = [
-        f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
-        "make it pub(crate) and re-export what an application needs"
-        for name in re.findall(r"\bpub\s+mod\s+(\w+)", top)
-        if name not in TOOLKIT_PUBLIC_MODULES
-    ]
+    out = [f"{lib}: `pub mod {name}` is outside the public modules {sorted(TOOLKIT_PUBLIC_MODULES)}: "
+           "make it pub(crate) and re-export what an application needs"
+           for name in re.findall(r"\bpub\s+mod\s+(\w+)", top) if name not in TOOLKIT_PUBLIC_MODULES]
     private = set(re.findall(r"\bmod\s+(\w+)", top)) - TOOLKIT_PUBLIC_MODULES
     for use in re.findall(r"\bpub\s+use\s+([^;]*);", top):
         for path in use_paths(use):
@@ -1727,15 +1341,11 @@ def api_problems(root):
             if path[-1:] == ["*"]:
                 path = path[:-1]
             if len(path) == 1 and path[0] in private:
-                out.append(
-                    f"{lib}: `pub use` of the module `{path[0]}` is outside the public modules "
-                    f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items"
-                )
+                out.append(f"{lib}: `pub use` of the module `{path[0]}` is outside the public modules "
+                           f"{sorted(TOOLKIT_PUBLIC_MODULES)}: re-export its items")
     for path in sorted(walk(root / TOOLKIT / "src", ".rs")):
         if re.search(r"^\s*pub(?:\([^)]*\))?\s+type\s+WidgetId\b", read(path), re.M):
-            out.append(
-                f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)"
-            )
+            out.append(f"{rel(path)}: WidgetId is a type alias: it is an opaque newtype (#649)")
     return out
 
 
@@ -1755,43 +1365,28 @@ def toolkit_boundary_problems(root=None):
         for name, dep in deps.items():
             dep = dep if isinstance(dep, dict) else {}
             if dep.get("workspace"):
-                out.append(
-                    f"{manifest}: [{table}] {name} is inherited from the workspace: "
-                    "the split leaves none, so write its version here"
-                )
+                out.append(f"{manifest}: [{table}] {name} is inherited from the workspace: "
+                           "the split leaves none, so write its version here")
             package = dep.get("package", name)
             if re.match(r"athanor[-_]", package):
-                out.append(
-                    f"{manifest}: [{table}] {name} is an Athanor crate: only dev-dependencies may be"
-                )
+                out.append(f"{manifest}: [{table}] {name} is an Athanor crate: only dev-dependencies may be")
             if "path" in dep:
-                out.append(
-                    f"{manifest}: [{table}] {name} is a path dependency: only dev-dependencies may be"
-                )
+                out.append(f"{manifest}: [{table}] {name} is a path dependency: only dev-dependencies may be")
     licence = data.get("package", {}).get("license")
     ids = re.split(r"\s+(?:OR|AND)\s+", licence) if licence else []
     wanted = {TOOLKIT_LICENCE_FILES.get(i) for i in ids}
     if not ids or None in wanted:
-        out.append(
-            f"{manifest}: license = {licence!r} names an identifier with no licence file "
-            f"({', '.join(sorted(TOOLKIT_LICENCE_FILES))} are known)"
-        )
-    present = {
-        f for f in TOOLKIT_LICENCE_FILES.values() if (root / TOOLKIT / f).is_file()
-    }
+        out.append(f"{manifest}: license = {licence!r} names an identifier with no licence file "
+                   f"({', '.join(sorted(TOOLKIT_LICENCE_FILES))} are known)")
+    present = {f for f in TOOLKIT_LICENCE_FILES.values() if (root / TOOLKIT / f).is_file()}
     for f in sorted(wanted - {None} - present):
         out.append(f"{TOOLKIT}/{f}: missing, license = {licence!r}")
     for f in sorted(present - wanted):
-        out.append(
-            f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it"
-        )
+        out.append(f"{TOOLKIT}/{f}: present, but license = {licence!r} does not name it")
     return out + gallery_problems(root) + api_problems(root)
 
 
-@check(
-    "toolkit-boundary",
-    "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver",
-)
+@check("toolkit-boundary", "The toolkit's build needs no Athanor crate, path or workspace dependency, its gallery stays apart, its licence files match its license, and its root exposes no module but driver")
 def check_toolkit_boundary():
     r = Result()
     for problem in toolkit_boundary_problems():
@@ -1805,9 +1400,7 @@ CONTACT_FIELDS = ("id", "purpose", "destination", "where_off")
 
 def preset_lines(root):
     """(verb, unit, file) of every enable or disable line of the presets this repository ships."""
-    files = sorted(root.glob("forge/specs/**/*.preset")) + sorted(
-        root.glob("system/**/*.preset")
-    )
+    files = sorted(root.glob("forge/specs/**/*.preset")) + sorted(root.glob("system/**/*.preset"))
     for f in files:
         for words in commands(read(f)):
             if words[0] in ("enable", "disable"):
@@ -1835,11 +1428,7 @@ def contacts_problems(root=None):
     problems = []
     contacts = data.get("contact", [])
     for c in contacts:
-        problems += [
-            f"{CONTACTS}: contact {c.get('id', '?')} has no {k}"
-            for k in CONTACT_FIELDS
-            if not c.get(k)
-        ]
+        problems += [f"{CONTACTS}: contact {c.get('id', '?')} has no {k}" for k in CONTACT_FIELDS if not c.get(k)]
     groups = {
         "contact": {c["unit"] for c in contacts if c.get("unit")},
         "local": {u["unit"] for u in data.get("local", [])},
@@ -1848,18 +1437,10 @@ def contacts_problems(root=None):
         "listener": {u["unit"] for u in data.get("listener", [])},
     }
     names = list(groups)
-    problems += [
-        f"{CONTACTS}: {u} is listed as both {a} and {b}"
-        for i, a in enumerate(names)
-        for b in names[i + 1 :]
-        for u in sorted(groups[a] & groups[b])
-    ]
+    problems += [f"{CONTACTS}: {u} is listed as both {a} and {b}"
+                 for i, a in enumerate(names) for b in names[i + 1:] for u in sorted(groups[a] & groups[b])]
     for group in ("local", "inert", "silent", "listener"):
-        problems += [
-            f"{CONTACTS}: a {group} entry has no reason"
-            for u in data.get(group, [])
-            if not u.get("reason")
-        ]
+        problems += [f"{CONTACTS}: a {group} entry has no reason" for u in data.get(group, []) if not u.get("reason")]
 
     def unit(name):
         return name if "." in name else name + ".service"
@@ -1869,35 +1450,22 @@ def contacts_problems(root=None):
     disabled = {u for verb, u, _ in lines if verb == "disable"}
     for f in ENABLERS:
         if (root / f).exists():
-            enabled |= {
-                unit(u)
-                for words in commands(read(root / f))
-                for u in enabled_units(words)
-            }
+            enabled |= {unit(u) for words in commands(read(root / f)) for u in enabled_units(words)}
     for c in contacts:
         if c.get("unit") and not c.get("planned") and c["unit"] not in enabled:
-            problems += [
-                f"{CONTACTS}: contact {c['id']} lists {c['unit']}, which no preset enables"
-            ]
+            problems += [f"{CONTACTS}: contact {c['id']} lists {c['unit']}, which no preset enables"]
         if c.get("config"):
             wanted = c.get("config_contains", "")
             try:
                 text = read(root / c["config"])
-                found = all(
-                    s in text for s in ([wanted] if isinstance(wanted, str) else wanted)
-                )
+                found = all(s in text for s in ([wanted] if isinstance(wanted, str) else wanted))
             except OSError:
                 found = False
             if not found:
-                problems += [
-                    f"{CONTACTS}: contact {c['id']} expects {wanted!r} in {c['config']}"
-                ]
+                problems += [f"{CONTACTS}: contact {c['id']} expects {wanted!r} in {c['config']}"]
     known = groups["contact"] | groups["local"] | groups["inert"]
-    problems += [
-        f"{where}: enables {u}, a timer {CONTACTS} does not list as a contact, local or inert"
-        for verb, u, where in lines
-        if verb == "enable" and u.endswith(".timer") and u not in known
-    ]
+    problems += [f"{where}: enables {u}, a timer {CONTACTS} does not list as a contact, local or inert"
+                 for verb, u, where in lines if verb == "enable" and u.endswith(".timer") and u not in known]
     for u in sorted(groups["silent"]):
         if u in enabled:
             problems += [f"{CONTACTS}: {u} is silent, and something enables it"]
@@ -1906,10 +1474,7 @@ def contacts_problems(root=None):
     return problems
 
 
-@check(
-    "contacts",
-    "What the image contacts by itself is listed in contacts.toml, and the presets agree",
-)
+@check("contacts", "What the image contacts by itself is listed in contacts.toml, and the presets agree")
 def check_contacts():
     r = Result()
     for problem in contacts_problems():
@@ -1925,19 +1490,17 @@ def check_contacts():
 POLKIT_ACTION_IN_CODE = re.compile(r"os\.athanor\.[a-z0-9_-]+\.[a-z0-9_-]+")
 
 
-@check(
-    "polkit", "Ogni action-id polkit applicata dal codice è dichiarata in un .policy"
-)
+@check("polkit", "Ogni action-id polkit applicata dal codice è dichiarata in un .policy")
 def check_polkit():
     r = Result()
 
-    used = {}  # action -> {file:riga}
+    used = {}   # action -> {file:riga}
     for p in rust_files():
         for i, line in enumerate(read(p).split("\n"), 1):
             for a in POLKIT_ACTION_IN_CODE.findall(line):
                 used.setdefault(a, set()).add(f"{rel(p)}:{i}")
 
-    declared = {}  # action -> file .policy
+    declared = {}   # action -> file .policy
     for pol in walk(ROOT, ".policy"):
         for a in re.findall(r'id="([^"]+)"', read(pol)):
             declared.setdefault(a, set()).add(rel(pol))
@@ -1953,24 +1516,18 @@ def check_polkit():
     for action in sorted(used):
         if action not in declared:
             where = sorted(used[action])[0]
-            r.fail(
-                f"{action}: applicata in {where} ma NON dichiarata in alcun .policy "
-                f"-> CheckAuthorization nega sempre"
-            )
+            r.fail(f"{action}: applicata in {where} ma NON dichiarata in alcun .policy "
+                   f"-> CheckAuthorization nega sempre")
         else:
             for f in declared[action]:
                 if Path(f).name not in installed:
-                    r.fail(
-                        f"{action}: dichiarata in {f} ma quel file non è installato "
-                        f"in polkit-1/actions da nessuno spec"
-                    )
+                    r.fail(f"{action}: dichiarata in {f} ma quel file non è installato "
+                           f"in polkit-1/actions da nessuno spec")
 
     for action in sorted(declared):
         if action not in used:
-            r.note(
-                f"{action}: dichiarata in {', '.join(sorted(declared[action]))} "
-                f"ma nessun codice la controlla (policy morta)"
-            )
+            r.note(f"{action}: dichiarata in {', '.join(sorted(declared[action]))} "
+                   f"ma nessun codice la controlla (policy morta)")
 
     return r
 
@@ -1978,7 +1535,6 @@ def check_polkit():
 # --------------------------------------------------------------------------- #
 # 4. percorsi runtime — niente artefatti letti da target/ o stato in /tmp
 # --------------------------------------------------------------------------- #
-
 
 def path_problems(relative_path, text):
     """I rilievi di percorso di un file, già formattati con riga e motivo."""
@@ -1988,15 +1544,11 @@ def path_problems(relative_path, text):
     for i, line in enumerate(text.split("\n"), 1):
         code = line.split("//")[0]
         if not is_build_script and re.search(r'"[^"]*\btarget/[a-z0-9_./-]*"', code):
-            problems.append(
-                f"{relative_path}:{i} carica un artefatto da target/ — percorso "
-                f"dell'albero di build, inesistente su un sistema installato"
-            )
+            problems.append(f"{relative_path}:{i} carica un artefatto da target/ — percorso "
+                            f"dell'albero di build, inesistente su un sistema installato")
         if re.search(r'"/tmp/', code):
-            problems.append(
-                f"{relative_path}:{i} percorso hard-coded in /tmp — usa "
-                f"/run/athanor (0700) per stato privilegiato"
-            )
+            problems.append(f"{relative_path}:{i} percorso hard-coded in /tmp — usa "
+                            f"/run/athanor (0700) per stato privilegiato")
     return problems
 
 
@@ -2004,9 +1556,7 @@ def path_problems(relative_path, text):
 def check_attestation_absent():
     r = Result()
     if (ROOT / "system" / "confidential_computing").exists():
-        r.fail(
-            "system/confidential_computing exists: athanor-attestation is deleted (ADR-0103 D10)"
-        )
+        r.fail("system/confidential_computing exists: athanor-attestation is deleted (ADR-0103 D10)")
     return r
 
 
@@ -2014,9 +1564,7 @@ def inherits_from_workspace(table):
     """True if a manifest table takes any key from a parent workspace (`x = { workspace = true }`
     or `x.workspace = true`, at any depth)."""
     return isinstance(table, dict) and (
-        table.get("workspace") is True
-        or any(inherits_from_workspace(v) for v in table.values())
-    )
+        table.get("workspace") is True or any(inherits_from_workspace(v) for v in table.values()))
 
 
 def stale_lock_problems(locks, manifests):
@@ -2040,25 +1588,16 @@ def stale_lock_problems(locks, manifests):
             out.append(f"{name}: not valid TOML ({e})")
             continue
         if "workspace" not in manifest and inherits_from_workspace(manifest):
-            out.append(
-                f"{lock}: its crate inherits from a parent workspace, so cargo never reads "
-                f"this lock and its pins only raise advisories; delete it"
-            )
+            out.append(f"{lock}: its crate inherits from a parent workspace, so cargo never reads "
+                       f"this lock and its pins only raise advisories; delete it")
     return out
 
 
-@check(
-    "cargo-locks",
-    "No Cargo.lock beside a crate that inherits from a parent workspace, where cargo never reads it",
-)
+@check("cargo-locks", "No Cargo.lock beside a crate that inherits from a parent workspace, where cargo never reads it")
 def check_cargo_locks():
     r = Result()
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*Cargo.lock"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock"], cwd=ROOT,
+                            capture_output=True, text=True)
     if listed.returncode != 0:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
@@ -2066,9 +1605,7 @@ def check_cargo_locks():
     manifests = {}
     for lock in locks:
         manifest = Path(lock).with_name("Cargo.toml")
-        manifests[str(manifest)] = (
-            read(ROOT / manifest) if (ROOT / manifest).is_file() else None
-        )
+        manifests[str(manifest)] = read(ROOT / manifest) if (ROOT / manifest).is_file() else None
     for problem in stale_lock_problems(locks, manifests):
         r.fail(problem)
     return r
@@ -2372,9 +1909,7 @@ def potfiles_problems(root):
                 base = crate
                 if spec.get("workspace"):
                     ws = workspace(crate)
-                    entry = ws and ws[1].get("workspace", {}).get(
-                        "dependencies", {}
-                    ).get(key)
+                    entry = ws and ws[1].get("workspace", {}).get("dependencies", {}).get(key)
                     if entry is None:
                         problems.append(
                             f"{potfiles.relative_to(root)}: {(crate / 'Cargo.toml').relative_to(root)} "
@@ -2384,14 +1919,10 @@ def potfiles_problems(root):
                     if not isinstance(entry, dict):
                         continue
                     # The workspace sets the source and default-features; the member adds features.
-                    base, spec = (
-                        ws[0],
-                        {
-                            **entry,
-                            "features": entry.get("features", [])
-                            + spec.get("features", []),
-                        },
-                    )
+                    base, spec = ws[0], {
+                        **entry,
+                        "features": entry.get("features", []) + spec.get("features", []),
+                    }
                 if "path" not in spec:
                     continue
                 dep = (base / spec["path"]).resolve()
@@ -2459,9 +1990,7 @@ def check_potfiles():
     return r
 
 
-@check(
-    "paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp"
-)
+@check("paths", "Nessun artefatto runtime da target/, nessuno stato privilegiato in /tmp")
 def check_paths():
     r = Result()
     for p in rust_files():
@@ -2474,17 +2003,14 @@ def check_paths():
 # 5. packaging — un crate che compila e basta non è nel prodotto
 # --------------------------------------------------------------------------- #
 
-
 def has_binary_target(crate_dir):
     """True se il crate produce un eseguibile: src/main.rs, src/bin/ o una sezione [[bin]]."""
     cargo = crate_dir / "Cargo.toml"
     if not cargo.exists():
         return True  # non giudicabile: resta soggetto al controllo
-    return (
-        (crate_dir / "src" / "main.rs").exists()
-        or (crate_dir / "src" / "bin").is_dir()
-        or re.search(r"^\s*\[\[\s*bin\s*\]\]", read(cargo), re.M) is not None
-    )
+    return ((crate_dir / "src" / "main.rs").exists()
+            or (crate_dir / "src" / "bin").is_dir()
+            or re.search(r"^\s*\[\[\s*bin\s*\]\]", read(cargo), re.M) is not None)
 
 
 COSMIC_OVERLAY = "/usr/share/athanor/cosmic-defaults"
@@ -2499,36 +2025,22 @@ def cosmic_defaults_problems(root):
     problems = []
     generated = root / "system/athanor-style/calmo/generated/cosmic/cosmic"
     if not generated.is_dir() or not any(p.is_file() for p in generated.rglob("*")):
-        problems.append(
-            "no generated COSMIC defaults: run forge/tools/calmo-cosmic-theme/derive.sh"
-        )
+        problems.append("no generated COSMIC defaults: run forge/tools/calmo-cosmic-theme/derive.sh")
 
-    env_file = (
-        root
-        / "forge/specs/athanor-calmo/SOURCES/usr/lib/environment.d/60-athanor-cosmic-defaults.conf"
-    )
+    env_file = root / "forge/specs/athanor-calmo/SOURCES/usr/lib/environment.d/60-athanor-cosmic-defaults.conf"
     env_text = read(env_file) if env_file.exists() else ""
     if not re.search(rf"^XDG_DATA_DIRS={re.escape(COSMIC_OVERLAY)}:", env_text, re.M):
-        problems.append(
-            f"environment.d: {COSMIC_OVERLAY} is not first in XDG_DATA_DIRS for the user manager"
-        )
+        problems.append(f"environment.d: {COSMIC_OVERLAY} is not first in XDG_DATA_DIRS for the user manager")
 
     session = root / "forge/specs/athanor-system-config/SOURCES/usr/bin/athanor-session"
     session_text = read(session) if session.exists() else ""
-    if not re.search(
-        rf'^export XDG_DATA_DIRS="?{re.escape(COSMIC_OVERLAY)}:', session_text, re.M
-    ):
-        problems.append(
-            f"athanor-session does not export XDG_DATA_DIRS with {COSMIC_OVERLAY} first: "
-            f"cosmic-comp and its children are not started by the user manager"
-        )
+    if not re.search(rf'^export XDG_DATA_DIRS="?{re.escape(COSMIC_OVERLAY)}:', session_text, re.M):
+        problems.append(f"athanor-session does not export XDG_DATA_DIRS with {COSMIC_OVERLAY} first: "
+                        f"cosmic-comp and its children are not started by the user manager")
 
     spec = root / "forge/specs/athanor-calmo/athanor-calmo.spec"
     files = read(spec).split("%files", 1)[-1] if spec.exists() else ""
-    for shipped in (
-        COSMIC_OVERLAY,
-        "/usr/lib/environment.d/60-athanor-cosmic-defaults.conf",
-    ):
+    for shipped in (COSMIC_OVERLAY, "/usr/lib/environment.d/60-athanor-cosmic-defaults.conf"):
         if not re.search(rf"^{re.escape(shipped)}$", files, re.M):
             problems.append(f"athanor-calmo.spec: %files does not list {shipped}")
     return problems
@@ -2553,30 +2065,18 @@ def crates_built_by_specs(root=None):
 
 UPDATE_SOURCES = "forge/specs/athanor-update/SOURCES"
 UPDATE_SHIPPED = [
-    "/usr/bin/athanor-update",
-    "/usr/bin/athanor-update-notify",
-    "/usr/libexec/athanor-update/render-policy",
+    "/usr/bin/athanor-update", "/usr/bin/athanor-update-notify", "/usr/libexec/athanor-update/render-policy",
     "/usr/share/athanor/containers/templates/policy.json.in",
     "/usr/share/athanor/containers/templates/attachments-policy.json.in",
     "/usr/share/athanor/containers/templates/athanor.yaml.in",
-    "/usr/lib/systemd/system/athanor-update-check.timer",
-    "/usr/lib/systemd/system/athanor-update-check.service",
-    "/usr/lib/systemd/system/athanor-update.service",
-    "/usr/lib/systemd/system/athanor-update-state.service",
-    "/usr/lib/systemd/system/athanor-update-migrate.service",
-    "/usr/lib/systemd/user/athanor-update-notify.service",
-    "/usr/lib/systemd/system-preset/80-athanor-update.preset",
-    "/usr/lib/systemd/user-preset/80-athanor-update.preset",
-    "/usr/lib/tmpfiles.d/athanor-update.conf",
-    "/usr/share/dbus-1/system.d/os.athanor.Update1.conf",
-    "/usr/share/dbus-1/system-services/os.athanor.Update1.service",
-    "/usr/share/polkit-1/actions/os.athanor.update.policy",
+    "/usr/lib/systemd/system/athanor-update-check.timer", "/usr/lib/systemd/system/athanor-update-check.service",
+    "/usr/lib/systemd/system/athanor-update.service", "/usr/lib/systemd/system/athanor-update-state.service",
+    "/usr/lib/systemd/system/athanor-update-migrate.service", "/usr/lib/systemd/user/athanor-update-notify.service",
+    "/usr/lib/systemd/system-preset/80-athanor-update.preset", "/usr/lib/systemd/user-preset/80-athanor-update.preset",
+    "/usr/lib/tmpfiles.d/athanor-update.conf", "/usr/share/dbus-1/system.d/os.athanor.Update1.conf",
+    "/usr/share/dbus-1/system-services/os.athanor.Update1.service", "/usr/share/polkit-1/actions/os.athanor.update.policy",
 ]
-SYSTEM_IMAGES = [
-    "athanor-system",
-    "athanor-system-nvidia",
-    "athanor-system-nvidia-legacy",
-]
+SYSTEM_IMAGES = ["athanor-system", "athanor-system-nvidia", "athanor-system-nvidia-legacy"]
 
 
 def update_trust_problems(root=None):
@@ -2598,118 +2098,60 @@ def update_trust_problems(root=None):
     templates = root / UPDATE_SOURCES / "usr/share/athanor/containers/templates"
     scopes = [f"@REGISTRY@/{name}" for name in SYSTEM_IMAGES]
     try:
-        policy = json.loads(
-            read(templates / "policy.json.in").replace("@KEY_PATHS@", '"/k.pub"')
-        )
+        policy = json.loads(read(templates / "policy.json.in").replace("@KEY_PATHS@", '"/k.pub"'))
         attachments = json.loads(read(templates / "attachments-policy.json.in"))
         registries = read(templates / "athanor.yaml.in")
     except (OSError, ValueError) as err:
         return problems + [f"policy templates: {err}"]
-    for name, doc in (
-        ("policy.json.in", policy),
-        ("attachments-policy.json.in", attachments),
-    ):
+    for name, doc in (("policy.json.in", policy), ("attachments-policy.json.in", attachments)):
         if doc.get("default") != [{"type": "reject"}]:
-            problems.append(
-                f"{name}: `default` must be reject (bootc refuses insecureAcceptAnything; "
-                f"the attachments policy must open our repositories only)"
-            )
+            problems.append(f"{name}: `default` must be reject (bootc refuses insecureAcceptAnything; "
+                            f"the attachments policy must open our repositories only)")
     docker = policy.get("transports", {}).get("docker", {})
     if sorted(docker) != sorted([""] + scopes):
-        problems.append(
-            f'policy.json.in: docker scopes are {sorted(docker)}, expected the three system images and ""'
-        )
+        problems.append(f"policy.json.in: docker scopes are {sorted(docker)}, expected the three system images and \"\"")
     for scope in scopes:
         for req in docker.get(scope, [{}]):
-            if (
-                req.get("type") != "sigstoreSigned"
-                or req.get("signedIdentity") != {"type": "matchRepository"}
-                or not req.get("keyPaths")
-            ):
-                problems.append(
-                    f"policy.json.in: {scope} must be sigstoreSigned with keyPaths and matchRepository"
-                )
-    for transport in (
-        "docker-archive",
-        "oci",
-        "oci-archive",
-        "dir",
-        "containers-storage",
-        "docker-daemon",
-    ):
-        if policy.get("transports", {}).get(transport) != {
-            "": [{"type": "insecureAcceptAnything"}]
-        }:
-            problems.append(
-                f"policy.json.in: transport {transport} must stay open, or podman users lose it"
-            )
+            if req.get("type") != "sigstoreSigned" or req.get("signedIdentity") != {"type": "matchRepository"} or not req.get("keyPaths"):
+                problems.append(f"policy.json.in: {scope} must be sigstoreSigned with keyPaths and matchRepository")
+    for transport in ("docker-archive", "oci", "oci-archive", "dir", "containers-storage", "docker-daemon"):
+        if policy.get("transports", {}).get(transport) != {"": [{"type": "insecureAcceptAnything"}]}:
+            problems.append(f"policy.json.in: transport {transport} must stay open, or podman users lose it")
     if sorted(attachments.get("transports", {}).get("docker", {})) != sorted(scopes):
-        problems.append(
-            "attachments-policy.json.in: docker scopes must be exactly the three system images"
-        )
+        problems.append("attachments-policy.json.in: docker scopes must be exactly the three system images")
     declared = re.findall(r"^  (\S+):$", registries, re.M)
     if declared != scopes or registries.count("use-sigstore-attachments: true") != 3:
-        problems.append(
-            "athanor.yaml.in: must declare use-sigstore-attachments for exactly the three system images "
-            "(a missing entry makes a signed image read as unsigned, a wider scope collides with default.yaml)"
-        )
+        problems.append("athanor.yaml.in: must declare use-sigstore-attachments for exactly the three system images "
+                        "(a missing entry makes a signed image read as unsigned, a wider scope collides with default.yaml)")
 
-    preset = (
-        root
-        / "forge/specs/athanor-system-config/SOURCES/usr/lib/systemd/system-preset/80-athanor-system.preset"
-    )
-    if preset.exists() and re.search(
-        r"^enable bootc-fetch-apply\.timer$", read(preset), re.M
-    ):
-        problems.append(
-            f"{rel(preset)}: enables bootc-fetch-apply.timer, which does not exist"
-        )
-    override = (
-        root
-        / "forge/specs/athanor-base-config/SOURCES/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf"
-    )
+    preset = root / "forge/specs/athanor-system-config/SOURCES/usr/lib/systemd/system-preset/80-athanor-system.preset"
+    if preset.exists() and re.search(r"^enable bootc-fetch-apply\.timer$", read(preset), re.M):
+        problems.append(f"{rel(preset)}: enables bootc-fetch-apply.timer, which does not exist")
+    override = root / "forge/specs/athanor-base-config/SOURCES/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf"
     if override.exists():
-        problems.append(
-            f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have"
-        )
+        problems.append(f"{rel(override)}: calls `bootc upgrade --stage`, a flag bootc 1.16 does not have")
     for literal in walk(root / "forge/specs/athanor-update", ""):
-        if (
-            literal.is_file()
-            and "target" not in literal.parts
-            and "vectors" not in literal.parts
-        ):
+        if literal.is_file() and "target" not in literal.parts and "vectors" not in literal.parts:
             for owner in literal_owners(read(literal)):
-                problems.append(
-                    f"{rel(literal)}: literal registry owner {owner}; "
-                    f"the registry comes from the build's variables"
-                )
+                problems.append(f"{rel(literal)}: literal registry owner {owner}; "
+                                f"the registry comes from the build's variables")
     # D2: the Secure Boot daemon is retired. D42 (issue #148): nothing in the image seals LUKS to
     # the TPM or increments a rollback counter by itself, so none of these units may be shipped.
     for spec in walk(root / "forge/specs", ".spec"):
         # The changelog may name what was retired: only what the spec installs counts.
         text = read(spec).split("%changelog", 1)[0]
         if "athanor-secure-boot.service" in text:
-            problems.append(
-                f"{rel(spec)}: still ships athanor-secure-boot.service (retired by D2)"
-            )
+            problems.append(f"{rel(spec)}: still ships athanor-secure-boot.service (retired by D2)")
         for unit in AUTO_TPM_UNITS:
             if unit in text:
-                problems.append(
-                    f"{rel(spec)}: ships {unit}, which seals or counts without the user's action (D42)"
-                )
+                problems.append(f"{rel(spec)}: ships {unit}, which seals or counts without the user's action (D42)")
     for tree in ("forge", "system"):
         for found in walk(root / tree, ""):
-            if found.is_file() and any(
-                found.name.startswith(unit) for unit in AUTO_TPM_UNITS
-            ):
-                problems.append(
-                    f"{rel(found)}: {found.name} is shipped; D42 forbids auto-sealing and the rollback-counter units"
-                )
+            if found.is_file() and any(found.name.startswith(unit) for unit in AUTO_TPM_UNITS):
+                problems.append(f"{rel(found)}: {found.name} is shipped; D42 forbids auto-sealing and the rollback-counter units")
     for name in ("system/Containerfile", "system/athanor-install.ks"):
         installer = root / name
-        if installer.exists() and any(
-            unit in read(installer) for unit in AUTO_TPM_UNITS
-        ):
+        if installer.exists() and any(unit in read(installer) for unit in AUTO_TPM_UNITS):
             problems.append(f"{name}: names one of {', '.join(AUTO_TPM_UNITS)} (D42)")
     return problems
 
@@ -2717,10 +2159,7 @@ def update_trust_problems(root=None):
 # The one RPM signature override of the image build: athanor-base-config from the digest-pinned
 # tier 0 image, at rpm's digest level (UD44: the forge's RPMs are not signed).
 TIER0_DIGEST_INSTALL = "rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps \"$BASE_CONFIG\"; \\"
-SIGNATURE_OVERRIDE = re.compile(
-    r"_pkgverify_|--nosignature|--nodigest|--no-?gpgchecks?|gpgcheck=(0|no|off|false)",
-    re.I,
-)
+SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--no-?gpgchecks?|gpgcheck=(0|no|off|false)", re.I)
 
 
 def image_policy_problems(root=None):
@@ -2728,44 +2167,24 @@ def image_policy_problems(root=None):
     root = root or ROOT
     problems = []
     containerfile = read(root / "system/Containerfile")
-    if (
-        not re.search(r"^ARG IMAGE_REGISTRY$", containerfile, re.M)
-        or "render-policy" not in containerfile
-        or "--link-etc /etc" not in containerfile
-    ):
-        problems.append(
-            "system/Containerfile: does not run render-policy --link-etc /etc with ARG IMAGE_REGISTRY: "
-            "the policy is never in force and no machine verifies an image"
-        )
-    elif containerfile.index("render-policy") > containerfile.index(
-        "systemctl preset-all"
-    ):
+    if not re.search(r"^ARG IMAGE_REGISTRY$", containerfile, re.M) or "render-policy" not in containerfile or "--link-etc /etc" not in containerfile:
+        problems.append("system/Containerfile: does not run render-policy --link-etc /etc with ARG IMAGE_REGISTRY: "
+                        "the policy is never in force and no machine verifies an image")
+    elif containerfile.index("render-policy") > containerfile.index("systemctl preset-all"):
         problems.append("system/Containerfile: render-policy runs after preset-all")
     if "COPY system/keys/ /usr/share/athanor/keys/" not in containerfile:
-        problems.append(
-            "system/Containerfile: does not copy system/keys to /usr/share/athanor/keys"
-        )
-    keys = (
-        sorted((root / "system/keys").glob("*"))
-        if (root / "system/keys").is_dir()
-        else []
-    )
+        problems.append("system/Containerfile: does not copy system/keys to /usr/share/athanor/keys")
+    keys = sorted((root / "system/keys").glob("*")) if (root / "system/keys").is_dir() else []
     if not any(key.suffix == ".pub" for key in keys):
         problems.append("system/keys: no *.pub: the rendered policy would name no key")
     for key in keys:
         if key.suffix != ".pub":
-            problems.append(
-                f"system/keys/{key.name}: only *.pub files belong under system/keys"
-            )
+            problems.append(f"system/keys/{key.name}: only *.pub files belong under system/keys")
     for number, line in enumerate(containerfile.splitlines(), 1):
-        if SIGNATURE_OVERRIDE.search(line) and (
-            line.strip() != TIER0_DIGEST_INSTALL
-            or "BASE_CONFIG=$(find /tmp/tier0-repo " not in containerfile
-        ):
-            problems.append(
-                f"system/Containerfile:{number}: overrides RPM signature checking; only "
-                "athanor-base-config from the tier 0 image installs at the digest level (UD44)"
-            )
+        if SIGNATURE_OVERRIDE.search(line) and (line.strip() != TIER0_DIGEST_INSTALL
+                                                or "BASE_CONFIG=$(find /tmp/tier0-repo " not in containerfile):
+            problems.append(f"system/Containerfile:{number}: overrides RPM signature checking; only "
+                            "athanor-base-config from the tier 0 image installs at the digest level (UD44)")
     return problems
 
 
@@ -2777,43 +2196,16 @@ def image_policy_problems(root=None):
 # self-hosted runner and the development VM run it from the image (ADR-0091), but the
 # qemu-kvm metapackage stays out.
 REMOVED_PACKAGES = {
-    "antigravity",
-    "astro-toolchain",
-    "cargo-tools",
-    "ide-bootstrap",
-    "qa",
-    "cosmic-term",
-    "cosmic-files",
-    "cosmic-edit",
-    "cosmic-player",
-    "foot",
-    "swaybg",
-    "swaylock",
-    "Thunar",
-    "thunar-archive-plugin",
-    "thunar-volman",
-    "virt-manager",
-    "qemu-kvm",
-    "compiler-rt",
+    "antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa",
+    "cosmic-term", "cosmic-files", "cosmic-edit", "cosmic-player",
+    "foot", "swaybg", "swaylock", "Thunar", "thunar-archive-plugin", "thunar-volman",
+    "virt-manager", "qemu-kvm", "compiler-rt",
 }
-REMOVED_PACKAGES |= {
-    f"athanor-{n}"
-    for n in ("antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa")
-}
+REMOVED_PACKAGES |= {f"athanor-{n}" for n in ("antigravity", "astro-toolchain", "cargo-tools", "ide-bootstrap", "qa")}
 # Units and authselect features the image must not enable: accounts stay classic. Keylime
 # stays installed and disabled until a verifier exists for its agent to report to.
-REMOVED_UNITS = {
-    "systemd-homed",
-    "systemd-homed.service",
-    "systemd-homed-activate.service",
-    "with-systemd-homed",
-}
-KEYLIME_UNITS = {
-    "keylime_agent",
-    "keylime_agent.service",
-    "keylime-agent",
-    "keylime-agent.service",
-}
+REMOVED_UNITS = {"systemd-homed", "systemd-homed.service", "systemd-homed-activate.service", "with-systemd-homed"}
+KEYLIME_UNITS = {"keylime_agent", "keylime_agent.service", "keylime-agent", "keylime-agent.service"}
 # Known debt, one entry per (spec, package): athanor-shell-rs runs foot from its legacy
 # search and leaves with doc_portal.md (doc_software.md, decision 7). Delete the entry then.
 REQUIRES_DEBT = {("athanor-shell-rs", "foot")}
@@ -2838,21 +2230,13 @@ def commands(text):
 def enabled_units(words):
     """The units, features or packages-to-be a command enables, or an empty list."""
     if "systemctl" in words:
-        rest = words[words.index("systemctl") + 1 :]
+        rest = words[words.index("systemctl") + 1:]
         if "enable" in rest:
-            return [
-                w for w in rest[rest.index("enable") + 1 :] if not w.startswith("-")
-            ]
+            return [w for w in rest[rest.index("enable") + 1:] if not w.startswith("-")]
     if "authselect" in words and "enable-feature" in words:
-        return words[words.index("enable-feature") + 1 :]
+        return words[words.index("enable-feature") + 1:]
     if words[0] == "services" or words[0].startswith("--enabled"):
-        return [
-            u
-            for w in words
-            for flag in [w.partition("--enabled=")]
-            if flag[1]
-            for u in flag[2].split(",")
-        ]
+        return [u for w in words for flag in [w.partition("--enabled=")] if flag[1] for u in flag[2].split(",")]
     if words[0] == "enable":  # a preset line
         return words[1:]
     return []
@@ -2860,12 +2244,8 @@ def enabled_units(words):
 
 def installed_packages(words):
     for i, w in enumerate(words):
-        if w in INSTALLERS and "install" in words[i + 1 :]:
-            return [
-                x
-                for x in words[words.index("install", i) + 1 :]
-                if not x.startswith("-")
-            ]
+        if w in INSTALLERS and "install" in words[i + 1:]:
+            return [x for x in words[words.index("install", i) + 1:] if not x.startswith("-")]
     return []
 
 
@@ -2873,9 +2253,7 @@ def spec_requires(spec_text):
     for line in spec_text.split("\n"):
         m = re.match(r"Requires(?:\([^)]*\))?:\s*(.*)", line)
         if m:
-            yield from re.findall(
-                r"[A-Za-z0-9._+-]+", re.sub(r"[<>=]+\s*\S+", "", m.group(1))
-            )
+            yield from re.findall(r"[A-Za-z0-9._+-]+", re.sub(r"[<>=]+\s*\S+", "", m.group(1)))
 
 
 def removed_name_problems(root=None):
@@ -2885,54 +2263,33 @@ def removed_name_problems(root=None):
     manifest = root / "forge/config/packages.json"
     dag = set()
     if manifest.exists():
-
         def walk_lists(node, key):
             if isinstance(node, list):
                 yield key, node
             elif isinstance(node, dict):
                 for k, v in node.items():
                     yield from walk_lists(v, k)
-
         data = json.loads(read(manifest))
         dag = set(data.get("custom_packages", []))
         for key, names in walk_lists(data, ""):
-            problems += [
-                f"forge/config/packages.json: {key} lists the removed package {n}"
-                for n in names
-                if n in REMOVED_PACKAGES
-            ]
+            problems += [f"forge/config/packages.json: {key} lists the removed package {n}"
+                         for n in names if n in REMOVED_PACKAGES]
     files = [root / n for n in ENABLERS]
-    files += sorted(root.glob("forge/specs/**/*.preset")) + sorted(
-        root.glob("system/**/*.preset")
-    )
+    files += sorted(root.glob("forge/specs/**/*.preset")) + sorted(root.glob("system/**/*.preset"))
     for f in files:
         if not f.exists():
             continue
         for words in commands(read(f)):
-            problems += [
-                f"{rel(f)}: installs the removed package {n}"
-                for n in installed_packages(words)
-                if n in REMOVED_PACKAGES
-            ]
-            problems += [
-                f"{rel(f)}: enables {u}, which the image no longer ships"
-                for u in enabled_units(words)
-                if u in REMOVED_UNITS
-            ]
-            problems += [
-                f"{rel(f)}: enables the Keylime agent, and no verifier is configured for it to report to"
-                for u in enabled_units(words)
-                if u in KEYLIME_UNITS
-            ]
+            problems += [f"{rel(f)}: installs the removed package {n}" for n in installed_packages(words) if n in REMOVED_PACKAGES]
+            problems += [f"{rel(f)}: enables {u}, which the image no longer ships" for u in enabled_units(words) if u in REMOVED_UNITS]
+            problems += [f"{rel(f)}: enables the Keylime agent, and no verifier is configured for it to report to"
+                         for u in enabled_units(words) if u in KEYLIME_UNITS]
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
         name = spec.stem
         if name not in dag and name.removeprefix("athanor-") not in dag:
             continue
-        problems += [
-            f"{rel(spec)}: Requires the removed package {n}"
-            for n in sorted(set(spec_requires(read(spec))))
-            if n in REMOVED_PACKAGES and (name, n) not in REQUIRES_DEBT
-        ]
+        problems += [f"{rel(spec)}: Requires the removed package {n}" for n in sorted(set(spec_requires(read(spec))))
+                     if n in REMOVED_PACKAGES and (name, n) not in REQUIRES_DEBT]
     return problems
 
 
@@ -2940,9 +2297,7 @@ def keylime_problems(root=None):
     return [p for p in removed_name_problems(root) if "Keylime" in p]
 
 
-@check(
-    "shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale"
-)
+@check("shipped", "Ogni crate del workspace è impacchettato, o è dichiarato sperimentale")
 def check_shipped():
     r = Result()
     cargo = ROOT / "Cargo.toml"
@@ -2950,18 +2305,12 @@ def check_shipped():
         r.fail("nessun Cargo.toml in radice")
         return r
 
-    members = re.findall(
-        r'^\s*"([^"]+)",?\s*$',
-        re.search(r"members\s*=\s*\[(.*?)\]", read(cargo), re.S).group(1),
-        re.M,
-    )
+    members = re.findall(r'^\s*"([^"]+)",?\s*$',
+                         re.search(r"members\s*=\s*\[(.*?)\]", read(cargo), re.S).group(1),
+                         re.M)
 
     specs_dir = ROOT / "forge" / "specs"
-    spec_dirs = (
-        {d.name for d in specs_dir.iterdir() if d.is_dir()}
-        if specs_dir.is_dir()
-        else set()
-    )
+    spec_dirs = {d.name for d in specs_dir.iterdir() if d.is_dir()} if specs_dir.is_dir() else set()
 
     pkgs_file = ROOT / "forge" / "config" / "packages.json"
     dag = set()
@@ -2976,11 +2325,8 @@ def check_shipped():
     exempt_file = ROOT / "experimental" / "EXEMPT"
     exempt = set()
     if exempt_file.exists():
-        exempt = {
-            ln.strip()
-            for ln in read(exempt_file).split("\n")
-            if ln.strip() and not ln.startswith("#")
-        }
+        exempt = {ln.strip() for ln in read(exempt_file).split("\n")
+                  if ln.strip() and not ln.startswith("#")}
 
     built = crates_built_by_specs()
     for m in members:
@@ -2997,25 +2343,18 @@ def check_shipped():
         owner = built.get(name)
         if owner and not has_spec:
             # Built and installed by another package's spec: shipped if that package is.
-            has_spec, in_dag = (
-                True,
-                owner in dag or owner.replace("athanor-", "") in dag,
-            )
+            has_spec, in_dag = True, owner in dag or owner.replace("athanor-", "") in dag
         if not (has_spec and in_dag):
             why = []
             if not has_spec:
                 why.append("nessuno .spec")
             if not in_dag:
                 why.append("non in packages.json")
-            r.fail(
-                f"{name}: {', '.join(why)} -> compila ma non arriva sul sistema. "
-                f"Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT"
-            )
+            r.fail(f"{name}: {', '.join(why)} -> compila ma non arriva sul sistema. "
+                   f"Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT")
 
     for p in sorted(dag - tiers):
-        r.fail(
-            f"{p}: in custom_packages ma in nessun tier -> costruito e mai installato"
-        )
+        r.fail(f"{p}: in custom_packages ma in nessun tier -> costruito e mai installato")
     for p in sorted(tiers - dag):
         r.fail(f"{p}: in un tier ma non in custom_packages -> riferimento pendente")
 
@@ -3037,32 +2376,18 @@ def check_shipped():
 
 # Documents removed on purpose (issue #149); neither the file nor a link to it may come back,
 # for instance through a merge of an old branch.
-FORBIDDEN_DOCS = (
-    "doc_core_daemons.md",
-    "doc_telemetry.md",
-    "athanor-telemetry.md",
-    "athanor_telemetry.md",
-)
+FORBIDDEN_DOCS = ("doc_core_daemons.md", "doc_telemetry.md", "athanor-telemetry.md", "athanor_telemetry.md")
 
 
 def forbidden_doc_problems(root=None):
     root = root or ROOT
-    problems = [
-        f"{rel(p)}: removed document, delete it"
-        for p in walk(root, ".md")
-        if p.name in FORBIDDEN_DOCS
-    ]
-    for t in [rel(p) for p in walk(root / "docs", ".md")] + [
-        "README.md",
-        "system/README.md",
-        "system/ARCHITECTURE.md",
-    ]:
+    problems = [f"{rel(p)}: removed document, delete it"
+                for p in walk(root, ".md") if p.name in FORBIDDEN_DOCS]
+    for t in [rel(p) for p in walk(root / "docs", ".md")] + ["README.md", "system/README.md", "system/ARCHITECTURE.md"]:
         f = root / t
         if not f.exists():
             continue
-        for m in re.finditer(
-            r"\[[^\]]*\]\(([^)]+)\)|href=[\"']([^\"']+)[\"']", read(f)
-        ):
+        for m in re.finditer(r"\[[^\]]*\]\(([^)]+)\)|href=[\"']([^\"']+)[\"']", read(f)):
             target = m.group(1) or m.group(2)
             if Path(target.split("#")[0]).name in FORBIDDEN_DOCS:
                 problems.append(f"{t}: links the removed document {target}")
@@ -3111,9 +2436,7 @@ def needs_graph(root=None):
             tokens = [t.strip() for t in m.group(1).rstrip().rstrip(".").split(",")]
             for token in tokens:
                 if not REQUIREMENT_ID.fullmatch(token):
-                    problems.append(
-                        f"{where}: {current} needs {token!r}, not a requirement identifier"
-                    )
+                    problems.append(f"{where}: {current} needs {token!r}, not a requirement identifier")
                 elif token == current:
                     problems.append(f"{where}: {current} needs itself")
                 else:
@@ -3121,18 +2444,12 @@ def needs_graph(root=None):
     graph = {}
     for source, targets in needs.items():
         if len(defined[source]) > 1:
-            problems.append(
-                f"{source} is defined more than once: {', '.join(defined[source])}"
-            )
+            problems.append(f"{source} is defined more than once: {', '.join(defined[source])}")
         for target, where in targets.items():
             if target not in defined:
-                problems.append(
-                    f"{where}: {source} needs {target}, which no specification defines"
-                )
+                problems.append(f"{where}: {source} needs {target}, which no specification defines")
             elif len(defined[target]) > 1:
-                problems.append(
-                    f"{where}: {source} needs {target}, defined more than once: {', '.join(defined[target])}"
-                )
+                problems.append(f"{where}: {source} needs {target}, defined more than once: {', '.join(defined[target])}")
             graph.setdefault(source, set()).add(target)
     # Depth-first search with three colours; a grey node met again closes a cycle.
     colour, stack = {}, []
@@ -3142,7 +2459,7 @@ def needs_graph(root=None):
         stack.append(node)
         for nxt in sorted(graph.get(node, ())):
             if colour.get(nxt) == "grey":
-                cycle = stack[stack.index(nxt) :] + [nxt]
+                cycle = stack[stack.index(nxt):] + [nxt]
                 problems.append("Needs cycle: " + " -> ".join(cycle))
             elif nxt not in colour:
                 visit(nxt)
@@ -3175,31 +2492,23 @@ def register_count_problems(text):
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if in_counts and surface in stated and len(cells) == 2 and cells[1].isdigit():
             stated[surface][cells[0]] = int(cells[1])
-        elif (
-            not in_counts and surface and cells[0].startswith("F-") and len(cells) >= 5
-        ):
+        elif not in_counts and surface and cells[0].startswith("F-") and len(cells) >= 5:
             rows.setdefault(surface, []).append((cells[0], cells[3]))
 
     problems = []
     for surface, entries in rows.items():
         for entry, status in entries:
             if status not in REGISTER_STATUSES:
-                problems.append(
-                    f"{REGISTER}: {entry} has the unknown status '{status}'"
-                )
+                problems.append(f"{REGISTER}: {entry} has the unknown status '{status}'")
         if surface not in stated:
-            problems.append(
-                f"{REGISTER}: surface '{surface}' has no table under Counts"
-            )
+            problems.append(f"{REGISTER}: surface '{surface}' has no table under Counts")
             continue
         actual = {s: sum(1 for _, st in entries if st == s) for s in REGISTER_STATUSES}
         actual["total"] = len(entries)
         for status, n in actual.items():
             if stated[surface].get(status) != n:
-                problems.append(
-                    f"{REGISTER}: Counts of '{surface}' say {status} "
-                    f"{stated[surface].get(status)}, the rows give {n}"
-                )
+                problems.append(f"{REGISTER}: Counts of '{surface}' say {status} "
+                                f"{stated[surface].get(status)}, the rows give {n}")
     for surface in stated.keys() - rows.keys():
         problems.append(f"{REGISTER}: Counts name '{surface}', which has no rows")
     return problems
@@ -3222,12 +2531,8 @@ def prose_lines(text):
                 fence = m.group(1)
             else:
                 prose.append(line)
-        elif (
-            m
-            and m.group(1)[0] == fence[0]
-            and len(m.group(1)) >= len(fence)
-            and not line.strip().lstrip(fence[0])
-        ):
+        elif m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) \
+                and not line.strip().lstrip(fence[0]):
             fence = None
             prose.append("")
     return prose
@@ -3251,9 +2556,7 @@ def pipeline_workflow_problems(doc, workflows):
     A missing document, section or table fails; lines in code fences are neither headings
     nor rows."""
     if not doc.exists():
-        return [
-            f"{PIPELINE_DOC}: missing, section 3.5 cannot be checked against .github/workflows"
-        ]
+        return [f"{PIPELINE_DOC}: missing, section 3.5 cannot be checked against .github/workflows"]
     heading, rows = None, []
     for line in prose_lines(read(doc)):
         if heading is None:
@@ -3268,28 +2571,18 @@ def pipeline_workflow_problems(doc, workflows):
     if not rows:
         return [f"{PIPELINE_DOC}: section 3.5 lists no workflow file"]
     files = {p.name for p in workflows.iterdir() if p.suffix in (".yml", ".yaml")}
-    problems = [
-        f"{PIPELINE_DOC}: {name} has no row in section 3.5"
-        for name in sorted(files - set(rows))
-    ]
-    problems += [
-        f"{PIPELINE_DOC}: section 3.5 names {name}, which is not under .github/workflows/"
-        for name in sorted(set(rows) - files)
-    ]
-    problems += [
-        f"{PIPELINE_DOC}: section 3.5 lists {name} twice"
-        for name in sorted({name for name in rows if rows.count(name) > 1})
-    ]
-    count = re.search(r"\d+", heading[len("### 3.5 ") :])
+    problems = [f"{PIPELINE_DOC}: {name} has no row in section 3.5"
+                for name in sorted(files - set(rows))]
+    problems += [f"{PIPELINE_DOC}: section 3.5 names {name}, which is not under .github/workflows/"
+                 for name in sorted(set(rows) - files)]
+    problems += [f"{PIPELINE_DOC}: section 3.5 lists {name} twice"
+                 for name in sorted({name for name in rows if rows.count(name) > 1})]
+    count = re.search(r"\d+", heading[len("### 3.5 "):])
     if not count:
-        problems.append(
-            f"{PIPELINE_DOC}: the heading of section 3.5 states no workflow count"
-        )
+        problems.append(f"{PIPELINE_DOC}: the heading of section 3.5 states no workflow count")
     elif int(count.group()) != len(rows):
-        problems.append(
-            f"{PIPELINE_DOC}: the heading of section 3.5 counts {count.group()} "
-            f"workflows, its table has {len(rows)} rows"
-        )
+        problems.append(f"{PIPELINE_DOC}: the heading of section 3.5 counts {count.group()} "
+                        f"workflows, its table has {len(rows)} rows")
     return problems
 
 
@@ -3298,20 +2591,10 @@ def check_docs():
     r = Result()
     for problem in forbidden_doc_problems():
         r.fail(problem)
-    targets = [
-        "README.md",
-        "system/README.md",
-        "system/ARCHITECTURE.md",
-        "ANALISI_2026-09-02.md",
-        "PIANO_RIPARTENZA.md",
-        "CLAUDE.md",
-        "ROADMAP.md",
-        "AGENTS.md",
-        "forge/AGENTS.md",
-        "forge/specs/azoth/AGENTS.md",
-        "system/AGENTS.md",
-        ".github/workflows/AGENTS.md",
-    ]
+    targets = ["README.md", "system/README.md", "system/ARCHITECTURE.md",
+               "ANALISI_2026-09-02.md", "PIANO_RIPARTENZA.md", "CLAUDE.md", "ROADMAP.md",
+               "AGENTS.md", "forge/AGENTS.md", "forge/specs/azoth/AGENTS.md", "system/AGENTS.md",
+               ".github/workflows/AGENTS.md"]
     targets += [rel(p) for p in walk(ROOT / "docs", ".md")]
 
     for t in targets:
@@ -3328,17 +2611,13 @@ def check_docs():
                 continue
             if not (base / link).exists():
                 r.fail(f"{t}: link rotto [{label[:30]}] -> {link}")
-    for problem in pipeline_workflow_problems(
-        ROOT / PIPELINE_DOC, ROOT / ".github" / "workflows"
-    ):
+    for problem in pipeline_workflow_problems(ROOT / PIPELINE_DOC, ROOT / ".github" / "workflows"):
         r.fail(problem)
     problems, graph = needs_graph()
     for problem in problems:
         r.fail(problem)
     edges = sum(len(targets) for targets in graph.values())
-    r.note(
-        f"Needs graph: {len(set(graph) | set().union(*graph.values()))} requirements, {edges} edges"
-    )
+    r.note(f"Needs graph: {len(set(graph) | set().union(*graph.values()))} requirements, {edges} edges")
     register = ROOT / REGISTER
     if register.exists():
         for problem in register_count_problems(read(register)):
@@ -3382,10 +2661,7 @@ def is_test_file(p):
     """Integration tests, benchmarks and examples are not code that runs in a daemon:
     a panic there fails a test, it does not end a service."""
     parts = Path(rel(p)).parts
-    return (
-        any(d in parts for d in ("tests", "benches", "examples"))
-        or Path(p).name == "tests.rs"
-    )
+    return any(d in parts for d in ("tests", "benches", "examples")) or Path(p).name == "tests.rs"
 
 
 TEST_MODULE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
@@ -3396,9 +2672,7 @@ def test_module_files(paths):
     of their own, compiled into the tests only, as a `#[cfg(test)]` block is."""
     found = set()
     for p in map(Path, paths):
-        here = (
-            p.parent if p.name in ("lib.rs", "main.rs", "mod.rs") else p.parent / p.stem
-        )
+        here = p.parent if p.name in ("lib.rs", "main.rs", "mod.rs") else p.parent / p.stem
         for name in TEST_MODULE.findall(read(p)):
             found.update({here / f"{name}.rs", here / name / "mod.rs"})
     return found
@@ -3541,9 +2815,7 @@ def check_panics():
                 r.fail(f"{at}: {k} over the budget of {budget}, propagate with `?`")
             r.note(f"{k}: {counts[k]} occorrenze, budget {budget}")
         elif counts[k] < budget:
-            r.note(
-                f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py"
-            )
+            r.note(f"{k}: {counts[k]} (budget {budget}) — abbassa il budget in scripts/verify.py")
 
     return r
 
@@ -3585,16 +2857,14 @@ HIDDEN_FAILURE = re.compile(
     rf"|\|\|\s*(?:{NOOP}(?![\w-])|\{{\s*{NOOP}\s*;?\s*\}}|\(\s*{NOOP}\s*;?\s*\))"
     rf"|\|\|(?!\s*[{{(])[^;|&]*(?:;|&&)\s*{NOOP}(?![\w-])"
     r"|\|\|\s*[{(][^;|&]*;\s*(?:true|:)\s*;?\s*[})]"
-    r"|2>&1\s*\|\|\s*(?:break|continue)\b"
-)
+    r"|2>&1\s*\|\|\s*(?:break|continue)\b")
 # `kill -0 PID 2> /dev/null` only asks whether the process lives: the exit status is the answer
 # and the one error sent away is "No such process". Only a plain operand (no substitution) and
 # only `kill` in command position are excused; `echo kill -0 $p 2>/dev/null` still counts.
 _VAR = r"\$\{?\w+\}?"
 PROBE = re.compile(
     r"(?:^\s*(?:!\s*)?|(?:[;(!{]|&&|\|\||\||(?<![\w-])(?:if|while|until|then|do|elif)(?![\w-]))\s*)"
-    rf"kill\s+-0\s+(?:\"[^\"$`()]*\"|\"{_VAR}\"|'[^']*'|{_VAR}|\w+|-?\d+)\s+2>\s*{DEV_NULL}"
-)
+    rf"kill\s+-0\s+(?:\"[^\"$`()]*\"|\"{_VAR}\"|'[^']*'|{_VAR}|\w+|-?\d+)\s+2>\s*{DEV_NULL}")
 CONTINUE_ON_ERROR = re.compile(r"^\s*(?:-\s+)?continue-on-error:(?!\s*false\b)")
 SHELL_SHEBANG = re.compile(rb"#!.*\b(?:ba|da)?sh\b")
 HEREDOC_START = re.compile(r"(?<!<)<<(?!<)(-?)")
@@ -3752,57 +3022,41 @@ def over_budget(r, found, budget, constant, what):
     if len(found) > budget:
         # One finding per line, as for panics, so that known-red.txt can list each.
         for at in found:
-            r.fail(
-                f"{at}: hides a failure, over the budget of {budget} of {what}; "
-                "send the output to a log or report it on stderr"
-            )
+            r.fail(f"{at}: hides a failure, over the budget of {budget} of {what}; "
+                   "send the output to a log or report it on stderr")
         r.note(f"shell-failures: {what}: {len(found)} occorrenze, budget {budget}")
     elif len(found) < budget:
-        r.note(
-            f"shell-failures: {what}: {len(found)} (budget {budget}) — "
-            f"abbassa {constant} in scripts/verify.py"
-        )
+        r.note(f"shell-failures: {what}: {len(found)} (budget {budget}) — "
+               f"abbassa {constant} in scripts/verify.py")
 
 
-@check(
-    "shell-failures",
-    "Il budget di fallimenti nascosti negli script e nei workflow non cresce",
-)
+@check("shell-failures", "Il budget di fallimenti nascosti negli script e nei workflow non cresce")
 def check_shell_failures():
     r = Result()
     for tree, budget in SHELL_BUDGETS.items():
         found = []
         for p in sorted(links(ROOT / tree)):
-            r.fail(
-                f"{p.relative_to(ROOT)}: a link hides a script from the budget: "
-                "move the script here, or call it by its own path"
-            )
+            r.fail(f"{p.relative_to(ROOT)}: a link hides a script from the budget: "
+                   "move the script here, or call it by its own path")
         for p in sorted(shell_scripts(ROOT / tree)):
             lines, opened = scan_shell(read(p))
             found += [f"{rel(p)}:{i}" for i in lines]
             if opened:
                 # Fail closed: the scanner skips a here-document body, so one it cannot close
                 # leaves the rest of the file unchecked.
-                r.fail(
-                    f"{rel(p)}:{opened}: unterminated here-document from line {opened}: "
-                    "the scanner cannot check the rest"
-                )
+                r.fail(f"{rel(p)}:{opened}: unterminated here-document from line {opened}: "
+                       "the scanner cannot check the rest")
         over_budget(r, found, budget, "SHELL_BUDGETS", tree)
-    found = [
-        f"{rel(p)}:{i}"
-        for tree in WORKFLOW_DIRS
-        for p in sorted(walk(ROOT / tree, (".yml", ".yaml")))
-        for i in workflow_failures(read(p))
-    ]
+    found = [f"{rel(p)}:{i}" for tree in WORKFLOW_DIRS
+             for p in sorted(walk(ROOT / tree, (".yml", ".yaml")))
+             for i in workflow_failures(read(p))]
     over_budget(r, found, WORKFLOW_BUDGET, "WORKFLOW_BUDGET", "workflows")
     found = []
     for p in walk(ROOT / GUEST_SHELL_DIR, GUEST_SHELL_FILE):
         lines, opened = guest_failures(read(p))
         found += [f"{rel(p)}:{i}" for i in lines]
         for i in opened:
-            r.fail(
-                f"{rel(p)}:{i}: unterminated here-document: the scanner cannot check the rest"
-            )
+            r.fail(f"{rel(p)}:{i}: unterminated here-document: the scanner cannot check the rest")
     over_budget(r, found, GUEST_SHELL_BUDGET, "GUEST_SHELL_BUDGET", GUEST_SHELL_FILE)
     return r
 
@@ -3819,18 +3073,10 @@ def check_shell_failures():
 CSS_DIRS = ["system", "forge/specs"]
 CSS_TOKENS = "system/athanor-style/calmo/tokens.toml"
 CSS_BUDGETS = {
-    "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {
-        "px": 31,
-        "font-px": 2,
-    },
+    "forge/specs/athanor-recovery/athanor-recovery-1.0.0/src/main.rs": {"px": 31, "font-px": 2},
     "system/athanor-style/calmo/templates/surfaces.css.in": {"px": 71, "font-px": 13},
     "system/athanor-style/src/accent_template.css": {"px": 2},
-    "system/athanor-style/src/style.css": {
-        "px": 178,
-        "font-px": 15,
-        "duration": 9,
-        "curve": 15,
-    },
+    "system/athanor-style/src/style.css": {"px": 178, "font-px": 15, "duration": 9, "curve": 15},
 }
 # A literal length in pixels; `${token}px` in a template, or `{}px` in Rust, is not one.
 CSS_PX = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)px\b")
@@ -3840,20 +3086,10 @@ CSS_DECLARATION = re.compile(r"([a-z-]+)\s*:\s*((?:\$\{\w+\}|[^;{}])*)")
 # `}` of its rule. Only whole literals are read: CSS built with `concat!` or `format!`, or split
 # across literals, is seen piece by piece, and a piece without a declaration is not read.
 CSS_IN_RUST = re.compile(r"[a-z-]+\s*:\s*[^;{}\n]+(?:;|\})")
-CSS_MOTION = {
-    "transition",
-    "transition-duration",
-    "transition-timing-function",
-    "transition-delay",
-    "animation",
-    "animation-duration",
-    "animation-timing-function",
-    "animation-delay",
-}
+CSS_MOTION = {"transition", "transition-duration", "transition-timing-function", "transition-delay",
+              "animation", "animation-duration", "animation-timing-function", "animation-delay"}
 CSS_TIME = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?|\.\d+)(ms|s)\b")
-CSS_CURVE = re.compile(
-    r"cubic-bezier\(([^)]*)\)|\b(?:ease(?:-in-out|-in|-out)?|linear|step-start|step-end|steps)\b"
-)
+CSS_CURVE = re.compile(r"cubic-bezier\(([^)]*)\)|\b(?:ease(?:-in-out|-in|-out)?|linear|step-start|step-end|steps)\b")
 
 
 def css_texts(path, text):
@@ -3909,12 +3145,7 @@ def css_findings(root=ROOT):
     motion = tomllib.loads(read(root / CSS_TOKENS))["sal"]["motion"]
     rust = [p for d in CSS_DIRS for p in walk(root / d, ".rs")]
     tests = test_module_files(rust)
-    files = [
-        p
-        for d in CSS_DIRS
-        for suffix in (".css", ".css.in")
-        for p in walk(root / d, suffix)
-    ]
+    files = [p for d in CSS_DIRS for suffix in (".css", ".css.in") for p in walk(root / d, suffix)]
     files += [p for p in rust if not (is_test_file(p) or p in tests)]
     found = {}
     for p in sorted(files):
@@ -3936,15 +3167,11 @@ def css_budget(r, found, budgets):
             budget = budgets.get(path, {}).get(kind, 0)
             if len(hits) > budget:
                 for line, _, text in hits:
-                    r.fail(
-                        f"{path}:{line}: {text}: {kind} over the budget of {budget}; take the "
-                        "value from a token of tokens.toml (doc_visual_language.md VL11)"
-                    )
+                    r.fail(f"{path}:{line}: {text}: {kind} over the budget of {budget}; take the "
+                           "value from a token of tokens.toml (doc_visual_language.md VL11)")
             elif len(hits) < budget:
-                r.fail(
-                    f"{path}: {kind}: {len(hits)} finding(s) under the budget of {budget}; "
-                    "lower CSS_BUDGETS in scripts/verify.py to match"
-                )
+                r.fail(f"{path}: {kind}: {len(hits)} finding(s) under the budget of {budget}; "
+                       "lower CSS_BUDGETS in scripts/verify.py to match")
 
 
 @check("css", "The shell's CSS takes its lengths and motion from the tokens (VL11)")
@@ -3971,14 +3198,10 @@ OUTSIDE_THE_LIST = {"/usr/bin/athanor-greeter-ui"}
 # its interfaces can be derived here; their interfaces come from SN12's derivation run. Each
 # must keep one line, for the unit it runs in, and a spec that comes to install one ends its
 # exemption with a failure. A scope is the one the supervisor of SESSION_COMPONENTS starts it in.
-UPSTREAM = {
-    "/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
-    "/usr/bin/cosmic-osd": "cosmic-osd.service",
-    "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service",
-}
-SESSION_COMPONENTS = (
-    "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
-)
+UPSTREAM = {"/usr/bin/cosmic-greeter": "cosmic-greeter-locker.scope",
+            "/usr/bin/cosmic-osd": "cosmic-osd.service",
+            "/usr/bin/cosmic-randr": "app-athanor-com.system76.CosmicSettings*@.service"}
+SESSION_COMPONENTS = "forge/specs/athanor-system-config/SOURCES/usr/libexec/athanor/session-components"
 PACKAGES_JSON = "forge/config/packages.json"
 # Settings keeps the main socket for this client's sake, and no longer than it stays upstream.
 SETTINGS_CLIENT = "/usr/bin/cosmic-randr"
@@ -3987,16 +3210,10 @@ SETTINGS_CLIENT = "/usr/bin/cosmic-randr"
 SERVER = ("athanor-sulphur", "/usr/bin/athanor-sulphur")
 # The name of the layer enum (gtk4-layer-shell's, the zwlr protocol's) and each alias of it: a
 # surface on its top or overlay layer, however the variant is reached, is refused without a grant.
-LAYER_ALIAS = re.compile(
-    r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;"
-)
+LAYER_ALIAS = re.compile(r"\bLayer\s+as\s+(\w+)|\btype\s+(\w+)\s*=\s*(?:[\w:]+::)?Layer\s*;")
 # What a spec puts under these directories is an executable a line can name.
-EXEC_DIRS = {
-    "%{_bindir}": "/usr/bin",
-    "%{_sbindir}": "/usr/sbin",
-    "%{_libexecdir}": "/usr/libexec",
-    "%{_prefix}": "/usr",
-}
+EXEC_DIRS = {"%{_bindir}": "/usr/bin", "%{_sbindir}": "/usr/sbin", "%{_libexecdir}": "/usr/libexec",
+             "%{_prefix}": "/usr"}
 EXEC_ROOTS = ("/usr/bin/", "/usr/sbin/", "/usr/libexec/")
 INSTALL = {"install", "%{__install}", "%__install", "/usr/bin/install"}
 COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
@@ -4012,50 +3229,42 @@ COPY = {"cp", "%{__cp}", "%__cp", "/usr/bin/cp"}
 # counts for a target only when code outside the crate names `Client`, the one type that
 # connects, under any alias: a crate that reads only the crate's `idle` module, as athanor-idle
 # does, binds nothing through it (maintainer decision, 2026-11-07).
-ON_DEMAND = {
-    "system/athanor-sulphur-client/src/capture.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/actions.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/keyboard_group.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/a11y.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/workspace_tiling.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/windows.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)"),
-    ),
-    "system/athanor-sulphur-client/src/connection.rs": (
-        "system/athanor-sulphur-client",
-        re.compile(r"\bClient\b"),
-    ),
-}
+ON_DEMAND = {"system/athanor-sulphur-client/src/capture.rs":
+             ("system/athanor-sulphur-client", re.compile(r"\.\s*capture\b|::\s*capture\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/actions.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*window_actions\b|::\s*window_actions\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/keyboard_group.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_keyboard_group\b|::\s*watch_keyboard_group\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/a11y.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_accessibility\b|::\s*watch_accessibility\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/workspace_tiling.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_tiling\b|::\s*watch_tiling\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/windows.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\.\s*watch_windows\b|::\s*watch_windows\b(?!\s*::)")),
+             "system/athanor-sulphur-client/src/connection.rs":
+             ("system/athanor-sulphur-client",
+              re.compile(r"\bClient\b"))}
 CLIENT_CRATE = "system/athanor-sulphur-client"
 # Where athanor-sulphur-client names the privileged globals it binds at connect, at the
 # first capture, at the first window action, at the first watch of the keyboard group, at the
 # first watch of the accessibility state, at the first watch of the tiling and at the first watch
 # of the windows. Each names at least one, or the check no longer sees what the client binds.
-CLIENT_BINDS = {
-    "system/athanor-sulphur-client/src/connection.rs": "at connect",
-    "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
-    "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
-    "system/athanor-sulphur-client/src/keyboard_group.rs": "at the first watch of the keyboard group",
-    "system/athanor-sulphur-client/src/a11y.rs": "at the first watch of the accessibility state",
-    "system/athanor-sulphur-client/src/workspace_tiling.rs": "at the first watch of the tiling",
-    "system/athanor-sulphur-client/src/windows.rs": "at the first watch of the windows",
-}
+CLIENT_BINDS = {"system/athanor-sulphur-client/src/connection.rs": "at connect",
+                "system/athanor-sulphur-client/src/capture.rs": "at the first capture",
+                "system/athanor-sulphur-client/src/actions.rs": "at the first window action",
+                "system/athanor-sulphur-client/src/keyboard_group.rs":
+                "at the first watch of the keyboard group",
+                "system/athanor-sulphur-client/src/a11y.rs":
+                "at the first watch of the accessibility state",
+                "system/athanor-sulphur-client/src/workspace_tiling.rs":
+                "at the first watch of the tiling",
+                "system/athanor-sulphur-client/src/windows.rs":
+                "at the first watch of the windows"}
 # The classes of data/globals, as the compositor's fixture reads them (`classified`).
 CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 
@@ -4063,17 +3272,9 @@ CLASSES = ("standard", "unconfined", "layer-gated", "privileged")
 def top_layer(files):
     """Where the first of `files` reaches the top or overlay variant of the layer enum, by its
     name or an alias, a variant import or a glob import of it; None when none does."""
-    names = {"Layer"} | {
-        a
-        for text in files.values()
-        for m in LAYER_ALIAS.finditer(text)
-        for a in m.groups()
-        if a
-    }
-    variant = re.compile(
-        rf"\b(?:{'|'.join(sorted(names))})\s*::\s*"
-        r"(?:\*|\{[^}]*\b(?:Top|Overlay)\b|(?:Top|Overlay)\b)"
-    )
+    names = {"Layer"} | {a for text in files.values() for m in LAYER_ALIAS.finditer(text) for a in m.groups() if a}
+    variant = re.compile(rf"\b(?:{'|'.join(sorted(names))})\s*::\s*"
+                         r"(?:\*|\{[^}]*\b(?:Top|Overlay)\b|(?:Top|Overlay)\b)")
     for where, text in sorted(files.items()):
         found = variant.search(text)
         if found:
@@ -4096,14 +3297,7 @@ def spec_installs(spec):
         while i < len(words):
             w = words[i]
             if w in ("--target-directory", "--mode", "--owner", "--group", "--suffix"):
-                directory, i = (
-                    (
-                        words[i + 1]
-                        if w == "--target-directory" and i + 1 < len(words)
-                        else directory
-                    ),
-                    i + 1,
-                )
+                directory, i = (words[i + 1] if w == "--target-directory" and i + 1 < len(words) else directory), i + 1
             elif w.startswith("--target-directory="):
                 directory = w.split("=", 1)[1]
             elif w == "--directory" and words[0] in INSTALL:
@@ -4114,7 +3308,7 @@ def spec_installs(spec):
                         args = None
                         break
                     if c in "mogSt":
-                        value = w[k + 1 :]
+                        value = w[k + 1:]
                         if not value and i + 1 < len(words):
                             i, value = i + 1, words[i + 1]
                         directory = value if c == "t" else directory
@@ -4130,11 +3324,8 @@ def spec_installs(spec):
             if len(args) < 2:
                 continue
             *sources, directory = args
-            if (
-                len(sources) == 1
-                and not directory.endswith("/")
-                and executable_path(directory) not in EXEC_DIRS.values()
-            ):
+            if len(sources) == 1 and not directory.endswith("/") and \
+                    executable_path(directory) not in EXEC_DIRS.values():
                 if executable_path(directory).startswith(EXEC_ROOTS):
                     yield sources[0], executable_path(directory)
                 continue
@@ -4165,15 +3356,9 @@ def binaries(crate, manifest):
         if package.get("name") and (crate / "src/main.rs").is_file():
             found[package["name"]] = crate / "src/main.rs"
         found.update((p.stem, p) for p in sorted((crate / "src/bin").glob("*.rs")))
-        found.update(
-            (p.parent.name, p) for p in sorted((crate / "src/bin").glob("*/main.rs"))
-        )
+        found.update((p.parent.name, p) for p in sorted((crate / "src/bin").glob("*/main.rs")))
     for b in manifest.get("bin", []):
-        entry = (
-            crate / b["path"]
-            if "path" in b
-            else found.get(b["name"], crate / "src/main.rs")
-        )
+        entry = crate / b["path"] if "path" in b else found.get(b["name"], crate / "src/main.rs")
         found = {n: p for n, p in found.items() if p != entry}
         found[b["name"]] = entry
     return found
@@ -4206,17 +3391,10 @@ def crate_sources(crate, start, entry=None):
     others = [p for p in binaries(crate, manifest).values() if p != entry]
     dirs = [p.parent if p.name == "main.rs" else p.with_suffix("") for p in others]
     dirs = [d for d in dirs if d != start and d.is_relative_to(start)]
-    files = [
-        p
-        for p in walk(start, ".rs")
-        if p not in others and not any(p.is_relative_to(d) for d in dirs)
-    ]
+    files = [p for p in walk(start, ".rs") if p not in others and not any(p.is_relative_to(d) for d in dirs)]
     test_modules = test_module_files(files)
-    return [
-        (p, without_comments(without_test_items(read(p))))
-        for p in files
-        if not is_test_file(p) and p not in test_modules
-    ]
+    return [(p, without_comments(without_test_items(read(p))))
+            for p in files if not is_test_file(p) and p not in test_modules]
 
 
 def enabled_dependencies(manifest, features, defaults):
@@ -4252,13 +3430,8 @@ def enabled_dependencies(manifest, features, defaults):
 def path_dependencies(crate, manifest, root):
     """(name in code, crate directory, entry) of each path dependency of `[dependencies]` and
     of `[target.*.dependencies]`, through `workspace = true` too."""
-    workspace = (
-        tomllib.loads(read(root / "Cargo.toml"))
-        .get("workspace", {})
-        .get("dependencies", {})
-        if (root / "Cargo.toml").is_file()
-        else {}
-    )
+    workspace = tomllib.loads(read(root / "Cargo.toml")).get("workspace", {}).get("dependencies", {}) \
+        if (root / "Cargo.toml").is_file() else {}
     tables = [manifest.get("dependencies", {})]
     tables += [t.get("dependencies", {}) for t in manifest.get("target", {}).values()]
     for table in tables:
@@ -4277,9 +3450,7 @@ def depends_on(root, where, owner):
     relative to `root` too, through the path dependencies of its Cargo.toml, under any name,
     directly or through the dependencies of those."""
     root = root.resolve()
-    crate = next(
-        (d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None
-    )
+    crate = next((d for d in (root / where).parents if (d / "Cargo.toml").is_file()), None)
     seen, todo = set(), [crate] if crate else []
     while todo:
         crate = todo.pop()
@@ -4296,15 +3467,7 @@ def target_files(crate, entry, features, defaults, root):
     dependencies its code names, followed transitively with the features the build enables
     (an optional dependency counts only when they turn it on)."""
     files, done = {}, {}
-    todo = [
-        (
-            crate.resolve(),
-            entry.parent.resolve(),
-            entry.resolve(),
-            set(features),
-            defaults,
-        )
-    ]
+    todo = [(crate.resolve(), entry.parent.resolve(), entry.resolve(), set(features), defaults)]
     while todo:
         crate, start, entry, features, defaults = todo.pop()
         before = done.get((crate, start))
@@ -4326,31 +3489,14 @@ def target_files(crate, entry, features, defaults, root):
         for name, entry, dep in path_dependencies(crate, manifest, root):
             if entry.get("optional") and name not in on:
                 continue
-            ident = (
-                name
-                if "package" in entry
-                else tomllib.loads(read(dep / "Cargo.toml"))
-                .get("lib", {})
-                .get("name", name)
-            )
+            ident = name if "package" in entry else \
+                tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("name", name)
             # A dependency the code never names adds nothing that runs.
             if not re.search(rf"\b{ident.replace('-', '_')}\b", code):
                 continue
-            lib = (
-                tomllib.loads(read(dep / "Cargo.toml"))
-                .get("lib", {})
-                .get("path", "src/lib.rs")
-            )
+            lib = tomllib.loads(read(dep / "Cargo.toml")).get("lib", {}).get("path", "src/lib.rs")
             wanted = set(entry.get("features", [])) | sub[name]
-            todo.append(
-                (
-                    dep,
-                    (dep / lib).parent,
-                    None,
-                    wanted,
-                    entry.get("default-features", True),
-                )
-            )
+            todo.append((dep, (dep / lib).parent, None, wanted, entry.get("default-features", True)))
     return files
 
 
@@ -4400,46 +3546,31 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
             continue
         words = line.split()
         if len(words) != 2 or words[1] not in CLASSES:
-            problems.append(
-                f"{GLOBALS_FILE}:{number}: not `<interface> <class>` with a class of "
-                f"{', '.join(CLASSES)}, which the compositor's fixture refuses: {line}"
-            )
+            problems.append(f"{GLOBALS_FILE}:{number}: not `<interface> <class>` with a class of "
+                            f"{', '.join(CLASSES)}, which the compositor's fixture refuses: {line}")
             continue
         classes[words[0]] = words[1]
     privileged = {i for i, c in classes.items() if c == "privileged"}
     grantable = {i for i, c in classes.items() if c in ("privileged", "layer-gated")}
     if not privileged:
-        problems.append(
-            f"{GLOBALS_FILE} has no privileged row: no client would need a line"
-        )
+        problems.append(f"{GLOBALS_FILE} has no privileged row: no client would need a line")
     if (root / CLIENT_CRATE / "Cargo.toml").is_file():
         for where, when in CLIENT_BINDS.items():
-            text = (
-                without_comments(without_test_items(read(root / where)))
-                if (root / where).is_file()
-                else ""
-            )
+            text = without_comments(without_test_items(read(root / where))) if (root / where).is_file() else ""
             if not any(re.search(rf"\b{i}\b", text) for i in privileged):
-                problems.append(
-                    f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
-                    f"longer sees what athanor-sulphur-client binds {when}"
-                )
+                problems.append(f"{where} names no privileged global of {GLOBALS_FILE}: the check no "
+                                f"longer sees what athanor-sulphur-client binds {when}")
     lines = collections.defaultdict(list)
     for line in read(root / ALLOW_LIST).splitlines():
         words = line.split()
         if len(words) in (1, 2) and not words[0].startswith("#"):
-            problems.append(
-                f"{ALLOW_LIST}: not `<executable> <unit> <interface>...`, which makes the "
-                f"compositor grant nothing at all: {line.strip()}"
-            )
+            problems.append(f"{ALLOW_LIST}: not `<executable> <unit> <interface>...`, which makes the "
+                            f"compositor grant nothing at all: {line.strip()}")
         elif words and not words[0].startswith("#"):
             lines[words[0]].append(words[1:])
-            problems += [
-                f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
-                f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
-                for name in words[2:]
-                if name not in grantable and name != TRUSTED_PROMPT
-            ]
+            problems += [f"{ALLOW_LIST}: the line of {words[0]} for {words[1]} "
+                         f"names {name}, which is no privileged or layer-gated row of {GLOBALS_FILE}"
+                         for name in words[2:] if name not in grantable and name != TRUSTED_PROMPT]
 
     bins = {}
     for manifest_path in (p for d in RS_DIRS for p in walk(root / d, "Cargo.toml")):
@@ -4470,42 +3601,29 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
             # carries a crate: then no bin target of the tree has the name it installs, or
             # the name is a shell variable, a glob or a macro this check cannot expand.
             if in_tree and re.search(r"[$*?\[{%`]", built):
-                problems.append(
-                    f"{spec_path.relative_to(root)}: an install of target/release/{built} "
-                    "names its binary through a shell variable, a glob or a macro the check "
-                    "cannot expand: name each binary in the spec"
-                )
+                problems.append(f"{spec_path.relative_to(root)}: an install of target/release/{built} "
+                                "names its binary through a shell variable, a glob or a macro the check "
+                                "cannot expand: name each binary in the spec")
             elif in_tree:
-                problems.append(
-                    f"{executable}: {spec_path.relative_to(root)} installs target/release/"
-                    f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds"
-                )
+                problems.append(f"{executable}: {spec_path.relative_to(root)} installs target/release/"
+                                f"{built}, which no bin target of a crate under {', '.join(RS_DIRS)} builds")
             continue
         checked += 1
         crate, package, entry = bins[built]
         features, defaults, every = build_flags(spec, package)
         if every:
-            features = set(
-                tomllib.loads(read(crate / "Cargo.toml")).get("features", {})
-            )
+            features = set(tomllib.loads(read(crate / "Cargo.toml")).get("features", {}))
         layer, names = None, {}
-        files = {
-            path.relative_to(root.resolve()): text
-            for path, text in target_files(
-                crate, entry, features, defaults, root
-            ).items()
-        }
+        files = {path.relative_to(root.resolve()): text for path, text in
+                 target_files(crate, entry, features, defaults, root).items()}
         # The call is looked for only in crates whose Cargo.toml depends on the owner: a crate
         # that does not cannot reach its calls, whatever its code names (Sal's
         # `DecorationMode::Client` is no `Client` of athanor-sulphur-client; maintainer
         # decision, 2026-11-07).
         for where in [w for w in files if w.as_posix() in ON_DEMAND]:
             owner, call = ON_DEMAND[where.as_posix()]
-            if not any(
-                call.search(text)
-                for other, text in files.items()
-                if not other.is_relative_to(owner) and depends_on(root, other, owner)
-            ):
+            if not any(call.search(text) for other, text in files.items()
+                       if not other.is_relative_to(owner) and depends_on(root, other, owner)):
                 del files[where]
         layer = top_layer(files)
         for where, text in sorted(files.items()):
@@ -4515,103 +3633,58 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
                         names[interface] = f"{where}:{i}"
         if layer is None and not names:
             continue
-        asks = ([f"the top or overlay layer ({layer})"] if layer else []) + [
-            f"{n} ({at})" for n, at in sorted(names.items())
-        ]
+        asks = ([f"the top or overlay layer ({layer})"] if layer else []) + \
+            [f"{n} ({at})" for n, at in sorted(names.items())]
         if executable in outside and executable not in lines:
-            notes.append(
-                f"{executable}: asks for {', '.join(asks)}, outside the list until it moves "
-                "(doc_session.md SN12)"
-            )
+            notes.append(f"{executable}: asks for {', '.join(asks)}, outside the list until it moves "
+                         "(doc_session.md SN12)")
         elif executable not in lines:
-            problems.append(
-                f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it"
-            )
+            problems.append(f"{executable}: asks for {', '.join(asks)} and {ALLOW_LIST} has no line for it")
         else:
             for line in lines[executable]:
                 if layer and LAYER_SHELL not in line[1:]:
-                    problems.append(
-                        f"{executable}: asks for the top or overlay layer ({layer}) and its line "
-                        f"for {line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)"
-                    )
-                problems += [
-                    f"{executable}: binds {n} ({at}) and its line for {line[0]} does not grant it"
-                    for n, at in sorted(names.items())
-                    if n not in line[1:]
-                ]
+                    problems.append(f"{executable}: asks for the top or overlay layer ({layer}) and its line "
+                                    f"for {line[0]} does not name {LAYER_SHELL}: the surface is closed (#683)")
+                problems += [f"{executable}: binds {n} ({at}) and its line for {line[0]} does not grant it"
+                             for n, at in sorted(names.items()) if n not in line[1:]]
 
     if not checked:
-        problems.append(
-            f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
-            "builds: the check found no target"
-        )
+        problems.append(f"no spec under forge/specs installs a binary that a crate under {', '.join(RS_DIRS)} "
+                        "builds: the check found no target")
     for executable in lines:
         if executable not in installed and executable not in upstream:
-            problems.append(
-                f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs"
-            )
-    components = (
-        read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
-    )
-    packages = (
-        json.loads(read(root / PACKAGES_JSON))
-        if (root / PACKAGES_JSON).is_file()
-        else {}
-    )
-    image = {
-        name
-        for key, names in packages.items()
-        if key.startswith("upstream_")
-        for name in names
-    }
+            problems.append(f"{ALLOW_LIST}: {executable} is installed by no spec under forge/specs")
+    components = read(root / SESSION_COMPONENTS) if (root / SESSION_COMPONENTS).is_file() else ""
+    packages = json.loads(read(root / PACKAGES_JSON)) if (root / PACKAGES_JSON).is_file() else {}
+    image = {name for key, names in packages.items() if key.startswith("upstream_") for name in names}
     launch = root / CLIENT_CRATE / "src/launch.rs"
-    if (
-        SETTINGS_CLIENT not in upstream
-        and launch.is_file()
-        and "fn keeps_main_socket" in read(launch)
-    ):
-        problems.append(
-            f"{launch.relative_to(root)}: keeps_main_socket outlives {SETTINGS_CLIENT}: "
-            "remove it (doc_settings.md SE23)"
-        )
+    if SETTINGS_CLIENT not in upstream and launch.is_file() and "fn keeps_main_socket" in read(launch):
+        problems.append(f"{launch.relative_to(root)}: keeps_main_socket outlives {SETTINGS_CLIENT}: "
+                        "remove it (doc_settings.md SE23)")
     for executable, unit in sorted(upstream.items()):
         if executable not in lines:
-            problems.append(
-                f"{executable} is upstream and has no line in {ALLOW_LIST}: "
-                "remove it from UPSTREAM (doc_session.md SN12)"
-            )
+            problems.append(f"{executable} is upstream and has no line in {ALLOW_LIST}: "
+                            "remove it from UPSTREAM (doc_session.md SN12)")
         elif [line[0] for line in lines[executable]] != [unit]:
-            problems.append(
-                f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
-                "the unit it runs in"
-            )
+            problems.append(f"{ALLOW_LIST}: {executable} is upstream and needs one line, for {unit}, "
+                            "the unit it runs in")
         started = rf"^[ \t]*systemd-run(?:[ \t]+-\S*)*[ \t]+--unit={re.escape(unit)}(?:[ \t]|$)"
         if unit.endswith(".scope") and not re.search(started, components, re.MULTILINE):
-            problems.append(
-                f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
-                "names: the grant would reach nothing"
-            )
+            problems.append(f"{executable}: {SESSION_COMPONENTS} starts no {unit}, the scope its line "
+                            "names: the grant would reach nothing")
         if Path(executable).name not in image:
-            problems.append(
-                f"{executable} is upstream and {PACKAGES_JSON} no longer installs it: "
-                f"remove its line and its entry in UPSTREAM (doc_settings.md SE23)"
-            )
+            problems.append(f"{executable} is upstream and {PACKAGES_JSON} no longer installs it: "
+                            f"remove its line and its entry in UPSTREAM (doc_settings.md SE23)")
         if executable in installed:
-            problems.append(
-                f"{executable} is upstream and a spec under forge/specs installs it: "
-                "remove it from UPSTREAM, so that its line is derived"
-            )
+            problems.append(f"{executable} is upstream and a spec under forge/specs installs it: "
+                            "remove it from UPSTREAM, so that its line is derived")
     for executable in sorted(outside):
         if executable in lines:
-            problems.append(
-                f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
-                "remove it from OUTSIDE_THE_LIST (doc_session.md SN12)"
-            )
+            problems.append(f"{executable} has a line in {ALLOW_LIST} and is still outside the list: "
+                            "remove it from OUTSIDE_THE_LIST (doc_session.md SN12)")
         if executable not in installed:
-            problems.append(
-                f"{executable} is outside the list and installed by no spec under forge/specs: "
-                "remove it from OUTSIDE_THE_LIST"
-            )
+            problems.append(f"{executable} is outside the list and installed by no spec under forge/specs: "
+                            "remove it from OUTSIDE_THE_LIST")
     return problems
 
 
@@ -4619,12 +3692,8 @@ def allow_list_problems(root=None, notes=None, outside=None, upstream=None):
 # scripts: the compositor's own privileged and layer-gated rows, and the names cosmic-comp has
 # for the same powers, which no table of the tree carries (#886).
 FORBIDDEN_GLOBALS = "forge/test/shell/forbidden-globals.txt"
-FORBIDDEN_READERS = (
-    "forge/test/shell/compositor_e2e.py",
-    "scripts/devvm/compositor-acceptance.sh",
-    "scripts/devvm/dock-acceptance.sh",
-    "scripts/devvm/launcher-acceptance.sh",
-)
+FORBIDDEN_READERS = ("forge/test/shell/compositor_e2e.py", "scripts/devvm/compositor-acceptance.sh",
+                     "scripts/devvm/dock-acceptance.sh", "scripts/devvm/launcher-acceptance.sh")
 
 
 def forbidden_globals_problems(root=None):
@@ -4633,38 +3702,18 @@ def forbidden_globals_problems(root=None):
     FORBIDDEN_READERS that does not read that file."""
     root = Path(root or ROOT)
     forbidden = set(read(root / FORBIDDEN_GLOBALS).split())
-    rows = [
-        line.split()
-        for line in read(root / GLOBALS_FILE).splitlines()
-        if not line.startswith("#")
-    ]
-    gated = {
-        row[0]
-        for row in rows
-        if len(row) == 2 and row[1] in ("privileged", "layer-gated")
-    }
-    problems = (
-        [f"{GLOBALS_FILE} has no privileged row: the list is checked against nothing"]
-        if not gated
-        else []
-    )
-    problems += [
-        f"{FORBIDDEN_GLOBALS} does not name {name}, a global of {GLOBALS_FILE} no confined "
-        "application may see"
-        for name in sorted(gated - forbidden)
-    ]
-    problems += [
-        f"{reader} does not read {FORBIDDEN_GLOBALS}"
-        for reader in FORBIDDEN_READERS
-        if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)
-    ]
+    rows = [line.split() for line in read(root / GLOBALS_FILE).splitlines() if not line.startswith("#")]
+    gated = {row[0] for row in rows if len(row) == 2 and row[1] in ("privileged", "layer-gated")}
+    problems = [f"{GLOBALS_FILE} has no privileged row: the list is checked against nothing"] if not gated else []
+    problems += [f"{FORBIDDEN_GLOBALS} does not name {name}, a global of {GLOBALS_FILE} no confined "
+                 "application may see" for name in sorted(gated - forbidden)]
+    problems += [f"{reader} does not read {FORBIDDEN_GLOBALS}"
+                 for reader in FORBIDDEN_READERS
+                 if Path(FORBIDDEN_GLOBALS).name not in read(root / reader)]
     return problems
 
 
-@check(
-    "forbidden-globals",
-    "The acceptance scripts forbid every global the compositor privileges",
-)
+@check("forbidden-globals", "The acceptance scripts forbid every global the compositor privileges")
 def check_forbidden_globals():
     r = Result()
     for problem in forbidden_globals_problems():
@@ -4672,10 +3721,7 @@ def check_forbidden_globals():
     return r
 
 
-@check(
-    "allow-list",
-    "Every shipped client that asks for a privileged global or layer has its allow-list line",
-)
+@check("allow-list", "Every shipped client that asks for a privileged global or layer has its allow-list line")
 def check_allow_list():
     r, notes = Result(), []
     for problem in allow_list_problems(notes=notes):
@@ -4731,16 +3777,12 @@ def cmdline_problems(root=None):
     for site, parameters in found.items():
         for parameter in parameters:
             for rejected, why in REJECTED_PARAMETERS.items():
-                if parameter == rejected or (
-                    rejected.endswith(".") and parameter.startswith(rejected)
-                ):
+                if parameter == rejected or (rejected.endswith(".") and parameter.startswith(rejected)):
                     problems.append(f"{site}: {parameter} -> {why}")
     return problems
 
 
-@check(
-    "cmdline", "La riga di comando del kernel non contraddice le decisioni del profilo"
-)
+@check("cmdline", "La riga di comando del kernel non contraddice le decisioni del profilo")
 def check_cmdline():
     r = Result()
     for problem in cmdline_problems():
@@ -4772,14 +3814,8 @@ def sysctl_problems(root=None):
             continue
         for number, line in enumerate(read(path).splitlines(), 1):
             name = line.split("=", 1)[0].strip().lstrip("-").replace("/", ".")
-            if (
-                "=" in line
-                and not line.lstrip().startswith(("#", ";"))
-                and name in base
-            ):
-                problems.append(
-                    f"{relative}:{number}: sets {name}, a base sysctl of {PROFILE_MANIFEST}"
-                )
+            if "=" in line and not line.lstrip().startswith(("#", ";")) and name in base:
+                problems.append(f"{relative}:{number}: sets {name}, a base sysctl of {PROFILE_MANIFEST}")
     return problems
 
 
@@ -4796,11 +3832,7 @@ def check_sysctl():
 # scripts/ci/audited-lockfiles.txt; a lockfile missing from it is never checked (#465).
 AUDITED_LOCKFILES = "scripts/ci/audited-lockfiles.txt"
 # The lockfiles of the workspaces security-audit.sh runs `cargo deny check advisories` on.
-DENY_LOCKFILES = (
-    "Cargo.lock",
-    "system/athanor-sal/gallery/Cargo.lock",
-    "fuzz/Cargo.lock",
-)
+DENY_LOCKFILES = ("Cargo.lock", "system/athanor-sal/gallery/Cargo.lock", "fuzz/Cargo.lock")
 UNAUDITED = re.compile(r"unaudited (\S+) #\d+")
 
 
@@ -4813,12 +3845,8 @@ def advisory_lock_problems(root=None):
     manifest = root / "Cargo.toml"
     data = tomllib.loads(read(manifest)) if manifest.exists() else {}
     members = set(data.get("workspace", {}).get("members", []))
-    members |= {
-        d["path"]
-        for table in data.get("patch", {}).values()
-        for d in table.values()
-        if isinstance(d, dict) and "path" in d
-    }
+    members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
+                if isinstance(d, dict) and "path" in d}
     listed, unaudited, problems = [], [], []
     for line in read(root / AUDITED_LOCKFILES).splitlines():
         line = line.strip()
@@ -4827,9 +3855,7 @@ def advisory_lock_problems(root=None):
         if line.startswith("unaudited"):
             match = UNAUDITED.fullmatch(line)
             if match is None:
-                problems.append(
-                    f"{AUDITED_LOCKFILES}: expected `unaudited PATH #ISSUE`, got `{line}`"
-                )
+                problems.append(f"{AUDITED_LOCKFILES}: expected `unaudited PATH #ISSUE`, got `{line}`")
             else:
                 unaudited.append(match[1])
         else:
@@ -4838,41 +3864,20 @@ def advisory_lock_problems(root=None):
     if script.exists():
         loop = re.search(r"^for manifest in (.+); do$", read(script), re.M)
         manifests = loop[1].split() if loop else []
-        if sorted(m.replace("Cargo.toml", "Cargo.lock") for m in manifests) != sorted(
-            DENY_LOCKFILES
-        ):
-            problems.append(
-                f"{script.relative_to(root)}: its cargo-deny loop ({' '.join(manifests)}) "
-                "does not match DENY_LOCKFILES in scripts/verify.py"
-            )
-    tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\0")
+        if sorted(m.replace("Cargo.toml", "Cargo.lock") for m in manifests) != sorted(DENY_LOCKFILES):
+            problems.append(f"{script.relative_to(root)}: its cargo-deny loop ({' '.join(manifests)}) "
+                            "does not match DENY_LOCKFILES in scripts/verify.py")
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, text=True, check=True).stdout.split("\0")
     locks = {f for f in tracked if f == "Cargo.lock" or f.endswith("/Cargo.lock")}
-    found = {
-        f
-        for f in locks - set(DENY_LOCKFILES)
-        if f.removesuffix("/Cargo.lock") not in members
-    }
-    problems += [
-        f"{p}: a tracked lockfile that no advisory check reads; add it to {AUDITED_LOCKFILES}"
-        for p in sorted(found - set(listed) - set(unaudited))
-    ]
-    problems += [
-        f"{AUDITED_LOCKFILES}: {p} does not exist"
-        for p in listed + unaudited
-        if p not in found
-    ]
+    found = {f for f in locks - set(DENY_LOCKFILES) if f.removesuffix("/Cargo.lock") not in members}
+    problems += [f"{p}: a tracked lockfile that no advisory check reads; add it to {AUDITED_LOCKFILES}"
+                 for p in sorted(found - set(listed) - set(unaudited))]
+    problems += [f"{AUDITED_LOCKFILES}: {p} does not exist" for p in listed + unaudited if p not in found]
     return problems
 
 
-@check(
-    "advisory-locks",
-    "Every tracked Cargo.lock is read by an advisory check (security-audit.sh), or excluded with an issue",
-)
+@check("advisory-locks", "Every tracked Cargo.lock is read by an advisory check (security-audit.sh), or excluded with an issue")
 def check_advisory_locks():
     r = Result()
     for problem in advisory_lock_problems():
@@ -4892,24 +3897,11 @@ def udev_group_problems(root=None):
     """Every GROUP= of a repository udev rule names a group a repository sysusers.d file declares."""
     root = root or ROOT
     declared = set()
-    for pattern in (
-        "forge/specs/**/sysusers.d/*.conf",
-        "forge/specs/**/*.sysusers",
-        "system/**/sysusers.d/*.conf",
-    ):
+    for pattern in ("forge/specs/**/sysusers.d/*.conf", "forge/specs/**/*.sysusers", "system/**/sysusers.d/*.conf"):
         for path in root.glob(pattern):
             declared.update(SYSUSERS_GROUP.findall(read(path)))
     problems = []
-    rules = sorted(
-        {
-            p
-            for pattern in (
-                "forge/specs/**/rules.d/*.rules",
-                "system/**/rules.d/*.rules",
-            )
-            for p in root.glob(pattern)
-        }
-    )
+    rules = sorted({p for pattern in ("forge/specs/**/rules.d/*.rules", "system/**/rules.d/*.rules") for p in root.glob(pattern)})
     for path in rules:
         relative = path.relative_to(root).as_posix()
         for number, line in enumerate(read(path).splitlines(), 1):
@@ -4917,16 +3909,11 @@ def udev_group_problems(root=None):
                 continue
             for group in UDEV_GROUP.findall(line):
                 if group not in declared:
-                    problems.append(
-                        f'{relative}:{number}: GROUP="{group}" is declared by no sysusers.d file'
-                    )
+                    problems.append(f"{relative}:{number}: GROUP=\"{group}\" is declared by no sysusers.d file")
     return problems
 
 
-@check(
-    "udev-groups",
-    "Every GROUP= of a udev rule names a group a sysusers.d file declares",
-)
+@check("udev-groups", "Every GROUP= of a udev rule names a group a sysusers.d file declares")
 def check_udev_groups():
     r = Result()
     for problem in udev_group_problems():
@@ -4935,9 +3922,7 @@ def check_udev_groups():
 
 
 PAM_CONTAINERFILE = "system/Containerfile"
-NULLOK_GUARD = re.compile(
-    r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE
-)
+NULLOK_GUARD = re.compile(r"^RUN authselect enable-feature without-nullok\b", re.MULTILINE)
 PWQUALITY_MINLEN = "'minlen = 12'"
 FAILLOCK_SETTINGS = {"deny": "5", "fail_interval": "900", "unlock_time": "600"}
 FAILLOCK_CONF = "/etc/security/faillock.conf"
@@ -4951,9 +3936,7 @@ def nullok_problems(root=None):
     except OSError as err:
         return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
     if not NULLOK_GUARD.search(text):
-        return [
-            f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature without-nullok' step (A2-23)"
-        ]
+        return [f"{PAM_CONTAINERFILE}: no 'RUN authselect enable-feature without-nullok' step (A2-23)"]
     return []
 
 
@@ -4964,10 +3947,7 @@ def pwquality_problems(root=None):
         text = read(root / PAM_CONTAINERFILE)
     except OSError as err:
         return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
-    if any(
-        PWQUALITY_MINLEN in line and not line.lstrip().startswith("#")
-        for line in text.splitlines()
-    ):
+    if any(PWQUALITY_MINLEN in line and not line.lstrip().startswith("#") for line in text.splitlines()):
         return []
     return [f"{PAM_CONTAINERFILE}: no pwquality drop-in with {PWQUALITY_MINLEN}"]
 
@@ -4975,34 +3955,23 @@ def pwquality_problems(root=None):
 def faillock_problems(root=None):
     """The image build enables authselect's with-faillock with the thresholds of ADR-0090."""
     import shlex
-
     root = root or ROOT
     try:
         text = read(root / PAM_CONTAINERFILE)
     except OSError as err:
         return [f"{PAM_CONTAINERFILE}: cannot read ({err})"]
-    steps = [
-        s.strip()
-        for s in text.replace("\\\n", " ").splitlines()
-        if s.strip().startswith("RUN ")
-    ]
+    steps = [s.strip() for s in text.replace("\\\n", " ").splitlines() if s.strip().startswith("RUN ")]
     where, problems = PAM_CONTAINERFILE, []
     if any("disable-feature with-faillock" in s for s in steps):
         problems.append(f"{where}: a step disables with-faillock (ADR-0090)")
     if not any("authselect enable-feature with-faillock" in s for s in steps):
-        problems.append(
-            f"{where}: no 'RUN authselect enable-feature with-faillock' step (ADR-0090)"
-        )
+        problems.append(f"{where}: no 'RUN authselect enable-feature with-faillock' step (ADR-0090)")
     writers = [s for s in steps if ">> " + FAILLOCK_CONF in s]
     if len(writers) != 1:
-        return problems + [
-            f"{where}: expected one RUN step appending to {FAILLOCK_CONF}, found {len(writers)} (ADR-0090)"
-        ]
+        return problems + [f"{where}: expected one RUN step appending to {FAILLOCK_CONF}, found {len(writers)} (ADR-0090)"]
     step = writers[0]
     if "pam_faillock.so preauth" not in step or "pam_faillock.so authfail" not in step:
-        problems.append(
-            f"{where}: the faillock step does not check preauth and authfail in the stacks"
-        )
+        problems.append(f"{where}: the faillock step does not check preauth and authfail in the stacks")
     try:
         words = shlex.split(step)
     except ValueError as err:
@@ -5010,7 +3979,7 @@ def faillock_problems(root=None):
     if "printf" not in words:
         return problems + [f"{where}: the faillock step has no printf"]
     args = []
-    for word in words[words.index("printf") + 2 :]:
+    for word in words[words.index("printf") + 2:]:
         if word in ("&&", ">>", ";"):
             break
         args.append(word)
@@ -5020,14 +3989,10 @@ def faillock_problems(root=None):
         if m:
             last[m.group(1)] = m.group(2)
         if re.match(r"^\s*(even_deny_root|admin_group)\b", arg):
-            problems.append(
-                f"{where}: faillock.conf must not set {arg.strip()!r}: root is not locked out (ADR-0090)"
-            )
+            problems.append(f"{where}: faillock.conf must not set {arg.strip()!r}: root is not locked out (ADR-0090)")
     for key, value in FAILLOCK_SETTINGS.items():
         if last.get(key) != value:
-            problems.append(
-                f"{where}: faillock.conf must end with {key} = {value}, not {last.get(key)} (ADR-0090)"
-            )
+            problems.append(f"{where}: faillock.conf must end with {key} = {value}, not {last.get(key)} (ADR-0090)")
     return problems
 
 
@@ -5060,43 +4025,24 @@ def lock_pam_problems(root=None):
         except OSError as err:
             problems.append(f"{where}: cannot read ({err})")
             continue
-        lines = [
-            " ".join(line.split())
-            for line in text.splitlines()
-            if line.strip() and not line.lstrip().startswith("#")
-        ]
+        lines = [" ".join(line.split()) for line in text.splitlines()
+                 if line.strip() and not line.lstrip().startswith("#")]
         for number, line in enumerate(lines, 1):
             for word in LOCK_PAM_BANNED:
                 if word in line:
                     problems.append(f"{where}: rule {number} names {word} (LP8)")
             words = line.split()
-            if (
-                len(words) > 2
-                and words[1] in ("include", "substack")
-                and words[2] != "system-auth"
-            ):
-                problems.append(
-                    f"{where}: rule {number} includes {words[2]}, not system-auth (LP8)"
-                )
+            if len(words) > 2 and words[1] in ("include", "substack") and words[2] != "system-auth":
+                problems.append(f"{where}: rule {number} includes {words[2]}, not system-auth (LP8)")
         if lines != expected:
-            problems.append(
-                f"{where}: the rules are not LP8's {len(expected)} lines: {lines}"
-            )
+            problems.append(f"{where}: the rules are not LP8's {len(expected)} lines: {lines}")
     return problems
 
 
-@check(
-    "pam",
-    "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090), the lock's stacks (LP8)",
-)
+@check("pam", "No empty passwords (A2-23), no new password under twelve characters, account lockout (ADR-0090), the lock's stacks (LP8)")
 def check_pam():
     r = Result()
-    for problem in (
-        nullok_problems()
-        + pwquality_problems()
-        + faillock_problems()
-        + lock_pam_problems()
-    ):
+    for problem in nullok_problems() + pwquality_problems() + faillock_problems() + lock_pam_problems():
         r.fail(problem)
     return r
 
@@ -5105,11 +4051,7 @@ def check_pam():
 # 8. polkit, il lato codice — il subject deve essere il CHIAMANTE
 # --------------------------------------------------------------------------- #
 
-
-@check(
-    "polkit-subject",
-    "Il subject polkit identifica il chiamante, e i default sono raggiungibili",
-)
+@check("polkit-subject", "Il subject polkit identifica il chiamante, e i default sono raggiungibili")
 def check_polkit_subject():
     r = Result()
 
@@ -5120,16 +4062,12 @@ def check_polkit_subject():
         for i, line in enumerate(txt.split("\n"), 1):
             code = line.split("//")[0]
             if "peer_creds" in code or "peer_credentials" in code:
-                r.fail(
-                    f"{rel(p)}:{i} peer_creds() in un percorso polkit: restituisce le "
-                    f"credenziali del bus all'altro capo del socket, MAI quelle del "
-                    f"chiamante. Usa PolkitSubject::system_bus_name(sender)"
-                )
+                r.fail(f"{rel(p)}:{i} peer_creds() in un percorso polkit: restituisce le "
+                       f"credenziali del bus all'altro capo del socket, MAI quelle del "
+                       f"chiamante. Usa PolkitSubject::system_bus_name(sender)")
             if re.search(r"unix_user_id\(\)\s*==\s*Some\(0\)", code):
-                r.fail(
-                    f"{rel(p)}:{i} short-circuit su uid 0 derivato dal socket peer: "
-                    f"se il bus gira come root questo autorizza chiunque"
-                )
+                r.fail(f"{rel(p)}:{i} short-circuit su uid 0 derivato dal socket peer: "
+                       f"se il bus gira come root questo autorizza chiunque")
 
     # un default auth_* è irraggiungibile se il sito di chiamata vieta l'interazione
     declared = {}
@@ -5148,12 +4086,10 @@ def check_polkit_subject():
             action, interactive = m.group(1), m.group(2) == "true"
             default = declared.get(action)
             if default and default.startswith("auth_") and not interactive:
-                r.fail(
-                    f"{rel(p)}:{i} {action} è dichiarata {default} ma qui "
-                    f"allow_user_interaction=false: polkit non può mostrare il dialogo, "
-                    f"quindi l'autorizzazione fallisce sempre. Passa true, o abbassa il "
-                    f"default sapendo cosa comporta"
-                )
+                r.fail(f"{rel(p)}:{i} {action} è dichiarata {default} ma qui "
+                       f"allow_user_interaction=false: polkit non può mostrare il dialogo, "
+                       f"quindi l'autorizzazione fallisce sempre. Passa true, o abbassa il "
+                       f"default sapendo cosa comporta")
 
     return r
 
@@ -5181,10 +4117,8 @@ def manifest_spec_problems(root=None):
             if pkg in EXTERNAL_PACKAGES:
                 continue
             if not ((specs / f"athanor-{pkg}").is_dir() or (specs / pkg).is_dir()):
-                problems.append(
-                    f"{rel(manifest)}: {key} lists {pkg}, but forge/specs has neither "
-                    f"athanor-{pkg} nor {pkg}"
-                )
+                problems.append(f"{rel(manifest)}: {key} lists {pkg}, but forge/specs has neither "
+                                f"athanor-{pkg} nor {pkg}")
     return problems
 
 
@@ -5233,9 +4167,7 @@ def unraised_releases(root, base):
     classes = load_module("scripts/ci/release_class.py")
 
     def git(*args):
-        return subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True
-        )
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
     if git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}").returncode != 0:
         raise ValueError(f"{base} is not a commit of {root}")
@@ -5247,27 +4179,19 @@ def unraised_releases(root, base):
     problems = []
     for spec in sorted(RELEASE_BY_HAND - RELEASE_FROM_KERNEL):
         directory = spec.rsplit("/", 1)[0] + "/"
-        content = [
-            p
-            for p in changed
-            if p.startswith(directory)
-            and not any(p.startswith(d) for d in RELEASE_UNPACKAGED)
-        ]
+        content = [p for p in changed if p.startswith(directory)
+                   and not any(p.startswith(d) for d in RELEASE_UNPACKAGED)]
         if not content or not (Path(root) / spec).is_file():
             continue
         listed = git("ls-tree", "-z", "--name-only", base, "--", spec)
         if listed.returncode != 0:
-            problems.append(
-                f"{spec}: cannot list it at {base}: {listed.stderr.strip()}"
-            )
+            problems.append(f"{spec}: cannot list it at {base}: {listed.stderr.strip()}")
             continue
         if not listed.stdout:
             continue
         before = git("show", f"{base}:{spec}")
         if before.returncode != 0:
-            problems.append(
-                f"{spec}: cannot read it at {base}: {before.stderr.strip()}"
-            )
+            problems.append(f"{spec}: cannot read it at {base}: {before.stderr.strip()}")
             continue
         if re.search(r"^Release:.*%\{\?athanor_content\}", before.stdout, re.M):
             continue
@@ -5283,26 +4207,21 @@ def unraised_releases(root, base):
                 continue
         if not raised:
             problems.append(
-                f"{spec}: {', '.join(c[len(directory) :] for c in content)} changed but "
+                f"{spec}: {', '.join(c[len(directory):] for c in content)} changed but "
                 f"Version-Release {new} is not higher than {old} at {base}: raise Release and add "
                 f"a %changelog entry, or add a path no build reads to RELEASE_UNPACKAGED in "
-                f"scripts/verify.py, only with its reason"
-            )
+                f"scripts/verify.py, only with its reason")
     return problems
 
 
-@check(
-    "specs", "Le spec installano da percorsi che esistono dalla loro working directory"
-)
+@check("specs", "Le spec installano da percorsi che esistono dalla loro working directory")
 def check_specs():
     r = Result()
     for problem in manifest_spec_problems():
         r.fail(problem)
     if BASE_REF is None:
-        r.note(
-            "no base revision (--known-red-base REF): the Release raises of RELEASE_BY_HAND "
-            "were not checked"
-        )
+        r.note("no base revision (--known-red-base REF): the Release raises of RELEASE_BY_HAND "
+               "were not checked")
     else:
         try:
             for problem in unraised_releases(ROOT, BASE_REF):
@@ -5311,27 +4230,14 @@ def check_specs():
             r.fail(f"Release raises against {BASE_REF}: {e}")
         else:
             commits = {
-                subprocess.run(
-                    [
-                        "git",
-                        "-C",
-                        str(ROOT),
-                        "rev-parse",
-                        "--verify",
-                        "--quiet",
-                        f"{ref}^{{commit}}",
-                    ],
-                    capture_output=True,
-                    text=True,
-                ).stdout
+                subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--verify", "--quiet",
+                                f"{ref}^{{commit}}"], capture_output=True, text=True).stdout
                 for ref in (BASE_REF, "HEAD")
             }
             if len(commits) == 1:
-                r.note(
-                    f"the base {BASE_REF} is the checked-out commit, so only uncommitted edits were compared for "
-                    "Release raises: pass the pull request's base, e.g. "
-                    "`just check-static origin/iso-v0`"
-                )
+                r.note(f"the base {BASE_REF} is the checked-out commit, so only uncommitted edits were compared for "
+                       "Release raises: pass the pull request's base, e.g. "
+                       "`just check-static origin/iso-v0`")
     import shlex
 
     def sections(text):
@@ -5339,18 +4245,8 @@ def check_specs():
         out, cur = {}, None
         for line in text.split("\n"):
             m = re.match(r"^%(\w+)\b", line)
-            if m and m.group(1) in (
-                "prep",
-                "build",
-                "install",
-                "files",
-                "changelog",
-                "post",
-                "preun",
-                "postun",
-                "description",
-                "package",
-            ):
+            if m and m.group(1) in ("prep", "build", "install", "files", "changelog",
+                                    "post", "preun", "postun", "description", "package"):
                 cur = m.group(1)
                 out.setdefault(cur, [])
                 continue
@@ -5385,20 +4281,11 @@ def check_specs():
         text = read(spec)
         release = re.search(r"^Release:[ \t]*(\S+)", text, re.M)
         by_hand = rel(spec) in RELEASE_BY_HAND
-        if (
-            rel(spec).startswith("forge/specs/")
-            and release
-            and by_hand == ("%{?athanor_content}" in release.group(1))
-        ):
-            r.fail(
-                f"{rel(spec)}: Release {release.group(1)} "
-                + (
-                    "carries %{?athanor_content}: drop the spec from RELEASE_BY_HAND"
-                    if by_hand
-                    else "lacks %{?athanor_content}: write <N>%{?athanor_content}%{?dist}, or list the spec in "
-                    "RELEASE_BY_HAND and raise its Release by hand (forge/AGENTS.md)"
-                )
-            )
+        if rel(spec).startswith("forge/specs/") and release and by_hand == ("%{?athanor_content}" in release.group(1)):
+            r.fail(f"{rel(spec)}: Release {release.group(1)} " + (
+                "carries %{?athanor_content}: drop the spec from RELEASE_BY_HAND" if by_hand else
+                "lacks %{?athanor_content}: write <N>%{?athanor_content}%{?dist}, or list the spec in "
+                "RELEASE_BY_HAND and raise its Release by hand (forge/AGENTS.md)"))
         sec = sections(text)
         prep = sec.get("prep", "")
         # senza %setup/%autosetup rpmbuild non entra in una sottodirectory:
@@ -5411,10 +4298,8 @@ def check_specs():
             # residuo del generatore: crea un file VUOTO che install poi spedisce
             m = re.match(r"^mkdir -p \$\(dirname (\S+)\) && touch \1$", stripped)
             if m:
-                r.fail(
-                    f"{rel(spec)}:{i} `touch {m.group(1)}` crea un file vuoto nella "
-                    f"working directory: se poi viene installato, spedisci 0 byte"
-                )
+                r.fail(f"{rel(spec)}:{i} `touch {m.group(1)}` crea un file vuoto nella "
+                       f"working directory: se poi viene installato, spedisci 0 byte")
                 continue
 
             if not stub_prep:
@@ -5424,11 +4309,9 @@ def check_specs():
                 continue
             if src.startswith(("%", "$", "/", "~")) or "/" in src:
                 continue
-            r.fail(
-                f"{rel(spec)}:{i} install da nome nudo `{src}`: %prep non fa "
-                f"%setup, quindi %install gira dalla radice del build e quel file "
-                f"non è lì. Usa il percorso completo dalla radice del repo"
-            )
+            r.fail(f"{rel(spec)}:{i} install da nome nudo `{src}`: %prep non fa "
+                   f"%setup, quindi %install gira dalla radice del build e quel file "
+                   f"non è lì. Usa il percorso completo dalla radice del repo")
 
     return r
 
@@ -5456,27 +4339,17 @@ COSMIC_ALLOWED = (
     "forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/src/bindings/cosmic.rs",
 )
 BOUNDARY_DIRS = ("system", "forge/specs", "forge/tools")
-COSMIC_APPLICATION_ID = re.compile(
-    r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+\*@\.service\b"
-)
-DEPENDENCY_TABLES = (
-    "dependencies",
-    "dev-dependencies",
-    "dev_dependencies",
-    "build-dependencies",
-    "build_dependencies",
-)
+COSMIC_APPLICATION_ID = re.compile(r"com\.system76\.\w+\.desktop\b|app-athanor-com\.system76\.\w+\*@\.service\b")
+DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "dev_dependencies",
+                     "build-dependencies", "build_dependencies")
 
 
 def cosmic_dependencies(manifest):
     """The crate names of a parsed Cargo manifest's dependencies that are libcosmic or
     cosmic-*. A renamed dependency (`package = "cosmic-..."`) is found by its crate name."""
     tables = [manifest.get(name, {}) for name in DEPENDENCY_TABLES]
-    tables += [
-        target.get(name, {})
-        for target in manifest.get("target", {}).values()
-        for name in DEPENDENCY_TABLES
-    ]
+    tables += [target.get(name, {}) for target in manifest.get("target", {}).values()
+               for name in DEPENDENCY_TABLES]
     tables.append(manifest.get("workspace", {}).get("dependencies", {}))
     found = []
     for table in tables:
@@ -5503,10 +4376,8 @@ def boundary_problems(root):
                 problems.append(f"{relative}: not valid TOML ({error})")
                 continue
             for crate in cosmic_dependencies(manifest):
-                problems.append(
-                    f"{relative} depends on {crate}: only athanor-sulphur-client "
-                    f"may depend on COSMIC"
-                )
+                problems.append(f"{relative} depends on {crate}: only athanor-sulphur-client "
+                                f"may depend on COSMIC")
         for path in walk(root / base, ".rs"):
             relative = path.relative_to(root).as_posix()
             if relative.startswith(COSMIC_ALLOWED):
@@ -5516,17 +4387,12 @@ def boundary_problems(root):
                 # successors of COSMIC's former default apps, doc_bar.md BR7), and so does the
                 # family of units an allow-list line names for it.
                 if "com.system76" in COSMIC_APPLICATION_ID.sub("", line.split("//")[0]):
-                    problems.append(
-                        f"{relative}:{i} names a com.system76 configuration: read it "
-                        f"through athanor-sulphur-client"
-                    )
+                    problems.append(f"{relative}:{i} names a com.system76 configuration: read it "
+                                    f"through athanor-sulphur-client")
     return problems
 
 
-@check(
-    "boundary",
-    "Only the compositor client depends on COSMIC or reads its configuration",
-)
+@check("boundary", "Only the compositor client depends on COSMIC or reads its configuration")
 def check_boundary():
     r = Result()
     for problem in boundary_problems(ROOT):
@@ -5542,10 +4408,8 @@ DRM_GRANTS = ('"/dev/dri"', "DRM_DEVICE_DIR")
 NVIDIA_GRANT = 'nvidia_device_nodes(Path::new("/dev"))'
 CAIRO_RENDERER = "GSK_RENDERER=cairo"
 DRM_BIND = re.compile(r"--dev-bind(?:-try)?\s+/dev/dri\s")
-NVIDIA_BINDS = (
-    "--ro-bind-try /sys/module/nvidia /sys/module/nvidia",
-    "--ro-bind /usr/bin/true /usr/bin/nvidia-modprobe",
-)
+NVIDIA_BINDS = ("--ro-bind-try /sys/module/nvidia /sys/module/nvidia",
+                "--ro-bind /usr/bin/true /usr/bin/nvidia-modprobe")
 USR_BIND = "--ro-bind /usr /usr"
 # A bind whose source is under /dev, other than a device bind, makes bwrap remount
 # the filesystem under /dev read-only, which SELinux refuses xdm_t: the greeter never starts.
@@ -5554,9 +4418,8 @@ DEV_SOURCE_BIND = re.compile(r"--(?:ro-)?bind(?:-try)?\s+[\"']?/dev(?:[/\"'\s]|$
 
 def uncommented(text, marker):
     """The lines of text that are not comments starting with marker."""
-    return "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith(marker)
-    )
+    return "\n".join(line for line in text.splitlines()
+                     if not line.lstrip().startswith(marker))
 
 
 def nvidia_nodes_function(text):
@@ -5565,17 +4428,15 @@ def nvidia_nodes_function(text):
     if start < 0:
         return None
     end = text.find("\n}\n", start)
-    return text[start:] if end < 0 else text[start : end + 2]
+    return text[start:] if end < 0 else text[start:end + 2]
 
 
 def renders_with_cairo(source):
     """Whether a unit of the crate holding source pins GTK to the cairo renderer."""
     for parent in source.parents:
         if (parent / "Cargo.toml").is_file():
-            return any(
-                CAIRO_RENDERER in read(unit)
-                for unit in walk(parent / "data", ".service")
-            )
+            return any(CAIRO_RENDERER in read(unit)
+                       for unit in walk(parent / "data", ".service"))
     return False
 
 
@@ -5586,22 +4447,15 @@ def wrapper_problems(relative, text):
     code = uncommented(text, "#")
     if not DRM_BIND.search(code):
         return []
-    problems = [
-        f"{relative}: binds /dev/dri but lacks '{bind}'"
-        for bind in NVIDIA_BINDS
-        if bind not in code
-    ]
-    problems += [
-        f"{relative}: '{match.group(0).strip()}' binds from /dev without "
-        f"--dev-bind: SELinux refuses xdm_t the read-only remount under /dev"
-        for match in DEV_SOURCE_BIND.finditer(code)
-    ]
-    invocation = code[code.find("exec bwrap") :]
+    problems = [f"{relative}: binds /dev/dri but lacks '{bind}'"
+                for bind in NVIDIA_BINDS if bind not in code]
+    problems += [f"{relative}: '{match.group(0).strip()}' binds from /dev without "
+                 f"--dev-bind: SELinux refuses xdm_t the read-only remount under /dev"
+                 for match in DEV_SOURCE_BIND.finditer(code)]
+    invocation = code[code.find("exec bwrap"):]
     if '"$@"' in invocation and invocation.find('"$@"') < invocation.find(USR_BIND):
-        problems.append(
-            f"{relative}: passes \"$@\" before '{USR_BIND}', which would cover "
-            f"the nvidia-modprobe mask"
-        )
+        problems.append(f"{relative}: passes \"$@\" before '{USR_BIND}', which would cover "
+                        f"the nvidia-modprobe mask")
     return problems
 
 
@@ -5618,15 +4472,10 @@ def gpu_grant_problems(root):
             relative = path.relative_to(root).as_posix()
             if path.suffix == ".rs":
                 code = uncommented(read(path), "//")
-                if (
-                    any(grant in code for grant in DRM_GRANTS)
-                    and NVIDIA_GRANT not in code
-                    and not renders_with_cairo(path)
-                ):
-                    problems.append(
-                        f"{relative}: grants the DRM nodes to Landlock but not the "
-                        f"NVIDIA nodes ({NVIDIA_GRANT})"
-                    )
+                if (any(grant in code for grant in DRM_GRANTS) and NVIDIA_GRANT not in code
+                        and not renders_with_cairo(path)):
+                    problems.append(f"{relative}: grants the DRM nodes to Landlock but not the "
+                                    f"NVIDIA nodes ({NVIDIA_GRANT})")
                 body = nvidia_nodes_function(code)
                 if body is not None:
                     copies[relative] = body
@@ -5635,16 +4484,11 @@ def gpu_grant_problems(root):
                 if text.startswith("#!"):
                     problems += wrapper_problems(relative, text)
     if len(set(copies.values())) > 1:
-        problems.append(
-            "the copies of nvidia_device_nodes differ: " + ", ".join(sorted(copies))
-        )
+        problems.append("the copies of nvidia_device_nodes differ: " + ", ".join(sorted(copies)))
     return problems
 
 
-@check(
-    "gpu-grants",
-    "Confined GPU clients reach the NVIDIA driver as well as /dev/dri (#535)",
-)
+@check("gpu-grants", "Confined GPU clients reach the NVIDIA driver as well as /dev/dri (#535)")
 def check_gpu_grants():
     r = Result()
     for problem in gpu_grant_problems(ROOT):
@@ -5662,9 +4506,7 @@ def check_gpu_grants():
 LANDLOCK_SANDBOX = "system/athanor-unit/src/sandbox.rs"
 LANDLOCK_CRATE = "system/athanor-unit/Cargo.toml"
 PATH_FD = re.compile(r"\bPathFd\b")
-PATH_FD_READ = re.compile(
-    r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)"
-)
+PATH_FD_READ = re.compile(r"PathBeneath::new\(\s*PathFd::new\([^()]*\)\??\s*,\s*AccessFs::from_read\([^()]*\)\s*,?\s*\)")
 LANDLOCK_USE = re.compile(r"\buse\s+landlock::\{[^}]*\}\s*;")
 # In sandbox.rs, outside its tests module: a rule's descriptor is `<name>.as_fd()`; a
 # public function takes its grants only as these types, so a write grant is a dirs::Checked or
@@ -5673,30 +4515,19 @@ PATH_BENEATH = re.compile(r"PathBeneath::new\(")
 PATH_BENEATH_FD = re.compile(r"PathBeneath::new\(\s*\w+\.as_fd\(\)\s*,")
 SANDBOX_PARAMETERS = {"&[&Path]", "&[Checked]", "&[CheckedNode]"}
 SANDBOX_PUB_FN = re.compile(r"\bpub\s+fn\s+(\w+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)")
-SANDBOX_OPENS = re.compile(
-    r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b"
-)
+SANDBOX_OPENS = re.compile(r"\b(path_beneath_rules|File::|OpenOptions|OwnedFd|BorrowedFd|from_raw_fd|openat)\b")
 
 
 def landlock_dependencies(manifest):
     """The dependency tables of a Cargo manifest that name the landlock crate, by its own
     name or as the `package` of a renamed one."""
-    tables = {
-        name: manifest.get(name, {})
-        for name in ("dependencies", "dev-dependencies", "build-dependencies")
-    }
+    tables = {name: manifest.get(name, {}) for name in ("dependencies", "dev-dependencies", "build-dependencies")}
     for target, spec in manifest.get("target", {}).items():
         for name in ("dependencies", "dev-dependencies", "build-dependencies"):
             tables[f"target.{target}.{name}"] = spec.get(name, {})
-    return [
-        table
-        for table, deps in tables.items()
-        if any(
-            name == "landlock"
-            or (isinstance(dep, dict) and dep.get("package") == "landlock")
-            for name, dep in deps.items()
-        )
-    ]
+    return [table for table, deps in tables.items()
+            if any(name == "landlock" or (isinstance(dep, dict) and dep.get("package") == "landlock")
+                   for name, dep in deps.items())]
 
 
 def without_tests_module(text):
@@ -5710,11 +4541,7 @@ def without_tests_module(text):
     for pos in range(match.end() - 1, len(text)):
         depth += {"{": 1, "}": -1}.get(text[pos], 0)
         if depth == 0:
-            return (
-                text[: match.start()]
-                + "\n" * text.count("\n", match.start(), pos + 1)
-                + text[pos + 1 :]
-            )
+            return text[:match.start()] + "\n" * text.count("\n", match.start(), pos + 1) + text[pos + 1:]
     return text
 
 
@@ -5722,7 +4549,6 @@ def sandbox_grant_problems(relative, code, read_grants):
     """What in athanor_unit's sandbox.rs, its tests left out, could grant a write by something
     other than a dirs::Checked or dirs::CheckedNode."""
     found = []
-
     def line(pos):
         return code.count("\n", 0, pos) + 1
 
@@ -5730,26 +4556,18 @@ def sandbox_grant_problems(relative, code, read_grants):
         if any(start <= match.start() < end for start, end in read_grants):
             continue
         # One built on PathFd is the PathFd finding below; this one is any other descriptor.
-        if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(
-            r"\s*PathFd\b", code[match.end() :]
-        ):
-            found.append(
-                f"{relative}:{line(match.start())}: a rule whose descriptor is not "
-                f"`<name>.as_fd()`; a write grant is a dirs::Checked descriptor"
-            )
+        if not PATH_BENEATH_FD.match(code, match.start()) and not re.match(r"\s*PathFd\b", code[match.end():]):
+            found.append(f"{relative}:{line(match.start())}: a rule whose descriptor is not "
+                         f"`<name>.as_fd()`; a write grant is a dirs::Checked descriptor")
     for match in SANDBOX_PUB_FN.finditer(code):
         for parameter in filter(None, (p.strip() for p in match.group(2).split(","))):
             kind = re.sub(r"\s+", "", parameter.partition(":")[2])
             if kind not in SANDBOX_PARAMETERS:
-                found.append(
-                    f"{relative}:{line(match.start())}: {match.group(1)} takes "
-                    f"`{parameter}`; a grant is one of {', '.join(sorted(SANDBOX_PARAMETERS))}"
-                )
+                found.append(f"{relative}:{line(match.start())}: {match.group(1)} takes "
+                             f"`{parameter}`; a grant is one of {', '.join(sorted(SANDBOX_PARAMETERS))}")
     for match in SANDBOX_OPENS.finditer(code):
-        found.append(
-            f"{relative}:{line(match.start())}: {match.group(1)} opens a descriptor or "
-            f"builds rules from paths; grants come from athanor_unit::dirs"
-        )
+        found.append(f"{relative}:{line(match.start())}: {match.group(1)} opens a descriptor or "
+                     f"builds rules from paths; grants come from athanor_unit::dirs")
     return found
 
 
@@ -5762,24 +4580,11 @@ def landlock_fd_problems(root):
     # Every file git would commit, not RS_DIRS: a crate under forge/tools or fuzz links landlock
     # as well as one under system, and git-ignored trees (.scratch, worktrees) are not the code.
     listed = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
-        capture_output=True,
-        text=True,
-    )
+        ["git", "-C", str(root), "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
     if listed.returncode:
         return [f"cannot list the repository files: {listed.stderr.strip()}"]
-    files = sorted(
-        {name for name in listed.stdout.split("\0") if name and (root / name).is_file()}
-    )
+    files = sorted({name for name in listed.stdout.split("\0") if name and (root / name).is_file()})
     for relative in (name for name in files if name.rsplit("/", 1)[-1] == "Cargo.toml"):
         path = root / relative
         if relative == LANDLOCK_CRATE:
@@ -5790,46 +4595,32 @@ def landlock_fd_problems(root):
             problems.append(f"{relative}: not valid TOML: {err}")
             continue
         for table in landlock_dependencies(manifest):
-            problems.append(
-                f"{relative}: [{table}] names the landlock crate; confine through "
-                f"athanor_unit::sandbox, whose grants are dirs::Checked"
-            )
+            problems.append(f"{relative}: [{table}] names the landlock crate; confine through "
+                            f"athanor_unit::sandbox, whose grants are dirs::Checked")
     for relative in (name for name in files if name.endswith(".rs")):
         path = root / relative
         text = read(path)
         allowed = []
         if relative == LANDLOCK_SANDBOX:
             allowed = [match.span() for match in PATH_FD_READ.finditer(text)]
-            allowed += [
-                match.span()
-                for match in LANDLOCK_USE.finditer(text)
-                if not re.search(r"\bPathFd\s+as\b", match.group())
-            ]
+            allowed += [match.span() for match in LANDLOCK_USE.finditer(text)
+                        if not re.search(r"\bPathFd\s+as\b", match.group())]
         if relative == LANDLOCK_SANDBOX:
-            problems += sandbox_grant_problems(
-                relative, without_tests_module(text), allowed
-            )
+            problems += sandbox_grant_problems(relative, without_tests_module(text), allowed)
         for match in PATH_FD.finditer(text):
             if any(start <= match.start() < end for start, end in allowed):
                 continue
             line = text.count("\n", 0, match.start()) + 1
             if relative == LANDLOCK_SANDBOX:
-                problems.append(
-                    f"{relative}:{line}: PathFd other than the parent of a read "
-                    f"grant; a write grant is a dirs::Checked descriptor"
-                )
+                problems.append(f"{relative}:{line}: PathFd other than the parent of a read "
+                                f"grant; a write grant is a dirs::Checked descriptor")
             else:
-                problems.append(
-                    f"{relative}:{line}: landlock's PathFd grants by path, following "
-                    f"links; grant by an athanor_unit::dirs::Checked descriptor"
-                )
+                problems.append(f"{relative}:{line}: landlock's PathFd grants by path, following "
+                                f"links; grant by an athanor_unit::dirs::Checked descriptor")
     return problems
 
 
-@check(
-    "landlock-fd",
-    "Landlock write grants go by a checked descriptor, never by path (#1052)",
-)
+@check("landlock-fd", "Landlock write grants go by a checked descriptor, never by path (#1052)")
 def check_landlock_fd():
     r = Result()
     for problem in landlock_fd_problems(ROOT):
@@ -5841,13 +4632,7 @@ def check_landlock_fd():
 PLACEHOLDER_OWNERS = {"owner", "o"}
 # Where the pipeline names its images.
 REGISTRY_DIRS = (".github/workflows", "scripts", "forge/scripts")
-REGISTRY_FILES = (
-    "Justfile",
-    "forge/Justfile",
-    "system/Justfile",
-    "system/Containerfile",
-    "flake.nix",
-)
+REGISTRY_FILES = ("Justfile", "forge/Justfile", "system/Justfile", "system/Containerfile", "flake.nix")
 # The file types that name images: workflows, scripts, recipes, container builds and Nix.
 REGISTRY_SUFFIXES = {".yml", ".yaml", ".sh", ".py", ".just", ".nix"}
 REGISTRY_NAMES = {"Justfile", "Containerfile"}
@@ -5870,27 +4655,17 @@ def registry_problems(root):
     for path in sorted(paths):
         relative = path.relative_to(root)
         # Unit test fixtures need a literal owner to prove the check reports one.
-        if (
-            not path.is_file()
-            or relative.parts[:2] == ("scripts", "tests")
-            or (
-                path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES
-            )
-        ):
+        if (not path.is_file() or relative.parts[:2] == ("scripts", "tests")
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
             continue
         for i, line in enumerate(read(path).split("\n"), 1):
             for owner in literal_owners(line):
-                problems.append(
-                    f"{relative.as_posix()}:{i}: literal registry owner {owner}; use "
-                    f"REGISTRY_HOST and the repository owner, each with a default"
-                )
+                problems.append(f"{relative.as_posix()}:{i}: literal registry owner {owner}; use "
+                                f"REGISTRY_HOST and the repository owner, each with a default")
     return problems
 
 
-@check(
-    "registry",
-    "Images come from REGISTRY_HOST and the repository owner, never a literal owner",
-)
+@check("registry", "Images come from REGISTRY_HOST and the repository owner, never a literal owner")
 def check_registry():
     r = Result()
     for problem in registry_problems(ROOT):
@@ -5904,12 +4679,9 @@ def check_registry():
 # `nixpkgs-<alias>#`, `nixpkgs?<query>#`, `flake:nixpkgs#` and `github:NixOS/nixpkgs[/<ref>]#`
 # name a source of their own.
 PINNING_DIRS = REGISTRY_DIRS + (".github/actions", "system")
-NIXPKGS_REF = re.compile(
-    r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
-    r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
-    r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+",
-    re.I,
-)
+NIXPKGS_REF = re.compile(r"(?:github:|git\+https://github\.com/)nixos/nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?:flake|indirect|registry):nixpkgs[\w./?=&-]*#[\w.+-]+"
+                         r"|(?<![\w./:+-])nixpkgs[\w./?=&-]*#[\w.+-]+", re.I)
 # Where one nix command ends: a shell separator, the -c/--command of nix shell, the next nix.
 NIX_COMMAND_BREAK = re.compile(r";|&&|\|\|?|\s(?:-c|--command)\s|(?<![\w./-])nix(?=\s)")
 
@@ -5943,33 +4715,20 @@ def pinning_problems(root):
     for path in sorted(set(paths)):
         relative = path.relative_to(root)
         # Unit test fixtures need an unpinned reference to prove the check reports one.
-        if (
-            not path.is_file()
-            or relative.parts[1:2] == ("tests",)
-            or (
-                path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES
-            )
-        ):
+        if (not path.is_file() or relative.parts[1:2] == ("tests",)
+                or (path.suffix not in REGISTRY_SUFFIXES and path.name not in REGISTRY_NAMES)):
             continue
         for i, line in logical_lines(read(path)):
             for ref in NIXPKGS_REF.finditer(line):
-                command = NIX_COMMAND_BREAK.split(line[: ref.start()])[-1]
-                if (
-                    not ref.group().startswith("nixpkgs#")
-                    or "--inputs-from " not in command
-                ):
-                    problems.append(
-                        f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
-                        f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
-                        f"nix command, so nixpkgs is flake.lock's"
-                    )
+                command = NIX_COMMAND_BREAK.split(line[:ref.start()])[-1]
+                if not ref.group().startswith("nixpkgs#") or "--inputs-from " not in command:
+                    problems.append(f"{relative.as_posix()}:{i}: {ref.group()} is not pinned; run "
+                                    f"nixpkgs#<tool> with --inputs-from <checkout> in the same "
+                                    f"nix command, so nixpkgs is flake.lock's")
     return problems
 
 
-@check(
-    "pinning",
-    "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)",
-)
+@check("pinning", "Tools come from the locked flake, never an unpinned nixpkgs# reference (PL8)")
 def check_pinning():
     r = Result()
     for problem in pinning_problems(ROOT):
@@ -5981,48 +4740,24 @@ def check_pinning():
 SPEC_SECTION = re.compile(
     r"^%(package|description|prep|generate_buildrequires|conf|build|install|check|clean|files|"
     r"changelog|pre|post|preun|postun|pretrans|posttrans|preuntrans|postuntrans|verify|"
-    r"(?:trans)?filetrigger(?:in|un|postun)|trigger(?:prein|in|un|postun))\b"
-)
-SCRIPTLETS = {
-    "pre",
-    "post",
-    "preun",
-    "postun",
-    "pretrans",
-    "posttrans",
-    "preuntrans",
-    "postuntrans",
-    "verify",
-    "triggerprein",
-    "triggerin",
-    "triggerun",
-    "triggerpostun",
-    "filetriggerin",
-    "filetriggerun",
-    "filetriggerpostun",
-    "transfiletriggerin",
-    "transfiletriggerun",
-    "transfiletriggerpostun",
-}
+    r"(?:trans)?filetrigger(?:in|un|postun)|trigger(?:prein|in|un|postun))\b")
+SCRIPTLETS = {"pre", "post", "preun", "postun", "pretrans", "posttrans", "preuntrans",
+              "postuntrans", "verify", "triggerprein", "triggerin", "triggerun", "triggerpostun",
+              "filetriggerin", "filetriggerun", "filetriggerpostun", "transfiletriggerin",
+              "transfiletriggerun", "transfiletriggerpostun"}
 # /usr and /etc, spelled out or through the macros that expand below them.
-IMAGE_PATH = (
-    r"(?:/usr|/etc)\b|%\{?_(?:sysconfdir|prefix|exec_prefix|bindir|sbindir|libdir|"
-    r"libexecdir|datadir|datarootdir|includedir|mandir|docdir|unitdir|userunitdir|"
-    r"presetdir|userpresetdir|tmpfilesdir|sysusersdir|udevrulesdir|modprobedir|"
-    r"sysctldir|environmentdir)\b"
-)
-MUTATION = re.compile(
-    r"(?:^|[\s;&|(])(?:cp|mv|install|chmod|chown|chgrp|ln|rm|mkdir|touch|tee|"
-    r"truncate|rsync|sed\s+-i\S*)\s[^;&|]*?(?:" + IMAGE_PATH + r")"
-    r"|>>?\s*(?:" + IMAGE_PATH + r")"
-)
-WEAKENING = re.compile(
-    r"\b(?:repo_)?gpgcheck\s*=\s*(?:0|false|no)\b|--nogpgcheck\b"
-    r"|%undefine\s+_(?:fortify_source|hardened_build)\b"
-    r"|%(?:define|global)\s+_(?:fortify_level|hardened_build)\s+0\b"
-    r"|-U_FORTIFY_SOURCE\b|-D_FORTIFY_SOURCE=0\b|-fno-stack-protector\b"
-    r"|-fcf-protection=none\b|-z\s*(?:norelro|execstack)\b|-no-pie\b|-fno-PIE\b"
-)
+IMAGE_PATH = (r"(?:/usr|/etc)\b|%\{?_(?:sysconfdir|prefix|exec_prefix|bindir|sbindir|libdir|"
+              r"libexecdir|datadir|datarootdir|includedir|mandir|docdir|unitdir|userunitdir|"
+              r"presetdir|userpresetdir|tmpfilesdir|sysusersdir|udevrulesdir|modprobedir|"
+              r"sysctldir|environmentdir)\b")
+MUTATION = re.compile(r"(?:^|[\s;&|(])(?:cp|mv|install|chmod|chown|chgrp|ln|rm|mkdir|touch|tee|"
+                      r"truncate|rsync|sed\s+-i\S*)\s[^;&|]*?(?:" + IMAGE_PATH + r")"
+                      r"|>>?\s*(?:" + IMAGE_PATH + r")")
+WEAKENING = re.compile(r"\b(?:repo_)?gpgcheck\s*=\s*(?:0|false|no)\b|--nogpgcheck\b"
+                       r"|%undefine\s+_(?:fortify_source|hardened_build)\b"
+                       r"|%(?:define|global)\s+_(?:fortify_level|hardened_build)\s+0\b"
+                       r"|-U_FORTIFY_SOURCE\b|-D_FORTIFY_SOURCE=0\b|-fno-stack-protector\b"
+                       r"|-fcf-protection=none\b|-z\s*(?:norelro|execstack)\b|-no-pie\b|-fno-PIE\b")
 
 
 def forge_rule_problems(root):
@@ -6042,15 +4777,11 @@ def forge_rule_problems(root):
             if header or line.lstrip().startswith("#"):
                 continue
             if section in SCRIPTLETS and MUTATION.search(line):
-                problems.append(
-                    f"{relative}:{i}: rule 2, %{section} writes under /usr or /etc: "
-                    f"install the file in %install or create it with tmpfiles.d"
-                )
+                problems.append(f"{relative}:{i}: rule 2, %{section} writes under /usr or /etc: "
+                                f"install the file in %install or create it with tmpfiles.d")
             if WEAKENING.search(line):
-                problems.append(
-                    f"{relative}:{i}: rule 3, turns off a signature check or a "
-                    f"hardening flag"
-                )
+                problems.append(f"{relative}:{i}: rule 3, turns off a signature check or a "
+                                f"hardening flag")
     return problems
 
 
@@ -6090,28 +4821,16 @@ UPSTREAM_SPECS = {
 OWN_LICENCE_EXCEPTIONS = {
     # greetd_ipc is GPL-3.0-only; the greeter binary links it, so the binary can only be
     # distributed under GPL-3.0-only terms (maintainer decision, audit 4, LIC-N02).
-    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/Cargo.toml": (
-        "GPL-3.0-only",
-        "links greetd_ipc (GPL-3.0-only)",
-        "greetd_ipc",
-    ),
-    "forge/specs/athanor-greeter-ui/athanor-greeter-ui.spec": (
-        "GPL-3.0-only",
-        "links greetd_ipc (GPL-3.0-only)",
-        "greetd_ipc",
-    ),
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/Cargo.toml":
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
+    "forge/specs/athanor-greeter-ui/athanor-greeter-ui.spec":
+        ("GPL-3.0-only", "links greetd_ipc (GPL-3.0-only)", "greetd_ipc"),
     # The toolkit is permissive so that applications outside Athanor can use it (ADR-0121,
     # doc_own_stack.md OS7).
-    "system/athanor-sal/Cargo.toml": (
-        "MIT OR Apache-2.0",
-        "permissive toolkit, ADR-0121",
-        None,
-    ),
-    "system/athanor-sal/gallery/Cargo.toml": (
-        "MIT OR Apache-2.0",
-        "the toolkit's gallery, ADR-0126",
-        None,
-    ),
+    "system/athanor-sal/Cargo.toml":
+        ("MIT OR Apache-2.0", "permissive toolkit, ADR-0121", None),
+    "system/athanor-sal/gallery/Cargo.toml":
+        ("MIT OR Apache-2.0", "the toolkit's gallery, ADR-0126", None),
 }
 # The crate whose dependency forces the greeter's exception above; a crate that depends on it
 # must be in the table with it as its dependency.
@@ -6120,26 +4839,10 @@ GPL3_ONLY_DEPENDENCY = "greetd_ipc"
 NFPM_FILES = ["flake.nix"]
 # The SPDX identifiers the repository actually uses. A new one is added here on purpose.
 SPDX_IDS = {
-    "0BSD",
-    "Apache-2.0",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "BSL-1.0",
-    "CC0-1.0",
-    "GPL-2.0-only",
-    "GPL-2.0-or-later",
-    "GPL-3.0-only",
-    "GPL-3.0-or-later",
-    "ISC",
-    "LGPL-2.0-or-later",
-    "LGPL-2.1-or-later",
-    "LGPL-3.0-or-later",
-    "MIT",
-    "MPL-2.0",
-    "Unicode-3.0",
-    "Unicode-DFS-2016",
-    "Unlicense",
-    "Zlib",
+    "0BSD", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "BSL-1.0", "CC0-1.0",
+    "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0-only", "GPL-3.0-or-later", "ISC",
+    "LGPL-2.0-or-later", "LGPL-2.1-or-later", "LGPL-3.0-or-later", "MIT", "MPL-2.0", "Unicode-3.0",
+    "Unicode-DFS-2016", "Unlicense", "Zlib",
 }
 SPDX_EXCEPTIONS = {"LLVM-exception", "Linux-syscall-note"}
 
@@ -6149,10 +4852,7 @@ def spdx_problem(expr):
     tokens = re.findall(r"\(|\)|[^\s()]+", expr)
     if not tokens:
         return "empty"
-    depth, expect = (
-        0,
-        "id",
-    )  # id: identifier or "(" ; exc: exception id ; op: operator or ")"
+    depth, expect = 0, "id"  # id: identifier or "(" ; exc: exception id ; op: operator or ")"
     for tok in tokens:
         if tok == "(":
             if expect != "id":
@@ -6185,18 +4885,8 @@ def licence_problems(root=None):
     root = Path(root or ROOT)
     out = []
     git = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "ls-files",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ],
-        capture_output=True,
-        text=True,
-    )
+        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True, text=True)
     if git.returncode:
         return [f"cannot list the repository files: {git.stderr.strip()}"]
     files = [f for f in git.stdout.split("\n") if (root / f).is_file()]
@@ -6211,10 +4901,7 @@ def licence_problems(root=None):
             if pkg is None:
                 continue
             lic = pkg.get("license")
-            want = (
-                VENDORED_CRATES.get(f.rsplit("/", 1)[0])
-                or OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
-            )
+            want = VENDORED_CRATES.get(f.rsplit("/", 1)[0]) or OWN_LICENCE_EXCEPTIONS.get(f, (OWN_LICENCE,))[0]
             if lic != want:
                 out.append(f"{f}: license = {lic!r}, expected {want!r}")
         elif name.endswith(".spec"):
@@ -6232,9 +4919,7 @@ def licence_problems(root=None):
             for n, line in enumerate(read(root / f).split("\n"), 1):
                 m = re.match(r"""^\s*license:\s*["']?([^"'\s]*)""", line)
                 if m and m.group(1) != OWN_LICENCE:
-                    out.append(
-                        f"{f}:{n}: nfpm license: {m.group(1)}, expected {OWN_LICENCE}"
-                    )
+                    out.append(f"{f}:{n}: nfpm license: {m.group(1)}, expected {OWN_LICENCE}")
     out += exception_problems(root, files)
     if not (root / "LICENSE").is_file():
         out.append("LICENSE: missing at the repository root")
@@ -6259,28 +4944,17 @@ def exception_problems(root, files):
             dependents.add(f)
     for f in sorted(dependents):
         if OWN_LICENCE_EXCEPTIONS.get(f, (None, None, None))[2] != GPL3_ONLY_DEPENDENCY:
-            out.append(
-                f"{f}: depends on {GPL3_ONLY_DEPENDENCY} (GPL-3.0-only) and has no entry in OWN_LICENCE_EXCEPTIONS"
-            )
+            out.append(f"{f}: depends on {GPL3_ONLY_DEPENDENCY} (GPL-3.0-only) and has no entry in OWN_LICENCE_EXCEPTIONS")
     for f, (_, reason, dependency) in sorted(OWN_LICENCE_EXCEPTIONS.items()):
         if not reason:
             out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry without a reason")
-        if (
-            dependency
-            and f.endswith("Cargo.toml")
-            and (root / f).is_file()
-            and f not in dependents
-        ):
-            out.append(
-                f"{f}: OWN_LICENCE_EXCEPTIONS entry, but it no longer depends on {dependency}"
-            )
+        if (dependency and f.endswith("Cargo.toml") and (root / f).is_file()
+                and f not in dependents):
+            out.append(f"{f}: OWN_LICENCE_EXCEPTIONS entry, but it no longer depends on {dependency}")
     return out
 
 
-@check(
-    "licence",
-    "own crates and specs declare GPL-3.0-or-later, upstream specs a valid SPDX expression",
-)
+@check("licence", "own crates and specs declare GPL-3.0-or-later, upstream specs a valid SPDX expression")
 def check_licence():
     r = Result()
     for problem in licence_problems():
@@ -6291,9 +4965,7 @@ def check_licence():
 CI_DOC = "docs/architecture/doc_ci.md"
 # A workflow file name, bare or under .github/workflows/; not the tail of another path such as
 # .github/actions/kvm/action.yml.
-WORKFLOW_NAME = re.compile(
-    r"(?<![\w./-])(?:\.github/workflows/)?([\w-][\w.-]*\.ya?ml)\b"
-)
+WORKFLOW_NAME = re.compile(r"(?<![\w./-])(?:\.github/workflows/)?([\w-][\w.-]*\.ya?ml)\b")
 SECRET_OR_VAR = re.compile(r"\b(?:secrets|vars)\.([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -6305,37 +4977,25 @@ def ci_problems(root):
     if not doc.is_file():
         return [f"{CI_DOC}: missing"]
     text = read(doc)
-    workflows = sorted(
-        p
-        for p in (root / ".github/workflows").glob("*.y*ml")
-        if p.suffix in (".yml", ".yaml")
-    )
+    workflows = sorted(p for p in (root / ".github/workflows").glob("*.y*ml")
+                       if p.suffix in (".yml", ".yaml"))
     present = {p.name for p in workflows}
     named = set(WORKFLOW_NAME.findall(text))
-    problems = [
-        f".github/workflows/{name}: not described in {CI_DOC}"
-        for name in sorted(present - named)
-    ]
-    problems += [
-        f"{CI_DOC}: names {name}, which is not in .github/workflows"
-        for name in sorted(named - present)
-    ]
+    problems = [f".github/workflows/{name}: not described in {CI_DOC}"
+                for name in sorted(present - named)]
+    problems += [f"{CI_DOC}: names {name}, which is not in .github/workflows"
+                 for name in sorted(named - present)]
     for path in workflows:
         seen = set()
         for i, line in enumerate(read(path).split("\n"), 1):
             for name in SECRET_OR_VAR.findall(line):
                 if name not in seen and not re.search(rf"\b{name}\b", text):
                     seen.add(name)
-                    problems.append(
-                        f"{path.relative_to(root).as_posix()}:{i}: {name} is not named in {CI_DOC}"
-                    )
+                    problems.append(f"{path.relative_to(root).as_posix()}:{i}: {name} is not named in {CI_DOC}")
     return problems
 
 
-@check(
-    "ci",
-    "every workflow, secret and variable is described in docs/architecture/doc_ci.md",
-)
+@check("ci", "every workflow, secret and variable is described in docs/architecture/doc_ci.md")
 def check_ci():
     r = Result()
     for problem in ci_problems(ROOT):
@@ -6346,8 +5006,7 @@ def check_ci():
 DECISION_FIELDS = ("id", "title", "date", "status", "issues", "areas")
 DECISION_ID = r"[A-Z0-9][A-Za-z0-9-]*"
 DECISION_STATUS = re.compile(
-    rf"^(accepted|(?:superseded|amended) by {DECISION_ID}(?:, {DECISION_ID})*)$"
-)
+    rf"^(accepted|(?:superseded|amended) by {DECISION_ID}(?:, {DECISION_ID})*)$")
 
 
 def decision_front_matter(text):
@@ -6389,9 +5048,7 @@ def decision_problems(root=None):
             records[id_] = (name, fm.get("status", ""), fm.get("title", "").strip('"'))
         status = fm.get("status")
         if status and not DECISION_STATUS.match(status):
-            out.append(
-                f"{name}: status '{status}' is not accepted, superseded by <id> or amended by <id>"
-            )
+            out.append(f"{name}: status '{status}' is not accepted, superseded by <id> or amended by <id>")
         for h in ("Context", "Decision", "Consequences"):
             if f"\n## {h}\n" not in read(f):
                 out.append(f"{name}: missing section '## {h}'")
@@ -6405,9 +5062,7 @@ def decision_problems(root=None):
         return out
     listed = re.findall(
         r"^\| ([^|\s]+) \| (\d{4}) \| \[([^\]]*)\]\(([^)]+)\) \| ([^|]*?) \|",
-        read(readme),
-        re.M,
-    )
+        read(readme), re.M)
     index_files = [row[3] for row in listed]
     for f in files:
         if f.name not in index_files:
@@ -6428,10 +5083,7 @@ def decision_problems(root=None):
     return out
 
 
-@check(
-    "decisions",
-    "decision records have valid front matter, unique ids, a matching README index and existing targets",
-)
+@check("decisions", "decision records have valid front matter, unique ids, a matching README index and existing targets")
 def check_decisions():
     r = Result()
     for problem in decision_problems():
@@ -6620,9 +5272,7 @@ def service_problems(files):
     return problems
 
 
-@check(
-    "services", "Every shipped service sets NoNewPrivileges or a capability allow-list"
-)
+@check("services", "Every shipped service sets NoNewPrivileges or a capability allow-list")
 def check_services():
     r = Result()
     listed = subprocess.run(
@@ -6720,9 +5370,7 @@ SESSION_TIME_KEYS = {"RestartSec", "RestartMaxDelaySec", "StartLimitIntervalSec"
 # and why. An entry that no longer matches a finding fails the check, so the list cannot
 # outlive its reasons, and it covers that finding only: a new divergence of the same unit fails.
 SN3_CITE = "(doc_session.md, SN3)"
-NOT_THE_TARGET = (
-    f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
-)
+NOT_THE_TARGET = f"WantedBy=graphical-session.target, not athanor-session.target {SN3_CITE}"
 ACTIVATED_INSTALL = f"D-Bus-activated, so no [Install] {SN3_CITE}"
 ACTIVATED_PRESET = f"D-Bus-activated, so no user preset enabling it {SN3_CITE}"
 SCRIPT_STARTED = (
@@ -6731,58 +5379,33 @@ SCRIPT_STARTED = (
 )
 SURFACE_WANTS = "the surface class of doc_session.md, SN6, wants"
 SESSION_EXEMPT = {
-    (
-        "athanor-skel-sync.service",
-        f"no PartOf=graphical-session.target {SN3_CITE}",
-    ): "SN13 step 1 does not list it",
-    (
-        "athanor-skel-sync.service",
-        NOT_THE_TARGET,
-    ): "the target wants it; SN13 step 1 does not list it",
-    (
-        "cosmic-osd.service",
-        NOT_THE_TARGET,
-    ): "the target wants it; SN13 step 1 does not list it",
-    (
-        "cosmic-settings-daemon.service",
-        NOT_THE_TARGET,
-    ): "the target wants it; SN13 step 1 does not list it",
-    (
-        "athanor-lock.service",
-        f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}",
-    ): "installed and not enabled until its preset at the switch (doc_lock_and_prompts.md, LP18 step 3)",
-    (
-        "athanor-launcher.service",
-        ACTIVATED_INSTALL,
-    ): "enabled by hand until the switch (doc_launcher.md, LA12)",
-    (
-        "athanor-control-center.service",
-        ACTIVATED_INSTALL,
-    ): "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
+    ("athanor-skel-sync.service", f"no PartOf=graphical-session.target {SN3_CITE}"):
+        "SN13 step 1 does not list it",
+    ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("athanor-lock.service", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}"):
+        "installed and not enabled until its preset at the switch (doc_lock_and_prompts.md, LP18 step 3)",
+    ("athanor-launcher.service", ACTIVATED_INSTALL):
+        "enabled by hand until the switch (doc_launcher.md, LA12)",
+    ("athanor-control-center.service", ACTIVATED_INSTALL):
+        "[Install] kept for a preset that disables it (doc_control_center.md, CC2)",
     (
         "athanor-control-center-shortcut.service",
         f"headless, so neither After= nor Requisite=athanor-desktop.service {SN3_CITE}",
     ): "SN6 names no class for it, and SN3 does not say whether it connects to the compositor",
-    (
-        "athanor-update-notify.service",
-        f"RestartSec=30, {SURFACE_WANTS} 0.1",
-    ): "SN13 step 1 changes only its [Install]",
-    (
-        "athanor-update-notify.service",
-        f"StartLimitBurst=(unset), {SURFACE_WANTS} 10",
-    ): "SN13 step 1 changes only its [Install]",
-    (
-        "athanor-update-notify.service",
-        f"StartLimitIntervalSec=(unset), {SURFACE_WANTS} 600",
-    ): "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"RestartSec=30, {SURFACE_WANTS} 0.1"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitBurst=(unset), {SURFACE_WANTS} 10"):
+        "SN13 step 1 changes only its [Install]",
+    ("athanor-update-notify.service", f"StartLimitIntervalSec=(unset), {SURFACE_WANTS} 600"):
+        "SN13 step 1 changes only its [Install]",
     (
         "xdg-desktop-portal-athanor.service",
         f"connects to the compositor, so After= and Requisite=athanor-desktop.service {SN3_CITE}",
     ): "its dialogs connect to the compositor (doc_portal.md); SN13 step 1 does not list it",
-    (
-        "xdg-desktop-portal-athanor.service",
-        "Restart=on-failure, the helper class of doc_session.md, SN6, wants no",
-    ): "until doc_portal.md PT3's next revision (doc_session.md, section 3)",
+    ("xdg-desktop-portal-athanor.service", "Restart=on-failure, the helper class of doc_session.md, SN6, wants no"):
+        "until doc_portal.md PT3's next revision (doc_session.md, section 3)",
 }
 
 
@@ -6812,16 +5435,7 @@ def unit_names(pairs, key):
 
 def time_span(value):
     """A systemd time span in seconds (systemd.time(7)); a bare number is seconds."""
-    scale = {
-        "us": 1e-6,
-        "ms": 1e-3,
-        "": 1,
-        "s": 1,
-        "sec": 1,
-        "m": 60,
-        "min": 60,
-        "h": 3600,
-    }
+    scale = {"us": 1e-6, "ms": 1e-3, "": 1, "s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600}
     parts = re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]*)", value)
     if not parts or "".join(n + u for n, u in parts) != value.replace(" ", ""):
         return None
@@ -6841,36 +5455,16 @@ def session_unit_problems(units, enabled):
     def fail(unit, rule, message):
         found.append(((unit, rule), message))
 
-    for unit in sorted(
-        units.keys()
-        - SESSION_UNITS.keys()
-        - NOT_SESSION_UNITS.keys()
-        - {SESSION_TARGET}
-    ):
-        fail(
-            unit,
-            "class",
-            "a shipped user unit with no entry in SESSION_UNITS (doc_session.md, SN6)",
-        )
-    for unit in sorted(
-        (SESSION_UNITS.keys() | NOT_SESSION_UNITS.keys() | {SESSION_TARGET})
-        - units.keys()
-    ):
+    for unit in sorted(units.keys() - SESSION_UNITS.keys() - NOT_SESSION_UNITS.keys() - {SESSION_TARGET}):
+        fail(unit, "class", "a shipped user unit with no entry in SESSION_UNITS (doc_session.md, SN6)")
+    for unit in sorted((SESSION_UNITS.keys() | NOT_SESSION_UNITS.keys() | {SESSION_TARGET}) - units.keys()):
         fail(unit, "class", "listed in SESSION_UNITS but not shipped; remove the entry")
 
     target = unit_section(units.get(SESSION_TARGET, ""), "Unit")
     if "graphical-session.target" not in unit_names(target, "BindsTo"):
-        fail(
-            SESSION_TARGET,
-            "order",
-            "no BindsTo=graphical-session.target (doc_session.md, SN3)",
-        )
+        fail(SESSION_TARGET, "order", "no BindsTo=graphical-session.target (doc_session.md, SN3)")
     if "xdg-desktop-autostart.target" not in unit_names(target, "Before"):
-        fail(
-            SESSION_TARGET,
-            "order",
-            "not Before=xdg-desktop-autostart.target (doc_session.md, SN4)",
-        )
+        fail(SESSION_TARGET, "order", "not Before=xdg-desktop-autostart.target (doc_session.md, SN4)")
     pulled = unit_names(target, "Wants") | unit_names(target, "Requires")
 
     for unit, (cls, graphical, start) in sorted(SESSION_UNITS.items()):
@@ -6880,55 +5474,28 @@ def session_unit_problems(units, enabled):
         service = unit_section(units[unit], "Service")
         install = unit_section(units[unit], "Install")
         if "graphical-session.target" not in unit_names(head, "PartOf"):
-            fail(
-                unit,
-                "binding",
-                "no PartOf=graphical-session.target (doc_session.md, SN3)",
-            )
+            fail(unit, "binding", "no PartOf=graphical-session.target (doc_session.md, SN3)")
 
         wanted_by = unit_names(install, "WantedBy")
         if wanted_by - {SESSION_TARGET}:
-            fail(
-                unit,
-                "install",
-                f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)",
-            )
+            fail(unit, "install", f"WantedBy={' '.join(sorted(wanted_by))}, not {SESSION_TARGET} (doc_session.md, SN3)")
         if start == "preset" and (wanted_by != {SESSION_TARGET} or unit not in enabled):
-            fail(
-                unit,
-                "install",
-                f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)",
-            )
+            fail(unit, "install", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset (doc_session.md, SN3)")
         if start == "activated" and install:
             fail(unit, "install", ACTIVATED_INSTALL)
         if start == "activated" and unit in enabled:
             fail(unit, "install", ACTIVATED_PRESET)
         if start == "target" and unit not in pulled:
-            fail(
-                unit,
-                "install",
-                f"marked as started by {SESSION_TARGET}, which neither wants nor requires it",
-            )
+            fail(unit, "install", f"marked as started by {SESSION_TARGET}, which neither wants nor requires it")
         if start == "script" and (install or unit in enabled or unit in pulled):
             fail(unit, "install", SCRIPT_STARTED)
 
         gate = "athanor-desktop.service"
-        edges = (
-            gate in unit_names(head, "After"),
-            gate in unit_names(head, "Requisite"),
-        )
+        edges = (gate in unit_names(head, "After"), gate in unit_names(head, "Requisite"))
         if graphical and edges != (True, True):
-            fail(
-                unit,
-                "edge",
-                f"connects to the compositor, so After= and Requisite={gate} (doc_session.md, SN3)",
-            )
+            fail(unit, "edge", f"connects to the compositor, so After= and Requisite={gate} (doc_session.md, SN3)")
         if not graphical and any(edges):
-            fail(
-                unit,
-                "edge",
-                f"headless, so neither After= nor Requisite={gate} (doc_session.md, SN3)",
-            )
+            fail(unit, "edge", f"headless, so neither After= nor Requisite={gate} (doc_session.md, SN3)")
 
         # The start limits belong to [Unit], the rest to [Service] (systemd.unit(5), systemd.service(5)).
         settings = dict(service)
@@ -6940,31 +5507,18 @@ def session_unit_problems(units, enabled):
             else:
                 same = have == want
             if not same:
-                fail(
-                    unit,
-                    "class",
-                    f"{key}={have if have is not None else '(unset)'}, the {cls} class of doc_session.md, SN6, wants {want if want is not None else 'it unset'}",
-                )
+                fail(unit, "class", f"{key}={have if have is not None else '(unset)'}, the {cls} class of doc_session.md, SN6, wants {want if want is not None else 'it unset'}")
 
     bar = unit_section(units.get("athanor-bar.service", ""), "Unit")
-    if not {"athanor-shelld.service"} <= unit_names(bar, "Wants") & unit_names(
-        bar, "After"
-    ):
-        fail(
-            "athanor-bar.service",
-            "order",
-            "does not want athanor-shelld.service and start after it (doc_session.md, SN4)",
-        )
+    if not {"athanor-shelld.service"} <= unit_names(bar, "Wants") & unit_names(bar, "After"):
+        fail("athanor-bar.service", "order", "does not want athanor-shelld.service and start after it (doc_session.md, SN4)")
     return found
 
 
 def session_exempt_problems(found):
     """The findings SESSION_EXEMPT does not name, and its entries no finding matches."""
     failing = {(key[0], message) for key, message in found}
-    problems = [
-        f"{unit}: {message}"
-        for unit, message in sorted(failing - SESSION_EXEMPT.keys())
-    ]
+    problems = [f"{unit}: {message}" for unit, message in sorted(failing - SESSION_EXEMPT.keys())]
     problems += [
         f"{unit}: exempt in SESSION_EXEMPT from '{finding}' but meets the rule; remove the entry"
         for unit, finding in sorted(SESSION_EXEMPT.keys() - failing)
@@ -6981,13 +5535,9 @@ FILES_END = re.compile(
 # What may precede a path in %files: %attr(), %config, %config(), %verify(), %defattr().
 FILES_DIRECTIVES = re.compile(r"^(?:%(?:attr|config|verify|defattr)(?:\([^)]*\))?\s+)+")
 USER_UNIT_DIR = r"(?:/usr/lib/systemd/user|%\{_userunitdir\})"
-USER_UNIT_PATH = re.compile(
-    USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))"
-)
+USER_UNIT_PATH = re.compile(USER_UNIT_DIR + r"/([^/\s*?\[\]%]+\.(?:service|target|timer|socket))")
 # A drop-in directory, or a file in one, is not a unit: its unit is shipped elsewhere.
-USER_DROPIN_PATH = re.compile(
-    USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?"
-)
+USER_DROPIN_PATH = re.compile(USER_UNIT_DIR + r"/[^/\s*?\[\]%]+\.d(?:/[^/\s*?\[\]%]+\.conf)?")
 USER_UNIT_MENTION = re.compile(r"systemd/user(?![-\w])|_userunitdir|systemd_user")
 
 
@@ -7021,20 +5571,11 @@ def shipped_user_units(root):
     units, problems = {}, []
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
         names, unclassified = spec_user_units(read(spec))
-        problems += [
-            f"{rel(spec)}: cannot tell which user unit '{line}' ships; list each unit as a plain path, optionally after %attr(), %config or %verify()"
-            for line in unclassified
-        ]
+        problems += [f"{rel(spec)}: cannot tell which user unit '{line}' ships; list each unit as a plain path, optionally after %attr(), %config or %verify()" for line in unclassified]
         for name in names:
-            sources = [
-                p
-                for p in walk(spec.parent, name)
-                if p.name == name and "skel" not in p.parts
-            ]
+            sources = [p for p in walk(spec.parent, name) if p.name == name and "skel" not in p.parts]
             if len(sources) != 1:
-                problems.append(
-                    f"{rel(spec)}: ships {name}, found {len(sources)} source files of that name"
-                )
+                problems.append(f"{rel(spec)}: ships {name}, found {len(sources)} source files of that name")
                 continue
             units[name] = read(sources[0])
     return units, problems
@@ -7050,14 +5591,8 @@ def shipped_user_state_directories(root):
     names = set()
     for spec in sorted(root.glob("forge/specs/*/*.spec")):
         text = read(spec)
-        files = (
-            text.split("%files", 1)[1].split("%changelog", 1)[0]
-            if "%files" in text
-            else ""
-        )
-        for conf in sorted(
-            (spec.parent / "SOURCES/usr/share/user-tmpfiles.d").glob("*.conf")
-        ):
+        files = text.split("%files", 1)[1].split("%changelog", 1)[0] if "%files" in text else ""
+        for conf in sorted((spec.parent / "SOURCES/usr/share/user-tmpfiles.d").glob("*.conf")):
             if f"/usr/share/user-tmpfiles.d/{conf.name}" not in files:
                 continue
             for line in read(conf).splitlines():
@@ -7086,10 +5621,7 @@ def state_link_problems(units, created):
     ]
 
 
-@check(
-    "session-units",
-    "The shipped user units follow doc_session.md's binding, order and crash classes",
-)
+@check("session-units", "The shipped user units follow doc_session.md's binding, order and crash classes")
 def check_session_units():
     r = Result()
     units, problems = shipped_user_units(ROOT)
@@ -7118,38 +5650,19 @@ NAMESPACING_PROPERTY = re.compile(
 # spellings, ProtectProc=default or ProcSubset=all.
 NAMESPACING_OFF = ("", "0", "no", "n", "false", "f", "off", "default", "all")
 # The command lines of a unit, each a program its namespaces hold.
-UNIT_EXEC = re.compile(
-    r"(Exec(?:Start(?:Pre|Post)?|Condition|Reload|Stop(?:Post)?))\s*=\s*[-@:+!]*(\S+)"
-)
+UNIT_EXEC = re.compile(r"(Exec(?:Start(?:Pre|Post)?|Condition|Reload|Stop(?:Post)?))\s*=\s*[-@:+!]*(\S+)")
 # A read of a process's executable: any mention of `admit_user_unit` but its definition, an
 # import under another name included, or a path `/proc/<pid>/exe` built in code.
-EXE_READING_ADMISSION = re.compile(
-    r"(?<!fn )\badmit_user_unit\b|/proc/\{[^}]*\}/exe\b|\.join\(\s*\"exe\"\s*\)"
-)
+EXE_READING_ADMISSION = re.compile(r"(?<!fn )\badmit_user_unit\b|/proc/\{[^}]*\}/exe\b|\.join\(\s*\"exe\"\s*\)")
 # The namespaced user units' programs that are no binary of a crate here, each with why it
 # admits no peer by its executable. A wrapper (env, sh -c, systemd-run) is listed only with its
 # unit, so a wrapper that starts one of this repository's daemons is never passed by name.
 FOREIGN_PROGRAMS = {
-    (
-        "athanor-launcher-rates.service",
-        "mkdir",
-    ): "an ExecStartPre= that creates qalculate's directory",
-    (
-        "athanor-launcher-rates.service",
-        "qalc",
-    ): "Qalculate's command line refreshes the currency rates and accepts no connection",
-    (
-        "athanor-skel-sync.service",
-        "bash",
-    ): "a script that copies /etc/skel once and accepts no connection",
-    (
-        "cosmic-osd.service",
-        "cosmic-osd",
-    ): "upstream COSMIC's program; no code of this repository runs in it",
-    (
-        "cosmic-settings-daemon.service",
-        "cosmic-settings-daemon",
-    ): "upstream COSMIC's program; no code of this repository runs in it",
+    ("athanor-launcher-rates.service", "mkdir"): "an ExecStartPre= that creates qalculate's directory",
+    ("athanor-launcher-rates.service", "qalc"): "Qalculate's command line refreshes the currency rates and accepts no connection",
+    ("athanor-skel-sync.service", "bash"): "a script that copies /etc/skel once and accepts no connection",
+    ("cosmic-osd.service", "cosmic-osd"): "upstream COSMIC's program; no code of this repository runs in it",
+    ("cosmic-settings-daemon.service", "cosmic-settings-daemon"): "upstream COSMIC's program; no code of this repository runs in it",
 }
 # A library file whose exe read is the body of a function matched by name at each call site, so
 # depending on its crate reads nothing: athanor-unit's peer.rs, the read of admit_user_unit.
@@ -7171,14 +5684,8 @@ def crate_programs(root):
             bins = {name} | {b.get("name") for b in package.get("bin", [])}
             bins |= {f.stem for f in (manifest.parent / "src" / "bin").glob("*.rs")}
             bins.discard(None)
-            tables = [package.get("dependencies", {})] + [
-                t.get("dependencies", {}) for t in package.get("target", {}).values()
-            ]
-            deps = {
-                (spec.get("package", key) if isinstance(spec, dict) else key)
-                for table in tables
-                for key, spec in table.items()
-            }
+            tables = [package.get("dependencies", {})] + [t.get("dependencies", {}) for t in package.get("target", {}).values()]
+            deps = {(spec.get("package", key) if isinstance(spec, dict) else key) for table in tables for key, spec in table.items()}
             reads = []
             for source in walk(manifest.parent / "src", ".rs"):
                 for number, line in enumerate(read(source).split("\n"), 1):
@@ -7188,27 +5695,11 @@ def crate_programs(root):
 
     def reads_of(name, seen):
         bins, deps, reads = crates[name]
-        own = next(
-            (
-                f"{path}:{number}"
-                for path, number in reads
-                if not seen or path not in READ_BY_CALL
-            ),
-            None,
-        )
+        own = next((f"{path}:{number}" for path, number in reads if not seen or path not in READ_BY_CALL), None)
         if own:
             return own
         seen.add(name)
-        return next(
-            (
-                r
-                for d in sorted(deps)
-                if d in crates and d not in seen
-                for r in [reads_of(d, seen)]
-                if r
-            ),
-            None,
-        )
+        return next((r for d in sorted(deps) if d in crates and d not in seen for r in [reads_of(d, seen)] if r), None)
 
     programs = {}
     for name, (bins, _, _) in crates.items():
@@ -7222,11 +5713,7 @@ def user_unit_texts(root, units):
     """{unit: text} of the shipped user units with every drop-in of `<unit>.d/*.conf` appended."""
     texts = dict(units)
     for conf in walk(root / "forge" / "specs", ".conf"):
-        if (
-            conf.parent.name.endswith(".service.d")
-            and conf.parts[-4:-2] == ("systemd", "user")
-            and "skel" not in conf.parts
-        ):
+        if conf.parent.name.endswith(".service.d") and conf.parts[-4:-2] == ("systemd", "user") and "skel" not in conf.parts:
             unit = conf.parent.name[:-2]
             texts[unit] = texts.get(unit, "") + "\n" + read(conf)
     return texts
@@ -7239,14 +5726,7 @@ def peer_admission_problems(units, programs):
     problems = []
     for unit, text in sorted(units.items()):
         lines = [line.strip() for line in text.split("\n")]
-        namespaced = next(
-            (
-                m
-                for m in map(NAMESPACING_PROPERTY.match, lines)
-                if m and m.group(2).strip().lower() not in NAMESPACING_OFF
-            ),
-            None,
-        )
+        namespaced = next((m for m in map(NAMESPACING_PROPERTY.match, lines) if m and m.group(2).strip().lower() not in NAMESPACING_OFF), None)
         if not namespaced:
             continue
         for line in lines:
@@ -7256,28 +5736,19 @@ def peer_admission_problems(units, programs):
             program = m.group(2).rsplit("/", 1)[-1]
             if program in programs:
                 if programs[program]:
-                    problems.append(
-                        f"{unit}: runs {program}, which reads a peer's executable at {programs[program]}, and sets {namespaced.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer by control group (athanor_unit::peer::admit_user_unit_cgroup, doc_session_daemons.md SD17)"
-                    )
+                    problems.append(f"{unit}: runs {program}, which reads a peer's executable at {programs[program]}, and sets {namespaced.group(1)}=: the unit's user namespace cannot read the peer's /proc/<pid>/exe, so every peer is refused. Admit the peer by control group (athanor_unit::peer::admit_user_unit_cgroup, doc_session_daemons.md SD17)")
             elif (unit, program) not in FOREIGN_PROGRAMS:
-                problems.append(
-                    f"{unit}: sets {namespaced.group(1)}= and its {m.group(1)}= runs {m.group(2)}, which is neither a binary of a crate under system/ or forge/specs nor in FOREIGN_PROGRAMS: say which it is"
-                )
+                problems.append(f"{unit}: sets {namespaced.group(1)}= and its {m.group(1)}= runs {m.group(2)}, which is neither a binary of a crate under system/ or forge/specs nor in FOREIGN_PROGRAMS: say which it is")
     return problems
 
 
-@check(
-    "peer-exe",
-    "A user unit with namespacing properties runs no program that reads its peer's executable",
-)
+@check("peer-exe", "A user unit with namespacing properties runs no program that reads its peer's executable")
 def check_peer_exe():
     r = Result()
     units, problems = shipped_user_units(ROOT)
     for problem in problems:
         r.fail(problem)
-    for problem in peer_admission_problems(
-        user_unit_texts(ROOT, units), crate_programs(ROOT)
-    ):
+    for problem in peer_admission_problems(user_unit_texts(ROOT, units), crate_programs(ROOT)):
         r.fail(problem)
     for (unit, program), why in FOREIGN_PROGRAMS.items():
         r.note(f"foreign: {unit}: {program}: {why}")
@@ -7287,28 +5758,7 @@ def check_peer_exe():
 # The polkit model (doc_threat_model.md TM9, maintainer decision T3 of 2026-10-07): every
 # action the repository declares in a .policy file or overrides in a polkit .rules file has
 # one row in TM9's table, with its result for the active session.
-POLKIT_RULES_WORDS = {
-    "polkit",
-    "addRule",
-    "addAdminRule",
-    "Result",
-    "function",
-    "if",
-    "else",
-    "return",
-    "action",
-    "id",
-    "subject",
-    "user",
-    "groups",
-    "isInGroup",
-    "isInNetGroup",
-    "local",
-    "active",
-    "session",
-    "seat",
-    "pid",
-}
+POLKIT_RULES_WORDS = {"polkit", "addRule", "addAdminRule", "Result", "function", "if", "else", "return", "action", "id", "subject", "user", "groups", "isInGroup", "isInNetGroup", "local", "active", "session", "seat", "pid"}
 POLKIT_MODEL_DOC = "docs/architecture/doc_threat_model.md"
 POLKIT_RESULTS = {
     "no",
@@ -7431,12 +5881,12 @@ def polkit_rules_declared(path, text, cannot):
             "outside the identifiers a rule is read with"
         )
     if re.sub(r"\x00\d+\x00|[A-Za-z_]+", "", code).strip(" \t\r\n(){}[].,;=|&"):
-        return unreadable(
-            "it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &"
-        )
+        return unreadable("it uses characters other than identifiers, strings and ( ) { } [ ] . , ; = | &")
     if any(len(run) not in (2, 3) for run in re.findall(r"=+", code)):
         return unreadable("it assigns: only == and === are read")
-    members = r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
+    members = (
+        r"\bpolkit\s*\.\s*(?:addRule|addAdminRule|Result\s*\.\s*[A-Z_]+)\b"
+    )
     if len(re.findall(r"\bpolkit\b", code)) != len(re.findall(members, code)):
         return unreadable(
             "polkit is used other than through polkit.addRule, polkit.Result.X and its other members"
@@ -7473,11 +5923,7 @@ def polkit_rules_declared(path, text, cannot):
             for r in re.findall(r"\bpolkit\s*\.\s*Result\s*\.\s*([A-Z_]+)", block)
         }
         returns = len(re.findall(r"\breturn\b", block))
-        if returns != len(
-            re.findall(
-                r"\breturn\s+polkit\s*\.\s*Result\s*\.\s*[A-Z_]+\s*[;}]", block + ";"
-            )
-        ):
+        if returns != len(re.findall(r"\breturn\s+polkit\s*\.\s*Result\s*\.\s*[A-Z_]+\s*[;}]", block + ";")):
             ids = None
         if not ids or not results or re.search(r"\b(?:action|function)\b", block):
             return unreadable(
@@ -7609,25 +6055,9 @@ COMPONENTS = "docs/architecture/components.toml"
 COMPONENT_PARENTS = ("", "system", "forge", "forge/specs", "scripts")
 # Children of COMPONENT_PARENTS that hold components instead of being one.
 COMPONENT_CONTAINERS = {"docs", "forge", "forge/specs", "scripts", "system"}
-COMPONENT_KINDS = {
-    "crate",
-    "rpm spec",
-    "script tool",
-    "config",
-    "image",
-    "tests",
-    "site",
-}
-COMPONENT_AREAS = {
-    "kernel",
-    "build-ci",
-    "signing-update",
-    "security",
-    "shell",
-    "apps",
-    "platform",
-    "docs",
-}
+COMPONENT_KINDS = {"crate", "rpm spec", "script tool", "config", "image", "tests", "site"}
+COMPONENT_AREAS = {"kernel", "build-ci", "signing-update", "security", "shell", "apps",
+                   "platform", "docs"}
 COMPONENT_STATUSES = {"specified", "out-of-1.0", "missing"}
 
 
@@ -7640,11 +6070,8 @@ def component_dirs(files):
         for parent in COMPONENT_PARENTS:
             depth = len(parent.split("/")) if parent else 0
             if len(parts) > depth + 1 and "/".join(parts[:depth]) == parent:
-                child = "/".join(parts[: depth + 1])
-                if (
-                    not parts[depth].startswith(".")
-                    and child not in COMPONENT_CONTAINERS
-                ):
+                child = "/".join(parts[:depth + 1])
+                if not parts[depth].startswith(".") and child not in COMPONENT_CONTAINERS:
                     dirs.add(child)
     return dirs
 
@@ -7656,21 +6083,15 @@ def entry_problems(root, entry):
     if not (root / path).exists():
         out.append("the path does not exist")
     if entry.get("kind") not in COMPONENT_KINDS:
-        out.append(
-            f"kind {entry.get('kind')!r} is not one of {sorted(COMPONENT_KINDS)}"
-        )
+        out.append(f"kind {entry.get('kind')!r} is not one of {sorted(COMPONENT_KINDS)}")
     if entry.get("area") not in COMPONENT_AREAS:
-        out.append(
-            f"area {entry.get('area')!r} is not one of {sorted(COMPONENT_AREAS)}"
-        )
+        out.append(f"area {entry.get('area')!r} is not one of {sorted(COMPONENT_AREAS)}")
     if not entry.get("purpose"):
         out.append("no purpose")
     status = entry.get("status")
     if status not in COMPONENT_STATUSES:
         out.append(f"status {status!r} is not one of {sorted(COMPONENT_STATUSES)}")
-    if status == "out-of-1.0" and not (
-        isinstance(entry.get("issue"), int) and entry["issue"] > 0
-    ):
+    if status == "out-of-1.0" and not (isinstance(entry.get("issue"), int) and entry["issue"] > 0):
         out.append("out-of-1.0 without an issue number")
     if status == "specified" and not (entry.get("spec") and entry.get("item")):
         out.append("specified without both spec and item")
@@ -7689,11 +6110,8 @@ def coverage_problems(root=None, files=None):
     without a specification (status missing) is a warning, not a failure."""
     root = Path(root or ROOT)
     if files is None:
-        git = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "--cached", "-z"],
-            capture_output=True,
-            text=True,
-        )
+        git = subprocess.run(["git", "-C", str(root), "ls-files", "--cached", "-z"],
+                             capture_output=True, text=True)
         if git.returncode:
             return [f"cannot list the repository files: {git.stderr.strip()}"], []
         files = [f for f in git.stdout.split("\0") if f]
@@ -7722,22 +6140,15 @@ def coverage_problems(root=None, files=None):
         problems.append(f"{d}: component directory without an entry in {COMPONENTS}")
     notes = []
     if missing:
-        notes.append(
-            f"{len(missing)} components have no specification (status missing): "
-            + ", ".join(missing)
-        )
+        notes.append(f"{len(missing)} components have no specification (status missing): "
+                     + ", ".join(missing))
     if pending:
-        notes.append(
-            f"{len(pending)} entries cite a specification not merged here yet: "
-            + ", ".join(pending)
-        )
+        notes.append(f"{len(pending)} entries cite a specification not merged here yet: "
+                     + ", ".join(pending))
     return problems, notes
 
 
-@check(
-    "coverage",
-    "Every component has an inventory entry, and every entry a spec or an issue",
-)
+@check("coverage", "Every component has an inventory entry, and every entry a spec or an issue")
 def check_coverage():
     r = Result()
     problems, notes = coverage_problems()
@@ -7748,18 +6159,8 @@ def check_coverage():
     return r
 
 
-BUS_API_MESH_IDENT = re.compile(
-    r"\b(?:mesh\w*|\w*mesh\w*|NodeIdentityPayload|AiDecisionPayload|KernelTelemetry)\b",
-    re.I,
-)
-BUS_API_DENIED_DEPS = (
-    "x25519-dalek",
-    "ed25519-dalek",
-    "ring",
-    "rand_core",
-    "zeroize",
-    "subtle",
-)
+BUS_API_MESH_IDENT = re.compile(r"\b(?:mesh\w*|\w*mesh\w*|NodeIdentityPayload|AiDecisionPayload|KernelTelemetry)\b", re.I)
+BUS_API_DENIED_DEPS = ("x25519-dalek", "ed25519-dalek", "ring", "rand_core", "zeroize", "subtle")
 BUS_API_DEP_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
 
 
@@ -7777,15 +6178,9 @@ def bus_api_residue(root):
         if f.parent == crate / "src" and f.name in ("lib.rs", "polkit.rs"):
             pass
         elif f.parent == crate / "src" or "src" in f.relative_to(crate).parts:
-            problems.append(
-                f"{rel}: module outside lib.rs and polkit.rs (ADR-0103 D10)"
-            )
-        for m in sorted(
-            {m.group(0) for m in BUS_API_MESH_IDENT.finditer(f.read_text())}
-        ):
-            problems.append(
-                f"{rel}: {m} is mesh or post-quantum residue (ADR-0103 D10)"
-            )
+            problems.append(f"{rel}: module outside lib.rs and polkit.rs (ADR-0103 D10)")
+        for m in sorted({m.group(0) for m in BUS_API_MESH_IDENT.finditer(f.read_text())}):
+            problems.append(f"{rel}: {m} is mesh or post-quantum residue (ADR-0103 D10)")
     manifest = crate / "Cargo.toml"
     if manifest.exists():
         data = tomllib.loads(manifest.read_text())
@@ -7794,16 +6189,11 @@ def bus_api_residue(root):
             tables += [target.get(t, {}) for t in BUS_API_DEP_TABLES]
         for dep in sorted({d for t in tables for d in t}):
             if dep in BUS_API_DENIED_DEPS or dep.startswith("pqcrypto"):
-                problems.append(
-                    f"{manifest.relative_to(root)}: dependency {dep} is post-quantum residue (ADR-0103 D10)"
-                )
+                problems.append(f"{manifest.relative_to(root)}: dependency {dep} is post-quantum residue (ADR-0103 D10)")
     return problems
 
 
-@check(
-    "bus-api-residue",
-    "athanor-bus-api holds no mesh or post-quantum residue (ADR-0103 D10)",
-)
+@check("bus-api-residue", "athanor-bus-api holds no mesh or post-quantum residue (ADR-0103 D10)")
 def check_bus_api_residue():
     r = Result()
     for problem in bus_api_residue(ROOT):
@@ -7819,12 +6209,8 @@ ZBUS_INTERFACE = re.compile(r"#\[(?:zbus::)?interface\b")
 ZBUS_CONNECTION_ARG = re.compile(r"#\[zbus\(connection\)\]\s*(\w+)\s*:")
 # What a method may do with its connection without waiting for a reply: build an emitter, name
 # the object server, emit.
-ZBUS_NO_REPLY_BEFORE = re.compile(
-    r"(?:SignalEmitter::new|\bemit_\w+|\bbar_emitter\([^()]*,)\s*\(?\s*&?$"
-)
-ZBUS_NO_REPLY_AFTER = re.compile(
-    r"\s*\.(?:object_server|unique_name|emit_signal|request_name|release_name)\b"
-)
+ZBUS_NO_REPLY_BEFORE = re.compile(r"(?:SignalEmitter::new|\bemit_\w+|\bbar_emitter\([^()]*,)\s*\(?\s*&?$")
+ZBUS_NO_REPLY_AFTER = re.compile(r"\s*\.(?:object_server|unique_name|emit_signal|request_name|release_name)\b")
 
 
 def matching(txt, at, open_, close):
@@ -7861,49 +6247,35 @@ def zbus_replies(files, root):
             brace = txt.find("{", iface.end())
             if brace < 0:
                 continue
-            block = txt[brace : matching(txt, brace, "{", "}")]
+            block = txt[brace:matching(txt, brace, "{", "}")]
             for fn in re.finditer(r"\bfn\s+(\w+)[^(]*\(", block):
                 params_end = matching(block, fn.end() - 1, "(", ")")
                 arg = ZBUS_CONNECTION_ARG.search(block, fn.end(), params_end)
                 body_start = block.find("{", params_end)
                 if not arg or body_start < 0:
                     continue
-                body = block[body_start : matching(block, body_start, "{", "}")]
+                body = block[body_start:matching(block, body_start, "{", "}")]
                 name = re.escape(arg.group(1))
                 for use in re.finditer(rf"(?<![\w.]){name}\b", body):
                     start = max(body.rfind(c, 0, use.start()) for c in ";{}") + 1
                     end = body.find(";", use.end())
-                    statement = body[start : end if end >= 0 else len(body)]
+                    statement = body[start:end if end >= 0 else len(body)]
                     if ".await" not in statement:
                         continue
-                    if ZBUS_NO_REPLY_BEFORE.search(
-                        body[start : use.start()]
-                    ) or ZBUS_NO_REPLY_AFTER.match(body, use.end()):
+                    if ZBUS_NO_REPLY_BEFORE.search(body[start:use.start()]) or ZBUS_NO_REPLY_AFTER.match(body, use.end()):
                         continue
-                    at = txt[: brace + body_start + use.start()].count("\n") + 1
-                    problems.append(
-                        f"{Path(path).relative_to(root)}:{at}: `{fn.group(1)}` awaits a reply on the connection that serves it"
-                    )
+                    at = txt[:brace + body_start + use.start()].count("\n") + 1
+                    problems.append(f"{Path(path).relative_to(root)}:{at}: `{fn.group(1)}` awaits a reply on the connection that serves it")
                     break
     return problems
 
 
-@check(
-    "zbus-replies",
-    "an object-server method awaits no reply on the connection that serves it (issue #1035)",
-)
+@check("zbus-replies", "an object-server method awaits no reply on the connection that serves it (issue #1035)")
 def check_zbus_replies():
     r = Result()
     files = list(rust_files())
     skip = test_module_files(files)
-    for problem in zbus_replies(
-        [
-            p
-            for p in files
-            if not is_test_file(p) and p not in skip and not vendored(rel(p))
-        ],
-        ROOT,
-    ):
+    for problem in zbus_replies([p for p in files if not is_test_file(p) and p not in skip and not vendored(rel(p))], ROOT):
         r.fail(problem)
     return r
 
@@ -7950,10 +6322,8 @@ def landlock_proc_problems(root):
             if is_test_file(path) or path in skip or vendored(relative):
                 continue
             # Comment lines blanked, not dropped, so that line numbers hold.
-            code = "\n".join(
-                "" if line.lstrip().startswith("//") else line
-                for line in without_test_items(read(path)).split("\n")
-            )
+            code = "\n".join("" if line.lstrip().startswith("//") else line
+                             for line in without_test_items(read(path)).split("\n"))
             crates.setdefault(crate_of(path, root), []).append((relative, code))
         for sources in crates.values():
             if not any(LANDLOCK_GRANT.search(code) for _, code in sources):
@@ -7961,11 +6331,9 @@ def landlock_proc_problems(root):
             for relative, code in sources:
                 for i, line in enumerate(code.split("\n"), 1):
                     if PROC_LITERAL.search(line):
-                        problems.append(
-                            f"{relative}:{i}: a Landlock-confined crate names /proc; "
-                            f"ask the bus and systemd for a caller's unit "
-                            f"(athanor_unit::bus_caller), never grant /proc"
-                        )
+                        problems.append(f"{relative}:{i}: a Landlock-confined crate names /proc; "
+                                        f"ask the bus and systemd for a caller's unit "
+                                        f"(athanor_unit::bus_caller), never grant /proc")
     return problems
 
 
@@ -7993,16 +6361,10 @@ RULE_GLOB = re.compile(r"""^\s*-\s*["']?([^"'#]+?)["']?\s*$""")
 def agent_docs(tracked):
     """The tracked files agents load as instructions: every AGENTS.md and CLAUDE.md, and the
     Markdown under .claude/ but its skills, which are tools, not rules."""
-    return sorted(
-        f
-        for f in tracked
-        if Path(f).name in ("AGENTS.md", "CLAUDE.md")
-        or (
-            f.startswith(".claude/")
-            and f.endswith(".md")
-            and not f.startswith(".claude/skills/")
-        )
-    )
+    return sorted(f for f in tracked
+                  if Path(f).name in ("AGENTS.md", "CLAUDE.md")
+                  or (f.startswith(".claude/") and f.endswith(".md")
+                      and not f.startswith(".claude/skills/")))
 
 
 def glob_regex(glob):
@@ -8024,9 +6386,7 @@ def glob_regex(glob):
             i += 1
         elif glob[i] == "{" and "}" in glob[i:]:
             end = glob.index("}", i)
-            out.append(
-                "(?:" + "|".join(map(re.escape, glob[i + 1 : end].split(","))) + ")"
-            )
+            out.append("(?:" + "|".join(map(re.escape, glob[i + 1:end].split(","))) + ")")
             i = end + 1
         else:
             out.append(re.escape(glob[i]))
@@ -8037,9 +6397,7 @@ def glob_regex(glob):
 def path_exists(path, files, dirs):
     if any(c in path for c in "*?{"):
         pattern = glob_regex(path)
-        return any(pattern.fullmatch(f) for f in files) or any(
-            pattern.fullmatch(d) for d in dirs
-        )
+        return any(pattern.fullmatch(f) for f in files) or any(pattern.fullmatch(d) for d in dirs)
     return path in files or path in dirs
 
 
@@ -8050,16 +6408,11 @@ def agent_doc_problems(doc, text, tracked, ignored, checks):
     a path only when its first segment is an entry of the root or of the document's directory:
     `origin/iso-v0` or `actions/checkout` are not."""
     files = set(tracked)
-    dirs = {
-        str(parent) for f in files for parent in Path(f).parents if str(parent) != "."
-    }
+    dirs = {str(parent) for f in files for parent in Path(f).parents if str(parent) != "."}
     here = Path(doc).parent
     roots = {Path(f).parts[0] for f in files}
-    local = {
-        Path(f).relative_to(here).parts[0]
-        for f in files
-        if here != Path(".") and Path(f).is_relative_to(here) and f != doc
-    }
+    local = {Path(f).relative_to(here).parts[0] for f in files
+             if here != Path(".") and Path(f).is_relative_to(here) and f != doc}
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
@@ -8079,9 +6432,7 @@ def agent_doc_problems(doc, text, tracked, ignored, checks):
                 continue
             m = RULE_GLOB.match(line)
             if in_paths and m and not path_exists(m.group(1), files, set()):
-                problems.append(
-                    f"{doc}:{n}: paths glob {m.group(1)} matches no tracked file"
-                )
+                problems.append(f"{doc}:{n}: paths glob {m.group(1)} matches no tracked file")
 
     fence = None
     for n, line in enumerate(lines, 1):
@@ -8098,63 +6449,41 @@ def agent_doc_problems(doc, text, tracked, ignored, checks):
             code = CODE_TOKEN.findall(line)
             for token in code:
                 token = LINE_SUFFIX.sub("", token.strip())
-                if (
-                    not token
-                    or "/" not in token
-                    or any(c in token for c in " <>=$@")
-                    or token.startswith(("/", "~", "-", "http"))
-                ):
+                if (not token or "/" not in token or any(c in token for c in " <>=$@")
+                        or token.startswith(("/", "~", "-", "http"))):
                     continue
                 first = token.split("/")[0]
-                candidates = ([token] if first in roots else []) + (
-                    [str(here / token)] if first in local else []
-                )
-                if candidates and not any(
-                    path_exists(c.rstrip("/"), files, dirs) or ignored(c)
-                    for c in candidates
-                ):
-                    problems.append(
-                        f"{doc}:{n}: {token} is neither tracked nor git-ignored"
-                    )
+                candidates = ([token] if first in roots else []) \
+                    + ([str(here / token)] if first in local else [])
+                if candidates and not any(path_exists(c.rstrip("/"), files, dirs) or ignored(c)
+                                          for c in candidates):
+                    problems.append(f"{doc}:{n}: {token} is neither tracked nor git-ignored")
         for piece in code:
             for m in VERIFY_CITATION.finditer(piece):
                 for name in m.group(1).split():
                     if name not in checks:
-                        problems.append(
-                            f"{doc}:{n}: verify.py has no check named {name}"
-                        )
+                        problems.append(f"{doc}:{n}: verify.py has no check named {name}")
     return problems
 
 
-@check(
-    "agent-docs", "The agent instructions name paths, rule globs and checks that exist"
-)
+@check("agent-docs", "The agent instructions name paths, rule globs and checks that exist")
 def check_agent_docs():
     r = Result()
-    listed = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True
-    )
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
     tracked = [f for f in listed.stdout.split("\0") if f]
 
     def ignored(path):
-        return (
-            subprocess.run(
-                ["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", path],
-                capture_output=True,
-            ).returncode
-            == 0
-        )
+        return subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index", path],
+                              capture_output=True).returncode == 0
 
     for doc in agent_docs(tracked):
         if not (ROOT / doc).is_file():
             r.fail(f"{doc}: tracked but missing from the worktree")
             continue
-        for problem in agent_doc_problems(
-            doc, read(ROOT / doc), tracked, ignored, set(CHECKS)
-        ):
+        for problem in agent_doc_problems(doc, read(ROOT / doc), tracked, ignored, set(CHECKS)):
             r.fail(problem)
     return r
 
@@ -8164,17 +6493,11 @@ def check_agent_docs():
 # --------------------------------------------------------------------------- #
 
 # What a backtick span cites: `path:N`, `path:N-M`, `path:N, M-K`, or `:N` for the path named last.
-LINE_CITATION = re.compile(
-    r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)"
-)
+LINE_CITATION = re.compile(r"([\w.+-]+(?:/[\w.+-]+)*)?:(\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)")
 # What a sentence names in code: a backticked identifier (hyphens and a dotted suffix allowed:
 # `cosmic-osd.service`), or a bare snake_case or `::` path.
-CITED_TOKEN = re.compile(
-    r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])"
-)
-FILE_LIKE = re.compile(
-    r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$"
-)
+CITED_TOKEN = re.compile(r"(?<=`)[A-Za-z_][\w.-]*(?:::\w+)*(?=`)|(?<![\w`/.-])[A-Za-z]\w*(?:_\w+|::\w+)+(?![\w/.`-])")
+FILE_LIKE = re.compile(r"/|\.(?:rs|toml|py|md|json|sh|spec|ya?ml|ks|target|conf|lock|txt|ron)$")
 CRATE_ROOT = re.compile(r"^(.+?)/(?:src|data|tests|benches)/")
 # The length from which a range is too long for one citation: such a range holds almost any word, so it proves nothing.
 LINE_RANGE_LIMIT = 200
@@ -8188,10 +6511,8 @@ SECTION_ID = re.compile(r"\b[A-Z]{1,4}\d+\b")
 SECTION_START = re.compile(r"\*\*[A-Z]{1,4}\d+[a-z]?\b|#{1,3} ")
 # A path with a directory and an extension written in plain text, with or without its `:N` span
 # (`forge/config/packages.json:128`): read as if it were in backticks.
-PLAIN_PATH = re.compile(
-    r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
-    r"(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?)(?![\w/`-])"
-)
+PLAIN_PATH = re.compile(r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
+                        r"(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?)(?![\w/`-])")
 # The files whose entries are named by words that are rarely in backticks: a citation of one
 # that names nothing the check can match is a finding, and its hyphenated lowercase words
 # (`cosmic-osd`, not in backticks) count as tokens when the file holds them.
@@ -8217,36 +6538,19 @@ def section_lines(rows, ident):
     """The first and the last line (from 1) of the section `ident` of a document, or None."""
     for first, row in enumerate(rows, 1):
         if row.startswith(f"**{ident}."):
-            end = next(
-                (
-                    n
-                    for n in range(first + 1, len(rows) + 1)
-                    if SECTION_START.match(rows[n - 1])
-                ),
-                len(rows) + 1,
-            )
+            end = next((n for n in range(first + 1, len(rows) + 1) if SECTION_START.match(rows[n - 1])),
+                       len(rows) + 1)
             return first, end - 1
     return None
-
 
 # Findings the heuristic cannot settle, each (document, cited path, cited lines, token, n) with the
 # reason: one entry covers one citation, the n-th (from 1) of the document that has the same path,
 # lines and token. An entry that matches no finding fails, so the list only shrinks.
 LINE_CITATIONS_KEPT = {
-    (
-        "doc_tetragon.md",
-        "system/Containerfile",
-        "244",
-        "tmpfiles.d",
-        1,
-    ): "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
-    (
-        "doc_software.md",
-        "forge/config/packages.json",
-        "2-84",
-        None,
-        1,
-    ): "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
+    ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
+        "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
+    ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
+        "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 
 
@@ -8303,9 +6607,7 @@ def citation_findings(doc, text, tracked, read_file):
     only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
     them ("are both in"), only the key is demanded, and a removed single-word entry is not seen."""
     known = set(tracked)
-    prefixes = tuple(
-        sorted({f"{path.split('/')[0]}/" for path in known if "/" in path})
-    )
+    prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
     for path in known:
         parts = path.split("/")
@@ -8326,40 +6628,20 @@ def citation_findings(doc, text, tracked, read_file):
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
-                last = (
-                    resolve(span.group(1), crate)
-                    if FILE_LIKE.search(span.group(1))
-                    else last
-                )
+                last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
                 continue
             named, spec = m.groups()
             path = last if named is None else resolve(named, crate)
-            if (
-                path is None
-                and named
-                and (
-                    named.startswith(prefixes)
-                    or (
-                        named.endswith(".md")
-                        and "/" not in named
-                        and not any(t.endswith("/" + named) for t in known)
-                    )
-                )
-            ):
-                out.append(
-                    (
-                        number,
-                        named,
-                        spec,
-                        None,
-                        f"{doc}:{number}: `{named}:{spec}` names a file that does not exist",
-                    )
-                )
+            if path is None and named and (named.startswith(prefixes) or (
+                    named.endswith(".md") and "/" not in named
+                    and not any(t.endswith("/" + named) for t in known))):
+                out.append((number, named, spec, None,
+                            f"{doc}:{number}: `{named}:{spec}` names a file that does not exist"))
             last = path
             if path is None:
                 continue
             body = read_file(path)
-            if c := CRATE_ROOT.match(path):
+            if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
             ranges = []
             for part in re.split(r",\s*", spec):
@@ -8368,94 +6650,40 @@ def citation_findings(doc, text, tracked, read_file):
             rows = body.split("\n")
             if rows[-1] == "":
                 rows.pop()
-            if any(
-                f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT
-                for f, e in ranges
-            ):
-                out.append(
-                    (
-                        number,
-                        path,
-                        spec,
-                        None,
-                        f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
-                        f"(fewer than {LINE_RANGE_LIMIT} lines)",
-                    )
-                )
+            if any(f < 1 or e < f or e > len(rows) or e - f + 1 >= LINE_RANGE_LIMIT for f, e in ranges):
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
+                            f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
             if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
-                out.append(
-                    (
-                        number,
-                        path,
-                        spec,
-                        None,
-                        f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved",
-                    )
-                )
+                out.append((number, path, spec, None,
+                            f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
                 continue
-            start = max(
-                line.rfind(sep, 0, span.start())
-                for sep in (". ", "; ", ": ", "), ", " | ")
-            )
+            start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
             own = {part.split(".")[0] for part in path.split("/")}
             listed = path.rsplit("/", 1)[-1] in LIST_FILES
-            sentence = line[start + 1 : span.start()]
-            found = [
-                (m.start(), m.end(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)
-            ]
+            sentence = line[start + 1:span.start()]
+            found = [(m.start(), m.end(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
             if listed:
-                found += [
-                    (m.start(), m.end(), m.group(0))
-                    for m in BARE_NAME.finditer(sentence)
-                ]
+                found += [(m.start(), m.end(), m.group(0)) for m in BARE_NAME.finditer(sentence)]
             if path.endswith(".md"):
-                found += [
-                    (m.start(1), m.end(1), m.group(1))
-                    for m in ROW_NAME.finditer(sentence)
-                ]
+                found += [(m.start(1), m.end(1), m.group(1)) for m in ROW_NAME.finditer(sentence)]
             if path.endswith(".md"):
-                spans = {
-                    i: section_lines(rows, i)
-                    for i in dict.fromkeys(SECTION_ID.findall(sentence))
-                }
+                spans = {i: section_lines(rows, i) for i in dict.fromkeys(SECTION_ID.findall(sentence))}
                 spans = {i: lines for i, lines in spans.items() if lines}
                 if spans:
                     low = min(first for first, _ in spans.values())
                     high = max(last for _, last in spans.values())
-                    if any(
-                        not (
-                            low <= f
-                            and e <= high
-                            or any(
-                                holds_token("\n".join(rows[f - 1 : e]), i)
-                                for i in spans
-                            )
-                        )
-                        for f, e in ranges
-                    ):
+                    if any(not (low <= f and e <= high or any(holds_token("\n".join(rows[f - 1:e]), i)
+                                                               for i in spans)) for f, e in ranges):
                         named = ", ".join(spans)
-                        out.append(
-                            (
-                                number,
-                                path,
-                                spec,
-                                named,
-                                f"{doc}:{number}: `{path}:{spec}` is not in "
-                                f"the section of {named}, which its sentence names: the lines moved",
-                            )
-                        )
+                        out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
+                                    f"the section of {named}, which its sentence names: the lines moved"))
                         continue
             quoted = path.endswith(".json")
-
             def usable(items):
-                return [
-                    i
-                    for i in sorted(items)
-                    if not FILE_LIKE.search(i[2])
-                    and i[2] not in own
-                    and holds_token(body, i[2], quoted)
-                ]
+                return [i for i in sorted(items) if not FILE_LIKE.search(i[2]) and i[2] not in own
+                        and holds_token(body, i[2], quoted)]
 
             tokens = usable(found)
             if listed:
@@ -8466,92 +6694,46 @@ def citation_findings(doc, text, tracked, read_file):
                 # backticks stays in the run when the file no longer holds it, so a removed entry
                 # is a finding.
                 run, single, crossed = [], False, False
-                for item in reversed(
-                    sorted(
-                        {
-                            *tokens,
-                            *(
-                                i
-                                for i in found
-                                if sentence[i[0] - 1 : i[0]]
-                                == "`"
-                                == sentence[i[1] : i[1] + 1]
-                                and BARE_NAME.fullmatch(i[2])
-                                and i[2] not in own
-                            ),
-                        }
-                    )
-                ):
+                for item in reversed(sorted({*tokens, *(
+                        i for i in found if sentence[i[0] - 1:i[0]] == "`" == sentence[i[1]:i[1] + 1]
+                        and BARE_NAME.fullmatch(i[2]) and i[2] not in own)})):
                     if run:
-                        gap = sentence[item[1] : run[-1][0]]
+                        gap = sentence[item[1]:run[-1][0]]
                         key = len(run) == 1 and LIST_KEY_GAP.fullmatch(gap)
-                        if (
-                            single
-                            or not (key or LIST_GAP.fullmatch(gap))
-                            or (crossed and LIST_KEY_BEFORE.search(sentence[: item[0]]))
-                        ):
+                        if single or not (key or LIST_GAP.fullmatch(gap)) or (
+                                crossed and LIST_KEY_BEFORE.search(sentence[:item[0]])):
                             break
                         single = bool(key) and key.group(1) == "is"
                         crossed = crossed or bool(key)
                     run.append(item)
                 if not run:
-                    after = line[span.end() :]
+                    after = line[span.end():]
                     ends = [i for i in (after.find(". "), after.find("; ")) if i >= 0]
-                    after = after[: min(ends)] if ends else after
-                    items = usable(
-                        [
-                            (m.start(), m.end(), m.group(0))
-                            for m in (
-                                *CITED_TOKEN.finditer(after),
-                                *BARE_NAME.finditer(after),
-                            )
-                        ]
-                    )
+                    after = after[:min(ends)] if ends else after
+                    items = usable([(m.start(), m.end(), m.group(0))
+                                    for m in (*CITED_TOKEN.finditer(after), *BARE_NAME.finditer(after))])
                     for item in items:
-                        if run and not LIST_GAP.fullmatch(after[run[-1][1] : item[0]]):
+                        if run and not LIST_GAP.fullmatch(after[run[-1][1]:item[0]]):
                             break
                         run.append(item)
                 tokens = run
             else:
                 tokens = tokens[-1:]
-            held = "\n".join("\n".join(rows[f - 1 : e]) for f, e in ranges)
+            held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
             if listed and not tokens:
-                out.append(
-                    (
-                        number,
-                        path,
-                        spec,
-                        None,
-                        f"{doc}:{number}: `{path}:{spec}` names no token "
-                        "that the file holds: put the entry's name in backticks, or hyphenated, "
-                        "in its sentence",
-                    )
-                )
-            elif missing := next(
-                (t for _, _, t in tokens if not holds_token(held, t, quoted)), None
-            ):
-                out.append(
-                    (
-                        number,
-                        path,
-                        spec,
-                        missing,
-                        f"{doc}:{number}: `{path}:{spec}` does not hold "
-                        f"`{missing}`, which its sentence names: the lines moved",
-                    )
-                )
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` names no token "
+                            "that the file holds: put the entry's name in backticks, or hyphenated, "
+                            "in its sentence"))
+            elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
+                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}:{spec}` does not hold "
+                            f"`{missing}`, which its sentence names: the lines moved"))
     return out
 
 
-@check(
-    "line-citations",
-    "A path:line citation of an architecture document holds the code its sentence names",
-)
+@check("line-citations", "A path:line citation of an architecture document holds the code its sentence names")
 def check_line_citations():
     r = Result()
-    listed = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True
-    )
+    listed = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True)
     if listed.returncode:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
@@ -8564,24 +6746,16 @@ def check_line_citations():
             return ""
 
     seen = set()
-    for doc in sorted(
-        [
-            *(ROOT / "docs/architecture").glob("doc_*.md"),
-            ROOT / "docs/architecture/shell-features.md",
-        ]
-    ):
+    for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
+                       ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
-        for _, path, spec, token, problem in citation_findings(
-            doc.name, read(doc), tracked, read_file
-        ):
+        for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
                 r.fail(problem)
     for key in sorted(set(LINE_CITATIONS_KEPT) - seen):
-        r.fail(
-            f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry"
-        )
+        r.fail(f"LINE_CITATIONS_KEPT names {key}, which matches no finding: remove the entry")
     return r
 
 
@@ -8593,10 +6767,7 @@ OWN_REFUSED_CRATES = {"gtk4", "libadwaita", "libcosmic", "iced"}
 def own_refused(name):
     """NAME is a refused toolkit or one of its subcrates (gtk4-sys, libadwaita-sys, iced_core).
     iced's subcrates take an underscore, so iced-x86, an unrelated disassembler, is not one."""
-    return (
-        name in OWN_REFUSED_CRATES
-        or re.match(r"gtk4[-_]|libadwaita[-_]|iced_", name) is not None
-    )
+    return name in OWN_REFUSED_CRATES or re.match(r"gtk4[-_]|libadwaita[-_]|iced_", name) is not None
 
 
 def third_party_cargo(path):
@@ -8611,18 +6782,14 @@ def manifest_dependencies(manifest, renames, kinds):
     for _, table in dependency_tables(manifest, kinds):
         for key, dep in table.items():
             dep = dep if isinstance(dep, dict) else {}
-            out.add(
-                dep.get("package")
-                or (renames.get(key, key) if dep.get("workspace") else key)
-            )
+            out.add(dep.get("package") or (renames.get(key, key) if dep.get("workspace") else key))
     return out
 
 
 def dev_only_dependencies(manifest, renames):
     """The package names MANIFEST takes as dev-dependencies only."""
-    return manifest_dependencies(
-        manifest, renames, ("dev-dependencies",)
-    ) - manifest_dependencies(manifest, renames, ("dependencies", "build-dependencies"))
+    return (manifest_dependencies(manifest, renames, ("dev-dependencies",))
+            - manifest_dependencies(manifest, renames, ("dependencies", "build-dependencies")))
 
 
 def toolkit_crates(root=None):
@@ -8637,12 +6804,8 @@ def toolkit_crates(root=None):
     lockfile holds without a source, patched in by path (`[patch.crates-io]`), is no root of its
     own: it counts through the crates of the repository that reach it."""
     root = Path(root or ROOT)
-    listed = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.split("\0")
+    listed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*Cargo.toml", "*Cargo.lock"],
+                            capture_output=True, text=True, check=True).stdout.split("\0")
     paths = [p for p in listed if p and not third_party_cargo(p)]
     manifests, renames = {}, {}
     for path in (p for p in paths if p.endswith("Cargo.toml")):
@@ -8662,19 +6825,11 @@ def toolkit_crates(root=None):
 
         def dependencies(package):
             member = "source" not in package and package["name"] in manifests
-            skip = (
-                dev_only_dependencies(manifests[package["name"]], renames)
-                if member
-                else set()
-            )
+            skip = dev_only_dependencies(manifests[package["name"]], renames) if member else set()
             for dep in package.get("dependencies", []):
                 name, *version = dep.split(" ")
                 if name not in skip:
-                    yield from (
-                        c
-                        for c in by_name.get(name, [])
-                        if not version or c["version"] == version[0]
-                    )
+                    yield from (c for c in by_name.get(name, []) if not version or c["version"] == version[0])
 
         for package in packages:
             if "source" in package or package["name"] not in manifests:
@@ -8690,14 +6845,8 @@ def toolkit_crates(root=None):
                             hits.setdefault(package["name"], set()).add(dep["name"])
     unlocked = []
     for name in sorted(n for n in manifests if n not in locked):
-        direct = set(
-            filter(
-                own_refused,
-                manifest_dependencies(
-                    manifests[name], renames, ("dependencies", "build-dependencies")
-                ),
-            )
-        )
+        direct = set(filter(own_refused, manifest_dependencies(manifests[name], renames,
+                                                               ("dependencies", "build-dependencies"))))
         if direct:
             hits[name] = direct
         else:
@@ -8708,11 +6857,8 @@ def toolkit_crates(root=None):
 def own_base_entries(root, base, parse):
     """The (kind, name) entries of OWN_ALLOW at revision BASE, None when BASE has no such file
     (the adoption); ValueError when BASE is not a commit, as load_known_red_base."""
-
     def git(*args):
-        return subprocess.run(
-            ["git", "-C", str(root), *args], capture_output=True, text=True
-        )
+        return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
 
     commit = git("rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")
     if commit.returncode != 0:
@@ -8735,47 +6881,30 @@ def own_problems(root=None, base=None):
         return [f"{OWN_ALLOW}: {err}"]
     crates = {name for kind, name, _ in entries if kind == "crate"}
     hits, unlocked = toolkit_crates(root)
-    problems = [
-        f"{name}: no tracked Cargo.lock holds it, so the toolkits it reaches cannot be "
-        "read; add its lockfile (ADR-0141 decision 7)"
-        for name in unlocked
-    ]
-    problems += [
-        f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
-        "(ADR-0141 decision 7)"
-        for name in sorted(set(hits) - crates)
-    ]
-    problems += [
-        f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))} or their subcrates; "
-        "remove its entry"
-        for name in sorted(crates - set(hits))
-    ]
+    problems = [f"{name}: no tracked Cargo.lock holds it, so the toolkits it reaches cannot be "
+                "read; add its lockfile (ADR-0141 decision 7)" for name in unlocked]
+    problems += [f"{name}: reaches {', '.join(sorted(hits[name]))}, and {OWN_ALLOW} does not list it "
+                "(ADR-0141 decision 7)" for name in sorted(set(hits) - crates)]
+    problems += [f"{OWN_ALLOW}: crate {name} reaches none of {', '.join(sorted(OWN_REFUSED_CRATES))} or their subcrates; "
+                 "remove its entry" for name in sorted(crates - set(hits))]
     if base is not None:
         try:
             before = own_base_entries(root, base, parse)
         except ValueError as err:
             return problems + [f"{OWN_ALLOW} at {base}: {err}"]
         if before is not None:
-            problems += [
-                f"{OWN_ALLOW}: {kind} {name} is not listed at {base}; the list only shrinks"
-                for kind, name, _ in entries
-                if (kind, name) not in before
-            ]
+            problems += [f"{OWN_ALLOW}: {kind} {name} is not listed at {base}; the list only shrinks"
+                         for kind, name, _ in entries if (kind, name) not in before]
     return problems
 
 
-@check(
-    "own",
-    "No crate built from the repository reaches gtk4, libadwaita, libcosmic or iced unless own-allow.txt lists it, and the list only shrinks (ADR-0141 decision 7)",
-)
+@check("own", "No crate built from the repository reaches gtk4, libadwaita, libcosmic or iced unless own-allow.txt lists it, and the list only shrinks (ADR-0141 decision 7)")
 def check_own():
     r = Result()
     for problem in own_problems(base=BASE_REF):
         r.fail(problem)
     if BASE_REF is None:
-        r.note(
-            f"no base revision (--known-red-base REF): entries added to {OWN_ALLOW} were not checked"
-        )
+        r.note(f"no base revision (--known-red-base REF): entries added to {OWN_ALLOW} were not checked")
     return r
 
 
@@ -8791,26 +6920,16 @@ def dependency_paths(manifest):
     """The `path` of every dependency, target dependency, workspace dependency and [patch] entry
     of a parsed manifest, in each spelling of DEPENDENCY_TABLES. A key that is not a table holds
     none."""
-
     def table(parent, key):
         value = parent.get(key) if isinstance(parent, dict) else None
         return value if isinstance(value, dict) else {}
-
     tables = [table(manifest, k) for k in DEPENDENCY_TABLES]
-    tables += [
-        table(target, k)
-        for target in table(manifest, "target").values()
-        for k in DEPENDENCY_TABLES
-    ]
+    tables += [table(target, k) for target in table(manifest, "target").values()
+               for k in DEPENDENCY_TABLES]
     tables += list(table(manifest, "patch").values())
     tables.append(table(table(manifest, "workspace"), "dependencies"))
-    return [
-        dep["path"]
-        for table in tables
-        if isinstance(table, dict)
-        for dep in table.values()
-        if isinstance(dep, dict) and isinstance(dep.get("path"), str)
-    ]
+    return [dep["path"] for table in tables if isinstance(table, dict)
+            for dep in table.values() if isinstance(dep, dict) and isinstance(dep.get("path"), str)]
 
 
 def sub_locks(locks, manifests):
@@ -8823,11 +6942,7 @@ def sub_locks(locks, manifests):
     for lock in sorted(locks):
         top = Path(lock).parent
         root_manifest = str(top / "Cargo.toml")
-        if (
-            lock == "Cargo.lock"
-            or "/vendor/" in f"/{lock}"
-            or root_manifest not in manifests
-        ):
+        if lock == "Cargo.lock" or "/vendor/" in f"/{lock}" or root_manifest not in manifests:
             continue
         if "workspace" not in load_toml(root_manifest, manifests[root_manifest]):
             continue
@@ -8836,10 +6951,8 @@ def sub_locks(locks, manifests):
             crate = Path(name).parent
             if not crate.is_relative_to(top):
                 continue
-            if any(
-                not (ROOT / crate / path).resolve().is_relative_to(inside)
-                for path in dependency_paths(load_toml(name, text))
-            ):
+            if any(not (ROOT / crate / path).resolve().is_relative_to(inside)
+                   for path in dependency_paths(load_toml(name, text))):
                 out.append(lock)
                 break
     return out
@@ -8848,14 +6961,12 @@ def sub_locks(locks, manifests):
 def semver_compatible(a, b):
     """True if cargo can move `a` to `b` under a caret requirement: the same first non-zero
     component, and every component before it, pre-release and build metadata aside."""
-
     def key(v):
         parts = v.split("+")[0].split("-")[0].split(".")
         for i, part in enumerate(parts):
             if part != "0":
                 return parts[: i + 1]
         return parts
-
     return key(a) == key(b)
 
 
@@ -8872,15 +6983,11 @@ def lock_version_problems(root, sub, path):
     for package in load_toml("Cargo.lock", root).get("package", []):
         source = package.get("source", "")
         held.setdefault(package["name"], set()).add(
-            (package["version"], source if source.startswith("git+") else "registry")
-        )
+            (package["version"], source if source.startswith("git+") else "registry"))
     manifest = str(Path(path).with_name("Cargo.toml"))
     lock = load_toml(path, sub)
-    out = [
-        f"{path}: [[patch.unused]] {p.get('name')} {p.get('version')}: the patch in {manifest} "
-        "is not applied"
-        for p in lock.get("patch", {}).get("unused", [])
-    ]
+    out = [f"{path}: [[patch.unused]] {p.get('name')} {p.get('version')}: the patch in {manifest} "
+           "is not applied" for p in lock.get("patch", {}).get("unused", [])]
     for package in lock.get("package", []):
         name, old, source = package["name"], package["version"], package.get("source")
         if source is None or name not in held:
@@ -8898,9 +7005,7 @@ def lock_version_problems(root, sub, path):
             fix = f"cargo update --manifest-path {manifest} -p {name}@{old} --precise {new[0]}"
         else:
             fix = f"no semver-compatible root version ({', '.join(versions)})"
-        out.append(
-            f"{path}: {name} {old} ({source}) is not in the root Cargo.lock: {fix}"
-        )
+        out.append(f"{path}: {name} {old} ({source}) is not in the root Cargo.lock: {fix}")
     return sorted(out)
 
 
@@ -8922,51 +7027,32 @@ def fuzz_patch_problems(manifests):
         for registry, entries in table.items():
             for crate, spec in entries.items() if isinstance(entries, dict) else ():
                 path = spec.get("path") if isinstance(spec, dict) else None
-                out[(registry, crate)] = (
-                    ((ROOT / name).parent / path).resolve()
-                    if isinstance(path, str)
-                    else spec
-                )
+                out[(registry, crate)] = ((ROOT / name).parent / path).resolve() if isinstance(path, str) else spec
         return out
-
     fuzz = patches(FUZZ_MANIFEST)
-    return [
-        f"{FUZZ_MANIFEST}: [patch.{registry}] {crate} is not the root Cargo.toml's entry, "
-        f"{spec.relative_to(ROOT) if isinstance(spec, Path) else spec}"
-        for (registry, crate), spec in sorted(patches("Cargo.toml").items())
-        if fuzz.get((registry, crate)) != spec
-    ]
+    return [f"{FUZZ_MANIFEST}: [patch.{registry}] {crate} is not the root Cargo.toml's entry, "
+            f"{spec.relative_to(ROOT) if isinstance(spec, Path) else spec}"
+            for (registry, crate), spec in sorted(patches("Cargo.toml").items())
+            if fuzz.get((registry, crate)) != spec]
 
 
-@check(
-    "lock-versions",
-    "A workspace of its own that builds the root's crates by path holds the root Cargo.lock's version of every crate they share",
-)
+@check("lock-versions", "A workspace of its own that builds the root's crates by path holds the root Cargo.lock's version of every crate they share")
 def check_lock_versions():
     r = Result()
-    listed = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*Cargo.lock", "*Cargo.toml"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock", "*Cargo.toml"],
+                            cwd=ROOT, capture_output=True, text=True)
     if listed.returncode != 0:
         r.fail(f"git ls-files failed: {listed.stderr.strip()}")
         return r
     files = [p for p in listed.stdout.split("\0") if p]
     locks = [p for p in files if p.endswith("Cargo.lock")]
     try:
-        manifests = {
-            p: read(ROOT / p)
-            for p in files
-            if p.endswith("Cargo.toml") and (ROOT / p).is_file()
-        }
+        manifests = {p: read(ROOT / p) for p in files
+                     if p.endswith("Cargo.toml") and (ROOT / p).is_file()}
         subs = sub_locks(locks, manifests)
         if not subs:
-            r.fail(
-                "no workspace of its own builds the root's crates by path: fuzz/ and the Sal "
-                "gallery did"
-            )
+            r.fail("no workspace of its own builds the root's crates by path: fuzz/ and the Sal "
+                   "gallery did")
         root = read(ROOT / "Cargo.lock")
         for path in subs:
             for problem in lock_version_problems(root, read(ROOT / path), path):
@@ -9090,8 +7176,6 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
-
-
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:
@@ -9157,11 +7241,7 @@ def main(argv):
             )
         else:
             if name in tolerated:
-                own = [
-                    (issue, expires)
-                    for check, issue, expires, _ in entries
-                    if check == name
-                ]
+                own = [(issue, expires) for check, issue, expires, _ in entries if check == name]
                 issues = ", ".join(sorted({issue for issue, _ in own}))
                 print(
                     f"  {YEL}KNOWN-RED{OFF}  {BOLD}{name}{OFF}  {YEL}{n}{OFF}  "

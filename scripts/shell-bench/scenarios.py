@@ -24,9 +24,7 @@ CENTRE_TOLERANCE_PX = 2
 
 
 def _write_layout(m, dock):
-    m.run(
-        f"mkdir -p ~/.config/athanor && printf %s {shlex.quote(DOC.format(dock=dock))} > {LAYOUT}"
-    )
+    m.run(f"mkdir -p ~/.config/athanor && printf %s {shlex.quote(DOC.format(dock=dock))} > {LAYOUT}")
 
 
 def run(m):
@@ -38,21 +36,10 @@ def run(m):
             bench.restart(m, "athanor-dock")
             time.sleep(3)
             # An application button: its context menu is the one the last scenario opens.
-            dock = next(
-                t
-                for t in bench.locate(m, since)
-                if t.unit == "athanor-dock" and t.popup
-            )
+            dock = next(t for t in bench.locate(m, since) if t.unit == "athanor-dock" and t.popup)
             _, placements = analysis.parse_journal(m.journal(since))
-            island = [
-                p
-                for p in placements
-                if p.unit == "athanor-dock" and p.surface == "dock"
-            ][-1]
-            band = (
-                island.y,
-                island.output_h - 4,
-            )  # the strip's 4 px are allowed to change
+            island = [p for p in placements if p.unit == "athanor-dock" and p.surface == "dock"][-1]
+            band = (island.y, island.output_h - 4)  # the strip's 4 px are allowed to change
             w, h = island.output_w, island.output_h
             centre = (w // 2, h // 2)
             m.systemctl("stop", "athanor-dock")
@@ -63,9 +50,7 @@ def run(m):
 
             def hidden():
                 count, _ = analysis.changed(reference, m.screenshot(), band)
-                return count <= HIDDEN_NOISE * w * (
-                    band[1] - band[0]
-                ), f"{count} pixels differ"
+                return count <= HIDDEN_NOISE * w * (band[1] - band[0]), f"{count} pixels differ"
 
             def shown():
                 count, box = analysis.changed(reference, m.screenshot(), (island.y, h))
@@ -73,43 +58,26 @@ def run(m):
                     return False, "nothing drawn"
                 offset = (box[0] + box[2]) / 2 - w / 2
                 wide = box[2] - box[0] + 1 >= 0.9 * island.w
-                return (
-                    abs(offset) <= CENTRE_TOLERANCE_PX and wide,
-                    f"box {box}, off centre by {offset:+.1f} px",
-                )
+                return abs(offset) <= CENTRE_TOLERANCE_PX and wide, f"box {box}, off centre by {offset:+.1f} px"
 
             def check(name, ops, marker, limit, state):
                 injected = bench.inject(m, w, h, ops + [f"wait {HORIZON // MS}"])
                 t = [ns for op, ns in injected if op == marker][-1]
                 frames, _ = analysis.parse_journal(m.journal(since))
-                in_time = analysis.settled(
-                    [t], frames, "athanor-dock", "dock", limit, HORIZON
-                )[0]
+                in_time = analysis.settled([t], frames, "athanor-dock", "dock", limit, HORIZON)[0]
                 ok, detail = state()
-                results[f"dock-autohide/{name}"] = {
-                    "pass": in_time and ok,
-                    "register": "F-dock-27",
-                    "detail": f"settled in time: {in_time}; {detail}",
-                }
+                results[f"dock-autohide/{name}"] = {"pass": in_time and ok, "register": "F-dock-27",
+                                                    "detail": f"settled in time: {in_time}; {detail}"}
 
             # Switching from visible to auto-hide while running hides the dock as a start in auto-hide does.
-            t0 = int(
-                m.session(
-                    "python3 -c 'import time; print(time.clock_gettime_ns(time.CLOCK_MONOTONIC))'"
-                )
-            )
+            t0 = int(m.session("python3 -c 'import time; print(time.clock_gettime_ns(time.CLOCK_MONOTONIC))'"))
             _write_layout(m, "auto-hide")
             time.sleep(HORIZON / 1e9 + 0.5)
             frames, _ = analysis.parse_journal(m.journal(since))
-            in_time = analysis.settled(
-                [t0], frames, "athanor-dock", "dock", HIDE_LIMIT, HORIZON
-            )[0]
+            in_time = analysis.settled([t0], frames, "athanor-dock", "dock", HIDE_LIMIT, HORIZON)[0]
             ok, detail = hidden()
-            results["dock-autohide/switch"] = {
-                "pass": in_time and ok,
-                "register": "F-dock-27",
-                "detail": f"settled in time: {in_time}; {detail}",
-            }
+            results["dock-autohide/switch"] = {"pass": in_time and ok, "register": "F-dock-27",
+                                               "detail": f"settled in time: {in_time}; {detail}"}
             edge = f"move {w // 2} {h - 1}"
             # Resting on the edge reveals the dock at its place, centred, within 0.3 s.
             check("rest", [edge], edge, REVEAL_LIMIT, shown)
@@ -118,24 +86,8 @@ def run(m):
             check("leave", [away], away, HIDE_LIMIT, hidden)
             # After a context menu opens and closes (a click on the desktop: Escape does not close it,
             # spike Q2) and the pointer leaves, it hides again.
-            check(
-                "menu",
-                [
-                    edge,
-                    "wait 600",
-                    f"move {dock.x} {dock.y}",
-                    "wait 300",
-                    "rclick",
-                    "wait 500",
-                    f"move {bench.DESKTOP[0]} {bench.DESKTOP[1]}",
-                    "click",
-                    "wait 300",
-                    away,
-                ],
-                away,
-                HIDE_LIMIT,
-                hidden,
-            )
+            check("menu", [edge, "wait 600", f"move {dock.x} {dock.y}", "wait 300", "rclick", "wait 500",
+                           f"move {bench.DESKTOP[0]} {bench.DESKTOP[1]}", "click", "wait 300", away], away, HIDE_LIMIT, hidden)
     finally:
         if original:
             m.run(f"printf %s {shlex.quote(original.decode())} > {LAYOUT}")

@@ -35,22 +35,18 @@ def unpack(z):
 
     out = bytearray()
     for start in range(0, len(z), GROUP_DIGITS):
-        group = z[start : start + GROUP_DIGITS]
+        group = z[start:start + GROUP_DIGITS]
         width = GROUP_BYTES if len(group) == GROUP_DIGITS else len(group) * 2 // 5
         if width == 0:
-            raise ValueError(
-                f"trailing group of {len(group)} digits at offset {start} "
-                f"is too short to carry a byte"
-            )
+            raise ValueError(f"trailing group of {len(group)} digits at offset {start} "
+                             f"is too short to carry a byte")
         n = int(group)
         for _ in range(width):
             out.append(n % 256)
             n //= 256
         if n:
-            raise ValueError(
-                f"the group at digit {start} does not fit in {width} bytes: "
-                f"the payload is not a drm_panic QR code"
-            )
+            raise ValueError(f"the group at digit {start} does not fit in {width} bytes: "
+                             f"the payload is not a drm_panic QR code")
     return bytes(out)
 
 
@@ -92,10 +88,8 @@ def main(argv):
         print(f"decode-drm-panic: {e}", file=sys.stderr)
         return 1
 
-    print(
-        f"# drm_panic  architecture: {fields.get('a', 'unknown')}  "
-        f"kernel: {fields.get('v', 'unknown')}"
-    )
+    print(f"# drm_panic  architecture: {fields.get('a', 'unknown')}  "
+          f"kernel: {fields.get('v', 'unknown')}")
     text = log.decode("utf-8", "replace")
     sys.stdout.write(text if text.endswith("\n") else text + "\n")
     return 0

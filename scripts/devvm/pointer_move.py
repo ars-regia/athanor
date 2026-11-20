@@ -35,32 +35,10 @@ def emit(fd, kind, code, value):
 def main():
     dx = int(sys.argv[1])
     fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
-    for ioctl, bit in (
-        (UI_SET_EVBIT, EV_REL),
-        (UI_SET_EVBIT, EV_KEY),
-        (UI_SET_EVBIT, EV_SYN),
-        (UI_SET_RELBIT, REL_X),
-        (UI_SET_RELBIT, REL_Y),
-        (UI_SET_KEYBIT, BTN_LEFT),
-    ):
+    for ioctl, bit in ((UI_SET_EVBIT, EV_REL), (UI_SET_EVBIT, EV_KEY), (UI_SET_EVBIT, EV_SYN), (UI_SET_RELBIT, REL_X), (UI_SET_RELBIT, REL_Y), (UI_SET_KEYBIT, BTN_LEFT)):
         fcntl.ioctl(fd, ioctl, bit)
     zeros = [0] * ABS_CNT
-    os.write(
-        fd,
-        struct.pack(
-            "80sHHHHi" + "i" * (4 * ABS_CNT),
-            b"athanor-acceptance-rel",
-            BUS_VIRTUAL,
-            0,
-            0,
-            1,
-            0,
-            *zeros,
-            *zeros,
-            *zeros,
-            *zeros,
-        ),
-    )
+    os.write(fd, struct.pack("80sHHHHi" + "i" * (4 * ABS_CNT), b"athanor-acceptance-rel", BUS_VIRTUAL, 0, 0, 1, 0, *zeros, *zeros, *zeros, *zeros))
     fcntl.ioctl(fd, UI_DEV_CREATE)
     time.sleep(SETTLE_S)
     for _ in range(abs(TOP) // STEP):

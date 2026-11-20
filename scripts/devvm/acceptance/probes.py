@@ -195,9 +195,7 @@ def collect():
     # The hourly snapshot, started by hand: the first run creates the snapshot subvolume (#595).
     # Before the denials are read, so that the run's own denials count.
     probe("backup", ["systemctl", "start", "athanor-backup-hourly.service"], sudo=True)
-    facts["backup"] = probe(
-        "backup:list", ["athanor-backup", "list"], sudo=True
-    ).split()
+    facts["backup"] = probe("backup:list", ["athanor-backup", "list"], sudo=True).split()
     facts["avc"] = parse_avc(
         probe(
             "avc",
@@ -451,9 +449,7 @@ def evaluate(facts, expect, contacts, tunnel_port, signed):
         )
 
     if not facts["backup"]:
-        fail(
-            "backup", "athanor-backup list shows no snapshot after the hourly unit ran"
-        )
+        fail("backup", "athanor-backup list shows no snapshot after the hourly unit ran")
     return bad
 
 

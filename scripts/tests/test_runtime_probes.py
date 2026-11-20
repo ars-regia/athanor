@@ -235,9 +235,7 @@ class Expectations(unittest.TestCase):
     def test_an_installed_absent_unit_fails(self):
         f = good()
         f["units"]["example-absent.service"] = "disabled"
-        expect = EXPECT | {
-            "units": EXPECT["units"] | {"absent": ["example-absent.service"]}
-        }
+        expect = EXPECT | {"units": EXPECT["units"] | {"absent": ["example-absent.service"]}}
         got = {c for c, _ in probes.evaluate(f, expect, CONTACTS, TUNNEL, SIGNED)}
         self.assertEqual(got, {"units"})
 

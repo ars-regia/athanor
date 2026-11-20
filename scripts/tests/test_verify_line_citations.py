@@ -119,25 +119,19 @@ class Lists(unittest.TestCase):
 
     def test_a_name_that_is_a_prefix_of_its_neighbour_is_not_the_neighbour(self):
         self.assertEqual(self.found(f"The `cosmic-settings` is at `{self.PJ}:4`."), [])
-        self.assertEqual(
-            len(self.found(f"The `cosmic-settings` is at `{self.PJ}:3`.")), 1
-        )
+        self.assertEqual(len(self.found(f"The `cosmic-settings` is at `{self.PJ}:3`.")), 1)
         self.assertEqual(len(self.found(f"The `cosmic-osd` is at `{self.PJ}:5`.")), 1)
         self.assertEqual(self.found(f"The `cosmic-osd` is at `{self.PJ}:2`."), [])
 
     def test_every_name_of_a_run_sits_in_the_cited_lines(self):
-        self.assertEqual(
-            self.found(f"The `nix` and `nix-daemon` are at `{self.PJ}:6-7`."), []
-        )
+        self.assertEqual(self.found(f"The `nix` and `nix-daemon` are at `{self.PJ}:6-7`."), [])
         out = self.found(f"The `nix` and `nix-daemon` are at `{self.PJ}:7`.")
         self.assertEqual(len(out), 1)
         self.assertIn("does not hold `nix`", out[0])
 
     def test_a_run_reaches_across_an_is_in_to_the_key(self):
-        keyed = {
-            self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
-            '    "nix-daemon"\n  ]\n}\n'
-        }
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
         cite = "`nix` and `nix-daemon` are in `upstream_core` (`%s:%s`)."
         self.assertEqual(messages(cite % (self.PJ, "5-7"), keyed), [])
         out = messages(cite % (self.PJ, "3-5"), keyed)
@@ -145,28 +139,17 @@ class Lists(unittest.TestCase):
         self.assertIn("does not hold `nix-daemon`", out[0])
 
     def test_an_is_in_joins_one_name_and_no_other_clause(self):
-        keyed = {
-            self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
-            '    "nix-daemon"\n  ]\n}\n'
-        }
-        self.assertEqual(
-            messages(
-                f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5-6`).",
-                keyed,
-            ),
-            [],
-        )
-        out = messages(
-            f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5`).", keyed
-        )
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
+        self.assertEqual(messages(f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5-6`).",
+                                  keyed), [])
+        out = messages(f"`x-one` is in `a` and `nix` is in `upstream_core` (`{self.PJ}:5`).", keyed)
         self.assertEqual(len(out), 1)
         self.assertIn("does not hold `nix`", out[0])
 
     def test_an_are_in_clause_does_not_reach_the_key_of_the_clause_before(self):
-        keyed = {
-            self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
-            '    "nix-daemon"\n  ]\n}\n'
-        }
+        keyed = {self.PJ: '{\n  "a": [\n    "x-one"\n  ],\n  "upstream_core": [\n    "nix",\n'
+                 '    "nix-daemon"\n  ]\n}\n'}
         cite = "`x-one` and `y-two` are in `a` and `nix` and `nix-daemon` are in `upstream_core` (`%s:%s`)."
         self.assertEqual(messages(cite % (self.PJ, "5-7"), keyed), [])
         out = messages(cite % (self.PJ, "5-6"), keyed)
@@ -174,36 +157,24 @@ class Lists(unittest.TestCase):
         self.assertIn("does not hold `nix-daemon`", out[0])
 
     def test_a_backticked_word_that_is_no_entry_is_not_demanded(self):
-        self.assertEqual(
-            self.found(
-                f"The `nix` ships in the image, built by `rpmbuild` (`{self.PJ}:6`)."
-            ),
-            [],
-        )
+        self.assertEqual(self.found(f"The `nix` ships in the image, built by `rpmbuild` (`{self.PJ}:6`)."), [])
 
     def test_a_name_in_backticks_the_file_no_longer_holds_is_a_finding(self):
-        for text in (
-            f"The `nix` and `gone-pkg` are at `{self.PJ}:6-7`.",
-            f"The `gone-pkg` and `nix` are at `{self.PJ}:6-7`.",
-        ):
+        for text in (f"The `nix` and `gone-pkg` are at `{self.PJ}:6-7`.",
+                     f"The `gone-pkg` and `nix` are at `{self.PJ}:6-7`."):
             with self.subTest(text=text):
                 out = self.found(text)
                 self.assertEqual(len(out), 1)
                 self.assertIn("does not hold `gone-pkg`", out[0])
 
     def test_a_name_of_another_clause_is_not_part_of_the_run(self):
-        self.assertEqual(
-            self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), []
-        )
+        self.assertEqual(self.found(f"The `nix` ships in `cosmic-osd` (`{self.PJ}:2`)."), [])
 
     def test_a_citation_with_no_name_to_match_is_a_finding(self):
         out = self.found(f"The nix is listed in `{self.PJ}:6`.")
         self.assertEqual(len(out), 1)
         self.assertIn("names no token", out[0])
-        self.assertEqual(
-            self.found(f"The nix is listed in `{self.PJ}:6`.".replace("nix", "`nix`")),
-            [],
-        )
+        self.assertEqual(self.found(f"The nix is listed in `{self.PJ}:6`.".replace("nix", "`nix`")), [])
 
     def test_a_hyphenated_name_without_backticks_is_matched(self):
         self.assertEqual(self.found(f"The cosmic-osd is at `{self.PJ}:2`."), [])
@@ -211,9 +182,7 @@ class Lists(unittest.TestCase):
 
     def test_a_name_after_the_citation_is_read_when_none_comes_before(self):
         self.assertEqual(self.found(f"The line `{self.PJ}:2` names `cosmic-osd`."), [])
-        self.assertEqual(
-            len(self.found(f"The line `{self.PJ}:3` names `cosmic-osd`.")), 1
-        )
+        self.assertEqual(len(self.found(f"The line `{self.PJ}:3` names `cosmic-osd`.")), 1)
 
     def test_a_bare_span_after_the_file_checks_the_name_before_it(self):
         text = f"In `{self.PJ}` cosmic-osd is at `:2`, cosmic-settings at `:4` and nix-daemon at `:7`."

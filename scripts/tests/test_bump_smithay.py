@@ -34,14 +34,8 @@ esac
 
 def commits(*messages):
     return json.dumps(
-        {
-            "commits": [
-                {"sha": f"abc{i}" + "0" * 37, "commit": {"message": m}}
-                for i, m in enumerate(messages)
-            ]
-        }
+        {"commits": [{"sha": f"abc{i}" + "0" * 37, "commit": {"message": m}} for i, m in enumerate(messages)]}
     )
-
 
 STUB_CARGO = """#!/usr/bin/env bash
 echo "cargo $*" >> "$STUB_LOG"
@@ -79,9 +73,7 @@ class BumpSmithay(unittest.TestCase):
             "STUB_LOG": str(self.log),
             "STUB_OLD": OLD,
             "STUB_STATUS": "ahead",
-            "STUB_COMMITS": commits(
-                "input: fix the grab for @someone in #12\n\nThe body."
-            ),
+            "STUB_COMMITS": commits("input: fix the grab for @someone in #12\n\nThe body."),
         }
 
     def tearDown(self):
@@ -112,12 +104,8 @@ class BumpSmithay(unittest.TestCase):
         )
         body = (self.out / "body.md").read_text()
         self.assertIn(f"{URL}/compare/{OLD}...{NEW}", body)
-        self.assertIn(
-            "```text\nabc000000 input: fix the grab for @someone in #12\n```", body
-        )
-        self.assertIn(
-            f"api --paginate repos/Smithay/smithay/compare/{OLD}...{NEW}", self.calls()
-        )
+        self.assertIn("```text\nabc000000 input: fix the grab for @someone in #12\n```", body)
+        self.assertIn(f"api --paginate repos/Smithay/smithay/compare/{OLD}...{NEW}", self.calls())
 
     def test_a_carriage_return_cannot_close_the_fence(self):
         self.env["STUB_COMMITS"] = commits("x\r```\r@user", "second")
@@ -158,9 +146,7 @@ class BumpSmithay(unittest.TestCase):
         self.assertIn("at 2 revisions", result.stderr)
 
     def hold(self, status):
-        (self.work / README).write_text(
-            f"| Revision | `{OLD}` |\n| Held before | `{HOLD}` |\n"
-        )
+        (self.work / README).write_text(f"| Revision | `{OLD}` |\n| Held before | `{HOLD}` |\n")
         self.env["STUB_HOLD"] = HOLD
         self.env["STUB_HOLD_STATUS"] = status
 

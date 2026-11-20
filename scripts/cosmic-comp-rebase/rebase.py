@@ -93,9 +93,7 @@ def expand(text, spec_text):
     }
     macros |= {
         m.group(1): m.group(2)
-        for m in re.finditer(
-            r"^%(?:global|define)\s+(\w+)\s+(\S+)\s*$", spec_text, re.M
-        )
+        for m in re.finditer(r"^%(?:global|define)\s+(\w+)\s+(\S+)\s*$", spec_text, re.M)
     }
     for _ in range(MAX_EXPANSIONS):
         m = re.search(r"%\{(\w+)\}", text)
@@ -104,9 +102,7 @@ def expand(text, spec_text):
         if m.group(1) not in macros:
             sys.exit(f"cosmic-comp.spec: %{{{m.group(1)}}} is not defined in the spec")
         text = text[: m.start()] + macros[m.group(1)] + text[m.end() :]
-    sys.exit(
-        f"cosmic-comp.spec: {text} does not finish expanding in {MAX_EXPANSIONS} steps"
-    )
+    sys.exit(f"cosmic-comp.spec: {text} does not finish expanding in {MAX_EXPANSIONS} steps")
 
 
 def spec_crates(spec_text):
@@ -122,13 +118,9 @@ def spec_crates(spec_text):
         if not name.endswith(".crate"):
             continue
         if not name or "/" in name or name.startswith("."):
-            sys.exit(
-                f"cosmic-comp.spec: invalid file name derived from {entry}: '{name}'"
-            )
+            sys.exit(f"cosmic-comp.spec: invalid file name derived from {entry}: '{name}'")
         if not re.match(r"^(https?|file)://", url):
-            sys.exit(
-                f"cosmic-comp.spec: Source{m.group(1)} {url} is not an http, https or file URL"
-            )
+            sys.exit(f"cosmic-comp.spec: Source{m.group(1)} {url} is not an http, https or file URL")
         crates.append((url, name))
     return crates
 
@@ -160,10 +152,7 @@ def download(url, name):
             error = failure
             if attempt < RETRIES:
                 time.sleep(RETRY_DELAY)
-    print(
-        f"{name}: download of {url} failed after {RETRIES + 1} attempts: {error}",
-        file=sys.stderr,
-    )
+    print(f"{name}: download of {url} failed after {RETRIES + 1} attempts: {error}", file=sys.stderr)
     raise SystemExit(DOWNLOAD_FAILED)
 
 

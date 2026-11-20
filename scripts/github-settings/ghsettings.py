@@ -378,9 +378,7 @@ def bypass_counts(repo):
 def hidden_bypass(repo, want, live):
     """Compares by count the bypass actors this token cannot read, and takes them out of
     want and live so that compare() leaves them alone. Returns (drift lines, notes)."""
-    hidden = [
-        n for n, r in live.items() if r.get("bypass_actors") is None and n in want
-    ]
+    hidden = [n for n, r in live.items() if r.get("bypass_actors") is None and n in want]
     if not hidden:
         return [], []
     counts = bypass_counts(repo)
@@ -390,9 +388,7 @@ def hidden_bypass(repo, want, live):
         wanted = len(want[name].pop("bypass_actors", None) or [])
         path = f"rulesets {name}.bypass_actors"
         if counts.get(name) != wanted:
-            lines.append(
-                f"drift {path}: file {wanted} actor(s), live {counts.get(name)}"
-            )
+            lines.append(f"drift {path}: file {wanted} actor(s), live {counts.get(name)}")
         else:
             notes.append(
                 f"note {path}: {wanted} actor(s) as in the file; who they are and their "
@@ -720,9 +716,7 @@ def plan_labels(repo, have, want):
     old = {label["name"]: label for label in have}
     new = {label["name"]: label for label in want}
     calls = [
-        ("POST", f"repos/{repo}/labels", label)
-        for n, label in new.items()
-        if n not in old
+        ("POST", f"repos/{repo}/labels", label) for n, label in new.items() if n not in old
     ]
     calls += [
         (
@@ -896,8 +890,7 @@ def _entry_key(want, live):
     """The field that names every entry of both lists once, or None."""
     for key in ENTRY_KEYS:
         if all(isinstance(x, dict) and key in x for x in want + live) and all(
-            len({json.dumps(x[key]) for x in side}) == len(side)
-            for side in (want, live)
+            len({json.dumps(x[key]) for x in side}) == len(side) for side in (want, live)
         ):
             return key
     return None

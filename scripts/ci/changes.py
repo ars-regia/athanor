@@ -166,11 +166,7 @@ def only_adds_members(path, old, new):
     return (
         canonical(old) == canonical(new)
         and before <= {canonical(package) for package in after}
-        and all(
-            "source" not in package
-            for package in after
-            if canonical(package) not in before
-        )
+        and all("source" not in package for package in after if canonical(package) not in before)
     )
 
 
@@ -250,9 +246,7 @@ def main(base, out, cwd=".", event="pull_request"):
     path = pathlib.Path(out)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, sort_keys=True) + "\n")
-    print(
-        f"changes: {len(changed)} file(s) changed since {result['base'][:12]} ({event})"
-    )
+    print(f"changes: {len(changed)} file(s) changed since {result['base'][:12]} ({event})")
     for key in (*AREAS, "docs_only"):
         print(f"changes: {key}={'yes' if result[key] else 'no'}")
 
@@ -260,8 +254,4 @@ def main(base, out, cwd=".", event="pull_request"):
 if __name__ == "__main__":
     if len(sys.argv) not in (3, 4):
         sys.exit("usage: changes.py BASE OUT [EVENT]")
-    main(
-        sys.argv[1],
-        sys.argv[2],
-        event=sys.argv[3] if len(sys.argv) == 4 else "pull_request",
-    )
+    main(sys.argv[1], sys.argv[2], event=sys.argv[3] if len(sys.argv) == 4 else "pull_request")

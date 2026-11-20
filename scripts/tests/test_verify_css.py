@@ -50,10 +50,8 @@ class ProblemsTest(unittest.TestCase):
         self.assertEqual(kinds("a { animation-duration: 150ms; }"), [(0, "duration")])
 
     def test_a_delay_off_the_scale_is_found_and_none_is_not(self):
-        self.assertEqual(
-            kinds("a { transition-delay: 50ms; animation-delay: 0s; }"),
-            [(0, "duration")],
-        )
+        self.assertEqual(kinds("a { transition-delay: 50ms; animation-delay: 0s; }"),
+                         [(0, "duration")])
 
     def test_a_curve_other_than_the_token_is_found(self):
         for value in (
@@ -83,10 +81,9 @@ class ProblemsTest(unittest.TestCase):
             [(4, "px")],
         )
 
+
     def test_a_declaration_ended_by_its_rule_is_read_in_a_rust_string(self):
-        texts = verify.css_texts(
-            pathlib.Path("ui.rs"), 'const CSS: &str = "a { margin: 4px }";\n'
-        )
+        texts = verify.css_texts(pathlib.Path("ui.rs"), 'const CSS: &str = "a { margin: 4px }";\n')
         self.assertEqual([css for _, css in texts], ['"a { margin: 4px }"'])
         self.assertEqual(kinds(texts[0][1]), [(0, "px")])
 
@@ -125,13 +122,9 @@ class BudgetTest(unittest.TestCase):
     def test_a_budget_above_its_findings_fails(self):
         found = self.findings("a { margin: 6px; }\n")
         r = verify.Result()
-        verify.css_budget(
-            r, found, {"system/shell.css": {"px": 2}, "system/gone.css": {"curve": 1}}
-        )
+        verify.css_budget(r, found, {"system/shell.css": {"px": 2}, "system/gone.css": {"curve": 1}})
         self.assertEqual(len(r.problems), 2, r.problems)
-        self.assertIn(
-            "system/shell.css: px: 1 finding(s) under the budget of 2", r.problems[1]
-        )
+        self.assertIn("system/shell.css: px: 1 finding(s) under the budget of 2", r.problems[1])
 
     def test_the_repository_is_within_its_budget(self):
         self.assertTrue(verify.check_css().ok, verify.check_css().problems)

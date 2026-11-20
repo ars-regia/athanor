@@ -19,11 +19,8 @@ class UpdateTrust(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
-        shutil.copytree(
-            ROOT / "forge/specs/athanor-update",
-            self.root / "forge/specs/athanor-update",
-            ignore=shutil.ignore_patterns("target", "vectors"),
-        )
+        shutil.copytree(ROOT / "forge/specs/athanor-update", self.root / "forge/specs/athanor-update",
+                        ignore=shutil.ignore_patterns("target", "vectors"))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -42,86 +39,40 @@ class UpdateTrust(unittest.TestCase):
         self.assertEqual(verify.update_trust_problems(), [])
 
     def test_a_permissive_default_is_reported(self):
-        self.edit(
-            f"{TEMPLATES}/policy.json.in",
-            '"default": [{"type": "reject"}]',
-            '"default": [{"type": "insecureAcceptAnything"}]',
-        )
+        self.edit(f"{TEMPLATES}/policy.json.in", '"default": [{"type": "reject"}]', '"default": [{"type": "insecureAcceptAnything"}]')
         self.assertTrue(any("`default` must be reject" in p for p in self.problems()))
 
     def test_a_closed_user_transport_is_reported(self):
-        self.edit(
-            f"{TEMPLATES}/policy.json.in",
-            '    "oci": {"": [{"type": "insecureAcceptAnything"}]},\n',
-            "",
-        )
-        self.assertTrue(
-            any("transport oci must stay open" in p for p in self.problems())
-        )
+        self.edit(f"{TEMPLATES}/policy.json.in", '    "oci": {"": [{"type": "insecureAcceptAnything"}]},\n', "")
+        self.assertTrue(any("transport oci must stay open" in p for p in self.problems()))
 
     def test_a_repository_without_match_repository_is_reported(self):
-        self.edit(
-            f"{TEMPLATES}/policy.json.in",
-            '"@REGISTRY@/athanor-system-nvidia": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@], "signedIdentity": {"type": "matchRepository"}}]',
-            '"@REGISTRY@/athanor-system-nvidia": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@]}]',
-        )
-        self.assertTrue(
-            any(
-                "athanor-system-nvidia must be sigstoreSigned" in p
-                for p in self.problems()
-            )
-        )
+        self.edit(f"{TEMPLATES}/policy.json.in", '"@REGISTRY@/athanor-system-nvidia": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@], "signedIdentity": {"type": "matchRepository"}}]',
+                  '"@REGISTRY@/athanor-system-nvidia": [{"type": "sigstoreSigned", "keyPaths": [@KEY_PATHS@]}]')
+        self.assertTrue(any("athanor-system-nvidia must be sigstoreSigned" in p for p in self.problems()))
 
     def test_a_missing_registries_entry_is_reported(self):
-        self.edit(
-            f"{TEMPLATES}/athanor.yaml.in",
-            "  @REGISTRY@/athanor-system-nvidia-legacy:\n    use-sigstore-attachments: true\n",
-            "",
-        )
+        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system-nvidia-legacy:\n    use-sigstore-attachments: true\n", "")
         self.assertTrue(any("athanor.yaml.in" in p for p in self.problems()))
 
     def test_a_file_the_spec_does_not_list_is_reported(self):
-        self.edit(
-            "forge/specs/athanor-update/athanor-update.spec",
-            "/usr/share/polkit-1/actions/os.athanor.update.policy\n%doc",
-            "%doc",
-        )
-        self.assertTrue(
-            any(
-                "%files does not list /usr/share/polkit-1/actions/os.athanor.update.policy"
-                in p
-                for p in self.problems()
-            )
-        )
+        self.edit("forge/specs/athanor-update/athanor-update.spec", "/usr/share/polkit-1/actions/os.athanor.update.policy\n%doc", "%doc")
+        self.assertTrue(any("%files does not list /usr/share/polkit-1/actions/os.athanor.update.policy" in p for p in self.problems()))
 
     def test_the_wiring_this_package_replaces_must_be_gone(self):
-        preset = (
-            self.root
-            / "forge/specs/athanor-system-config/SOURCES/usr/lib/systemd/system-preset/80-athanor-system.preset"
-        )
+        preset = self.root / "forge/specs/athanor-system-config/SOURCES/usr/lib/systemd/system-preset/80-athanor-system.preset"
         preset.parent.mkdir(parents=True)
         preset.write_text("enable greetd.service\nenable bootc-fetch-apply.timer\n")
-        override = (
-            self.root
-            / "forge/specs/athanor-base-config/SOURCES/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf"
-        )
+        override = self.root / "forge/specs/athanor-base-config/SOURCES/usr/lib/systemd/system/bootc-fetch-apply-updates.service.d/override.conf"
         override.parent.mkdir(parents=True)
-        override.write_text(
-            "[Service]\nExecStart=\nExecStart=/usr/bin/bootc upgrade --stage --quiet\n"
-        )
+        override.write_text("[Service]\nExecStart=\nExecStart=/usr/bin/bootc upgrade --stage --quiet\n")
         found = self.problems()
         self.assertTrue(any("bootc-fetch-apply.timer" in p for p in found))
         self.assertTrue(any("--stage" in p for p in found))
 
     def test_a_literal_registry_owner_is_reported(self):
-        self.edit(
-            f"{TEMPLATES}/athanor.yaml.in",
-            "  @REGISTRY@/athanor-system:\n",
-            "  ghcr.io/someone/athanor-system:\n",
-        )
-        self.assertTrue(
-            any("literal registry owner ghcr.io/someone" in p for p in self.problems())
-        )
+        self.edit(f"{TEMPLATES}/athanor.yaml.in", "  @REGISTRY@/athanor-system:\n", "  ghcr.io/someone/athanor-system:\n")
+        self.assertTrue(any("literal registry owner ghcr.io/someone" in p for p in self.problems()))
 
     def test_a_package_may_build_more_than_one_crate(self):
         built = verify.crates_built_by_specs()
@@ -129,44 +80,25 @@ class UpdateTrust(unittest.TestCase):
         self.assertEqual(built.get("athanor-update-notify"), "athanor-update")
 
     def test_the_retired_secure_boot_daemon_must_stay_gone(self):
-        self.assertEqual(
-            [
-                p
-                for p in verify.update_trust_problems()
-                if "SecureBoot" in p or "secure-boot" in p
-            ],
-            [],
-        )
+        self.assertEqual([p for p in verify.update_trust_problems() if "SecureBoot" in p or "secure-boot" in p], [])
         spec = self.root / "forge/specs/athanor-secure-boot/athanor-secure-boot.spec"
         spec.parent.mkdir(parents=True)
-        spec.write_text(
-            "%files\n/usr/lib/systemd/system/athanor-secure-boot.service\n/usr/lib/systemd/system/athanor-tpm-luks-seal.service\n"
-        )
+        spec.write_text("%files\n/usr/lib/systemd/system/athanor-secure-boot.service\n/usr/lib/systemd/system/athanor-tpm-luks-seal.service\n")
         found = self.problems()
         self.assertTrue(any("athanor-secure-boot.service" in p for p in found))
 
     def test_the_auto_sealing_and_rollback_units_must_not_ship(self):
         self.assertEqual([p for p in verify.update_trust_problems() if "D42" in p], [])
-        unit = (
-            self.root
-            / "forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-rollback-check.service"
-        )
+        unit = self.root / "forge/specs/athanor-secure-boot/SOURCES/usr/lib/systemd/system/athanor-tpm-rollback-check.service"
         unit.parent.mkdir(parents=True)
         unit.write_text("[Unit]\n")
-        self.assertTrue(
-            any(
-                "athanor-tpm-rollback-check" in p and "D42" in p
-                for p in self.problems()
-            )
-        )
+        self.assertTrue(any("athanor-tpm-rollback-check" in p and "D42" in p for p in self.problems()))
 
     def test_the_image_build_renders_the_policy_and_links_etc(self):
         self.assertEqual(verify.image_policy_problems(), [])
         system = self.root / "system"
         (system / "keys").mkdir(parents=True)
-        (system / "Containerfile").write_text(
-            "FROM scratch\nRUN systemctl preset-all\n"
-        )
+        (system / "Containerfile").write_text("FROM scratch\nRUN systemctl preset-all\n")
         found = verify.image_policy_problems(self.root)
         self.assertTrue(any("render-policy" in p for p in found))
         self.assertTrue(any("system/keys" in p for p in found))
@@ -175,51 +107,27 @@ class UpdateTrust(unittest.TestCase):
         (system / "Containerfile").write_text(
             "ARG IMAGE_REGISTRY\nCOPY system/keys/ /usr/share/athanor/keys/\n"
             'RUN /usr/libexec/athanor-update/render-policy --registry "${IMAGE_REGISTRY}" --keys-dir /usr/share/athanor/keys '
-            "--out /usr/share/athanor/containers --link-etc /etc\nRUN systemctl preset-all\n"
-        )
-        self.assertEqual(
-            verify.image_policy_problems(self.root),
-            ["system/keys/leak.key: only *.pub files belong under system/keys"],
-        )
+            "--out /usr/share/athanor/containers --link-etc /etc\nRUN systemctl preset-all\n")
+        self.assertEqual(verify.image_policy_problems(self.root), ["system/keys/leak.key: only *.pub files belong under system/keys"])
 
     def test_only_the_tier0_base_config_install_skips_the_signature(self):
         system = self.root / "system"
         (system / "keys").mkdir(parents=True)
         (system / "keys/athanor-image-1.pub").write_text("-----BEGIN PUBLIC KEY-----\n")
-        policy = (
-            "ARG IMAGE_REGISTRY\nCOPY system/keys/ /usr/share/athanor/keys/\n"
-            "RUN /usr/libexec/athanor-update/render-policy --link-etc /etc\nRUN systemctl preset-all\n"
-        )
-        tier0 = (
-            'RUN BASE_CONFIG=$(find /tmp/tier0-repo -name "athanor-base-config*.rpm") && \\\n    '
-            + verify.TIER0_DIGEST_INSTALL
-            + "\n"
-        )
+        policy = ("ARG IMAGE_REGISTRY\nCOPY system/keys/ /usr/share/athanor/keys/\n"
+                  "RUN /usr/libexec/athanor-update/render-policy --link-etc /etc\nRUN systemctl preset-all\n")
+        tier0 = ('RUN BASE_CONFIG=$(find /tmp/tier0-repo -name "athanor-base-config*.rpm") && \\\n    '
+                 + verify.TIER0_DIGEST_INSTALL + "\n")
         for text, expected in (
             (tier0, []),
-            (
-                tier0.replace("/tmp/tier0-repo", "/tmp/elsewhere"),
-                ["system/Containerfile:2"],
-            ),
+            (tier0.replace("/tmp/tier0-repo", "/tmp/elsewhere"), ["system/Containerfile:2"]),
             ("RUN rpm -Uvh --nosignature x.rpm\n", ["system/Containerfile:1"]),
             ("RUN dnf5 install -y --nogpgcheck x\n", ["system/Containerfile:1"]),
             ("RUN dnf5 install -y --no-gpgchecks x\n", ["system/Containerfile:1"]),
-            (
-                "RUN dnf5 install -y --setopt=gpgcheck=no x\n",
-                ["system/Containerfile:1"],
-            ),
-            (
-                "RUN dnf5 install -y --setopt=gpgcheck=off x\n",
-                ["system/Containerfile:1"],
-            ),
-            (
-                "RUN echo '%_pkgverify_level none' > /etc/rpm/macros.x\n",
-                ["system/Containerfile:1"],
-            ),
-            (
-                "RUN dnf5 install -y --setopt=localpkg_gpgcheck=0 ./x.rpm\n",
-                ["system/Containerfile:1"],
-            ),
+            ("RUN dnf5 install -y --setopt=gpgcheck=no x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=gpgcheck=off x\n", ["system/Containerfile:1"]),
+            ("RUN echo '%_pkgverify_level none' > /etc/rpm/macros.x\n", ["system/Containerfile:1"]),
+            ("RUN dnf5 install -y --setopt=localpkg_gpgcheck=0 ./x.rpm\n", ["system/Containerfile:1"]),
         ):
             with self.subTest(text=text):
                 (system / "Containerfile").write_text(text + policy)

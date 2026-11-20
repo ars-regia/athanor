@@ -21,11 +21,7 @@ def podman_args(event):
         fake.write_text(FAKE_PODMAN)
         fake.chmod(0o755)
         log = pathlib.Path(tmp) / "log"
-        env = {
-            **os.environ,
-            "PATH": f"{tmp}:{os.environ['PATH']}",
-            "FAKE_LOG": str(log),
-        }
+        env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "FAKE_LOG": str(log)}
         env.pop("GITHUB_EVENT_NAME", None)
         if event is not None:
             env["GITHUB_EVENT_NAME"] = event
@@ -36,14 +32,7 @@ def podman_args(event):
 class CacheTest(unittest.TestCase):
     def test_every_event_builds_fresh(self):
         # The pull request's build is promoted to the push (ADR-0110): it gets no cached layers.
-        for event in (
-            "pull_request",
-            "push",
-            "schedule",
-            "workflow_dispatch",
-            "merge_group",
-            None,
-        ):
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch", "merge_group", None):
             with self.subTest(event=event):
                 args = podman_args(event)
                 self.assertIn("--no-cache", args)

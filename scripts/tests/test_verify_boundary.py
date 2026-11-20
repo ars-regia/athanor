@@ -99,14 +99,10 @@ class BoundaryTest(unittest.TestCase):
         code = 'const OLD: &str = "com.system76.CosmicTerm.desktop";\n'
         self.assertEqual(problems({"system/athanor-layout/src/favorites.rs": code}), [])
         both = 'const X: [&str; 2] = ["com.system76.CosmicFiles.desktop", "com.system76.CosmicPanel"];\n'
-        self.assertEqual(
-            len(problems({"system/athanor-layout/src/favorites.rs": both})), 1
-        )
+        self.assertEqual(len(problems({"system/athanor-layout/src/favorites.rs": both})), 1)
 
     def test_a_family_of_units_of_a_cosmic_application_is_not_a_configuration(self):
-        code = (
-            'const LINE: &str = "app-athanor-com.system76.CosmicSettings*@.service";\n'
-        )
+        code = 'const LINE: &str = "app-athanor-com.system76.CosmicSettings*@.service";\n'
         self.assertEqual(problems({"system/athanor-layout/src/main.rs": code}), [])
 
     def test_only_the_theme_tool_and_the_compositor_client_may_name_cosmic(self):

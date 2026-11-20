@@ -22,28 +22,16 @@ def main():
     apps = [desktop.get_child_at_index(i) for i in range(desktop.get_child_count())]
     app = next((a for a in apps if a is not None and a.get_name() == sys.argv[1]), None)
     if app is None:
-        print(
-            f"no application {sys.argv[1]!r} on the accessibility bus", file=sys.stderr
-        )
+        print(f"no application {sys.argv[1]!r} on the accessibility bus", file=sys.stderr)
         return 1
     for index in range(app.get_child_count()):
         window = app.get_child_at_index(index)
         if window is None:
             continue
         extents = window.get_extents(Atspi.CoordType.WINDOW)
-        print(
-            json.dumps(
-                {
-                    "toplevel": index,
-                    "name": window.get_name(),
-                    "w": extents.width,
-                    "h": extents.height,
-                }
-            )
-        )
-        pending = [
-            window.get_child_at_index(i) for i in range(window.get_child_count())
-        ]
+        print(json.dumps({"toplevel": index, "name": window.get_name(),
+                          "w": extents.width, "h": extents.height}))
+        pending = [window.get_child_at_index(i) for i in range(window.get_child_count())]
         while pending:
             node = pending.pop()
             if node is None:
@@ -52,23 +40,12 @@ def main():
                 states = node.get_state_set()
                 if states.contains(Atspi.StateType.SHOWING):
                     box = node.get_extents(Atspi.CoordType.WINDOW)
-                    print(
-                        json.dumps(
-                            {
-                                "window": index,
-                                "name": node.get_name(),
-                                "role": node.get_role_name(),
-                                "popup": states.contains(Atspi.StateType.HAS_POPUP),
-                                "x": box.x,
-                                "y": box.y,
-                                "w": box.width,
-                                "h": box.height,
-                            }
-                        )
-                    )
-                pending.extend(
-                    node.get_child_at_index(i) for i in range(node.get_child_count())
-                )
+                    print(json.dumps({
+                        "window": index, "name": node.get_name(), "role": node.get_role_name(),
+                        "popup": states.contains(Atspi.StateType.HAS_POPUP),
+                        "x": box.x, "y": box.y, "w": box.width, "h": box.height,
+                    }))
+                pending.extend(node.get_child_at_index(i) for i in range(node.get_child_count()))
             except GLib.Error:
                 # Destroyed while walked: a rebuild replaced it.
                 continue

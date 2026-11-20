@@ -17,9 +17,7 @@ from test_kernel_artifacts import Tool  # noqa: E402
 
 SCRIPT = ROOT / "scripts/ci/release_candidate.py"
 # The check, without its wait for a record that a test leaves behind for good.
-NO_WAIT = (
-    "import sys, release_candidate as r; r.SETTLE = 0; sys.exit(r.main(sys.argv[1:]))"
-)
+NO_WAIT = "import sys, release_candidate as r; r.SETTLE = 0; sys.exit(r.main(sys.argv[1:]))"
 R = "ars-regia/athanor"
 REG = "ghcr.io/owner"
 ORCH = ".github/workflows/athanor-forge-orchestrator.yml"
@@ -93,9 +91,7 @@ class Candidate(Tool):
     def setUp(self):
         super().setUp()
         for tool in ("podman", "rpm", "curl", "git"):
-            (self.dir / "bin" / tool).symlink_to(
-                pathlib.Path(__file__).with_name("fake_release_tools.py")
-            )
+            (self.dir / "bin" / tool).symlink_to(pathlib.Path(__file__).with_name("fake_release_tools.py"))
 
     def github(
         self,
@@ -249,29 +245,12 @@ class Candidate(Tool):
         self.assertEqual(got["build_time"], "2026-10-11T04:00:05Z")
         schema.validate(got, schema.load("release-candidate"))
         self.assertEqual(
-            [
-                (
-                    c["repository"],
-                    c["baseline_digest"],
-                    c["candidate_digest"],
-                    c["class"],
-                )
-                for c in got["classes"]
-            ],
-            [
-                (f"{REG}/{n}", digest(i + 8), digest(i + 1), "feature")
-                for i, n in enumerate(NAMES)
-            ],
+            [(c["repository"], c["baseline_digest"], c["candidate_digest"], c["class"]) for c in got["classes"]],
+            [(f"{REG}/{n}", digest(i + 8), digest(i + 1), "feature") for i, n in enumerate(NAMES)],
         )
         calls = (self.dir / "calls.log").read_text().splitlines()
         self.assertTrue([c for c in calls if c.startswith("podman create")])
-        self.assertFalse(
-            [
-                c
-                for c in calls
-                if c.split()[:2] in (["podman", "start"], ["podman", "run"])
-            ]
-        )
+        self.assertFalse([c for c in calls if c.split()[:2] in (["podman", "start"], ["podman", "run"])])
 
     def test_a_class_reason_reaches_the_job_summary(self):
         self.github(labels={"org.opencontainers.image.revision": ""})
@@ -306,10 +285,7 @@ class Candidate(Tool):
 
     def test_a_release_run_on_another_ref_refuses(self):
         self.github()
-        self.refused(
-            "releases only from refs/heads/iso-v0, not refs/heads/main",
-            ref="refs/heads/main",
-        )
+        self.refused("releases only from refs/heads/iso-v0, not refs/heads/main", ref="refs/heads/main")
 
     def test_a_request_from_another_workflow_refuses(self):
         self.github(req=request(workflow_path=".github/workflows/other.yml"))
@@ -373,9 +349,7 @@ class Candidate(Tool):
         return run, found, len(list(answers))
 
     def test_the_check_waits_while_the_run_reads_as_queued(self):
-        run, _, left = self.settle(
-            run_object(status="queued"), jobs(), run_object(), jobs()
-        )
+        run, _, left = self.settle(run_object(status="queued"), jobs(), run_object(), jobs())
         self.assertEqual((run["status"], left), ("in_progress", 0))
 
     def test_the_check_waits_while_a_job_has_no_conclusion(self):
@@ -403,9 +377,7 @@ class Candidate(Tool):
         import release_candidate as module
 
         with self.assertRaisesRegex(module.Refused, "404"):
-            self.settle(
-                module.Refused("gh: Not Found (HTTP 404)"), run_object(), jobs()
-            )
+            self.settle(module.Refused("gh: Not Found (HTTP 404)"), run_object(), jobs())
 
     def test_a_run_at_another_attempt_is_not_waited_for(self):
         spare = (run_object(), jobs())
@@ -587,9 +559,7 @@ class Candidate(Tool):
             "org.opencontainers.image.revision"
         ] = OLD
         self.registry(fx)
-        self.refused(
-            f"candidate names revision '{OLD}', not the request's commit {SHA}"
-        )
+        self.refused(f"candidate names revision '{OLD}', not the request's commit {SHA}")
 
 
 if __name__ == "__main__":

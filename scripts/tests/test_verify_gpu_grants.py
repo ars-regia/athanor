@@ -104,8 +104,7 @@ class GpuGrantsTest(unittest.TestCase):
 
     def test_a_mask_bound_from_dev_is_reported(self):
         from_dev = WRAPPER.format(
-            binds=COMPLETE
-            + 'set -- "$@" --ro-bind /dev/null /usr/bin/nvidia-modprobe\n'
+            binds=COMPLETE + 'set -- "$@" --ro-bind /dev/null /usr/bin/nvidia-modprobe\n'
         )
         found = problems({"forge/specs/c/SOURCES/usr/libexec/client": from_dev})
         self.assertEqual(len(found), 1)

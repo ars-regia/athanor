@@ -97,21 +97,10 @@ class Drill(unittest.TestCase):
     def exit_of(self, *extra, repo=None):
         """The exit status and stderr of a drill that stops before its report."""
         stderr = io.StringIO()
-        with (
-            unittest.mock.patch.object(sys, "stderr", stderr),
-            self.assertRaises(SystemExit) as stopped,
-        ):
+        with unittest.mock.patch.object(sys, "stderr", stderr), self.assertRaises(SystemExit) as stopped:
             rebase.main(
-                [
-                    str(self.tmp / "out"),
-                    "--spec",
-                    str(self.spec),
-                    "--patches",
-                    str(self.patches),
-                    "--repo",
-                    repo or str(self.upstream),
-                    *extra,
-                ]
+                [str(self.tmp / "out"), "--spec", str(self.spec), "--patches", str(self.patches),
+                 "--repo", repo or str(self.upstream), *extra]
             )
         return stopped.exception.code, stderr.getvalue()
 
@@ -126,9 +115,7 @@ class Drill(unittest.TestCase):
         self.assertEqual(code, rebase.CLONE_FAILED)
         self.assertIn("git clone", stderr)
 
-    def test_a_git_apply_check_that_answers_128_stops_the_drill_and_1_is_a_failing_patch(
-        self,
-    ):
+    def test_a_git_apply_check_that_answers_128_stops_the_drill_and_1_is_a_failing_patch(self):
         (self.patches / "p.patch").write_text("x")
         self.declare("p.patch")
         real = subprocess.run
@@ -136,11 +123,8 @@ class Drill(unittest.TestCase):
         def answering(status):
             def run(cmd, **kwargs):
                 if "--check" in cmd:
-                    return subprocess.CompletedProcess(
-                        cmd, status, "", "fatal: corrupt patch"
-                    )
+                    return subprocess.CompletedProcess(cmd, status, "", "fatal: corrupt patch")
                 return real(cmd, **kwargs)
-
             return run
 
         with unittest.mock.patch.object(rebase.subprocess, "run", answering(128)):
@@ -153,18 +137,12 @@ class Drill(unittest.TestCase):
 
     def test_a_spec_that_declares_no_patches_is_a_clean_empty_set(self):
         status, report, text = self.run_drill()
-        self.assertEqual(
-            (status, report["tag"], report["patches"]), (0, "epoch-1.9.0", [])
-        )
+        self.assertEqual((status, report["tag"], report["patches"]), (0, "epoch-1.9.0", []))
         self.assertIn("declares no patches", text)
 
     def test_reports_which_patches_apply(self):
-        (self.patches / "0001-keeps.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n"
-        )
-        (self.patches / "0002-conflicts.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n"
-        )
+        (self.patches / "0001-keeps.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n")
+        (self.patches / "0002-conflicts.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+2\n three\n")
         self.declare("0001-keeps.patch", "0002-conflicts.patch")
         status, report, text = self.run_drill()
         self.assertEqual(status, 1)
@@ -177,58 +155,25 @@ class Drill(unittest.TestCase):
     def test_patches_apply_in_spec_index_order_each_on_top_of_the_last(self):
         # The second patch edits the line the first adds, and its file name sorts first:
         # in name order it would fail, in index order both apply.
-        (self.patches / "z-first.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n"
-        )
-        (self.patches / "a-second.patch").write_text(
-            "--- a/a.txt\n+++ b/a.txt\n@@ -2,3 +2,3 @@\n TWO\n three\n-four\n+FOUR\n"
-        )
+        (self.patches / "z-first.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -1,3 +1,4 @@\n one\n TWO\n three\n+four\n")
+        (self.patches / "a-second.patch").write_text("--- a/a.txt\n+++ b/a.txt\n@@ -2,3 +2,3 @@\n TWO\n three\n-four\n+FOUR\n")
         self.declare("z-first.patch", "a-second.patch")
         status, report, _ = self.run_drill()
         self.assertEqual(status, 0)
-        self.assertEqual(
-            [p["patch"] for p in report["patches"]], ["z-first.patch", "a-second.patch"]
-        )
+        self.assertEqual([p["patch"] for p in report["patches"]], ["z-first.patch", "a-second.patch"])
         self.assertTrue(all(p["applies"] for p in report["patches"]))
 
     def test_a_missing_spec_patch_directory_or_declared_file_is_an_error(self):
         out = str(self.tmp / "out")
         with self.assertRaises(SystemExit):
-            rebase.main(
-                [
-                    out,
-                    "--spec",
-                    str(self.tmp / "none.spec"),
-                    "--patches",
-                    str(self.patches),
-                    "--repo",
-                    str(self.upstream),
-                ]
-            )
+            rebase.main([out, "--spec", str(self.tmp / "none.spec"), "--patches", str(self.patches), "--repo", str(self.upstream)])
         with self.assertRaises(SystemExit):
-            rebase.main(
-                [
-                    out,
-                    "--spec",
-                    str(self.spec),
-                    "--patches",
-                    str(self.tmp / "none"),
-                    "--repo",
-                    str(self.upstream),
-                ]
-            )
+            rebase.main([out, "--spec", str(self.spec), "--patches", str(self.tmp / "none"), "--repo", str(self.upstream)])
         self.declare("0001-absent.patch")
         with self.assertRaises(SystemExit):
             self.run_drill()
 
-    def crate(
-        self,
-        sha256=None,
-        member="wayland-backend-0.3.15/src/wire.rs",
-        manifest=None,
-        source=None,
-        macros="",
-    ):
+    def crate(self, sha256=None, member="wayland-backend-0.3.15/src/wire.rs", manifest=None, source=None, macros=""):
         """A crate archive holding `member`, declared as Source1 by a file:// URL through a
         %global, its sha256 in sources.sha256, and a patch on it. `manifest` replaces the
         manifest's text, `source` the Source1 value, `macros` adds lines to the spec."""
@@ -242,9 +187,7 @@ class Drill(unittest.TestCase):
         archive.write_bytes(packed.getvalue())
         digest = sha256 or hashlib.sha256(packed.getvalue()).hexdigest()
         (self.patches / "sources.sha256").write_text(
-            f"{digest}  wayland-backend-0.3.15.crate\n"
-            if manifest is None
-            else manifest
+            f"{digest}  wayland-backend-0.3.15.crate\n" if manifest is None else manifest
         )
         (self.patches / "0001-vendor.patch").write_text(
             "--- a/vendor/wayland-backend-0.3.15/src/wire.rs\n"
@@ -270,10 +213,7 @@ class Drill(unittest.TestCase):
     def test_a_patch_on_a_crate_the_spec_unpacks_under_vendor_applies(self):
         self.crate()
         status, report, _ = self.run_drill()
-        self.assertEqual(
-            (status, [(p["patch"], p["applies"]) for p in report["patches"]]),
-            (0, [("0001-vendor.patch", True)]),
-        )
+        self.assertEqual((status, [(p["patch"], p["applies"]) for p in report["patches"]]), (0, [("0001-vendor.patch", True)]))
 
     def test_a_crate_whose_sha256_differs_from_the_manifest_is_an_error(self):
         self.crate(sha256="0" * 64)
@@ -284,26 +224,17 @@ class Drill(unittest.TestCase):
         self.assertIn("no sha256 for wayland-backend-0.3.15.crate", self.drill_exits())
 
     def test_a_malformed_manifest_line_is_an_error(self):
-        for line in (
-            "not-a-hash",
-            f"{'0' * 64}  a.crate  b.crate",
-            f"{'g' * 64}  a.crate",
-        ):
+        for line in ("not-a-hash", f"{'0' * 64}  a.crate  b.crate", f"{'g' * 64}  a.crate"):
             with self.subTest(line=line):
                 self.crate(manifest=line + "\n")
                 self.assertIn("not a `sha256  name` line", self.drill_exits())
 
     def test_an_undefined_macro_is_an_error(self):
-        self.crate(
-            source="https://static.crates.io/crates/wayland-backend/wayland-backend-%{undefined}.crate"
-        )
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-%{undefined}.crate")
         self.assertIn("%{undefined} is not defined", self.drill_exits())
 
     def test_a_macro_that_names_itself_is_an_error_not_a_hang(self):
-        self.crate(
-            source="https://static.crates.io/%{again}.crate",
-            macros="%global again %{again}\n",
-        )
+        self.crate(source="https://static.crates.io/%{again}.crate", macros="%global again %{again}\n")
 
         def hung(*_):
             raise TimeoutError("the expansion did not stop")
@@ -316,9 +247,7 @@ class Drill(unittest.TestCase):
     def test_a_file_name_that_is_not_one_path_component_is_an_error(self):
         for name in ("../../x.crate", "a/b.crate", ".hidden.crate"):
             with self.subTest(name=name):
-                self.crate(
-                    source=f"{self.tmp.as_uri()}/wayland-backend-0.3.15.crate#/{name}"
-                )
+                self.crate(source=f"{self.tmp.as_uri()}/wayland-backend-0.3.15.crate#/{name}")
                 self.assertIn("invalid file name", self.drill_exits())
 
     def test_a_crate_url_that_is_not_http_https_or_file_is_an_error(self):
@@ -329,20 +258,14 @@ class Drill(unittest.TestCase):
         self.crate(member="../escaped.rs")
         self.assertIn("escaped.rs", self.drill_exits())
 
-    def test_a_crate_that_cannot_be_downloaded_exits_apart_from_a_patch_that_fails(
-        self,
-    ):
-        self.crate(
-            source=(self.tmp / "absent").as_uri() + "/wayland-backend-0.3.15.crate"
-        )
+    def test_a_crate_that_cannot_be_downloaded_exits_apart_from_a_patch_that_fails(self):
+        self.crate(source=(self.tmp / "absent").as_uri() + "/wayland-backend-0.3.15.crate")
         self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
         rebase.RETRY_DELAY = 0
         self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
 
     def test_a_download_is_tried_four_times_with_a_timeout_whatever_fails(self):
-        self.crate(
-            source="https://static.crates.io/crates/wayland-backend/wayland-backend-0.3.15.crate"
-        )
+        self.crate(source="https://static.crates.io/crates/wayland-backend/wayland-backend-0.3.15.crate")
         failures = [
             http.client.IncompleteRead(b"x", 10),
             http.client.BadStatusLine("x"),
@@ -351,15 +274,10 @@ class Drill(unittest.TestCase):
         ]
         self.addCleanup(setattr, rebase, "RETRY_DELAY", rebase.RETRY_DELAY)
         rebase.RETRY_DELAY = 0
-        with unittest.mock.patch.object(
-            rebase.urllib.request, "urlopen", side_effect=failures
-        ) as urlopen:
+        with unittest.mock.patch.object(rebase.urllib.request, "urlopen", side_effect=failures) as urlopen:
             self.assertEqual(self.drill_exits(), rebase.DOWNLOAD_FAILED)
         self.assertEqual(urlopen.call_count, 4)
-        self.assertTrue(
-            all(call.kwargs.get("timeout") for call in urlopen.call_args_list)
-        )
-
+        self.assertTrue(all(call.kwargs.get("timeout") for call in urlopen.call_args_list))
 
 if __name__ == "__main__":
     unittest.main()

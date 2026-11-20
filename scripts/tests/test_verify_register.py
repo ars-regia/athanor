@@ -73,14 +73,10 @@ class RegisterCountsTest(unittest.TestCase):
         self.assertIn("F-bar-02", found[0])
 
     def test_a_decided_exclusion_is_a_status_of_its_own(self):
-        text = ROWS.replace(
-            "| missing | not verified |", "| excluded | decided 2026-10-04 |"
-        )
+        text = ROWS.replace("| missing | not verified |", "| excluded | decided 2026-10-04 |")
         self.assertEqual(
             verify.register_count_problems(
-                text
-                + counts("Bar", 1, 1, 0, 0, 3, decided=1)
-                + counts("Dock", 0, 0, 0, 1, 1)
+                text + counts("Bar", 1, 1, 0, 0, 3, decided=1) + counts("Dock", 0, 0, 0, 1, 1)
             ),
             [],
         )
