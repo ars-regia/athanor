@@ -60,11 +60,18 @@ fi
 sed -i "s/rev = \"${old}\"/rev = \"${new}\"/" "$root/$manifest"
 for lock in Cargo.lock fuzz/Cargo.lock; do
     cargo update --manifest-path "$root/${lock%Cargo.lock}Cargo.toml" -p smithay -p smithay-drm-extras
-    grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/$lock" ||
-        {
-            echo "smithay.sh: ${lock} does not take Smithay at ${new} after cargo update" >&2
-            exit 1
-        }
+    for package in smithay smithay-drm-extras; do
+        awk -v package="$package" -v want="source = \"git+${url}?rev=${new}#${new}\"" '
+            $0 == "name = \"" package "\"" { found = 1; next }
+            found && /^source = / { exit ($0 == want ? 0 : 1) }
+            /^\[\[package\]\]/ { found = 0 }
+            END { if (!found) exit 1 }
+        ' "$root/$lock" ||
+            {
+                echo "smithay.sh: ${lock} does not take ${package} at ${new} after cargo update" >&2
+                exit 1
+            }
+    done
 done
 commits=$(gh api --paginate "$compare" \
     --jq '.commits[] | "\(.sha[:9]) \(.commit.message | split("\n")[0] | gsub("\r"; " "))"')
