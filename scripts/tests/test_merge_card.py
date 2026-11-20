@@ -5,11 +5,11 @@ The gh calls are faked with responses of the shape gh returns; nothing here reac
 
 import contextlib
 import copy
-import glob
 import io
 import json
 import pathlib
 import re
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -47,6 +47,8 @@ def entry(path, *lines, **more):
         "filename": path,
         "status": "modified",
         "patch": "@@ -1 +1 @@\n" + "\n".join(lines),
+        "additions": sum(x.startswith("+") for x in lines),
+        "deletions": sum(x.startswith("-") for x in lines),
         **more,
     }
 
@@ -108,6 +110,7 @@ def run(
     files=FILES,
     codeowners=CODEOWNERS,
     later=None,
+    table_at_base=False,
 ):
     """(exit code, stdout, stderr) of the script against a faked GitHub.
 
@@ -132,6 +135,10 @@ def run(
             return json.dumps(pr)
         if "Accept: application/vnd.github.raw" in args:
             assert path.endswith(f"?ref={BASE}"), path
+            if "merge_card_categories.json" in path:
+                if not table_at_base:
+                    raise merge_card.NotFound("404")
+                return merge_card.CATEGORIES.read_text()
             if codeowners is None:
                 raise merge_card.NotFound("404")
             return codeowners
@@ -192,7 +199,9 @@ class Card(unittest.TestCase):
             "merge_queue yes",
             "CI workflows: .github/workflows/pr.yml",
             "unsafe: src/a.rs",
-            "2 files, the list is complete; the patterns are heuristic",
+            "files (2, every changed file; the tags are heuristic, this list is the authority)",
+            "the local file (the table is missing at the base",
+            "card time: ",
         ):
             self.assertIn(text, out)
 
@@ -399,10 +408,23 @@ class Findings(unittest.TestCase):
         self.assertIn("CODEOWNERS: .github/CODEOWNERS (path)", out)
         self.assertIn("CI workflows: .github/workflows/w.yml (path)", out)
 
-    def test_a_file_with_no_patch_is_listed_never_clean(self):
-        files = [{"filename": "img.png", "status": "added"}, FILES[0]]
-        _, out, _ = run(files=files)
-        self.assertIn("no patch shown: review the whole file: img.png (added)", out)
+    def test_a_file_read_only_in_part_is_marked_to_be_read_whole(self):
+        files = [
+            {"filename": "img.png", "status": "added", "additions": 0, "deletions": 0},
+            entry("moved.rs", "+x", status="renamed", previous_filename="old.rs"),
+            entry("odd.rs", "+x", additions=5),
+        ]
+        reasons = [r["review"] for r in merge_card.classify(files, [])]
+        self.assertEqual(
+            reasons,
+            [
+                "no patch shown",
+                "renamed: new content at the new path",
+                "the patch does not match the counted additions and deletions",
+            ],
+        )
+        _, out, _ = run(pr={"changedFiles": 3}, files=files)
+        self.assertEqual(out.count("review the whole file ("), 3)
 
     def test_a_patch_line_with_plus_signs_is_a_changed_line(self):
         files = [entry("a.rs", "+++subprocess.run(x)", "---old"), FILES[1]]
@@ -410,17 +432,31 @@ class Findings(unittest.TestCase):
             merge_card.changed_lines(files[0]), ["+++subprocess.run(x)", "---old"]
         )
 
-    def test_only_docs_prose_is_left_out_and_tests_are_listed_apart(self):
+    def test_only_unnamed_docs_prose_collapses_and_it_is_listed_by_name(self):
         files = [
             entry("docs/guide.md", "+unsafe prose"),
+            entry("docs/architecture/doc_x.md", "+text"),
             entry("docs/gen/tool.py", "+subprocess.run(x)"),
             entry("system/foo/tests/t.rs", "+unsafe { f() }"),
         ]
-        _, out, _ = run(pr={"changedFiles": 3}, files=files)
-        self.assertNotIn("guide.md", out)
+        _, out, _ = run(pr={"changedFiles": 4}, files=files)
+        self.assertIn(
+            "docs prose, not approved documents (1 files): docs/guide.md", out
+        )
+        self.assertNotIn("  docs/guide.md [", out)
+        self.assertIn(
+            "  docs/architecture/doc_x.md [modified]: approved document text", out
+        )
         self.assertIn("process launch: docs/gen/tool.py: +subprocess.run(x)", out)
-        self.assertIn("unsafe: in tests: system/foo/tests/t.rs", out)
-        self.assertNotIn("unsafe: system/foo/tests", out)
+        self.assertIn("unsafe: in tests: system/foo/tests/t.rs: +unsafe { f() }", out)
+
+    def test_the_card_prints_its_time_for_verify_approval(self):
+        _, out, _ = run()
+        self.assertRegex(out, r"card time: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
+
+    def test_the_table_at_the_base_wins_and_the_local_one_is_said_when_used(self):
+        self.assertIn("categories: the base " + BASE[:12], run(table_at_base=True)[1])
+        self.assertIn("categories: the local file", run()[1])
 
     def test_process_launch_catches_command_and_the_process_modules(self):
         for line in (
@@ -451,68 +487,164 @@ class Findings(unittest.TestCase):
         self.assertIn("dependencies: .gitmodules (path)", out)
 
 
-class Comments(unittest.TestCase):
+class Tags(unittest.TestCase):
     CATS = [{"name": "unsafe", "paths": [], "patterns": [r"\bunsafe\b"]}]
 
-    def hunks(self, path, *lines):
-        return merge_card.hunks([entry(path, *lines)], self.CATS)[:2]
+    def tags(self, path, *lines, **more):
+        (rec,) = merge_card.classify([entry(path, *lines, **more)], self.CATS)
+        return rec
 
-    def test_a_comment_only_match_is_counted_and_has_no_hunk(self):
-        code, comments = self.hunks(
-            "a.rs", "+// unsafe here", "+/// unsafe", "-    * unsafe"
-        )
-        self.assertEqual((code, comments), ({}, {"unsafe": {"a.rs": 3}}))
+    def test_a_comment_only_match_is_tagged_comment_and_has_no_evidence(self):
+        rec = self.tags("a.rs", "+// unsafe here", "+// unsafe")
+        self.assertEqual((rec["tags"], rec["evidence"]), ({"unsafe": "comment"}, {}))
         for path in ("a.sh", "b.toml", "c.service", "d.spec", "e.py"):
-            self.assertEqual(self.hunks(path, "+  # unsafe")[0], {})
-        self.assertEqual(self.hunks("notes/x.md", "+unsafe prose")[0], {})
+            self.assertEqual(
+                self.tags(path, "+  # unsafe")["tags"], {"unsafe": "comment"}
+            )
 
-    def test_a_code_match_is_a_hunk(self):
-        code, comments = self.hunks("a.rs", "+    unsafe { f() }")
-        self.assertEqual(
-            (code, comments), ({"unsafe": ["a.rs: +    unsafe { f() }"]}, {})
-        )
+    def test_a_star_or_block_comment_line_counts_as_code(self):
+        for line in ("+ * unsafe", "+/* unsafe */", "-    * unsafe"):
+            self.assertEqual(self.tags("a.rs", line)["tags"], {"unsafe": "code"}, line)
+
+    def test_a_code_match_is_tagged_with_its_line(self):
+        rec = self.tags("a.rs", "+    unsafe { f() }")
+        self.assertEqual(rec["tags"], {"unsafe": "code"})
+        self.assertEqual(rec["evidence"], {"unsafe": "a.rs: +    unsafe { f() }"})
 
     def test_a_hash_in_rust_is_code_and_a_slash_in_shell_is_not_a_comment(self):
-        self.assertIn("unsafe", self.hunks("a.rs", "+#[unsafe(no_mangle)]")[0])
-        self.assertIn("unsafe", self.hunks("a.sh", "+// unsafe")[0])
+        self.assertEqual(
+            self.tags("a.rs", "+#[unsafe(no_mangle)]")["tags"], {"unsafe": "code"}
+        )
+        self.assertEqual(self.tags("a.sh", "+// unsafe")["tags"], {"unsafe": "code"})
 
-    def test_a_mixed_file_yields_both_and_the_card_prints_the_count_line(self):
-        files = [entry("a.rs", "+unsafe { f() }", "+// unsafe is why")]
-        code, comments, _ = merge_card.hunks(files, self.CATS)
-        self.assertEqual((len(code["unsafe"]), comments["unsafe"]), (1, {"a.rs": 1}))
+    def test_a_mixed_file_is_code_and_a_file_that_matched_nothing_is_unclassified(self):
+        self.assertEqual(
+            self.tags("a.rs", "+unsafe { f() }", "+// unsafe is why")["tags"],
+            {"unsafe": "code"},
+        )
+        files = [entry("a.rs", "+let x = 1;"), entry("b.rs", "+// unsafe")]
         out = io.StringIO()
         pr = {**PR, "checks": [], "reviews": []}
         with contextlib.redirect_stdout(out):
             merge_card.print_card(pr, BASE, RULES, None, files, self.CATS)
-        self.assertIn("unsafe: a.rs: +unsafe { f() }", out.getvalue())
-        self.assertIn("unsafe: also 1 comment line in a.rs", out.getvalue())
+        self.assertIn("a.rs [modified]: unclassified", out.getvalue())
+        self.assertIn("b.rs [modified]: unsafe (comments only)", out.getvalue())
+        self.assertNotIn("none of the listed", out.getvalue())
 
-    def test_the_count_line_is_plural_from_two(self):
-        files = [entry("a.rs", "+// unsafe", "+// unsafe again")]
-        out = io.StringIO()
-        pr = {**PR, "checks": [], "reviews": []}
-        with contextlib.redirect_stdout(out):
-            merge_card.print_card(pr, BASE, RULES, None, files, self.CATS)
-        self.assertIn("also 2 comment lines in a.rs", out.getvalue())
+    def test_a_test_file_shows_its_first_matching_line(self):
+        rec = self.tags("x/tests/t.rs", "+// unsafe", "+unsafe { g() }")
+        self.assertEqual(rec["tags"], {"unsafe": "test"})
+        self.assertEqual(
+            rec["evidence"], {"unsafe": "in tests: x/tests/t.rs: +// unsafe"}
+        )
+
+
+class Real(unittest.TestCase):
+    """The shipped table against lines and paths the audits found missing."""
+
+    CATS = json.loads(merge_card.CATEGORIES.read_text())["categories"]
+
+    def tags(self, path, *lines):
+        (rec,) = merge_card.classify([entry(path, *lines)], self.CATS)
+        return set(rec["tags"])
+
+    def test_lines_of_each_category_are_tagged(self):
+        cases = {
+            "process launch": [
+                "+Command::new(x)",
+                "+ExecStartPre=/x",
+                "+execvp(a)",
+                "+let p = fork();",
+                "+c.args([a])",
+                "+c.arg(a)",
+            ],
+            "files": ["+fs::write(a)", "+symlink(a, b)", "+std::fs::hard_link(a, b)"],
+            "unsafe": ["+#![deny(unsafe_code)]"],
+            "D-Bus": ["+gio::bus_get()", "+busctl call"],
+            "confinement": [
+                "+ProtectHome=yes",
+                "+PrivateTmp=yes",
+                "+SystemCallFilter=@x",
+                "+ReadWritePaths=/x",
+            ],
+            "trust seal": [
+                "+fn ask_seal()",
+                "+validate_seal(x)",
+                "+ShowSeal",
+                "+Seal::new()",
+                "+let sealed = 1;",
+            ],
+            "power": ["+HandlePowerKey=ignore"],
+            "polkit": ["+polkit check"],
+            "authentication": ["+pam_authenticate(h)"],
+        }
+        for category, lines in cases.items():
+            for line in lines:
+                self.assertIn(category, self.tags("src/x.rs", line), line)
+
+    def test_paths_of_each_category_are_tagged(self):
+        cases = {
+            "systemd units": ["a/b.service", "a/b.socket", "a/b.timer"],
+            "confinement": ["x/a.te", "x/a.cil", "x/a.fc"],
+            "D-Bus": ["x/usr/share/dbus-1/system.d/a.conf"],
+            "power": ["x/src/logind.rs"],
+            "dependencies": [
+                "a/Cargo.lock",
+                "flake.lock",
+                ".cargo/config.toml",
+                "flake.nix",
+                "a/b.repo",
+                "x/Containerfile",
+                "forge/specs/p/p.spec",
+            ],
+            "merge rule and its tooling": [
+                "scripts/merge_card.py",
+                "scripts/merge_card_categories.json",
+                "scripts/tests/test_merge_card.py",
+                "CLAUDE.md",
+                "AGENTS.md",
+                ".claude/rules/x.md",
+            ],
+            "polkit": ["system/athanor-bus-api/src/polkit.rs"],
+            "authentication": [
+                "system/athanor-auth/src/a.rs",
+                "forge/specs/athanor-unlockd/a.spec",
+                "x/pam.d/y",
+            ],
+            "signing and keys": [
+                "system/verify-images.sh",
+                "system/tag-images.sh",
+                "system/image-digests.sh",
+                "system/sign-images.sh",
+            ],
+            "trust seal": [
+                "forge/specs/athanor-greeter-ui/athanor-greeter-ui-1.0.0/src/seal.rs"
+            ],
+        }
+        for category, paths in cases.items():
+            for path in paths:
+                self.assertIn(category, self.tags(path), path)
 
 
 class Categories(unittest.TestCase):
     CATEGORIES = json.loads(merge_card.CATEGORIES.read_text())["categories"]
-    # The repository has no submodule yet; the day it has one, the file is a dependency change.
-    NOT_YET = {".gitmodules"}
+    # No submodule and no SELinux file-context file yet; the day there is one, it is listed.
+    NOT_YET = {".gitmodules", "*.fc"}
 
-    def test_every_listed_path_exists(self):
+    def test_every_listed_path_matches_a_tracked_file(self):
+        tracked = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split("\n")
         for cat in self.CATEGORIES:
             for path in cat["paths"] + cat.get("exclude", []):
                 if path in self.NOT_YET:
                     continue
-                if path.endswith("/"):
-                    self.assertTrue((ROOT / path).is_dir(), path)
-                else:
-                    found = glob.glob(str(ROOT / path)) or glob.glob(
-                        str(ROOT / "**" / path.lstrip("*")), recursive=True
-                    )
-                    self.assertTrue(found, path)
+                self.assertTrue(
+                    any(merge_card.path_matches(f, [path]) for f in tracked), path
+                )
 
     def test_every_pattern_compiles(self):
         for cat in self.CATEGORIES:

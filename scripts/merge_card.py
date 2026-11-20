@@ -10,7 +10,7 @@ It prints the card, then one `REFUSED:` line on stderr per precondition that doe
 and exits 1 when there is one. A 404 on the branch protection means only the rulesets count.
 --verify-approval is the re-check just before the merge: it repeats the reading and adds that
 the head and the base are the card's and that a code owner approved at the card's head after
-CARD_TIME (ISO 8601 with a time zone, e.g. 2026-11-20T20:00:00Z). The approver is `hr-mes` (the
+CARD_TIME (ISO 8601 with a time zone): the `card time:` line the card printed. The approver is `hr-mes` (the
 rule of CLAUDE.md, "Merging") unless --approver names others; the last `*` line of
 .github/CODEOWNERS at the base sha must list each approver, else the script refuses.
 
@@ -22,8 +22,10 @@ have changed. Without a merge_queue rule on the base, the checks must have run o
 base: the head must contain the base head (ancestry only; the other way of workflow.md, the
 timing of each run, is not used, so the reading fails closed on every base without a queue).
 
-The categories of the card come from scripts/merge_card_categories.json. Paths are exact; the
-patterns are heuristic, and a file with no patch (binary, too large) is listed, never clean.
+Run it from a checkout of the base. The categories come from scripts/merge_card_categories.json
+at the base sha (the local file, said on the card, when the base has none). The card lists every
+changed file with its tags, `unclassified` when it has none; the patterns are heuristic aids, and
+a file read in part (no patch, renamed, a patch that does not add up) is marked to be read whole.
 """
 
 import argparse
@@ -33,7 +35,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 CATEGORIES = pathlib.Path(__file__).with_name("merge_card_categories.json")
 FIELDS = (
@@ -180,13 +182,12 @@ def path_matches(path, patterns):
 
 
 def is_comment(path, line):
-    """Whether a changed line (with its +/- mark) is a comment, by the type of its file."""
+    """Whether a changed line (with its +/- mark) is a comment: only `//`, or `#` in the files
+    that take it, or any line of Markdown. A line starting `*` or `/*` counts as code."""
     if path.endswith(".md"):
         return True
     text = line[1:].lstrip()
-    if path.endswith(SLASH_COMMENT):
-        return text.startswith(("//", "/*", "*"))
-    return text.startswith("#")
+    return text.startswith("//" if path.endswith(SLASH_COMMENT) else "#")
 
 
 def is_test(path):
@@ -200,20 +201,44 @@ def changed_lines(entry):
     ]
 
 
-def hunks(files, categories):
-    """(code, comments, tests) by category, from the entries of pulls/<n>/files.
+def review_reason(entry):
+    """Why the file must be read whole, or None: no patch, new content at a new path, or a
+    patch that does not account for the additions and deletions GitHub counts."""
+    if not entry.get("patch"):
+        return "no patch shown"
+    if entry["status"] in ("renamed", "copied"):
+        return f"{entry['status']}: new content at the new path"
+    lines = changed_lines(entry)
+    added = sum(x.startswith("+") for x in lines)
+    if (entry.get("additions", added), entry.get("deletions", len(lines) - added)) != (
+        added,
+        len(lines) - added,
+    ):
+        return "the patch does not match the counted additions and deletions"
+    return None
 
-    code: evidence lines; a path category lists the file by `filename` or `previous_filename`;
-    a pattern category lists the first code line that matches in a file. comments:
-    {path: count} of matching comment lines. tests: the files under a tests directory that
-    match a pattern. Only `docs/**/*.md` prose is left out of the patterns.
+
+def classify(files, categories):
+    """One record per changed file: its tags and the evidence behind them, in file order.
+
+    A tag is a category with a kind: path (the path or the previous path matches), code,
+    comment (every matching line is a comment) or test (a match under a tests directory).
+    A file that matched nothing has no tag: the card calls it unclassified. `prose` marks the
+    docs/**/*.md files that no path of any category names.
     """
-    code, comments, tests = {}, {}, {}
-    for cat in categories:
-        regexes = [re.compile(p) for p in cat["patterns"]]
-        for entry in files:
-            path = entry["filename"]
-            named = [path, entry.get("previous_filename") or path]
+    records = []
+    for entry in files:
+        path = entry["filename"]
+        named = [path, entry.get("previous_filename") or path]
+        rec = {
+            "path": path,
+            "status": entry["status"],
+            "tags": {},
+            "evidence": {},
+            "review": review_reason(entry),
+            "prose": False,
+        }
+        for cat in categories:
             hit = next(
                 (
                     p
@@ -224,27 +249,45 @@ def hunks(files, categories):
                 None,
             )
             if hit:
-                code.setdefault(cat["name"], []).append(f"{hit} (path)")
-                continue
-            if path.startswith("docs/") and path.endswith(".md"):
-                continue
-            matching = [
-                x for x in changed_lines(entry) if any(r.search(x) for r in regexes)
-            ]
-            if not matching:
-                continue
-            if is_test(path):
-                tests.setdefault(cat["name"], {})[path] = len(matching)
-                continue
-            first = next((x for x in matching if not is_comment(path, x)), None)
-            if first:
-                code.setdefault(cat["name"], []).append(
-                    f"{path}: {first.strip()[:100]}"
-                )
-            n = sum(is_comment(path, x) for x in matching)
-            if n:
-                comments.setdefault(cat["name"], {})[path] = n
-    return code, comments, tests
+                rec["tags"][cat["name"]] = "path"
+                rec["evidence"][cat["name"]] = f"{hit} (path)"
+        rec["prose"] = (
+            not rec["tags"]
+            and not rec["review"]
+            and path.startswith("docs/")
+            and path.endswith(".md")
+        )
+        if not rec["prose"]:
+            for cat in categories:
+                if cat["name"] in rec["tags"]:
+                    continue
+                regexes = [re.compile(p) for p in cat["patterns"]]
+                matching = [
+                    x for x in changed_lines(entry) if any(r.search(x) for r in regexes)
+                ]
+                if not matching:
+                    continue
+                code = next((x for x in matching if not is_comment(path, x)), None)
+                if is_test(path):
+                    rec["tags"][cat["name"]] = "test"
+                    rec["evidence"][cat["name"]] = (
+                        f"in tests: {path}: {matching[0].strip()[:100]}"
+                    )
+                elif code:
+                    rec["tags"][cat["name"]] = "code"
+                    rec["evidence"][cat["name"]] = f"{path}: {code.strip()[:100]}"
+                else:
+                    rec["tags"][cat["name"]] = "comment"
+        records.append(rec)
+    return records
+
+
+TAG_SUFFIX = {
+    "path": "",
+    "code": "",
+    "comment": " (comments only)",
+    "test": " (in tests)",
+}
 
 
 def stale_base(repo, pr, base_sha, has_queue):
@@ -367,12 +410,15 @@ def refusals(repo, pr, base_sha, rules, protection, args, files):
     return bad
 
 
-def print_card(pr, base_sha, rules, protection, files, categories):
+def print_card(pr, base_sha, rules, protection, files, categories, source=""):
     base = pr["baseRefName"]
     required = required_checks(rules, protection)
     queue = any(r["type"] == "merge_queue" for r in rules)
+    print(f"card time: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     print(f"pull request #{pr['number']}  base {base} @ {base_sha}")
     print(f"head {pr['headRefOid']}")
+    if source:
+        print(f"categories: {source}")
     print(
         f"draft {pr['isDraft']}  mergeable {pr['mergeable']}  "
         f"reviewDecision {pr['reviewDecision'] or '(empty)'}  merge_queue {'yes' if queue else 'no'}"
@@ -385,30 +431,51 @@ def print_card(pr, base_sha, rules, protection, files, categories):
         "latest reviews: "
         + (", ".join(f"{w} {s}" for w, s in sorted(reviews.items())) or "none")
     )
-    code, comments, tests = hunks(files, categories)
+    records = classify(files, categories)
+    prose = [r["path"] for r in records if r["prose"]]
     print(
-        f"hunks ({len(files)} files, the list is complete; the patterns are heuristic, the paths exact):"
+        f"files ({len(records)}, every changed file; the tags are heuristic, this list is the authority):"
     )
+    for r in records:
+        if r["prose"]:
+            continue
+        tags = (
+            ", ".join(c + TAG_SUFFIX[k] for c, k in r["tags"].items()) or "unclassified"
+        )
+        print(f"  {r['path']} [{r['status']}]: {tags}")
+        if r["review"]:
+            print(f"    review the whole file ({r['review']})")
+    if prose:
+        print(
+            f"docs prose, not approved documents ({len(prose)} files): {', '.join(prose)}"
+        )
+    print("hunk lines (heuristic aids, not a proof that nothing else changed):")
     for cat in categories:
-        name = cat["name"]
-        lines = code.get(name, [])
+        lines = [
+            r["evidence"][cat["name"]] for r in records if cat["name"] in r["evidence"]
+        ]
         for line in lines[:2]:
-            print(f"  {name}: {line}")
+            print(f"  {cat['name']}: {line}")
         if len(lines) > 2:
-            print(f"  {name}: and {len(lines) - 2} more")
-        if name in comments:
-            n = sum(comments[name].values())
-            noun = "comment line" if n == 1 else "comment lines"
-            print(f"  {name}: also {n} {noun} in {', '.join(comments[name])}")
-        if name in tests:
-            print(f"  {name}: in tests: {', '.join(tests[name])}")
-    if not (code or comments or tests):
-        print("  none of the listed categories")
-    for entry in files:
-        if not entry.get("patch"):
-            print(
-                f"  no patch shown: review the whole file: {entry['filename']} ({entry['status']})"
-            )
+            print(f"  {cat['name']}: and {len(lines) - 2} more")
+
+
+def load_categories(repo, base_sha):
+    """(categories, where they came from): the table at the base sha, else the local file."""
+    try:
+        text, source = (
+            gh(
+                "api",
+                "-H",
+                "Accept: application/vnd.github.raw",
+                f"repos/{repo}/contents/scripts/merge_card_categories.json?ref={base_sha}",
+            ),
+            f"the base {base_sha[:12]}",
+        )
+    except NotFound:
+        text = CATEGORIES.read_text()
+        source = f"the local file (the table is missing at the base {base_sha[:12]})"
+    return json.loads(text)["categories"], source
 
 
 def snapshot(repo, n, base):
@@ -456,9 +523,9 @@ def main(argv):
     pr["checks"] = read_checks(repo, pr["headRefOid"])
     pr["reviews"] = read_reviews(repo, args.pr)
     files = read_files(repo, args.pr)
-    categories = json.loads(CATEGORIES.read_text())["categories"]
+    categories, source = load_categories(repo, base_sha)
 
-    print_card(pr, base_sha, rules, protection, files, categories)
+    print_card(pr, base_sha, rules, protection, files, categories, source)
     bad = refusals(repo, pr, base_sha, rules, protection, args, files)
     before = (pr["headRefOid"], base, pr["state"], base_sha, pr["reviews"])
     after = snapshot(repo, args.pr, base)
