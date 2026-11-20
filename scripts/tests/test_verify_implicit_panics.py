@@ -6,6 +6,8 @@ import importlib.util
 import json
 import os
 import pathlib
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -92,6 +94,36 @@ class BudgetTest(unittest.TestCase):
         run.assert_not_called()
         self.assertEqual(res.problems, [])
         self.assertEqual(len(res.notes), 1)
+
+
+class BaseTest(unittest.TestCase):
+    """The budget against the base, in any locale: a file the change adds has no base, and a
+    line raised over the base's fails."""
+
+    def check(self, base, now):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            budget = root / verify.IMPLICIT_PANIC_BUDGET
+            budget.parent.mkdir(parents=True)
+            git = ["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+            subprocess.run([*git, "init", "-q"], check=True)
+            if base is not None:
+                budget.write_text(base)
+                subprocess.run([*git, "add", "."], check=True)
+            subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], check=True)
+            budget.write_text(now)
+            with (
+                mock.patch.object(verify, "ROOT", root),
+                mock.patch.object(verify, "BASE_REF", "HEAD"),
+                mock.patch.dict(os.environ, {verify.IMPLICIT_PANIC_CARGO: "", "LANGUAGE": "it", "LANG": "it_IT.UTF-8"}),
+            ):
+                return verify.check_implicit_panics().problems
+
+    def test_a_budget_the_change_adds_has_no_base(self):
+        self.assertEqual(self.check(None, "a 3\n"), [])
+
+    def test_a_raised_line_fails_against_the_base(self):
+        self.assertEqual(len(self.check("a 2\nb 4\n", "a 3\nb 1\n")), 1)
 
 
 if __name__ == "__main__":

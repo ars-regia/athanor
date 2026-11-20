@@ -7369,8 +7369,9 @@ def check_implicit_panics():
         r.fail(str(e))
         return r
     if BASE_REF is not None:
+        # git's own words tell a budget the change adds from a base that cannot be read.
         shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{IMPLICIT_PANIC_BUDGET}"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"})
         try:
             if shown.returncode == 0:
                 for problem in implicit_panic_raises(budget, implicit_panic_budget(shown.stdout)):
