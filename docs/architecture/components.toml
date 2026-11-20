@@ -262,7 +262,7 @@ area = "shell"
 status = "specified"
 spec = "doc_own_stack.md"
 item = "OS3"
-purpose = "Athanor's own Wayland compositor on Smithay, shipped as the greeter's default session (doc_session.md, SN14 and SN15) under decision 28 of doc_own_stack.md; cosmic-comp's session stays the second until it passes OS19 and the overview and the window switcher on Alt+Tab have come"
+purpose = "Athanor's own Wayland compositor on Smithay, shipped as the greeter's default session (doc_session.md, SN14 and SN15) under decision 28 of doc_own_stack.md; cosmic-comp's session stays the second until it passes OS19 and the overview and the window switcher on Alt+Tab have come, and leaves in 1.0 (ADR-0141 decisions 3 and 4)"
 
 [[component]]
 path = "forge/specs/athanor-layout-chooser"
@@ -272,6 +272,15 @@ status = "specified"
 spec = "doc_settings.md"
 item = "SE23"
 purpose = "The layout chooser (os.athanor.Layout); retired when the Settings Desktop page lands"
+
+[[component]]
+path = "forge/specs/athanor-lock"
+kind = "rpm spec"
+area = "security"
+status = "specified"
+spec = "doc_lock_and_prompts.md"
+item = "LP2"
+purpose = "The session lock, written in Sal, and its guard user unit; installed and not enabled until LP18 step 3"
 
 [[component]]
 path = "forge/specs/athanor-matugen"
@@ -423,7 +432,7 @@ area = "shell"
 status = "specified"
 spec = "doc_compositor.md"
 item = "CO3"
-purpose = "cosmic-comp with Athanor's patches; the one COSMIC component that stays"
+purpose = "cosmic-comp with Athanor's patches, for cosmic-comp's session at the greeter; it leaves tier 2 in 1.0 (ADR-0141 decision 3)"
 
 [[component]]
 path = "forge/specs/greenboot-rs"
@@ -511,7 +520,7 @@ area = "shell"
 status = "specified"
 spec = "doc_compositor.md"
 item = "CO3"
-purpose = "Rebases Athanor's cosmic-comp patches on a new upstream tag"
+purpose = "Rebases Athanor's cosmic-comp patches on a new upstream tag; it leaves with forge/specs/cosmic-comp in 1.0 (ADR-0141 decision 3)"
 
 [[component]]
 path = "scripts/decode-drm-panic.py"

@@ -1,7 +1,12 @@
 Lettore schermo attivo.
-Bilanciato selezionato pulsante radio.
+Batteria
+Modalità di alimentazione pannello
+Modalità di alimentazione
+Bilanciato selezionato pulsante radio
+Luminosità dello schermo controllo scorrevole orizzontale 60 59 percento.
 tabulazione
-Luminosità dello schermo controllo scorrevole orizzontale 60 60 percento.
+Modalità di alimentazione pannello
+Modalità di alimentazione
+Bilanciato selezionato pulsante radio
 tabulazione
-Bilanciato selezionato pulsante radio.
 Lettore schermo disattivato.

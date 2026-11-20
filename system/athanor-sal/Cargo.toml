@@ -19,6 +19,8 @@ vello_gpu = { version = "0.4", default-features = false, features = ["wgpu", "te
 wgpu = { version = "30", default-features = false, features = ["std", "wgsl", "vulkan", "gles"], optional = true }
 wayland-backend = { version = "0.3", features = ["client_system", "rwh_06"], optional = true }
 smithay-client-toolkit = { version = "0.21", default-features = false, features = ["calloop", "xkbcommon"] }
+# The layout names of the keyboard's keymap (driver/layout.rs): the version sctk already links.
+xkbcommon = { version = "0.8", default-features = false }
 wayland-client = "0.31"
 # Overwrites the text of a password field when it changes or goes (password.rs).
 zeroize = "1.8.1"

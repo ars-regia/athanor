@@ -277,7 +277,7 @@ The maintenance owner of each component below is the maintainer ([ADR-0097](../d
 
 **OV17. Retiring cosmic-workspaces.** In one change at the switch (OV19, step 5):
 
-- remove `cosmic-workspaces` from `forge/config/packages.json:123`;
+- remove `cosmic-workspaces` from `forge/config/packages.json:125`;
 - point `Opener::Workspaces` at `os.athanor.Overview1.Show` (`launch.rs:511-515, 573-574`; the bar's module and the dock at `athanor-dock-1.0.0/src/ui/surface.rs:267` follow without change);
 - set the `WorkspaceOverview` entry of the `system_actions` file under `/usr/share/athanor/cosmic-defaults` (LN9's bullet "The `system_actions` file", the single owner by the ruling of 2026-10-05) to a `gdbus call` of `os.athanor.Overview1.Toggle`, written as LA8 writes the launcher's;
 - update `scripts/devvm/compositor-acceptance.sh:160`, which opens cosmic-workspaces;
@@ -389,7 +389,7 @@ Applied with the approval of this document.
   - `docs/operations/release-1.0.md`: amended by ADR-0138 (`docs/decisions/0138-own-components-in-1-0.md`, pull request #1017) itself (row 12, section 3); nothing more is owed here.
   - `doc_own_stack.md`: the 1.1 placement of the window switcher at the lines ADR-0138 lists (about 423, 666, 778, 917 to 920, 940 and 1205), and OS13's list of default bindings, which gains Alt+Tab and Alt+Shift+Tab.
   - `doc_session.md` SN16, gap 8 (`:229`): split into the overview, still absent under athanor-sulphur, and Alt+Tab, closed at OV28 step 4.
-  - `doc_launcher.md` LA12 (`:173`) and "Left for plan 3c" (`:253`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
+  - `doc_launcher.md` LA12 (`:173`) and "Left for plan 3c" (`:254`): the switcher of this document exists in release 1.0, and the switch, with `athanor-launcher` rewritten in Sal and `athanor-library` (decisions 13 and 14), removes cosmic-launcher, pop-launcher and cosmic-app-library once OV28 steps 4, 5 and 6 have merged and section 8's acceptance holds.
   - `doc_shell.md` SH3, the row of cosmic-launcher (`:70`): its condition is met by OV28 step 7.
   - `shell-features.md` F-overview-10 (`:399`): owned by this document, not by "the launcher's plan 3c"; its source becomes `athanor-switcher` at OV28 step 7.
   - `docs/architecture/components.toml`: an entry for `forge/specs/athanor-switcher`, status "specified", spec `doc_overview.md`, item OV20.
@@ -503,10 +503,10 @@ Read on `origin/iso-v0` at 6e143d23 (2026-11-06) and, for COSMIC's files, on the
   - Its globals include no COSMIC protocol (`S/data/globals`), so cosmic-launcher's switcher, a client of COSMIC's toplevel protocols, does not serve this session.
 - **The compositor client.** `Window { id, app_id, title, state, outputs }`, with `activated` and `minimized` in `state` and the window's output connectors in `outputs` (`system/athanor-sulphur-client/src/model.rs:51-61`). Neither compositor reports an order of use.
 - **Sal today** (`system/athanor-sal`).
-  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:148-181`).
+  - A layer surface is expressible: `Role::Layer(LayerOptions)` with layer, namespace, anchors, margin, exclusive zone, keyboard interactivity and input region (`src/driver.rs:149-182`).
   - Surfaces open at start or one per output (`Application::start` and `output`, `:220-232`). When revision 3 was written, `Shell::open` and `close` were private, so no layer surface opened on a chosen output at run time; #1022 (2026-11-06) added the public `Shell::open_layer` (`:893`) and made `Shell::close` (`:914`) public.
-  - The keyboard handler (`src/driver.rs:3176-3257`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
-  - `sync_window_focus` (`src/driver.rs:2512`) gives AccessKit window focus to the surface that holds the keys.
+  - The keyboard handler (`src/driver.rs:3197-3293`) takes from the keys held at `enter` only whether there are any, leaves `release_key` empty and keeps the modifiers to itself.
+  - `sync_window_focus` (`src/driver.rs:2530`) gives AccessKit window focus to the surface that holds the keys.
   - `Kind::List` is a list of rows of text, one Tab stop; Up on its first row and Down on its last leave it, as Shift+Tab and Tab do (`src/widget.rs:156-171`). `Image` carries a description for AT-SPI, and `IconTheme` resolves icons with a fallback (`src/icon.rs`). The toolkit dock is the Sal client in the tree (`forge/specs/athanor-dock/athanor-dock-1.0.0/src/toolkit/`).
 - **Not verified.** The rule of OV4, that cosmic-comp drops a client that destroys a mapped layer surface, was observed with gtk4-layer-shell 1.3 and cosmic-comp 1.8.0; whether it holds for a Sal client is not known (OV27, item 1).
 
@@ -543,7 +543,7 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 - **While shown,** each `Next()` or `Previous()` moves the selection by one and wraps. Tab, Shift+Tab, Up and Down do the same when they reach the surface; with Alt held they arrive as calls in both sessions (rationale). With Tab pressed n times while the modifier is held, the first press included, the selection is n places back in the order of use, counting the window in use as 0 and wrapping after the last.
 - **Choosing.** Releasing the held modifier activates the selected window through the compositor client, which also activates its workspace or unminimises it, and closes the surface. Enter does the same, for a modifier that is locked (sticky keys' second tap) and for Orca's users; a latched Alt, sticky keys' first tap, gives a quick press: `Kind::List` raises `Event::Selected` on Enter (`system/athanor-sal/src/widget.rs:377-384`). Space does not choose, so that it never activates a window by accident. A click on a row does the same as Enter.
 - **Cancelling.** Escape closes the surface and activates nothing; the window that had the keyboard keeps it.
-- **Losing the keyboard.** A keyboard `leave` while the card is open cancels, as Escape does. The application learns it through `Application::keyboard(shell, id, focused)` with `focused` false (`system/athanor-sal/src/driver.rs:245-246`, called from `keyboard_moved`, `:2701-2706`). This covers Super+Escape, which takes the keyboard from an exclusive surface (`escape_exclusive`, `S/src/layer.rs:196-220`), a session lock, and another exclusive surface mapped above the card.
+- **Losing the keyboard.** A keyboard `leave` while the card is open cancels, as Escape does. The application learns it through `Application::keyboard(shell, id, focused)` with `focused` false (`system/athanor-sal/src/driver.rs:246-247`, called from `keyboard_moved`, `:2719-2724`). This covers Super+Escape, which takes the keyboard from an exclusive surface (`escape_exclusive`, `S/src/layer.rs:196-220`), a session lock, and another exclusive surface mapped above the card.
 - **After Super+Escape.** athanor-sulphur keeps the escape for the identity the grant went to, executable and unit, until the user clicks one of its layer surfaces that takes the keyboard (`S/src/layer.rs:196-203`, `S/src/input.rs:35-47`), so a later opening of the switcher would get no keyboard. Later openings must still work: when the user presses Alt+Tab or Alt+Shift+Tab, athanor-sulphur lifts the escape of the identity its allow-list line names for `athanor-switcher` before it makes the call, as a click on its surface does. It does so only for a physical key, as Super alone arms only on one (`source == KeyboardSource::Physical`, `S/src/input.rs:142`), so a virtual keyboard cannot lift it; only while the switcher has no mapped surface, so a card that hangs open cannot take the keyboard back; and never while the session is locked. That key is the user's own choice of the switcher, as deliberate as the click. The change lands with OV28 step 4. cosmic-comp has no such escape.
 - **While locked,** a call is refused and logged at info, as OV10 refuses `Show()`.
 
@@ -564,8 +564,8 @@ The upstream candidate is cosmic-launcher's switcher. It is iced and libcosmic, 
 
 **OV27. Sal prerequisites** (proposed, revision 3), in one Sal pull request agreed with the lock (`doc_lock_and_prompts.md` LP18) and the on-screen display, which need items 1 to 3 too:
 
-1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:1222`, and `close`, `:2422`; `Shell::open_layer`, `:893`, and a public `close`, `:914`, have since landed). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
-2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:3177-3207, 3235-3257`).
+1. **Surfaces on demand.** A public call that opens a layer surface on a chosen output at run time, and a public `close` (today the private `Shell::open`, `src/driver.rs:1238`, and `close`, `:2440`; `Shell::open_layer`, `:909`, and a public `close`, `:930`, have since landed). A test opens and closes a surface 100 times under each compositor without the connection being dropped.
+2. **Modifiers and releases.** The keys held at `enter`, the depressed, latched and locked masks of the first `modifiers` event after it and of each later one, and the releases of the keys the application asks for, reach the application (`src/driver.rs:3198-3228, 3256-3293`).
 3. **Focus at map.** The focused widget is reported to AT-SPI when the surface first takes the keyboard, proven by an AT-SPI golden.
 4. **The list.** A row that shows an icon before its text, and a selection the application moves and that wraps (`Kind::List` holds rows of text and leaves at its ends, `src/widget.rs:377-384`). Enter raises `Event::Selected` on the selected row, as it does today.
 

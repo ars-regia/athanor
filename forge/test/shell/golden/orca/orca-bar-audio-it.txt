@@ -1,21 +1,22 @@
 Lettore schermo attivo.
-Volume di uscita controllo scorrevole orizzontale 40 39 percento.
+Audio
+Volume di uscita controllo scorrevole orizzontale 39.9993896484375 39 percento.
+Silenzia l'uscita pulsante di commutazione non premuto
 tabulazione
-Silenzia l'uscita casella di spunta non spuntata.
+Speakers, in uso pulsante
 tabulazione
-Speakers, in uso button.
+Headphones pulsante
 tabulazione
-Headphones button.
+Volume di ingresso controllo scorrevole orizzontale 54.998779296875 54 percento.
 tabulazione
-Volume di ingresso controllo scorrevole orizzontale 55 54 percento.
+Silenzia il microfono pulsante di commutazione non premuto
 tabulazione
-Silenzia il microfono casella di spunta non spuntata.
+Brano precedente pulsante
 tabulazione
-Brano precedente button.
+Pausa pulsante
 tabulazione
-Pausa button.
+Brano successivo pulsante
 tabulazione
-Brano successivo button.
+Volume di uscita controllo scorrevole orizzontale 39.9993896484375 39 percento.
 tabulazione
-Volume di uscita controllo scorrevole orizzontale 40 39 percento.
 Lettore schermo disattivato.

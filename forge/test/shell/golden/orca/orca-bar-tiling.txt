@@ -1,4 +1,5 @@
 Screen reader on.
-Tile windows check box not checked.
+Tiling
+Tile windows toggle button not pressed
 tab
 Screen reader off.

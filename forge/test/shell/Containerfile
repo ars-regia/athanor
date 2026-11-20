@@ -8,10 +8,10 @@ ARG RIG_BASE=rig-fresh
 # FORGE_REGISTRY and TIER2_DIGEST: the forge's tier 2 repository, by digest, which carries the
 # cosmic-comp the session ships (see the rig stage). rig.sh passes the registry.
 ARG FORGE_REGISTRY
-ARG TIER2_DIGEST=sha256:fa4b084fdbb1d5ef655744c8d908f11e3a839f729fa338944c64527a1b36dac8
+ARG TIER2_DIGEST=sha256:165f5a375c258843596e78abbd7cde3cc5f2b7484e1734459b7713c07cda012c
 FROM ${FORGE_REGISTRY}/athanor-forge-tier2-repo@${TIER2_DIGEST} AS tier2-repo
 
-FROM registry.fedoraproject.org/fedora@sha256:0b52d7c65426cdb567000481d0d1b056040b4d80c1a479bc967383c41aae5809 AS rig-fresh
+FROM registry.fedoraproject.org/fedora:45@sha256:01f161e3776a4032437618baff61192baf51c00a34d17577f9789fed59fc0fdc AS rig-fresh
 
 RUN dnf5 -y install --setopt=install_weak_deps=False \
       cosmic-comp cosmic-panel cosmic-applets cosmic-settings cosmic-settings-daemon \
@@ -68,11 +68,13 @@ RUN dnf5 -y install --setopt=install_weak_deps=False mesa-demos \
 # file and walks the surface with Tab through wtype's virtual keyboard, as the rig has no input
 # device. The base image installs English messages only (%_install_langs); the Italian
 # transcript says roles and states in Orca's and AT-SPI's Italian, so this step keeps both.
-# AT-SPI's come with an update of at-spi2-core: the base's release is no longer in the
-# repositories to install again. wl-clipboard is for rig.sh toolkit-clipboard (wl-copy, wl-paste).
+# AT-SPI's come with at-spi2-core, which the base already has without them: reinstalling it
+# under the macro adds its Italian catalog (Orca names roles through at-spi2-core's domain).
+# wl-clipboard is for rig.sh toolkit-clipboard (wl-copy, wl-paste).
 RUN echo '%_install_langs en_US:it' > /etc/rpm/macros.zz-orca-langs \
   && dnf5 -y install --setopt=install_weak_deps=False orca wtype wl-clipboard \
-  && dnf5 -y upgrade --setopt=install_weak_deps=False at-spi2-core \
+  && dnf5 -y reinstall --setopt=install_weak_deps=False at-spi2-core \
+  && test -f /usr/share/locale/it/LC_MESSAGES/at-spi2-core.mo \
   && rm /etc/rpm/macros.zz-orca-langs \
   && dnf5 clean all
 # The cosmic-comp the session ships, Athanor's build of forge/specs/cosmic-comp in place of

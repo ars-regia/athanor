@@ -32,8 +32,9 @@ from golden_report import exemptions
 #
 # The same goes for a single-line field: AccessKit's Role::TextInput reaches AT-SPI as an entry
 # and has no way to say "text", the role of GTK's GtkText, so the line of a field may be heard
-# as an entry's. Only that line is rewritten: Orca ends a field's line with a full stop and a
-# label's without, so a label such as "Sample text" is matched as it is said.
+# as an entry's. Only the line of a field of the gallery (the `field` and `notes` keys of its
+# strings.tsv) is rewritten: Orca 51 ends a role's line without a full stop, so nothing else tells
+# a field's line from a label's, and a label such as "Sample text" is matched as it is said.
 #
 # A multi-line field too: GTK's GtkTextView reaches AT-SPI as a text, AccessKit's
 # Role::MultilineTextInput as a multi-line entry, and Orca says the line of the caret after a
@@ -48,14 +49,14 @@ from golden_report import exemptions
 # Core-AAM role). So a field's line followed by that query, and only by it, may be heard as one
 # entry utterance that ends in it.
 #
-# And a switch: GTK's GtkSwitch reaches AT-SPI as a check box, AccessKit's Role::Switch as a toggle
-# button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a line that
-# names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of the
-# control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of its
-# fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) or of the bar (BAR_SWITCHES,
-# in its catalogs, under the rule the maintainer widened to later ports on 2026-11-14) with the
-# role and the state words together is rewritten: a real check box, whatever
-# its label, spoken as a toggle button still fails.
+# And a switch: GTK 4.24's GtkSwitch reaches AT-SPI as a switch, AccessKit's Role::Switch as a
+# toggle button (maintainer, 2026-10-21), the role W3C Core-AAM 1.2 maps ARIA's switch to. Only a
+# line that names a switch of the gallery (the `switch` and `enable` keys of its strings.tsv) or of
+# the control center (CONTROL_CENTER_SWITCHES, in its English and Italian catalogs, and the VPN of
+# its fixture, CONTROL_CENTER_FIXTURE_SWITCHES; maintainer, 2026-11-14) or of the bar
+# (BAR_SWITCHES, in its catalogs, under the rule the maintainer widened to later ports on
+# 2026-11-14) with the state and the role words together is rewritten: a check box, whatever its
+# label, spoken as a toggle button still fails.
 
 
 STRINGS = Path(__file__).resolve().parents[3] / "system/athanor-sal/gallery/strings.tsv"
@@ -128,15 +129,16 @@ def switch_labels():
     )
 
 
+# Orca 51's words, from its catalogue: the state, then the role.
 SWITCH_SPEECH = {
-    "check box checked.": "toggle button pressed.",
-    "check box not checked.": "toggle button not pressed.",
-    "casella di spunta spuntata.": "pulsante di commutazione premuto.",
-    "casella di spunta non spuntata.": "pulsante di commutazione non premuto.",
+    "on switch": "toggle button pressed",
+    "off switch": "toggle button not pressed",
+    "attivo selettore": "pulsante di commutazione premuto",
+    "non attivo selettore": "pulsante di commutazione non premuto",
 }
 SAME_ROLE = {"grouping": "panel", "raggruppamento": "pannello"}
 SAME_FIELD_ROLE = {"text": "entry", "testo": "campo inserimento"}
-TYPED = "cc window."
+TYPED = "cc window"
 
 # Focus that returns from a dialog. When a dialog closes, GTK moves the focus to the window's
 # control, then makes the window active, then sends window:activate, and Orca says the window's
@@ -165,6 +167,28 @@ KEY_ECHOES = {"space", "tab", "spazio", "tabulazione"}
 ARROWS = "GTK leaves the calendar's arrows unnamed, the toolkit names them (maintainer, 2026-11-13, #1122)"
 ARROWS_REFERENCES = {"orca-bar-calendar", "orca-bar-calendar-it", "orca-gallery", "orca-gallery-it"}
 UNNAMED_BUTTON = "button."
+# GTK 4.24's calendar names its arrows in English, untranslated in every language's walk, where the
+# toolkit says its own CalendarText, the gallery's strings.tsv. The maintainer extended the ARROWS
+# rule on 2026-11-18 (#1210), next to #1122's: in the same references, and on the same pages of
+# atspi_compare.py, a GTK arrow of one of these names is spoken by the toolkit's same arrow, by its
+# text in the strings' languages. Another name, another arrow's or none, still fails.
+GTK_ARROWS = {
+    "Previous Month": "calendar.previous-month",
+    "Next Month": "calendar.next-month",
+    "Previous Year": "calendar.previous-year",
+    "Next Year": "calendar.next-year",
+}
+GTK_ARROWS_NOTE = (
+    "GTK 4.24 names the calendar's arrows in English, the toolkit in the session's language"
+    " (maintainer, 2026-11-18, #1210)"
+)
+
+
+def toolkit_arrows(name):
+    """The toolkit's texts, every language, of the calendar arrow that GTK 4.24 names `name`;
+    none for any other name."""
+    key = GTK_ARROWS.get(name)
+    return gallery_labels(key) if key else []
 
 
 def heard_as(utterance):
@@ -175,12 +199,17 @@ def heard_as(utterance):
         if utterance.endswith(f" {role}"):
             yield f"{utterance[: -len(role)]}{said}"
     for role, said in SAME_FIELD_ROLE.items():
-        if utterance.endswith(f" {role}."):
-            yield f"{utterance[: -len(role) - 1]}{said}."
+        label = utterance.removesuffix(f" {role}")
+        if label != utterance and label in gallery_labels("field", "notes"):
+            yield f"{label} {said}"
     for gtk, said in SWITCH_SPEECH.items():
         label = utterance.removesuffix(f" {gtk}")
         if label != utterance and label in switch_labels():
             yield f"{label} {said}"
+
+
+# Orca 51 says the role in the language of the session.
+BUTTON = {"en": "button", "it": "pulsante"}
 
 
 def dialog_returns(reference):
@@ -189,9 +218,10 @@ def dialog_returns(reference):
     if not any(line.endswith(f" {word}") for line in reference for word in FRAME_ROLE):
         return {}
     forms = {
-        f"{title} {word}": (f"{close} button.", title)
-        for title, close, word in zip(
-            gallery_labels("title"), gallery_labels("dialog.close"), FRAME_ROLE, strict=True
+        f"{title} {word}": (f"{close} {button}", title)
+        for title, close, word, button in zip(
+            gallery_labels("title"), gallery_labels("dialog.close"), FRAME_ROLE, BUTTON.values(),
+            strict=True,
         )
     }
     lines = [line for line in reference if line not in KEY_ECHOES]
@@ -206,11 +236,11 @@ def dialog_returns(reference):
     return {line: heard for line, heard in returns.items() if line not in elsewhere}
 
 
-def compare(reference, transcript, exempt=None, arrows=False):
+def compare(reference, transcript, exempt=None, lang="en", arrows=False):
     """Returns (lines, failures) for two lists of utterances. `exempt` maps the name of a button
-    decision 28 hides to its (cause, issue); Orca says such a button as "<name> button.".
-    `arrows` applies the ARROWS rule."""
-    exempt = {f"{name} button.": why for name, why in (exempt or {}).items()}
+    decision 28 hides to its (cause, issue); Orca 51 says such a button as "<name> <role>", the
+    role in `lang`. `arrows` applies the ARROWS rule."""
+    exempt = {f"{name} {BUTTON[lang]}": why for name, why in (exempt or {}).items()}
     spoken = set(transcript)
     lines, failures = [], []
     if not reference:
@@ -223,7 +253,7 @@ def compare(reference, transcript, exempt=None, arrows=False):
     together = {}
     for field, after in pairwise(reference):
         for role, said in SAME_FIELD_ROLE.items():
-            label = field.removesuffix(f" {role}.")
+            label = field.removesuffix(f" {role}")
             if label == field or not (after == TYPED or label in gallery_labels("notes")):
                 continue
             joined = f"{label} {said} {after}"
@@ -241,6 +271,15 @@ def compare(reference, transcript, exempt=None, arrows=False):
             said = next((line for line in named if line not in reference), None)
             if said is not None:
                 lines.append(f"{utterance!r}: spoken as {said!r}; note: {ARROWS}")
+                continue
+        # The arrow's line ends in the button's role word of the walk's language.
+        word = next((word for word in BUTTON.values() if utterance.endswith(f" {word}")), None)
+        if said is None and arrows and word is not None:
+            name = utterance.removesuffix(f" {word}")
+            heard = (f"{text} {word}" for text in toolkit_arrows(name))
+            said = next((line for line in heard if line in spoken), None)
+            if said is not None:
+                lines.append(f"{utterance!r}: spoken as {said!r}; note: {GTK_ARROWS_NOTE}")
                 continue
         if said is None and returns.get(utterance) in follows:
             said = returns[utterance][1]
@@ -305,12 +344,12 @@ def main(argv):
         print(__doc__, file=sys.stderr)
         return 2
     reference, transcript = (Path(path).read_text().splitlines() for path in argv[:2])
-    exempt = {}
+    exempt, lang = {}, "en"
     if own:
         preset, dock, lang = (None if v == "-" else v for v in own[1:])
         exempt = exemptions(preset, dock, lang)
     arrows = Path(argv[0]).stem in ARROWS_REFERENCES
-    lines, failures = compare(reference, transcript, exempt, arrows=arrows)
+    lines, failures = compare(reference, transcript, exempt, lang, arrows=arrows)
     print("\n".join(lines))
     for failure in failures:
         print(f"FAIL {failure}", file=sys.stderr)

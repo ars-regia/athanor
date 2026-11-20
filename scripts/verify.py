@@ -1072,10 +1072,10 @@ def check_installer():
 # 2. kickstart — una direttiva che Anaconda non riconosce ferma l'installazione
 # --------------------------------------------------------------------------- #
 
-# La sintassi che l'Anaconda spedito sull'ISO sa leggere. L'ISO è Fedora 43: alzalo
-# insieme alla base, non oltre, perché una direttiva introdotta dopo passerebbe qui
-# e fallirebbe sul supporto reale.
-KICKSTART_SYNTAX = "F43"
+# The syntax the Anaconda shipped on the ISO reads. The ISO is Fedora 45: raise it
+# with the base and no further, because a directive introduced later would pass here
+# and fail on the real media.
+KICKSTART_SYNTAX = "F45"
 
 
 # The kickstarts that live inside another file: bootc-image-builder's TOML carries the ISO's.
@@ -1193,25 +1193,38 @@ def check_install_channel():
 # --------------------------------------------------------------------------- #
 
 OS_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/os-release"
+FEDORA_RELEASE = "forge/specs/athanor-base-config/SOURCES/usr/lib/fedora-release"
 
 
 def os_release_problems(root=None):
-    """Every non-empty line of the shipped os-release is KEY=VALUE.
+    """Every non-empty line of the shipped os-release is KEY=VALUE, and fedora-release names the
+    release of its VERSION_ID.
 
     os-release(5) allows comment lines, but bootc-image-builder does not: it stops the ISO build
-    with "readOSRelease: invalid input" on any non-empty line without "=".
+    with "readOSRelease: invalid input" on any non-empty line without "=". fedora-release was left
+    at 43 when os-release moved to 45.
     """
     root = root or ROOT
-    try:
-        text = read(root / OS_RELEASE)
-    except OSError as err:
-        return [f"{OS_RELEASE}: cannot read ({err})"]
-    return [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
-            for number, line in enumerate(text.splitlines(), 1)
-            if line.strip() and "=" not in line]
+    texts = []
+    for path in (OS_RELEASE, FEDORA_RELEASE):
+        try:
+            texts.append(read(root / path))
+        except OSError as err:
+            return [f"{path}: cannot read ({err})"]
+    text, release = texts
+    out = [f"{OS_RELEASE}:{number}: not KEY=VALUE, bootc-image-builder rejects it: {line.strip()}"
+           for number, line in enumerate(text.splitlines(), 1)
+           if line.strip() and "=" not in line]
+    version = next((line.split("=", 1)[1].strip().strip('"') for line in text.splitlines()
+                    if line.startswith("VERSION_ID=")), None)
+    named = re.search(r" release (\S+) ", release)
+    if not named or named.group(1) != version:
+        out.append(f"{FEDORA_RELEASE}: names release {named.group(1) if named else 'none'}, "
+                   f"os-release VERSION_ID is {version}")
+    return out
 
 
-@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires")
+@check("os-release", "Every line of os-release is KEY=VALUE, as bootc-image-builder requires, and fedora-release names its VERSION_ID")
 def check_os_release():
     r = Result()
     for problem in os_release_problems():
@@ -2143,6 +2156,12 @@ def update_trust_problems(root=None):
     return problems
 
 
+# The one RPM signature override of the image build: athanor-base-config from the digest-pinned
+# tier 0 image, at rpm's digest level (UD44: the forge's RPMs are not signed).
+TIER0_DIGEST_INSTALL = "rpm --define '_pkgverify_level digest' -Uvh --replacefiles --replacepkgs --nodeps \"$BASE_CONFIG\"; \\"
+SIGNATURE_OVERRIDE = re.compile(r"_pkgverify_|--nosignature|--nodigest|--no-?gpgchecks?|gpgcheck=(0|no|off|false)", re.I)
+
+
 def image_policy_problems(root=None):
     """system/Containerfile puts the policy in force and system/keys holds public keys only."""
     root = root or ROOT
@@ -2161,6 +2180,11 @@ def image_policy_problems(root=None):
     for key in keys:
         if key.suffix != ".pub":
             problems.append(f"system/keys/{key.name}: only *.pub files belong under system/keys")
+    for number, line in enumerate(containerfile.splitlines(), 1):
+        if SIGNATURE_OVERRIDE.search(line) and (line.strip() != TIER0_DIGEST_INSTALL
+                                                or "BASE_CONFIG=$(find /tmp/tier0-repo " not in containerfile):
+            problems.append(f"system/Containerfile:{number}: overrides RPM signature checking; only "
+                            "athanor-base-config from the tier 0 image installs at the digest level (UD44)")
     return problems
 
 
@@ -5286,6 +5310,7 @@ SESSION_UNITS = {
     "athanor-dock.service": ("surface", True, "preset"),
     "athanor-shelld.service": ("surface", False, "preset"),
     "athanor-idle.service": ("guard", True, "preset"),
+    "athanor-lock.service": ("guard", True, "preset"),
     "athanor-wallpaper.service": ("surface", True, "preset"),
     "athanor-launcher.service": ("surface", True, "activated"),
     "athanor-control-center.service": ("surface", True, "activated"),
@@ -5359,6 +5384,8 @@ SESSION_EXEMPT = {
     ("athanor-skel-sync.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-osd.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
     ("cosmic-settings-daemon.service", NOT_THE_TARGET): "the target wants it; SN13 step 1 does not list it",
+    ("athanor-lock.service", f"started eagerly, so WantedBy={SESSION_TARGET} and enabled by a user preset {SN3_CITE}"):
+        "installed and not enabled until its preset at the switch (doc_lock_and_prompts.md, LP18 step 3)",
     ("athanor-launcher.service", ACTIVATED_INSTALL):
         "enabled by hand until the switch (doc_launcher.md, LA12)",
     ("athanor-control-center.service", ACTIVATED_INSTALL):
@@ -6482,6 +6509,29 @@ ROW_NAME = re.compile(r"\b([A-Z][a-z]+) row\b")
 # ends at the next such line or heading.
 SECTION_ID = re.compile(r"\b[A-Z]{1,4}\d+\b")
 SECTION_START = re.compile(r"\*\*[A-Z]{1,4}\d+[a-z]?\b|#{1,3} ")
+# A path with a directory and an extension written in plain text, with or without its `:N` span
+# (`forge/config/packages.json:128`): read as if it were in backticks.
+PLAIN_PATH = re.compile(r"(?<![\w/.`:-])((?:[\w.+-]+/)+[\w.+-]*\w\.[A-Za-z]+"
+                        r"(?::\d+(?:-\d+)?(?:,\s*\d+(?:-\d+)?)*)?)(?![\w/`-])")
+# The files whose entries are named by words that are rarely in backticks: a citation of one
+# that names nothing the check can match is a finding, and its hyphenated lowercase words
+# (`cosmic-osd`, not in backticks) count as tokens when the file holds them.
+LIST_FILES = {"packages.json", "Cargo.toml"}
+LIST_GAP = re.compile(r"[\s,`]*(?:and|or)?[\s,`]*")
+# The verb between a list of entries and the key that holds them: `are in` takes the list before it,
+# `is in` one name only, so "`x` is in `a` and `y` is in `b`" does not join `a` to `b`.
+LIST_KEY_GAP = re.compile(r"[\s`]*(are|is)(?:\s+listed)?\s+(?:in|under)[\s`]*")
+# A name that such a verb precedes is the key of an earlier clause, where a run that crossed one stops.
+LIST_KEY_BEFORE = re.compile(r"\b(?:are|is)(?:\s+listed)?\s+(?:in|under)[\s`]*$")
+BARE_NAME = re.compile(r"(?<![\w`/.-])[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w/`-])")
+
+
+def backtick_plain_paths(line):
+    """`line` with each path written outside backticks put in backticks."""
+    parts = line.split("`")
+    for i in range(0, len(parts), 2):
+        parts[i] = PLAIN_PATH.sub(lambda m: f"`{m.group(1)}`", parts[i])
+    return "`".join(parts)
 
 
 def section_lines(rows, ident):
@@ -6499,12 +6549,18 @@ def section_lines(rows, ident):
 LINE_CITATIONS_KEPT = {
     ("doc_tetragon.md", "system/Containerfile", "244", "tmpfiles.d", 1):
         "the sentence lists several changes; the citation belongs to `systemctl enable tetragon.service`",
+    ("doc_software.md", "forge/config/packages.json", "2-84", None, 1):
+        "the crate is absent from the lists: the citation names the lists, and the entry is not in them",
 }
 
 
-def holds_token(text, token):
+def holds_token(text, token, quoted=False):
     """Whether `text` has `token` as a whole identifier (the last segment of a `A::b` path): not
-    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open."""
+    inside `open_layer` or `reopen`, but in `fn open` and in a comment that says open. With
+    `quoted` (a JSON file) the token must be a whole string: `"cosmic-settings"`, not
+    `cosmic-settings-daemon` or `cosmic-osd.service`."""
+    if quoted:
+        return f'"{token}"' in text
     word = re.escape(token.rsplit("::", 1)[-1])
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 
@@ -6534,11 +6590,22 @@ def citation_findings(doc, text, tracked, read_file):
     several words of one sentence (`packages.json:2, 51` for two lists), so the token cannot be
     attributed to one entry; each entry must still be a line range.
 
+    A path written in plain text (`forge/config/packages.json:128`) is read as one in backticks. For
+    `packages.json` and `Cargo.toml`, lists of entries, the check is stricter: the entries a
+    citation names are the run of names next to it that only a comma, `and` or `or` separates (before
+    it, else after it), and that reaches across an `are in` (the whole list) or an `is in` (one name)
+    to the key nearest the citation; each must be in the cited lines, a name is a backticked
+    identifier or a hyphenated lowercase word (`cosmic-osd`), a hyphenated name in backticks that
+    the file no longer holds stays in the run and is a finding, a JSON name matches a whole string
+    (`"cosmic-settings"`, not `cosmic-settings-daemon`), and a citation that names none is a finding.
+
     Limit: a sentence with no such token is not checked, nor is a citation that names a wrong
     place holding the token, and a word that the cited lines hold in a comment or a string
     satisfies the check as it does in code. A citation of another document with no token, no row
     name and no section id in its sentence is checked only for a first line that holds words, so
-    a stale one that still lands on text goes unseen (#1089)."""
+    a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
+    only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
+    them ("are both in"), only the key is demanded, and a removed single-word entry is not seen."""
     known = set(tracked)
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
@@ -6557,6 +6624,7 @@ def citation_findings(doc, text, tracked, read_file):
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
+        line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
             if not m:
@@ -6593,10 +6661,13 @@ def citation_findings(doc, text, tracked, read_file):
                 continue
             start = max(line.rfind(sep, 0, span.start()) for sep in (". ", "; ", ": ", "), ", " | "))
             own = {part.split(".")[0] for part in path.split("/")}
+            listed = path.rsplit("/", 1)[-1] in LIST_FILES
             sentence = line[start + 1:span.start()]
-            found = [(m.start(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            found = [(m.start(), m.end(), m.group(0)) for m in CITED_TOKEN.finditer(sentence)]
+            if listed:
+                found += [(m.start(), m.end(), m.group(0)) for m in BARE_NAME.finditer(sentence)]
             if path.endswith(".md"):
-                found += [(m.start(), m.group(1)) for m in ROW_NAME.finditer(sentence)]
+                found += [(m.start(1), m.end(1), m.group(1)) for m in ROW_NAME.finditer(sentence)]
             if path.endswith(".md"):
                 spans = {i: section_lines(rows, i) for i in dict.fromkeys(SECTION_ID.findall(sentence))}
                 spans = {i: lines for i, lines in spans.items() if lines}
@@ -6609,12 +6680,53 @@ def citation_findings(doc, text, tracked, read_file):
                         out.append((number, path, spec, named, f"{doc}:{number}: `{path}:{spec}` is not in "
                                     f"the section of {named}, which its sentence names: the lines moved"))
                         continue
-            tokens = [t for _, t in sorted(found)
-                      if not FILE_LIKE.search(t) and t not in own and holds_token(body, t)]
+            quoted = path.endswith(".json")
+            def usable(items):
+                return [i for i in sorted(items) if not FILE_LIKE.search(i[2]) and i[2] not in own
+                        and holds_token(body, i[2], quoted)]
+
+            tokens = usable(found)
+            if listed:
+                # The items the citation names: the run of tokens next to it that only a comma,
+                # `and` or `or` separates, reaching from the key nearest the citation across an
+                # `are in` (`nix` and `nix-daemon` are in `upstream_core`) or, for one name, an
+                # `is in`; with none before it, the run that follows it. A hyphenated name in
+                # backticks stays in the run when the file no longer holds it, so a removed entry
+                # is a finding.
+                run, single, crossed = [], False, False
+                for item in reversed(sorted({*tokens, *(
+                        i for i in found if sentence[i[0] - 1:i[0]] == "`" == sentence[i[1]:i[1] + 1]
+                        and BARE_NAME.fullmatch(i[2]) and i[2] not in own)})):
+                    if run:
+                        gap = sentence[item[1]:run[-1][0]]
+                        key = len(run) == 1 and LIST_KEY_GAP.fullmatch(gap)
+                        if single or not (key or LIST_GAP.fullmatch(gap)) or (
+                                crossed and LIST_KEY_BEFORE.search(sentence[:item[0]])):
+                            break
+                        single = bool(key) and key.group(1) == "is"
+                        crossed = crossed or bool(key)
+                    run.append(item)
+                if not run:
+                    after = line[span.end():]
+                    ends = [i for i in (after.find(". "), after.find("; ")) if i >= 0]
+                    after = after[:min(ends)] if ends else after
+                    items = usable([(m.start(), m.end(), m.group(0))
+                                    for m in (*CITED_TOKEN.finditer(after), *BARE_NAME.finditer(after))])
+                    for item in items:
+                        if run and not LIST_GAP.fullmatch(after[run[-1][1]:item[0]]):
+                            break
+                        run.append(item)
+                tokens = run
+            else:
+                tokens = tokens[-1:]
             held = "\n".join("\n".join(rows[f - 1:e]) for f, e in ranges)
-            if tokens and not holds_token(held, tokens[-1]):
-                out.append((number, path, spec, tokens[-1], f"{doc}:{number}: `{path}:{spec}` does not hold "
-                            f"`{tokens[-1]}`, which its sentence names: the lines moved"))
+            if listed and not tokens:
+                out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` names no token "
+                            "that the file holds: put the entry's name in backticks, or hyphenated, "
+                            "in its sentence"))
+            elif missing := next((t for _, _, t in tokens if not holds_token(held, t, quoted)), None):
+                out.append((number, path, spec, missing, f"{doc}:{number}: `{path}:{spec}` does not hold "
+                            f"`{missing}`, which its sentence names: the lines moved"))
     return out
 
 
@@ -6634,7 +6746,8 @@ def check_line_citations():
             return ""
 
     seen = set()
-    for doc in sorted((ROOT / "docs/architecture").glob("doc_*.md")):
+    for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
+                       ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
         for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1

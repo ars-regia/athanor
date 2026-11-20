@@ -7,6 +7,7 @@
 
 mod clipboard;
 mod dialog;
+mod layout;
 mod modifiers;
 
 pub use modifiers::KeyModifiers;
@@ -64,7 +65,7 @@ use smithay_client_toolkit::{
         SessionLockSurfaceConfigure,
     },
     seat::{
-        keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
+        keyboard::{KeyEvent, KeyboardHandler, Keymap, Keysym, Modifiers, RawModifiers},
         pointer::{
             cursor_shape::CursorShapeManager, AxisScroll, PointerEvent, PointerEventKind,
             PointerHandler, BTN_LEFT, BTN_MIDDLE, BTN_RIGHT,
@@ -324,6 +325,10 @@ pub trait Application {
     /// The compositor's token for the request [`Shell::request_activation_token`] numbered
     /// `request`.
     fn activation_token(&mut self, _shell: &mut Shell, _request: u64, _token: String) {}
+
+    /// [`Shell::keyboard_layout`] changed: the compositor switched the layout group, or sent a
+    /// keymap that names the active group otherwise.
+    fn layout_changed(&mut self, _shell: &mut Shell) {}
 }
 
 /// Opens `ui` in a window and runs until the user closes it.
@@ -437,6 +442,7 @@ fn run_on(
         closing: Vec::new(),
         closed_popups: Vec::new(),
         reduced_motion: false,
+        layouts: layout::Layouts::default(),
         settled: Vec::new(),
         // Bound as the others; where the compositor withholds it, as athanor-sulphur does from a
         // client its allow-list does not name, Shell::lock is refused.
@@ -622,6 +628,8 @@ pub struct Shell {
     closed_popups: Vec<OpenPopup<SurfaceId>>,
     /// Whether motions only fade ([`Shell::set_reduced_motion`]).
     reduced_motion: bool,
+    /// The keymap's layout names and the effective group ([`Shell::keyboard_layout`]).
+    layouts: layout::Layouts,
     /// The surfaces whose motion ended since [`Application::settled`] last ran.
     settled: Vec<SurfaceId>,
     /// ext_session_lock_manager_v1, of which [`Shell::lock`] asks a lock.
@@ -873,6 +881,14 @@ impl Shell {
     /// Whether reduced motion is on: off until [`Shell::set_reduced_motion`] turns it on.
     pub fn reduced_motion(&self) -> bool {
         self.reduced_motion
+    }
+
+    /// The keyboard's effective layout group and the name the compositor's keymap gives it, as
+    /// "English (US)": what a surface that takes a password names (doc_lock_and_prompts.md, LP14).
+    /// `None` before the compositor sent a keymap, or for a group the keymap names not.
+    /// [`Application::layout_changed`] tells when it changes.
+    pub fn keyboard_layout(&self) -> Option<(u32, String)> {
+        self.layouts.active()
     }
 
     /// The surface the open menu was opened from, if a menu is open.
@@ -1972,6 +1988,8 @@ fn ime_field(ui: &Ui) -> Option<(WidgetId, Rect, ContentHint)> {
     let widget = ui.widget(id);
     let hint = match &widget.kind {
         Kind::TextArea(_) => ContentHint::Multiline,
+        // A trusted password field takes only the keyboard: the input method stays disabled.
+        Kind::Field(field) if field.is_trusted() => return None,
         // An input method neither shows, learns nor suggests what a password field is given.
         Kind::Field(field) if field.is_password() => {
             ContentHint::HiddenText | ContentHint::SensitiveData
@@ -3157,6 +3175,9 @@ impl SeatHandler for App {
                 if let Some(keyboard) = self.keyboard.take() {
                     keyboard.release();
                 }
+                if self.shell.layouts.clear() {
+                    self.application.layout_changed(&mut self.shell);
+                }
             }
             Capability::Pointer => {
                 if let Some(device) = self.cursor_shape_device.take() {
@@ -3250,9 +3271,24 @@ impl KeyboardHandler for App {
         _: u32,
         modifiers: Modifiers,
         _: RawModifiers,
-        _: u32,
+        group: u32,
     ) {
         self.modifiers = modifiers;
+        if self.shell.layouts.group(group) {
+            self.application.layout_changed(&mut self.shell);
+        }
+    }
+
+    fn update_keymap(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        _: &wl_keyboard::WlKeyboard,
+        keymap: Keymap<'_>,
+    ) {
+        if self.shell.layouts.keymap(&keymap.as_string()) {
+            self.application.layout_changed(&mut self.shell);
+        }
     }
 }
 
@@ -4031,6 +4067,35 @@ mod tests {
         // Another field of the same hint, on the same surface.
         assert!(ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
         assert!(!ime.change(Some((a, WidgetId(2, 0), ContentHint::None))));
+    }
+
+    #[test]
+    fn trusted_password_disables_text_input() {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        ui.layout();
+        ui.set_focus(Some(field));
+        assert_eq!(ui.focus(), Some(field));
+        assert_eq!(ime_field(&ui).map(|(id, _, _)| id), None);
+    }
+
+    #[test]
+    fn plain_field_enables_text_input_again() {
+        let mut ui = Ui::new("Lock", Theme::default(), false);
+        let name = ui.field(Ui::ROOT, "Name", "");
+        let field = ui.trusted_password(Ui::ROOT, "Password");
+        ui.layout();
+        let a = SurfaceId(1);
+        let asked = |ui: &Ui| ime_field(ui).map(|(id, _, hint)| (a, id, hint));
+        let mut ime = Ime::default();
+        ui.set_focus(Some(name));
+        assert!(ime.change(asked(&ui)), "enabled for the plain field");
+        ui.set_focus(Some(field));
+        assert_eq!(asked(&ui), None);
+        assert!(ime.change(asked(&ui)), "disabled for the trusted field");
+        ui.set_focus(Some(name));
+        assert!(ime.change(asked(&ui)), "enabled again");
+        assert_eq!(asked(&ui).map(|(_, id, _)| id), Some(name));
     }
 
     #[test]

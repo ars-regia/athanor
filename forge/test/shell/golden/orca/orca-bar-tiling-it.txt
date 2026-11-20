@@ -1,4 +1,5 @@
 Lettore schermo attivo.
-Affianca le finestre casella di spunta non spuntata.
+Affiancamento
+Affianca le finestre pulsante di commutazione non premuto
 tabulazione
 Lettore schermo disattivato.

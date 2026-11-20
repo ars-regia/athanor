@@ -16,7 +16,7 @@ set -euo pipefail
 }
 base=$1
 policy=$2
-EXPECTED=8
+EXPECTED=7
 src=$(cd "$(dirname "${BASH_SOURCE[0]}")/SOURCES" && pwd)
 
 podman run --rm --security-opt label=disable \

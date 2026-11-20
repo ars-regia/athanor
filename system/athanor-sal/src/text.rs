@@ -196,6 +196,9 @@ pub struct TextField {
     /// A password field's text, while the editor holds one mask for each of its characters
     /// (`crate::password`); none for any other field.
     hidden: Option<Secret>,
+    /// Whether this is a trusted password field, which keeps no selection: its selection
+    /// commands move the caret only.
+    trusted: bool,
 }
 
 impl TextField {
@@ -214,6 +217,7 @@ impl TextField {
             column: None,
             multiline: false,
             hidden: None,
+            trusted: false,
         }
     }
 
@@ -223,6 +227,19 @@ impl TextField {
         let mut field = Self::new(name, "", size, rtl);
         field.hidden = Some(Secret::default());
         field
+    }
+
+    /// An empty trusted password field named `name`: a password field that keeps no
+    /// selection (doc_lock_and_prompts.md, D36).
+    pub(crate) fn trusted_password(name: &str, size: f32, rtl: bool) -> Self {
+        let mut field = Self::password(name, size, rtl);
+        field.trusted = true;
+        field
+    }
+
+    /// Whether this is a trusted password field.
+    pub fn is_trusted(&self) -> bool {
+        self.trusted
     }
 
     /// Whether this is a password field.
@@ -560,26 +577,42 @@ impl TextField {
         self.editor.selected_text().map(str::to_owned)
     }
 
-    /// Moves the selection's focus one cluster to the left on screen, as Shift+Left does.
+    /// Moves the selection's focus one cluster to the left on screen, as Shift+Left does; a
+    /// trusted field's caret moves instead.
     pub(crate) fn select_left(&mut self, cx: &mut TextContext) {
+        if self.trusted {
+            return self.left(cx);
+        }
         self.driver(cx).select_left();
     }
 
-    /// Moves the selection's focus one cluster to the right on screen, as Shift+Right does.
+    /// Moves the selection's focus one cluster to the right on screen, as Shift+Right does; a
+    /// trusted field's caret moves instead.
     pub(crate) fn select_right(&mut self, cx: &mut TextContext) {
+        if self.trusted {
+            return self.right(cx);
+        }
         self.driver(cx).select_right();
     }
 
-    /// Selects the whole text.
+    /// Selects the whole text; a trusted field's caret moves to its end.
     pub(crate) fn select_all(&mut self, cx: &mut TextContext) {
+        if self.trusted {
+            return self.move_to_end(cx);
+        }
         self.driver(cx).select_all();
     }
 
     /// Puts the selection's anchor and focus at byte offsets `anchor` and `focus` of the text,
-    /// each clamped to it; an offset inside a character leaves that end where it was.
+    /// each clamped to it; an offset inside a character leaves that end where it was. A trusted
+    /// field's caret goes to `focus`.
     pub(crate) fn select_bytes(&mut self, cx: &mut TextContext, anchor: usize, focus: usize) {
         let len = self.text().len();
+        let trusted = self.trusted;
         let mut driver = self.driver(cx);
+        if trusted {
+            return driver.move_to_byte(focus.min(len));
+        }
         driver.move_to_byte(anchor.min(len));
         driver.extend_selection_to_byte(focus.min(len));
     }
@@ -589,8 +622,12 @@ impl TextField {
         self.driver(cx).move_to_point(x, y);
     }
 
-    /// Moves the selection's focus to the point of the layout nearest `(x, y)`, as a drag does.
+    /// Moves the selection's focus to the point of the layout nearest `(x, y)`, as a drag does;
+    /// a trusted field's caret moves instead.
     pub(crate) fn drag_to(&mut self, cx: &mut TextContext, x: f32, y: f32) {
+        if self.trusted {
+            return self.press_at(cx, x, y);
+        }
         self.driver(cx).extend_selection_to_point(x, y);
     }
 

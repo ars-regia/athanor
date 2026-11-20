@@ -157,6 +157,8 @@ def labelled(app, Atspi, role, label):
     """Every showing accessible of `role` named `label`, directly or through a LabelledBy
     relation to a label accessible: a GTK Switch takes its accessible name from the row's
     label this way, not from its own Property::Label."""
+    # at-spi2-core 2.62 reports GtkSwitch as "switch"; 2.58 said "check box".
+    roles = {role, "switch"} if role == "check box" else {role}
     found = []
 
     def name_of(accessible):
@@ -175,7 +177,7 @@ def labelled(app, Atspi, role, label):
 
     def visit(accessible):
         if (
-            accessible.get_role_name() == role
+            accessible.get_role_name() in roles
             and showing(accessible, Atspi)
             and name_of(accessible) == label
         ):

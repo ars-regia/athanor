@@ -1028,6 +1028,28 @@ class CheckTier(Repo):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.plan(), ("none nvidia nvidia-legacy", "true"))
 
+    def test_the_tier_is_named_by_the_tag_tier_digests_resolved(self):
+        """The tag comes from system/tier-digests.sh: a landing pull request (issue #1321) names
+        its rebase/* head's tiers, not `latest`."""
+        self.prepare([f"./athanor-azoth/kernel-core-{NVR}.x86_64.rpm"])
+        for n, (base, head, tag) in enumerate((
+            ("rebase/fedora-45", None, "branch-rebase-fedora-45"),
+            ("iso-v0", "rebase/fedora-45", "branch-rebase-fedora-45"),
+            ("main", "rebase/Fedora-45", "branch-rebase-fedora-45"),
+            ("iso-v0", "fix/tiers", "latest"),
+            ("rebase/fedora-45", "rebase/fedora-46", "branch-rebase-fedora-45"),
+            (None, None, "latest"),
+        )):
+            with self.subTest(base=base, head=head):
+                for name, value in (("GITHUB_BASE_REF", base), ("GITHUB_HEAD_REF", head)):
+                    if value is None:
+                        self.env.pop(name, None)
+                    else:
+                        self.env[name] = value
+                r = self.check({"system/x": f"{n}\n"})
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn(f"tier 0 {tag} ({self.TIER0}) carries {NVR}", r.stdout)
+
     def test_a_tier_that_cannot_be_read_fails(self):
         self.prepare([f"./kernel-core-{NVR}.x86_64.rpm"], errors=[self.REF])
         r = self.check({"system/x": "1\n"})
@@ -1106,6 +1128,62 @@ class CheckPlan(Repo):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
 
+    def test_nvidia_pin_bump_with_its_packaging_and_documents_builds_the_default_image(self):
+        # A move of the legacy branch to another repository tree changes the lock and the code
+        # that reads it together (#669): only the NVIDIA variants use either.
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
+        r = self.plan({
+            **self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP),
+            "system/nvidia/locks/open.lock": "l\n",
+            "system/nvidia/lock.py": "p\n",
+            "system/nvidia/azoth-nvidia-kmod.spec": "s\n",
+            "system/nvidia/tests/test_lock.py": "t\n",
+            "docs/architecture/doc_system_image.md": "d\n",
+        })
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.state_file()["check_gpus"], self.state_file()["check_delta"]), ("none", "true"))
+
+    def pin_bump_with(self, path):
+        self.state("modules-missing", kernel_digest=KERNEL, boot_digest=BOOT)
+        return self.plan({**self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP), path: f"{path}\n"})
+
+    def test_nvidia_pin_bump_with_a_key_fails(self):
+        r = self.pin_bump_with("system/nvidia/keys/RPM-GPG-KEY-x")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_another_file_of_the_image_fails(self):
+        r = self.pin_bump_with("system/Containerfile")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_the_variant_build_fails(self):
+        # build-rpms.sh builds the variants: a change to it is checked by building them, before
+        # the merge, in its own pull request (#1323).
+        r = self.pin_bump_with("system/nvidia/build-rpms.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_the_variant_gate_fails(self):
+        # gate.sh judges the variants: weakening it beside a pin bump would only run after the
+        # merge (#1323).
+        r = self.pin_bump_with("system/nvidia/gate.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_with_other_nvidia_packaging_fails(self):
+        r = self.pin_bump_with("system/nvidia/mirror.sh")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
+    def test_nvidia_pin_bump_that_moves_a_key_into_the_documents_fails(self):
+        self.commit({"system/nvidia/keys/RPM-GPG-KEY-x": "k\n"})
+        (self.work / "docs").mkdir(exist_ok=True)
+        self.git("mv", "system/nvidia/keys/RPM-GPG-KEY-x", "docs/RPM-GPG-KEY-x")
+        r = self.pin_bump_with("system/nvidia/locks/open.lock")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("own pull request", r.stderr)
+
     def test_nvidia_pin_bump_without_the_signed_vmlinuz_fails(self):
         # Even the default image copies the signed vmlinuz in: without it nothing can be built.
         self.state("modules-missing", kernel_digest=KERNEL)
@@ -1123,6 +1201,21 @@ class CheckPlan(Repo):
         self.state("modules-missing", kernel_digest=KERNEL)
         r = self.plan(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP, CACHYOS_PATCHES_COMMIT="f" * 40))
         self.assertEqual(r.returncode, 1)
+
+    def test_kernel_pin_bump_with_the_kernel_configuration_skips_every_build(self):
+        # A builder move changes kernel-local with the pins (KERNEL_CONFIG_FILES).
+        self.state("kernel-missing")
+        for name in ("kernel-local", "build.sh"):
+            with self.subTest(name=name):
+                r = self.plan({**self.pin_change(FEDORA_KERNEL_NVR=f"7.2.6-10{len(name)}.fc43"), f"forge/specs/azoth/{name}": f"{name}\n"})
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_kernel_configuration_alone_does_not_explain_a_missing_kernel(self):
+        self.state("kernel-missing")
+        for name in ("kernel-local", "build.sh"):
+            with self.subTest(name=name):
+                r = self.plan({f"forge/specs/azoth/{name}": f"{name} alone\n"})
+                self.assertEqual(r.returncode, 1)
 
     def test_kernel_missing_with_only_nvidia_pins_moved_fails(self):
         # only_kernel_pins is true (the diff touches only pins.env, a KERNEL_PIN_FILES member),

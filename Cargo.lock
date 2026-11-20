@@ -615,6 +615,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "athanor-lock"
+version = "1.0.0"
+
+[[package]]
 name = "athanor-osd"
 version = "1.0.0"
 dependencies = [
@@ -687,6 +691,7 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wgpu",
+ "xkbcommon 0.8.0",
  "yeslogic-fontconfig-sys",
  "zeroize",
 ]
