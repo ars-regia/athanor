@@ -454,21 +454,26 @@ def print_card(pr, base_sha, rules, protection, files, categories, source=""):
     required = required_checks(rules, protection)
     queue = any(r["type"] == "merge_queue" for r in rules)
     print(f"card time: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
-    print(f"pull request #{pr['number']}  base {base} @ {base_sha}")
-    print(f"head {pr['headRefOid']}")
+    print(f"pull request #{esc(pr['number'])}  base {base} @ {esc(base_sha)}")
+    print(f"head {esc(pr['headRefOid'])}")
     if source:
         print(f"categories: {esc(source)}")
     print(
-        f"draft {pr['isDraft']}  mergeable {pr['mergeable']}  "
-        f"reviewDecision {pr['reviewDecision'] or '(empty)'}  merge_queue {'yes' if queue else 'no'}"
+        f"draft {esc(pr['isDraft'])}  mergeable {esc(pr['mergeable'])}  "
+        f"reviewDecision {esc(pr['reviewDecision']) or '(empty)'}  merge_queue {'yes' if queue else 'no'}"
     )
     print("checks:")
     for (_, name), (state, _) in sorted(latest_checks(pr["checks"]).items()):
-        print(f"  {state:8} {esc(name)}{'  [required]' if name in required else ''}")
+        print(
+            f"  {esc(state):8} {esc(name)}{'  [required]' if name in required else ''}"
+        )
     reviews = latest_reviews(pr["reviews"])
     print(
         "latest reviews: "
-        + (", ".join(f"{esc(w)} {s}" for w, s in sorted(reviews.items())) or "none")
+        + (
+            ", ".join(f"{esc(w)} {esc(s)}" for w, s in sorted(reviews.items()))
+            or "none"
+        )
     )
     records = classify(files, categories)
     prose = [r["path"] for r in records if r["prose"]]
@@ -481,11 +486,12 @@ def print_card(pr, base_sha, rules, protection, files, categories, source=""):
         if r["prose"]:
             continue
         tags = (
-            ", ".join(c + TAG_SUFFIX[k] for c, k in r["tags"].items()) or "unclassified"
+            ", ".join(esc(c) + TAG_SUFFIX[k] for c, k in r["tags"].items())
+            or "unclassified"
         )
-        print(f"  {esc(r['path'])} [{r['status']}]: {tags}")
+        print(f"  {esc(r['path'])} [{esc(r['status'])}]: {tags}")
         if r["review"]:
-            print(f"    review the whole file ({r['review']})")
+            print(f"    review the whole file ({esc(r['review'])})")
     if prose:
         print(
             f"docs prose, not approved documents ({len(prose)} files): {', '.join(esc(x) for x in prose)}"
@@ -496,9 +502,9 @@ def print_card(pr, base_sha, rules, protection, files, categories, source=""):
             r["evidence"][cat["name"]] for r in records if cat["name"] in r["evidence"]
         ]
         for line in lines[:2]:
-            print(f"  {cat['name']}: {esc(line)}")
+            print(f"  {esc(cat['name'])}: {esc(line)}")
         if len(lines) > 2:
-            print(f"  {cat['name']}: and {len(lines) - 2} more")
+            print(f"  {esc(cat['name'])}: and {len(lines) - 2} more")
 
 
 def check_categories(table):
@@ -511,6 +517,13 @@ def check_categories(table):
         if not isinstance(cat, dict) or not isinstance(cat.get("name"), str):
             bad.append("a category has no name")
             continue
+        if "exclude" in cat and not (
+            isinstance(cat["exclude"], list)
+            and all(isinstance(x, str) for x in cat["exclude"])
+        ):
+            bad.append(f"category {cat['name']!r} has no list of strings exclude")
+        if cat["name"] in REQUIRED and not (cat.get("paths") or cat.get("patterns")):
+            bad.append(f"category {cat['name']!r} has no paths and no patterns")
         for key in ("paths", "patterns"):
             if not isinstance(cat.get(key), list) or not all(
                 isinstance(x, str) for x in cat[key]
@@ -523,7 +536,11 @@ def check_categories(table):
                 re.compile(pattern)
             except (re.error, TypeError) as exc:
                 bad.append(f"category {cat['name']!r}: pattern {pattern!r}: {exc}")
-    names = {c.get("name") for c in cats if isinstance(c, dict)}
+    names = {
+        c["name"]
+        for c in cats
+        if isinstance(c, dict) and isinstance(c.get("name"), str)
+    }
     bad += [f"the table has no category {n!r}" for n in REQUIRED if n not in names]
     return bad
 
@@ -642,5 +659,23 @@ def main(argv):
     return finish(bad)
 
 
+def run_main(argv):
+    """main() with the checks that a RESULT line was delivered: no stdout, or a failed flush,
+    never yields exit 0."""
+    if sys.stdout is None:
+        print(
+            "merge_card: stdout is closed, the card cannot be delivered",
+            file=sys.stderr,
+        )
+        return 2
+    code = main(argv)
+    try:
+        sys.stdout.flush()
+    except (OSError, ValueError) as exc:
+        print(f"merge_card: stdout could not be written: {exc}", file=sys.stderr)
+        return code or 2
+    return code
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(run_main(sys.argv[1:]))

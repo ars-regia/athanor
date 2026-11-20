@@ -504,6 +504,10 @@ class Findings(unittest.TestCase):
         bad_regex["categories"][0]["patterns"].append("(")
         no_paths = copy.deepcopy(shipped)
         del no_paths["categories"][0]["paths"]
+        bad_exclude = copy.deepcopy(shipped)
+        bad_exclude["categories"][0]["exclude"] = "x"
+        empty_required = copy.deepcopy(shipped)
+        empty_required["categories"][0].update(paths=[], patterns=[])
         cases = {
             "not JSON": "{",
             "non-empty list": json.dumps({"categories": []}),
@@ -511,6 +515,9 @@ class Findings(unittest.TestCase):
             "pattern '('": json.dumps(bad_regex),
             "has no list of strings paths": json.dumps(no_paths),
             "no name": json.dumps({"categories": [{}]}),
+            "has no name": json.dumps({"categories": [{"name": ["x"]}]}),
+            "has no list of strings exclude": json.dumps(bad_exclude),
+            "has no paths and no patterns": json.dumps(empty_required),
         }
         for reason, table in cases.items():
             code, out, _ = run(table_at_base=table)
@@ -525,6 +532,49 @@ class Findings(unittest.TestCase):
         self.assertIn("REFUSED: the pull request is a draft", out)
         self.assertIn("REFUSED: the pull request is a draft", err)
         self.assertEqual(out.splitlines()[-1], "RESULT: REFUSED (1)")
+
+    def test_a_path_only_required_category_stays_valid(self):
+        self.assertEqual(
+            merge_card.check_categories(json.loads(merge_card.CATEGORIES.read_text())),
+            [],
+        )
+
+    def test_a_newline_in_a_status_or_a_category_name_forges_no_line(self):
+        shipped = json.loads(merge_card.CATEGORIES.read_text())
+        shipped["categories"].append(
+            {"name": "x\nFORGED-NAME", "paths": ["src/"], "patterns": []}
+        )
+        files = [entry("src/a.rs", "+x", status="modified\nFORGED-STATUS")]
+        _, out, _ = run(
+            files=files,
+            pr={"changedFiles": 1, "mergeable": "MERGEABLE\nFORGED-MERGE"},
+            table_at_base=json.dumps(shipped),
+        )
+        self.assertNotRegex(out, r"(?m)^FORGED")
+        for word in ("NAME", "STATUS", "MERGE"):
+            self.assertIn(f"\\nFORGED-{word}", out)
+
+    def test_a_closed_stdout_is_exit_2_and_a_failed_flush_is_never_zero(self):
+        err = io.StringIO()
+        with (
+            mock.patch.object(sys, "stdout", None),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertEqual(merge_card.run_main(["5"]), 2)
+        self.assertIn("stdout is closed", err.getvalue())
+
+        class Broken(io.StringIO):
+            def flush(self):
+                raise OSError("full")
+
+        err = io.StringIO()
+        with (
+            mock.patch.object(merge_card, "main", return_value=0),
+            mock.patch.object(sys, "stdout", Broken()),
+            contextlib.redirect_stderr(err),
+        ):
+            self.assertNotEqual(merge_card.run_main(["5"]), 0)
+        self.assertIn("could not be written", err.getvalue())
 
     def test_the_card_says_how_many_files_are_unclassified(self):
         files = [entry("a.rs", "+let x = 1;"), entry("docs/spikes/x.md", "+t")]
