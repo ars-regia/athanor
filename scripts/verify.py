@@ -6949,10 +6949,11 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     cited so. The definition's lines are then read as cited lines, for the token and the sections
     of the sentence; a symbol does not move, so the hunks are not read for it, and its lines may
     span LINE_RANGE_LIMIT or more: a long definition holds more words, and proves less. A `#symbol`
-    after no file that resolves on its line is a finding.
+    on a line that names no file before it is a finding; after a name that resolves to no file (code
+    outside the repository), it is not checked.
 
     With `lines_kept` (the files that keep `path:N`), a `path:N` of any other file is a finding, as
-    is a bare `:N` after no file that resolves on its line. `cited`, a set, gets the file of every
+    is a bare `:N` on a line that names no file before it. `cited`, a set, gets the file of every
     `path:N`."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
@@ -6973,6 +6974,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
     out = []
     for number, line in enumerate(text.split("\n"), 1):
         last = crate = None
+        named_any = False
         line = backtick_plain_paths(line)
         for span in re.finditer(r"`([^`]+)`", line):
             m = LINE_CITATION.fullmatch(span.group(1))
@@ -6980,6 +6982,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                 m = SYMBOL_CITATION.fullmatch(span.group(1))
             if not m:
                 last = resolve(span.group(1), crate) if FILE_LIKE.search(span.group(1)) else last
+                named_any = named_any or bool(FILE_LIKE.search(span.group(1)))
                 continue
             named, spec = m.groups()
             symbol = spec.strip() if m.re is SYMBOL_CITATION else None
@@ -6992,10 +6995,12 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text="", l
                             f"{doc}:{number}: `{named}{sep}{spec}` names a file that does not exist"))
             last = path
             if path is None:
-                if named is None and (symbol or lines_kept is not None):
+                if named is None and not named_any and (symbol or lines_kept is not None):
                     out.append((number, None, spec, None, f"{doc}:{number}: `{sep}{spec}` cites the file named "
-                                "before it on its line, and no file named there resolves: name its path"))
+                                "before it on its line, and the line names none: name its path"))
+                named_any = named_any or named is not None
                 continue
+            named_any = True
             if (c := CRATE_ROOT.match(path)):
                 crate = c.group(1)
             if not symbol and cited is not None:

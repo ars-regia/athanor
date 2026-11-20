@@ -174,6 +174,10 @@ class Forms(unittest.TestCase):
         self.assertEqual(len(messages("- then `grant` at `:5`.", lines_kept={})), 1)
         self.assertEqual(messages("- then `grant` at `:5`."), [])
 
+    def test_a_bare_citation_after_a_file_outside_the_repository_is_not_checked(self):
+        self.assertEqual(messages("In `glib/gmain.c` the `grant` at `#grant` and `:5`.", lines_kept={}), [])
+        self.assertEqual(messages("`glib/gmain.c:3`, then `#grant` and `:5`.", lines_kept={}), [])
+
     def test_a_colour_is_no_citation(self):
         self.assertEqual(
             messages("`src/x.rs#grant` paints `#e62d42` and `#rrggbb`."), []
