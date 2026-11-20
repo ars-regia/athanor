@@ -512,10 +512,12 @@ fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
 
 /// The updates that publish `ui`, in order. With an announcement asked for, the first adds it to
 /// the tree, as a child of the root, and the second removes it: the bridge announces the text
-/// once and keeps no stale copy of it in the tree. The announcement is taken.
-pub fn tree_updates(ui: &mut Ui, scale: f64) -> Vec<TreeUpdate> {
+/// once and keeps no stale copy of it in the tree. The announcement is taken, unless the
+/// adapter cannot hear it yet (`hears` false, as one not active, which drops every update):
+/// it then stays pending for the first publish the adapter hears (#1267).
+pub fn tree_updates(ui: &mut Ui, scale: f64, hears: bool) -> Vec<TreeUpdate> {
     let mut updates = Vec::with_capacity(2);
-    if let Some(live) = announcement(ui, scale) {
+    if let Some(live) = announcement(ui, scale).filter(|_| hears) {
         let mut update = tree_update(ui, scale);
         let root = node_id(Ui::ROOT);
         for (_, node) in update.nodes.iter_mut().filter(|(id, _)| *id == root) {
@@ -1834,7 +1836,7 @@ mod tests {
         };
         let publish = |ui: &mut Ui, adapter: &mut Adapter| {
             ui.layout();
-            for update in tree_updates(ui, 1.0) {
+            for update in tree_updates(ui, 1.0, true) {
                 adapter.update(update);
             }
         };
@@ -1879,7 +1881,7 @@ mod tests {
         let before = children(&adapter);
         for _ in 0..2 {
             ui.announce("Volume 45 percent", Priority::Polite);
-            let updates = tree_updates(&mut ui, 1.0);
+            let updates = tree_updates(&mut ui, 1.0, true);
             assert_eq!(updates.len(), 2);
             for update in updates {
                 adapter.update(update);
@@ -1887,7 +1889,7 @@ mod tests {
             assert_eq!(children(&adapter), before);
         }
         // Nothing more is announced once it was.
-        for update in tree_updates(&mut ui, 1.0) {
+        for update in tree_updates(&mut ui, 1.0, true) {
             adapter.update(update);
         }
         let polite = ("Volume 45 percent".to_owned(), "Polite".to_owned());
@@ -1909,7 +1911,7 @@ mod tests {
             ("Battery charging", Priority::Polite),
         ] {
             ui.announce(text, priority);
-            for update in tree_updates(&mut ui, 1.0) {
+            for update in tree_updates(&mut ui, 1.0, true) {
                 adapter.update(update);
             }
         }
@@ -1933,7 +1935,31 @@ mod tests {
         ui.announce("The action did not complete.", Priority::Polite);
         let (mut adapter, heard) = at_spi(&ui);
         for _ in 0..2 {
-            for update in tree_updates(&mut ui, 1.0) {
+            for update in tree_updates(&mut ui, 1.0, true) {
+                adapter.update(update);
+            }
+        }
+        let heard = heard.lock().expect("not poisoned");
+        let expected = [("The action did not complete.".to_owned(), "Polite".to_owned())];
+        assert_eq!(heard.announcements, expected);
+    }
+
+    /// A surface's adapter activates on the bus's thread, and may still be inactive at the
+    /// surface's first publish, whose updates it drops: an announcement pending then waits for
+    /// the publish after the activation, and is heard once (#1267).
+    #[test]
+    fn an_announcement_published_before_the_adapter_activates_is_heard_once_after() {
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Power mode".into()));
+        ui.layout();
+        ui.announce("The action did not complete.", Priority::Polite);
+        // The first publish, to an adapter not active yet: its updates are dropped.
+        let dropped = tree_updates(&mut ui, 1.0, false);
+        assert_eq!(dropped.len(), 1, "the tree alone, without the announcement");
+        // The adapter activates with the last update, then hears the next publishes.
+        let (mut adapter, heard) = at_spi(&ui);
+        for _ in 0..2 {
+            for update in tree_updates(&mut ui, 1.0, true) {
                 adapter.update(update);
             }
         }
@@ -2010,18 +2036,18 @@ mod tests {
         ui.layout();
         let (mut adapter, heard) = at_spi_focused(&ui, true);
         ui.set_focus(Some(plain));
-        for update in tree_updates(&mut ui, 1.0) {
+        for update in tree_updates(&mut ui, 1.0, true) {
             adapter.update(update);
         }
         assert!(heard.lock().expect("not poisoned").expanded.is_empty());
         ui.set_focus(Some(menu));
-        for update in tree_updates(&mut ui, 1.0) {
+        for update in tree_updates(&mut ui, 1.0, true) {
             adapter.update(update);
         }
         assert_eq!(heard.lock().expect("not poisoned").expanded, [false]);
         for focus in [plain, menu] {
             ui.set_focus(Some(focus));
-            for update in tree_updates(&mut ui, 1.0) {
+            for update in tree_updates(&mut ui, 1.0, true) {
                 adapter.update(update);
             }
         }
@@ -2043,7 +2069,7 @@ mod tests {
         let tree = rejoining(&mut ui, 1.0);
         assert!(tree.nodes.iter().all(|(id, _)| *id != ANNOUNCEMENT));
         let (mut adapter, again) = at_spi(&ui);
-        for update in tree_updates(&mut ui, 1.0) {
+        for update in tree_updates(&mut ui, 1.0, true) {
             adapter.update(update);
         }
         assert!(heard.lock().expect("not poisoned").announcements.is_empty());

@@ -85,6 +85,7 @@ use smithay_client_toolkit::{
     },
     shm::{slot::SlotPool, Shm, ShmHandler},
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -396,12 +397,13 @@ fn run_on(
     #[cfg(not(feature = "gpu"))]
     debug_assert!(!gpu, "wants_gpu refuses gpu without the feature");
 
-    // The adapters call their handlers on their own thread: actions travel to the event loop.
+    // The adapters call their handlers on their own thread: actions, and the activations an
+    // announcement waits for, travel to the event loop.
     let (actions, receiver) = channel::channel();
     event_loop
         .handle()
-        .insert_source(receiver, |event, _, app: &mut App| {
-            if let channel::Event::Msg((id, request)) = event {
+        .insert_source(receiver, |event, _, app: &mut App| match event {
+            channel::Event::Msg(FromBus::Action(id, request)) => {
                 if app.shell.dialogs.blocked(id) {
                     return;
                 }
@@ -411,6 +413,12 @@ fn run_on(
                     .and_then(|surface| surface.ui.do_action(&request));
                 app.changed(id, event);
             }
+            channel::Event::Msg(FromBus::Activated(id)) => {
+                if let Some(surface) = app.shell.get_mut(id) {
+                    surface.activated();
+                }
+            }
+            channel::Event::Closed => {}
         })
         .map_err(|e| e.error.to_string())?;
 
@@ -606,7 +614,7 @@ pub struct Shell {
     layer_shell: Option<LayerShell>,
     fractional_scale: Option<WpFractionalScaleManagerV1>,
     viewporter: Option<WpViewporter>,
-    actions: Sender<(SurfaceId, ActionRequest)>,
+    actions: Sender<FromBus>,
     next: u64,
     surfaces: Vec<Surface>,
     /// The popup open, at most one.
@@ -834,9 +842,10 @@ impl Shell {
                 if let Ok(mut initial) = surface.initial.lock() {
                     *initial = Some(tree);
                 }
-                let mut a11y = adapter(id, &surface.initial, &actions);
+                let (mut a11y, hold) = adapter(id, &surface.initial, &actions);
                 a11y.update_window_focus_state(surface.window_focused);
                 surface.a11y = Some(a11y);
+                surface.hold = hold;
                 surface.dirty = true;
             }
             _ => {}
@@ -1312,7 +1321,8 @@ impl Shell {
         };
         // The first tree comes from the last update drawn.
         let initial = Arc::new(Mutex::new(Some(tree_update(&ui, 1.0))));
-        let a11y = Some(adapter(id, &initial, &self.actions));
+        let (a11y, hold) = adapter(id, &initial, &self.actions);
+        let a11y = Some(a11y);
         // A layer surface asks for its widgets' size before the first configure.
         let size = match &shown {
             Shown::Layer(surface) => {
@@ -1345,6 +1355,7 @@ impl Shell {
             ui,
             a11y,
             initial,
+            hold,
             window_focused: false,
             scale: 1.0,
             size,
@@ -1645,6 +1656,8 @@ struct Surface {
     a11y: Option<accesskit_unix::Adapter>,
     /// The tree the adapter activates with; `None` once the surface left the tree.
     initial: Arc<Mutex<Option<TreeUpdate>>>,
+    /// Whether the adapter activated, which an announcement waits for.
+    hold: Hold,
     /// The adapter's window is the focused one, which a new adapter takes over.
     window_focused: bool,
     /// Physical pixels per logical pixel: the preferred fractional scale, else wl_surface's
@@ -1819,11 +1832,28 @@ impl Surface {
         }
     }
 
+    /// The adapter activated: an announcement held for it is published, as the next update it
+    /// hears. One past [`Hold::LIMIT`] is stale, and dropped; before the first draw, the draw
+    /// publishes it.
+    fn activated(&mut self) {
+        if self.ui.announcement.is_none() || !self.drawn {
+            return;
+        }
+        if self.hold.since.elapsed() < Hold::LIMIT {
+            self.publish_tree();
+        } else {
+            self.ui.announcement = None;
+        }
+    }
+
     /// Hands the tree of the surface just drawn to the accessibility adapter. An adapter that
     /// activates from here on starts from the last update, which holds no announcement: one it
-    /// started with would be registered without being spoken ([`tree_update`]).
+    /// started with would be registered without being spoken ([`tree_update`]). An adapter not
+    /// active yet drops the updates: an announcement then stays pending, for [`Hold::LIMIT`],
+    /// until the publish after the activation ([`Surface::activated`]).
     fn publish_tree(&mut self) {
-        let updates = tree_updates(&mut self.ui, f64::from(self.scale));
+        let hears = self.a11y.is_none() || !self.hold.waiting();
+        let updates = tree_updates(&mut self.ui, f64::from(self.scale), hears);
         if let (Some(last), Ok(mut initial)) = (updates.last(), self.initial.lock()) {
             *initial = Some(last.clone());
         }
@@ -1835,37 +1865,83 @@ impl Surface {
     }
 }
 
-/// The accessibility adapter of surface `id`, whose first tree is `initial`'s and whose actions
-/// travel on `actions` to the event loop.
-fn adapter(
-    id: SurfaceId,
-    initial: &Arc<Mutex<Option<TreeUpdate>>>,
-    actions: &Sender<(SurfaceId, ActionRequest)>,
-) -> accesskit_unix::Adapter {
-    accesskit_unix::Adapter::new(
-        Activation(Arc::clone(initial)),
-        Actions(id, actions.clone()),
-        Deactivation,
-    )
+/// What an adapter's thread tells the event loop.
+enum FromBus {
+    /// An assistive technology's action on a widget of the surface.
+    Action(SurfaceId, ActionRequest),
+    /// The surface's adapter activated: an announcement held for it can be heard.
+    Activated(SurfaceId),
 }
 
-struct Activation(Arc<Mutex<Option<TreeUpdate>>>);
+/// Whether a surface's adapter activated: it does on the bus's thread, and may still be
+/// inactive at the surface's first publish, whose updates it drops.
+struct Hold {
+    active: Arc<AtomicBool>,
+    since: Instant,
+}
 
-impl ActivationHandler for Activation {
-    /// `None` once the surface left the tree: the adapter then stays pending, registering
-    /// nothing, until it is dropped.
-    fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
-        self.0.lock().ok().and_then(|tree| tree.clone())
+impl Hold {
+    /// How long an announcement waits for the adapter: with no assistive technology running,
+    /// it never activates, and an announcement older than this one would be stale once one
+    /// starts.
+    const LIMIT: Duration = Duration::from_secs(1);
+
+    /// Whether an announcement waits for the adapter to activate.
+    fn waiting(&self) -> bool {
+        !self.active.load(Ordering::Acquire) && self.since.elapsed() < Self::LIMIT
     }
 }
 
-struct Actions(SurfaceId, Sender<(SurfaceId, ActionRequest)>);
+/// The accessibility adapter of surface `id`, whose first tree is `initial`'s and whose actions
+/// and activation travel on `actions` to the event loop, with its [`Hold`].
+fn adapter(
+    id: SurfaceId,
+    initial: &Arc<Mutex<Option<TreeUpdate>>>,
+    actions: &Sender<FromBus>,
+) -> (accesskit_unix::Adapter, Hold) {
+    let hold = Hold {
+        active: Arc::new(AtomicBool::new(false)),
+        since: Instant::now(),
+    };
+    let activation = Activation {
+        id,
+        initial: Arc::clone(initial),
+        active: Arc::clone(&hold.active),
+        bus: actions.clone(),
+    };
+    let adapter =
+        accesskit_unix::Adapter::new(activation, Actions(id, actions.clone()), Deactivation);
+    (adapter, hold)
+}
+
+struct Activation {
+    id: SurfaceId,
+    initial: Arc<Mutex<Option<TreeUpdate>>>,
+    active: Arc<AtomicBool>,
+    bus: Sender<FromBus>,
+}
+
+impl ActivationHandler for Activation {
+    /// `None` once the surface left the tree: the adapter then stays pending, registering
+    /// nothing, until it is dropped. The first tree given tells the event loop, for an
+    /// announcement held until the adapter activates.
+    fn request_initial_tree(&mut self) -> Option<TreeUpdate> {
+        let tree = self.initial.lock().ok().and_then(|tree| tree.clone());
+        if tree.is_some() && !self.active.swap(true, Ordering::AcqRel) {
+            // As for an action: once the receiver is gone, the driver is ending.
+            let _ = self.bus.send(FromBus::Activated(self.id));
+        }
+        tree
+    }
+}
+
+struct Actions(SurfaceId, Sender<FromBus>);
 
 impl ActionHandler for Actions {
     fn do_action(&mut self, request: ActionRequest) {
         // The receiver lives as long as the event loop; once it is gone the driver is ending
         // and there is nothing left to act on.
-        let _ = self.1.send((self.0, request));
+        let _ = self.1.send(FromBus::Action(self.0, request));
     }
 }
 
@@ -3469,6 +3545,41 @@ mod tests {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use wayland_client::protocol::wl_registry;
+
+    /// An announcement waits for a surface's adapter while it is not active, which the first
+    /// tree it is given marks, and no longer than [`Hold::LIMIT`]: with no assistive technology
+    /// running, the adapter never activates (#1267).
+    #[test]
+    fn an_announcement_waits_for_the_adapter_to_activate_a_bounded_time() {
+        let (bus, _receiver) = channel::channel();
+        let initial = Arc::new(Mutex::new(None));
+        let hold = Hold {
+            active: Arc::new(AtomicBool::new(false)),
+            since: Instant::now(),
+        };
+        let mut activation = Activation {
+            id: SurfaceId(0),
+            initial: Arc::clone(&initial),
+            active: Arc::clone(&hold.active),
+            bus,
+        };
+        assert!(hold.waiting());
+        assert!(activation.request_initial_tree().is_none());
+        assert!(hold.waiting(), "a surface out of the tree activates nothing");
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        ui.layout();
+        if let Ok(mut tree) = initial.lock() {
+            *tree = Some(tree_update(&ui, 1.0));
+        }
+        assert!(activation.request_initial_tree().is_some());
+        assert!(!hold.waiting(), "active: heard at once");
+        let since = Instant::now().checked_sub(Hold::LIMIT).expect("a clock past the limit");
+        let stale = Hold {
+            active: Arc::new(AtomicBool::new(false)),
+            since,
+        };
+        assert!(!stale.waiting(), "never active: the announcement goes");
+    }
 
     /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
     /// move with Ctrl+Up and Ctrl+Down: a calendar alone reads Ctrl+arrow apart.
