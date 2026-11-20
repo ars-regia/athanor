@@ -74,7 +74,8 @@ below reverses or completes one recorded earlier.
    `[target.'cfg(target_os = "linux")']` table, which shadows `[build]` on Linux:
    `target-cpu=x86-64-v3`, which the hardware audience of
    [ADR-0054](0054-audience-and-support-window.md) needs, and the mold linker. Every build of the
-   workspace, local and CI ones included, then targets x86-64-v3, as the image already does.
+   workspace, local and CI ones included, then targets x86-64-v3, as the image already does, and
+   links with mold, which becomes a build requirement of every host and image that builds it.
    With the `RUSTFLAGS` override gone, the hardening flags that `.cargo/config.toml` already sets
    (full RELRO, PIC, frame pointers, `-D unsafe_code`) apply to the RPM builds of the workspace's
    packages too.
