@@ -59,7 +59,7 @@
   checks it.
   Also amended 2026-11-21 (#1353, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)),
   approved by the maintainer with the pull request that makes the change: the `merge_group` run
-  builds the shell and the specs a change selects, and not the kernel; PL44, M3, the `pr.yml`
+  builds the specs a change selects, and not the kernel or the shell (a shell entry costs about 45-50 minutes of wall clock and about 240 runner minutes; the push run of `shell-surfaces.yml` covers it after the merge); PL44, M3, the `pr.yml`
   row of section 3.5 and the `changes.json` row of section 3.3 follow.
   Also amended 2026-11-07, approved by the maintainer with the pull request that makes the
   change (maintainer decision, 2026-11-07): the `changes.json` row of section 3.3 says that a
@@ -193,7 +193,7 @@ jobs that sign, which are jobs of the entry workflow that runs them: `sign-kerne
 
 | Entry            | Triggers                                       | What it does                                                                                                                                                       |
 | ---------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `pr.yml`         | `pull_request`, `merge_group`                  | change detection, the `check-*` jobs (together `just check`), the build checks the change selects (specs, kernel, image, shell surfaces; on `merge_group` all but the kernel, PL44), one aggregate job `gate`, the only required check |
+| `pr.yml`         | `pull_request`, `merge_group`                  | change detection, the `check-*` jobs (together `just check`), the build checks the change selects (specs, kernel, image, shell surfaces; on `merge_group` the specs only, PL44), one aggregate job `gate`, the only required check |
 | `build.yml`      | `push` to `iso-v0` and `main`, `workflow_dispatch` | plan, packages, kernel and modules when their inputs changed, signing of the kernel, images pushed by `:<run_id>`; its last job dispatches `release.yml` for the run (PL54) |
 | `release.yml`    | `workflow_dispatch` only, from `build.yml` on `iso-v0` or by hand, input `build_run_id` (PL54) | the candidate and its order (PL55, PL58), signing of the images, `:latest`, ISO, release evidence; its last job dispatches `accept.yml` (PL56) |
 | `accept.yml`     | `workflow_dispatch` with a run id, from the last job of `release.yml` or by hand (PL56) | ISO and upgrade acceptance on the run's own digests (UD17, UD18), evidence files, the VSA                                       |
@@ -248,7 +248,7 @@ The schemas live in `scripts/ci/schemas/` and every writer validates against the
 
 | File                          | Writer                    | Readers                         | Content                                                                                             |
 | ----------------------------- | ------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`, except a root `Cargo.toml` that only adds workspace members and a root `Cargo.lock` that only adds packages of the workspace (no `source`): a new crate that no surface uses yet, while a surface that starts using it changes its own `Cargo.toml` (2026-11-07). On `merge_group` the kernel is not selected and the other areas are (PL44, ADR-0137). Known gap: `deny.toml` belongs to no area yet (follow-up) |
+| `changes.json`                | `pr.yml` change detection | `pr.yml` jobs                   | the areas a change touches (specs, kernel, shell, docs only; the image joins with its `pr.yml` job in PB11, PB12). `just check` (its `check-*` jobs) compiles and tests the Rust workspace on every change, and `Cargo.toml`, `Cargo.lock` and `.cargo/` select `shell`, except a root `Cargo.toml` that only adds workspace members and a root `Cargo.lock` that only adds packages of the workspace (no `source`): a new crate that no surface uses yet, while a surface that starts using it changes its own `Cargo.toml` (2026-11-07). On `merge_group` the kernel and the shell are not selected and the specs are (PL44, ADR-0137). Known gap: `deny.toml` belongs to no area yet (follow-up) |
 | `plan.json`                   | `build.yml` `plan`        | every build stage               | dirty packages with content hashes, whether kernel or modules change, the variants of `images.json` |
 | `kernel-artifacts.env`        | `system/kernel-artifacts.sh` | image, signing                | kernel, devel, module and boot digests and their registry (O5)                                      |
 | `tier-digests.json`           | `call-packages.yml`       | `call-image.yml`                | tier repository digests, verified (UD44)                                                            |
@@ -1133,7 +1133,7 @@ decides; Kernel Build no longer runs on unrelated pull requests.
 
 **PL44. The release path does not repeat what the merge queue proved, and an artifact is
 built at most twice.** The pull-request run builds what the change selects; the
-`merge_group` run repeats change detection and `just check` and builds the shell and the specs a change selects, on the base it lands on, but not the kernel; `build.yml`
+`merge_group` run repeats change detection and `just check` and builds the specs a change selects, on the base it lands on, but not the kernel (ADR-0110) or the shell (about 45-50 minutes of wall clock and about 240 runner minutes per entry; the push run of `shell-surfaces.yml` on `iso-v0` covers it, ADR-0137); `build.yml`
 starts from the plan and builds once, and that build is the one signed, accepted on its own
 digests (UD17) and promoted, so what is released is what was tested. Building the release
 candidates in the `merge_group` run instead is not adopted now: the queue's ref is not a
@@ -1144,8 +1144,8 @@ build run that succeeded (PL55). The kernel is the exception (ADR-0110), once #3
 are merged: the push to `iso-v0`
 publishes the RPMs of the merged pull request's `pr.yml` kernel build when the four
 conditions of `doc_kernel_build.md` section 7 hold, and builds otherwise. On `merge_group`,
-`scripts/ci/changes.py` selects the shell and the specs as on a pull request, and not the kernel
-(`QUEUE_SKIPS`, ADR-0110, ADR-0137), so `pr.yml` builds the kernel on `pull_request` only (PB11).
+`scripts/ci/changes.py` selects the specs as on a pull request, and neither the kernel nor the
+shell (`QUEUE_SKIPS`, ADR-0110, ADR-0137), so `pr.yml` builds those on `pull_request` only (PB11).
 
 **PL45. The bar is built once per run** and its output passed to the jobs that test it.
 
@@ -1386,7 +1386,7 @@ Applied:
   PL44, PB2).
 - M2: `azoth-signer.yml` in section 3.5, in PL12 and PL19, its digest bumped
   by a bot (PB4, PB12).
-- M3 (in part): an artifact is built at most twice; the `merge_group` run builds the shell and the specs a change selects, and not the kernel.
+- M3 (in part): an artifact is built at most twice; the `merge_group` run builds the specs a change selects, and not the kernel or the shell.
   Release candidates built in the merge queue are not adopted now (PL44).
 - M4: Build L3 for hosted builds, L2 for the self-hosted kernel, `--deny-self-hosted-runners`
   in the verification (principle 1, PL19, PL21, PB4, ADR-0088).

@@ -251,7 +251,7 @@ class MainTest(unittest.TestCase):
         self.assertEqual(set(changes.AREAS), {*changes.BUILDS, "rust_audit"})
         self.assertLessEqual(set(changes.QUEUE_SKIPS), set(changes.BUILDS))
 
-    def test_a_merge_group_builds_the_shell_and_the_specs_but_not_the_kernel(self):
+    def test_a_merge_group_builds_the_specs_but_not_the_kernel_or_the_shell(self):
         (self.root / "forge/specs/azoth/notes.txt").write_text("kernel 2\n")
         (self.root / "forge/specs/athanor-bar").mkdir(parents=True)
         (self.root / "forge/specs/athanor-bar/bar.spec").write_text("Name: bar\n")
