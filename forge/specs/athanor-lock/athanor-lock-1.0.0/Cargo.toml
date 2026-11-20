@@ -6,8 +6,9 @@ license = "GPL-3.0-or-later"
 description = "The Athanor session lock, written in Sal (doc_lock_and_prompts.md, LP2)"
 authors = ["Athanor Forge <forge@athanor.os>"]
 
-# LP18 step 2: each dependency arrives with the task that uses it; Sal and athanor-auth follow.
+# LP18 step 2: each dependency arrives with the task that uses it; Sal follows.
 [dependencies]
+athanor-auth = { path = "../../../../system/athanor-auth" }
 calloop = { workspace = true }
 tokio = { workspace = true }
 zbus = { workspace = true }

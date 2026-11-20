@@ -504,6 +504,7 @@ dependencies = [
 name = "athanor-fuzz-entries"
 version = "1.0.0"
 dependencies = [
+ "athanor-auth",
  "athanor-bar",
  "athanor-layout",
  "athanor-shelld",
@@ -618,6 +619,7 @@ dependencies = [
 name = "athanor-lock"
 version = "1.0.0"
 dependencies = [
+ "athanor-auth",
  "calloop",
  "tokio",
  "zbus 6.2.1",

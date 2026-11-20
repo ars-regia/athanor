@@ -1,0 +1,2 @@
+PAM_ERROR_MSG The account is locked due to 5 failed logins.\n(10 minutes left to unlock)
+FAILURE

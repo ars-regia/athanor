@@ -50,6 +50,7 @@ replay_tests! {
     "layout" layout_favorites => athanor_fuzz_entries::layout::favorites;
     "layout" trust_state => athanor_fuzz_entries::layout::trust_state;
     "sulphur" sulphur_protocol => athanor_fuzz_entries::sulphur::protocol;
+    "auth" auth_protocol => athanor_fuzz_entries::auth::protocol;
 }
 
 /// A corpus directory or a `[[bin]]` without a line above is a target nobody replays.
