@@ -1819,12 +1819,15 @@ impl Surface {
         }
     }
 
-    /// Hands the tree of the surface just drawn to the accessibility adapter.
+    /// Hands the tree of the surface just drawn to the accessibility adapter. An adapter that
+    /// activates from here on starts from the last update, which holds no announcement: one it
+    /// started with would be registered without being spoken ([`tree_update`]).
     fn publish_tree(&mut self) {
-        for update in tree_updates(&mut self.ui, f64::from(self.scale)) {
-            if let Ok(mut initial) = self.initial.lock() {
-                *initial = Some(update.clone());
-            }
+        let updates = tree_updates(&mut self.ui, f64::from(self.scale));
+        if let (Some(last), Ok(mut initial)) = (updates.last(), self.initial.lock()) {
+            *initial = Some(last.clone());
+        }
+        for update in updates {
             if let Some(a11y) = &mut self.a11y {
                 a11y.update_if_active(|| update);
             }

@@ -371,9 +371,6 @@ pub fn node(ui: &Ui, id: WidgetId, scale: f64) -> Node {
     let shown = widget.children.iter().filter(|&&c| ui.shown(c));
     let mut children: Vec<NodeId> = shown.map(|&c| node_id(c)).collect();
     children.extend((0..shown_labels(ui, id).len()).map(|n| text_run_id(id, n)));
-    if id == Ui::ROOT && ui.announcement.is_some() {
-        children.push(ANNOUNCEMENT);
-    }
     if let Kind::Label(_) = &widget.kind {
         children.push(text_run_id(id, 0));
     }
@@ -513,13 +510,19 @@ fn announcement(ui: &Ui, scale: f64) -> Option<(NodeId, Node)> {
     Some((ANNOUNCEMENT, node))
 }
 
-/// The updates that publish `ui`, in order. With an announcement asked for, the first holds it
-/// and the second no longer does: the bridge announces the text once and keeps no stale copy of
-/// it in the tree. The announcement is taken.
+/// The updates that publish `ui`, in order. With an announcement asked for, the first adds it to
+/// the tree, as a child of the root, and the second removes it: the bridge announces the text
+/// once and keeps no stale copy of it in the tree. The announcement is taken.
 pub fn tree_updates(ui: &mut Ui, scale: f64) -> Vec<TreeUpdate> {
     let mut updates = Vec::with_capacity(2);
-    if ui.announcement.is_some() {
-        updates.push(tree_update(ui, scale));
+    if let Some(live) = announcement(ui, scale) {
+        let mut update = tree_update(ui, scale);
+        let root = node_id(Ui::ROOT);
+        for (_, node) in update.nodes.iter_mut().filter(|(id, _)| *id == root) {
+            node.push_child(ANNOUNCEMENT);
+        }
+        update.nodes.push(live);
+        updates.push(update);
         ui.announcement = None;
     }
     updates.push(tree_update(ui, scale));
@@ -593,6 +596,10 @@ pub fn rejoining(ui: &mut Ui, scale: f64) -> TreeUpdate {
 }
 
 /// The whole tree of the visible widgets, as the adapter's first update and after every change.
+/// It never holds the announcement, which only [`tree_updates`] adds: the bridge registers a live
+/// region of the tree an adapter activates with without speaking it, and speaks one only as an
+/// update adds it (`accesskit_atspi_common`, `adapter.rs`, `add_node`), so one pending as a
+/// surface opens is heard at its first publication.
 pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
     let mut tree = TreeInfo::new(node_id(Ui::ROOT));
     tree.toolkit_name = Some("athanor-sal".into());
@@ -603,7 +610,6 @@ pub fn tree_update(ui: &Ui, scale: f64) -> TreeUpdate {
             .map(|id| (node_id(id), node(ui, id, scale)))
             .chain(shown().flat_map(|id| text_runs(ui, id, scale)))
             .chain(shown().flat_map(|id| row_labels(ui, id, scale)))
-            .chain(announcement(ui, scale))
             .collect(),
         tree: Some(tree),
         tree_id: TreeId::ROOT,
@@ -1912,6 +1918,27 @@ mod tests {
             ("Battery critically low".to_owned(), "Assertive".to_owned()),
             ("Battery charging".to_owned(), "Polite".to_owned()),
         ];
+        assert_eq!(heard.announcements, expected);
+    }
+
+    /// An announcement pending when a surface opens is heard once, at the first publication: the
+    /// tree the adapter activates with, the driver's first tree of the surface, does not hold
+    /// it, since the bridge registers a live region it starts with without speaking it, and
+    /// speaks one only as an update adds it (#1267).
+    #[test]
+    fn an_announcement_pending_when_a_surface_opens_is_heard_once() {
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        ui.add(Ui::ROOT, Kind::Button("Power mode".into()));
+        ui.layout();
+        ui.announce("The action did not complete.", Priority::Polite);
+        let (mut adapter, heard) = at_spi(&ui);
+        for _ in 0..2 {
+            for update in tree_updates(&mut ui, 1.0) {
+                adapter.update(update);
+            }
+        }
+        let heard = heard.lock().expect("not poisoned");
+        let expected = [("The action did not complete.".to_owned(), "Polite".to_owned())];
         assert_eq!(heard.announcements, expected);
     }
 
