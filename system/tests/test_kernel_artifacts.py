@@ -1232,7 +1232,14 @@ class CheckPlan(Repo):
         recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change."""
         script = SCRIPT.read_text()
         self.assertEqual(len(re.findall(r"^NVIDIA_PIN_COMPANIONS\+?=", script, re.M)), 1, "assigned once, never extended")
-        self.assertNotIn("NVIDIA_PIN_COMPANIONS+=", script)
+        other_writes = [
+            r"NVIDIA_PIN_COMPANIONS\+=",
+            r"NVIDIA_PIN_COMPANIONS\[[^@*\]][^\]]*\]\+?=",
+            r"(mapfile|readarray)\b[^\n]*\bNVIDIA_PIN_COMPANIONS\b",
+            r"\bread\b[^\n]*\s-\w*a\w*\s[^\n]*\bNVIDIA_PIN_COMPANIONS\b",
+        ]
+        for pattern in other_writes:
+            self.assertIsNone(re.search(pattern, script), f"NVIDIA_PIN_COMPANIONS is written by {pattern}")
         line = re.search(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", script, re.M).group(0)
         out = subprocess.run(["bash", "-c", line + "\nprintf '%s\\n' \"${NVIDIA_PIN_COMPANIONS[@]}\"\n"], capture_output=True, text=True, check=True)
         doc = (ROOT / "docs/architecture/doc_build_ordering.md").read_text()
