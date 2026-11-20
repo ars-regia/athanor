@@ -107,6 +107,43 @@ class SemverCompatibleTest(unittest.TestCase):
         self.assertTrue(verify.semver_compatible("0.0.3+build.5", "0.0.3"))
 
 
+class DependencyPathsTest(unittest.TestCase):
+    def test_every_dependency_table_is_read(self):
+        manifest = verify.load_toml(
+            "Cargo.toml",
+            """
+[lib]
+path = "../lib"
+[dependencies]
+a = { path = "../a" }
+[dev-dependencies]
+b = { path = "../b" }
+[dev_dependencies]
+c = { path = "../c" }
+[build-dependencies]
+d = { path = "../d" }
+[build_dependencies]
+e = { path = "../e" }
+[target.'cfg(unix)'.dependencies]
+f = { path = "../f" }
+[target.'cfg(unix)'.build_dependencies]
+g = { path = "../g" }
+[patch.crates-io]
+h = { path = "../h" }
+[workspace.dependencies]
+i = { path = "../i" }
+""",
+        )
+        self.assertEqual(
+            sorted(verify.dependency_paths(manifest)),
+            [f"../{c}" for c in "abcdefghi"],
+        )
+
+    def test_a_key_that_is_not_a_table_holds_no_path(self):
+        for key in ("target", "patch", "workspace", "dependencies"):
+            self.assertEqual(verify.dependency_paths({key: 5}), [], key)
+
+
 class SubLocksTest(unittest.TestCase):
     WORKSPACE = '[package]\nname = "x"\n\n[workspace]\n\n[dependencies]\n'
 
@@ -208,6 +245,12 @@ class CheckTest(unittest.TestCase):
             result = verify.check_lock_versions()
         self.assertFalse(result.ok)
         self.assertIn("gone", result.problems[-1])
+
+    def test_an_invalid_manifest_fails_the_check_with_its_name(self):
+        with mock.patch.object(verify, "read", return_value="[x"):
+            result = verify.check_lock_versions()
+        self.assertFalse(result.ok)
+        self.assertIn("Cargo.toml: not valid TOML", result.problems[-1])
 
 
 if __name__ == "__main__":

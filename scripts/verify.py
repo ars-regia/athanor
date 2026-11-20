@@ -6918,12 +6918,16 @@ def load_toml(name, text):
 
 def dependency_paths(manifest):
     """The `path` of every dependency, target dependency, workspace dependency and [patch] entry
-    of a parsed manifest."""
-    tables = [manifest.get(k) for k in DEPENDENCY_TABLES]
-    tables += [target.get(k) for target in manifest.get("target", {}).values()
-               if isinstance(target, dict) for k in DEPENDENCY_TABLES]
-    tables += list(manifest.get("patch", {}).values())
-    tables.append(manifest.get("workspace", {}).get("dependencies"))
+    of a parsed manifest, in each spelling of DEPENDENCY_TABLES. A key that is not a table holds
+    none."""
+    def table(parent, key):
+        value = parent.get(key) if isinstance(parent, dict) else None
+        return value if isinstance(value, dict) else {}
+    tables = [table(manifest, k) for k in DEPENDENCY_TABLES]
+    tables += [table(target, k) for target in table(manifest, "target").values()
+               for k in DEPENDENCY_TABLES]
+    tables += list(table(manifest, "patch").values())
+    tables.append(table(table(manifest, "workspace"), "dependencies"))
     return [dep["path"] for table in tables if isinstance(table, dict)
             for dep in table.values() if isinstance(dep, dict) and isinstance(dep.get("path"), str)]
 
