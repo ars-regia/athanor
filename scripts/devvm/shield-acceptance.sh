@@ -11,7 +11,8 @@
 # verified one: a security digest waiting for the next shutdown, which must offer "Postpone"
 # beside "Restart to update"; the same postponed, which must carry the expiry and no button; and
 # an opted-out machine, which must carry the persistent warning. It does not press the switch:
-# the switch is no push button for shield_probe.py, so the warning it opens is not driven here.
+# shield_probe.py finds the switch by its name but presses only push buttons, so the warning the
+# switch opens is not driven here.
 # The stale stage moves the guest's clock 15 days past the last successful check, with no
 # check since, and the shield must read "Not verified yet" (SH12, 14 days); the clock goes
 # back to the host's, and NTP as it was, before the stage ends or in the cleanup.
