@@ -515,6 +515,21 @@ impl<'de> serde::de::Visitor<'de> for HintsVisitor {
     }
 }
 
+/// A `connection` argument the agent never reads (`SaveSecrets`, `DeleteSecrets`), `a{sa{sv}}`.
+/// Every value is skipped as `IgnoredAny`, so no secret in it is built into an owned value.
+/// zbus's message buffer still holds it, as for `ConnectionHints`.
+struct Discarded;
+
+impl zbus::Type for Discarded {
+    const SIGNATURE: &'static zbus::Signature = <BTreeMap<String, Props> as zbus::Type>::SIGNATURE;
+}
+
+impl<'de> serde::Deserialize<'de> for Discarded {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        serde::de::IgnoredAny::deserialize(deserializer).map(|_| Self)
+    }
+}
+
 /// One setting, `a{sv}`, of which only the `KEPT` keys are built.
 struct Setting<'a>(&'a str);
 
@@ -894,7 +909,7 @@ impl Agent {
     // Nothing is ever stored here, so there is nothing to delete; and nothing is saved.
     fn save_secrets(
         &self,
-        _connection: BTreeMap<String, Props>,
+        _connection: Discarded,
         _connection_path: ObjectPath<'_>,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<(), AgentError> {
@@ -904,7 +919,7 @@ impl Agent {
 
     fn delete_secrets(
         &self,
-        _connection: BTreeMap<String, Props>,
+        _connection: Discarded,
         _connection_path: ObjectPath<'_>,
         #[zbus(header)] header: Header<'_>,
     ) -> Result<(), AgentError> {
@@ -2341,7 +2356,10 @@ mod tests {
             .await
             .expect("proxy");
         let path = ObjectPath::try_from(SAVED).expect("path");
-        let empty: HashMap<&str, HashMap<&str, Variant>> = HashMap::new();
+        let empty: HashMap<&str, HashMap<&str, Variant>> = HashMap::from([(
+            SECURITY_SETTING,
+            HashMap::from([("psk", Variant::from("old-secret"))]),
+        )]);
         let result = match method {
             "CancelGetSecrets" => proxy.call_method(method, &(path, SECURITY_SETTING)).await,
             _ => proxy.call_method(method, &(empty, path)).await,
@@ -3071,6 +3089,23 @@ mod tests {
             agent_call(&rig.nm, &rig.client, "DeleteSecrets").await,
             "ok"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_agent_declares_the_connection_of_every_method_as_a_dict_of_dicts() {
+        let rig = rig(REPLY_TIMEOUT).await;
+        let name = rig.client.unique_name().expect("unique name").to_string();
+        let proxy = Proxy::new(
+            &rig.nm,
+            name,
+            AGENT_PATH,
+            "org.freedesktop.DBus.Introspectable",
+        )
+        .await
+        .expect("proxy");
+        let xml: String = proxy.call("Introspect", &()).await.expect("introspect");
+        // The argument of GetSecrets, SaveSecrets and DeleteSecrets, and the reply of GetSecrets.
+        assert_eq!(xml.matches(r#"type="a{sa{sv}}""#).count(), 4, "{xml}");
     }
 
     #[tokio::test(flavor = "current_thread")]
