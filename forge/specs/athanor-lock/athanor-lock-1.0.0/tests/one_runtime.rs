@@ -1,8 +1,9 @@
 //! zbus runs the logind thread's connections on that thread's Tokio runtime and starts no
 //! runtime of its own (plan decision M3): the thread adds itself to the process and nothing
 //! else. A test binary of its own, with one test, so that no other test's threads are counted.
-//! The count holds whichever zbus features the build unifies: the root workspace's adds
-//! `tokio-multithread` (athanor-sulphur), the package build of `-p athanor-lock` does not.
+//! The count tells the thread's runtime from zbus's own only in the root workspace's build,
+//! which unifies `tokio-multithread` (athanor-sulphur): there zbus's runtime shows as worker
+//! threads. The package build of `-p athanor-lock` has no such runtime to tell apart.
 
 mod common;
 
