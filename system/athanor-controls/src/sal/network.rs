@@ -17,7 +17,7 @@ use athanor_services::network::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-use super::widgets::{column, heading, switch_row, Failure, Look};
+use super::widgets::{column, heading, icon_image, icon_images, switch_row, Failure, Look};
 use super::Turn;
 use crate::bridge;
 use crate::i18n::{tr, tr_with};
@@ -251,14 +251,6 @@ fn shape(state: Option<&NetworkState>) -> (String, Vec<(&'static str, Network)>)
     (wifi.device.clone(), networks.collect())
 }
 
-/// The image of the strength icon `name`, from those [`Ids::strengths`] holds.
-fn strength(strengths: &[(&'static str, Option<Image>)], name: &str) -> Option<Image> {
-    strengths
-        .iter()
-        .find(|(icon, _)| *icon == name)
-        .and_then(|(_, image)| image.clone())
-}
-
 /// The widgets of the page in the surface's [`Ui`].
 struct Ids {
     list: WidgetId,
@@ -398,19 +390,14 @@ impl Page {
 
         let state = self.service.state.borrow();
         let (device, wanted) = shape(state.as_ref());
-        let mut strengths = Vec::new();
-        for icon in (0..=u8::MAX).map(network::signal_icon) {
-            if !strengths.iter().any(|(name, _)| *name == icon) {
-                strengths.push((icon, (look.icon)(icon)));
-            }
-        }
+        let strengths = icon_images(look, (0..=u8::MAX).map(network::signal_icon));
         let icons = wanted.iter().map(|(icon, _)| *icon).collect();
         let rows = wanted
             .into_iter()
             .map(|(icon, network)| {
                 // The strength's icon, then the name, as the GTK row's box.
                 let name = network_name(&network);
-                let icon = strength(&strengths, icon);
+                let icon = icon_image(&strengths, icon);
                 let row = ui.labelled_button(networks, &name, icon, look.icon_size, &name);
                 ui.set_sensitive(row, usable(&network));
                 (row, network)
@@ -514,7 +501,7 @@ impl Page {
             let rows = ids.rows.iter_mut().zip(&mut ids.icons);
             for (((row, shown), icon), (now_icon, network)) in rows.zip(wanted) {
                 if *icon != now_icon {
-                    ui.set_image(*row, strength(&ids.strengths, now_icon));
+                    ui.set_image(*row, icon_image(&ids.strengths, now_icon));
                     *icon = now_icon;
                 }
                 if *shown != network {

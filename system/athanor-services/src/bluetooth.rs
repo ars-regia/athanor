@@ -89,6 +89,18 @@ pub struct BluetoothState {
     pub refused: u32,
 }
 
+/// Every icon [`icon`] maps to: a page looks them up before it knows its devices' kinds.
+pub const ICONS: [&str; 8] = [
+    "audio-headphones-symbolic",
+    "audio-speakers-symbolic",
+    "input-keyboard-symbolic",
+    "input-mouse-symbolic",
+    "input-gaming-symbolic",
+    "phone-symbolic",
+    "computer-symbolic",
+    "bluetooth-symbolic",
+];
+
 /// BlueZ's `Icon` property, mapped to an icon the theme has; anything else is generic.
 pub fn icon(bluez: &str) -> &'static str {
     match bluez {
@@ -1033,6 +1045,27 @@ mod tests {
             vec![("Alias", Variant::from("CC-DD"))],
         );
         objects
+    }
+
+    #[test]
+    fn every_icon_a_device_maps_to_is_in_the_list() {
+        let kinds = [
+            "audio-headphones",
+            "audio-headset",
+            "audio-card",
+            "audio-speakers",
+            "input-keyboard",
+            "input-mouse",
+            "input-tablet",
+            "input-gaming",
+            "phone",
+            "computer",
+            "printer",
+            "",
+        ];
+        let mapped: Vec<_> = kinds.iter().map(|kind| icon(kind)).collect();
+        assert!(mapped.iter().all(|name| ICONS.contains(name)));
+        assert!(ICONS.iter().all(|name| mapped.contains(name)), "no icon listed for nothing");
     }
 
     #[test]
