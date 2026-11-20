@@ -7417,8 +7417,9 @@ def check_implicit_panics():
 # SN8) the hook's message, place, thread and backtrace are all a crash leaves.
 PANIC_HOOK = "athanor_unit::panic::install();"
 # Programs on the login path, whose `main` waits on the maintainer before even this line (AGENTS.md,
-# "Stop and ask before editing"). athanor-lock does not depend on athanor-unit yet.
-PANIC_HOOK_PENDING = {"athanor-greeter-ui", "athanor-unlockd", "athanor-lock"}
+# "Stop and ask before editing"): the greeter's starts with its confinement, and athanor-lock
+# does not depend on athanor-unit yet.
+PANIC_HOOK_PENDING = {"athanor-greeter-ui", "athanor-lock"}
 
 
 def program_mains(crate_dir):
