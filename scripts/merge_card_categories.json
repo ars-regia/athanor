@@ -1,0 +1,18 @@
+{
+  "_comment": "Categories of the merge card (CLAUDE.md, Merging). paths: a directory prefix ending in '/', a glob, or a file; any change to a match lists the file. patterns: regular expressions tried on every added or removed line outside docs/ and tests.",
+  "categories": [
+    {"name": "process launch", "paths": [], "patterns": ["Command::new", "\\bExecStart=", "\\bsubprocess\\.", "\\bposix_spawn\\b", "\\bexecve?\\("]},
+    {"name": "files", "paths": [], "patterns": ["std::fs::", "\\bOpenOptions\\b", "\\bFile::(create|open)\\b", "\\bset_permissions\\b", "\\bchmod\\b", "\\bfs::(write|remove|rename)"]},
+    {"name": "unsafe", "paths": [], "patterns": ["\\bunsafe\\b"]},
+    {"name": "D-Bus", "paths": [], "patterns": ["\\bzbus\\b", "\\bdbus\\b", "#\\[(zbus::)?interface"]},
+    {"name": "confinement", "paths": [], "patterns": ["(?i)landlock", "(?i)seccomp", "\\bCapabilityBoundingSet=", "\\bNoNewPrivileges=", "\\bProtectSystem="]},
+    {"name": "trust seal", "paths": [], "patterns": ["(?i)trust[_ -]?seal", "(?i)\\bsealed?\\b"]},
+    {"name": "power", "paths": [], "patterns": ["(?i)\\blogind\\b", "(?i)\\b(suspend|hibernate|poweroff|reboot)\\b", "PrepareForSleep"]},
+    {"name": "signing", "paths": ["forge/specs/azoth/keys/", "system/keys/", "system/sign-images.sh", "system/promote.sh", "forge/scripts/sign_attest.sh"], "patterns": ["\\bcosign\\b", "\\bsbsign\\b", "(?i)\\bMOK\\b"]},
+    {"name": "approved document text", "paths": ["docs/architecture/doc_*.md", "docs/decisions/*.md"], "patterns": []},
+    {"name": "CI workflows", "paths": [".github/workflows/"], "patterns": []},
+    {"name": "repository settings", "paths": [".github/settings/", ".claude/settings.json"], "patterns": []},
+    {"name": "CODEOWNERS", "paths": [".github/CODEOWNERS"], "patterns": []},
+    {"name": "dependencies", "paths": ["*Cargo.lock", "*Cargo.toml", "deny.toml", "forge/config/packages.json", "scripts/ci/audited-lockfiles.txt", "scripts/ci/requirements*.txt", "system/nvidia/locks/"], "patterns": ["^[ +-]*(\\[(dev-|build-)?dependencies[.\\]]|[A-Za-z0-9_-]+ = \\{ *(version|git|path)\\b)"]}
+  ]
+}
