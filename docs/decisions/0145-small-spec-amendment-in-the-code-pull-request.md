@@ -26,8 +26,11 @@ Decided by the maintainer on 2026-11-18.
 1. **A small amendment to an approved specification may be approved in the same pull request as
    the code that needs it.** Merging that pull request approves the amendment, as merging a
    revision's pull request does under ADR-0074 decision 5.
-2. **"Small" covers a corrected requirement, a renamed identifier or a narrowed rule.** It does
-   not cover a new component or a new trust boundary; those keep ADR-0074's separate revision.
+2. **"Small" covers a corrected requirement, a renamed identifier or a narrowed rule.** A
+   narrowed rule is a rule that allows less. It does not cover a new component or a new trust
+   boundary; those keep ADR-0074's separate revision. Loosening a requirement keeps it too, and
+   so does any amendment in the stop-and-ask areas of `AGENTS.md` (signing, keys, Secure Boot,
+   MOK, polkit, attestation, authentication, migrations) or in its inviolable rules.
 3. **The pull request shows the specification hunk next to the code** that needs it.
 4. **Code-owner approval is unchanged.** The pull request needs the review of the code owner of
    every path it touches, the specification's included, as any other pull request does

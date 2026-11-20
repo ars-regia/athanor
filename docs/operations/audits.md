@@ -21,8 +21,8 @@ Automate the class, audit the delta, probe the runtime.
 - **After a CLEAN audit of a pull request's head, the audit of a later head covers only the
   delta** between the two heads, plus whatever a base merge brought into the pull request's
   own diff *(maintainer decision, 2026-11-18)*. A full audit is repeated only when the delta
-  touches process launch, files, `unsafe`, D-Bus, confinement, the trust seal, power, signing, workflows, settings, `CODEOWNERS` or dependencies.
-  The merge card names the audited range as `<CLEAN head sha>..<audited head sha>`, with full
+  touches an area of the merge card's list: process launch, files, `unsafe`, D-Bus, confinement, the trust seal, power, signing and keys, an approved document's text, CI workflows, repository settings, `CODEOWNERS`, dependencies, polkit, authentication, the merge rule and its tooling, and systemd units. The list is the card's, and its source is `scripts/merge_card_categories.json`, so that the two cannot diverge.
+  The audit report names the audited range as `<CLEAN head sha>..<audited head sha>`, with full
   shas, so that a reader sees what each audit covered.
 - **Every audit re-examines every decision within its scope**: a full audit all of them, a
   delta audit every decision that bears on what changed, listed in its report first. The
