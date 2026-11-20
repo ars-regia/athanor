@@ -215,3 +215,17 @@ class WalkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.mock.patch.object(check.time, "sleep")
+class CollectTest(unittest.TestCase):
+    def app(self, times):
+        return Fake("application", (0, 0, 0, 0), [Rebuilt(times, "button", (0, 0, 1, 1), name="Close")])
+
+    def test_a_node_destroyed_mid_walk_collects_again_from_the_root(self, _sleep):
+        found = check.collect(self.app(2), lambda node: node.get_role_name() == "button")
+        self.assertEqual([node.get_name() for node in found], ["Close"])
+
+    def test_a_tree_that_keeps_changing_raises_not_an_empty_list(self, _sleep):
+        with self.assertRaises(Vanished):
+            check.collect(self.app(check.WALK_TRIES), lambda node: node.get_role_name() == "button")

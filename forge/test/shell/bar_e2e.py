@@ -33,7 +33,7 @@ from pathlib import Path
 from gi.repository import GLib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from atspi_check import afresh, children, find_application, walk  # noqa: E402
+from atspi_check import collect, find_application, walk  # noqa: E402
 
 READY_FILE = Path("/tmp/athanor-bar.ready")
 PID_FILE = Path("/tmp/athanor-bar.pid")
@@ -100,25 +100,12 @@ def showing(accessible, Atspi):
 def buttons_matching(app, Atspi, regex):
     """Every showing push button whose name matches `regex`, found afresh: a rebuild
     replaces them."""
-    return afresh(lambda: matching_buttons(app, Atspi, regex))
-
-
-def matching_buttons(app, Atspi, regex):
-    """buttons_matching in one walk, which a node destroyed mid-walk ends with its error."""
-    found = []
-
-    def visit(accessible):
-        if (
-            accessible.get_role_name() == "button"
-            and regex.search(accessible.get_name())
-            and showing(accessible, Atspi)
-        ):
-            found.append(accessible)
-        for child in children(accessible):
-            visit(child)
-
-    visit(app)
-    return found
+    return collect(
+        app,
+        lambda node: node.get_role_name() == "button"
+        and regex.search(node.get_name())
+        and showing(node, Atspi),
+    )
 
 
 def buttons(app, Atspi, name):
@@ -159,7 +146,6 @@ def labelled(app, Atspi, role, label):
     label this way, not from its own Property::Label."""
     # at-spi2-core 2.62 reports GtkSwitch as "switch"; 2.58 said "check box".
     roles = {role, "switch"} if role == "check box" else {role}
-    found = []
 
     def name_of(accessible):
         name = accessible.get_name()
@@ -175,22 +161,12 @@ def labelled(app, Atspi, role, label):
                             return target_name
         return name
 
-    def visit(accessible):
-        if (
-            accessible.get_role_name() in roles
-            and showing(accessible, Atspi)
-            and name_of(accessible) == label
-        ):
-            found.append(accessible)
-        for child in children(accessible):
-            visit(child)
-
-    def walk_once():
-        found.clear()
-        visit(app)
-        return found
-
-    return afresh(walk_once)
+    return collect(
+        app,
+        lambda node: node.get_role_name() in roles
+        and showing(node, Atspi)
+        and name_of(node) == label,
+    )
 
 
 def print_tree(app, Atspi):
@@ -215,15 +191,14 @@ def confirm_button(app, Atspi, name):
     """The confirmation's button: the sibling of Cancel called `name`. The row of the
     same name sits on the hidden page of the stack."""
 
-    def find():
-        for cancel in matching_buttons(app, Atspi, re.compile("^Cancel$")):
-            parent = cancel.get_parent()
-            for child in children(parent):
-                if child.get_role_name() == "button" and child.get_name() == name:
-                    return cancel, child
-        return None, None
-
-    return afresh(find)
+    for cancel in buttons(app, Atspi, "Cancel"):
+        siblings = collect(
+            cancel.get_parent(),
+            lambda node: node.get_role_name() == "button" and node.get_name() == name,
+        )
+        if siblings:
+            return cancel, siblings[0]
+    return None, None
 
 
 def pss_kb(pid):

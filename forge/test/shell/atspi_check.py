@@ -100,6 +100,26 @@ def afresh(read):
         time.sleep(0.2)
 
 
+def collect(root, keep):
+    """The nodes under `root`, itself included, for which `keep(node)` is true, in tree
+    order. Read afresh: a node destroyed mid-walk, by `keep` or by the descent, starts it
+    again from `root`."""
+
+    def once():
+        found = []
+
+        def visit(node):
+            if keep(node):
+                found.append(node)
+            for child in children(node):
+                visit(child)
+
+        visit(root)
+        return found
+
+    return afresh(once)
+
+
 def walk(accessible, Atspi):
     """Every node under `accessible` as (role, name, showing, depth), read afresh: a node
     destroyed mid-walk starts the walk again from `accessible`."""
