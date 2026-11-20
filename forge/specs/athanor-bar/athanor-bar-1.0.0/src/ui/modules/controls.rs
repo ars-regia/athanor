@@ -3,10 +3,11 @@
 
 use athanor_apps::sal::Icons;
 use athanor_controls::sal::widgets::Look;
+use athanor_controls::sal::Turn;
 use athanor_sal::{Image, Rgba, TextStyle, Theme};
 use athanor_style::sal;
 
-use super::{Wake, Wakeup, ICON};
+use super::{Reply, Wake, Wakeup, ICON};
 
 /// The room between a page's radio rows, for the GTK popover's 30 px apart (measured on the
 /// goldens of bar-battery at scale 1).
@@ -62,6 +63,17 @@ pub fn image(icons: &mut Icons, name: &str, scale: u16, rtl: bool) -> Option<Ima
     icons.image(&name, ICON, scale)
 }
 
+/// What the bar does after a page's `turn`: a popover keeps its size once open, so a page that
+/// built its widgets again, or whose widgets set in place changed the layout's size
+/// (`resized`, run only then), is built again at the new size; else `stay` says.
+pub fn after_turn(turn: Turn, resized: impl FnOnce() -> bool, stay: impl FnOnce() -> Reply) -> Reply {
+    match turn {
+        Turn::Rebuild => Reply::Reopen,
+        Turn::Updated if resized() => Reply::Reopen,
+        Turn::Updated | Turn::Unchanged => stay(),
+    }
+}
+
 /// What follows a page's model for the bar: each state wakes the bar, so that an open popover
 /// shows it.
 pub fn waker<T>(wake: &Wake) -> impl Fn(&T) + 'static {
@@ -82,6 +94,15 @@ mod tests {
 
     use super::*;
     use crate::ui::look;
+
+    #[test]
+    fn a_page_set_in_place_reopens_the_popover_only_when_its_size_changed() {
+        let stay = || Reply::Close;
+        assert_eq!(after_turn(Turn::Updated, || true, stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Updated, || false, stay), Reply::Close);
+        assert_eq!(after_turn(Turn::Rebuild, || false, stay), Reply::Reopen);
+        assert_eq!(after_turn(Turn::Unchanged, || panic!("no turn, no layout"), stay), Reply::Close);
+    }
 
     #[test]
     fn a_page_draws_its_buttons_on_the_popover_fill() {
