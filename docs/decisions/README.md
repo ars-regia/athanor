@@ -142,7 +142,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | A2-35 | 0072 | [MOK enrolment page in the installer](0072-mok-enrolment-in-installer.md) | amended by ADR-0103 | signing, installer |
 | ADR-0073 | 0073 | [Retire components without a product role](0073-component-verdicts.md) | amended by ADR-0087 | platform, security, build |
 | ADR-0074 | 0074 | [Agent and contributor model](0074-agent-and-contributor-model.md) | accepted | docs |
-| ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | accepted | build, security |
+| ADR-0075 | 0075 | [Engineering gates](0075-engineering-gates.md) | amended by ADR-0143 | build, security |
 | ADR-0076 | 0076 | [Platform scope for 1.0](0076-platform-scope-for-1-0.md) | accepted | platform, security, build, docs |
 | ADR-0077 | 0077 | [Desktop decisions from Audit 3](0077-desktop-decisions.md) | accepted | shell, apps, security |
 | ADR-0078 | 0078 | [Fedora 45 is the next base, with Fedora 44 as the fallback](0078-fedora-release-target.md) | amended by ADR-0103 | platform |
@@ -177,7 +177,7 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0107 | 0107 | [Code-owner review with unowned low-risk paths](0107-code-owner-review-with-unowned-paths.md) | accepted | process, security |
 | ADR-0108 | 0108 | [A GitHub App for the bump and merge bots, with a review-only bypass](0108-bots-github-app.md) | accepted | process, security, build |
 | ADR-0109 | 0109 | [Weekly kernel bumps](0109-weekly-kernel-bumps.md) | accepted | kernel, build, process |
-| ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | accepted | kernel, build, signing, process |
+| ADR-0110 | 0110 | [Promote the pull request's kernel build to the release](0110-kernel-artifact-promotion.md) | amended by ADR-0143 | kernel, build, signing, process |
 | ADR-0111 | 0111 | [Approve pipeline revision 3 with its review fixes and four accepted risks](0111-pipeline-revision-3-approval.md) | accepted | build, signing, release, process |
 | ADR-0112 | 0112 | [Pace to 0.9: the D3 freeze lifted, the open pull request limit suspended, S1 in 0.5](0112-pace-to-0-9.md) | amended by ADR-0115, ADR-0135 | process, docs, shell |
 | ADR-0113 | 0113 | [Approve update trust revision 4 and software revision 3, aligned to ADR-0103](0113-update-trust-software-approval.md) | accepted | update, security, apps |
@@ -205,8 +205,9 @@ ids are unique, that this index lists every record and nothing else, and that ev
 | ADR-0135 | 0135 | [A faster road to 1.0: ten open pull requests, a scope freeze, and the own compositor's full acceptance in 1.1](0135-faster-road-to-1-0.md) | amended by ADR-0138, ADR-0139, ADR-0141 | process, docs, shell, security |
 | ADR-0136 | 0136 | [A promotion asks for one release approval: the ISO step joins the promote job](0136-one-release-approval-per-promotion.md) | accepted | release, build, security |
 | ADR-0137 | 0137 | [Pull requests land on iso-v0 through a merge queue with grouping](0137-merge-queue-on-iso-v0.md) | accepted | process, build |
-| ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141 | shell, security, process, docs |
+| ADR-0138 | 0138 | [Athanor's own polkit agent, lock, window switcher, session daemons and output management are placed in 1.0, written in Sal](0138-own-components-in-1-0.md) | amended by ADR-0141, ADR-0143 | shell, security, process, docs |
 | ADR-0139 | 0139 | [Pull requests that change only files under docs/ do not count against the open pull request limit](0139-docs-pull-requests-outside-the-limit.md) | accepted | process, docs |
 | ADR-0140 | 0140 | [Cache the Rust builds of the shell jobs in CI through the rig's compiler cache](0140-cache-the-shell-jobs-rust-builds.md) | accepted | build, process, security |
-| ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | accepted | shell, security, apps, process, docs |
+| ADR-0141 | 0141 | [Release 1.0 is entirely Athanor's own: what counts as own, and the scope it sets](0141-everything-own-in-1-0.md) | amended by ADR-0143 | shell, security, apps, process, docs |
 | ADR-0142 | 0142 | [The move to Fedora 45 turns sshd off on upgraded machines, as Fedora's desktop preset does](0142-fedora-45-upgrade-turns-sshd-off.md) | accepted | security, network |
+| ADR-0143 | 0143 | [Pre-1.0 audit decisions of 2026-11-20: the confined class, one build policy, the kernel and alerting gates, the firewall acceptance and the recovery console](0143-pre-1-0-audit-decisions.md) | accepted | security, build, process, kernel, shell, docs |
