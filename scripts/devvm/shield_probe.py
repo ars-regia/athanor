@@ -3,8 +3,8 @@
 
     press APP NAME     presses the showing push button called NAME through its first
                        action, as a click does; exits 1 when it never shows
-    showing APP TEXT   exits 0 once a showing label or push button called TEXT exists
-    hidden APP TEXT    exits 0 once no showing label or push button called TEXT exists
+    showing APP TEXT   exits 0 once a showing label, push button or switch called TEXT exists
+    hidden APP TEXT    exits 0 once no showing label, push button or switch called TEXT exists
     center APP NAME    prints "X Y", the middle of the showing push button called NAME in
                        its window's coordinates; exits 1 when it never shows
 
@@ -20,7 +20,13 @@ import gi
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi, GLib  # noqa: E402
 
-ROLES = {Atspi.Role.PUSH_BUTTON, Atspi.Role.LABEL}
+# A Sal switch carries its own name, where a GTK switch sat beside a label of that name; the
+# roles are the ones forge/test/shell/shield_e2e.py accepts for a switch. Older at-spi2-core
+# releases have no Atspi.Role.SWITCH.
+SWITCH_ROLES = {Atspi.Role.TOGGLE_BUTTON, Atspi.Role.CHECK_BOX} | (
+    {Atspi.Role.SWITCH} if hasattr(Atspi.Role, "SWITCH") else set()
+)
+ROLES = {Atspi.Role.PUSH_BUTTON, Atspi.Role.LABEL} | SWITCH_ROLES
 
 
 def application(name):
