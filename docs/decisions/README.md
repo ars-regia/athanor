@@ -2,10 +2,8 @@
 
 Each file in this directory records one decision taken by the maintainer, in the
 order it was taken. The records replace the decision log that used to live outside
-the repository (A2-34); [log.md](log.md) lists the decisions by date and points to where each
-is recorded.
-
-The [decision log](log.md) lists the maintainer's decisions by date, newest first, with a link to where each is recorded. It is an index of dates, not a record.
+the repository (A2-34); [log.md](log.md) lists the maintainer's decisions by date, newest first, and points to where each
+is recorded. It is an index of dates, not a record.
 
 ## When to write a record
 

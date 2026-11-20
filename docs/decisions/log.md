@@ -12,6 +12,8 @@ A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a deci
 "maintainer decision, <date>", and the date of that citation is the date of the line.
 
 - 2026-11-21: no area is exploratory today; an area becomes exploratory only when the maintainer declares it at its start with a dated line in this log, and stops being exploratory when the specification revision written from its spike is approved. [contributing.md](../operations/contributing.md) CT5, [#1290](https://github.com/ars-regia/athanor/issues/1290).
+- 2026-11-21: the areas that bring back a full audit are the merge card's full list, and the audit report names the audited range. [audits.md](../operations/audits.md), [contributing.md](../operations/contributing.md) CT6, [#1283](https://github.com/ars-regia/athanor/issues/1283).
+- 2026-11-21: a narrowed rule is a rule that allows less; a loosening, or any amendment in the areas listed under "Stop and ask before editing" in `AGENTS.md` or in its inviolable rules, keeps a separate revision. [ADR-0145](0145-small-spec-amendment-in-the-code-pull-request.md), [contributing.md](../operations/contributing.md) CT5, [#1282](https://github.com/ars-regia/athanor/issues/1282).
 
 ## Backfill
 
@@ -58,21 +60,21 @@ A line says only what its source records.
 - 2026-11-06: the own components are placed in 1.0, written in Sal. [ADR-0138](0138-own-components-in-1-0.md).
 - 2026-11-06: pull requests land on `iso-v0` through a merge queue. [ADR-0137](0137-merge-queue-on-iso-v0.md).
 - 2026-11-06, the brightness slider of a monitor that answers `NotSupported` is hidden, and kept with a note on `Failed`. [doc_control_center](../architecture/doc_control_center.md) (OD4 of [doc_osd](../architecture/doc_osd.md)).
-- 2026-11-06, about 11 decisions of ADR-0138 for the launcher and the library: both are written in Sal in 1.0, and the launcher is rewritten in Sal. [doc_launcher](../architecture/doc_launcher.md).
-- 2026-11-06, about 40 decisions on the lock, D24 to D33 among them: the helper is written in Rust (D25), the cost of a socket trigger limit is accepted, and the helper refuses a uid with no active Wayland session (D29). [doc_lock_and_prompts](../architecture/doc_lock_and_prompts.md).
-- 2026-11-06, about 20 decisions on the on-screen display: the eight of OD4 (the control center is the only caller of the brightness methods, checked by cgroup; the set takes any value from 0 to 100 in one call; the latest value wins; a monitor is identified by make, model and serial; and others) and the placement of the program in 1.0 (ADR-0138). [doc_osd](../architecture/doc_osd.md).
-- 2026-11-06, about 20 decisions on the overview and the switcher: the window switcher is `athanor-switcher`, a Sal client of its own and not part of `athanor-overview`, designed in section 8; it uses neither GTK4 nor gtk4-layer-shell (OV20). [doc_overview](../architecture/doc_overview.md).
+- 2026-11-06, decisions of ADR-0138 for the launcher and the library: both are written in Sal in 1.0, and the launcher is rewritten in Sal. [doc_launcher](../architecture/doc_launcher.md).
+- 2026-11-06, decisions D24 to D38 on the lock: the helper is written in Rust (D25), the cost of a socket trigger limit is accepted, and the helper refuses a uid with no active Wayland session (D29). [doc_lock_and_prompts](../architecture/doc_lock_and_prompts.md).
+- 2026-11-06, decisions on the on-screen display: those of OD4 (the control center is the only caller of the brightness methods, checked by cgroup; the set takes any value from 0 to 100 in one call; the latest value wins; a monitor is identified by make, model and serial; and others) and the placement of the program in 1.0 (ADR-0138). [doc_osd](../architecture/doc_osd.md).
+- 2026-11-06, decisions 9 to 14 on the overview and the switcher: the window switcher is `athanor-switcher`, a Sal client of its own and not part of `athanor-overview`, designed in section 8; it uses neither GTK4 nor gtk4-layer-shell (OV20). [doc_overview](../architecture/doc_overview.md).
 - 2026-11-06: the inhibitor file of the session has the shape `{"version":1,"inhibitors":[...]}`. [doc_session](../architecture/doc_session.md).
-- 2026-11-06, about 30 decisions on the session daemons: `athanor-idle` is headless on `wayland-client`, `athanor-wallpaper` is a Sal client, the roles of cosmic-settings-daemon are replaced in 1.0, and SD16 carries cosmic-idle's compiled defaults over as 0, never. [doc_session_daemons](../architecture/doc_session_daemons.md).
+- 2026-11-06, decisions of ADR-0138 on the session daemons: `athanor-idle` is headless on `wayland-client`, `athanor-wallpaper` is a Sal client, the roles of cosmic-settings-daemon are replaced in 1.0, and SD16 carries cosmic-idle's compiled defaults over as 0, never. [doc_session_daemons](../architecture/doc_session_daemons.md).
 - 2026-11-05: on a base with no merge queue, the checks of a pull request must have run on the current base before its card. [.claude/rules/workflow.md](../../.claude/rules/workflow.md).
 - 2026-11-05: a faster road to 1.0. [ADR-0135](0135-faster-road-to-1-0.md).
 - 2026-10-30: the magnifier, the colour filters and the keyboard aids move into the own compositor. [ADR-0133](0133-magnifier-filters-and-keyboard-aids-in-the-own-compositor.md).
-- 2026-10-30, about 19 decisions of ADR-0133: who shows a latched modifier before `athanor-osd` exists (AX11), and the keys of Athanor's own that cosmic-comp and the own compositor read (AX10). [doc_accessibility](../architecture/doc_accessibility.md).
+- 2026-10-30, decisions of ADR-0133: who shows a latched modifier before `athanor-osd` exists (AX11), and the keys of Athanor's own that cosmic-comp and the own compositor read (AX10). [doc_accessibility](../architecture/doc_accessibility.md).
 - 2026-10-30: while sticky keys are on, Super alone latches and shows nothing, and Super then A shows the launcher (AX11). [doc_launcher](../architecture/doc_launcher.md), [doc_own_stack](../architecture/doc_own_stack.md).
 - 2026-10-22: a sync pull request of a rebase integration branch is merged with `--merge`. [.claude/rules/workflow.md](../../.claude/rules/workflow.md).
 - 2026-10-22: a `pull_request` run with no published kernel skips the build when the merge commit and the base show no difference that shapes it (revision 3). [doc_kernel_build](../architecture/doc_kernel_build.md).
 - 2026-10-22: across a base change a release is classified from the git half alone, so only a `security` `release-class.toml` yields `security` (#681). [doc_pipeline](../architecture/doc_pipeline.md).
-- 2026-10-19, 17 decisions of ADR-0124 on the visual language, revision 3: it binds only the new toolkit, the toolkit's bar is a 32 px full-width strip, and others. [ADR-0124](0124-visual-language-revision-3.md), [doc_visual_language](../architecture/doc_visual_language.md).
+- 2026-10-19, decisions of ADR-0124 on the visual language, revision 3: it binds only the new toolkit, the toolkit's bar is a 32 px full-width strip, and others. [ADR-0124](0124-visual-language-revision-3.md), [doc_visual_language](../architecture/doc_visual_language.md).
 - 2026-10-19: under reduced motion the overlay fades in about 100 ms with no translation, for the fade only. [doc_osd](../architecture/doc_osd.md).
 - 2026-10-17: the toolkit draws its own title bar. [doc_own_stack](../architecture/doc_own_stack.md).
 - 2026-10-15, #144: the unit fix for the volume keys shipped earlier than the retirement step. [doc_osd](../architecture/doc_osd.md) (four amendments).
