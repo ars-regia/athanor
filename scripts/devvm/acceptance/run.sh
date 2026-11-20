@@ -321,6 +321,10 @@ stage_older() { # item 9
   point_stable v1
   guest_ssh sudo bootc switch --enforce-container-sigpolicy --transport registry "$REPO:stable"
   reboot_guest
+  # Earlier stages' checks pruned v1's signature object (#926 keeps only the booted, staged,
+  # rollback and candidate digests'); the boot-time publication never fetches, so the first
+  # check back at v1 does.
+  check_now
   expect "9: and back inside it reads verified" .verified.reason signature
 }
 
