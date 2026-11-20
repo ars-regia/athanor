@@ -1,7 +1,9 @@
 """Unit tests of system/kernel-artifacts.sh against an offline registry
 (python3 -B -m unittest discover -s system/tests -v)."""
 
-import ast
+import contextlib
+import importlib.util
+import io
 import datetime
 import hashlib
 import json
@@ -1229,6 +1231,8 @@ class CheckPlan(Repo):
         """Files allowed beside NVIDIA pins run only after the merge (#1332): the list is
         recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change."""
         script = SCRIPT.read_text()
+        self.assertEqual(len(re.findall(r"^NVIDIA_PIN_COMPANIONS\+?=", script, re.M)), 1, "assigned once, never extended")
+        self.assertNotIn("NVIDIA_PIN_COMPANIONS+=", script)
         line = re.search(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", script, re.M).group(0)
         out = subprocess.run(["bash", "-c", line + "\nprintf '%s\\n' \"${NVIDIA_PIN_COMPANIONS[@]}\"\n"], capture_output=True, text=True, check=True)
         doc = (ROOT / "docs/architecture/doc_build_ordering.md").read_text()
@@ -1236,18 +1240,42 @@ class CheckPlan(Repo):
         self.assertIsNotNone(recorded, "doc_build_ordering.md does not record the companions of an NVIDIA pin bump")
         self.assertEqual(set(re.findall(r"`([^`]+)`", recorded.group(1))), set(out.stdout.split()))
 
-    def test_lock_tests_keep_refusing_bytes_that_do_not_match(self):
-        """lock.py fetch is allowed beside NVIDIA pins and first runs after the merge (#1332):
-        the tests that make it refuse an RPM whose SHA-256 differs from the lock, on the download
-        path and on the mirror path, must stay, or a pin bump could thin them out unseen."""
-        tree = ast.parse((ROOT / "system/nvidia/tests/test_lock.py").read_text())
-        have = {(c.name, f.name) for c in tree.body if isinstance(c, ast.ClassDef) for f in c.body if isinstance(f, ast.FunctionDef)}
-        guards = {
-            ("Fetch", "test_hash_mismatch_fails_and_keeps_nothing"),
-            ("MirrorFirst", "test_fetch_falls_back_when_the_mirror_returns_other_bytes"),
-            ("MirrorFirst", "test_fetch_still_refuses_wrong_bytes_from_both_sources"),
-        }
-        self.assertEqual(guards - have, set())
+    def test_lock_fetch_refuses_bytes_that_do_not_match_the_lock(self):
+        """lock.py fetch is allowed beside NVIDIA pins and first runs after the merge (#1332), so
+        this test, outside NVIDIA_PIN_COMPANIONS, holds its hash check on every path itself."""
+        spec = importlib.util.spec_from_file_location("nvidia_lock", ROOT / "system/nvidia/lock.py")
+        lock = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lock)
+        good = b"rpm bytes"
+        sha = hashlib.sha256(good).hexdigest()
+
+        class Mirror:
+            def __init__(self, blob):
+                self.blob = blob
+
+            def has(self, wanted):
+                return self.blob is not None
+
+            def get(self, wanted):
+                if self.blob is None:
+                    raise OSError("HTTP Error 404: Not Found")
+                return self.blob
+
+        def fetch(mirror_blob, downloaded):
+            with tempfile.TemporaryDirectory() as d:
+                tmp = pathlib.Path(d)
+                url = lock.BRANCHES["open"]["baseurl"] + "a.rpm"
+                lock.write_lock(tmp / "open.lock", "open", "610.57.04", lock.BRANCHES["open"]["baseurl"], [(sha, url)])
+                out = tmp / "out" / "a.rpm"
+                with contextlib.redirect_stderr(io.StringIO()):
+                    code = lock.main(["fetch", "open", "--out", str(tmp / "out"), "--locks", str(tmp)], download=lambda u: downloaded, mirror=Mirror(mirror_blob))
+                return code, out.read_bytes() if out.exists() else None
+
+        self.assertEqual(fetch(good, b"never used"), (0, good), "the mirror's right bytes are accepted")
+        self.assertEqual(fetch(b"tampered", b"wrong"), (1, None), "wrong bytes from both sources")
+        self.assertEqual(fetch(b"tampered", good), (0, good), "the mirror's wrong bytes fall back to the download")
+        self.assertEqual(fetch(None, b"wrong"), (1, None), "a wrong download with an empty mirror")
+        self.assertEqual(fetch(None, good), (0, good))
 
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
