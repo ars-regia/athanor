@@ -1832,17 +1832,11 @@ impl Surface {
         }
     }
 
-    /// The adapter activated: an announcement held for it is published, as the next update it
-    /// hears. One past [`Hold::LIMIT`] is stale, and dropped; before the first draw, the draw
-    /// publishes it.
+    /// The adapter activated: a pending announcement is published, as the next update it hears,
+    /// unless [`Hold::activated`] finds it stale; before the first draw, the draw publishes it.
     fn activated(&mut self) {
-        if self.ui.announcement.is_none() || !self.drawn {
-            return;
-        }
-        if self.hold.since.elapsed() < Hold::LIMIT {
+        if self.drawn && self.hold.activated(&mut self.ui) {
             self.publish_tree();
-        } else {
-            self.ui.announcement = None;
         }
     }
 
@@ -1852,8 +1846,8 @@ impl Surface {
     /// active yet drops the updates: an announcement then stays pending, for [`Hold::LIMIT`],
     /// until the publish after the activation ([`Surface::activated`]).
     fn publish_tree(&mut self) {
-        let hears = self.a11y.is_none() || !self.hold.waiting();
-        let updates = tree_updates(&mut self.ui, f64::from(self.scale), hears);
+        let adapter = self.a11y.is_some();
+        let updates = self.hold.updates(&mut self.ui, f64::from(self.scale), adapter);
         if let (Some(last), Ok(mut initial)) = (updates.last(), self.initial.lock()) {
             *initial = Some(last.clone());
         }
@@ -1877,7 +1871,10 @@ enum FromBus {
 /// inactive at the surface's first publish, whose updates it drops.
 struct Hold {
     active: Arc<AtomicBool>,
-    since: Instant,
+    /// The adapter's creation and [`Hold::LIMIT`]: no announcement waits past it.
+    until: Instant,
+    /// A publish kept an announcement pending, for an adapter not active yet.
+    held: bool,
 }
 
 impl Hold {
@@ -1888,7 +1885,31 @@ impl Hold {
 
     /// Whether an announcement waits for the adapter to activate.
     fn waiting(&self) -> bool {
-        !self.active.load(Ordering::Acquire) && self.since.elapsed() < Self::LIMIT
+        !self.active.load(Ordering::Acquire) && Instant::now() < self.until
+    }
+
+    /// The updates that publish `ui` to the adapter, or with none (`adapter` false): an
+    /// announcement the adapter cannot hear yet stays pending, held, and is taken once heard.
+    fn updates(&mut self, ui: &mut Ui, scale: f64, adapter: bool) -> Vec<TreeUpdate> {
+        let hears = !adapter || !self.waiting();
+        let updates = tree_updates(ui, scale, hears);
+        self.held = !hears && ui.announcement.is_some();
+        updates
+    }
+
+    /// The adapter activated: whether `ui`'s pending announcement is to be published now. One a
+    /// publish held past [`Hold::LIMIT`] is stale, and dropped; one asked for since the last
+    /// publish is fresh, however old the surface.
+    fn activated(&mut self, ui: &mut Ui) -> bool {
+        if ui.announcement.is_none() {
+            return false;
+        }
+        if self.held && Instant::now() >= self.until {
+            ui.announcement = None;
+            self.held = false;
+            return false;
+        }
+        true
     }
 }
 
@@ -1901,7 +1922,8 @@ fn adapter(
 ) -> (accesskit_unix::Adapter, Hold) {
     let hold = Hold {
         active: Arc::new(AtomicBool::new(false)),
-        since: Instant::now(),
+        until: Instant::now() + Hold::LIMIT,
+        held: false,
     };
     let activation = Activation {
         id,
@@ -3542,6 +3564,7 @@ fn requeue(settled: &mut Vec<SurfaceId>, id: SurfaceId, ended: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widget::Priority;
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
     use wayland_client::protocol::wl_registry;
@@ -3551,11 +3574,12 @@ mod tests {
     /// running, the adapter never activates (#1267).
     #[test]
     fn an_announcement_waits_for_the_adapter_to_activate_a_bounded_time() {
-        let (bus, _receiver) = channel::channel();
+        let (bus, receiver) = channel::channel();
         let initial = Arc::new(Mutex::new(None));
         let hold = Hold {
             active: Arc::new(AtomicBool::new(false)),
-            since: Instant::now(),
+            until: Instant::now() + Hold::LIMIT,
+            held: false,
         };
         let mut activation = Activation {
             id: SurfaceId(0),
@@ -3573,12 +3597,56 @@ mod tests {
         }
         assert!(activation.request_initial_tree().is_some());
         assert!(!hold.waiting(), "active: heard at once");
-        let since = Instant::now().checked_sub(Hold::LIMIT).expect("a clock past the limit");
+        assert!(activation.request_initial_tree().is_some());
+        let sent: Vec<_> = std::iter::from_fn(|| receiver.try_recv().ok()).collect();
+        assert!(
+            matches!(sent.as_slice(), [FromBus::Activated(SurfaceId(0))]),
+            "the event loop hears of the activation once"
+        );
         let stale = Hold {
             active: Arc::new(AtomicBool::new(false)),
-            since,
+            until: Instant::now(),
+            held: false,
         };
         assert!(!stale.waiting(), "never active: the announcement goes");
+    }
+
+    /// An announcement a publish held for an adapter not active yet is published at its
+    /// activation within [`Hold::LIMIT`], and dropped past it, stale (#1267).
+    #[test]
+    fn an_announcement_held_past_the_limit_is_dropped_at_the_activation() {
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        ui.layout();
+        let mut hold = Hold {
+            active: Arc::new(AtomicBool::new(false)),
+            until: Instant::now() + Hold::LIMIT,
+            held: false,
+        };
+        ui.announce("Charging", Priority::Polite);
+        assert_eq!(hold.updates(&mut ui, 1.0, true).len(), 1, "not heard yet");
+        assert!(hold.held && ui.announcement.is_some());
+        hold.active.store(true, Ordering::Release);
+        assert!(hold.activated(&mut ui), "within the limit: published");
+        hold.until = Instant::now();
+        assert!(!hold.activated(&mut ui), "past the limit: stale");
+        assert!(ui.announcement.is_none() && !hold.held);
+    }
+
+    /// An announcement asked for on a surface older than [`Hold::LIMIT`], just before its
+    /// adapter activates, was held by no publish: the activation publishes it, as a live region.
+    #[test]
+    fn a_fresh_announcement_on_an_old_surface_is_published_at_the_activation() {
+        let mut ui = Ui::new("Battery", Theme::default(), false);
+        ui.layout();
+        let mut hold = Hold {
+            active: Arc::new(AtomicBool::new(true)),
+            until: Instant::now(),
+            held: false,
+        };
+        ui.announce("Charging", Priority::Polite);
+        assert!(hold.activated(&mut ui), "fresh: published");
+        assert_eq!(hold.updates(&mut ui, 1.0, true).len(), 2, "added, then removed");
+        assert!(ui.announcement.is_none() && !hold.held);
     }
 
     /// An application's key hook reads Ctrl+Up as Up with Ctrl held, as the launcher's results
