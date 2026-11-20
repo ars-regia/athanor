@@ -6974,16 +6974,21 @@ def lock_version_problems(root, sub, path):
     """A package of the lock `path` (text `sub`) from the registry or from git, at a version and
     source the root lock (text `root`) does not hold: the same crate builds twice, and only the
     root one is tested and moved by Dependabot. A registry crate the root patches by path must
-    take the patch, at its version. A crate the root does not use is the sub-workspace's own, and
-    a path crate is built from the same tree."""
+    take the patch's version. Whether it applies the patch is its own manifest's policy, not
+    drift: the gallery builds as an application outside Athanor would and patches only AccessKit
+    (GALLERY_PATCH, ADR-0126). A [[patch.unused]] entry is a patch the lock no longer applies
+    (#638). A crate the root does not use is the sub-workspace's own, and a path crate is built
+    from the same tree."""
     held = {}
     for package in load_toml("Cargo.lock", root).get("package", []):
         source = package.get("source", "")
         held.setdefault(package["name"], set()).add(
             (package["version"], source if source.startswith("git+") else "registry"))
     manifest = str(Path(path).with_name("Cargo.toml"))
-    out = []
-    for package in load_toml(path, sub).get("package", []):
+    lock = load_toml(path, sub)
+    out = [f"{path}: [[patch.unused]] {p.get('name')} {p.get('version')}: the patch in {manifest} "
+           "is not applied" for p in lock.get("patch", {}).get("unused", [])]
+    for package in lock.get("package", []):
         name, old, source = package["name"], package["version"], package.get("source")
         if source is None or name not in held:
             continue

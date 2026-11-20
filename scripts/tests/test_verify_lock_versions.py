@@ -77,6 +77,25 @@ class LockVersionProblemsTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("--precise 0.21.0", found[0])
 
+    def test_a_crate_the_root_patches_left_unpatched_at_its_version_passes(self):
+        self.assertEqual(
+            problems(
+                [("wayland-backend", "0.3.17", None)],
+                [("wayland-backend", "0.3.17", REGISTRY)],
+            ),
+            [],
+        )
+
+    def test_an_unused_patch_fails(self):
+        sub = lock(("cc", "1.4.4", REGISTRY)) + (
+            '\n[[patch.unused]]\nname = "accesskit_atspi_common"\nversion = "0.21.0"\n'
+        )
+        found = verify.lock_version_problems(
+            lock(("cc", "1.4.4", REGISTRY)), sub, "fuzz/Cargo.lock"
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("[[patch.unused]] accesskit_atspi_common 0.21.0", found[0])
+
     def test_a_git_crate_at_another_revision_fails(self):
         root = [("smithay", "0.7.0", SMITHAY.format("aaa"))]
         self.assertEqual(
