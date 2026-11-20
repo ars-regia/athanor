@@ -373,9 +373,9 @@ pub fn icon(state: &NetworkState) -> &'static str {
 pub type Settings<'a> = HashMap<&'a str, HashMap<&'a str, Variant<'a>>>;
 
 /// The settings of a network to join. The password, when there is one, goes to
-/// NetworkManager inside these settings and nowhere else. The settings borrow it: the only
-/// copy is the one zbus serialises into the call's message body, which zbus frees without
-/// wiping.
+/// NetworkManager inside these settings and nowhere else. The settings borrow it: the copies
+/// are those in zbus's message buffer, which grows as zbus serialises the call and may leave
+/// earlier copies in memory it reallocated; zbus frees them without wiping.
 pub fn wifi_settings<'a>(network: &'a Network, password: Option<&'a str>) -> Settings<'a> {
     let mut settings = Settings::new();
     settings.insert(
@@ -535,8 +535,9 @@ impl SecretsRequest {
 /// The reply of `GetSecrets`, `a{sa{sv}}`: the password and nothing else. It owns the password
 /// in a buffer overwritten as it drops, and builds the dict, borrowing it, only while zbus
 /// serialises it: an owned variant would copy it into a buffer freed without being wiped. The
-/// copy in the reply message's body, and in the socket's buffers, is zbus's and the kernel's,
-/// and is not wiped. No `Debug`: nothing can print it.
+/// copies in zbus's message buffer, which grows as zbus serialises the reply and may leave
+/// earlier copies in memory it reallocated, and in the socket's buffers, are zbus's and the
+/// kernel's, and are not wiped. No `Debug`: nothing can print it.
 struct SecretsReply(Zeroizing<String>);
 
 impl zbus::Type for SecretsReply {
