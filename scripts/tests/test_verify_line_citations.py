@@ -3,6 +3,8 @@
 
 import importlib.util
 import pathlib
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -329,6 +331,81 @@ class Limits(unittest.TestCase):
         out = messages("The `needle` is at `big.rs:1-301`.")
         self.assertEqual(len(out), 1)
         self.assertIn("fewer than 200 lines", out[0])
+
+
+class Moved(unittest.TestCase):
+    """A change to a cited file moves the lines its unchanged citations name."""
+
+    HEAD = {"src/x.rs": "p\nq\nr\n" + FILES["src/x.rs"]}
+    TEXT = "The line `grant` is at `src/x.rs:1-4`."
+
+    def found(self, text, hunks, base=None, extra=None):
+        files = {**FILES, **(self.HEAD if extra is None else extra)}
+        return [
+            f[-1]
+            for f in verify.citation_findings(
+                "doc.md", text, set(files), files.__getitem__, hunks, text if base is None else base
+            )
+        ]
+
+    def test_an_insertion_above_a_range_that_still_holds_its_token_fails(self):
+        self.assertEqual(self.found(self.TEXT, {}), [])
+        out = self.found(self.TEXT, {"src/x.rs": [(0, 0, 3)]})
+        self.assertEqual(len(out), 1)
+        self.assertIn("doc.md:1: `src/x.rs:1-4` is moved by this change", out[0])
+        self.assertIn("it should name `src/x.rs:4-7`", out[0])
+
+    def test_a_citation_that_names_the_new_lines_passes(self):
+        text = "The line `grant` is at `src/x.rs:4-7`."
+        self.assertEqual(self.found(text, {"src/x.rs": [(0, 0, 3)]}, base=self.TEXT), [])
+
+    def test_a_document_line_the_change_wrote_is_not_read_through_the_hunks(self):
+        self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(0, 0, 3)]}, base=""), [])
+
+    def test_a_hunk_below_the_range_or_in_another_file_moves_nothing(self):
+        self.assertEqual(self.found(self.TEXT, {"src/x.rs": [(4, 0, 3)]}), [])
+        self.assertEqual(self.found(self.TEXT, {"other.md": [(0, 0, 3)]}), [])
+
+    def test_an_insertion_inside_a_range_moves_its_end_and_a_list_entry_keeps_its_form(self):
+        out = self.found("The `grant` is at `src/x.rs:1, 3-4`.", {"src/x.rs": [(1, 0, 2)]}, extra={})
+        self.assertEqual(len(out), 1)
+        self.assertIn("it should name `src/x.rs:1, 5-6`", out[0])
+
+    def test_an_edited_or_removed_cited_line_is_left_to_a_reader(self):
+        for hunk in ((2, 1, 1), (3, 2, 0)):
+            with self.subTest(hunk=hunk):
+                out = self.found(self.TEXT, {"src/x.rs": [hunk]}, extra={})
+                self.assertEqual(len(out), 1)
+                self.assertIn("edited or removed: place it again", out[0])
+
+    def test_moved_ranges_counts_every_hunk_before_a_line(self):
+        hunks = [(1, 1, 3), (10, 2, 0)]
+        self.assertIsNone(verify.moved_ranges([(1, 1)], hunks))
+        self.assertEqual(verify.moved_ranges([(2, 9)], hunks), [(4, 11)])
+        self.assertEqual(verify.moved_ranges([(12, 12)], hunks), [(12, 12)])
+
+
+class DiffHunks(unittest.TestCase):
+    def test_the_hunks_of_a_two_tree_diff_are_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+
+            def git(*args):
+                subprocess.run(["git", "-C", tmp, *args], check=True, capture_output=True)
+
+            git("init", "-q")
+            (root / "a b.rs").write_text("1\n2\n3\n4\n5\n")
+            (root / "gone.rs").write_text("x\ny\n")
+            git("add", ".")
+            git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-qm", "base")
+            (root / "a b.rs").write_text("0\n1\n2\n4\n5\n")
+            (root / "gone.rs").unlink()
+            self.assertEqual(
+                verify.diff_hunks(root, "HEAD"),
+                {"a b.rs": [(0, 0, 1), (3, 1, 0)], "gone.rs": [(1, 2, 0)]},
+            )
+            with self.assertRaises(ValueError):
+                verify.diff_hunks(root, "no-such-revision")
 
 
 class Kept(unittest.TestCase):

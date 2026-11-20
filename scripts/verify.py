@@ -6569,7 +6569,42 @@ def holds_token(text, token, quoted=False):
     return re.search(rf"(?<![\w-]){word}(?![\w-])", text) is not None
 
 
-def citation_findings(doc, text, tracked, read_file):
+HUNK_HEADER = re.compile(r"@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@")
+DIFF_FILE = re.compile(r"diff --git a/(.+) b/\1")
+
+
+def diff_hunks(root, base):
+    """The hunks of the two-tree diff of the working tree against revision BASE, as
+    {path: [(first old line, old lines, new lines)]}: what `git diff -U0` prints, a count of 0 being
+    an insertion after the old line (or a deletion before the new one). Raises ValueError when git
+    cannot diff BASE."""
+    diff = subprocess.run(["git", "-C", str(root), "-c", "core.quotepath=off", "diff", "-U0",
+                           "--no-renames", "--no-ext-diff", base, "--"], capture_output=True, text=True)
+    if diff.returncode != 0:
+        raise ValueError(f"git diff {base} failed: {diff.stderr.strip()}")
+    out, hunks = {}, None
+    for line in diff.stdout.split("\n"):
+        if m := DIFF_FILE.fullmatch(line):
+            hunks = out.setdefault(m[1], [])
+        elif hunks is not None and (m := HUNK_HEADER.match(line)):
+            hunks.append((int(m[1]), 1 if m[2] is None else int(m[2]), 1 if m[3] is None else int(m[3])))
+    return out
+
+
+def moved_ranges(ranges, hunks):
+    """The ranges (first, last) of a citation, as the lines of the file are numbered after the
+    HUNKS of `diff_hunks`; None when a hunk edited or removed one of the cited lines, which a reader
+    must place again."""
+    def shifted(n):
+        return n + sum(new - old for first, old, new in hunks if (first + old - 1 if old else first) < n)
+
+    if any(old and first <= last and first + old - 1 >= start for start, last in ranges
+           for first, old, _ in hunks):
+        return None
+    return [(shifted(start), shifted(last)) for start, last in ranges]
+
+
+def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     """The citations of the document's `text` that no longer name what they cite, as
     (line, path, lines, token, message); `token` is None when the finding is not a moved line.
     `tracked` is the repository's files, `read_file(path)` the text of one.
@@ -6609,8 +6644,15 @@ def citation_findings(doc, text, tracked, read_file):
     name and no section id in its sentence is checked only for a first line that holds words, so
     a stale one that still lands on text goes unseen (#1089). In a list file, a run reaches the key
     only across the exact `are` or `is`, then an optional `listed`, then `in` or `under`: with other words between
-    them ("are both in"), only the key is demanded, and a removed single-word entry is not seen."""
+    them ("are both in"), only the key is demanded, and a removed single-word entry is not seen.
+
+    With `hunks` (diff_hunks against the revision the document was at, whose text is `base_text`),
+    a citation on a line of the document that the change left as it was is also read through the
+    hunks of its file: it fails with the lines it should name when the change moved them, and
+    when the change edited or removed a cited line it fails for a reader to place. A line of
+    the document that the change wrote or edited is the author's own placing, and is not read so."""
     known = set(tracked)
+    unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
     suffixes = {}
     for path in known:
@@ -6659,6 +6701,18 @@ def citation_findings(doc, text, tracked, read_file):
                             f"{doc}:{number}: `{path}:{spec}` is not a line range of its file "
                             f"(fewer than {LINE_RANGE_LIMIT} lines)"))
                 continue
+            if line in unchanged and path in hunks:
+                new = moved_ranges(ranges, hunks[path])
+                if new is None:
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites a line "
+                                "that this change edited or removed: place it again"))
+                    continue
+                if new != ranges:
+                    named = ", ".join(f"{a}-{b}" if "-" in part else str(a) for part, (a, b)
+                                      in zip(re.split(r",\s*", spec), new))
+                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` is moved by "
+                                f"this change: it should name `{path}:{named}`"))
+                    continue
             if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):
                 out.append((number, path, spec, None,
                             f"{doc}:{number}: `{path}:{spec}` starts on a line with no words: the lines moved"))
@@ -6749,11 +6803,26 @@ def check_line_citations():
         except OSError:
             return ""
 
+    hunks = None
+    if BASE_REF is None:
+        r.note("no base revision (--known-red-base REF): the citations that the change moved were not checked")
+    else:
+        try:
+            hunks = diff_hunks(ROOT, BASE_REF)
+        except ValueError as e:
+            r.fail(str(e))
+
+    def base_text(doc):
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{doc.relative_to(ROOT).as_posix()}"],
+                               capture_output=True, text=True)
+        return shown.stdout if shown.returncode == 0 else ""  # a document the change adds has no base text
+
     seen = set()
     for doc in sorted([*(ROOT / "docs/architecture").glob("doc_*.md"),
                        ROOT / "docs/architecture/shell-features.md"]):
         counted = {}
-        for _, path, spec, token, problem in citation_findings(doc.name, read(doc), tracked, read_file):
+        for _, path, spec, token, problem in citation_findings(
+                doc.name, read(doc), tracked, read_file, hunks, base_text(doc) if hunks else ""):
             n = counted[path, spec, token] = counted.get((path, spec, token), 0) + 1
             seen.add((doc.name, path, spec, token, n))
             if (doc.name, path, spec, token, n) not in LINE_CITATIONS_KEPT:
