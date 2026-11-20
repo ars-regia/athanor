@@ -532,7 +532,9 @@ def release_problems(root):
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
-    for job_id in sorted(set(jobs) - {"request-release"}):
+    # A job that needs request-release (the PL51 alert) ends the run and cannot be needed by it.
+    after = {job_id for job_id, job in jobs.items() if "request-release" in (job.get("needs") or [])}
+    for job_id in sorted(set(jobs) - {"request-release"} - after):
         if job_id not in request.get("needs", []):
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":
@@ -582,7 +584,7 @@ RELEASE_PATH_ACTIONS = {
     "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
     "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
     "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
-    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm", "./.github/actions/alert",
 }
 # The settings that give a build a cache from outside the job: sccache on the Actions cache, and
 # a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
