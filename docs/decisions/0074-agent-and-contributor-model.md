@@ -2,7 +2,7 @@
 id: ADR-0074
 title: "Agent and contributor model"
 date: 2026-10-06
-status: accepted
+status: amended by ADR-0145
 issues: [223]
 areas: [docs]
 ---

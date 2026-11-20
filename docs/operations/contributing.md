@@ -57,6 +57,7 @@ A new `verify.py` check is registered with `@check` like the others and has a te
 ## CT5. Specs and decisions
 
 - **A behaviour change updates its spec in the same pull request:** `docs/architecture/doc_<area>.md`, citing the item id it changes (for example `BR7`).
+- **A small amendment to an approved specification may be approved in the pull request of the code that needs it** ([ADR-0145](../decisions/0145-small-spec-amendment-in-the-code-pull-request.md), amending ADR-0074 decision 5). "Small" is a corrected requirement, a renamed identifier or a narrowed rule; a new component or a new trust boundary is not small and keeps the separate revision. The pull request shows the specification hunk next to the code, and the review of the code owner is required as for any pull request.
 - **A decision is a record:** `docs/decisions/NNNN-slug.md`, with the front matter described in `docs/decisions/README.md`. A spec states what; the record states why and which alternative was rejected.
 - A runbook (run, release, rotate, rebuild) goes to `docs/operations/<topic>.md`.
 
