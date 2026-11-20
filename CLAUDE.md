@@ -26,7 +26,7 @@ applies to Claude Code only.
   checks, verdict and, in two lines each, the hunks that touch process launch, files,
   `unsafe`, D-Bus, confinement, the trust seal, power, signing, an approved document's text,
   CI workflows, repository settings, `CODEOWNERS` or dependencies. Before the card, and
-  again just before the merge, Claude reads at the source, with `python3 scripts/merge_card.py -R <repo> <n>` (it only reads, prints the card and names every reading that fails; `--verify-approval <card time> --head <sha>` repeats it before the merge and adds the approval): the required checks of the base
+  again just before the merge, Claude reads at the source: the required checks of the base
   (`gh api repos/<repo>/rules/branches/<base>` and `.../branches/<base>/protection`, where a
   404 means only the rulesets count), never from the pull request's own files, present and `pass`,
   and a base with no required check is not merged on this rule; every other check `pass` or
