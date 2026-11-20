@@ -3848,8 +3848,12 @@ def advisory_lock_problems(root=None):
     members |= {d["path"] for table in data.get("patch", {}).values() for d in table.values()
                 if isinstance(d, dict) and "path" in d}
     listed, unaudited, problems = [], [], []
-    for line in read(root / AUDITED_LOCKFILES).splitlines():
-        line = line.strip()
+    for number, line in enumerate(read(root / AUDITED_LOCKFILES).splitlines(), 1):
+        if line != line.strip():
+            # security-audit.sh takes a line as it is, so a stray blank is part of a path there
+            problems.append(f"{AUDITED_LOCKFILES}:{number}: leading or trailing whitespace, which "
+                            "security-audit.sh does not strip")
+            continue
         if not line or line.startswith("#"):
             continue
         if line.startswith("unaudited"):

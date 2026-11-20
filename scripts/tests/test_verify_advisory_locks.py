@@ -38,6 +38,14 @@ class AdvisoryLocks(unittest.TestCase):
         self.write(LOCK)
         self.assertEqual(verify.advisory_lock_problems(self.root), [])
 
+    def test_whitespace_around_a_line_is_refused(self):
+        for text in (f"{LOCK} \n", f" {LOCK}\n", " # indented comment\n", " \n"):
+            with self.subTest(text=text):
+                self.write(verify.AUDITED_LOCKFILES, text + f"{LOCK}\n")
+                self.write(LOCK)
+                problems = verify.advisory_lock_problems(self.root)
+                self.assertTrue(any("whitespace" in p and ":1:" in p for p in problems), problems)
+
     def test_an_unlisted_lockfile_is_named(self):
         self.write(verify.AUDITED_LOCKFILES, "# none\n")
         self.write(LOCK)
