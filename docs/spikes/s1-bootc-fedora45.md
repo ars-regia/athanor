@@ -177,8 +177,8 @@ Each subject:
 - *NetworkManager connections.* `s1-before` survives both updates. After each `GoBack()` the
   list is phase 1's. Pass.
 - *SELinux policy store.* Every record reads `Enforcing` and holds the `s1before` module and
-  the `virt_use_nfs` boolean. Pass. The records' AVC reading measured nothing, for the same
-  reason as above.
+  the `virt_use_nfs` boolean. The records' AVC reading measured nothing, for the same reason
+  as above. The verdict is therefore pass for the F45 leg, and not measured for the F43 leg.
   - The F45 leg's audit log was read again afterwards, across its boots. It holds one denial,
     and that denial comes before phase 1: `bootupctl`, `sys_admin`, in the permissive
     `bootupd_t` domain, on the first F45 boot. No denial came after it. Pass for the F45 leg.
@@ -187,8 +187,8 @@ Each subject:
 - *Phase 3 after the rollback.* **Fail** in both legs, as expected.
   - After `GoBack()` the four files have the same sha256 as in phase 1. `s1b` and `s1g` are
     gone, P1 logs in and P2 is refused.
-  - In the F45 leg the rest of `/etc` reverts as the rule says. `s1-after` is absent and
-    `/etc/issue` is `v1`'s.
+  - In the F45 leg, `s1-after` is absent, so that part of `/etc` reverts as the rule says.
+    `/etc/issue` cannot tell the deployments apart here, because both hold the local edit.
   - No rollback notice was observed in the F45 leg within two minutes of reaching the guest.
     In the F43 leg no session could be captured, so the notice was not observed either way.
   - After the roll forward, the four files equal the state before the rollback.
@@ -329,8 +329,10 @@ unchanged on a Fedora 45 base, and whether the major upgrade from Fedora 43 and 
 boots, passes greenboot and rolls back to a working Fedora 43.
 **Fail.** Any `FAIL` line; record the stage and the guest journal.
 
-**Answer.** Pass on the maintainer's reading, with two `FAIL` lines judged to be outside
-Fedora 45.
+**Answer.** Pass, with two `FAIL` lines judged to be outside Fedora 45.
+
+- The maintainer decided F6 and ruled that S1 passes.
+- That F5 is a harness defect is this report's own judgement.
 
 - `run.sh` ran on the F45 branch image, after the harness fixes of findings F1 to F4
   (section 6). It never ended green in one run.
