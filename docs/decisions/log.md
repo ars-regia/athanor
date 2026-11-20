@@ -11,6 +11,8 @@ still gets one, and the log line then links to it.
 A line has the form `YYYY-MM-DD: what was decided. Where.` Documents cite a decision as
 "maintainer decision, <date>", and the date of that citation is the date of the line.
 
+- 2026-11-21: no area is exploratory today; an area becomes exploratory only when the maintainer declares it at its start with a dated line in this log, and stops being exploratory when the specification revision written from its spike is approved. [contributing.md](../operations/contributing.md) CT5, [#1290](https://github.com/ars-regia/athanor/issues/1290).
+
 ## Backfill
 
 The lines below are the decisions that `CLAUDE.md`, `.claude/rules/` and the specifications
