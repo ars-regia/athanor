@@ -89,8 +89,8 @@ class Result:
 
 
 PRUNE = {"target", ".git", "repo-cache", ".cache", "node_modules",
-         "graph-vaults", "graph-pages", ".codegraph", "graphify-out",
-         "experimental"}
+         "graph-vaults", "graph-pages", ".codegraph", "graphify-out"}
+# `ROOT/experimental` is pruned too, at the root only (`walk`, `links`).
 
 
 # Units that sealed LUKS to the TPM or bumped its rollback counter on their own (D42, issue #148).
@@ -98,13 +98,13 @@ AUTO_TPM_UNITS = ("athanor-tpm-luks-seal", "athanor-tpm-rollback-check", "athano
 
 
 def walk(base, suffix):
-    """os.walk con potatura: rglob su questo repo entra in target/ (decine di
-    migliaia di file) e su un filesystem montato ci mette minuti."""
+    """os.walk with pruning: rglob enters target/ (tens of thousands of files) and takes
+    minutes on a mounted filesystem. An `experimental/` below the root is code, and is walked."""
     base = Path(base)
     if not base.is_dir():
         return
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        dirnames[:] = [d for d in dirnames if d not in PRUNE and Path(dirpath, d) != ROOT / "experimental"]
         for f in filenames:
             if f.endswith(suffix):
                 yield Path(dirpath) / f
@@ -2347,11 +2347,11 @@ def check_shipped():
         if not (has_spec and in_dag):
             why = []
             if not has_spec:
-                why.append("nessuno .spec")
+                why.append("no .spec")
             if not in_dag:
-                why.append("non in packages.json")
-            r.fail(f"{name}: {', '.join(why)} -> compila ma non arriva sul sistema. "
-                   f"Impacchettalo, spostalo in experimental/, o elencalo in experimental/EXEMPT")
+                why.append("not in packages.json")
+            r.fail(f"{name}: {', '.join(why)} -> it builds but never reaches the system. "
+                   f"Package it, move it under experimental/, or list it in experimental/EXEMPT")
 
     for p in sorted(dag - tiers):
         r.fail(f"{p}: in custom_packages ma in nessun tier -> costruito e mai installato")
@@ -2963,7 +2963,7 @@ def hidden_failures(text):
 def links(base):
     """The links under `base`, to a file or a directory: `walk` follows neither."""
     for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if d not in PRUNE]
+        dirnames[:] = [d for d in dirnames if d not in PRUNE and Path(dirpath, d) != ROOT / "experimental"]
         for name in dirnames + filenames:
             if (Path(dirpath) / name).is_symlink():
                 yield Path(dirpath) / name
