@@ -6908,6 +6908,162 @@ def check_own():
     return r
 
 
+def load_toml(name, text):
+    """The parsed TOML `text`, or a ValueError that names the file `name`."""
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{name}: not valid TOML ({e})") from e
+
+
+def dependency_paths(manifest):
+    """The `path` of every dependency, target dependency, workspace dependency and [patch] entry
+    of a parsed manifest, in each spelling of DEPENDENCY_TABLES. A key that is not a table holds
+    none."""
+    def table(parent, key):
+        value = parent.get(key) if isinstance(parent, dict) else None
+        return value if isinstance(value, dict) else {}
+    tables = [table(manifest, k) for k in DEPENDENCY_TABLES]
+    tables += [table(target, k) for target in table(manifest, "target").values()
+               for k in DEPENDENCY_TABLES]
+    tables += list(table(manifest, "patch").values())
+    tables.append(table(table(manifest, "workspace"), "dependencies"))
+    return [dep["path"] for table in tables if isinstance(table, dict)
+            for dep in table.values() if isinstance(dep, dict) and isinstance(dep.get("path"), str)]
+
+
+def sub_locks(locks, manifests):
+    """The locks of workspaces of their own, other than the root, any of whose manifests builds a
+    crate outside the workspace's directory by path: they resolve the root's crates with a lock
+    that Dependabot never moves, since it updates only the dependencies a directory's own
+    manifest declares (#1313). `locks` are paths relative to the root; `manifests` maps every
+    tracked Cargo.toml to its text."""
+    out = []
+    for lock in sorted(locks):
+        top = Path(lock).parent
+        root_manifest = str(top / "Cargo.toml")
+        if lock == "Cargo.lock" or "/vendor/" in f"/{lock}" or root_manifest not in manifests:
+            continue
+        if "workspace" not in load_toml(root_manifest, manifests[root_manifest]):
+            continue
+        inside = (ROOT / top).resolve()
+        for name, text in sorted(manifests.items()):
+            crate = Path(name).parent
+            if not crate.is_relative_to(top):
+                continue
+            if any(not (ROOT / crate / path).resolve().is_relative_to(inside)
+                   for path in dependency_paths(load_toml(name, text))):
+                out.append(lock)
+                break
+    return out
+
+
+def semver_compatible(a, b):
+    """True if cargo can move `a` to `b` under a caret requirement: the same first non-zero
+    component, and every component before it, pre-release and build metadata aside."""
+    def key(v):
+        parts = v.split("+")[0].split("-")[0].split(".")
+        for i, part in enumerate(parts):
+            if part != "0":
+                return parts[: i + 1]
+        return parts
+    return key(a) == key(b)
+
+
+def lock_version_problems(root, sub, path):
+    """A package of the lock `path` (text `sub`) from the registry or from git, at a version and
+    source the root lock (text `root`) does not hold: the same crate builds twice, and only the
+    root one is tested and moved by Dependabot. A registry crate the root patches by path must
+    take the patch's version. Whether it applies the patch is its own manifest's policy, not
+    drift: the gallery builds as an application outside Athanor would and patches only AccessKit
+    (GALLERY_PATCH, ADR-0126). A [[patch.unused]] entry is a patch the lock no longer applies
+    (#638). A crate the root does not use is the sub-workspace's own, and a path crate is built
+    from the same tree."""
+    held = {}
+    for package in load_toml("Cargo.lock", root).get("package", []):
+        source = package.get("source", "")
+        held.setdefault(package["name"], set()).add(
+            (package["version"], source if source.startswith("git+") else "registry"))
+    manifest = str(Path(path).with_name("Cargo.toml"))
+    lock = load_toml(path, sub)
+    out = [f"{path}: [[patch.unused]] {p.get('name')} {p.get('version')}: the patch in {manifest} "
+           "is not applied" for p in lock.get("patch", {}).get("unused", [])]
+    for package in lock.get("package", []):
+        name, old, source = package["name"], package["version"], package.get("source")
+        if source is None or name not in held:
+            continue
+        git = source.startswith("git+")
+        if (old, source if git else "registry") in held[name]:
+            continue
+        versions = sorted({v for v, s in held[name] if s == "registry"})
+        new = [v for v in versions if semver_compatible(old, v)]
+        if git and any(k.startswith("git+") for _, k in held[name]):
+            fix = f"cargo update --manifest-path {manifest} -p {name}"
+        elif git or not versions:
+            fix = f"take the root's source of {name} in {manifest}"
+        elif new:
+            fix = f"cargo update --manifest-path {manifest} -p {name}@{old} --precise {new[0]}"
+        else:
+            fix = f"no semver-compatible root version ({', '.join(versions)})"
+        out.append(f"{path}: {name} {old} ({source}) is not in the root Cargo.lock: {fix}")
+    return sorted(out)
+
+
+FUZZ_MANIFEST = "fuzz/Cargo.toml"
+
+
+def fuzz_patch_problems(manifests):
+    """Every [patch] entry of the root Cargo.toml that fuzz/Cargo.toml does not carry, from the
+    same directory: the fuzzed compositor must parse the wire as the shipped one does, and a
+    workspace of its own takes no [patch] of the root. The gallery patches only AccessKit instead
+    (GALLERY_PATCH, ADR-0126). `manifests` maps every tracked Cargo.toml to its text."""
+    if FUZZ_MANIFEST not in manifests:
+        return [f"{FUZZ_MANIFEST} is not tracked"]
+
+    def patches(name):
+        data = load_toml(name, manifests[name])
+        table = data.get("patch") if isinstance(data.get("patch"), dict) else {}
+        out = {}
+        for registry, entries in table.items():
+            for crate, spec in entries.items() if isinstance(entries, dict) else ():
+                path = spec.get("path") if isinstance(spec, dict) else None
+                out[(registry, crate)] = ((ROOT / name).parent / path).resolve() if isinstance(path, str) else spec
+        return out
+    fuzz = patches(FUZZ_MANIFEST)
+    return [f"{FUZZ_MANIFEST}: [patch.{registry}] {crate} is not the root Cargo.toml's entry, "
+            f"{spec.relative_to(ROOT) if isinstance(spec, Path) else spec}"
+            for (registry, crate), spec in sorted(patches("Cargo.toml").items())
+            if fuzz.get((registry, crate)) != spec]
+
+
+@check("lock-versions", "A workspace of its own that builds the root's crates by path holds the root Cargo.lock's version of every crate they share")
+def check_lock_versions():
+    r = Result()
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*Cargo.lock", "*Cargo.toml"],
+                            cwd=ROOT, capture_output=True, text=True)
+    if listed.returncode != 0:
+        r.fail(f"git ls-files failed: {listed.stderr.strip()}")
+        return r
+    files = [p for p in listed.stdout.split("\0") if p]
+    locks = [p for p in files if p.endswith("Cargo.lock")]
+    try:
+        manifests = {p: read(ROOT / p) for p in files
+                     if p.endswith("Cargo.toml") and (ROOT / p).is_file()}
+        subs = sub_locks(locks, manifests)
+        if not subs:
+            r.fail("no workspace of its own builds the root's crates by path: fuzz/ and the Sal "
+                   "gallery did")
+        root = read(ROOT / "Cargo.lock")
+        for path in subs:
+            for problem in lock_version_problems(root, read(ROOT / path), path):
+                r.fail(problem)
+        for problem in fuzz_patch_problems(manifests):
+            r.fail(problem)
+    except (OSError, ValueError) as e:
+        r.fail(f"a Cargo.lock or Cargo.toml could not be read: {e}")
+    return r
+
+
 # --------------------------------------------------------------------------- #
 # runner
 # --------------------------------------------------------------------------- #

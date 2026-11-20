@@ -1,0 +1,317 @@
+"""Unit tests of the lock-versions check in scripts/verify.py
+(python3 -B -m unittest discover -s scripts/tests -v)."""
+
+import importlib.util
+import pathlib
+import unittest
+from unittest import mock
+
+SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "verify.py"
+spec = importlib.util.spec_from_file_location("verify", SCRIPT)
+verify = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(verify)
+
+REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
+SMITHAY = "git+https://github.com/Smithay/smithay?rev={0}#{0}"
+
+
+def lock(*packages):
+    """The text of a Cargo.lock holding (name, version, source) packages."""
+    out = ["version = 4\n"]
+    for name, version, source in packages:
+        out.append(f'[[package]]\nname = "{name}"\nversion = "{version}"\n')
+        if source:
+            out.append(f'source = "{source}"\n')
+    return "\n".join(out)
+
+
+def problems(root, sub):
+    return verify.lock_version_problems(lock(*root), lock(*sub), "fuzz/Cargo.lock")
+
+
+class LockVersionProblemsTest(unittest.TestCase):
+    def test_a_version_the_root_does_not_hold_fails_with_its_command(self):
+        found = problems([("cc", "1.4.4", REGISTRY)], [("cc", "1.6.0", REGISTRY)])
+        self.assertEqual(len(found), 1)
+        self.assertIn(
+            "cargo update --manifest-path fuzz/Cargo.toml -p cc@1.6.0 --precise 1.4.4",
+            found[0],
+        )
+
+    def test_the_command_names_the_compatible_root_version(self):
+        root = [("thiserror", "1.0.69", REGISTRY), ("thiserror", "2.0.21", REGISTRY)]
+        found = problems(root, [("thiserror", "2.0.20", REGISTRY)])
+        self.assertEqual(len(found), 1)
+        self.assertIn("-p thiserror@2.0.20 --precise 2.0.21", found[0])
+
+    def test_a_zero_major_moves_only_within_its_minor(self):
+        found = problems([("libc", "0.3.0", REGISTRY)], [("libc", "0.2.189", REGISTRY)])
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("--precise", found[0])
+
+    def test_one_of_several_root_versions_passes(self):
+        root = [("thiserror", "1.0.69", REGISTRY), ("thiserror", "2.0.21", REGISTRY)]
+        self.assertEqual(problems(root, [("thiserror", "1.0.69", REGISTRY)]), [])
+
+    def test_a_crate_only_in_the_sub_lock_passes(self):
+        self.assertEqual(
+            problems(
+                [("cc", "1.4.4", REGISTRY)], [("libfuzzer-sys", "0.4.10", REGISTRY)]
+            ),
+            [],
+        )
+
+    def test_a_path_crate_is_not_compared(self):
+        self.assertEqual(
+            problems(
+                [("athanor-unit", "1.0.0", REGISTRY)], [("athanor-unit", "0.1.0", None)]
+            ),
+            [],
+        )
+
+    def test_a_registry_crate_the_root_patches_is_compared(self):
+        found = problems(
+            [("accesskit_atspi_common", "0.21.0", None)],
+            [("accesskit_atspi_common", "0.21.1", REGISTRY)],
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("--precise 0.21.0", found[0])
+
+    def test_a_crate_the_root_patches_left_unpatched_at_its_version_passes(self):
+        self.assertEqual(
+            problems(
+                [("wayland-backend", "0.3.17", None)],
+                [("wayland-backend", "0.3.17", REGISTRY)],
+            ),
+            [],
+        )
+
+    def test_an_unused_patch_fails(self):
+        sub = lock(("cc", "1.4.4", REGISTRY)) + (
+            '\n[[patch.unused]]\nname = "accesskit_atspi_common"\nversion = "0.21.0"\n'
+        )
+        found = verify.lock_version_problems(
+            lock(("cc", "1.4.4", REGISTRY)), sub, "fuzz/Cargo.lock"
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("[[patch.unused]] accesskit_atspi_common 0.21.0", found[0])
+
+    def test_a_git_crate_at_another_revision_fails(self):
+        root = [("smithay", "0.7.0", SMITHAY.format("aaa"))]
+        self.assertEqual(
+            problems(root, [("smithay", "0.7.0", SMITHAY.format("aaa"))]), []
+        )
+        found = problems(root, [("smithay", "0.7.0", SMITHAY.format("bbb"))])
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("--precise", found[0])
+        self.assertIn("cargo update --manifest-path fuzz/Cargo.toml -p smithay", found[0])
+
+    def test_a_registry_crate_the_root_takes_from_git_names_the_source(self):
+        found = problems(
+            [("smithay", "0.7.0", SMITHAY.format("aaa"))],
+            [("smithay", "0.7.0", REGISTRY)],
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("take the root's source of smithay", found[0])
+
+
+class FuzzPatchProblemsTest(unittest.TestCase):
+    ROOT_PATCH = (
+        '[patch.crates-io]\na = { path = "vendor/a" }\nb = { path = "vendor/b" }\n'
+    )
+
+    def found(self, fuzz):
+        return verify.fuzz_patch_problems(
+            {"Cargo.toml": self.ROOT_PATCH, "fuzz/Cargo.toml": fuzz}
+        )
+
+    def test_the_root_patches_from_the_same_directories_pass(self):
+        fuzz = '[patch.crates-io]\na = { path = "../vendor/a" }\nb = { path = "../vendor/b" }\nc = "1"\n'
+        self.assertEqual(self.found(fuzz), [])
+
+    def test_a_missing_root_patch_fails(self):
+        found = self.found('[patch.crates-io]\na = { path = "../vendor/a" }\n')
+        self.assertEqual(len(found), 1)
+        self.assertIn("[patch.crates-io] b", found[0])
+        self.assertIn("vendor/b", found[0])
+
+    def test_a_patch_from_another_directory_fails(self):
+        fuzz = '[patch.crates-io]\na = { path = "../vendor/a" }\nb = { path = "../copy/b" }\n'
+        self.assertEqual(len(self.found(fuzz)), 1)
+
+    def test_no_patch_table_fails_for_each_entry(self):
+        self.assertEqual(len(self.found('[package]\nname = "f"\n')), 2)
+
+    def test_an_untracked_fuzz_manifest_fails(self):
+        self.assertEqual(
+            verify.fuzz_patch_problems({"Cargo.toml": self.ROOT_PATCH}),
+            ["fuzz/Cargo.toml is not tracked"],
+        )
+
+
+class SemverCompatibleTest(unittest.TestCase):
+    def test_the_first_non_zero_component_decides(self):
+        self.assertTrue(verify.semver_compatible("1.2.3", "1.9.0"))
+        self.assertFalse(verify.semver_compatible("1.2.3", "2.0.0"))
+        self.assertTrue(verify.semver_compatible("0.2.1", "0.2.9"))
+        self.assertFalse(verify.semver_compatible("0.0.3", "0.0.4"))
+
+    def test_pre_release_and_build_metadata_are_set_aside(self):
+        self.assertTrue(verify.semver_compatible("0.0.3-rc.1", "0.0.3"))
+        self.assertTrue(verify.semver_compatible("0.0.3+build.5", "0.0.3"))
+
+
+class DependencyPathsTest(unittest.TestCase):
+    def test_every_dependency_table_is_read(self):
+        manifest = verify.load_toml(
+            "Cargo.toml",
+            """
+[lib]
+path = "../lib"
+[dependencies]
+a = { path = "../a" }
+[dev-dependencies]
+b = { path = "../b" }
+[dev_dependencies]
+c = { path = "../c" }
+[build-dependencies]
+d = { path = "../d" }
+[build_dependencies]
+e = { path = "../e" }
+[target.'cfg(unix)'.dependencies]
+f = { path = "../f" }
+[target.'cfg(unix)'.build_dependencies]
+g = { path = "../g" }
+[patch.crates-io]
+h = { path = "../h" }
+[workspace.dependencies]
+i = { path = "../i" }
+""",
+        )
+        self.assertEqual(
+            sorted(verify.dependency_paths(manifest)),
+            [f"../{c}" for c in "abcdefghi"],
+        )
+
+    def test_a_key_that_is_not_a_table_holds_no_path(self):
+        for key in ("target", "patch", "workspace", "dependencies"):
+            self.assertEqual(verify.dependency_paths({key: 5}), [], key)
+
+
+class SubLocksTest(unittest.TestCase):
+    WORKSPACE = '[package]\nname = "x"\n\n[workspace]\n\n[dependencies]\n'
+
+    def subs(self, dependency):
+        return verify.sub_locks(
+            ["Cargo.lock", "a/Cargo.lock", "a/vendor/v/Cargo.lock"],
+            {
+                "Cargo.toml": self.WORKSPACE + dependency,
+                "a/Cargo.toml": self.WORKSPACE + dependency,
+                "a/vendor/v/Cargo.toml": self.WORKSPACE + dependency,
+            },
+        )
+
+    def test_a_workspace_that_builds_a_crate_outside_its_directory_is_compared(self):
+        self.assertEqual(self.subs('b = { path = "../b" }\n'), ["a/Cargo.lock"])
+
+    def test_a_patch_outside_its_directory_counts(self):
+        self.assertEqual(
+            self.subs('\n[patch.crates-io]\nc = { path = "../vendor/c" }\n'),
+            ["a/Cargo.lock"],
+        )
+
+    def test_a_workspace_of_crates_inside_its_directory_is_its_own(self):
+        self.assertEqual(self.subs('b = { path = "b" }\n'), [])
+
+    def test_a_path_back_into_its_directory_stays_inside(self):
+        self.assertEqual(self.subs('b = { path = "../a/b" }\n'), [])
+
+    def test_a_path_that_is_not_a_dependency_does_not_count(self):
+        self.assertEqual(self.subs('\n[package.metadata.x]\npath = "../zzz"\n'), [])
+
+    def test_a_member_that_builds_a_crate_outside_counts(self):
+        member = '[package]\nname = "m"\n\n[dependencies]\nb = { path = "../../b" }\n'
+        self.assertEqual(
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": member},
+            ),
+            ["a/Cargo.lock"],
+        )
+
+    def test_a_member_path_resolves_from_the_member(self):
+        member = '[package]\nname = "m"\n\n[dependencies]\nx = { path = "../x" }\n'
+        self.assertEqual(
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": member},
+            ),
+            [],
+        )
+
+    def test_invalid_toml_names_its_file(self):
+        with self.assertRaisesRegex(ValueError, "^a/m/Cargo.toml: not valid TOML"):
+            verify.sub_locks(
+                ["a/Cargo.lock"],
+                {"a/Cargo.toml": self.WORKSPACE, "a/m/Cargo.toml": "[x"},
+            )
+
+    def test_a_crate_without_a_workspace_table_is_not_a_root(self):
+        member = '[package]\nname = "x"\n\n[dependencies]\nb = { path = "../b" }\n'
+        self.assertEqual(
+            verify.sub_locks(["a/Cargo.lock"], {"a/Cargo.toml": member}), []
+        )
+
+
+class CheckTest(unittest.TestCase):
+    def test_the_repository_compares_the_fuzz_and_gallery_locks_and_passes(self):
+        result = verify.check_lock_versions()
+        self.assertTrue(result.ok, result.problems)
+        compared = []
+        real = verify.lock_version_problems
+
+        def spy(root, sub, path):
+            compared.append(path)
+            return real(root, sub, path)
+
+        with mock.patch.object(verify, "lock_version_problems", spy):
+            verify.check_lock_versions()
+        self.assertEqual(
+            compared, ["fuzz/Cargo.lock", "system/athanor-sal/gallery/Cargo.lock"]
+        )
+
+    def test_a_fuzz_patch_problem_fails_the_check(self):
+        with mock.patch.object(
+            verify, "fuzz_patch_problems", lambda manifests: ["fuzz: patch"]
+        ):
+            self.assertEqual(verify.check_lock_versions().problems, ["fuzz: patch"])
+
+    def test_a_drifted_lock_fails_the_check(self):
+        with mock.patch.object(
+            verify, "lock_version_problems", lambda root, sub, path: [f"{path}: drift"]
+        ):
+            result = verify.check_lock_versions()
+        self.assertEqual(
+            result.problems,
+            ["fuzz/Cargo.lock: drift", "system/athanor-sal/gallery/Cargo.lock: drift"],
+        )
+
+    def test_no_workspace_to_compare_fails_the_check(self):
+        with mock.patch.object(verify, "sub_locks", lambda locks, manifests: []):
+            self.assertFalse(verify.check_lock_versions().ok)
+
+    def test_an_unreadable_lock_fails_the_check(self):
+        with mock.patch.object(verify, "read", side_effect=OSError("gone")):
+            result = verify.check_lock_versions()
+        self.assertFalse(result.ok)
+        self.assertIn("gone", result.problems[-1])
+
+    def test_an_invalid_manifest_fails_the_check_with_its_name(self):
+        with mock.patch.object(verify, "read", return_value="[x"):
+            result = verify.check_lock_versions()
+        self.assertFalse(result.ok)
+        self.assertIn("Cargo.toml: not valid TOML", result.problems[-1])
+
+
+if __name__ == "__main__":
+    unittest.main()
