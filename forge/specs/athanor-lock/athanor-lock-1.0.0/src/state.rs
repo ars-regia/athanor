@@ -19,7 +19,7 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-/// From the compositor's `finished` to the next request to lock (LP3).
+/// From a refusal, the compositor's `finished` before `locked`, to the next request (LP3).
 pub const RETRY: Duration = Duration::from_secs(1);
 
 /// The caller's key for one lock surface, one per output.
@@ -30,8 +30,9 @@ pub enum State {
     /// No lock is asked for or held.
     Unlocked,
     /// `Shell::lock` was sent and the compositor has not answered (`waiting` false), or the
-    /// compositor refused or ended the lock and the machine asks again at `RetryDue` (`waiting`
-    /// true). The session counts as locked only from `Locked`.
+    /// compositor refused the lock and the machine asks again at `RetryDue` (`waiting` true).
+    /// The hint is true from the request on (D41); the session counts as locked only from
+    /// `Locked`.
     Locking { waiting: bool },
     /// The compositor confirmed the lock: only the lock surfaces show.
     Locked,
@@ -145,7 +146,7 @@ pub struct Machine {
 
 impl Machine {
     /// The machine at start, with the session's `LockedHint`: it takes the sleep inhibitor, and
-    /// locks at once if a previous instance locked and did not unlock (LP10). The start of a
+    /// locks at once if a previous instance asked for a lock and did not unlock (LP10, D41). The start of a
     /// session never locks otherwise (LP4).
     pub fn start(locked_hint: bool) -> (Self, Vec<Action>) {
         let mut machine = Machine {
@@ -201,7 +202,6 @@ impl Machine {
             Event::Locked => match self.state {
                 State::Locking { waiting: false } => {
                     self.state = State::Locked;
-                    self.set_hint(true, &mut out);
                     out.extend([Action::ClearField, Action::FieldSensitive(true)]);
                     self.release_if_shown(&mut out);
                 }
@@ -213,18 +213,20 @@ impl Machine {
                 self.presented.clear();
                 match self.state {
                     State::Unlocking => self.end_unlocked(&mut out),
-                    // The hint stays as it is: a crash during the wait comes back locked (LP10).
-                    State::Locking { waiting: false } | State::Locked | State::Authenticating => {
+                    // A refusal keeps the hint, since another live lock client may hold the
+                    // session, and a crash in the wait comes back locked (LP3, LP10, D41).
+                    State::Locking { waiting: false } => {
                         self.state = State::Locking { waiting: true };
                         out.push(Action::ArmRetry(RETRY));
                     }
+                    // The compositor ended a lock it had confirmed: asked for again at once.
+                    State::Locked | State::Authenticating => self.ask(&mut out),
                     State::Unlocked | State::Locking { waiting: true } => {}
                 }
             }
             Event::RetryDue => {
                 if self.state == (State::Locking { waiting: true }) {
-                    self.state = State::Locking { waiting: false };
-                    out.push(Action::Lock);
+                    self.ask(&mut out);
                 }
             }
             Event::SurfaceAdded(surface) => {
@@ -278,16 +280,20 @@ impl Machine {
 
     fn request_lock(&mut self, out: &mut Vec<Action>) {
         match self.state {
-            State::Unlocked => {
-                self.state = State::Locking { waiting: false };
-                self.surfaces.clear();
-                self.presented.clear();
-                out.push(Action::Lock);
-            }
+            State::Unlocked => self.ask(out),
             // A later request to lock cancels the `Unlock` kept; the lock is already asked for.
             State::Unlocking => self.state = State::Locking { waiting: false },
             State::Locking { .. } | State::Locked | State::Authenticating => {}
         }
+    }
+
+    /// Every request, a retry included, sends the hint first, so that a request granted after
+    /// another client unlocked leaves the hint true (LP3, D41). The surfaces were cleared where
+    /// the driver closed them: at `finished` and at the lock's own unlock.
+    fn ask(&mut self, out: &mut Vec<Action>) {
+        self.state = State::Locking { waiting: false };
+        self.hint = true;
+        out.extend([Action::SetLockedHint(true), Action::Lock]);
     }
 
     fn answered(&mut self, outcome: Outcome, out: &mut Vec<Action>) {
@@ -382,7 +388,11 @@ mod tests {
     #[test]
     fn the_session_counts_as_locked_only_after_locked() {
         let (mut m, _) = Machine::start(false);
-        assert_eq!(m.handle(Event::Lock), vec![Action::Lock]);
+        assert_eq!(
+            m.handle(Event::Lock),
+            vec![Action::SetLockedHint(true), Action::Lock],
+            "the hint goes out with the request"
+        );
         m.handle(Event::SurfaceAdded(1));
         m.handle(Event::Presented(1));
         assert!(!m.is_locked());
@@ -391,19 +401,25 @@ mod tests {
             vec![],
             "no attempt before the lock holds"
         );
-        let actions = m.handle(Event::Locked);
-        assert_eq!(actions[0], Action::SetLockedHint(true));
+        assert_eq!(
+            m.handle(Event::Locked),
+            vec![Action::ClearField, Action::FieldSensitive(true)]
+        );
         assert!(m.is_locked());
     }
 
     #[test]
-    fn finished_waits_one_second_and_asks_again() {
+    fn a_refusal_keeps_the_hint_and_asks_again_after_one_second() {
         let (mut m, _) = Machine::start(false);
         m.handle(Event::Lock);
         assert_eq!(m.handle(Event::Finished), vec![Action::ArmRetry(RETRY)]);
         assert!(!m.is_locked());
         assert_eq!(m.handle(Event::Lock), vec![], "the wait is not cut short");
-        assert_eq!(m.handle(Event::RetryDue), vec![Action::Lock]);
+        assert_eq!(
+            m.handle(Event::RetryDue),
+            vec![Action::SetLockedHint(true), Action::Lock],
+            "a retry sends the hint again"
+        );
         assert_eq!(m.state(), State::Locking { waiting: false });
     }
 
@@ -439,14 +455,13 @@ mod tests {
     #[test]
     fn finished_leaves_unlock_and_destroy_to_the_driver() {
         // The driver has answered `finished` itself; `Shell::unlock` would be refused.
+        // A lock the compositor confirmed and then ended is asked for again at once.
         let mut m = locked();
-        let actions = m.handle(Event::Finished);
-        assert!(!unlocks(&actions));
-        assert!(
-            !actions.contains(&Action::SetLockedHint(false)),
-            "a crash in the wait relocks"
+        assert_eq!(
+            m.handle(Event::Finished),
+            vec![Action::SetLockedHint(true), Action::Lock]
         );
-        assert_eq!(m.handle(Event::RetryDue), vec![Action::Lock]);
+        assert_eq!(m.state(), State::Locking { waiting: false });
     }
 
     #[test]
@@ -506,6 +521,35 @@ mod tests {
                         assert!(success || logind || kept, "{m:?} unlocked on {event:?}");
                         causes[usize::from(logind) + 2 * usize::from(kept)] = true;
                     }
+                    // Only an unlock, the helper's or logind's (kept or not), ends a lock or
+                    // clears the hint (LP3, D41).
+                    let ended = m.state != State::Unlocked && after.state == State::Unlocked;
+                    if ended || actions.contains(&Action::SetLockedHint(false)) {
+                        assert!(
+                            success || event == Event::Unlock || m.state == State::Unlocking,
+                            "{m:?} ended the lock on {event:?}"
+                        );
+                    }
+                    assert_eq!(
+                        after.hint,
+                        after.state != State::Unlocked,
+                        "{m:?} on {event:?}: the hint is true exactly while a lock is asked for"
+                    );
+                    if let Some(lock) = actions.iter().position(|a| *a == Action::Lock) {
+                        assert_eq!(
+                            actions[..lock].last(),
+                            Some(&Action::SetLockedHint(true)),
+                            "{m:?} on {event:?}: a request without the hint"
+                        );
+                    }
+                    if actions.contains(&Action::ReleaseInhibitor) {
+                        assert!(
+                            after.is_locked()
+                                && !after.surfaces.is_empty()
+                                && after.surfaces.is_subset(&after.presented),
+                            "{m:?} released the inhibitor on {event:?}"
+                        );
+                    }
                     next.push(after);
                 }
             }
@@ -561,12 +605,62 @@ mod tests {
             m.handle(Event::PrepareForSleep(true)),
             vec![Action::ReleaseInhibitor]
         );
+
+        // The last output without a frame goes: every output left has presented.
+        let mut m = locked();
+        m.handle(Event::PrepareForSleep(true));
+        m.handle(Event::Presented(1));
+        assert_eq!(
+            m.handle(Event::SurfaceRemoved(2)),
+            vec![Action::ReleaseInhibitor]
+        );
+
+        // Every frame presented before `locked`: released at `locked`.
+        let (mut m, _) = Machine::start(false);
+        m.handle(Event::PrepareForSleep(true));
+        m.handle(Event::SurfaceAdded(1));
+        m.handle(Event::Presented(1));
+        assert!(m.handle(Event::Locked).contains(&Action::ReleaseInhibitor));
+    }
+
+    #[test]
+    fn a_new_lock_waits_for_its_own_frames() {
+        // Surface keys come back with the next lock; the frames of the one that ended, at
+        // `finished` or at an unlock, do not count.
+        for end in [Event::Finished, Event::Unlock] {
+            let mut m = locked();
+            m.handle(Event::Presented(1));
+            m.handle(Event::Presented(2));
+            m.handle(end);
+            m.handle(Event::Lock);
+            m.handle(Event::SurfaceAdded(1));
+            m.handle(Event::SurfaceAdded(2));
+            m.handle(Event::Locked);
+            assert!(
+                !m.handle(Event::PrepareForSleep(true))
+                    .contains(&Action::ReleaseInhibitor),
+                "{end:?}"
+            );
+            m.handle(Event::Presented(1));
+            assert_eq!(
+                m.handle(Event::Presented(2)),
+                vec![Action::ReleaseInhibitor],
+                "{end:?}"
+            );
+        }
     }
 
     #[test]
     fn a_start_with_locked_hint_locks_at_once() {
         let (m, actions) = Machine::start(true);
-        assert_eq!(actions, vec![Action::TakeInhibitor, Action::Lock]);
+        assert_eq!(
+            actions,
+            vec![
+                Action::TakeInhibitor,
+                Action::SetLockedHint(true),
+                Action::Lock
+            ]
+        );
         assert_eq!(m.state(), State::Locking { waiting: false });
         let (m, actions) = Machine::start(false);
         assert_eq!(actions, vec![Action::TakeInhibitor]);
@@ -615,7 +709,8 @@ mod tests {
 
     #[test]
     fn an_unlock_during_the_wait_cancels_the_retry() {
-        let mut m = locked();
+        let (mut m, _) = Machine::start(false);
+        m.handle(Event::Lock);
         m.handle(Event::Finished);
         assert_eq!(
             m.handle(Event::Unlock),
@@ -726,9 +821,12 @@ mod tests {
     #[test]
     fn finished_while_authenticating_relocks() {
         let mut m = authenticating();
-        assert_eq!(m.handle(Event::Finished), vec![Action::ArmRetry(RETRY)]);
+        assert_eq!(
+            m.handle(Event::Finished),
+            vec![Action::SetLockedHint(true), Action::Lock]
+        );
         assert_eq!(m.handle(outcome(&m, Outcome::Success)), vec![]);
-        assert_eq!(m.handle(Event::RetryDue), vec![Action::Lock]);
+        assert_eq!(m.state(), State::Locking { waiting: false });
     }
 
     #[test]
