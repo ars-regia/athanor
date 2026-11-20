@@ -1,0 +1,41 @@
+# Implicit panics per crate: the hits of clippy::arithmetic_side_effects, clippy::indexing_slicing
+# and clippy::string_slice outside tests, each of which aborts a process under panic = "abort" with
+# overflow-checks (verify.py implicit-panics, #1352). Measured on 2026-11-21 in the shell rig. A line
+# only goes down; a new crate adds its own. Sulphur, shelld, the portal and athanor-edid reach zero
+# before 1.0.
+athanor-apps 3
+athanor-auth 14
+athanor-backup 0
+athanor-bar 12
+athanor-bus-api 0
+athanor-control-center 5
+athanor-controls 14
+athanor-dock 9
+athanor-edid 2
+athanor-fuzz-entries 17
+athanor-greeter-ui 11
+athanor-i18n 2
+athanor-idle 36
+athanor-launcher 13
+athanor-layout 1
+athanor-layout-chooser 0
+athanor-lock 1
+athanor-osd 7
+athanor-portal 3
+athanor-preview 15
+athanor-preview-render 16
+athanor-sal 355
+athanor-search 9
+athanor-services 20
+athanor-sessiond 0
+athanor-shelld 29
+athanor-style 2
+athanor-sulphur 315
+athanor-sulphur-client 25
+athanor-trust-state 0
+athanor-unit 1
+athanor-unlockd 3
+athanor-update 12
+athanor-update-notify 2
+athanor-wallpaper 33
+xdg-desktop-portal-athanor 0

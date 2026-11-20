@@ -7259,6 +7259,157 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
+
+# --------------------------------------------------------------------------- #
+# implicit-panics — the panics that no token shows
+# --------------------------------------------------------------------------- #
+
+# Under `panic = "abort"` with `overflow-checks = true` ([profile.release] of Cargo.toml) an
+# overflow, an index out of bounds or a slice off a character boundary ends the process, and no
+# `.unwrap()` marks the place. Clippy finds them: their count per crate is a ratchet, as BUDGET is,
+# that only goes down (#1352). The lints are passed on clippy's command line and are not in
+# [workspace.lints], since no crate inherits that table and security-audit.sh denies warnings.
+IMPLICIT_PANIC_LINTS = ("clippy::arithmetic_side_effects", "clippy::indexing_slicing", "clippy::string_slice")
+IMPLICIT_PANIC_BUDGET = "scripts/ci/implicit-panics.txt"
+# Two runs, as in security-audit.sh: athanor-preview-render needs zbus on async-io. No test target:
+# a panic in a test fails the test, it does not end a service.
+IMPLICIT_PANIC_RUNS = (
+    ["--workspace", "--exclude", "athanor-preview-render"],
+    ["-p", "athanor-preview-render"],
+)
+# The cargo command the check runs clippy with. The GTK crates build only where their libraries
+# are, so measuring is opt-in: `ATHANOR_IMPLICIT_PANICS_CARGO="bash forge/test/shell/rig.sh cargo"`.
+IMPLICIT_PANIC_CARGO = "ATHANOR_IMPLICIT_PANICS_CARGO"
+
+
+def implicit_panic_budget(text):
+    """{crate: count} of the budget file: one `crate count` line per crate, `#` comments."""
+    budget = {}
+    for n, line in enumerate(text.split("\n"), 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        name, _, count = line.partition(" ")
+        if not count.strip().isdigit() or name in budget:
+            raise ValueError(f"{IMPLICIT_PANIC_BUDGET}:{n}: not one `crate count` line per crate: {line}")
+        budget[name] = int(count)
+    return budget
+
+
+def package_crate(package_id):
+    """The crate of a local `package_id`: `path+file:///d/dir#name@1.0`, or `path+file:///d/name#1.0`
+    when the directory is named after the crate."""
+    path, _, fragment = package_id.partition("#")
+    return fragment.partition("@")[0] if "@" in fragment else path.rsplit("/", 1)[-1]
+
+
+def implicit_panic_counts(lines):
+    """({crate: hits}, problems) of the JSON lines of clippy runs. A hit counts once per place and
+    lint, though two targets or two runs compile the same module; every local crate built has an
+    entry, zero included, and vendored crates have none. A run that did not finish, or failed, is
+    a problem: a crate it did not reach would read as zero."""
+    counts, seen, problems, finished = {}, set(), [], 0
+    for line in lines:
+        if not line.startswith("{"):
+            continue
+        msg = json.loads(line)
+        if msg.get("reason") == "build-finished":
+            finished += 1
+            if msg.get("success") is not True:
+                problems.append("a clippy run did not succeed, so its crates were not all counted")
+            continue
+        package = msg.get("package_id", "")
+        if not package.startswith("path+") or "/vendor/" in package:
+            continue
+        crate = package_crate(package)
+        counts.setdefault(crate, 0)
+        lint = ((msg.get("message") or {}).get("code") or {}).get("code")
+        if msg.get("reason") != "compiler-message" or lint not in IMPLICIT_PANIC_LINTS:
+            continue
+        spans = [(s["file_name"], s["line_start"], s["column_start"])
+                 for s in msg["message"]["spans"] if s.get("is_primary")]
+        key = (crate, lint, *spans[:1])
+        if key not in seen:
+            seen.add(key)
+            counts[crate] += 1
+    if not finished:
+        problems.append("no clippy run finished")
+    return counts, problems
+
+
+def implicit_panic_problems(counts, budget):
+    """(problems, notes) of the measured `counts` against `budget`."""
+    problems, notes = [], []
+    for crate in sorted(counts.keys() | budget.keys()):
+        have, allowed = counts.get(crate), budget.get(crate)
+        if have is None:
+            problems.append(f"{crate}: in {IMPLICIT_PANIC_BUDGET} but built by no clippy run: remove its line")
+        elif allowed is None:
+            problems.append(f"{crate}: {have} implicit panics and no line in {IMPLICIT_PANIC_BUDGET}")
+        elif have > allowed:
+            problems.append(f"{crate}: {have} implicit panics over the budget of {allowed}: use checked or "
+                            f"saturating arithmetic, `.get()`, or a split on a character boundary")
+        elif have < allowed:
+            notes.append(f"{crate}: {have} (budget {allowed}): lower its line in {IMPLICIT_PANIC_BUDGET}")
+    return problems, notes
+
+
+def implicit_panic_raises(budget, base):
+    """The crates whose line `budget` raises over `base`: the budget only goes down."""
+    return [f"{crate}: {IMPLICIT_PANIC_BUDGET} raises its budget from {base[crate]} to {n}"
+            for crate, n in sorted(budget.items()) if n > base.get(crate, n)]
+
+
+@check("implicit-panics", "Implicit panics (overflow, index, string slice) per crate do not grow")
+def check_implicit_panics():
+    r = Result()
+    try:
+        budget = implicit_panic_budget(read(ROOT / IMPLICIT_PANIC_BUDGET))
+    except (OSError, ValueError) as e:
+        r.fail(str(e))
+        return r
+    if BASE_REF is not None:
+        shown = subprocess.run(["git", "-C", str(ROOT), "show", f"{BASE_REF}:{IMPLICIT_PANIC_BUDGET}"],
+                               capture_output=True, text=True)
+        try:
+            if shown.returncode == 0:
+                for problem in implicit_panic_raises(budget, implicit_panic_budget(shown.stdout)):
+                    r.fail(problem)
+            elif "does not exist" not in shown.stderr and "but not in" not in shown.stderr:
+                r.fail(f"git show {BASE_REF}:{IMPLICIT_PANIC_BUDGET}: {shown.stderr.strip()}")
+        except ValueError as e:
+            r.fail(f"{BASE_REF}: {e}")
+    cargo = os.environ.get(IMPLICIT_PANIC_CARGO)
+    if not cargo:
+        r.note(f"clippy not run, only the budget read: {IMPLICIT_PANIC_CARGO}=\"bash forge/test/shell/rig.sh "
+               f"cargo\" measures it")
+        return r
+    lines = []
+    for run in IMPLICIT_PANIC_RUNS:
+        args = [*cargo.split(), "clippy", "--locked", *run, "--all-features", "--message-format=json",
+                "--", *(f"-W{lint}" for lint in IMPLICIT_PANIC_LINTS)]
+        try:
+            p = subprocess.run(args, cwd=ROOT, stdout=subprocess.PIPE, text=True)
+        except OSError as e:
+            r.fail(f"{' '.join(args)}: {e}")
+            return r
+        if p.returncode != 0:
+            r.fail(f"{' '.join(args)}: exit {p.returncode}")
+            return r
+        lines += p.stdout.split("\n")
+    try:
+        counts, problems = implicit_panic_counts(lines)
+    except (ValueError, KeyError, TypeError) as e:
+        r.fail(f"clippy's JSON could not be read: {e!r}")
+        return r
+    if not problems:
+        problems, notes = implicit_panic_problems(counts, budget)
+        r.notes += notes
+    for problem in problems:
+        r.fail(problem)
+    return r
+
+
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:
