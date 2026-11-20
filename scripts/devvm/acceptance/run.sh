@@ -579,8 +579,8 @@ session_probe() { # session_probe showing|hidden|press NAME
   guest_ssh "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/\$(id -u)/bus; python3 - $1 athanor-bar $(printf '%q' "$2")" < "$ACC_HERE/../shield_probe.py"
 }
 sheet_shows() { session_probe showing "$2" || die "FAIL  $1: the sheet does not show '$2'"; }
-# `hidden` passes on a sheet that is not drawn yet: the switch's label, which the sheet always has, is
-# waited for first.
+# `hidden` passes on a sheet that is not drawn yet: the switch, or its label, which the sheet always
+# has, is waited for first.
 sheet_hides() {
   session_probe showing "Automatic security updates" || die "FAIL  $1: the sheet is not populated (no 'Automatic security updates')"
   session_probe hidden "$2" || die "FAIL  $1: the sheet shows '$2'"
