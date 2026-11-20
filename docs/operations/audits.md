@@ -18,6 +18,12 @@ Automate the class, audit the delta, probe the runtime.
   ISO, `:stable`, 1.0), after a Fedora major release bump, and after a batch of merges in
   a sensitive area (updates, signing, PAM, SELinux, the Gatekeeper). No full-repository
   audit runs on a calendar: the broad audit belongs to milestones.
+- **After a CLEAN audit of a pull request's head, the audit of a later head covers only the
+  delta** between the two heads, plus whatever a base merge brought into the pull request's
+  own diff *(maintainer decision, 2026-11-18)*. A full audit is repeated only when the delta
+  touches process launch, files, `unsafe`, D-Bus, confinement, the trust seal, power, signing, workflows, settings, `CODEOWNERS` or dependencies.
+  The merge card names the audited range as `<CLEAN head sha>..<audited head sha>`, with full
+  shas, so that a reader sees what each audit covered.
 - **Every audit re-examines every decision within its scope**: a full audit all of them, a
   delta audit every decision that bears on what changed, listed in its report first. The
   maintainer's and the agents' alike, none excluded: decision records, answers to review
