@@ -6656,7 +6656,7 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
     hunks of its file: it fails with the lines it should name when the change moved them, and
     when the change edited or removed a cited line it fails for a reader to place. A line of
     the document that the change wrote or edited is the author's own placing, and is not read so:
-    limit, every citation on an edited line is skipped, also one the edit did not touch."""
+    the limit: every citation on an edited line is skipped, also one the edit did not touch."""
     known = set(tracked)
     unchanged = {backtick_plain_paths(row) for row in base_text.split("\n")} if hunks else set()
     prefixes = tuple(sorted({f"{path.split('/')[0]}/" for path in known if "/" in path}))
@@ -6710,13 +6710,13 @@ def citation_findings(doc, text, tracked, read_file, hunks=None, base_text=""):
             if line in unchanged and path in hunks:
                 new = moved_ranges(ranges, hunks[path])
                 if new is None:
-                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` cites a line "
+                    out.append((number, path, spec, "edited", f"{doc}:{number}: `{path}:{spec}` cites a line "
                                 "that this change edited or removed: place it again"))
                     continue
                 if new != ranges:
                     named = ", ".join(f"{a}-{b}" if "-" in part else str(a) for part, (a, b)
                                       in zip(re.split(r",\s*", spec), new))
-                    out.append((number, path, spec, None, f"{doc}:{number}: `{path}:{spec}` is moved by "
+                    out.append((number, path, spec, "moved", f"{doc}:{number}: `{path}:{spec}` is moved by "
                                 f"this change: it should name `{path}:{named}`"))
                     continue
             if path.endswith(".md") and EMPTY_LINE.fullmatch(rows[ranges[0][0] - 1]):

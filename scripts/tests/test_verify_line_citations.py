@@ -426,6 +426,19 @@ class Kept(unittest.TestCase):
                 self.assertTrue(any("matches no finding" in p for p in result.problems))
                 self.assertTrue(any("does not hold" in p for p in result.problems))
 
+    def test_a_kept_entry_does_not_hide_a_moved_citation(self):
+        key = next(k for k in verify.LINE_CITATIONS_KEPT if k[3] is None)
+        moved = {key[1]: [(0, 0, 3)]}
+        with (
+            mock.patch.object(verify, "BASE_REF", "HEAD"),
+            mock.patch.object(verify, "diff_hunks", return_value=moved),
+        ):
+            result = verify.check_line_citations()
+        self.assertTrue(
+            any(key[0] in p and f"`{key[1]}:{key[2]}` is moved by this change" in p for p in result.problems),
+            result.problems,
+        )
+
     def test_a_kept_entry_that_matches_no_finding_fails(self):
         stale = dict(verify.LINE_CITATIONS_KEPT)
         stale[("doc_none.md", "src/x.rs", "1", "grant", 1)] = "a reason"
