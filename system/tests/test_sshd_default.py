@@ -35,6 +35,17 @@ class NewInstallTest(unittest.TestCase):
             self.assertEqual(lines, ["firewall --use-system-defaults"], path)
 
 
+class UpgradeAcceptanceTest(unittest.TestCase):
+    def test_the_upgrade_case_keeps_sshd_across_the_update(self):
+        # ADR-0142 point 3: only a link the image's default /etc lacks survives the merge into a
+        # Fedora 45 candidate; the link of `systemctl enable` is the one a Fedora 43 image ships (#1372).
+        text = (ROOT / "forge/test/iso/collaudo.ks").read_text()
+        blocks = re.findall(r"^# upgrade-acceptance begin\n(.*?)^# upgrade-acceptance end$", text, re.M | re.S)
+        self.assertTrue(blocks)
+        lines = [ln.strip() for b in blocks for ln in b.splitlines() if re.search(r"^\s*systemctl\b.*\bsshd\b", ln)]
+        self.assertEqual(lines, ["systemctl add-wants graphical.target sshd.service"])
+
+
 class ExistingMachineTest(unittest.TestCase):
     def test_no_shipped_preset_names_sshd(self):
         for preset in ROOT.glob("forge/specs/*/SOURCES/**/system-preset/*.preset"):
