@@ -7182,103 +7182,136 @@ def judge_known_red(entries, base, results, today):
 TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
                    "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
 SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
-SUBPROCESS_RUNNERS = {"run", "Popen", "check_call", "check_output", "call"}
+COMMENT_LINE = re.compile(r"(?m)^\s*#.*$")
 
 
-def environment_readers(tree):
-    """Lines where a test hands the whole environment on: os.environ (or `environ` imported from
-    os) read as a whole rather than as os.environ[...] or os.environ.get(...), and a subprocess call
-    with no env= keyword, which inherits everything."""
-    parents = {id(c): n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
-    from_os = any(isinstance(n, ast.ImportFrom) and n.module == "os"
-                  and any(a.name == "environ" for a in n.names) for n in ast.walk(tree))
-    lines = []
+def dotted(node, aliases):
+    """`a.b.c` of a Name or Attribute chain whose first name is expanded through the import aliases,
+    "" for anything else."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if not isinstance(node, ast.Name):
+        return ""
+    parts.append(aliases.get(node.id, node.id))
+    return ".".join(reversed(parts))
+
+
+def string_literals(tree):
+    """The module-level `NAME = (strings...)` tuples, lists and sets of a module, as {NAME: {strings}}."""
+    return {n.targets[0].id: {e.value for e in n.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+            for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+            and isinstance(n.targets[0], ast.Name) and isinstance(n.value, (ast.Tuple, ast.List, ast.Set))}
+
+
+def isolation_gaps(tree, shared):
+    """What a test module lacks of the isolation block: a module-level mock.patch.dict(os.environ), a
+    setUpModule that starts it and pops every TRUST_ENV_NAMES entry, a tearDownModule that stops it.
+    The names popped come from a literal of the module or from `from signed_registry import TRUST_ENV`."""
+    aliases = {}
     for n in ast.walk(tree):
-        whole = (isinstance(n, ast.Attribute) and n.attr == "environ" and isinstance(n.value, ast.Name)
-                 and n.value.id == "os") or (from_os and isinstance(n, ast.Name) and n.id == "environ")
-        if whole:
-            up = parents.get(id(n))
-            single = (isinstance(up, ast.Subscript) and up.value is n) or (
-                isinstance(up, ast.Attribute) and up.attr in ("get", "setdefault", "pop", "__contains__"))
-            if not single and not isinstance(up, ast.Compare):
-                lines.append(n.lineno)
-        elif isinstance(n, ast.Call):
-            f = n.func
-            name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
-            owner = f.value.id if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) else "subprocess"
-            if (name in SUBPROCESS_RUNNERS and owner == "subprocess"
-                    and not any(k.arg in ("env", None) for k in n.keywords)):
-                lines.append(n.lineno)
-    return lines
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                aliases[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(n, ast.ImportFrom) and n.module:
+            for a in n.names:
+                aliases[a.asname or a.name] = f"{n.module}.{a.name}"
+    lists = string_literals(tree)
+    if aliases.get("TRUST_ENV") == "signed_registry.TRUST_ENV":
+        lists["TRUST_ENV"] = shared
+    patch = next((n.targets[0].id for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+                  and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Call)
+                  and dotted(n.value.func, aliases) == "unittest.mock.patch.dict" and n.value.args
+                  and dotted(n.value.args[0], aliases) == "os.environ"), None)
+    if patch is None:
+        return ["a module-level mock.patch.dict(os.environ)"]
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
 
+    def calls(fn, method):
+        return fn is not None and any(
+            isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == method
+            and isinstance(c.func.value, ast.Name) and c.func.value.id == patch for c in ast.walk(fn))
 
-def dropped_names(tree, shared):
-    """The strings a test lists in a tuple, list or set literal, plus those of the shared TRUST_ENV
-    tuple when the test names it."""
-    names = {e.value for n in ast.walk(tree) if isinstance(n, (ast.Tuple, ast.List, ast.Set))
-             for e in n.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)}
-    if any((isinstance(n, ast.Name) and n.id == "TRUST_ENV")
-           or (isinstance(n, ast.ImportFrom) and any(a.name == "TRUST_ENV" for a in n.names))
-           for n in ast.walk(tree)):
-        names |= shared
-    return names
+    gaps = []
+    setup = funcs.get("setUpModule")
+    if not calls(setup, "start"):
+        gaps.append("a setUpModule that starts the patch")
+    if not calls(funcs.get("tearDownModule"), "stop"):
+        gaps.append("a tearDownModule that stops the patch")
+    popped = set()
+    if setup is not None:
+        loops = {}  # loop variable -> the literal it iterates
+        for n in ast.walk(setup):
+            pairs = [(n.target, n.iter)] if isinstance(n, ast.For) else [
+                (g.target, g.iter) for g in getattr(n, "generators", [])]
+            for target, it in pairs:
+                if isinstance(target, ast.Name) and isinstance(it, ast.Name) and it.id in lists:
+                    loops[target.id] = lists[it.id]
+        for c in ast.walk(setup):
+            if isinstance(c, ast.Call) and dotted(c.func, aliases) == "os.environ.pop" and c.args:
+                arg = c.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    popped.add(arg.value)
+                elif isinstance(arg, ast.Name):
+                    popped |= loops.get(arg.id, set())
+    missing = [n for n in TRUST_ENV_NAMES if n not in popped]
+    if missing:
+        gaps.append(f"a setUpModule that pops {', '.join(missing)}")
+    return gaps
 
 
 def trust_env_problems(root=None):
-    """Every tracked test_*.py that hands the whole environment to a subprocess (environment_readers)
-    and names a script that reaches tier-digests.sh lists every TRUST_ENV_NAMES entry in a tuple, list
-    or set literal, or names the TRUST_ENV tuple of SHARED_TRUST_ENV. A script reaches tier-digests.sh
-    when a non-comment line of it names tier-digests.sh or a script that does, on a path boundary."""
+    """Every tracked test_*.py that names a script reaching tier-digests.sh carries the isolation block
+    (isolation_gaps). A script reaches it when a non-comment line of a tracked .sh or non-test .py names
+    tier-digests.sh or a script that reaches it, as a whole file name."""
     root = root or ROOT
     tracked = [f for f in subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
                                          text=True, check=True).stdout.split("\0") if f]
-    problems, shells = [], {}
+    is_test = re.compile(r"(?:^|/)test_[^/]*\.py$")
+    problems, texts = [], {}
     for f in tracked:
-        if f.endswith(".sh"):
+        if f.endswith((".sh", ".py")):
             try:
-                shells[f.rsplit("/", 1)[-1]] = re.sub(r"(?m)^\s*#.*$", "", read(root / f))
+                texts[f] = COMMENT_LINE.sub("", read(root / f))
             except OSError as e:
                 problems.append(f"{f}: tracked but unreadable ({e.strerror})")
 
-    def names(script, text):
-        return re.search(r"""(?:^|[/"' =])""" + re.escape(script) + r"\b", text) is not None
+    def naming(names, candidates):
+        found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w-])")
+        return {f for f in candidates if found.search(texts[f])}
 
-    reaching = {"tier-digests.sh"}
-    while True:
-        more = {n for n, text in shells.items() if n not in reaching and any(names(r, text) for r in reaching)}
-        if not more:
-            break
+    base = lambda f: f.rsplit("/", 1)[-1]  # noqa: E731
+    reaching = {f for f in texts if base(f) == "tier-digests.sh"}
+    pending, rest = {base(f) for f in reaching}, {f for f in texts if not is_test.search(f)} - reaching
+    while pending and rest:
+        more = naming(pending, rest)
+        rest -= more
         reaching |= more
-    shared = set()
+        pending = {base(f) for f in more}
+    names = {base(f) for f in reaching}
+    tests = sorted(f for f in naming(names, [f for f in texts if is_test.search(f)]))
+    shared, shared_error = set(), None
     try:
-        tree = ast.parse(read(root / SHARED_TRUST_ENV))
-        shared = dropped_names(tree, set()) if any(
-            isinstance(n, ast.Name) and n.id == "TRUST_ENV" for n in ast.walk(tree)) else set()
-    except (OSError, SyntaxError):
-        pass
-    for f in sorted(tracked):
-        if not re.search(r"(?:^|/)test_[^/]*\.py$", f):
-            continue
+        shared = string_literals(ast.parse(read(root / SHARED_TRUST_ENV))).get("TRUST_ENV", set())
+    except (OSError, SyntaxError) as e:
+        shared_error = f"{SHARED_TRUST_ENV}: cannot be read as the shared TRUST_ENV ({e})"
+    for f in tests:
         try:
-            text = read(root / f)
-            tree = ast.parse(text)
-        except OSError as e:
-            problems.append(f"{f}: tracked but unreadable ({e.strerror})")
-            continue
+            tree = ast.parse(read(root / f))
         except SyntaxError as e:
             problems.append(f"{f}: not parseable ({e.msg}, line {e.lineno})")
             continue
-        code = re.sub(r"(?m)^\s*#.*$", "", text)
-        if not any(names(r, code) for r in reaching) or not environment_readers(tree):
+        if shared_error and "signed_registry" in texts[f]:
+            problems.append(f"{f}: {shared_error}")
             continue
-        missing = [n for n in TRUST_ENV_NAMES if n not in dropped_names(tree, shared)]
-        if missing:
-            problems.append(f"{f}: hands the whole environment to a subprocess of a script that reaches "
-                            f"tier-digests.sh without dropping {', '.join(missing)}")
+        gaps = isolation_gaps(tree, shared)
+        if gaps:
+            problems.append(f"{f}: reaches tier-digests.sh without the isolation block; it lacks " + "; ".join(gaps))
     return problems
 
 
-@check("test-trust-env", "A test that hands the whole environment to a script reaching tier-digests.sh drops the CI run's trust environment")
+@check("test-trust-env", "A test that reaches tier-digests.sh isolates the CI run's trust environment (module-level patch, popped in setUpModule)")
 def check_test_trust_env():
     r = Result()
     for problem in trust_env_problems():

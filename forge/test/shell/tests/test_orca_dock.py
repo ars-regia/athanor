@@ -87,5 +87,23 @@ class MainTest(unittest.TestCase):
         self.assertEqual(self.run_main("orca-nothing.txt", ["x"], ["Tab"]), 1)
 
 
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+TRUST_ENV = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
+             "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    [_os.environ.pop(name, None) for name in TRUST_ENV]
+
+
+def tearDownModule():
+    _environ.stop()
+
+
 if __name__ == "__main__":
     unittest.main()

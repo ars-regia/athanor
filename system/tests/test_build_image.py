@@ -398,5 +398,21 @@ class ActivationOwners(unittest.TestCase):
         self.assertEqual(loop, ["/" + d for d in check_image_session.SESSION_SERVICE_DIRS])
 
 
+# The CI run's trust environment must not reach the scripts under test (#1257).
+import os as _os  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
+
+_environ = _mock.patch.dict(_os.environ)
+
+
+def setUpModule():
+    _environ.start()
+    [_os.environ.pop(name, None) for name in TRUST_ENV]
+
+
+def tearDownModule():
+    _environ.stop()
+
+
 if __name__ == "__main__":
     unittest.main()
