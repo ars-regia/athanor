@@ -109,6 +109,43 @@ pub fn read_line_within(
     read
 }
 
+/// A line read from a non-blocking stream over as many reads as it takes: a read that would
+/// block keeps the bytes read so far for the next one, where [`read_line`] would lose them.
+/// The line is held in a [`Secret`], so a line that carries an answer is zeroised too.
+#[derive(Debug, Default)]
+pub struct LineReader {
+    line: Secret,
+    /// The line is whole and was handed out: the next read starts a new one.
+    whole: bool,
+}
+
+impl LineReader {
+    pub fn new() -> Self {
+        LineReader::default()
+    }
+
+    /// Reads on from `reader`. `Some` is a whole line of at most `MAX_LINE` bytes, its newline
+    /// included, without the newline; `None` is a read that would block before the newline,
+    /// with the bytes read so far kept. On an error the partial line is cleared.
+    pub fn read(&mut self, reader: &mut impl Read) -> Result<Option<&[u8]>, ReadError> {
+        if self.whole {
+            self.line.clear();
+            self.whole = false;
+        }
+        match fill(reader, &mut self.line, MAX_LINE) {
+            Ok(()) => {
+                self.whole = true;
+                Ok(Some(self.line.as_bytes()))
+            }
+            Err(ReadError::Io(err)) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(err) => {
+                self.line.clear();
+                Err(err)
+            }
+        }
+    }
+}
+
 fn fill(reader: &mut impl Read, secret: &mut Secret, max: usize) -> Result<(), ReadError> {
     // ponytail: one read syscall per byte, at most MAX_LINE per line; read into a zeroising
     // buffer of our own if a measurement ever shows the cost.
@@ -230,6 +267,70 @@ mod tests {
         let mut reader: &[u8] = b"one\ntwo\n";
         read_line(&mut reader, &mut secret).expect("first line");
         assert_eq!(reader, b"two\n");
+    }
+
+    /// A non-blocking stream: each chunk is what one wake-up finds, and a read past a chunk's
+    /// end would block until the next one; past the last chunk the stream ends.
+    struct Chunks(std::collections::VecDeque<&'static [u8]>);
+
+    impl Read for Chunks {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let Some(chunk) = self.0.front_mut() else {
+                return Ok(0);
+            };
+            if chunk.is_empty() {
+                self.0.pop_front();
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let n = buf.len().min(chunk.len());
+            buf[..n].copy_from_slice(&chunk[..n]);
+            *chunk = &chunk[n..];
+            Ok(n)
+        }
+    }
+
+    #[test]
+    fn a_line_split_by_would_block_is_read_whole() {
+        let mut stream = Chunks([&b"PAM_TEXT"[..], b"_INFO hi\nSUC", b"CESS\n"].into());
+        let mut reader = LineReader::new();
+        assert_eq!(reader.read(&mut stream).expect("would block"), None);
+        assert_eq!(
+            reader.read(&mut stream).expect("a line"),
+            Some(&b"PAM_TEXT_INFO hi"[..])
+        );
+        // The rest of the chunk, then the end of the line on the next wake-up.
+        assert_eq!(reader.read(&mut stream).expect("would block"), None);
+        assert_eq!(
+            reader.read(&mut stream).expect("a line"),
+            Some(&b"SUCCESS"[..])
+        );
+    }
+
+    #[test]
+    fn an_error_clears_the_partial_line() {
+        for (chunks, want) in [
+            (vec![&b"gues"[..], b"s"], "eof"),
+            (vec![&b"gu"[..], b"\0ess\n"], "nul"),
+            (vec![&b"aaaa"[..]; MAX_LINE / 4 + 1], "too long"),
+        ] {
+            let mut stream = Chunks(chunks.into());
+            let mut reader = LineReader::new();
+            let err = loop {
+                match reader.read(&mut stream) {
+                    Ok(None) => continue,
+                    Ok(Some(line)) => panic!("{want}: read {} bytes", line.len()),
+                    Err(err) => break err,
+                }
+            };
+            let matched = match want {
+                "eof" => matches!(err, ReadError::Eof),
+                "nul" => matches!(err, ReadError::Nul),
+                _ => matches!(err, ReadError::TooLong),
+            };
+            assert!(matched, "{want}: {err:?}");
+            assert!(reader.line.is_empty(), "{want}");
+            assert!(reader.line.storage().iter().all(|&b| b == 0), "{want}");
+        }
     }
 
     #[test]

@@ -54,7 +54,7 @@ jobs:
       - name: Branch, commit, PR (never auto-merged)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: forge/specs/azoth/open_bump_pr.sh smithay-bump bump/smithay "Cargo.lock forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/Cargo.toml" "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
+        run: forge/specs/azoth/open_bump_pr.sh smithay-bump bump/smithay "Cargo.lock fuzz/Cargo.lock forge/specs/athanor-sulphur/athanor-sulphur-1.0.0/Cargo.toml" "$RUNNER_TEMP/bump" "$GITHUB_REF_NAME"
 
       - name: Upload what the bump wrote
         if: ${{ always() }}

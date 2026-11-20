@@ -16,6 +16,8 @@ pub fn must(result: Setup) {
     }
 }
 
+#[cfg(feature = "auth")]
+pub mod auth;
 #[cfg(feature = "gtk")]
 pub mod bar;
 #[cfg(feature = "gtk")]

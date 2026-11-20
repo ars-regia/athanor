@@ -373,7 +373,9 @@ pub fn icon(state: &NetworkState) -> &'static str {
 pub type Settings<'a> = HashMap<&'a str, HashMap<&'a str, Variant<'a>>>;
 
 /// The settings of a network to join. The password, when there is one, goes to
-/// NetworkManager inside these settings and nowhere else.
+/// NetworkManager inside these settings and nowhere else. The settings borrow it: the copies
+/// are those in zbus's message buffer, which grows as zbus serialises the call and may leave
+/// earlier copies in memory it reallocated; zbus frees them without wiping.
 pub fn wifi_settings<'a>(network: &'a Network, password: Option<&'a str>) -> Settings<'a> {
     let mut settings = Settings::new();
     settings.insert(
@@ -530,13 +532,23 @@ impl SecretsRequest {
     }
 }
 
-/// The reply of `GetSecrets`, `a{sa{sv}}`: the password and nothing else.
-pub fn secrets_reply(password: &str) -> Option<BTreeMap<String, Props>> {
-    let psk = Variant::from(password).try_to_owned().ok()?;
-    Some(BTreeMap::from([(
-        SECURITY_SETTING.to_owned(),
-        Props::from([("psk".to_owned(), psk)]),
-    )]))
+/// The reply of `GetSecrets`, `a{sa{sv}}`: the password and nothing else. It owns the password
+/// in a buffer overwritten as it drops, and builds the dict, borrowing it, only while zbus
+/// serialises it: an owned variant would copy it into a buffer freed without being wiped. The
+/// copies in zbus's message buffer, which grows as zbus serialises the reply and may leave
+/// earlier copies in memory it reallocated, and in the socket's buffers, are zbus's and the
+/// kernel's, and are not wiped. No `Debug`: nothing can print it.
+struct SecretsReply(Zeroizing<String>);
+
+impl zbus::Type for SecretsReply {
+    const SIGNATURE: &'static zbus::Signature = <Settings<'static> as zbus::Type>::SIGNATURE;
+}
+
+impl serde::Serialize for SecretsReply {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let psk = HashMap::from([("psk", Variant::from(self.0.as_str()))]);
+        Settings::from([(SECURITY_SETTING, psk)]).serialize(serializer)
+    }
 }
 
 /// What the person can ask of NetworkManager. `Debug` never prints a password.
@@ -717,7 +729,7 @@ impl Agent {
         _hints: Vec<String>,
         flags: u32,
         #[zbus(header)] header: Header<'_>,
-    ) -> Result<BTreeMap<String, Props>, AgentError> {
+    ) -> Result<SecretsReply, AgentError> {
         self.require_nm(&header, "GetSecrets")?;
         let request = secrets_request(&connection, connection_path.as_str(), &setting_name, flags);
         // The settings may carry secrets: nothing of them is kept past the request.
@@ -766,8 +778,7 @@ impl Agent {
             _ = cancelled => None,
         };
         match outcome {
-            Some(Ok(Ok(Some(password)))) => secrets_reply(&password)
-                .ok_or_else(|| AgentError::Failed("the reply cannot be built".to_owned())),
+            Some(Ok(Ok(Some(password)))) => Ok(SecretsReply(password)),
             Some(Ok(Ok(None))) => Err(AgentError::UserCanceled("the person canceled".to_owned())),
             // The shell went away with the prompt open: no one will answer it.
             Some(Ok(Err(_))) => Err(AgentError::NoSecrets(
@@ -1746,7 +1757,13 @@ mod tests {
 
     #[test]
     fn the_reply_carries_the_psk_and_nothing_else() {
-        let reply = secrets_reply("hunter2hunter2").unwrap();
+        let reply = SecretsReply(Zeroizing::new("hunter2hunter2".into()));
+        // The password is overwritten as the reply drops.
+        fn overwritten<T: zeroize::ZeroizeOnDrop>(_: &T) {}
+        overwritten(&reply.0);
+        let ctxt = zbus::wire::serialized::Context::new(zbus::wire::LE, 0);
+        let bytes = zbus::wire::to_bytes(ctxt, &reply).unwrap();
+        let (reply, _): (BTreeMap<String, Props>, _) = bytes.deserialize().unwrap();
         assert_eq!(reply.len(), 1);
         assert_eq!(reply[SECURITY_SETTING].len(), 1);
         assert_eq!(

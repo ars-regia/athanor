@@ -1,0 +1,22 @@
+{
+  "_comment": "Categories of the merge card (CLAUDE.md, Merging; the stop-and-ask list of AGENTS.md). paths: a directory prefix ending in '/', or a glob, matched on filename and previous_filename, minus exclude. patterns: regular expressions tried on every added or removed line of a file's patch. Both only tag files: the card lists every changed file, and one that matches nothing is unclassified. Only a docs/*.md file under docs/superpowers/plans/, docs/spikes/, docs/reviews/, docs/shell-bench/ or docs/releases/ that no category names collapses into one list; every other file is listed with its tags.",
+  "categories": [
+    {"name": "process launch", "paths": [], "patterns": ["Command::new", "\\bCommand\\b", "std::process", "tokio::process", "\\bExec[A-Za-z]*=", "\\bexecv", "\\bfork\\b", "\\.args?\\(", "\\bsubprocess\\b", "\\bposix_spawn\\b", "\\bos\\.(system|exec|popen|spawn)", "\\bexecl", "\\bPopen\\b", "\\.(spawn|exec|pre_exec)\\("]},
+    {"name": "files", "paths": [], "patterns": ["\\bfs::", "\\bOpenOptions\\b", "\\bFile::(create|open)\\b", "\\bset_permissions\\b", "\\bchmod\\b", "symlink", "hard_link"]},
+    {"name": "unsafe", "paths": [], "patterns": ["\\bunsafe\\b", "unsafe_code"]},
+    {"name": "D-Bus", "paths": ["*dbus-1/*"], "patterns": ["\\bzbus\\b", "\\bdbus\\b", "#\\[(zbus::)?interface", "gio::bus", "\\bbusctl\\b"]},
+    {"name": "confinement", "paths": ["*.te", "*.cil", "*.fc"], "patterns": ["(?i)landlock", "(?i)seccomp", "\\b(Protect[A-Za-z]*|Private[A-Za-z]*|SystemCall[A-Za-z]*|ReadWritePaths|ReadOnlyPaths|InaccessiblePaths|CapabilityBoundingSet|AmbientCapabilities|NoNewPrivileges|Restrict[A-Za-z]*|LockPersonality|MemoryDenyWriteExecute|DeviceAllow|SELinuxContext)="]},
+    {"name": "trust seal", "paths": ["system/athanor-trust-state/", "*/seal.rs"], "patterns": ["(?<![A-Za-z])(?i:seal)|(?<=[a-z])Seal"]},
+    {"name": "power", "paths": ["*logind*"], "patterns": ["(?i)\\blogind\\b", "(?i)\\b(suspend|hibernate|poweroff|reboot)\\b", "PrepareForSleep", "\\bHandle[A-Za-z]*="]},
+    {"name": "signing and keys", "paths": ["forge/specs/azoth/keys/", "system/keys/", "system/sign-images.sh", "system/promote.sh", "forge/scripts/sign_attest.sh", "system/verify-images.sh", "system/tag-images.sh", "system/image-digests.sh"], "patterns": ["\\bcosign\\b", "\\bsbsign\\b", "(?i)\\bMOK\\b"]},
+    {"name": "polkit", "paths": ["system/athanor-bus-api/src/polkit.rs", "*polkit-1/*", "*.policy", "*.rules"], "patterns": ["(?i)polkit", "(?i)policykit"]},
+    {"name": "authentication", "paths": ["system/athanor-auth/", "forge/specs/athanor-unlockd/", "forge/specs/athanor-greeter-ui/", "*.pam", "*/pam.d/*", "*greetd*"], "patterns": ["\\bpam_", "(?i)\\bauthenticate\\b"]},
+    {"name": "systemd units", "paths": ["*.service", "*.socket", "*.timer"], "patterns": []},
+    {"name": "approved document text", "paths": ["docs/architecture/doc_*.md", "docs/decisions/*.md"], "patterns": []},
+    {"name": "CI workflows", "paths": [".github/"], "exclude": [".github/CODEOWNERS", ".github/settings/"], "patterns": []},
+    {"name": "repository settings", "paths": [".github/settings/", ".claude/settings.json"], "patterns": []},
+    {"name": "CODEOWNERS", "paths": [".github/CODEOWNERS"], "patterns": []},
+    {"name": "merge rule and its tooling", "paths": ["scripts/merge_card*", "scripts/tests/test_merge_card.py", "*CLAUDE.md", "*AGENTS.md", ".claude/"], "patterns": []},
+    {"name": "dependencies", "paths": ["*Cargo.toml", "*.lock", "deny.toml", ".cargo/config.toml", "flake.nix", "*.repo", "*Containerfile", "forge/specs/*.spec", ".gitmodules", "forge/config/packages.json", "scripts/ci/audited-lockfiles.txt", "scripts/ci/requirements*.txt", "system/nvidia/locks/"], "patterns": ["^[ +-]*(\\[(dev-|build-)?dependencies[.\\]]|[A-Za-z0-9_-]+ = \\{ *(version|git|path)\\b)", "Subproject commit"]}
+  ]
+}
