@@ -110,10 +110,11 @@ def run(
     files=FILES,
     codeowners=CODEOWNERS,
     later=None,
-    table_at_base=False,
+    table_at_base=True,
 ):
     """(exit code, stdout, stderr) of the script against a faked GitHub.
 
+    table_at_base: True for the shipped table, False for a 404, or the text served.
     later: values the end of the reading sees (head, base, state, base_sha, reviews).
     """
     pr = {**PR, **(pr or {})}
@@ -136,8 +137,10 @@ def run(
         if "Accept: application/vnd.github.raw" in args:
             assert path.endswith(f"?ref={BASE}"), path
             if "merge_card_categories.json" in path:
-                if not table_at_base:
+                if table_at_base is False:
                     raise merge_card.NotFound("404")
+                if isinstance(table_at_base, str):
+                    return table_at_base
                 return merge_card.CATEGORIES.read_text()
             if codeowners is None:
                 raise merge_card.NotFound("404")
@@ -192,6 +195,7 @@ class Card(unittest.TestCase):
     def test_a_clean_pull_request_passes_and_prints_the_card(self):
         code, out, err = run()
         self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out.splitlines()[-1], "RESULT: OK")
         for text in (
             f"#5  base iso-v0 @ {BASE}",
             f"head {HEAD}",
@@ -200,7 +204,7 @@ class Card(unittest.TestCase):
             "CI workflows: .github/workflows/pr.yml",
             "unsafe: src/a.rs",
             "files (2, every changed file; the tags are heuristic, this list is the authority)",
-            "the local file (the table is missing at the base",
+            "categories: the base ",
             "card time: ",
         ):
             self.assertIn(text, out)
@@ -434,35 +438,127 @@ class Findings(unittest.TestCase):
 
     def test_only_unnamed_docs_prose_collapses_and_it_is_listed_by_name(self):
         files = [
-            entry("docs/guide.md", "+unsafe prose"),
+            entry("docs/spikes/guide.md", "+unsafe prose"),
             entry("docs/architecture/doc_x.md", "+text"),
             entry("docs/gen/tool.py", "+subprocess.run(x)"),
             entry("system/foo/tests/t.rs", "+unsafe { f() }"),
         ]
         _, out, _ = run(pr={"changedFiles": 4}, files=files)
         self.assertIn(
-            "docs prose, not approved documents (1 files): docs/guide.md", out
+            "docs prose, not approved documents (1 files): docs/spikes/guide.md", out
         )
-        self.assertNotIn("  docs/guide.md [", out)
+        self.assertNotIn("  docs/spikes/guide.md [", out)
         self.assertIn(
             "  docs/architecture/doc_x.md [modified]: approved document text", out
         )
         self.assertIn("process launch: docs/gen/tool.py: +subprocess.run(x)", out)
         self.assertIn("unsafe: in tests: system/foo/tests/t.rs: +unsafe { f() }", out)
 
+    def test_a_decided_document_outside_the_prose_directories_is_listed(self):
+        names = [
+            "docs/operations/github-settings.md",
+            "docs/operations/ownership.md",
+            "docs/operations/secrets.md",
+            "docs/architecture/shell-features.md",
+            "docs/guide.md",
+        ]
+        files = [entry(n, "+text") for n in names]
+        _, out, _ = run(pr={"changedFiles": len(files)}, files=files)
+        self.assertNotIn("docs prose", out)
+        for n in names:
+            self.assertIn(f"  {n} [modified]: unclassified", out)
+        for d in merge_card.PROSE_DIRS:
+            _, out, _ = run(pr={"changedFiles": 1}, files=[entry(d + "x.md", "+t")])
+            self.assertIn("docs prose, not approved documents (1 files)", out, d)
+
     def test_the_card_prints_its_time_for_verify_approval(self):
         _, out, _ = run()
         self.assertRegex(out, r"card time: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
     def test_the_table_at_the_base_wins_and_the_local_one_is_said_when_used(self):
-        self.assertIn("categories: the base " + BASE[:12], run(table_at_base=True)[1])
-        self.assertIn("categories: the local file", run()[1])
+        self.assertIn("categories: the base " + BASE[:12], run()[1])
+        code, out, _ = run(table_at_base=False, argv=("--local-categories",))
+        digest = subprocess.run(
+            ["git", "hash-object", str(merge_card.CATEGORIES)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        self.assertEqual(code, 0)
+        self.assertIn(f"categories: the local file {digest} (", out)
+
+    def test_a_table_missing_at_the_base_is_refused_without_the_flag(self):
+        code, out, err = run(table_at_base=False)
+        self.assertEqual(code, 1)
+        self.assertIn("the categories table is missing at the base", out)
+        self.assertIn("REFUSED:", err)
+        self.assertEqual(out.splitlines()[-1], "RESULT: REFUSED (1)")
+        self.assertNotIn("card time:", out)
+
+    def test_an_unusable_table_is_refused_before_anything_is_printed(self):
+        shipped = json.loads(merge_card.CATEGORIES.read_text())
+        no_unsafe = {
+            "categories": [c for c in shipped["categories"] if c["name"] != "unsafe"]
+        }
+        bad_regex = copy.deepcopy(shipped)
+        bad_regex["categories"][0]["patterns"].append("(")
+        no_paths = copy.deepcopy(shipped)
+        del no_paths["categories"][0]["paths"]
+        cases = {
+            "not JSON": "{",
+            "non-empty list": json.dumps({"categories": []}),
+            "no category 'unsafe'": json.dumps(no_unsafe),
+            "pattern '('": json.dumps(bad_regex),
+            "has no list of strings paths": json.dumps(no_paths),
+            "no name": json.dumps({"categories": [{}]}),
+        }
+        for reason, table in cases.items():
+            code, out, _ = run(table_at_base=table)
+            self.assertEqual(code, 1, reason)
+            self.assertIn(reason, out)
+            self.assertNotIn("card time:", out)
+            self.assertRegex(out.splitlines()[-1], r"^RESULT: REFUSED \(\d+\)$")
+
+    def test_a_refusal_is_on_stdout_and_the_last_line_is_the_result(self):
+        code, out, err = run(pr={"isDraft": True})
+        self.assertEqual(code, 1)
+        self.assertIn("REFUSED: the pull request is a draft", out)
+        self.assertIn("REFUSED: the pull request is a draft", err)
+        self.assertEqual(out.splitlines()[-1], "RESULT: REFUSED (1)")
+
+    def test_the_card_says_how_many_files_are_unclassified(self):
+        files = [entry("a.rs", "+let x = 1;"), entry("docs/spikes/x.md", "+t")]
+        _, out, _ = run(files=files)
+        self.assertIn("1 of 2 files unclassified", out)
+
+    def test_a_control_character_in_a_path_or_a_line_cannot_forge_a_card_line(self):
+        evil = "src/a\n  CODEOWNERS: nothing\r\x1b[2J\x85\u2028b.rs"
+        files = [entry(evil, "+unsafe { f()\x1b[0m }"), FILES[0]]
+        _, out, _ = run(files=files)
+        self.assertNotRegex(out, "[\x00-\x09\x0b-\x1f\x7f-\x9f\u2028\u2029]")
+        for line in out.splitlines():
+            self.assertFalse(line.startswith("  CODEOWNERS: nothing"), line)
+        self.assertIn(
+            "src/a\\n  CODEOWNERS: nothing\\r\\u001b[2J\\u0085\\u2028b.rs [", out
+        )
+        prose = [entry("docs/spikes/a\nb.md", "+t"), FILES[1]]
+        _, out, _ = run(files=prose)
+        self.assertIn("docs/spikes/a\\nb.md", out)
 
     def test_process_launch_catches_command_and_the_process_modules(self):
         for line in (
             "+let c = Command::new(x);",
             "+use std::process::Command as C;",
             "+tokio::process::Command",
+            "+import subprocess",
+            "+subprocess.run(x)",
+            "+os.system(x)",
+            "+os.execvp(a, b)",
+            "+libc::execl(a)",
+            "+p = Popen(x)",
+            "+cmd.spawn()",
+            "+cmd.exec()",
+            "+cmd.pre_exec(f)",
         ):
             _, out, _ = run(files=[entry("src/a.rs", line), FILES[0]])
             self.assertIn("process launch: src/a.rs", out, line)
@@ -569,18 +665,23 @@ class Real(unittest.TestCase):
             ],
             "trust seal": [
                 "+fn ask_seal()",
+                "+let s = SEAL;",
                 "+validate_seal(x)",
                 "+ShowSeal",
                 "+Seal::new()",
                 "+let sealed = 1;",
             ],
             "power": ["+HandlePowerKey=ignore"],
-            "polkit": ["+polkit check"],
+            "polkit": ["+polkit check", "+import PolicyKit", "+policykit rule"],
             "authentication": ["+pam_authenticate(h)"],
         }
         for category, lines in cases.items():
             for line in lines:
                 self.assertIn(category, self.tags("src/x.rs", line), line)
+
+    def test_seal_is_not_a_substring_of_another_word(self):
+        for line in ("+fn CloseAll()", "+ReleaseAll(x)", "+parseAlias(a)", "+Disease"):
+            self.assertNotIn("trust seal", self.tags("src/x.rs", line), line)
 
     def test_paths_of_each_category_are_tagged(self):
         cases = {
@@ -605,7 +706,13 @@ class Real(unittest.TestCase):
                 "AGENTS.md",
                 ".claude/rules/x.md",
             ],
-            "polkit": ["system/athanor-bus-api/src/polkit.rs"],
+            "polkit": [
+                "system/athanor-bus-api/src/polkit.rs",
+                "x/etc/polkit-1/rules.d/10-a.rules",
+                "x/usr/share/polkit-1/actions/os.a.policy",
+                "x/a.policy",
+                "x/a.rules",
+            ],
             "authentication": [
                 "system/athanor-auth/src/a.rs",
                 "forge/specs/athanor-unlockd/a.spec",
