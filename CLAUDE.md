@@ -39,7 +39,7 @@ applies to Claude Code only.
   The authorisation depends on who opened the pull request. One the App opened needs an
   `APPROVED` review by `hr-mes` whose `commit.oid` in `gh pr view <n> --json reviews` is the
   card's head sha and whose `submittedAt` is later than the card; Claude then merges with
-  `athanor-agent gh pr merge <n> --squash --match-head-commit <full sha>`, never `--admin`. Once ADR-0137's ruleset is applied, on `iso-v0` this enqueues the head in the merge queue: it is merged once `gh pr view <n> --json state` is `MERGED`, and one the queue removes is not merged.
+  `athanor-agent gh pr merge <n> --squash --match-head-commit <full sha>`, never `--admin`. On a base with a `merge_queue` rule (`iso-v0`, ADR-0137) the queue sets the merge method and GitHub refuses `--squash`, so there every merge command of these rules and of `.claude/rules/workflow.md` drops it: `athanor-agent gh pr merge <n> --match-head-commit <full sha>` enqueues the head, which is merged once `gh pr view <n> --json state` is `MERGED`, and one the queue removes is not merged. *(2026-11-20: #1370's `--squash` was refused with "The merge strategy for iso-v0 is set by the merge queue")*
   An App pull request whose files are all under a path with no owner in `.github/CODEOWNERS`
   (ADR-0107: `docs/superpowers/plans/`, `docs/spikes/`) needs no approval: after the card
   and the reading above, Claude merges it the same way, and the card names the unowned path.
