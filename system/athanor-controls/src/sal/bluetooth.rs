@@ -404,26 +404,41 @@ impl Page {
         page
     }
 
-    /// Shows what changed since the last call: a new state or request, and a failure as the
-    /// note under the page. A device that came, went or changed asks for the page to be built
-    /// again.
+    /// Shows what changed since the last call: a new state or request, a device's new label or
+    /// connection in its row, and a failure as the note under the page. A device that came,
+    /// went, moved or shows another icon asks for the page to be built again: `turn` has no
+    /// [`Look`] to draw the icon with.
     pub fn turn(&mut self, ui: &mut Ui) -> Turn {
         let now = (self.service.states.get(), self.service.failures.get());
         if now == self.seen {
             return Turn::Unchanged;
         }
-        let rebuild = self.ids.as_ref().is_some_and(|ids| {
+        let rebuild = self.ids.as_mut().is_some_and(|ids| {
             let state = self.service.state.borrow();
             let (paired, nearby) = state.as_ref().map_or((&[][..], &[][..]), |s| {
                 (s.paired.as_slice(), s.nearby.as_slice())
             });
             let nearby = if self.pairing { nearby } else { &[] };
-            ids.paired_rows != paired.len()
+            let row = |d: &Device| (d.path.clone(), d.icon);
+            if ids.paired_rows != paired.len()
                 || !ids
                     .rows
                     .iter()
-                    .map(|(_, d)| d)
-                    .eq(paired.iter().chain(nearby))
+                    .map(|(_, d)| row(d))
+                    .eq(paired.iter().chain(nearby).map(row))
+            {
+                return true;
+            }
+            // The same devices with the same icons: a new label or connection is set in place.
+            for ((id, shown), device) in ids.rows.iter_mut().zip(paired.iter().chain(nearby)) {
+                if shown != device {
+                    let name = device_name(device);
+                    ui.set_text(*id, &name);
+                    ui.set_shown_text(*id, &name);
+                    shown.clone_from(device);
+                }
+            }
+            false
         });
         let failed = now.1 != self.seen.1;
         if rebuild {
@@ -689,9 +704,61 @@ mod tests {
         assert!(ui.is_visible(ids(&page).failure.note));
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
+    }
+
+    /// A device that connects, or takes a new label, keeps its row, which keeps the keyboard
+    /// focus on the row the person just pressed; a device that comes, goes, moves or shows
+    /// another icon builds the rows again (#1248).
+    #[test]
+    fn a_device_that_connects_keeps_its_row_and_a_new_device_rebuilds_them() {
+        let shown = |ui: &Ui, row| match &ui.widget(row).kind {
+            Kind::LabelledButton { label, text, .. } => (label.clone(), text.clone()),
+            _ => unreachable!("a labelled button"),
+        };
+        let (mut page, mut received) =
+            page(state(vec![device("Headphones", false), device("Keyboard", false)]));
+        let mut ui = Ui::new("t", Theme::default(), false);
+        page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+        let headphones = ids(&page).rows[0].0;
+        let mut renamed = device("Keyboard", false);
+        renamed.label = "Desk keyboard".to_owned();
+        page.service
+            .state
+            .replace(Some(state(vec![device("Headphones", true), renamed.clone()])));
+        page.service.changed();
+        assert_eq!(page.turn(&mut ui), Turn::Updated, "only the rows' state changed");
+        assert_eq!(ids(&page).rows[0].0, headphones);
+        let connected = tr_with("{device}, connected", "device", "Headphones");
+        assert_eq!(shown(&ui, headphones), (connected.clone(), connected));
+        let keyboard = ids(&page).rows[1].0;
+        let desk = "Desk keyboard".to_owned();
+        assert_eq!(shown(&ui, keyboard), (desk.clone(), desk));
+        // The row's press acts on the state the update brought.
+        let clicked = ui.activate(headphones);
+        assert!(clicked.is_some_and(|event| page.event(&mut ui, &event)));
+        assert!(matches!(
+            received.try_recv(),
+            Ok(BluetoothCommand::Disconnect(path)) if path == "/org/bluez/hci0/dev_Headphones"
+        ));
+
+        let mouse = Device {
+            icon: "input-mouse-symbolic",
+            ..renamed.clone()
+        };
+        for (now, why) in [
+            (vec![renamed.clone(), device("Headphones", true)], "another order"),
+            (vec![mouse, device("Headphones", true)], "another icon"),
+            (vec![device("Headphones", true)], "a device left"),
+        ] {
+            page.service.state.replace(Some(state(now)));
+            page.service.changed();
+            assert_eq!(page.turn(&mut ui), Turn::Rebuild, "{why}");
+            ui = Ui::new("t", Theme::default(), false);
+            page.build(&mut ui, Ui::ROOT, &mut Look::plain());
+        }
     }
 
     #[test]
@@ -701,11 +768,11 @@ mod tests {
         let mut ui = Ui::new("t", Theme::default(), false);
         page.build(&mut ui, Ui::ROOT, &mut Look::plain());
 
-        // A refusal that comes with a device that changed: the page built again shows it.
+        // A refusal that comes with a device that came: the page built again shows it.
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut ui), Turn::Rebuild);
         let mut again = Ui::new("t", Theme::default(), false);
@@ -760,7 +827,7 @@ mod tests {
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut fourth), Turn::Rebuild);
         page.dropped();
@@ -793,7 +860,7 @@ mod tests {
         page.service.failed();
         page.service
             .state
-            .replace(Some(state(vec![device("Keyboard", true)])));
+            .replace(Some(state(vec![device("Keyboard", false), device("Mouse", false)])));
         page.service.changed();
         assert_eq!(page.turn(&mut next), Turn::Rebuild);
         page.closed(&mut next);
