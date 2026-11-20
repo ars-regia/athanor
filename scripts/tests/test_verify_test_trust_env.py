@@ -104,12 +104,9 @@ class TestTrustEnv(unittest.TestCase):
         )
         self.assertEqual(self.problems(body + USES), [])
 
-    def test_a_script_reached_through_a_python_helper_needs_the_block(self):
+    def test_a_python_intermediary_is_out_of_scope(self):
         self.write("forge/scripts/helper.py", 'run("caller.sh")\n')
-        problems = self.problems('import helper\nhelper.go("helper.py")\n')
-        self.assertEqual(len(problems), 1)
-        self.assertIn("module-level mock.patch.dict", problems[0])
-        self.assertEqual(self.problems(BLOCK + 'helper.go("helper.py")\n'), [])
+        self.assertEqual(self.problems('import helper\nhelper.go("helper.py")\n'), [])
 
     def test_a_script_reached_through_another_script_needs_the_block(self):
         self.write("forge/scripts/outer.sh", 'bash "$here/caller.sh"\n')
@@ -123,6 +120,7 @@ class TestTrustEnv(unittest.TestCase):
         for body in (
             'run("mycaller.sh")\n',
             'run("caller.shx")\n',
+            'run("caller.sh.bak")\n',
             'run("a-caller.sh")\n',
         ):
             with self.subTest(body=body):

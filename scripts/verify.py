@@ -7261,24 +7261,26 @@ def isolation_gaps(tree, shared):
     return gaps
 
 
-def trust_env_problems(root=None):
+def trust_env_problems(root=None, reached=None):
     """Every tracked test_*.py that names a script reaching tier-digests.sh carries the isolation block
-    (isolation_gaps). A script reaches it when a non-comment line of a tracked .sh or non-test .py names
-    tier-digests.sh or a script that reaches it, as a whole file name."""
+    (isolation_gaps); `reached`, when given, is filled with those tests. A script reaches it when a
+    non-comment line of a tracked .sh names tier-digests.sh or a script that reaches it, as a whole file
+    name. A Python intermediary is out of scope: the closure through the .py files that name a reaching
+    script would cover almost every test, and a test would carry the block for a script it never runs."""
     root = root or ROOT
     tracked = [f for f in subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
                                          text=True, check=True).stdout.split("\0") if f]
     is_test = re.compile(r"(?:^|/)test_[^/]*\.py$")
     problems, texts = [], {}
     for f in tracked:
-        if f.endswith((".sh", ".py")):
+        if f.endswith(".sh") or is_test.search(f):
             try:
                 texts[f] = COMMENT_LINE.sub("", read(root / f))
             except OSError as e:
                 problems.append(f"{f}: tracked but unreadable ({e.strerror})")
 
     def naming(names, candidates):
-        found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w-])")
+        found = re.compile(r"(?<![\w.-])(?:" + "|".join(map(re.escape, sorted(names))) + r")(?![\w.-])")
         return {f for f in candidates if found.search(texts[f])}
 
     base = lambda f: f.rsplit("/", 1)[-1]  # noqa: E731
@@ -7291,6 +7293,8 @@ def trust_env_problems(root=None):
         pending = {base(f) for f in more}
     names = {base(f) for f in reaching}
     tests = sorted(f for f in naming(names, [f for f in texts if is_test.search(f)]))
+    if reached is not None:
+        reached.extend(tests)
     shared, shared_error = set(), None
     try:
         shared = string_literals(ast.parse(read(root / SHARED_TRUST_ENV))).get("TRUST_ENV", set())
