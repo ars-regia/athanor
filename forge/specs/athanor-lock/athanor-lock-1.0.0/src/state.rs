@@ -466,7 +466,7 @@ mod tests {
 
     #[test]
     fn nothing_else_reaches_unlock() {
-        // Every machine reachable in eight events from either start, every event from each.
+        // Every machine reachable in seven events from either start, every event from each.
         let alphabet = |m: &Machine| {
             let mut events = vec![
                 Event::Lock,
@@ -526,7 +526,10 @@ mod tests {
                     let ended = m.state != State::Unlocked && after.state == State::Unlocked;
                     if ended || actions.contains(&Action::SetLockedHint(false)) {
                         assert!(
-                            success || event == Event::Unlock || m.state == State::Unlocking,
+                            success
+                                || event == Event::Unlock
+                                || (m.state == State::Unlocking
+                                    && matches!(event, Event::Locked | Event::Finished)),
                             "{m:?} ended the lock on {event:?}"
                         );
                     }
@@ -647,7 +650,36 @@ mod tests {
                 vec![Action::ReleaseInhibitor],
                 "{end:?}"
             );
+
+            // A lock on fewer outputs: an output of the lock that ended is not waited for.
+            let mut m = locked();
+            m.handle(end);
+            m.handle(Event::Lock);
+            m.handle(Event::SurfaceAdded(1));
+            m.handle(Event::Locked);
+            m.handle(Event::PrepareForSleep(true));
+            assert_eq!(
+                m.handle(Event::Presented(1)),
+                vec![Action::ReleaseInhibitor],
+                "{end:?}"
+            );
         }
+    }
+
+    #[test]
+    fn an_output_that_comes_back_waits_for_a_new_frame() {
+        let mut m = locked();
+        m.handle(Event::Presented(1));
+        m.handle(Event::SurfaceRemoved(1));
+        m.handle(Event::SurfaceAdded(1));
+        m.handle(Event::PrepareForSleep(true));
+        assert!(!m
+            .handle(Event::Presented(2))
+            .contains(&Action::ReleaseInhibitor));
+        assert_eq!(
+            m.handle(Event::Presented(1)),
+            vec![Action::ReleaseInhibitor]
+        );
     }
 
     #[test]
