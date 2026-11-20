@@ -224,6 +224,39 @@ class Card(unittest.TestCase):
         )
 
 
+class Comments(unittest.TestCase):
+    CATS = [{"name": "unsafe", "paths": [], "patterns": [r"\bunsafe\b"]}]
+
+    def hunks(self, path, *lines):
+        return merge_card.hunks([(path, list(lines))], self.CATS)
+
+    def test_a_comment_only_match_is_counted_and_has_no_hunk(self):
+        code, comments = self.hunks("a.rs", "+// unsafe here", "+/// unsafe", "-    * unsafe")
+        self.assertEqual((code, comments), ({}, {"unsafe": {"a.rs": 3}}))
+        for path in ("a.sh", "b.toml", "c.service", "d.spec", "e.py"):
+            self.assertEqual(self.hunks(path, "+  # unsafe")[0], {})
+        self.assertEqual(self.hunks("notes/x.md", "+unsafe prose")[0], {})
+
+    def test_a_code_match_is_a_hunk(self):
+        code, comments = self.hunks("a.rs", "+    unsafe { f() }")
+        self.assertEqual((code, comments), ({"unsafe": ["a.rs: +    unsafe { f() }"]}, {}))
+
+    def test_a_hash_in_rust_is_code_and_a_slash_in_shell_is_not_a_comment(self):
+        self.assertIn("unsafe", self.hunks("a.rs", "+#[unsafe(no_mangle)]")[0])
+        self.assertIn("unsafe", self.hunks("a.sh", "+// unsafe")[0])
+
+    def test_a_mixed_file_yields_both_and_the_card_prints_the_count_line(self):
+        diff = "diff --git a/a.rs b/a.rs\n+++ b/a.rs\n+unsafe { f() }\n+// unsafe is why\n"
+        files = merge_card.parse_diff(diff)
+        code, comments = merge_card.hunks(files, self.CATS)
+        self.assertEqual((len(code["unsafe"]), comments["unsafe"]), (1, {"a.rs": 1}))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            merge_card.print_card({**PR, "reviews": []}, BASE, RULES, None, files, self.CATS)
+        self.assertIn("unsafe: a.rs: +unsafe { f() }", out.getvalue())
+        self.assertIn("unsafe: also 1 comment lines in a.rs", out.getvalue())
+
+
 class Approval(unittest.TestCase):
     ARGS = ("--verify-approval", "2026-01-01T12:00:00Z", "--head", HEAD)
 

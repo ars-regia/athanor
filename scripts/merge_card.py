@@ -118,21 +118,42 @@ def path_matches(path, patterns):
     )
 
 
+SLASH_COMMENT = (".rs", ".c", ".h", ".cc", ".cpp", ".hpp", ".js", ".ts")
+
+
+def is_comment(path, line):
+    """Whether a changed line (with its +/- mark) is a comment, by the type of its file."""
+    if path.endswith(".md"):
+        return True
+    text = line[1:].lstrip()
+    if path.endswith(SLASH_COMMENT):
+        return text.startswith(("//", "/*", "*"))
+    return text.startswith("#")
+
+
 def hunks(files, categories):
-    """category name -> one line of evidence per changed file that touches it."""
-    found = {}
+    """(code, comments): category -> evidence lines, and category -> {path: comment lines}.
+
+    A path category lists the file. A pattern category lists the first code line that matches
+    in a file, and counts the comment lines that match, so that nothing is lost.
+    """
+    code, comments = {}, {}
     for cat in categories:
         regexes = [re.compile(p) for p in cat["patterns"]]
         for path, lines in files:
             if path_matches(path, cat["paths"]):
-                found.setdefault(cat["name"], []).append(f"{path} (path)")
+                code.setdefault(cat["name"], []).append(f"{path} (path)")
                 continue
             if path.startswith("docs/") or "/tests/" in path:
                 continue
-            hit = next((x for x in lines if any(r.search(x) for r in regexes)), None)
+            matching = [x for x in lines if any(r.search(x) for r in regexes)]
+            hit = next((x for x in matching if not is_comment(path, x)), None)
             if hit:
-                found.setdefault(cat["name"], []).append(f"{path}: {hit.strip()[:100]}")
-    return found
+                code.setdefault(cat["name"], []).append(f"{path}: {hit.strip()[:100]}")
+            n = sum(is_comment(path, x) for x in matching)
+            if n:
+                comments.setdefault(cat["name"], {})[path] = n
+    return code, comments
 
 
 def stale_base(repo, pr, base_sha, checks, has_queue):
@@ -252,15 +273,19 @@ def print_card(pr, base_sha, rules, protection, files, categories):
         "latest reviews: "
         + (", ".join(f"{w} {s}" for w, s in sorted(reviews.items())) or "none")
     )
-    found = hunks(files, categories)
+    code, comments = hunks(files, categories)
     print("hunks:")
     for cat in categories:
-        lines = found.get(cat["name"], [])
+        lines = code.get(cat["name"], [])
         for line in lines[:2]:
             print(f"  {cat['name']}: {line}")
         if len(lines) > 2:
             print(f"  {cat['name']}: and {len(lines) - 2} more")
-    if not found:
+        if cat["name"] in comments:
+            where = ", ".join(comments[cat["name"]])
+            n = sum(comments[cat["name"]].values())
+            print(f"  {cat['name']}: also {n} comment lines in {where}")
+    if not code and not comments:
         print("  none of the listed categories")
 
 
