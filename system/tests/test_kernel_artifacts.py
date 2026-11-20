@@ -1224,6 +1224,17 @@ class CheckPlan(Repo):
         r = self.plan(self.pin_change(NVIDIA_OPEN_VERSION=NVIDIA_OPEN_BUMP))
         self.assertEqual(r.returncode, 1)
 
+    def test_nvidia_pin_companions_match_the_recorded_accepted_risk(self):
+        """Files allowed beside NVIDIA pins run only after the merge (#1332): the list is
+        recorded in doc_build_ordering.md, section 4, and widening it needs the doc to change."""
+        script = SCRIPT.read_text()
+        line = re.search(r"^NVIDIA_PIN_COMPANIONS=\(.*\)$", script, re.M).group(0)
+        out = subprocess.run(["bash", "-c", line + "\nprintf '%s\\n' \"${NVIDIA_PIN_COMPANIONS[@]}\"\n"], capture_output=True, text=True, check=True)
+        doc = (ROOT / "docs/architecture/doc_build_ordering.md").read_text()
+        recorded = re.search(r"Allowed: (`[^\n]*?`)\.", doc)
+        self.assertIsNotNone(recorded, "doc_build_ordering.md does not record the companions of an NVIDIA pin bump")
+        self.assertEqual(set(re.findall(r"`([^`]+)`", recorded.group(1))), set(out.stdout.split()))
+
     def test_kernel_pin_files_match_the_bump_workflow(self):
         """The kernel group of kernel-bump.yml regenerates exactly KERNEL_PIN_FILES (O7, O8):
         its bump-pins artifact plus the files of the bump-prep artifact (the two manifests and
