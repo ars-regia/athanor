@@ -49,6 +49,9 @@ class TierDigests(unittest.TestCase):
                 "GITHUB_BASE_REF",
                 "GITHUB_HEAD_REF",
                 "TIER_TRUSTED_REFS",
+                "GITHUB_ACTIONS",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
             )
         }
         self.env.update(

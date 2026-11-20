@@ -106,6 +106,9 @@ class PublishTiers(unittest.TestCase):
                 "GITHUB_REF",
                 "GITHUB_BASE_REF",
                 "GITHUB_HEAD_REF",
+                "GITHUB_ACTIONS",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
             )
         }
         self.env["RETRY_ATTEMPTS"] = "1"

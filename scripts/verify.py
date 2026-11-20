@@ -7176,6 +7176,51 @@ def judge_known_red(entries, base, results, today):
         if found and not new and name not in expired:
             tolerated.add(name)
     return tolerated, problems
+# A test that runs a script reaching system/tier-digests.sh and hands it a copy of
+# os.environ inherits the CI run's trust environment: on a pull request into rebase/*,
+# GITHUB_BASE_REF makes tier-digests.sh read that branch's rules over the network (#1257).
+TRUST_ENV_NAMES = ("GITHUB_BASE_REF", "GITHUB_REF", "GITHUB_REPOSITORY", "GITHUB_SERVER_URL",
+                   "TIER_TRUSTED_REFS", "GITHUB_ACTIONS", "GH_TOKEN", "GITHUB_TOKEN")
+ENVIRON_COPY = re.compile(r"os\.environ\.(?:items|copy)\(|\*\*os\.environ|dict\(os\.environ|patch\.dict\(os\.environ")
+SHARED_TRUST_ENV = "forge/scripts/tests/signed_registry.py"
+
+
+def trust_env_problems(root=None):
+    """Every tracked test_*.py that copies os.environ and names a script reaching tier-digests.sh
+    names every TRUST_ENV_NAMES entry too, itself or through the TRUST_ENV tuple of
+    SHARED_TRUST_ENV."""
+    root = root or ROOT
+    tracked = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                             capture_output=True, text=True, check=True).stdout.split("\0")
+    calls = re.compile(r'(?:bash\s+"?|=)\S*tier-digests\.sh')  # not a path in an error message
+    reaching = {"tier-digests.sh"} | {f.rsplit("/", 1)[-1] for f in tracked
+                                      if f.endswith(".sh") and calls.search(read(root / f))}
+    shared = read(root / SHARED_TRUST_ENV) if (root / SHARED_TRUST_ENV).exists() else ""
+    problems = []
+    for f in sorted(tracked):
+        if not re.search(r"(?:^|/)test_[^/]*\.py$", f):
+            continue
+        text = re.sub(r"(?m)^\s*#.*$", "", read(root / f))
+        if not ENVIRON_COPY.search(text):
+            continue
+        if not any(n in text for n in reaching):
+            continue
+        known = text + shared if "TRUST_ENV" in text else text
+        missing = [n for n in TRUST_ENV_NAMES if n not in known]
+        if missing:
+            problems.append(f"{f}: passes a copy of os.environ to a script that reaches tier-digests.sh "
+                            f"without removing {', '.join(missing)}")
+    return problems
+
+
+@check("test-trust-env", "A test that copies os.environ for a script reaching tier-digests.sh drops the CI run's trust environment")
+def check_test_trust_env():
+    r = Result()
+    for problem in trust_env_problems():
+        r.fail(problem)
+    return r
+
+
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""
     if name not in argv:
