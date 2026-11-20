@@ -1,7 +1,8 @@
 //! The lock confines itself only while it has one thread (LP15, plan decision M3). A binary
 //! without libtest's harness, whose `main` is the process's only thread: with a second thread
 //! alive the confinement is refused and nothing is applied; once that thread has gone it is
-//! applied, writes leave only the runtime directory, and the process is not dumpable.
+//! applied, writes leave only the runtime directory, no core file can be written, and the
+//! process is not dumpable.
 
 use std::fs;
 use std::io::ErrorKind;
@@ -10,6 +11,7 @@ use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
 
 use athanor_lock::confine::confine;
+use nix::sys::resource::{getrlimit, setrlimit, Resource};
 
 fn threads() -> usize {
     fs::read_dir("/proc/self/task").expect("tasks").count()
@@ -21,6 +23,13 @@ fn main() {
     let (runtime, outside) = (base.join("runtime"), base.join("outside"));
     fs::create_dir_all(&runtime).expect("mkdir runtime");
     fs::create_dir_all(&outside).expect("mkdir outside");
+
+    // A core limit the confinement must lower: the soft limit raised to the hard one.
+    let (_, hard) = getrlimit(Resource::RLIMIT_CORE).expect("getrlimit");
+    setrlimit(Resource::RLIMIT_CORE, hard, hard).expect("setrlimit");
+    if hard == 0 {
+        println!("confine: the hard core limit is 0 already, so its lowering is not observed");
+    }
 
     // A second thread, as the logind thread started before the confinement would be.
     let (release, wait) = channel::<()>();
@@ -37,6 +46,11 @@ fn main() {
     assert!(
         nix::sys::prctl::get_dumpable().expect("get_dumpable"),
         "a refused confinement leaves the process as it was"
+    );
+    assert_eq!(
+        getrlimit(Resource::RLIMIT_CORE).expect("getrlimit"),
+        (hard, hard),
+        "a refused confinement leaves the core limit as it was"
     );
     release.send(()).expect("release");
     other.join().expect("join").expect("released");
@@ -72,6 +86,11 @@ fn main() {
         "writes beneath the runtime directory stay open"
     );
     assert!(fs::read(outside.join("before")).is_ok(), "reads stay open");
+    assert_eq!(
+        getrlimit(Resource::RLIMIT_CORE).expect("getrlimit"),
+        (0, 0),
+        "no core file may be written, by any path"
+    );
     assert!(
         !nix::sys::prctl::get_dumpable().expect("get_dumpable"),
         "the confined process is not dumpable"
