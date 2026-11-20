@@ -225,11 +225,81 @@ class TestTrustEnv(unittest.TestCase):
             with self.subTest(copy=copy):
                 problems = self.problems(BLOCK + copy + "\n" + USES)
                 self.assertEqual(len(problems), 1)
-                self.assertIn("copy of os.environ when the module is imported", problems[0])
+                self.assertIn("os.environ at import time", problems[0])
 
     def test_an_environment_copied_in_a_function_is_not_an_import_copy(self):
         body = BLOCK + "def f():\n    return dict(o.environ)\n" + USES
         self.assertEqual(self.problems(body), [])
+
+
+    def test_only_the_read_of_one_named_variable_passes_at_import_time(self):
+        for use in ("A = o.environ.get('A')", "A = o.environ.get('A', 'd')", "A = o.environ['A']",
+                    "from os import environ as e\nA = e.get('A')", "from os import environ\nA = environ['A']",
+                    "class C:\n    A = o.environ.get('A')"):
+            with self.subTest(use=use):
+                self.assertEqual(self.problems(BLOCK + use + "\n" + USES), [])
+
+    def test_every_other_use_of_the_environment_at_import_time_is_named(self):
+        for use in ("A = [k for k in o.environ]", "A = o.environ.items()", "A = o.environ | {}",
+                    "A = f(o.environ)", "A = {k: v for k, v in o.environ.items()}",
+                    "A = o.environ.get(NAME)", "o.environ['A'] = '1'", "A = o.environ",
+                    "from os import environ as e\nA = [k for k in e]", "A = o.environ.get('A') + str(o.environ)",
+                    "def f(env=[k for k in o.environ]):\n    pass"):
+            with self.subTest(use=use):
+                problems = self.problems(BLOCK + use + "\n" + USES)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("os.environ at import time", problems[0])
+
+    def test_a_loop_list_extended_or_rebound_is_named(self):
+        for change in ("TRUST_ENV += ('X',)\n", "TRUST_ENV = ()\n", "TRUST_ENV.clear()\n",
+                       "TRUST_ENV[0] = 'X'\n", "def f():\n    global TRUST_ENV\n    TRUST_ENV = ()\n"):
+            with self.subTest(change=change):
+                body = BLOCK.replace(repr(NAMES), repr(list(NAMES))) + change + USES
+                problems = self.problems(body)
+                self.assertEqual(len(problems), 1)
+                self.assertIn("pop loop over TRUST_ENV", problems[0])
+
+    def test_a_loop_list_changed_inside_setUpModule_is_named(self):
+        body = BLOCK.replace("    _p.start()\n", "    _p.start()\n    TRUST_ENV.remove('GH_TOKEN')\n") + USES
+        self.assertIn("pop loop over TRUST_ENV", self.problems(body.replace(repr(NAMES), repr(list(NAMES))))[0])
+
+    def test_the_shared_tuple_rebound_in_the_module_is_named(self):
+        self.write(verify.SHARED_TRUST_ENV, LITERAL)
+        body = IMPORTS + "from signed_registry import TRUST_ENV\n" + PATCH + SETUP + TEARDOWN + "TRUST_ENV = ()\n" + USES
+        self.assertIn("pop loop over TRUST_ENV", self.problems(body)[0])
+
+    def test_addModuleCleanup_stands_for_tearDownModule(self):
+        body = IMPORTS + "import unittest\n" + LITERAL + PATCH + SETUP + "    unittest.addModuleCleanup(_p.stop)\n"
+        self.assertEqual(self.problems(body + USES), [])
+
+    def test_addModuleCleanup_after_a_return_does_not_count(self):
+        body = IMPORTS + "import unittest\n" + LITERAL + PATCH + SETUP + "    return\n    unittest.addModuleCleanup(_p.stop)\n"
+        self.assertIn("tearDownModule that stops", self.problems(body + USES)[0])
+
+    def test_a_return_in_a_nested_function_does_not_stop_the_run(self):
+        for nested in ("    def helper():\n        return 1\n", "    helper = lambda: (yield)\n",
+                       "    class K:\n        def m(self):\n            return 1\n"):
+            with self.subTest(nested=nested):
+                body = BLOCK.replace("    _p.start()\n", "    _p.start()\n" + nested) + USES
+                self.assertEqual(self.problems(body), [])
+
+    def test_a_pop_in_a_try_that_catches_keyerror_counts(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    for n in TRUST_ENV:\n        try:\n            o.environ.pop(n)\n"
+                             "        except KeyError:\n            pass\n") + USES
+        self.assertEqual(self.problems(body), [])
+
+    def test_a_pop_in_a_try_that_catches_another_error_is_named(self):
+        body = BLOCK.replace("    [o.environ.pop(n, None) for n in TRUST_ENV]\n",
+                             "    for n in TRUST_ENV:\n        try:\n            o.environ.pop(n)\n"
+                             "        except ValueError:\n            pass\n") + USES
+        self.assertIn("pops GITHUB_BASE_REF", self.problems(body)[0])
+
+    def test_the_check_names_its_static_limits(self):
+        doc = verify.check_test_trust_env.__doc__
+        self.assertIn("globals()", doc)
+        self.assertIn("setattr", doc)
+        self.assertIn("helper function", doc)
 
 
 # The CI run's trust environment must not reach the scripts under test (#1257).
