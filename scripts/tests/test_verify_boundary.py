@@ -53,6 +53,17 @@ class BoundaryTest(unittest.TestCase):
             all("only athanor-sulphur-client" in problem for problem in found)
         )
 
+    def test_the_underscore_spellings_of_the_dependency_tables_are_read(self):
+        found = problems(
+            {
+                "system/athanor-dock/Cargo.toml": (
+                    '[dev_dependencies]\ncosmic-text = "0.14"\n'
+                    '[build_dependencies]\nlibcosmic = "1"\n'
+                ),
+            }
+        )
+        self.assertEqual(len(found), 2, found)
+
     def test_a_renamed_dependency_is_found_by_its_crate_name(self):
         found = problems(
             {

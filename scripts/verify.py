@@ -6908,9 +6908,6 @@ def check_own():
     return r
 
 
-DEPENDENCY_TABLES = ("dependencies", "dev-dependencies", "build-dependencies")
-
-
 def load_toml(name, text):
     """The parsed TOML `text`, or a ValueError that names the file `name`."""
     try:
