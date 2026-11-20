@@ -396,7 +396,7 @@ The retirement order is therefore cosmic-idle (step 1), cosmic-bg (step 2), cosm
 Applied with the approval of this document.
 
 - **Requests met**, each with the rule that meets it:
-  - `doc_files.md` FM3, FM4 and decisions 1 and 9 (`doc_files.md:56-73`; the decisions at `:280` and `:288`): SD7 to SD9 and step 7 of SD22. FM3's "What comes next" and FM4's last sentence of the second bullet become present tense; FM3's declared limit on `StartTransientUnit` and the main socket ends for the window.
+  - `doc_files.md` FM3, FM4 and decisions 1 and 9 (`doc_files.md:56-73`, FM3's write roots as amended on 2026-11-21; the decisions at `:280` and `:288`): SD7 to SD9 and step 7 of SD22. FM3's "What comes next" and FM4's last sentence of the second bullet become present tense; FM3's declared limit on `StartTransientUnit` and the main socket ends for the window.
   - `doc_files.md` FM14 (`doc_files.md:157`): SD11. The sentence "A drive inserted while the file manager is not running stays unmounted … this is a declared limit" is replaced by a reference to SD11.
   - `doc_disks.md` DK16 row "Session daemons" (`:180`), DK21's "Where the notice lives" (`:244`) and section 3 (`:266`): SD12 and SD13.
   - `doc_lock_and_prompts.md` LP5 (`:89-95`): SD4 and SD5. LP5's "cosmic-idle decides when the screen blanks and suspends, and it locks by `loginctl lock-session` 500 ms after blanking" (`:91`), which was LP4's "cosmic-idle runs the same action after blanking", becomes "`athanor-idle` calls `LockSession` after blanking (SD4)" from SD22 step 1.
