@@ -71,6 +71,7 @@ fn failed(what: &str, code: athanor_trust_state::ErrorCode) -> ExitCode {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     tracing_subscriber::fmt().with_writer(std::io::stderr).without_time().init();
     let (tools, store) = (tools::System, store::Store::system());
     let ctx = check::Context::system(&tools, &store, now());

@@ -7409,6 +7409,59 @@ def check_implicit_panics():
         r.fail(problem)
     return r
 
+# --------------------------------------------------------------------------- #
+# panic-hook — a shipped program logs its panic before it aborts
+# --------------------------------------------------------------------------- #
+
+# The first statement of every shipped program's `main` (#1352): with core dumps off (doc_session.md
+# SN8) the hook's message, place, thread and backtrace are all a crash leaves.
+PANIC_HOOK = "athanor_unit::panic::install();"
+# Programs on the login path, whose `main` waits on the maintainer before even this line (AGENTS.md,
+# "Stop and ask before editing"). athanor-lock does not depend on athanor-unit yet.
+PANIC_HOOK_PENDING = {"athanor-greeter-ui", "athanor-unlockd", "athanor-lock"}
+
+
+def program_mains(crate_dir):
+    """The source files of a crate's programs: src/main.rs, src/bin/, and each [[bin]] path."""
+    manifest = tomllib.loads(read(crate_dir / "Cargo.toml"))
+    found = {crate_dir / b["path"] for b in manifest.get("bin", []) if "path" in b}
+    found |= {p for p in [crate_dir / "src" / "main.rs"] if p.exists()}
+    bins = crate_dir / "src" / "bin"
+    if bins.is_dir():
+        found |= set(bins.glob("*.rs")) | set(bins.glob("*/main.rs"))
+    return sorted(found)
+
+
+def panic_hook_problems(root=None):
+    """The shipped programs whose `main` does not start with PANIC_HOOK: every program of a
+    workspace member that experimental/EXEMPT does not list, but PANIC_HOOK_PENDING."""
+    root = root or ROOT
+    members = tomllib.loads(read(root / "Cargo.toml"))["workspace"]["members"]
+    exempt_file = root / "experimental" / "EXEMPT"
+    exempt = ({ln.strip() for ln in read(exempt_file).split("\n") if ln.strip() and not ln.startswith("#")}
+              if exempt_file.exists() else set())
+    first = re.compile(r"\bfn\s+main\s*\(\s*\)[^{]*\{\s*" + re.escape(PANIC_HOOK))
+    problems = []
+    for member in members:
+        crate_dir = root / member
+        name = tomllib.loads(read(crate_dir / "Cargo.toml"))["package"]["name"]
+        if name in exempt or name in PANIC_HOOK_PENDING:
+            continue
+        for main in program_mains(crate_dir):
+            if not main.exists():
+                problems.append(f"{main.relative_to(root)}: a [[bin]] path of {name} that does not exist")
+            elif not first.search(without_literals(without_test_items(read(main)))):
+                problems.append(f"{main.relative_to(root)}: `main` does not start with `{PANIC_HOOK}`")
+    return problems
+
+
+@check("panic-hook", "Every shipped program installs the panic hook first in main")
+def check_panic_hook():
+    r = Result()
+    for problem in panic_hook_problems():
+        r.fail(problem)
+    return r
+
 
 def take_option(argv, name):
     """Removes `NAME VALUE` from argv and returns VALUE, None when NAME is absent."""

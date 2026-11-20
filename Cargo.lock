@@ -406,6 +406,7 @@ name = "athanor-backup"
 version = "1.0.0"
 dependencies = [
  "anyhow",
+ "athanor-unit",
  "jiff 1.0.1",
  "nix 0.32.0",
 ]
@@ -862,6 +863,7 @@ version = "1.0.0"
 dependencies = [
  "athanor-bus-api",
  "athanor-trust-state",
+ "athanor-unit",
  "base64",
  "clap",
  "hex",

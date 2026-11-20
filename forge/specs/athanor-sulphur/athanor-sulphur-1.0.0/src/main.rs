@@ -5,6 +5,7 @@
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     // RUST_LOG adds to the log, as `smithay::backend::drm::compositor=trace` for where each
     // element of a frame goes; what it does not name stays at info. Its directives follow
     // `info`, and a later directive replaces an earlier one of the same target, so a bare level

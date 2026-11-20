@@ -145,6 +145,7 @@ async fn run(state_dir: &Path) -> zbus::Result<()> {
 }
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     tracing_subscriber::fmt().with_writer(std::io::stderr).without_time().init();
     // The sandbox comes first, while the process has one thread; the runtime is single-threaded too.
     let confined = sandbox::state_dir().and_then(|dir| {

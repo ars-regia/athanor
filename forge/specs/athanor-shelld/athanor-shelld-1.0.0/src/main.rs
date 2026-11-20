@@ -11,6 +11,7 @@ use athanor_shelld::server::{self, Config};
 use athanor_unit::{crash_loop, journal, notify, sandbox};
 
 fn main() -> ExitCode {
+    athanor_unit::panic::install();
     journal::init();
     let Some((state_dir, failures)) = dirs() else {
         tracing::error!("no absolute XDG_STATE_HOME or HOME, or no absolute XDG_RUNTIME_DIR");
