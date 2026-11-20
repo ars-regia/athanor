@@ -53,6 +53,10 @@
   the change, a factual correction and no new target decision: PL44's sentence on today's
   `merge_group` run and the `changes.json` row of section 3.3 say that change detection selects
   no build on `merge_group`, as PL44 and M3 already require.
+  Also amended 2026-11-21 (#1353), approved by the maintainer with the pull request that makes
+  the change: PL51's alert job ends all eleven scheduled workflows now, not only
+  `kernel-weekly.yml` and `maintenance.yml`, without waiting for PB2; `verify.py workflows`
+  checks it.
   Also amended 2026-11-21 (#1353, [ADR-0137](../decisions/0137-merge-queue-on-iso-v0.md)),
   approved by the maintainer with the pull request that makes the change: the `merge_group` run
   builds the shell and the specs a change selects, and not the kernel; PL44, M3, the `pr.yml`
@@ -1196,9 +1200,10 @@ runs the `alert` composite action on a GitHub-hosted runner once the jobs it rep
 whatever their result (every other job; the hours-long `mutants` job of `maintenance.yml` has an
 `alert-mutants` job of its own), so that a job whose runner was lost or that timed out is seen as well.
 The action opens or updates one issue per workflow and job labelled `ci-alert`, and closes
-it on the next success. No scheduled failure stays silent. Today `kernel-weekly.yml` and
-`maintenance.yml` end with that job; the other scheduled workflows gain it with PB2 (section
-12), and until then their failures raise no issue.
+it on the next success. No scheduled failure stays silent. Every scheduled workflow ends with
+that job, and `verify.py workflows` fails when one does not: a workflow with an `on.schedule`
+trigger needs an `always()` job on a hosted runner that uses the action and, with the other
+such jobs, needs every other job (#1353).
 
 **PL52. Settings drift is detected daily.** `scripts/github-settings/ghsettings.py diff`,
 which exists, is tested (`scripts/tests/test_ghsettings.py`) and exits 1 on drift, compares

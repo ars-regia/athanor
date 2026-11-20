@@ -197,7 +197,8 @@ def check_workflows():
 
     # 1e. D43: signing keys only in sign-only jobs
     for problem in (signing_problems(ROOT) + merge_queue_problems(ROOT) + release_problems(ROOT)
-                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)):
+                    + policy_pull_problems(ROOT) + release_cache_problems(ROOT)
+                    + scheduled_alert_problems(ROOT)):
         r.fail(problem)
 
     # 1d. actionlint, se disponibile
@@ -450,6 +451,36 @@ def merge_queue_problems(root):
     return problems
 
 
+ALERT_ACTION = "./.github/actions/alert"
+
+
+def scheduled_alert_problems(root):
+    """PL51: a workflow with an `on.schedule` trigger ends with alert jobs that use the alert
+    action on a GitHub-hosted runner, run with `always()`, and between them need every other job,
+    so a scheduled failure, a lost runner or a timeout opens a ci-alert issue."""
+    problems = []
+    for wf in sorted((Path(root) / ".github/workflows").glob("*.y*ml")):
+        doc = yaml.safe_load(read(wf))
+        if not isinstance(doc, dict) or "schedule" not in triggers(doc):
+            continue
+        jobs = doc.get("jobs") or {}
+        alerts = {name: job for name, job in jobs.items()
+                  if any(step.get("uses") == ALERT_ACTION for step in (job or {}).get("steps") or [])}
+        if not alerts:
+            problems.append(f"{wf.name}: runs on a schedule but no job uses {ALERT_ACTION} (PL51)")
+            continue
+        covered = set(alerts)
+        for name, job in alerts.items():
+            if "always()" not in str(job.get("if", "")):
+                problems.append(f"{wf.name}: alert job {name} has no always() in its if (PL51)")
+            if not GITHUB_HOSTED.match(str(job.get("runs-on", ""))):
+                problems.append(f"{wf.name}: alert job {name} is not on a GitHub-hosted runner (PL51)")
+            needed = job.get("needs") or []
+            covered |= {needed} if isinstance(needed, str) else set(needed)
+        problems += [f"{wf.name}: no alert job needs {name} (PL51)" for name in jobs if name not in covered]
+    return problems
+
+
 def job_contexts(root, doc, depth=0):
     """The status contexts a workflow's jobs report, as fnmatch patterns: an expression in a
     name and the values of an unnamed matrix match anything, and so does the inner job of a
@@ -532,7 +563,9 @@ def release_problems(root):
     condition = request.get("if", "")
     if "!cancelled()" not in condition:
         problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not ask !cancelled()")
-    for job_id in sorted(set(jobs) - {"request-release"}):
+    # A job that needs request-release (the PL51 alert) ends the run and cannot be needed by it.
+    after = {job_id for job_id, job in jobs.items() if "request-release" in (job.get("needs") or [])}
+    for job_id in sorted(set(jobs) - {"request-release"} - after):
         if job_id not in request.get("needs", []):
             problems.append(f"{Path(ORCHESTRATOR_YML).name}: request-release does not need {job_id}")
         elif job_id == "system-image":
@@ -582,7 +615,7 @@ RELEASE_PATH_ACTIONS = {
     "actions/attest-build-provenance", "actions/checkout", "actions/create-github-app-token",
     "actions/download-artifact", "actions/upload-artifact", "anchore/sbom-action/download-syft",
     "cachix/install-nix-action", "oras-project/setup-oras", "sigstore/cosign-installer",
-    "ublue-os/remove-unwanted-software", "./.github/actions/kvm",
+    "ublue-os/remove-unwanted-software", "./.github/actions/kvm", "./.github/actions/alert",
 }
 # The settings that give a build a cache from outside the job: sccache on the Actions cache, and
 # a BuildKit or buildah cache-from or cache-to of any type. A cache that lives only in the job's
