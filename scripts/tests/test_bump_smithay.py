@@ -39,7 +39,8 @@ def commits(*messages):
 
 STUB_CARGO = """#!/usr/bin/env bash
 echo "cargo $*" >> "$STUB_LOG"
-sed -i "s/$STUB_OLD/$STUB_MASTER/g" "$(git rev-parse --show-toplevel)/Cargo.lock"
+top=$(git rev-parse --show-toplevel)
+sed -i "s/$STUB_OLD/$STUB_MASTER/g" "$top/Cargo.lock" "$top/fuzz/Cargo.lock"
 """
 
 
@@ -63,6 +64,8 @@ class BumpSmithay(unittest.TestCase):
         (self.work / "Cargo.lock").write_text(
             f'name = "smithay"\nsource = "git+{URL}?rev={OLD}#{OLD}"\n'
         )
+        (self.work / "fuzz").mkdir()
+        (self.work / "fuzz" / "Cargo.lock").write_text((self.work / "Cargo.lock").read_text())
         for name, text in (("gh", STUB_GH), ("cargo", STUB_CARGO)):
             (stub / name).write_text(text)
             (stub / name).chmod(0o755)
@@ -97,7 +100,8 @@ class BumpSmithay(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.work / MANIFEST).read_text(), manifest(NEW))
         self.assertIn(f"?rev={NEW}#{NEW}", (self.work / "Cargo.lock").read_text())
-        self.assertIn("cargo update", self.calls())
+        self.assertIn(f"?rev={NEW}#{NEW}", (self.work / "fuzz" / "Cargo.lock").read_text())
+        self.assertIn(f"cargo update --manifest-path {self.work}/fuzz/Cargo.toml", self.calls())
         self.assertEqual(
             (self.out / "title").read_text(),
             f"chore(sulphur): bump Smithay to {NEW[:12]}\n",
@@ -167,6 +171,12 @@ class BumpSmithay(unittest.TestCase):
         self.assertEqual((self.work / MANIFEST).read_text(), manifest(NEW))
         self.assertTrue((self.out / "title").exists())
         self.assertIn(f"compare/{HOLD}...{NEW}", self.calls())
+
+    def test_a_fuzz_lock_cargo_did_not_move_fails(self):
+        (self.work / "fuzz" / "Cargo.lock").write_text("name = \"smithay\"\n")
+        result = self.run_script(NEW)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("fuzz/Cargo.lock does not take Smithay", result.stderr)
 
     def test_a_lock_cargo_did_not_move_fails(self):
         self.env["STUB_OLD"] = "nothing-to-replace"

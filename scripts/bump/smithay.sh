@@ -4,7 +4,7 @@
 #   scripts/bump/smithay.sh OUT_DIR
 #
 # Smithay publishes no release, so Sulphur takes it at a git revision. This rewrites that
-# revision in Sulphur's Cargo.toml and refreshes Cargo.lock through cargo. It writes
+# revision in Sulphur's Cargo.toml and refreshes Cargo.lock and fuzz/Cargo.lock through cargo. It writes
 # OUT_DIR/title and OUT_DIR/body.md, which open_bump_pr.sh turns into a pull request, only when
 # master has moved and no pull request with the label smithay-bump is open: one bump at a time,
 # fixed on its own branch when master changed the API, and the next one after its merge. A pin
@@ -58,12 +58,14 @@ if [[ -n $hold ]]; then
     fi
 fi
 sed -i "s/rev = \"${old}\"/rev = \"${new}\"/" "$root/$manifest"
-cargo update --manifest-path "$root/Cargo.toml" -p smithay -p smithay-drm-extras
-grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/Cargo.lock" ||
-    {
-        echo "smithay.sh: Cargo.lock does not take Smithay at ${new} after cargo update" >&2
-        exit 1
-    }
+for lock in Cargo.lock fuzz/Cargo.lock; do
+    cargo update --manifest-path "$root/${lock%Cargo.lock}Cargo.toml" -p smithay -p smithay-drm-extras
+    grep -q "^source = \"git+${url}?rev=${new}#${new}\"$" "$root/$lock" ||
+        {
+            echo "smithay.sh: ${lock} does not take Smithay at ${new} after cargo update" >&2
+            exit 1
+        }
+done
 commits=$(gh api --paginate "$compare" \
     --jq '.commits[] | "\(.sha[:9]) \(.commit.message | split("\n")[0] | gsub("\r"; " "))"')
 echo "chore(sulphur): bump Smithay to ${new:0:12}" > "$out/title"
