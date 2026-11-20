@@ -2864,10 +2864,7 @@ mod tests {
         if let NetworkCommand::Join { password, .. } = &command {
             overwritten(password);
         }
-        fn answered<T: zeroize::ZeroizeOnDrop>(
-            _: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>,
-        ) {
-        }
+        fn answered<T: zeroize::ZeroizeOnDrop>(_: fn(PasswordPrompt) -> oneshot::Sender<Option<T>>) {}
         answered(|prompt| prompt.reply);
     }
 
@@ -2928,10 +2925,7 @@ mod tests {
         let refused = get_secrets(&stranger, &rig.client, 0x1).await.unwrap();
         assert_eq!(outcome(&refused), DENIED);
         // The first request is still open: the stranger's cancel did not withdraw it.
-        prompt
-            .reply
-            .send(Some(Zeroizing::new("hunter2hunter2".into())))
-            .unwrap();
+        prompt.reply.send(Some(Zeroizing::new("hunter2hunter2".into()))).unwrap();
         let reply = asked.await.unwrap().unwrap();
         let answer: BTreeMap<String, Props> = reply.body().deserialize().unwrap();
         assert_eq!(
